@@ -143,6 +143,7 @@ export interface RendererEvents {
   mediaPlay: (e: MediaPlayInfo) => void
   instantAnnotation: (e: SelectionInfo) => void
   rendered: () => void
+  fontFallback: () => void
   tocReady: (items: { label: string; href: string; level?: number }[]) => void
   /**
    * Fired after a user-initiated jump (TOC/note/search/progress-drag) actually

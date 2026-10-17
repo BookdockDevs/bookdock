@@ -3,6 +3,16 @@ import { basicAuthHeader, buildRemoteUrl, parsePropfindXml, WebDavClient } from 
 import { AppError } from '../middleware/error'
 
 describe('WebDAV client protocol', () => {
+  it('verifies actual range responses instead of trusting advertised support', async () => {
+    const client = new WebDavClient({ url: 'https://dav.example.com', username: 'user', basePath: '/' })
+    const request = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('x', { status: 206, headers: { 'Content-Range': 'bytes 0-0/10' } }))
+      .mockResolvedValueOnce(new Response('whole response', { status: 200 }))
+    expect(await client.getRange('/book.epub', { start: 0, end: 0 })).toEqual({ data: Buffer.from('x'), size: 10 })
+    expect(request.mock.calls[0][1]?.headers).toMatchObject({ Range: 'bytes=0-0', 'Accept-Encoding': 'identity' })
+    expect(await client.getRange('/book.epub', { start: 0, end: 0 })).toBeNull()
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
   })

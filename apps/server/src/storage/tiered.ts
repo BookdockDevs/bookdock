@@ -1,7 +1,7 @@
 import fsSync, { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { Readable } from 'node:stream'
+import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { eq, sql } from 'drizzle-orm'
 
@@ -21,6 +21,10 @@ export class TieredStorageDriver implements StorageDriver {
   private remoteClient: RemoteTierClient | null = null
   private remoteBasePath: string = '/Bookdock/storage'
   private cacheMaxMb: number = 2048
+  private cacheFills = new Map<string, Promise<void>>()
+  private remoteSizes = new Map<string, { size: number; expires: number }>()
+  private rangeRetryAt = 0
+  private metadataRetryAt = 0
 
   constructor(client: RemoteTierClient, remoteBasePath: string, cacheMaxMb: number) {
     this.localDriver = new LocalFsDriver(path.join(config.dataDir, 'files'))
@@ -91,7 +95,38 @@ export class TieredStorageDriver implements StorageDriver {
       return this.localDriver.get(key, range)
     }
 
-    // Cache Miss: stream from remote storage into local cache via safe atomic pipeline (borrowed from ANX Reader)
+    if (range && !this.cacheFills.has(key) && this.remoteClient.getRange && Date.now() >= this.rangeRetryAt) {
+      const started = Date.now()
+      try {
+        const result = await this.remoteClient.getRange(this.getRemoteFilePath(key), range)
+        if (result) {
+          this.remoteSizes.set(key, { size: result.size, expires: Date.now() + 30000 })
+          // Several tiny ZIP reads on a high-latency store can cost more than one
+          // full download. Keep truly large files on the bounded Range path.
+          const slowProbe = range.end - range.start < 65536 && Date.now() - started > 1500
+            && result.size <= 32 * 1024 * 1024
+          if (!slowProbe) return Readable.from([result.data])
+        }
+      } catch {
+        // Transient failures also fall back to the shared full-file path.
+      }
+      this.rangeRetryAt = Date.now() + 30000
+    }
+
+    await this.ensureCached(key)
+    return this.localDriver.get(key, range)
+  }
+
+  private async ensureCached(key: string): Promise<void> {
+    let fill = this.cacheFills.get(key)
+    if (!fill) {
+      fill = this.fillCache(key, this.remoteSizes.get(key)?.size).finally(() => this.cacheFills.delete(key))
+      this.cacheFills.set(key, fill)
+    }
+    await fill
+  }
+
+  private async fillCache(key: string, expectedSize?: number): Promise<void> {
     const remotePath = this.getRemoteFilePath(key)
     const localTarget = path.join(config.dataDir, 'files', key)
     const tmpPath = localTarget + '.tmp.' + randomUUID()
@@ -99,12 +134,12 @@ export class TieredStorageDriver implements StorageDriver {
     await fs.mkdir(path.dirname(localTarget), { recursive: true })
 
     try {
-      const remoteStream = await this.remoteClient.getStream(remotePath)
+      const remoteStream = await this.remoteClient!.getStream(remotePath)
       await pipeline(remoteStream, fsSync.createWriteStream(tmpPath))
 
       const stat = await fs.stat(tmpPath)
-      if (stat.size === 0) {
-        throw new Error('Downloaded cache file is empty')
+      if (stat.size === 0 || (expectedSize !== undefined && stat.size !== expectedSize)) {
+        throw new Error('Downloaded cache file has an unexpected size')
       }
 
       await fs.rename(tmpPath, localTarget)
@@ -121,8 +156,9 @@ export class TieredStorageDriver implements StorageDriver {
       // Trigger LRU eviction check asynchronously
       triggerLruEviction(this.cacheMaxMb, this.localDriver)
 
-      return this.localDriver.get(key, range)
+      this.remoteSizes.delete(key)
     } catch (err) {
+      this.remoteSizes.delete(key)
       await fs.unlink(tmpPath).catch(() => {})
       throw err
     }
@@ -178,21 +214,30 @@ export class TieredStorageDriver implements StorageDriver {
       return this.localDriver.size(key)
     }
 
-    // Fast DB check
-    try {
-      const db = getDb()
-      const row = db.select({ size: blobs.size }).from(blobs).where(eq(blobs.key, key)).get()
-      if (row?.size != null) {
-        return row.size
-      }
-    } catch {}
-
     if (await this.localDriver.exists(key)) {
       return this.localDriver.size(key)
     }
 
     if (this.remoteClient) {
-      return this.remoteClient.size(this.getRemoteFilePath(key))
+      const cached = this.remoteSizes.get(key)
+      if (cached && cached.expires > Date.now()) return cached.size
+      if (Date.now() < this.metadataRetryAt) {
+        await this.ensureCached(key)
+        return this.localDriver.size(key)
+      }
+      let size: number
+      try {
+        size = await this.remoteClient.size(this.getRemoteFilePath(key))
+        if (!Number.isSafeInteger(size) || size <= 0) throw new Error('Invalid remote file size')
+      } catch {
+        // A failed HEAD/PROPFIND must not make a readable remote book unavailable.
+        this.metadataRetryAt = Date.now() + 60000
+        await this.ensureCached(key)
+        return this.localDriver.size(key)
+      }
+      if (this.remoteSizes.size >= 256) this.remoteSizes.clear()
+      this.remoteSizes.set(key, { size, expires: Date.now() + 30000 })
+      return size
     }
     return 0
   }

@@ -50,7 +50,7 @@ export async function streamBookFile(c: Context, book: { filePath: string; title
   if (!(await storage.exists(book.filePath))) {
     throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   }
-  const size = await storage.size(book.filePath)
+  let size = await storage.size(book.filePath)
   const fileName = `${safeFileBase(book.title)}.epub`
   // No HTTP caching on purpose: the URL is content-hash addressed (immutable
   // by design), but when the browser caches the full file, zip.js's Range
@@ -64,7 +64,7 @@ export async function streamBookFile(c: Context, book: { filePath: string; title
     'Cache-Control': 'private, no-store',
     'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
   }
-  const range = parseRangeHeader(c.req.header('Range'), size)
+  let range = parseRangeHeader(c.req.header('Range'), size)
   if (range === 'invalid') {
     return c.json(
       { error: { code: 'RANGE_NOT_SATISFIABLE', message: 'Requested range not satisfiable' } },
@@ -78,12 +78,27 @@ export async function streamBookFile(c: Context, book: { filePath: string; title
   // bridging can close the ReadableStream twice, throwing ERR_INVALID_STATE
   // as an uncaughtException that kills the whole server process
   if (range) {
+    let body = isHead ? null : await bufferFromStream(await storage.get(book.filePath, range))
+    if (!isHead) {
+      const actualSize = await storage.size(book.filePath)
+      if (actualSize !== size) {
+        size = actualSize
+        const resolved = parseRangeHeader(c.req.header('Range'), size)
+        if (!resolved || resolved === 'invalid') {
+          throw new AppError('BOOK_FILE_MISSING', 'File changed while reading; reopen the book')
+        }
+        range = resolved
+        body = await bufferFromStream(await storage.get(book.filePath, range))
+      }
+      if (body!.length !== range.end - range.start + 1) {
+        throw new AppError('BOOK_FILE_MISSING', 'Incomplete book range; retry the download')
+      }
+    }
     headers['Content-Range'] = `bytes ${range.start}-${range.end}/${size}`
     headers['Content-Length'] = String(range.end - range.start + 1)
-    const body = isHead ? null : new Uint8Array(await bufferFromStream(await storage.get(book.filePath, range)))
-    return c.newResponse(body, 206, headers)
+    return c.newResponse(body ? new Uint8Array(body) : null, 206, headers)
   }
-  headers['Content-Length'] = String(size)
   const body = isHead ? null : new Uint8Array(await bufferFromStream(await storage.get(book.filePath)))
+  headers['Content-Length'] = String(body?.byteLength ?? size)
   return c.newResponse(body, 200, headers)
 }

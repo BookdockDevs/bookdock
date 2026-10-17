@@ -4,6 +4,7 @@ import { DOMParser, type Element as XmlElement } from '@xmldom/xmldom'
 import type { WebDavEntry } from '@bookdock/shared'
 import { AppError } from '../middleware/error'
 import type { RemoteBrowseClient } from './remote-client'
+import { readRemoteRange } from './remote-client'
 
 export interface WebDavClientConfig {
   url: string
@@ -468,6 +469,19 @@ export class WebDavClient implements RemoteBrowseClient {
       const message = err instanceof Error ? err.message : String(err)
       throw new AppError('WEBDAV_CONNECTION_FAILED', `Failed to get remote file size: ${message}`)
     }
+  }
+
+  async getRange(filePath: string, range: { start: number; end: number }) {
+    const targetUrl = buildRemoteUrl(this.config.url, this.config.basePath, filePath, false)
+    const response = await fetch(targetUrl.toString(), {
+      headers: {
+        Authorization: basicAuthHeader(this.config.username, this.config.password),
+        Range: `bytes=${range.start}-${range.end}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: AbortSignal.timeout(15000),
+    })
+    return readRemoteRange(response, range)
   }
 
   async getStream(filePath: string, range?: { start: number; end: number }): Promise<Readable> {

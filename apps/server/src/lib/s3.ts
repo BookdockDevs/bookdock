@@ -5,6 +5,7 @@ import { DOMParser, type Element as XmlElement } from '@xmldom/xmldom'
 import type { WebDavEntry } from '@bookdock/shared'
 
 import type { RemoteBrowseClient } from './remote-client'
+import { readRemoteRange } from './remote-client'
 import { AppError } from '../middleware/error'
 
 export interface S3ClientConfig {
@@ -435,6 +436,14 @@ export class S3Client implements RemoteBrowseClient {
       const message = err instanceof Error ? err.message : String(err)
       throw new AppError('S3_CONNECTION_FAILED', `Failed to get remote file size: ${message}`)
     }
+  }
+
+  async getRange(filePath: string, range: { start: number; end: number }) {
+    const response = await this.signedFetch('GET', this.toKey(filePath), {}, undefined, {
+      Range: `bytes=${range.start}-${range.end}`,
+      'Accept-Encoding': 'identity',
+    }, 15000)
+    return readRemoteRange(response, range)
   }
 
   async getStream(filePath: string, range?: { start: number; end: number }): Promise<Readable> {

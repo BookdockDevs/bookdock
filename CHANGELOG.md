@@ -2,6 +2,20 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- WebDAV and S3 book reads use verified partial downloads when supported, reuse concurrent downloads, and fall back to whole-file caching when partial reads fail or small remote reads are slow.
+- Reader startup waits for the fonts needed by visible text and avoids flashing a loading indicator during fast opens. If font preparation fails, reading can continue with a fallback font and a notice.
+
+### Fixed
+
+- Opening a book now applies saved reading settings before displaying its text, preventing a temporary default layout while preferences load. Failed initial settings or font-list loads offer a retry.
+- Books can open correctly when a stored file size differs from the actual file size, including previously cached files.
+- Uploading the same TXT file in different accounts or libraries no longer overwrites another generated book; repeated uploads within the same library still reuse the existing book.
+- Remote downloads retain timeout protection until the response finishes, and incomplete downloads are discarded so subsequent opens can retry.
+
 ## [0.6.0] - 2026-10-16
 
 ### Highlights
@@ -695,6 +709,20 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [Unreleased]
+
+#### 变更
+
+- WebDAV 和 S3 读取在支持时使用经过校验的分段下载，合并并发下载；分段读取失败或远端小段读取过慢时，回退为整文件缓存。
+- 阅读器启动时等待可见正文所需的字体，快速打开时避免加载提示一闪而过；字体准备失败时会提示并使用替代字体继续阅读。
+
+#### 修复
+
+- 打开书籍时先应用已保存的阅读设置，再显示正文，避免偏好加载期间短暂显示默认排版；首次加载设置或字体列表失败时可重试。
+- 修复记录的文件大小与实际大小不一致时书籍无法正常打开的问题，包括已有本地缓存的文件。
+- 修复不同账号或书库上传相同 TXT 时，生成的书籍文件可能互相覆盖的问题；同一书库内重复上传仍复用已有书籍。
+- 远端下载的超时保护持续到响应接收完成，未完成的下载会被丢弃，后续打开可重新尝试。
 
 ### [0.6.0] - 2026-10-16
 

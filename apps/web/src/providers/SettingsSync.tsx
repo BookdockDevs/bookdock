@@ -8,6 +8,7 @@ import { customThemesFromSync } from '@/lib/reading-theme'
 import { notify } from '@/lib/notifications'
 import { fetchSettings, readStoredSettings } from '@/lib/settings-cache'
 import { useAuthStore } from '@/stores/auth.store'
+import { useSettingsSyncStore } from '@/stores/settings-sync.store'
 import { PENDING_SETTINGS_STORAGE_KEY, useUiStore } from '@/stores/ui.store'
 
 const SYNC_CHANNEL = 'bd-settings'
@@ -157,7 +158,7 @@ export function SettingsSync() {
   const userId = user?.id ?? null
   const isGuest = !user
 
-  const { data: settingsRes } = useQuery<{ data: SettingsRes }>({
+  const { data: settingsRes, isError: settingsError } = useQuery<{ data: SettingsRes }>({
     enabled: Boolean(userId) && !isGuest,
     queryKey: ['settings'],
     queryFn: fetchSettings,
@@ -177,10 +178,12 @@ export function SettingsSync() {
           applySettings(cached)
         }
         suppressSyncRef.current = false
+        useSettingsSyncStore.setState({ userId, ready: Boolean(pending || cached), failed: false })
         if (pending) {
           mutateRef.current(pending, { onSuccess: () => clearPendingSettings(userId, pending) })
         }
       } else {
+        useSettingsSyncStore.setState({ userId: null, ready: true, failed: false })
         suppressSyncRef.current = true
         useUiStore.setState({ fontPreferences: {}, fontOrder: [] })
         suppressSyncRef.current = false
@@ -196,7 +199,15 @@ export function SettingsSync() {
     suppressSyncRef.current = true
     applySettings(settingsRes.data)
     suppressSyncRef.current = false
+    useSettingsSyncStore.setState({ userId, ready: true, failed: false })
   }, [isGuest, settingsRes, userId])
+
+  useEffect(() => {
+    const state = useSettingsSyncStore.getState()
+    if (state.userId === userId && !state.ready) {
+      useSettingsSyncStore.setState({ failed: settingsError })
+    }
+  }, [settingsError, userId])
 
   useEffect(() => {
     const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(SYNC_CHANNEL) : null

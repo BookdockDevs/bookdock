@@ -16,6 +16,7 @@ import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
 import { registerParser, getParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
+import { EpubParser } from '../../formats/epub'
 import { appendCityVersionContent, appendTxtBookContent, getVersionTocState, previewCityToc, pushPrivateToVersion, reTocCityVersion, uploadBook, uploadCatalogBook } from '../books/books.service'
 import { publishPrivateBook } from './publish.service'
 import { updateLibrary } from './libraries.service'
@@ -597,8 +598,10 @@ describe('shared library catalog', () => {
     expect((await uploadCatalogBook(libraryId, ownerId, file)).duplicated).toBe(true)
     expect(db.select().from(schema.libraryBooks).all()).toHaveLength(1)
 
-    // Another library keeps its own entry: content identity is never merged,
-    // only the physical blob is shared.
+    // Generated EPUBs embed version-specific metadata and must stay independent.
+    const firstBlobKey = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, first.bookVersionId)).get()!.blobKey
+    const firstBytes = Buffer.from(files.get(firstBlobKey)!)
     const otherId = createId('lib')
     db.insert(schema.libraries).values({
       id: otherId, userId: outsiderId, type: 'shared', name: 'Other',
@@ -607,23 +610,32 @@ describe('shared library catalog', () => {
     const second = await uploadCatalogBook(otherId, outsiderId, file)
     expect(second.duplicated).toBe(false)
     expect(second.bookVersionId).not.toBe(first.bookVersionId)
-    expect(db.select().from(schema.blobs).all()).toHaveLength(1)
+    expect(db.select().from(schema.blobs).all()).toHaveLength(2)
+    const secondBlobKey = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, second.bookVersionId)).get()!.blobKey
+    expect(secondBlobKey).not.toBe(firstBlobKey)
+    expect(files.get(firstBlobKey)).toEqual(firstBytes)
   })
 
   it('releases an exclusive blob on last-version delete but keeps a shared one', async () => {
+    registerParser({
+      match: (fileName) => fileName === 'shared-blob-fixture.epub',
+      parse: (data) => new EpubParser().parse(data),
+    })
     const file = txtFile('novel.txt', '第一章\n正文内容')
     const first = await uploadCatalogBook(libraryId, ownerId, file)
     const blobKey = db.select().from(schema.contentRevisions)
       .where(eq(schema.contentRevisions.bookVersionId, first.bookVersionId)).get()!.blobKey
     expect(files.has(blobKey)).toBe(true)
 
-    // Same content in another library shares the physical blob, not the version.
+    // Identical EPUB bytes share the physical blob, not the version.
     const otherId = createId('lib')
     db.insert(schema.libraries).values({
       id: otherId, userId: outsiderId, type: 'shared', name: 'Other',
       description: '', visibility: 'public', createdAt: 1, updatedAt: 1,
     }).run()
-    const second = await uploadCatalogBook(otherId, outsiderId, file)
+    const second = await uploadCatalogBook(otherId, outsiderId,
+      new File([new Uint8Array(files.get(blobKey)!)], 'shared-blob-fixture.epub', { type: 'application/epub+zip' }))
     expect(db.select().from(schema.blobs).all()).toHaveLength(1)
 
     await deleteCatalogVersion(ownerId, libraryId, first.libraryBookId, first.versionLinkId!)
