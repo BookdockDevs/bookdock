@@ -377,7 +377,7 @@ function InstanceUsersView({
 
   if (isLoading) {
     return (
-      <div className="space-y-3 p-4 sm:p-6">
+      <div className="space-y-3 p-4 sm:p-6" role="status" aria-busy="true">
         {[1, 2, 3].map((i) => (
           <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
             <div className="flex items-center gap-2.5">
@@ -937,7 +937,7 @@ function LibraryMembersView({
 
   if (librariesLoading) {
     return (
-      <div className="space-y-3 p-4 sm:p-6">
+      <div className="space-y-3 p-4 sm:p-6" role="status" aria-busy="true">
         {[1, 2, 3].map((i) => (
           <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
             <div className="flex items-center gap-2.5">
@@ -965,7 +965,7 @@ function LibraryMembersView({
   return (
     <>
       {membersLoading ? (
-        <div className="space-y-3 p-4 sm:p-6">
+        <div className="space-y-3 p-4 sm:p-6" role="status" aria-busy="true">
           {[1, 2, 3].map((i) => (
             <div key={i} className="flex animate-pulse items-center justify-between py-2.5">
               <div className="flex items-center gap-2.5">

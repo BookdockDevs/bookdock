@@ -30,7 +30,7 @@ describe('ConfirmDialog', () => {
     expect(screen.getByRole('button', { name: 'library.cancel' })).toBeInTheDocument()
   })
 
-  it('calls onConfirm when confirm button is clicked', () => {
+  it('calls onConfirm when confirm button is clicked', async () => {
     const onConfirm = vi.fn()
     const onClose = vi.fn()
     render(
@@ -43,8 +43,10 @@ describe('ConfirmDialog', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '确定' }))
-    expect(onConfirm).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: '确定' }))
+      expect(onConfirm).toHaveBeenCalledTimes(1)
+    })
     expect(onClose).not.toHaveBeenCalled()
   })
 
@@ -127,4 +129,44 @@ describe('ConfirmDialog', () => {
     render(<ConfirmDialog {...props} />)
     expect(screen.getByRole('textbox')).toHaveValue('')
   })
+
+  it('guards unprompted confirmations (!needsText) against duplicate submits and closing while pending', async () => {
+    let finish!: () => void
+    const onConfirm = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+    const onClose = vi.fn()
+    render(
+      <ConfirmDialog
+        title="Delete Book"
+        message="Are you sure you want to delete this book?"
+        confirmLabel="Delete"
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />,
+    )
+
+    const confirmBtn = screen.getByRole('button', { name: 'Delete' })
+    const cancelBtn = screen.getByRole('button', { name: 'library.cancel' })
+
+    // Click twice rapidly
+    fireEvent.click(confirmBtn)
+    fireEvent.click(confirmBtn)
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+    expect(confirmBtn).toBeDisabled()
+    expect(cancelBtn).toBeDisabled()
+
+    // Escape and cancel button cannot dismiss while pending
+    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.click(cancelBtn)
+    expect(onClose).not.toHaveBeenCalled()
+
+    // Settle promise
+    finish()
+    await waitFor(() => expect(confirmBtn).not.toBeDisabled())
+    expect(cancelBtn).not.toBeDisabled()
+
+    // Can dismiss after completion
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 })
+

@@ -10,7 +10,7 @@ import { useAuthStore } from '@/stores/auth.store'
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_USERNAME_MAX_LENGTH, type SetupRes } from '@bookdock/shared'
 
 import { authErrorKey } from './errors'
-import { INSTANCE_QUERY_KEY } from './hooks'
+import { INSTANCE_QUERY_KEY, ME_QUERY_KEY } from './hooks'
 
 export default function Setup() {
   const _ = useTranslation()
@@ -22,9 +22,14 @@ export default function Setup() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    // Provisioning the first owner is not idempotent: a second concurrent
+    // request races the first and comes back FORBIDDEN. Lock the submit for
+    // the whole request so a double click cannot start two.
+    if (pending) return
     setError(null)
 
     const normalizedUsername = username.trim()
@@ -53,13 +58,17 @@ export default function Setup() {
       return
     }
 
+    setPending(true)
     try {
       const res = await apiPost<{ data: SetupRes }>('/auth/setup', { username: normalizedUsername, password })
       setAuth(res.data.user)
       await queryClient.invalidateQueries({ queryKey: INSTANCE_QUERY_KEY })
+      await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
       navigate({ to: '/' })
     } catch (err) {
       setError(err instanceof ApiError && err.code === 'FORBIDDEN' ? _('auth.setupFailed') : _(authErrorKey(err)))
+    } finally {
+      setPending(false)
     }
   }
 
@@ -127,7 +136,7 @@ export default function Setup() {
           />
         </div>
         {error && <p role="alert" aria-live="polite" className="mb-4 text-sm text-red-600">{error}</p>}
-        <Button type="submit" className="w-full">{_('auth.completeSetup')}</Button>
+        <Button type="submit" className="w-full" disabled={pending}>{_('auth.completeSetup')}</Button>
       </form>
     </div>
   )

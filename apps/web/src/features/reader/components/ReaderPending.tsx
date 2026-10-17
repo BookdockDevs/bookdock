@@ -7,6 +7,8 @@ export default function ReaderPending() {
   const _ = useTranslation()
   return (
     <div
+      role="status"
+      aria-busy="true"
       className="fixed inset-0 z-30 flex items-center justify-center"
       style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}
     >

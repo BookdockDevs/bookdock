@@ -8,6 +8,7 @@ import { apiDelete, apiGet, apiPost } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -94,10 +95,10 @@ export default function AccessTokensSection() {
             ))}
           </div>
         ) : tokens.length === 0 ? (
-          <div className="my-2 flex flex-col items-center justify-center rounded-xl border border-stone-200/60 bg-stone-50/30 px-4 py-6 text-center dark:border-stone-800/60 dark:bg-stone-800/20">
-            <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{_('settings.tokensEmpty')}</p>
-            <p className="mt-1 max-w-sm text-xs text-stone-400 dark:text-stone-500">{_('settings.tokensEmptyDesc')}</p>
-          </div>
+          <SettingsEmptyState>
+            <p className="font-medium text-stone-700 dark:text-stone-300">{_('settings.tokensEmpty')}</p>
+            <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{_('settings.tokensEmptyDesc')}</p>
+          </SettingsEmptyState>
         ) : (
           <div className="flex flex-col gap-3 pt-1">
             {tokens.map((token) => {

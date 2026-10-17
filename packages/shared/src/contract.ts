@@ -1774,6 +1774,7 @@ export interface AppendContentPreviewRes {
 export type AnnotationCreateReq = {
   draftId?: string
   imageIds?: string[]
+  replaceAnnotationIds?: string[]
   visibility?: 'private' | 'shared'
   revisionId?: string | null
   cfiRange: string

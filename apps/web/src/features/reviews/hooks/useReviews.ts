@@ -77,7 +77,10 @@ export function useSaveReview() {
       return apiPost<{ data: unknown }>('/reviews', { ...payload, bookVersionId: input.bookVersionId })
     },
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['reviews'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['reviews'] }),
+        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+      ])
     },
   })
 }

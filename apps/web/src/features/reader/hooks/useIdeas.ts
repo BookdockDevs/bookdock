@@ -296,6 +296,7 @@ export function useToggleIdeaLike(bookId: string) {
         queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['idea-discussion', ideaId] }),
         queryClient.invalidateQueries({ queryKey: ['annotations', bookId] }),
+        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
       ])
     },
   })

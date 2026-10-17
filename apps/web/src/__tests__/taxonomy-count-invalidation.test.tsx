@@ -33,6 +33,10 @@ function seed(queryClient: QueryClient) {
   queryClient.setQueryData(['libraries', 'lib-1', 'catalog'], { data: { items: [], total: 0 } })
   queryClient.setQueryData(['libraries', 'lib-1', 'categories'], { data: [] })
   queryClient.setQueryData(['libraries', 'lib-1', 'tags'], { data: [] })
+  queryClient.setQueryData(['archive', 'overview'], { data: {} })
+  queryClient.setQueryData(['reading-records', 'summary', 'today'], { data: {} })
+  queryClient.setQueryData(['reading-sessions', 'infinite', 'b1'], { pages: [], pageParams: [] })
+  queryClient.setQueryData(['progress', 'b1'], { data: {} })
 }
 
 function invalidated(queryClient: QueryClient, key: unknown[]) {
@@ -115,6 +119,36 @@ describe('book changes refresh the taxonomy counts beside them', () => {
       expect(invalidated(queryClient, ['tags'])).toBe(true)
     })
   }
+
+  it('keeps archive and reading projections unchanged when moving a book to trash', async () => {
+    const { result } = renderHook(() => useDeleteBook(), { wrapper: wrapper(queryClient) })
+    result.current.mutate({ id: 'b1', title: 'Book' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(invalidated(queryClient, ['archive', 'overview'])).toBe(false)
+    expect(invalidated(queryClient, ['reading-records', 'summary', 'today'])).toBe(false)
+    expect(invalidated(queryClient, ['progress', 'b1'])).toBe(false)
+  })
+
+  it('refreshes archive, reading records and progress after permanent deletion', async () => {
+    const { result } = renderHook(() => usePermanentDeleteBook(), { wrapper: wrapper(queryClient) })
+    result.current.mutate({ id: 'b1', title: 'Book' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(invalidated(queryClient, ['archive', 'overview'])).toBe(true)
+    expect(invalidated(queryClient, ['reading-records', 'summary', 'today'])).toBe(true)
+    expect(invalidated(queryClient, ['reading-sessions', 'infinite', 'b1'])).toBe(true)
+    expect(invalidated(queryClient, ['progress', 'b1'])).toBe(true)
+  })
+
+  it('refreshes personal projections when removing a collected book with data cleanup', async () => {
+    const { result } = renderHook(() => useDeleteBook(), { wrapper: wrapper(queryClient) })
+    result.current.mutate({ id: 'b1', title: 'Book', isCollected: true, deleteUserData: true })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(invalidated(queryClient, ['archive', 'overview'])).toBe(true)
+    expect(invalidated(queryClient, ['reading-records', 'summary', 'today'])).toBe(true)
+  })
 
   it('a settled upload refreshes the private shelves and tags', async () => {
     // The queue refreshes its target lists once nothing is pending, so the

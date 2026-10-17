@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
+import { eq } from 'drizzle-orm'
 import { IDEA_DISCUSSION_TAG, migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -149,6 +150,84 @@ describe('annotations service', () => {
     const items = await listAnnotations(ownerId, bookId)
     expect(items).toHaveLength(1)
     expect(items[0].color).toBe('red')
+  })
+
+  it('replaces overlapping highlights atomically and preserves other annotation kinds', async () => {
+    const oldHighlight = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/2)',
+      type: 'highlight',
+      text: 'old',
+    })
+    const note = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/2)',
+      type: 'note',
+      text: 'quoted',
+      note: 'keep this idea',
+    })
+    const bookmark = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/4)',
+      type: 'bookmark',
+      text: 'keep this bookmark',
+    })
+
+    const replacement = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/6)',
+      type: 'highlight',
+      text: 'new',
+      replaceAnnotationIds: [oldHighlight.id],
+    })
+
+    const items = await listAnnotations(ownerId, bookId)
+    expect(items.map((item) => item.id)).toEqual(expect.arrayContaining([replacement.id, note.id, bookmark.id]))
+    expect(items.map((item) => item.id)).not.toContain(oldHighlight.id)
+  })
+
+  it('rolls back replacement retirement when the new highlight insert fails', async () => {
+    const oldHighlight = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/2)',
+      type: 'highlight',
+      text: 'keep after failure',
+    })
+    db.$client.exec("CREATE TRIGGER reject_highlight_replacement BEFORE INSERT ON highlights BEGIN SELECT RAISE(ABORT, 'forced replacement failure'); END")
+
+    await expect(createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/6)',
+      type: 'highlight',
+      text: 'new',
+      replaceAnnotationIds: [oldHighlight.id],
+    })).rejects.toThrow('forced replacement failure')
+
+    expect(await listAnnotations(ownerId, bookId)).toEqual([expect.objectContaining({ id: oldHighlight.id, text: 'keep after failure' })])
+  })
+
+  it('does not retire a foreign highlight named in replacement IDs', async () => {
+    const foreignHighlightId = createId('hl')
+    const now = Date.now()
+    db.insert(schema.highlights).values({
+      id: foreignHighlightId,
+      userId: otherId,
+      bookVersionId: bookId,
+      revisionId: null,
+      cfiRange: 'epubcfi(/6/2!/4/2)',
+      cfiAnchor: null,
+      color: 'yellow',
+      style: 'highlight',
+      text: 'foreign',
+      chapter: null,
+      chapterHref: null,
+      relocation: 'ok',
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    }).run()
+
+    await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/6)',
+      type: 'highlight',
+      replaceAnnotationIds: [foreignHighlightId],
+    })
+
+    expect(db.select().from(schema.highlights).where(eq(schema.highlights.id, foreignHighlightId)).get()?.deletedAt).toBeNull()
   })
 
   it('keeps the row id stable when restoring a soft-deleted highlight', async () => {

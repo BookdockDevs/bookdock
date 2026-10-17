@@ -11,6 +11,8 @@ import type {
 } from '@bookdock/shared'
 
 import { apiGet, apiPost, apiPut } from '../client'
+import { getUserErrorNotification } from '@/lib/error-message'
+import { notify } from '@/lib/notifications'
 
 export const STORAGE_BACKEND_CONFIG_KEY = ['storage-backend', 'config'] as const
 export const STORAGE_BACKEND_MIGRATION_KEY = ['storage-backend', 'migration'] as const
@@ -77,6 +79,9 @@ export function useStartStorageMigration() {
       void queryClient.invalidateQueries({ queryKey: STORAGE_BACKEND_MIGRATION_KEY })
       void queryClient.invalidateQueries({ queryKey: STORAGE_BACKEND_CONFIG_KEY })
     },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.operationFailed'))
+    },
   })
 }
 
@@ -87,6 +92,9 @@ export function usePauseStorageMigration() {
       apiPost<{ data: { success: boolean } }>('/integrations/storage-backend/migration/pause', {}),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: STORAGE_BACKEND_MIGRATION_KEY })
+    },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.operationFailed'))
     },
   })
 }
@@ -118,6 +126,9 @@ export function useStartStorageRestore() {
       void queryClient.invalidateQueries({ queryKey: STORAGE_BACKEND_RESTORE_KEY })
       void queryClient.invalidateQueries({ queryKey: STORAGE_BACKEND_CONFIG_KEY })
     },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.operationFailed'))
+    },
   })
 }
 
@@ -128,6 +139,9 @@ export function usePauseStorageRestore() {
       apiPost<{ data: StorageRestoreStatusRes }>('/integrations/storage-backend/restore/pause', {}),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: STORAGE_BACKEND_RESTORE_KEY })
+    },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'errors.operationFailed'))
     },
   })
 }

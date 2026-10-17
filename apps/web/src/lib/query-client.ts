@@ -15,16 +15,7 @@ export const queryClient = new QueryClient({
       }
     },
   }),
-  mutationCache: new MutationCache({
-    onSettled: async () => {
-      // Archives and notifications also depend on source permissions and lifecycle writes.
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['notifications'] }),
-        queryClient.invalidateQueries({ queryKey: ['note-archive'] }),
-        queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] }),
-      ])
-    },
-  }),
+  mutationCache: new MutationCache(),
   defaultOptions: {
     queries: {
       staleTime: Infinity,
@@ -49,6 +40,7 @@ useAuthStore.subscribe((state, previous) => {
   const filters = { predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] !== 'auth' }
   void queryClient.cancelQueries(filters)
   queryClient.removeQueries(filters)
+  void queryClient.invalidateQueries({ queryKey: ['auth', 'me'] })
   if (state.user?.id) {
     seedSettingsQuery(queryClient, state.user.id)
   }
