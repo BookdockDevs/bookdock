@@ -10,6 +10,7 @@ import type { BookReader, ClickAreaMode, MarginalField, RendererEvents } from '.
 import type { EffectiveViewSettings } from '../lib/view-settings'
 
 interface UseReaderRendererOptions {
+  ready?: boolean
   url: string
   bookId?: string
   format?: BookFormat
@@ -38,6 +39,7 @@ interface UseReaderRendererOptions {
   onMediaPlay?: (e: Parameters<RendererEvents['mediaPlay']>[0]) => void
   onInstantAnnotation?: (e: Parameters<RendererEvents['instantAnnotation']>[0]) => void
   onRendered?: () => void
+  onFontFallback?: () => void
   onError?: (err: Error) => void
   onTocReady?: (items: { label: string; href: string; level?: number }[]) => void
   onJumpConfirmed?: (e: { cfi: string }) => void
@@ -52,6 +54,7 @@ interface UseReaderRendererOptions {
 }
 
 export function useReaderRenderer({
+  ready = true,
   url,
   bookId,
   format,
@@ -71,6 +74,7 @@ export function useReaderRenderer({
   onMediaPlay,
   onInstantAnnotation,
   onRendered,
+  onFontFallback,
   onError,
   onTocReady,
   onJumpConfirmed,
@@ -140,7 +144,15 @@ export function useReaderRenderer({
   // receives a concrete stack + optional @font-face/@import css. While the
   // fonts query is still loading an uploaded id resolves to the system
   // fallback; fontCss changing re-triggers the applyFont effect below.
-  const { data: fontsData } = useFonts()
+  const fontsQuery = useFonts()
+  const fontsData = fontsQuery.data
+  const preparedUrlRef = useRef('')
+  if (!url || !ready) {
+    preparedUrlRef.current = ''
+  } else if (fontsData) {
+    preparedUrlRef.current = url
+  }
+  const canMount = Boolean(url) && ready && preparedUrlRef.current === url
   const resolvedFont = resolveDualFont(fontFamily, cjkFontFamily, fontsData?.data ?? [], fontPreferences, fontOrder)
   const fontStack = resolvedFont.stack
   const fontCss = resolvedFont.css
@@ -156,6 +168,7 @@ export function useReaderRenderer({
   const onMediaPlayRef = useRef(onMediaPlay)
   const onInstantAnnotationRef = useRef(onInstantAnnotation)
   const onRenderedRef = useRef(onRendered)
+  const onFontFallbackRef = useRef(onFontFallback)
   const onErrorRef = useRef(onError)
   const onTocReadyRef = useRef(onTocReady)
   const onJumpConfirmedRef = useRef(onJumpConfirmed)
@@ -198,6 +211,7 @@ export function useReaderRenderer({
   onMediaPlayRef.current = onMediaPlay
   onInstantAnnotationRef.current = onInstantAnnotation
   onRenderedRef.current = onRendered
+  onFontFallbackRef.current = onFontFallback
   onErrorRef.current = onError
   onTocReadyRef.current = onTocReady
   onJumpConfirmedRef.current = onJumpConfirmed
@@ -231,7 +245,7 @@ export function useReaderRenderer({
   const createRenderer = useCallback(() => new FoliateReader(url, bookId, bookSize, format), [bookId, bookSize, format, url])
 
   useEffect(() => {
-    if (!containerRef.current || !url) return
+    if (!containerRef.current || !url || !canMount) return
     // Wait until the start position is known ('' means "no saved progress")
     // so mount navigates exactly once instead of goTo(0) then display(cfi).
     // Safe in deps: queries have staleTime Infinity, so initialCfi only
@@ -241,6 +255,21 @@ export function useReaderRenderer({
     const newRenderer = createRenderer()
     rendererRef.current = newRenderer
     const theme = themeRef.current
+
+    newRenderer.applyReadingMode(readingModeRef.current)
+    newRenderer.applyPageColumns(pageColumnsRef.current)
+    newRenderer.applyColumnGap(columnGapRef.current)
+    newRenderer.applyPageAnimation(pageAnimationRef.current)
+    newRenderer.applyShowHeader(showHeaderRef.current)
+    newRenderer.applyShowFooter(showFooterRef.current)
+    newRenderer.applyReadingTheme({ bg: theme.pageBg, text: theme.text, primary: theme.primary })
+    newRenderer.applyFont(fontRef.current)
+    newRenderer.applyParagraphStyle(paragraphRef.current)
+    newRenderer.applyPageWidth(pageWidthRef.current)
+    newRenderer.applyChineseConversion(chineseConversionRef.current)
+    newRenderer.applyContinuousScroll(continuousScrollRef.current)
+    newRenderer.applyClickSettings(clickAreaModeRef.current)
+    newRenderer.applyMarginals(marginalConfigRef.current)
 
     let cancelled = false
     const isCurrentRenderer = () => !cancelled && rendererRef.current === newRenderer
@@ -263,20 +292,6 @@ export function useReaderRenderer({
       // mount already navigated (initialTarget may be '' for "book start")
       lastDisplayedCfiRef.current = initialTarget
       setRenderer(newRenderer)
-      newRenderer.applyReadingMode(readingModeRef.current)
-      newRenderer.applyPageColumns(pageColumnsRef.current)
-      newRenderer.applyColumnGap(columnGapRef.current)
-      newRenderer.applyPageAnimation(pageAnimationRef.current)
-      newRenderer.applyShowHeader(showHeaderRef.current)
-      newRenderer.applyShowFooter(showFooterRef.current)
-      newRenderer.applyReadingTheme({ bg: theme.pageBg, text: theme.text, primary: theme.primary })
-      newRenderer.applyFont(fontRef.current)
-      newRenderer.applyParagraphStyle(paragraphRef.current)
-      newRenderer.applyPageWidth(pageWidthRef.current)
-      newRenderer.applyChineseConversion(chineseConversionRef.current)
-      newRenderer.applyContinuousScroll(continuousScrollRef.current)
-      newRenderer.applyClickSettings(clickAreaModeRef.current)
-      newRenderer.applyMarginals(marginalConfigRef.current)
     }).catch((err) => {
       console.error('[FoliateReader] mount failed:', err)
       if (isCurrentRenderer()) onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)))
@@ -292,6 +307,7 @@ export function useReaderRenderer({
     const unsubMediaPlay = newRenderer.on('mediaPlay', (e) => { if (isCurrentRenderer()) onMediaPlayRef.current?.(e) })
     const unsubInstantAnnotation = newRenderer.on('instantAnnotation', (e) => { if (isCurrentRenderer()) onInstantAnnotationRef.current?.(e) })
     const unsubRendered = newRenderer.on('rendered', () => { if (isCurrentRenderer()) onRenderedRef.current?.() })
+    const unsubFontFallback = newRenderer.on('fontFallback', () => { if (isCurrentRenderer()) onFontFallbackRef.current?.() })
     const unsubToc = newRenderer.on('tocReady', (items) => { if (isCurrentRenderer()) onTocReadyRef.current?.(items) })
     const unsubJumpConfirmed = newRenderer.on('jumpConfirmed', (e) => { if (isCurrentRenderer()) onJumpConfirmedRef.current?.(e) })
     const unsubNavigatePending = newRenderer.on('navigatePending', (e) => { if (isCurrentRenderer()) onNavigatePendingRef.current?.(e) })
@@ -315,6 +331,7 @@ export function useReaderRenderer({
       unsubMediaPlay()
       unsubInstantAnnotation()
       unsubRendered()
+      unsubFontFallback()
       unsubToc()
       unsubJumpConfirmed()
       unsubNavigatePending()
@@ -329,7 +346,7 @@ export function useReaderRenderer({
       if (rendererRef.current === newRenderer) rendererRef.current = null
       setRenderer((current) => (current === newRenderer ? null : current))
     }
-  }, [url, createRenderer, initialCfi, initialFraction])
+  }, [url, createRenderer, initialCfi, initialFraction, canMount])
 
   // Navigate to the saved position once both renderer and progress are ready.
   // Skipping when initialCfi is undefined avoids a spurious goTo({ index: 0 })
@@ -441,5 +458,5 @@ export function useReaderRenderer({
     current.setChapterWordCounts(chapterWordCounts)
   }, [chapterWordCounts, renderer])
 
-  return { containerRef, renderer, fontStack, fontCss }
+  return { containerRef, renderer, fontStack, fontCss, preparationFailed: !fontsData && fontsQuery.isError, retryPreparation: fontsQuery.refetch }
 }

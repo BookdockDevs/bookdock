@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsSync } from '../providers/SettingsSync'
 import { useAuthStore } from '../stores/auth.store'
 import { useUiStore } from '../stores/ui.store'
+import { useSettingsSyncStore } from '../stores/settings-sync.store'
 
 import { customThemesFromSync } from '../lib/reading-theme'
 import { writeStoredSettings } from '../lib/settings-cache'
@@ -78,6 +79,19 @@ describe('SettingsSync persistence', () => {
     expect(put).toBeDefined()
     const body = JSON.parse(String(put?.[1]?.body)) as { readingConfig: string }
     expect(body.readingConfig).toContain('护眼')
+  })
+
+  it('keeps uncached account preferences blocked until a successful retry has been applied', async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error('offline'))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(createElement(QueryClientProvider, { client }, createElement(SettingsSync)))
+    await vi.runAllTimersAsync()
+    expect(useSettingsSyncStore.getState()).toMatchObject({ userId: user.id, ready: false, failed: true })
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ data: {} }), { headers: { 'Content-Type': 'application/json' } }))
+    await client.refetchQueries({ queryKey: ['settings'] })
+    await vi.runAllTimersAsync()
+    expect(useSettingsSyncStore.getState()).toMatchObject({ userId: user.id, ready: true, failed: false })
+    client.clear()
   })
 
   it('saves ordinary reading changes through the same config snapshot', async () => {

@@ -19,6 +19,16 @@ function mockResponse(status: number, body = '', headers: Record<string, string>
 }
 
 describe('S3 SigV4 signing', () => {
+  it('signs and verifies remote ranges before returning partial bytes', async () => {
+    const request = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response('bc', { status: 206, headers: { 'Content-Range': 'bytes 1-2/6' } }),
+    )
+    try {
+      expect(await makeClient().getRange('/book.epub', { start: 1, end: 2 })).toEqual({ data: Buffer.from('bc'), size: 6 })
+      expect(request.mock.calls[0][1]?.headers).toMatchObject({ Range: 'bytes=1-2' })
+    } finally { request.mockRestore() }
+  })
+
   it('produces deterministic signatures with expected shape', () => {
     const args = {
       method: 'GET',

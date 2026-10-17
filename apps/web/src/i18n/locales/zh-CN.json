@@ -812,6 +812,7 @@
     "refresh": "刷新",
     "reupload": "重新上传",
     "bookLoadParseFailed": "书籍文件无法打开",
+    "fontLoadFallback": "字体加载未完成，已使用可用字体，可稍后重新打开重试",
     "bookLoadSlow": "网络较慢，仍在加载中…",
     "bookLoadFileHint": "该文件可能格式不支持或已损坏，请确认文件完整性后重新上传",
     "navigationLoadFailed": "章节加载失败",

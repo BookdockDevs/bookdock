@@ -39,6 +39,7 @@ import { NavigationPending, type NavigationTarget } from '../lib/navigation-pend
 import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
 import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
 import { getSelectionGeometry } from '../lib/selection-geometry'
+import { waitForReaderFonts } from '../lib/reader-font-ready'
 import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, type BookFormat } from '@bookdock/shared'
 
 import {
@@ -1186,14 +1187,24 @@ async function openZipEntryMap(url: string, foliate: any, bookSize?: number) {
   }
 }
 
-async function openZipFromWholeFile(url: string, foliate: any) {
+export async function openZipFromWholeFile(url: string, foliate: any) {
   const { configure, ZipReader: VendoredZipReader, BlobReader, TextWriter, BlobWriter } = foliate
   const ac = new AbortController()
   const timeoutId = setTimeout(() => ac.abort(), 60000)
-  const res = await fetch(url, { signal: ac.signal })
-  clearTimeout(timeoutId)
-  if (!res.ok) throw new Error(`fetch epub failed: ${res.status} ${res.statusText}`)
-  const file = await res.blob()
+  let file: Blob
+  try {
+    const res = await fetch(url, { signal: ac.signal })
+    if (!res.ok) throw new Error(`fetch epub failed: ${res.status} ${res.statusText}`)
+    file = await res.blob()
+    const expected = res.headers.get('content-length')
+    const encoding = res.headers.get('content-encoding')
+    const isEncoded = encoding !== null && encoding !== '' && encoding.toLowerCase() !== 'identity'
+    if (!isEncoded && expected !== null && file.size !== Number(expected)) {
+      throw new Error('Incomplete EPUB response')
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
   configure({ useWebWorkers: false })
   const reader = new VendoredZipReader(new BlobReader(file))
   const entries: any[] = await reader.getEntries()
@@ -1376,7 +1387,7 @@ function getParsedBook(url: string, foliate: any, bookSize?: number): Promise<an
     }
     // memo (this mount) → IndexedDB (cross-session, keyed by bookId|updatedAt)
     // → network. Only reached on a miss, so reopen reloads nothing that was
-    // cached before; TXT books don't go through this path at all.
+    // cached before; imported TXT artifacts use the same EPUB loading path.
     const loadText = memoizeLoadText(withTextCache(
       load((entry: any) => loadEntryData(entry, () => new TextWriter())),
       { namespace: chapterTextNamespaceFromUrl(url) },
@@ -2245,6 +2256,7 @@ export class FoliateReader implements BookReader {
   }
 
   private destroyed = false
+  private startupAbort = new AbortController()
 
   constructor(url: string, bookId = '', bookSize?: number, bookFormat: BookFormat = 'epub') {
     this.url = url
@@ -2403,6 +2415,21 @@ export class FoliateReader implements BookReader {
       } else {
         // Ensure first section is visible after applyAllSettings re-render
         await this.view?.renderer?.goTo?.({ index: 0 })
+      }
+      const startupIntent = this.navigationIntent
+      const startupCfi = this.lastCfi
+      const contents = this.view?.renderer?.getContents?.() ?? []
+      const currentDoc = contents.find((content: { index: number }) => content.index === this.currentSectionIndex)?.doc
+      if (currentDoc) {
+        const fontsReady = await waitForReaderFonts(currentDoc, this.startupAbort.signal, this.container?.getBoundingClientRect())
+        if (this.destroyed) return
+        if (!fontsReady) {
+          console.warn('[FoliateReader] font preparation failed or timed out; using available fallback fonts')
+          this.emit('fontFallback')
+        }
+        if (startupCfi && startupIntent === this.navigationIntent) await this.display(startupCfi, { internal: true })
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        if (this.destroyed) return
       }
       // Initial view creation and saved-position navigation can move focus
       // between the host document and book iframes. Do not let that startup
@@ -4397,6 +4424,7 @@ export class FoliateReader implements BookReader {
   }
 
   destroy() {
+    this.startupAbort.abort()
     this.setAutoReadingActive(false)
     this.destroyed = true
     // stop any in-flight search loop at the next chapter boundary; the

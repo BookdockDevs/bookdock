@@ -404,23 +404,29 @@ export async function bufferFromStream(stream: Readable): Promise<Buffer> {
 /** Dedup across uploads: the personal version in this library whose CURRENT
  * content matches the candidate blob. Old revisions with the same bytes do
  * not count (content moved on). */
-function findPersonalVersionByBlob(libraryId: string, blobKey: string): { versionId: string; libraryBookId: string } | null {
+function findPersonalVersionByBlob(libraryId: string, blobKey: string, format: BookFormat): { versionId: string; libraryBookId: string } | null {
   const db = getDb()
+  const sourceHash = hashFromBlobKey(blobKey)
   const candidates = db.select({
     versionId: libraryBookVersions.bookVersionId,
     libraryBookId: libraryBookVersions.libraryBookId,
   }).from(libraryBookVersions)
+    .innerJoin(bookVersions, eq(bookVersions.id, libraryBookVersions.bookVersionId))
     .innerJoin(contentRevisions, eq(contentRevisions.bookVersionId, libraryBookVersions.bookVersionId))
     .where(and(
       eq(libraryBookVersions.libraryId, libraryId),
       eq(libraryBookVersions.kind, 'personal'),
-      eq(contentRevisions.blobKey, blobKey),
+      eq(bookVersions.format, format),
+      or(eq(contentRevisions.blobKey, blobKey), and(
+        eq(contentRevisions.revisionNo, 1),
+        sql`json_extract(${contentRevisions.meta}, '$.sourceContentHash') = ${sourceHash}`,
+      )),
     )).all()
   for (const candidate of candidates) {
-    const latest = db.select({ blobKey: contentRevisions.blobKey }).from(contentRevisions)
+    const latest = db.select({ blobKey: contentRevisions.blobKey, revisionNo: contentRevisions.revisionNo, meta: contentRevisions.meta }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, candidate.versionId))
       .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
-    if (latest?.blobKey === blobKey) return candidate
+    if (latest?.blobKey === blobKey || (latest?.revisionNo === 1 && latest.meta.sourceContentHash === sourceHash)) return candidate
   }
   return null
 }
@@ -444,7 +450,7 @@ async function materializeUpload(userId: string, file: File, buffer: Buffer, ver
   const parsed = await parser.parse(buffer)
   const format: BookFormat = fileName.toLowerCase().endsWith('.txt') ? 'txt' : 'epub'
   const contentHash = sha256(buffer)
-  const fileKey = blobKey(contentHash, '.epub')
+  let fileKey = blobKey(contentHash, '.epub')
 
   let title = parsed.meta.title
   let author = parsed.meta.author ?? ''
@@ -526,6 +532,8 @@ async function materializeUpload(userId: string, file: File, buffer: Buffer, ver
       epubChapters,
       contentFor,
     )
+    fileKey = blobKey(sha256(epubBuffer), '.epub')
+    meta.sourceContentHash = contentHash
     await storage.put(fileKey, epubBuffer)
     size = epubBuffer.length
   } else {
@@ -621,7 +629,7 @@ export async function uploadBook(
 
   const versionId = createId('book')
   const buffer = Buffer.from(await file.arrayBuffer())
-  const duplicate = findPersonalVersionByBlob(library.id, blobKey(sha256(buffer), '.epub'))
+  const duplicate = findPersonalVersionByBlob(library.id, blobKey(sha256(buffer), '.epub'), file.name.toLowerCase().endsWith('.txt') ? 'txt' : 'epub')
   if (duplicate) {
     // Tags are additive and side-effect-free, so honor the requested assignment
     // even for a duplicate. The category is deliberately not touched: it is a
@@ -762,7 +770,7 @@ export async function uploadCatalogBook(
 
   const versionId = createId('book')
   const buffer = Buffer.from(await file.arrayBuffer())
-  const duplicate = findPersonalVersionByBlob(libraryId, blobKey(sha256(buffer), '.epub'))
+  const duplicate = findPersonalVersionByBlob(libraryId, blobKey(sha256(buffer), '.epub'), file.name.toLowerCase().endsWith('.txt') ? 'txt' : 'epub')
   if (duplicate) {
     if (tagIds.length > 0) {
       db.insert(libraryBookTags)

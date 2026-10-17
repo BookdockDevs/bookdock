@@ -12,6 +12,7 @@ import { notify } from '@/lib/notifications'
 import { registerBeforeHideHiddenReader, withReveal } from '@/lib/reveal-hidden'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
+import { useSettingsSyncStore } from '@/stores/settings-sync.store'
 
 import { cn } from '@/lib/utils'
 import ErrorBoundary from '@/components/ui/ErrorBoundary'
@@ -628,7 +629,7 @@ export default function Reader() {
     // a re-TOC) and by the renderer when the saved CFI fails to resolve
     // (content is unchanged, so the fraction still lands on the same text).
     initialFractionRef.current = data && data.percent > 0 ? data.fraction ?? data.percent / 100 : undefined
-    if (data && (data.cfi || data.percent > 0)) restoreGateRef.current?.arm()
+    restoreGateRef.current?.arm()
   }
 
   const [bookReady, setBookReady] = useState(false)
@@ -641,6 +642,13 @@ export default function Reader() {
   // false timeout card (which then self-healed when the load arrived late).
   // Real failures keep coming through the renderer's onError.
   const [slowLoad, setSlowLoad] = useState(false)
+  const [showLoading, setShowLoading] = useState(false)
+  useEffect(() => {
+    setShowLoading(false)
+    if (readerReady) return
+    const timer = setTimeout(() => setShowLoading(true), 200)
+    return () => clearTimeout(timer)
+  }, [readerReady, contentUrl])
   useEffect(() => {
     setBookReady(false)
     setReadyContentUrl(null)
@@ -735,7 +743,12 @@ export default function Reader() {
     }
   }, [chromePinned, isTouch, setSidebarOpen, settingsOpen, sidebarOpen, toolbarLocked])
 
-  const { containerRef, renderer, fontStack, fontCss } = useReaderRenderer({
+  const settingsSync = useSettingsSyncStore()
+  const resolvedBoundPresetId = useUiStore((s) => s.boundPresetId)
+  const settingsReady = isGuest || (settingsSync.userId === authUser?.id && settingsSync.ready)
+  const settingsFailed = !isGuest && settingsSync.userId === authUser?.id && settingsSync.failed
+  const { containerRef, renderer, fontStack, fontCss, preparationFailed, retryPreparation } = useReaderRenderer({
+    ready: settingsReady && resolvedBoundPresetId === boundPresetId,
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
     bookId: id,
     format: bookQuery.data?.data?.format,
@@ -745,6 +758,7 @@ export default function Reader() {
     initialCfi: initialCfiRef.current,
     initialFraction: initialFractionRef.current,
     settings: effectiveSettings,
+    onFontFallback: () => notify.warning({ key: 'reader.fontLoadFallback' }, { dedupeKey: `reader-font:${id}` }),
     chapterWordCounts,
     onRendered: () => {
       setBookReady(true)
@@ -1658,7 +1672,15 @@ export default function Reader() {
               // white until its theme styles are injected — without this the
               // loading overlay would flash white on every reader open
               <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[var(--bd-read-page-bg)] text-sm text-[var(--bd-read-sub)]">
-                {progressQuery.isError && initialCfiRef.current === undefined && !progressStartOver ? (
+                {settingsFailed || preparationFailed ? (
+                  <div className="pointer-events-auto flex flex-col items-center gap-3">
+                    <span>{_('errors.loadFailed')}</span>
+                    <Button onClick={() => {
+                      void queryClient.refetchQueries({ queryKey: ['settings'] })
+                      void retryPreparation?.()
+                    }}>{_('reader.retry')}</Button>
+                  </div>
+                ) : progressQuery.isError && initialCfiRef.current === undefined && !progressStartOver ? (
                   <>
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
                       <circle cx="12" cy="12" r="10" />
@@ -1719,7 +1741,7 @@ export default function Reader() {
                     </div>
                   </>
                 ) : (
-                  <div className="flex flex-col items-center gap-2">
+                  <div className={cn('flex flex-col items-center gap-2', !showLoading && 'invisible')}>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="animate-spin text-[var(--bd-read-sub)]">
                       <path d="M21 12a9 9 0 11-6.219-8.56" />
                     </svg>

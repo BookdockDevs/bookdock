@@ -25,6 +25,7 @@ import booksRoutes from './books.routes'
 import settingsRoutes from '../settings/settings.routes'
 import { resetInstanceCache } from '../auth/auth.service'
 import {
+  bufferFromStream,
   getBook,
   getActiveBook,
   updateBook,
@@ -308,14 +309,20 @@ describe('uploadBook dedup flag', () => {
     expect(book.filePath).toMatch(/\.epub$/)
   })
 
-  it('treats identical content from different users as separate rows but shared blob', async () => {
+  it('keeps generated TXT artifacts immutable across users and still deduplicates source uploads', async () => {
     const otherId = seedUser(db, 'other')
     const file = new File(['shared content abc'], 'book.txt', { type: 'text/plain' })
     const a = await uploadBook(ownerId, file)
+    const original = await bufferFromStream(await storage.getStorage().get(a.book.filePath))
     const b = await uploadBook(otherId, file)
     expect(b.duplicated).toBe(false)
     expect(b.book.id).not.toBe(a.book.id)
-    expect(b.book.filePath).toBe(a.book.filePath)
+    expect(b.book.filePath).not.toBe(a.book.filePath)
+    expect(await bufferFromStream(await storage.getStorage().get(a.book.filePath))).toEqual(original)
+    expect(await storage.getStorage().size(a.book.filePath)).toBe(a.book.size)
+    expect(await storage.getStorage().size(b.book.filePath)).toBe(b.book.size)
+    expect((await uploadBook(ownerId, file)).book.id).toBe(a.book.id)
+    expect((await uploadBook(otherId, file)).duplicated).toBe(true)
   })
 
   it('persists bookmeta (empty for txt) so getBook never re-parses on first open', async () => {

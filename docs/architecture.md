@@ -762,6 +762,15 @@ version.status = 'published'`:
 
 Reading position fields live in the `books` row; progress history and interval data live in storage files under `DATA_DIR`.
 
+### Reader startup readiness
+
+Reader startup resolves account settings, the book-bound profile and per-book overrides before
+creating the first chapter. Renderer settings are seeded before mounting, not replayed after
+the first `rendered` event. Only the selected fonts are awaited in the chapter document, with
+a bounded fallback; initial navigation settles before content is exposed, timers start or
+progress writes resume. Cached account settings remain usable during background refresh;
+uncached failures expose retry rather than mounting with unknown preferences.
+
 ### Reader book-style boundary
 
 The reader separates format-specific book layout semantics from renderer safety
@@ -966,6 +975,21 @@ export interface StorageDriver {
 ```
 
 Keys like `books/{bookId}/{filename}`, `covers/{id}.{ext}`. Current impls: `LocalFsDriver` (`DATA_DIR/files/`) and `TieredStorageDriver` (`storage/tiered.ts`), selected per boot from the `instance` row: when the owner enables the external backend, book blobs tier across local disk and WebDAV (`local` → `synced` → `remote`, tracked on `blobs.storage_tier` with `lastAccessedAt` for LRU); covers stay strictly local and are never uploaded or evicted. Reads serve locally when present and otherwise stream the remote copy into cache through an atomic temp-file pipeline; `exists()` treats a `synced`/`remote` DB tier as present because the live PROPFIND probe is too flaky to gate reads — `get()` is the source of truth. New storage = implement the interface + register, no service changes.
+
+File response lengths and range bounds come from the actual local file, or verified remote
+metadata on a cache miss, never a historical revision length. Remote range reads are used
+only after validating status, Content-Range and payload length; unsupported ranges fall back
+to a single shared atomic cache fill. Partial reads never mark a whole blob cached. Whole-file
+responses remain buffered to preserve the Node adapter's abort safety. Failed fills leave no
+published file. Failed remote metadata probes use a one-minute connection-local backoff
+and fall back to downloading actual bytes. Tiny range probes slower than 1.5 seconds
+fall back to full caching only for files up to 32 MiB; larger files retain bounded reads.
+No automatic repair of historical revision metadata occurs on reads.
+
+TXT uploads address the generated EPUB by its own byte hash. The original upload hash is
+stored as revision provenance (`sourceContentHash`) for library-scoped, same-format duplicate detection,
+including compatibility with legacy source-hash blob keys. Different generated artifacts
+must never overwrite one shared source-hash key or inherit an older blob size.
 
 ### 3.3 FormatRegistry
 
