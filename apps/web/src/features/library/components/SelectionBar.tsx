@@ -8,7 +8,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
-import { useLibraryCategories, useLibraryTags, useShelves, useTags } from '../hooks'
+import { invalidatePermanentlyDeletedBookQueries, useLibraryCategories, useLibraryTags, useShelves, useTags } from '../hooks'
 import { categoryChoices } from '../taxonomy'
 import { READ_STATUS_OPTIONS } from './read-status'
 
@@ -662,6 +662,7 @@ function BatchDeleteDialog({ ids, items, libraryId, trashEnabled, onRetainSelect
       void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
     }
+    if (!trashEnabled || deleteUserData) void invalidatePermanentlyDeletedBookQueries(queryClient)
     if (failed === 0) {
       notify.success({ key: 'library.batchDeleteSucceeded', params: { count: succeeded } })
     } else {
@@ -722,7 +723,7 @@ function BatchPermanentDeleteDialog({ ids, libraryId, onRetainSelection, onClose
       : apiDelete(`/books/${id}/permanent`))
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
-    void queryClient.invalidateQueries({ queryKey: ['books'] })
+    if (succeeded > 0) void invalidatePermanentlyDeletedBookQueries(queryClient)
     if (libraryId) {
       void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })

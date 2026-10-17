@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, apiGet, apiPost } from '@/api/client'
 
-import { ME_QUERY_KEY, useLogin } from '../features/auth/hooks'
+import { ME_QUERY_KEY, useLogin, useRegister } from '../features/auth/hooks'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
@@ -63,4 +63,26 @@ describe('useLogin', () => {
     await waitFor(() => expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual({ data: me }))
     expect(apiGet).toHaveBeenCalledTimes(2)
   })
+
+  it('refreshes the session query after registration', async () => {
+    const me = { id: 'user-2', username: 'bob', role: 'member', avatarKey: null }
+    vi.mocked(apiGet)
+      .mockRejectedValueOnce(new ApiError('UNAUTHORIZED', 'Not authenticated'))
+      .mockResolvedValueOnce({ data: me })
+    vi.mocked(apiPost).mockResolvedValue({
+      data: { token: 'token', user: { id: me.id, username: me.username, role: me.role } },
+    })
+
+    const { result } = renderHook(() => useRegister(), { wrapper: wrapper(queryClient) })
+
+    await waitFor(() => expect(queryClient.getQueryState(ME_QUERY_KEY)?.status).toBe('error'))
+
+    await act(async () => {
+      await result.current.mutateAsync({ username: me.username, password: 'password' })
+    })
+
+    await waitFor(() => expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual({ data: me }))
+    expect(apiGet).toHaveBeenCalledTimes(2)
+  })
 })
+

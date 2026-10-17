@@ -372,5 +372,23 @@ describe('UI Loading States Regression Tests', () => {
         expect(screen.getByText('Access Denied')).toBeInTheDocument()
       })
     })
+
+    it('does not invalidate interaction projections for an unrelated settled mutation', async () => {
+      const { queryClient: appQueryClient } = await import('@/lib/query-client')
+      const suffix = Date.now()
+      const keys = [
+        ['test-unrelated-notifications', suffix],
+        ['test-unrelated-note-archive', suffix],
+        ['test-unrelated-author-reviews', suffix],
+      ]
+      for (const key of keys) appQueryClient.setQueryData(key, { data: [] })
+
+      const mutation = appQueryClient.getMutationCache().build(appQueryClient, {
+        mutationFn: async () => ({ ok: true }),
+      })
+      await mutation.execute(undefined)
+
+      for (const key of keys) expect(appQueryClient.getQueryState(key)?.isInvalidated).toBe(false)
+    })
   })
 })

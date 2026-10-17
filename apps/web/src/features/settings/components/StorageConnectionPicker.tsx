@@ -18,6 +18,7 @@ export interface StorageConnectionPickerProps {
   showLocalOption?: boolean
   localLabel?: string
   onAddNew?: () => void
+  disabled?: boolean
   addNewLabel?: ReactNode
   triggerClassName?: string
   triggerNameClassName?: string
@@ -48,6 +49,7 @@ export default function StorageConnectionPicker({
   showLocalOption = false,
   localLabel = '本地磁盘',
   onAddNew,
+  disabled = false,
   addNewLabel = '添加存储',
   triggerClassName,
   triggerNameClassName = 'max-w-[140px]',
@@ -84,6 +86,7 @@ export default function StorageConnectionPicker({
         ref={menu.btnRef}
         type="button"
         onClick={menu.toggleFromButton}
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={menu.open}
         {...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
@@ -131,7 +134,7 @@ export default function StorageConnectionPicker({
         >
           <div className="max-h-56 overflow-y-auto overscroll-contain py-1">
             {showLocalOption && (
-              <button type="button" onClick={() => handleSelect('local')} className={optionButtonClass(isLocal)}>
+              <button type="button" disabled={disabled} onClick={() => handleSelect('local')} className={optionButtonClass(isLocal)}>
                 <div className="flex items-center gap-2 truncate">
                   <LocalStorageBadge />
                   <span className="truncate">{localLabel}</span>
@@ -147,7 +150,7 @@ export default function StorageConnectionPicker({
             {connections.map((c) => {
               const isSelected = value === c.id
               return (
-                <button key={c.id} type="button" onClick={() => handleSelect(c.id)} className={optionButtonClass(isSelected)}>
+                <button key={c.id} type="button" disabled={disabled} onClick={() => handleSelect(c.id)} className={optionButtonClass(isSelected)}>
                   <div className="flex items-center gap-2 truncate">
                     <span className="shrink-0" title={PROVIDER_MARK[c.provider]?.label ?? c.provider}>
                       {PROVIDER_MARK[c.provider]?.badge ?? (
@@ -168,6 +171,7 @@ export default function StorageConnectionPicker({
                 <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
                 <button
                   type="button"
+                  disabled={disabled}
                   onClick={() => {
                     menu.close()
                     onAddNew()

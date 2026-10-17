@@ -50,34 +50,39 @@ export default function InstanceSettingsSection() {
         label={_('admin.allowRegistration')}
         hint={_('admin.allowRegistrationHint')}
         checked={instance.allowRegistration}
+        disabled={updateInstance.isPending}
         onChange={(v) => toggle('allowRegistration', v)}
       />
       <ToggleRow
         label={_('admin.allowGuestAccess')}
         hint={_('admin.allowGuestAccessHint')}
         checked={instance.allowGuestAccess}
+        disabled={updateInstance.isPending}
         onChange={(v) => toggle('allowGuestAccess', v)}
       />
       <ToggleRow
         label={_('admin.allowUserCreateLibrary')}
         hint={_('admin.allowUserCreateLibraryHint')}
         checked={instance.allowUserCreateLibrary !== false}
+        disabled={updateInstance.isPending}
         onChange={(v) => toggle('allowUserCreateLibrary', v)}
       />
       <ToggleRow
         label={_('admin.allowUserUpload')}
         hint={_('admin.allowUserUploadHint')}
         checked={instance.allowUserUpload !== false}
+        disabled={updateInstance.isPending}
         onChange={(v) => toggle('allowUserUpload', v)}
       />
     </SettingsCard>
   )
 }
 
-function ToggleRow({ label, hint, checked, onChange }: {
+function ToggleRow({ label, hint, checked, disabled, onChange }: {
   label: string
   hint: string
   checked: boolean
+  disabled?: boolean
   onChange: (value: boolean) => void
 }) {
   return (
@@ -91,8 +96,9 @@ function ToggleRow({ label, hint, checked, onChange }: {
         role="switch"
         aria-checked={checked}
         aria-label={label}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700'}`}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${checked ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700'}`}
       >
         <span
           className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform dark:bg-stone-900 ${checked ? 'translate-x-5' : ''}`}

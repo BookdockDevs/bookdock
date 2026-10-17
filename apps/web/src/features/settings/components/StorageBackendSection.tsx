@@ -415,7 +415,7 @@ export default function StorageBackendSection() {
                         variant="secondary"
                         size="sm"
                         disabled={pauseMigrationMutation.isPending}
-                        onClick={() => void pauseMigrationMutation.mutateAsync()}
+                        onClick={() => pauseMigrationMutation.mutate()}
                       >
                         {_('settings.storageBackendMigrationPause')}
                       </Button>
@@ -425,7 +425,7 @@ export default function StorageBackendSection() {
                         variant="secondary"
                         size="sm"
                         disabled={startMigrationMutation.isPending}
-                        onClick={() => void startMigrationMutation.mutateAsync()}
+                        onClick={() => startMigrationMutation.mutate()}
                       >
                         {_('settings.storageBackendMigrationStart')}
                       </Button>
@@ -912,7 +912,7 @@ function StorageConfigModal({ config, connections, onClose }: StorageConfigModal
                       size="sm"
                       className="whitespace-nowrap"
                       disabled={pauseRestoreMutation.isPending}
-                      onClick={() => void pauseRestoreMutation.mutateAsync()}
+                      onClick={() => pauseRestoreMutation.mutate()}
                     >
                       暂停下载
                     </Button>
@@ -922,7 +922,7 @@ function StorageConfigModal({ config, connections, onClose }: StorageConfigModal
                       size="sm"
                       className="whitespace-nowrap"
                       disabled={startRestoreMutation.isPending}
-                      onClick={() => void startRestoreMutation.mutateAsync()}
+                      onClick={() => startRestoreMutation.mutate()}
                     >
                       下载还原至本地
                     </Button>

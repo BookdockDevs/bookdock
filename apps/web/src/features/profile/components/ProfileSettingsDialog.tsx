@@ -108,6 +108,9 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
               {_('profile.sectionModules')}
             </h3>
             <div className="flex flex-col divide-y divide-stone-100 rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:divide-stone-800/60 dark:border-stone-800 dark:bg-stone-900/40">
+              {/* Note: disabled is an interaction affordance to reduce accidental rapid double-toggles,
+                  not concurrency protection. Concurrency safety and serialization are guaranteed
+                  by useUpdateProfileSettings' promise queue and field-level rollback. */}
               <div className="flex items-center justify-between gap-4 pb-3">
                 <div className="flex flex-col gap-0.5">
                   <span className="text-sm font-medium text-stone-900 dark:text-stone-100">
@@ -117,7 +120,7 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
                     {_('profile.settingShowStatsHint')}
                   </span>
                 </div>
-                <Toggle checked={showStats} onChange={(v) => updateProfile.mutate({ showStats: v })} ariaLabel={_('profile.settingShowStats')} />
+                <Toggle checked={showStats} disabled={updateProfile.isPending} onChange={(v) => updateProfile.mutate({ showStats: v })} ariaLabel={_('profile.settingShowStats')} />
               </div>
 
               <div className="flex items-center justify-between gap-4 pt-3">
@@ -129,7 +132,7 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
                     {_('profile.settingShowShowcaseHint')}
                   </span>
                 </div>
-                <Toggle checked={showShowcase} onChange={(v) => updateProfile.mutate({ showShowcase: v })} ariaLabel={_('profile.settingShowShowcase')} />
+                <Toggle checked={showShowcase} disabled={updateProfile.isPending} onChange={(v) => updateProfile.mutate({ showShowcase: v })} ariaLabel={_('profile.settingShowShowcase')} />
               </div>
             </div>
           </section>
@@ -150,7 +153,7 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
                   {_('profile.settingPublicProfileHint')}
                 </span>
               </div>
-              <Toggle checked={isPublic} onChange={(v) => updateProfile.mutate({ isPublic: v })} ariaLabel={_('profile.settingPublicProfile')} />
+              <Toggle checked={isPublic} disabled={updateProfile.isPending} onChange={(v) => updateProfile.mutate({ isPublic: v })} ariaLabel={_('profile.settingPublicProfile')} />
             </div>
           </section>
 

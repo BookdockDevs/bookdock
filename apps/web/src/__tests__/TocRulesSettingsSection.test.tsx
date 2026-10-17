@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import type { TocRuleRes } from '@bookdock/shared'
 
@@ -129,20 +129,28 @@ describe('TocRulesSettingsSection', () => {
     expect(exported.rules[0]).not.toHaveProperty('builtIn')
   })
 
-  it('keeps selection and the confirmation open on failure and submits one batch', () => {
+  it('keeps selection and the confirmation open on failure and submits one batch', async () => {
     render(<TocRulesSettingsSection />)
     fireEvent.click(screen.getByRole('button', { name: 'settings.editModeEnter' }))
     selectRule(0)
     fireEvent.click(screen.getByRole('button', { name: 'settings.ruleDeleteSelected' }))
     expect(screen.getByRole('alertdialog')).toHaveTextContent('规则一')
     expect(mocks.deleteRules).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'settings.confirmDeleteAction' }))
+    // ConfirmDialog now awaits onConfirm and swaps the confirm label to
+    // "submitting" while the promise is in flight, so the button has to be
+    // waited back to its resting label before it can be located again.
+    const confirmButton = async () => {
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'settings.confirmDeleteAction' })).toBeEnabled())
+      fireEvent.click(screen.getByRole('button', { name: 'settings.confirmDeleteAction' }))
+    }
+    await confirmButton()
     const [body, callbacks] = mocks.deleteRules.mock.calls[0]!
     expect(body).toEqual({ ruleIds: ['rule-1'] })
     act(() => callbacks.onError(new Error('failed')))
     expect(screen.getByRole('alertdialog')).toBeInTheDocument()
     expect(screen.getAllByRole('checkbox')[1]).toBeChecked()
-    fireEvent.click(screen.getByRole('button', { name: 'settings.confirmDeleteAction' }))
+    await confirmButton()
     expect(mocks.deleteRules).toHaveBeenCalledTimes(2)
   })
 

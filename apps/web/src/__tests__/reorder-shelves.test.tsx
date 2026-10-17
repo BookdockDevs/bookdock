@@ -57,4 +57,25 @@ describe('useReorderShelves', () => {
     const cached = queryClient.getQueryData<{ data: ShelfListItem[] }>(['shelves'])
     expect(cached?.data.map((s) => s.id)).toEqual(['a', 'b', 'c'])
   })
+
+  it('preserves hidden shelves in optimistic cache and invalidates query on settle', async () => {
+    const hiddenShelf = { ...shelf('hidden', 'Hidden'), hidden: true }
+    queryClient.setQueryData(['shelves'], {
+      data: [shelf('a', 'A'), hiddenShelf, shelf('b', 'B')],
+    })
+    vi.mocked(apiClient.apiGet).mockResolvedValue({ data: [shelf('a', 'A'), hiddenShelf, shelf('b', 'B')] })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    const { result } = renderHook(() => useReorderShelves(), { wrapper: wrapper(queryClient) })
+
+    // User only reorders visible shelves ('b', 'a')
+    result.current.mutate(['b', 'a'])
+
+    // Hidden shelf remains at its position in optimistic update
+    const cached = queryClient.getQueryData<{ data: ShelfListItem[] }>(['shelves'])
+    expect(cached?.data.map((s) => s.id)).toEqual(['b', 'hidden', 'a'])
+
+    await waitFor(() => expect(apiClient.apiPut).toHaveBeenCalledWith('/shelves/order', { shelfIds: ['b', 'hidden', 'a'] }))
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['shelves'] }))
+  })
 })

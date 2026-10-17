@@ -61,10 +61,6 @@ export default function ConfirmDialog({
 
   async function confirm() {
     if (disabled || submittingRef.current) return
-    if (!needsText) {
-      onConfirm()
-      return
-    }
     submittingRef.current = true
     setSubmitting(true)
     setError(null)

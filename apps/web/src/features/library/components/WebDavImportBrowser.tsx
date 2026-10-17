@@ -37,10 +37,16 @@ interface ImportTaskItem {
   id: string
   path: string
   name: string
-  status: 'queued' | 'downloading' | 'processing' | 'success' | 'duplicate' | 'error'
-  progress: number
+  status: 'queued' | 'downloading' | 'processing' | 'success' | 'duplicate' | 'error' | 'cancelled'
+  progress?: number
   errorMessage?: string
   bookVersionId?: string
+}
+
+interface ImportRun {
+  id: number
+  controller: AbortController
+  cancelRequested: boolean
 }
 
 function getCachedBrowserState(): CachedWebDavBrowserState {
@@ -154,13 +160,19 @@ export default function WebDavImportBrowser({
 
   const [queueItems, setQueueItems] = useState<ImportTaskItem[]>([])
   const [isImporting, setIsImporting] = useState(false)
-  const abortRef = useRef(false)
   const pendingPathsRef = useRef<string[]>([])
   const isProcessingRef = useRef(false)
+  const nextRunIdRef = useRef(0)
+  const activeRunRef = useRef<ImportRun | null>(null)
+  const isMountedRef = useRef(true)
 
   useEffect(() => {
+    isMountedRef.current = true
     return () => {
-      abortRef.current = true
+      isMountedRef.current = false
+      activeRunRef.current?.controller.abort()
+      activeRunRef.current = null
+      pendingPathsRef.current = []
     }
   }, [])
 
@@ -168,11 +180,15 @@ export default function WebDavImportBrowser({
     () =>
       queueItems.length > 0 &&
       !isImporting &&
-      queueItems.every((item) => item.status === 'success' || item.status === 'duplicate' || item.status === 'error'),
+      queueItems.every((item) => item.status === 'success' || item.status === 'duplicate' || item.status === 'error' || item.status === 'cancelled'),
     [queueItems, isImporting],
   )
   const failedCount = useMemo(
     () => queueItems.filter((item) => item.status === 'error').length,
+    [queueItems],
+  )
+  const cancelledCount = useMemo(
+    () => queueItems.filter((item) => item.status === 'cancelled').length,
     [queueItems],
   )
   const readable = useMemo(
@@ -200,7 +216,7 @@ export default function WebDavImportBrowser({
     supportedFiles.length > 0 && supportedFiles.every((f) => selectedPaths.has(f.path))
 
   function handleConnectionChange(id: string) {
-    if (id === activeConnectionId) return
+    if (id === activeConnectionId || isImporting) return
     setSelectedConnectionId(id)
     onConnectionChange?.(id)
     const conn = connections.find((c) => c.id === id)
@@ -209,7 +225,6 @@ export default function WebDavImportBrowser({
     setCurrentPath(targetPath)
     setSelectedPaths(new Set())
     setQueueItems([])
-    setIsImporting(false)
     setSearchQuery('')
     setIsSearchOpen(false)
     setCachedBrowserState(id, targetPath)
@@ -263,7 +278,9 @@ export default function WebDavImportBrowser({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [currentPath, handleGoUp])
 
-  const patchQueueItem = useCallback((id: string, patch: Partial<ImportTaskItem>) => {
+  const patchQueueItem = useCallback((id: string, patch: Partial<ImportTaskItem>, runId?: number) => {
+    if (!isMountedRef.current) return
+    if (runId !== undefined && activeRunRef.current?.id !== runId) return
     setQueueItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   }, [])
 
@@ -271,70 +288,84 @@ export default function WebDavImportBrowser({
     if (isProcessingRef.current || !activeConnectionId) return
     isProcessingRef.current = true
     setIsImporting(true)
-    abortRef.current = false
+    const run: ImportRun = {
+      id: nextRunIdRef.current + 1,
+      controller: new AbortController(),
+      cancelRequested: false,
+    }
+    nextRunIdRef.current = run.id
+    activeRunRef.current = run
 
     const targetLibraryId = propLibraryId ?? (target?.url ? target.url.match(/\/libraries\/([^/]+)/)?.[1] : undefined)
     const newlyCreatedIds: string[] = []
     let freshSuccessCount = 0
     let freshDuplicateCount = 0
     let freshErrorCount = 0
+    let freshCancelledCount = 0
 
-    while (pendingPathsRef.current.length > 0 && !abortRef.current) {
+    while (pendingPathsRef.current.length > 0 && !run.cancelRequested && activeRunRef.current?.id === run.id) {
       const nextPath = pendingPathsRef.current.shift()!
 
-      patchQueueItem(nextPath, { status: 'downloading', progress: 20 })
-
-      let currentPct = 20
-      const progressTimer = setInterval(() => {
-        if (currentPct < 75) {
-          currentPct += 15
-          patchQueueItem(nextPath, { status: 'downloading', progress: currentPct })
-        } else if (currentPct < 90) {
-          currentPct += 5
-          patchQueueItem(nextPath, { status: 'processing', progress: currentPct })
-        }
-      }, 300)
+      patchQueueItem(nextPath, { status: 'downloading', progress: undefined }, run.id)
 
       try {
         const res = await importMutation.mutateAsync({
-          files: [nextPath],
-          shelfId,
-          tagIds: includeCurrentTag && tagId ? [tagId] : undefined,
-          libraryId: targetLibraryId,
+          body: {
+            files: [nextPath],
+            shelfId,
+            tagIds: includeCurrentTag && tagId ? [tagId] : undefined,
+            libraryId: targetLibraryId,
+          },
+          signal: run.controller.signal,
         })
-        clearInterval(progressTimer)
 
         const resItem = res.data.results[0]
         if (resItem?.status === 'success') {
           freshSuccessCount++
           const bookVersionId = resItem.bookId
           if (bookVersionId) newlyCreatedIds.push(bookVersionId)
-          patchQueueItem(nextPath, { status: 'success', progress: 100, bookVersionId })
+          patchQueueItem(nextPath, { status: 'success', progress: 100, bookVersionId }, run.id)
         } else if (resItem?.status === 'duplicate') {
           freshDuplicateCount++
-          patchQueueItem(nextPath, { status: 'duplicate', progress: 100 })
+          patchQueueItem(nextPath, { status: 'duplicate', progress: 100 }, run.id)
         } else {
           freshErrorCount++
           patchQueueItem(nextPath, {
             status: 'error',
             progress: 100,
             errorMessage: resItem?.errorMessage || '导入失败',
-          })
+          }, run.id)
         }
       } catch (err) {
-        clearInterval(progressTimer)
-        freshErrorCount++
-        const msg = err instanceof Error ? err.message : String(err)
-        patchQueueItem(nextPath, {
-          status: 'error',
-          progress: 100,
-          errorMessage: msg,
-        })
+        const isAborted = run.cancelRequested && err instanceof Error && err.name === 'AbortError'
+        if (isAborted) {
+          freshCancelledCount++
+          patchQueueItem(nextPath, {
+            status: 'cancelled',
+            progress: undefined,
+            errorMessage: _('library.webdavImportCancelled') || '已取消；服务端可能已完成导入',
+          }, run.id)
+        } else {
+          freshErrorCount++
+          const msg = err instanceof Error ? err.message : String(err)
+          patchQueueItem(nextPath, {
+            status: 'error',
+            progress: 100,
+            errorMessage: msg,
+          }, run.id)
+        }
       }
     }
 
-    isProcessingRef.current = false
-    setIsImporting(false)
+    if (activeRunRef.current?.id === run.id) {
+      activeRunRef.current = null
+      isProcessingRef.current = false
+      if (isMountedRef.current) {
+        setIsImporting(false)
+      }
+    }
+
+    if (!isMountedRef.current) return
 
     if (newlyCreatedIds.length > 0) {
       onImportComplete?.(newlyCreatedIds)
@@ -361,6 +392,8 @@ export default function WebDavImportBrowser({
       notify.error(`有 ${freshErrorCount} 本图书导入失败，可点击重试`, {
         title: _('library.webdavImportFailed') || '导入失败',
       })
+    } else if (freshCancelledCount > 0) {
+      notify.info(_('library.webdavImportCancelled') || '导入已取消；服务端可能已完成部分导入')
     }
   }, [activeConnectionId, importMutation, includeCurrentTag, onImportComplete, patchQueueItem, propLibraryId, shelfId, tagId, target, _])
 
@@ -373,7 +406,6 @@ export default function WebDavImportBrowser({
         path: p,
         name: p.split('/').filter(Boolean).pop() || 'book',
         status: 'queued',
-        progress: 0,
       }))
 
       setSelectedPaths((prev) => {
@@ -406,17 +438,25 @@ export default function WebDavImportBrowser({
   }
 
   function handleRetryAllFailed() {
-    const failedPaths = queueItems.filter((i) => i.status === 'error').map((i) => i.path)
+    const failedPaths = queueItems.filter((i) => i.status === 'error' || i.status === 'cancelled').map((i) => i.path)
     if (failedPaths.length > 0) {
       startImportQueue(failedPaths)
     }
   }
 
   function handleAbort() {
-    abortRef.current = true
-    pendingPathsRef.current = []
-    isProcessingRef.current = false
-    setIsImporting(false)
+    const run = activeRunRef.current
+    if (!run) return
+    run.cancelRequested = true
+    const pending = pendingPathsRef.current.splice(0)
+    for (const path of pending) {
+      patchQueueItem(path, {
+        status: 'cancelled',
+        progress: undefined,
+        errorMessage: _('library.webdavImportCancelled') || '已取消；尚未发送请求',
+      }, run.id)
+    }
+    run.controller.abort()
   }
 
   function handleRead() {
@@ -513,6 +553,7 @@ export default function WebDavImportBrowser({
                 id="drive-select"
                 value={activeConnectionId}
                 onChange={(e) => handleConnectionChange(e.target.value)}
+                disabled={isImporting}
                 className="sr-only"
                 tabIndex={-1}
               >
@@ -527,6 +568,7 @@ export default function WebDavImportBrowser({
                 connections={connections}
                 value={activeConnectionId}
                 onChange={handleConnectionChange}
+                disabled={isImporting}
                 triggerNameClassName="max-w-[180px]"
               />
             </div>
@@ -837,6 +879,20 @@ export default function WebDavImportBrowser({
                       {_('library.uploadRetry') || '重试'}
                     </button>
                   </>
+                ) : item.status === 'cancelled' ? (
+                  <>
+                    <span className="max-w-[180px] truncate shrink-0 text-xs text-stone-500 dark:text-stone-400" title={item.errorMessage}>
+                      {item.errorMessage || _('library.webdavImportCancelled') || '已取消'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleRetryOne(item.path)}
+                      disabled={isImporting}
+                      className="shrink-0 text-xs font-medium text-stone-600 underline decoration-stone-300 underline-offset-2 hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100 disabled:opacity-40 cursor-pointer"
+                    >
+                      {_('library.uploadRetry') || '重试'}
+                    </button>
+                  </>
                 ) : item.status === 'success' ? (
                   <span className="shrink-0 text-xs text-stone-400">
                     {_('library.uploadDone') || '完成'}
@@ -863,8 +919,7 @@ export default function WebDavImportBrowser({
                   <span className="w-24 shrink-0">
                     <span className="block h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
                       <span
-                        className="block h-full rounded-full bg-stone-800 transition-all duration-200 dark:bg-stone-200"
-                        style={{ width: `${item.progress}%` }}
+                        className="block h-full w-1/2 rounded-full bg-stone-800 motion-safe:animate-pulse dark:bg-stone-200 motion-reduce:animate-none"
                       />
                     </span>
                   </span>
@@ -929,7 +984,7 @@ export default function WebDavImportBrowser({
                 {_('library.startReading') || '开始阅读'}
               </Button>
             </>
-          ) : failedCount > 0 ? (
+          ) : failedCount > 0 || cancelledCount > 0 ? (
             <>
               <Button
                 type="button"

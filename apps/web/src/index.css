@@ -740,4 +740,23 @@ html[lang="en"] .mdxeditor button[class*="selectTrigger"] > span:first-child:emp
   .bd-slider::-moz-range-thumb {
     transition: none !important;
   }
+
+  /* App-wide fallback that satisfies the spec rule "all animate-pulse and
+     animate-spin must respect prefers-reduced-motion" in one place.
+     Why here instead of `motion-reduce:animate-none` at each call site:
+     there are 135 such sites (108 animate-pulse + 27 animate-spin) and only 16
+     carried the utility, so per-call-site opt-in is a silent, recurring audit
+     debt that new markup reintroduces immediately. One universal rule cannot be
+     forgotten, also covers motion from third-party CSS (mdxeditor, Radix) that
+     never had a utility variant, and keeps spinners/pulses readable: the
+     animation still runs once at ~0 duration, so the element renders its final
+     frame instead of disappearing. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

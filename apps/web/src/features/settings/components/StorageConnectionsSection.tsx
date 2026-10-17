@@ -155,7 +155,7 @@ export default function StorageConnectionsSection() {
         bodyClassName="pt-3"
       >
         {isLoading ? (
-          <div className="flex flex-col gap-2.5 pt-1" aria-busy="true" aria-label={_('settings.storageConnectionsLoading') || '正在加载存储…'}>
+          <div className="flex flex-col gap-2.5 pt-1" role="status" aria-busy="true" aria-label={_('settings.storageConnectionsLoading') || '正在加载存储…'}>
             {[1, 2].map((i) => (
               <div
                 key={i}

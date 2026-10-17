@@ -86,9 +86,9 @@ export function useStorageConnectionLs(
 export function useStorageConnectionImport(connectionId: string | null) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: WebDavImportReq) => {
+    mutationFn: ({ body, signal }: { body: WebDavImportReq; signal?: AbortSignal }) => {
       if (!connectionId) throw new Error('No storage connection selected')
-      return apiPost<{ data: WebDavImportRes }>(`/integrations/storage-connections/${connectionId}/import`, body)
+      return apiPost<{ data: WebDavImportRes }>(`/integrations/storage-connections/${connectionId}/import`, body, signal)
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['books'] })

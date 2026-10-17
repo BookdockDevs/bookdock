@@ -8,7 +8,7 @@ export default function ProfilePending() {
   const onBack = useBackNavigation('/')
 
   return (
-    <div className="mx-auto max-w-4xl p-4 sm:p-6" aria-busy="true">
+    <div className="mx-auto max-w-4xl p-4 sm:p-6" role="status" aria-busy="true">
       <header className="mb-6 flex items-center gap-3 border-b border-stone-200/70 pb-3 dark:border-stone-800/70">
         <Link
           to="/"

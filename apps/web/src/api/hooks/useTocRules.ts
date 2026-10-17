@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 
 import type { RuleBatchDeleteReq, BookDetailRes, CatalogBook, ReTocReq, TocPreviewReq, TocPreviewRes, TocRuleCreateReq, TocRuleImportReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
 
-import { apiDelete, apiGet, apiPost, apiPut } from '../client'
+import { apiGet, apiPost, apiPut } from '../client'
 
 const TOC_RULES_KEY = ['toc-rules'] as const
 
@@ -47,16 +47,6 @@ export function useUpdateTocRule() {
     onError: (_error, _variables, context) => {
       if (context?.previous) queryClient.setQueryData(TOC_RULES_KEY, context.previous)
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: TOC_RULES_KEY })
-    },
-  })
-}
-
-export function useDeleteTocRule() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) => apiDelete(`/toc-rules/${id}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: TOC_RULES_KEY })
     },

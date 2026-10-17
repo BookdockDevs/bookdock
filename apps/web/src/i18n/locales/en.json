@@ -173,6 +173,7 @@
     "webdavImportSummary": "Successfully imported {{success}} book(s)",
     "webdavImportDuplicate": "Book already exists",
     "webdavImportFailed": "Import failed",
+    "webdavImportCancelled": "Cancelled; the server may have completed the import",
     "storageConnectionSelectLabel": "Select Storage",
     "storageConnectionManage": "Manage Storage",
     "searchPlaceholder": "Search title or author...",

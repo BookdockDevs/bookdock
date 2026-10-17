@@ -171,6 +171,7 @@
     "webdavImportSummary": "成功导入 {{success}} 本",
     "webdavImportDuplicate": "书籍已存在",
     "webdavImportFailed": "导入失败",
+    "webdavImportCancelled": "已取消；服务端可能已完成导入",
     "storageConnectionSelectLabel": "选择存储",
     "storageConnectionManage": "管理存储",
     "searchPlaceholder": "搜索书名或作者...",

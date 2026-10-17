@@ -36,6 +36,7 @@ import {
 } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
+import { READING_RECORDS_KEY, READING_SESSIONS_KEY } from '@/api/hooks/reading-records'
 import { tocBasePath, invalidateCityVersionQueries, type TocTarget } from '@/api/hooks/useTocRules'
 import { useAuthStore } from '@/stores/auth.store'
 import { withReveal } from '@/lib/reveal-hidden'
@@ -239,6 +240,21 @@ export interface UploadTarget {
  */
 const BOOK_MEMBERSHIP_KEYS = [['books'], ['shelves'], ['tags']] as const
 
+export function invalidatePermanentlyDeletedBookQueries(queryClient: QueryClient) {
+  return Promise.all([
+    ...BOOK_MEMBERSHIP_KEYS.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    queryClient.invalidateQueries({ queryKey: ['book'] }),
+    queryClient.invalidateQueries({ queryKey: ['archive'] }),
+    queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY }),
+    queryClient.invalidateQueries({ queryKey: READING_SESSIONS_KEY }),
+    queryClient.invalidateQueries({ queryKey: ['progress'] }),
+    queryClient.invalidateQueries({ queryKey: ['annotations'] }),
+    queryClient.invalidateQueries({ queryKey: ['note-archive'] }),
+    queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    queryClient.invalidateQueries({ queryKey: ['reviews'] }),
+  ])
+}
+
 const PRIVATE_UPLOAD_TARGET: UploadTarget = {
   url: '/books',
   fields: (item) => ({
@@ -406,12 +422,6 @@ export function useLibraryMembers(libraryId: string | null) {  return useQuery({
   })
 }
 
-export function useAddLibraryMember() {
-  return useLibraryMutation<{ libraryId: string; username: string; role: MembershipRole }>(({ libraryId, username, role }) => ({
-    url: `/libraries/${libraryId}/members`, method: 'post', body: { username, role },
-  }))
-}
-
 export function useSetLibraryMemberRole() {
   return useLibraryMutation<{ libraryId: string; userId: string; role: MembershipRole }>(({ libraryId, userId, role }) => ({
     url: `/libraries/${libraryId}/members/${userId}`, method: 'patch', body: { role },
@@ -522,6 +532,9 @@ export function useReorderLibraryCategories() {
       if (ctx?.prev) queryClient.setQueryData(ctx.key, ctx.prev)
       notify.error(getUserErrorNotification(error, 'toast.reorderShelvesFailed'))
     },
+    onSettled: (_data, _error, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+    },
   })
 }
 
@@ -544,6 +557,9 @@ export function useReorderLibraryTags() {
     onError: (error, _vars, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(ctx.key, ctx.prev)
       notify.error(getUserErrorNotification(error, 'toast.reorderTagsFailed'))
+    },
+    onSettled: (_data, _error, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
     },
   })
 }
@@ -643,36 +659,6 @@ export function useCatalogSimilar(libraryId: string | null, params: { title: str
   })
 }
 
-export interface CatalogUploadVars {
-  libraryId: string
-  file: File
-  libraryBookId?: string
-  categoryId?: string
-  name?: string
-  title?: string
-  author?: string
-}
-
-export function useUploadCatalogBook() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ libraryId, file, ...fields }: CatalogUploadVars) => {
-      const form = new FormData()
-      form.set('file', file)
-      for (const [key, value] of Object.entries(fields)) {
-        if (value) form.set(key, value)
-      }
-      return apiUpload<{ data: CatalogBook; duplicated: boolean }>(`/libraries/${libraryId}/books`, form)
-    },
-    onSuccess: (_res, vars) => {
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
-      // The upload lands in a category and under tags, so both counters moved.
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
-    },
-  })
-}
-
 /**
  * File a work under a category (or take it out of one by passing null). This is
  * the shared library's counterpart of moving a private book to a shelf, and it
@@ -689,7 +675,9 @@ export function useSetWorkCategory() {
       void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
-
+    },
+    onError: (error) => {
+      notify.error(getUserErrorNotification(error, 'toast.moveBooksFailed'))
     },
   })
 }
@@ -762,6 +750,9 @@ function useCatalogVersionMutation<TVars extends { libraryId: string; libraryBoo
       // category row and the tag links the sidebar counts.
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+      if (build(vars).method === 'delete' && (_res as { data?: { trashed?: boolean } }).data?.trashed !== true) {
+        void invalidatePermanentlyDeletedBookQueries(queryClient)
+      }
     },
   })
 }
@@ -782,20 +773,6 @@ export function useUpdateCatalogVersion() {
       ])
     },
   })
-}
-
-/** Re-group a misfiled version under another work (5.5). */
-export function useMoveCatalogVersion() {
-  return useCatalogVersionMutation<{
-    libraryId: string
-    libraryBookId: string
-    versionLinkId: string
-    targetLibraryBookId: string
-  }>(({ libraryId, libraryBookId, versionLinkId, targetLibraryBookId }) => ({
-    url: `/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/move`,
-    method: 'patch',
-    body: { libraryBookId: targetLibraryBookId },
-  }))
 }
 
 /** Deleting the last version of a work deletes the work with it (5.6). */
@@ -840,6 +817,7 @@ export function usePermanentDeleteLibraryBook() {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      void invalidatePermanentlyDeletedBookQueries(queryClient)
       notify.success({ key: 'library.bookPermanentlyDeleted', params: { title: vars.title } })
     },
     onError: (error) => {
@@ -859,6 +837,7 @@ export function useEmptyLibraryTrash() {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      if (result.data.count > 0) void invalidatePermanentlyDeletedBookQueries(queryClient)
       if (result.data.count === 0) notify.info({ key: 'library.trashAlreadyEmpty' })
       else notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
     },
@@ -894,17 +873,6 @@ export function useRemoveCatalogVersionCover() {
         queryClient.invalidateQueries({ queryKey: ['books'] }),
         queryClient.invalidateQueries({ queryKey: ['book'] }),
       ])
-    },
-  })
-}
-
-export function useResetCatalogVersionMetadata() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ libraryId, libraryBookId, versionLinkId }: { libraryId: string; libraryBookId: string; versionLinkId: string }) =>
-      apiPost<{ data: CatalogBook }>(`/libraries/${libraryId}/books/${libraryBookId}/versions/${versionLinkId}/reset-metadata`),
-    onSuccess: (_res, vars) => {
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
     },
   })
 }
@@ -1121,32 +1089,66 @@ export function useProfileSettings(): NonNullable<SettingsRes['profile']> {
   return useProfileSettingsState().profile ?? {}
 }
 
-/** Partial update of the profile blob, with the same optimistic merge the
- *  library preferences use so a toggle lands in the same frame as the click. */
+/** Partial update of the profile blob, with field-level optimistic merge and
+ *  rollback. Serialized through a promise queue with refetchQueries on settlement
+ *  to guarantee localStorage and cache converge with server state. */
 export function useUpdateProfileSettings() {
   const queryClient = useQueryClient()
+  const profileWriteQueueRef = useRef(Promise.resolve())
+  const activeWritesCountRef = useRef(0)
 
   return useMutation({
-    mutationFn: (patch: NonNullable<SettingsRes['profile']>) => apiPut('/settings', { profile: patch }),
+    mutationFn: (patch: NonNullable<SettingsRes['profile']>) => {
+      const request = profileWriteQueueRef.current.then(() => apiPut('/settings', { profile: patch }))
+      profileWriteQueueRef.current = request.then(() => undefined, () => undefined)
+      return request
+    },
     onMutate: async (patch) => {
+      activeWritesCountRef.current += 1
       await queryClient.cancelQueries({ queryKey: ['settings'] })
       const prev = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+      const patchFields = Object.keys(patch) as Array<keyof NonNullable<SettingsRes['profile']>>
+      const prevFieldValues: Partial<NonNullable<SettingsRes['profile']>> = {}
+      if (prev?.data?.profile) {
+        for (const field of patchFields) {
+          prevFieldValues[field] = prev.data.profile[field]
+        }
+      }
       if (prev) {
         const next = { ...prev.data, profile: { ...prev.data.profile, ...patch } }
         queryClient.setQueryData(['settings'], { data: next })
         writeStoredSettings(next)
       }
-      return { prev }
+      return { patch, prevFieldValues }
     },
     onError: (error, _patch, ctx) => {
-      if (ctx?.prev) {
-        queryClient.setQueryData(['settings'], ctx.prev)
-        writeStoredSettings(ctx.prev.data)
+      if (ctx) {
+        const currentData = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+        if (currentData?.data?.profile) {
+          const restoredProfile = { ...currentData.data.profile }
+          let changed = false
+          for (const key of Object.keys(ctx.patch) as Array<keyof NonNullable<SettingsRes['profile']>>) {
+            // Only roll back if the field still holds the optimistic value written by this patch
+            if (restoredProfile[key] === ctx.patch[key]) {
+              restoredProfile[key] = ctx.prevFieldValues[key] as never
+              changed = true
+            }
+          }
+          if (changed) {
+            const next = { ...currentData.data, profile: restoredProfile }
+            queryClient.setQueryData(['settings'], { data: next })
+            writeStoredSettings(next)
+          }
+        }
       }
       notify.error(getUserErrorNotification(error, 'settings.profilePrefsUpdateFailed'))
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    onSettled: () => {
+      activeWritesCountRef.current = Math.max(0, activeWritesCountRef.current - 1)
+      if (activeWritesCountRef.current === 0) {
+        // Force refetchQueries to guarantee sync even when no active query observer exists
+        void queryClient.refetchQueries({ queryKey: ['settings'] })
+      }
     },
   })
 }
@@ -1158,12 +1160,34 @@ export function useUpdateProfileSettings() {
  */
 export function useUpdateLibraryPrefs() {
   const queryClient = useQueryClient()
+  const libraryWriteQueueRef = useRef(Promise.resolve())
+  const activeWritesCountRef = useRef(0)
 
   return useMutation({
-    mutationFn: (patch: NonNullable<SettingsRes['library']>) => apiPut('/settings', { library: patch }),
+    mutationFn: (patch: NonNullable<SettingsRes['library']>) => {
+      // Sort mode, display density, grid fields and hidden libraries all land
+      // here, and several of them fire twice within one gesture (a drag
+      // reorders and also switches the sort to manual). Serialize so a late
+      // failure cannot land on top of a newer successful write.
+      const request = libraryWriteQueueRef.current.then(() => apiPut('/settings', { library: patch }))
+      libraryWriteQueueRef.current = request.then(() => undefined, () => undefined)
+      return request
+    },
     onMutate: async (patch) => {
+      activeWritesCountRef.current += 1
       await queryClient.cancelQueries({ queryKey: ['settings'] })
       const prev = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+      const patchFields = Object.keys(patch) as Array<keyof NonNullable<SettingsRes['library']>>
+      // Record rather than Partial<LibrarySettings>: the blob mixes booleans,
+      // string arrays and nested sort objects, and indexing Partial with a union
+      // key collapses the assignment target to undefined.
+      const prevFieldValues: Record<string, unknown> = {}
+      if (prev?.data?.library) {
+        const currentLibrary: Record<string, unknown> = { ...prev.data.library }
+        for (const field of patchFields) {
+          prevFieldValues[field] = currentLibrary[field]
+        }
+      }
       if (prev) {
         const next = { ...prev.data, library: { ...prev.data.library, ...patch } }
         queryClient.setQueryData(['settings'], {
@@ -1171,17 +1195,46 @@ export function useUpdateLibraryPrefs() {
         })
         writeStoredSettings(next)
       }
-      return { prev }
+      return { patch, prevFieldValues }
     },
     onError: (error, _patch, ctx) => {
-      if (ctx?.prev) {
-        queryClient.setQueryData(['settings'], ctx.prev)
-        writeStoredSettings(ctx.prev.data)
+      // Field-level rollback: restore only the fields this patch wrote, and only
+      // while they still hold this patch's optimistic value. Restoring the whole
+      // settings snapshot would erase a newer successful write from another field.
+      if (ctx) {
+        const currentData = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+        if (currentData?.data?.library) {
+          // The library blob mixes booleans, string arrays and nested sort
+          // objects, so the per-field write is routed through a record and cast
+          // back once, rather than narrowing every field of the union.
+          const restoredLibrary: Record<string, unknown> = { ...currentData.data.library }
+          let changed = false
+          for (const key of Object.keys(ctx.patch) as Array<keyof NonNullable<SettingsRes['library']>>) {
+            if (restoredLibrary[key] === ctx.patch[key]) {
+              restoredLibrary[key] = ctx.prevFieldValues[key]
+              changed = true
+            }
+          }
+          if (changed) {
+            const next = {
+              ...currentData.data,
+              library: restoredLibrary as NonNullable<SettingsRes['library']>,
+            }
+            queryClient.setQueryData(['settings'], { data: next })
+            writeStoredSettings(next)
+          }
+        }
       }
       notify.error(getUserErrorNotification(error, 'settings.libraryPrefsUpdateFailed'))
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    onSettled: () => {
+      activeWritesCountRef.current = Math.max(0, activeWritesCountRef.current - 1)
+      if (activeWritesCountRef.current === 0) {
+        // refetchQueries, not invalidateQueries: correctness here depends on
+        // reconciling localStorage with the server, and invalidate alone does
+        // nothing when no ['settings'] observer is mounted.
+        void queryClient.refetchQueries({ queryKey: ['settings'] })
+      }
     },
   })
 }
@@ -1506,11 +1559,12 @@ export function useDeleteBook() {
       const query = deleteUserData ? '?deleteUserData=true' : ''
       return apiDelete<{ data: null }>(`/books/${id}${query}`)
     },
-    onSuccess: (_, { title, isCollected }) => {
+    onSuccess: (_, { title, isCollected, deleteUserData }) => {
       for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
       // Removing a collected card also changes the source library's catalog.
       queryClient.invalidateQueries({ queryKey: ['libraries'] })
       if (isCollected) {
+        if (deleteUserData) void invalidatePermanentlyDeletedBookQueries(queryClient)
         notify.success({
           key: 'library.bookRemovedFromLibrary',
           params: { title },
@@ -1520,6 +1574,7 @@ export function useDeleteBook() {
       // The server deletes permanently when trash is off; match the toast.
       const settings = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
       const trashOn = settings?.data.trash?.enabled !== false
+      if (!trashOn || deleteUserData) void invalidatePermanentlyDeletedBookQueries(queryClient)
       notify.success({
         key: trashOn ? 'library.bookMovedToTrash' : 'library.bookPermanentlyDeleted',
         params: { title },
@@ -1552,7 +1607,7 @@ export function usePermanentDeleteBook() {
   return useMutation({
     mutationFn: ({ id }: { id: string; title: string }) => apiDelete<{ data: null }>(`/books/${id}/permanent`),
     onSuccess: (_, { title }) => {
-      for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
+      void invalidatePermanentlyDeletedBookQueries(queryClient)
       notify.success({ key: 'library.bookPermanentlyDeleted', params: { title } })
     },
     onError: (error) => {
@@ -1568,6 +1623,7 @@ export function useEmptyTrash() {
     mutationFn: () => apiDelete<{ data: { count: number } }>('/books/trash'),
     onSuccess: (result) => {
       for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
+      if (result.data.count > 0) void invalidatePermanentlyDeletedBookQueries(queryClient)
       if (result.data.count === 0) notify.info({ key: 'library.trashAlreadyEmpty' })
       else notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
     },
@@ -1692,8 +1748,10 @@ export function useReorderShelves() {
       const prev = queryClient.getQueryData<{ data: ShelfListItem[] }>(['shelves'])
       if (prev) {
         const byId = new Map(prev.data.map((s) => [s.id, s]))
-        const next = shelfIds
-          .map((id) => byId.get(id))
+        const visible = new Set(shelfIds)
+        let position = 0
+        const next = prev.data
+          .map((row) => (visible.has(row.id) ? byId.get(shelfIds[position++]!) : row))
           .filter((s): s is ShelfListItem => Boolean(s))
         queryClient.setQueryData(['shelves'], { data: next })
       }
@@ -1702,6 +1760,9 @@ export function useReorderShelves() {
     onError: (error, _shelfIds, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['shelves'], ctx.prev)
       notify.error(getUserErrorNotification(error, 'toast.reorderShelvesFailed'))
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['shelves'] })
     },
   })
 }
@@ -1721,8 +1782,10 @@ export function useReorderTags() {
       const prev = queryClient.getQueryData<{ data: TagListItem[] }>(['tags'])
       if (prev) {
         const byId = new Map(prev.data.map((tag) => [tag.id, tag]))
-        const next = tagIds
-          .map((id) => byId.get(id))
+        const visible = new Set(tagIds)
+        let position = 0
+        const next = prev.data
+          .map((row) => (visible.has(row.id) ? byId.get(tagIds[position++]!) : row))
           .filter((tag): tag is TagListItem => Boolean(tag))
         queryClient.setQueryData(['tags'], { data: next })
       }
@@ -1731,6 +1794,9 @@ export function useReorderTags() {
     onError: (error, _tagIds, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(['tags'], ctx.prev)
       notify.error(getUserErrorNotification(error, 'toast.reorderTagsFailed'))
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['tags'] })
     },
   })
 }
@@ -1744,6 +1810,7 @@ export function useUpdateBook() {
     onSuccess: async (_result, { bookId }) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['books'] }),
+        queryClient.invalidateQueries({ queryKey: ['books', 'detail', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['book', bookId] }),
       ])
       notify.success({ key: 'toast.bookUpdated' })
@@ -1847,21 +1914,6 @@ export function useRemoveCover() {
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.removeBookCoverFailed'))
-    },
-  })
-}
-
-export function useResetMetadata() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (bookId: string) => apiPost<{ data: BookListItem }>(`/books/${bookId}/reset-metadata`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'toast.metadataReset' })
-    },
-    onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'toast.resetMetadataFailed'))
     },
   })
 }

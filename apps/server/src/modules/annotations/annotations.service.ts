@@ -173,51 +173,62 @@ export async function searchAnnotations(userId: string, bookId: string, query: s
 export async function createAnnotation(userId: string, bookId: string, data: AnnotationCreateReq, showHidden = false) {
   const db = getDb()
   if (data.type !== 'note' && (data.imageIds !== undefined || data.draftId !== undefined)) throw new AppError('VALIDATION_ERROR', 'Only ideas accept images')
+  if (data.type !== 'highlight' && data.replaceAnnotationIds !== undefined) throw new AppError('VALIDATION_ERROR', 'Only highlights accept replacement IDs')
   // Reading data belongs to User x BookVersion, not to a private card: anyone
   // with read rights may annotate, with or without collecting first. Guests
   // never reach here (mutations are guest-refused at the guard).
   await assertReadableBook(userId, bookId, showHidden)
   const now = Date.now()
   if (data.type === 'highlight') {
-    // A soft-deleted highlight at this CFI is restored instead of forked.
-    const existing = db.select().from(highlights)
-      .where(and(
-        eq(highlights.userId, userId),
-        eq(highlights.bookVersionId, bookId),
-        eq(highlights.cfiRange, data.cfiRange),
-      )).get()
-    if (existing) {
-      db.update(highlights).set({
-        cfiAnchor: data.cfiAnchor ?? existing.cfiAnchor,
-        color: data.color ?? existing.color,
-        style: data.style ?? existing.style,
-        text: data.text ?? existing.text,
-        chapter: data.chapter ?? existing.chapter,
-        chapterHref: data.chapterHref ?? existing.chapterHref,
-        deletedAt: null,
+    return db.transaction((tx) => {
+      if (data.replaceAnnotationIds && data.replaceAnnotationIds.length > 0) {
+        tx.update(highlights).set({ deletedAt: now, updatedAt: now }).where(and(
+          inArray(highlights.id, data.replaceAnnotationIds),
+          eq(highlights.userId, userId),
+          eq(highlights.bookVersionId, bookId),
+        )).run()
+      }
+
+      // A soft-deleted highlight at this CFI is restored instead of forked.
+      const existing = tx.select().from(highlights)
+        .where(and(
+          eq(highlights.userId, userId),
+          eq(highlights.bookVersionId, bookId),
+          eq(highlights.cfiRange, data.cfiRange),
+        )).get()
+      if (existing) {
+        tx.update(highlights).set({
+          cfiAnchor: data.cfiAnchor ?? existing.cfiAnchor,
+          color: data.color ?? existing.color,
+          style: data.style ?? existing.style,
+          text: data.text ?? existing.text,
+          chapter: data.chapter ?? existing.chapter,
+          chapterHref: data.chapterHref ?? existing.chapterHref,
+          deletedAt: null,
+          updatedAt: now,
+        }).where(eq(highlights.id, existing.id)).run()
+        return toRes('highlight', tx.select().from(highlights).where(eq(highlights.id, existing.id)).get()!)
+      }
+      const row = {
+        id: createId('hl'),
+        userId,
+        bookVersionId: bookId,
+        revisionId: null,
+        cfiRange: data.cfiRange,
+        cfiAnchor: data.cfiAnchor ?? null,
+        color: data.color ?? 'yellow',
+        style: data.style ?? 'highlight',
+        text: data.text ?? '',
+        chapter: data.chapter ?? null,
+        chapterHref: data.chapterHref ?? null,
+        relocation: 'ok' as const,
+        createdAt: now,
         updatedAt: now,
-      }).where(eq(highlights.id, existing.id)).run()
-      return toRes('highlight', db.select().from(highlights).where(eq(highlights.id, existing.id)).get()!)
-    }
-    const row = {
-      id: createId('hl'),
-      userId,
-      bookVersionId: bookId,
-      revisionId: null,
-      cfiRange: data.cfiRange,
-      cfiAnchor: data.cfiAnchor ?? null,
-      color: data.color ?? 'yellow',
-      style: data.style ?? 'highlight',
-      text: data.text ?? '',
-      chapter: data.chapter ?? null,
-      chapterHref: data.chapterHref ?? null,
-      relocation: 'ok' as const,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-    }
-    db.insert(highlights).values(row).run()
-    return toRes('highlight', row)
+        deletedAt: null,
+      }
+      tx.insert(highlights).values(row).run()
+      return toRes('highlight', row)
+    })
   }
   if (data.type === 'bookmark') {
     const existing = db.select().from(bookmarks)

@@ -209,12 +209,6 @@ export function useTestAiConfigDraft() {
   })
 }
 
-export function useTestAiConfig() {
-  return useMutation({
-    mutationFn: () => apiPost<{ data: AiConnectionTestRes }>('/ai/config/test'),
-  })
-}
-
 export function useCreateAiThread() {
   const queryClient = useQueryClient()
   return useMutation({

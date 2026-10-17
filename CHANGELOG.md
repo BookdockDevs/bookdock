@@ -8,6 +8,8 @@ All notable changes to Bookdock are documented here.
 
 - WebDAV and S3 book reads use verified partial downloads when supported, reuse concurrent downloads, and fall back to whole-file caching when partial reads fail or small remote reads are slow.
 - Reader startup waits for the fonts needed by visible text and avoids flashing a loading indicator during fast opens. If font preparation fails, reading can continue with a fallback font and a notice.
+- Animation now respects the operating system's reduced-motion preference across the whole app, instead of only on a handful of hand-marked elements.
+- Loading screens announce themselves to screen readers and expose their busy state.
 
 ### Fixed
 
@@ -15,6 +17,15 @@ All notable changes to Bookdock are documented here.
 - Books can open correctly when a stored file size differs from the actual file size, including previously cached files.
 - Uploading the same TXT file in different accounts or libraries no longer overwrites another generated book; repeated uploads within the same library still reuse the existing book.
 - Remote downloads retain timeout protection until the response finishes, and incomplete downloads are discarded so subsequent opens can retry.
+- Confirmation dialogs lock while their request is in flight, so double-clicking can no longer send a second destructive request and a dialog can no longer be dismissed mid-request.
+- Replacing a highlight no longer loses the highlights it replaced when saving the new one fails.
+- Drag-reordering shelves and tags keeps hidden items in their original slots instead of dropping them, and re-syncs with the server once the change settles.
+- Registering an account no longer leaves the page treating the session as a guest.
+- Instance-wide settings switches and the first-owner setup form can no longer be submitted twice at once.
+- A failed library-preference change now rolls back only the field that failed, instead of undoing a newer successful change to a different field.
+- Storage migration and restore actions report failures instead of failing silently.
+- The WebDAV import queue always releases its lock when a run finishes, so cancelling or closing the panel no longer leaves importing permanently stuck.
+- Moving a book to another category in a shared library now reports a failure instead of silently doing nothing.
 
 ## [0.6.0] - 2026-10-16
 
@@ -716,6 +727,8 @@ All notable changes to Bookdock are documented here.
 
 - WebDAV 和 S3 读取在支持时使用经过校验的分段下载，合并并发下载；分段读取失败或远端小段读取过慢时，回退为整文件缓存。
 - 阅读器启动时等待可见正文所需的字体，快速打开时避免加载提示一闪而过；字体准备失败时会提示并使用替代字体继续阅读。
+- 应用内的动画现在遵循操作系统的“减少动态效果”偏好，不再只作用于少数手工标记的元素。
+- 加载界面会向屏幕阅读器播报自身状态，并标记为忙碌状态。
 
 #### 修复
 
@@ -723,6 +736,15 @@ All notable changes to Bookdock are documented here.
 - 修复记录的文件大小与实际大小不一致时书籍无法正常打开的问题，包括已有本地缓存的文件。
 - 修复不同账号或书库上传相同 TXT 时，生成的书籍文件可能互相覆盖的问题；同一书库内重复上传仍复用已有书籍。
 - 远端下载的超时保护持续到响应接收完成，未完成的下载会被丢弃，后续打开可重新尝试。
+- 确认对话框在请求进行期间会锁定，连点不再发出第二个破坏性请求，请求中途也无法关闭或按 Esc 退出。
+- 替换划线时，若新划线保存失败，被替换的旧划线不再丢失。
+- 拖拽调整书架与标签顺序时，隐藏项保留在原有位置，不再被丢弃；变更结算后会与服务端重新同步。
+- 注册账号后，页面不再继续把当前会话视为访客。
+- 实例级设置开关与首个所有者初始化表单无法再被重复提交。
+- 书库偏好某一项保存失败时，只回滚该字段，不再连带撤销其他字段上已成功的修改。
+- 存储迁移与还原操作会提示失败，不再静默失败。
+- WebDAV 导入队列在一轮任务结束时必定释放占用，取消或关闭面板不再导致导入永久卡住。
+- 在共享书库中把书籍移动到其他分类时，失败会提示，不再静默无反应。
 
 ### [0.6.0] - 2026-10-16
 

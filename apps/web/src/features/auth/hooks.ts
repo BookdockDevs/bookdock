@@ -45,9 +45,13 @@ export function useLogin() {
 
 export function useRegister() {
   const setAuth = useAuthStore((s) => s.setAuth)
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: RegisterReq) => apiPost<{ data: RegisterRes }>('/auth/register', body),
-    onSuccess: (res) => setAuth(res.data.user),
+    onSuccess: async (res) => {
+      setAuth(res.data.user)
+      await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+    },
   })
 }
 

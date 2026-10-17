@@ -462,6 +462,7 @@ export const aiConfigTestSchema = z.object({
 
 export const annotationCreateSchema = z.object({
   ...contentFileAssociationSchema.shape,
+  replaceAnnotationIds: z.array(z.string().min(1)).max(100).optional(),
   visibility: z.enum(['private', 'shared']).optional(),
   revisionId: z.string().min(1).nullable().optional(),
   cfiRange: z.string().min(1),

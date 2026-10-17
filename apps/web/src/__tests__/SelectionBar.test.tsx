@@ -27,6 +27,11 @@ vi.mock('../features/library/hooks', () => ({
   useTags: () => ({ data: { data: tags } }),
   useLibraryCategories: () => ({ data: { data: categories } }),
   useLibraryTags: () => ({ data: { data: tags } }),
+  // Batch permanent delete routes through the shared projection helper so
+  // archive, reading records and interaction queries resync as well. The mock
+  // factory replaces that module wholesale, so the export has to be
+  // re-declared here or the call throws inside the component.
+  invalidatePermanentlyDeletedBookQueries: vi.fn(),
 }))
 
 function wrapper({ children }: { children: ReactNode }) {

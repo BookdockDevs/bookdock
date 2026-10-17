@@ -1,3 +1,5 @@
+import { useRef } from 'react'
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { ANNOTATION_MAX_TEXT_LENGTH, ErrorCode } from '@bookdock/shared'
@@ -21,9 +23,15 @@ export function useAnnotations(bookId: string, options: { enabled?: boolean } = 
 export function useCreateAnnotation(bookId: string) {
   const queryClient = useQueryClient()
   const key = ['annotations', bookId] as const
+  const replacementIdsByBody = useRef(new WeakMap<object, string[]>()).current
   return useMutation({
-    mutationFn: (body: AnnotationCreateReq) =>
-      apiPost<{ data: AnnotationRes }>(withReveal(`/annotations/book/${bookId}`), body),
+    mutationFn: (body: AnnotationCreateReq) => {
+      const replaceAnnotationIds = replacementIdsByBody.get(body)
+      return apiPost<{ data: AnnotationRes }>(withReveal(`/annotations/book/${bookId}`), {
+        ...body,
+        ...(replaceAnnotationIds?.length ? { replaceAnnotationIds } : {}),
+      })
+    },
     onMutate: async (body) => {
       if ((body.text?.length ?? 0) > ANNOTATION_MAX_TEXT_LENGTH) {
         throw new ApiError(ErrorCode.ANNOTATION_TEXT_TOO_LONG, 'Annotation text exceeds the maximum length')
@@ -47,22 +55,20 @@ export function useCreateAnnotation(bookId: string) {
         createdAt: now,
         updatedAt: now,
       }
-      // A new highlight replaces any overlapping highlight (strategy A):
-      // drop them from the cache now, soft-delete them on the server before
-      // the POST goes out (awaiting avoids a same-range restore being
-      // re-deleted by a late DELETE). Notes/bookmarks never participate.
+      // A new highlight replaces any overlapping highlight (strategy A).
+      // The IDs are sent with the create request so the server can retire the
+      // old rows atomically with creating/restoring the new row. Notes and
+      // bookmarks never participate.
       let replacedIds: string[] = []
       if (body.type === 'highlight' && previous?.data?.length) {
         try {
           const cfi = await loadCfiModule()
           replacedIds = previous.data
-            .filter((a) => a.type === 'highlight' && cfiRangesOverlap(cfi, a.cfiRange, body.cfiRange))
+            .filter((a) => a.type === 'highlight' && !a.id.startsWith('temp-') && cfiRangesOverlap(cfi, a.cfiRange, body.cfiRange))
             .map((a) => a.id)
         } catch { /* CFI module unavailable — skip replacement */ }
-        if (replacedIds.length) {
-          await Promise.all(replacedIds.map((id) => apiDelete(`/annotations/${id}`).catch(() => {})))
-        }
       }
+      replacementIdsByBody.set(body, replacedIds)
       const replaced = new Set(replacedIds)
       queryClient.setQueryData<AnnotationsCache>(key, (old) => ({
         data: [...(old?.data ?? []).filter((a) => !replaced.has(a.id)), optimistic],
@@ -86,7 +92,8 @@ export function useCreateAnnotation(bookId: string) {
     },
     // Not awaited on purpose: mutateAsync resolves as soon as the POST does,
     // the refetch resyncs the cache (including overlap deletes) in the background
-    onSettled: () => {
+    onSettled: (_data, _error, body) => {
+      if (body) replacementIdsByBody.delete(body)
       void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['idea-composer', bookId] })
@@ -122,6 +129,7 @@ export function useUpdateAnnotation(bookId: string) {
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
     },
   })
 }
