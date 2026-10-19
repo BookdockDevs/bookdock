@@ -5,16 +5,18 @@ interface HistoryCapsuleProps {
   canForward: boolean
   onBack: () => void
   onForward: () => void
+  onPointerEnter?: () => void
+  onPointerLeave?: () => void
 }
 
 const historyBtn =
   'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-current transition-colors hover:bg-stone-500/15'
 
-export default function HistoryCapsule({ canBack, canForward, onBack, onForward }: HistoryCapsuleProps) {
+export default function HistoryCapsule({ canBack, canForward, onBack, onForward, onPointerEnter, onPointerLeave }: HistoryCapsuleProps) {
   const _ = useTranslation()
   if (!canBack && !canForward) return null
   return (
-    <div data-reader-corner-control="" className="pointer-events-auto absolute bottom-3 left-3 sm:left-4 z-[60] flex h-11 items-center gap-0.5 rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 shadow-lg backdrop-blur-md">
+    <div data-reader-corner-control="" onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave} className="pointer-events-auto absolute bottom-3 left-3 sm:left-4 z-[60] flex h-11 items-center gap-0.5 rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 shadow-lg backdrop-blur-md">
       {canBack && (
         <button onClick={onBack} title={_('reader.historyBack')} className={historyBtn}>
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

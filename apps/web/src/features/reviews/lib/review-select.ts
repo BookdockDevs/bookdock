@@ -11,6 +11,19 @@ export function hasReviewBody(review: Review): boolean {
   return text.replace(/[*_`#>\-|[\]()!~:\\]+/g, '').trim().length > 0
 }
 
+/**
+ * The reviews a surface may show and open: the shared ones the viewer may
+ * see, plus the caller's own review when the shared list does not already
+ * carry it. A private-anchored own review never appears in the shared list,
+ * so this union is the only set that holds every review a surface offers to
+ * open. Every surface that lists or opens reviews must resolve against it.
+ */
+export function visibleReviews(own: Review | null | undefined, shared: Review[] | null | undefined): Review[] {
+  const list = Array.isArray(shared) ? shared : []
+  if (!own) return [...list]
+  return list.some((review) => review.id === own.id) ? [...list] : [own, ...list]
+}
+
 const DAY_MS = 86400000
 
 /** Hot score for 6+ candidates: engagement decayed over ~half a year. */

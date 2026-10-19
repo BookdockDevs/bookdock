@@ -125,19 +125,16 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
   })
 
-  it('summons the floating dock across its projected footprint', () => {
+  it('summons the floating dock from coordinates without covering the reading surface', () => {
     const { container } = renderSidebar(false)
     const sidebar = outerEl(container)
-    const hoverZone = screen.getByTestId('reader-floating-hover-zone')
 
     expect(sidebar).toHaveClass('overflow-visible', 'pointer-events-none')
-    expect(hoverZone).toHaveClass('pointer-events-auto', 'w-[70px]', 'h-[332px]')
-
-    fireEvent.pointerEnter(hoverZone, { clientX: 60, clientY: 80 })
+    expect(screen.queryByTestId('reader-floating-hover-zone')).toBeNull()
+    fireEvent.pointerMove(window, { clientX: 60, clientY: 80 })
     expect(dockEl(container)).toHaveClass('opacity-100')
 
-    fireEvent.pointerLeave(sidebar)
-    fireEvent.pointerEnter(hoverZone, { clientX: 71, clientY: 80 })
+    fireEvent.pointerMove(window, { clientX: 71, clientY: 80 })
     expect(dockEl(container)).toHaveClass('opacity-0')
   })
 
@@ -158,7 +155,7 @@ describe('ReaderSidebar on pointer devices', () => {
     act(() => useReaderState.setState({ sidebarOpen: true }))
     renderSidebar(false)
     expect(screen.getByTitle('固定工具栏')).toBeInTheDocument()
-    expect(screen.getByTestId('reader-sidebar-resize-handle')).toHaveClass('reader-resize-cursor')
+    expect(screen.getByTestId('reader-sidebar-resize-handle')).toHaveClass('reader-resize-cursor', 'right-0')
     expect(screen.queryByTestId('sidebar-backdrop')).toBeNull()
   })
 
@@ -210,6 +207,35 @@ describe('ReaderSidebar on pointer devices', () => {
     // Leaves dock: collapses
     fireEvent.pointerLeave(outerEl(container))
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
+  })
+
+  it('ignores iframe selection and drag movement, then allows a fresh hover after dismissal', async () => {
+    const { container } = renderSidebar(false)
+    const sidebar = outerEl(container)
+    act(() => useReaderState.setState({ sidebarOpen: true }))
+    fireEvent.click(screen.getByTitle('目录'))
+    expect(useReaderState.getState().sidebarOpen).toBe(false)
+
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 420, buttons: 0 })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350))
+    })
+
+    fireEvent(window, new CustomEvent('reader-pointermove', {
+      detail: { clientX: 20, clientY: 100, buttons: 0, hasSelection: true },
+    }))
+    expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
+    fireEvent(window, new CustomEvent('reader-pointermove', {
+      detail: { clientX: 20, clientY: 100, buttons: 1, hasSelection: false },
+    }))
+    expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
+
+    fireEvent(window, new CustomEvent('reader-pointermove', {
+      detail: { clientX: 20, clientY: 100, buttons: 0, hasSelection: false },
+    }))
+    expect(dockEl(container)).toHaveClass('opacity-100')
+
+    fireEvent.pointerLeave(sidebar)
   })
 
   it('renders a floating island dock decoupled from top and bottom bars when unlocked', () => {

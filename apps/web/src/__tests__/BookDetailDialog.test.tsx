@@ -19,6 +19,13 @@ const apiPatch = vi.fn()
 const apiPut = vi.fn()
 const apiDelete = vi.fn()
 const apiUpload = vi.fn()
+/** Review context for the book/work under test; the review endpoints answer with it. */
+let reviewContext: unknown = { composer: null, own: null, summary: null, reviews: [] }
+const apiGet = vi.fn((url: string) =>
+  url.startsWith('/reviews/')
+    ? Promise.resolve({ data: reviewContext })
+    : Promise.resolve({ data: [] }),
+)
 const createShelfMutate = vi.fn()
 const createTagMutate = vi.fn()
 const updateBookMutate = vi.fn()
@@ -36,7 +43,7 @@ const navigateMock = vi.fn()
 
 vi.mock('@/api/client', async (original) => ({
   ...await original<typeof import('@/api/client')>(),
-  apiGet: vi.fn().mockResolvedValue({ data: [] }),
+  apiGet: (...args: unknown[]) => apiGet(...(args as [string])),
   apiPatch: (...args: unknown[]) => apiPatch(...args),
   apiPut: (...args: unknown[]) => apiPut(...args),
   apiDelete: (...args: unknown[]) => apiDelete(...args),
@@ -163,6 +170,7 @@ beforeEach(async () => {
   categoriesPending = false
   categoriesError = false
   queriedWork = undefined
+  reviewContext = { composer: null, own: null, summary: null, reviews: [] }
   await i18n.changeLanguage('zh-CN')
 })
 
@@ -206,7 +214,8 @@ describe('BookDetailDialog shelf chips', () => {
     const row = screen.getByRole('button', { name: '在读' }).parentElement!.parentElement!
     expect(row.textContent).toBe('在读City📁Favorites#小说')
     expect(row).not.toContainElement(screen.getByText('有更新'))
-    expect(row).not.toContainElement(screen.getByRole('button', { name: '已在书库中' }))
+    // The private detail never offers a collection action any more.
+    expect(screen.queryByRole('button', { name: '已在书库中' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
     expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'shelf-1' } })
   })
@@ -322,7 +331,8 @@ describe('BookDetailDialog shelf chips', () => {
     const row = screen.getByRole('button', { name: '在读' }).parentElement!.parentElement!
     expect(row.textContent).toBe('在读City📁Favorites#小说')
     expect(row).not.toContainElement(screen.getByText('有更新'))
-    expect(row).not.toContainElement(screen.getByRole('button', { name: '已在书库中' }))
+    // The private detail never offers a collection action any more.
+    expect(screen.queryByRole('button', { name: '已在书库中' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
     expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'shelf-1' } })
   })
@@ -598,16 +608,34 @@ describe('BookDetailDialog read-status chip', () => {
     expect(updateBookMutate).not.toHaveBeenCalled()
   })
 
-  it('does not offer edits in read-only or uncollected detail views', () => {
-    const { rerender } = render(<BookDetailDialog book={book} readOnly onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+  it('does not offer edits in a read-only detail view', () => {
+    render(<BookDetailDialog book={book} readOnly onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
     expect(screen.queryByRole('button', { name: '修改阅读状态' })).toBeNull()
     expect(screen.queryByRole('button', { name: '修改书架' })).toBeNull()
     fireEvent.contextMenu(screen.getByRole('button', { name: '在读' }))
     expect(screen.queryByRole('menu')).toBeNull()
-    bookDetail = { data: { ...book, collected: false } }
-    rerender(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: '修改阅读状态' })).toBeNull()
+  })
+
+  it('keeps uncollected shared details read-only when opened from an archive', () => {
+    bookDetail = {
+      data: {
+        ...book,
+        collected: false,
+        source: { libraryId: 'shared-library', libraryBookVersionId: 'shared-listing', libraryName: 'Shared' },
+      },
+    }
+    renderDialog()
+
+    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
     expect(screen.queryByRole('button', { name: '修改书架' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '移出书库' })).toBeNull()
+    fireEvent.contextMenu(screen.getByRole('button', { name: '在读' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(updateBookMutate).not.toHaveBeenCalled()
+    expect(updateMembershipMutate).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '开始阅读' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/books/$id', params: { id: book.id } })
   })
 
   it('edits only the private shelf and supports clearing its assignment', () => {
@@ -742,7 +770,9 @@ describe('BookDetailDialog metadata rows', () => {
     expect(screen.queryByText('有更新')).toBeNull()
   })
 
-  it('shows owns-source exactly like a collected version in the book detail', () => {
+  it('never offers a collection action in the private detail', () => {
+    // A private row is a collected card by definition, so the collect and
+    // owns-source branches the detail used to carry were unreachable.
     bookDetail = {
       data: {
         ...book,
@@ -755,9 +785,7 @@ describe('BookDetailDialog metadata rows', () => {
     renderDialog()
 
     expect(screen.queryByRole('button', { name: '加入书库' })).toBeNull()
-    const joined = screen.getByRole('button', { name: '已在书库中' })
-    expect(joined).toBeInTheDocument()
-    expect(joined).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '已在书库中' })).toBeNull()
   })
 
   it('keeps a text selection instead of hijacking it with the full value', async () => {
@@ -1245,10 +1273,11 @@ describe('BookDetailDialog download dialog', () => {
 })
 
 describe('BookDetailDialog publish action', () => {
-  it('renders publish in the action bar for a publishable book and invokes onPublish', () => {
+  it('publishes from the overflow menu for a publishable book and invokes onPublish', () => {
     const onPublish = vi.fn()
     render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} onPublish={onPublish} />, { wrapper })
 
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
     const publish = screen.getByRole('button', { name: '发布' })
     expect(publish.querySelector('path[d="M12 17V3"]')).not.toBeNull()
     fireEvent.click(publish)
@@ -1256,11 +1285,13 @@ describe('BookDetailDialog publish action', () => {
   })
 
   it('does not render publish when onPublish is not provided or readOnly', () => {
-    const { rerender } = render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    const { rerender } = render(<BookDetailDialog book={{ ...book, format: 'txt' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
     expect(screen.queryByRole('button', { name: '发布' })).not.toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
 
-    rerender(<BookDetailDialog book={book} readOnly onClose={vi.fn()} onDelete={vi.fn()} onPublish={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: '发布' })).not.toBeInTheDocument()
+    rerender(<BookDetailDialog book={{ ...book, format: 'txt' }} readOnly onClose={vi.fn()} onDelete={vi.fn()} onPublish={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument()
   })
 })
 
@@ -1273,13 +1304,70 @@ describe('BookDetailDialog more actions', () => {
     expect(screen.getByRole('button', { name: '追加内容' })).toBeInTheDocument()
   })
 
-  it('opens reading data for a non-TXT book without showing TXT maintenance actions', () => {
+  it('opens reading data from the action row and keeps TXT maintenance out of it', () => {
     render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    expect(screen.queryByRole('button', { name: '更换目录规则' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '追加内容' })).not.toBeInTheDocument()
+    // Reading data is a drill-in, so it sits in the action row rather than
+    // the overflow menu.
     fireEvent.click(screen.getByRole('button', { name: '阅读数据' }))
     expect(navigateMock).toHaveBeenCalledWith({ to: '/archive', search: { bookId: book.id, bookView: 'data' } })
+
+    // A non-TXT book has no content maintenance, so it needs no overflow.
+    expect(screen.queryByRole('button', { name: '更多操作' })).toBeNull()
+  })
+})
+
+describe('BookDetailDialog review action', () => {
+  const composer = {
+    anchor: 'private' as const,
+    eligible: true,
+    sourceReadable: false,
+    canPublishShared: false,
+    defaultVisibility: 'private' as const,
+    existing: null,
+    bookVersionId: 'book-1',
+  }
+
+  function ownReview(over: Record<string, unknown> = {}) {
+    return {
+      id: 'rv1',
+      rating: null,
+      title: null,
+      body: '我的书评正文',
+      bodyFormat: 'markdown' as const,
+      visibility: 'private' as const,
+      source: null,
+      privateLibraryBookId: 'lb1',
+      provenance: null,
+      author: { id: 'u1', name: '烟雨生平', avatarKey: null },
+      own: true,
+      canDelete: true,
+      likeCount: 0,
+      liked: false,
+      commentCount: 0,
+      createdAt: 1,
+      updatedAt: 1,
+      editedAt: null,
+      ...over,
+    }
+  }
+
+  it('opens the composer when the caller has no review yet', async () => {
+    reviewContext = { composer, own: null, summary: null, reviews: [] }
+    renderDialog()
+
+    fireEvent.click(await screen.findByRole('button', { name: '书评' }))
+    expect(screen.getByText('发表书评')).toBeInTheDocument()
+  })
+
+  it('opens the caller own review instead of the composer', async () => {
+    // A private own review is never in the shared list, so the detail pane
+    // has to resolve it from the caller's own review.
+    reviewContext = { composer, own: ownReview(), summary: null, reviews: [] }
+    renderDialog()
+
+    fireEvent.click(await screen.findByRole('button', { name: '书评' }))
+    expect(screen.getByText('书评详情')).toBeInTheDocument()
+    expect(screen.getAllByText('我的书评正文').length).toBeGreaterThan(0)
   })
 })
 
@@ -1525,7 +1613,9 @@ describe('BookDetailDialog shared work mode', () => {
     renderWorkDialog(catalogWork({ versions: [catalogVersion({ maintainable: false })] }), { canContribute: true })
     expect(screen.queryByRole('button', { name: '追加内容' })).toBeNull()
     expect(screen.queryByRole('button', { name: '更换目录规则' })).toBeNull()
-    // Uploading a version for the work is still theirs to do.
+    // Uploading a version for the work is still theirs to do, from the
+    // overflow menu.
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
     expect(screen.getByRole('button', { name: '上传新版本' })).toBeInTheDocument()
   })
 
@@ -1692,6 +1782,7 @@ describe('BookDetailDialog shared work mode', () => {
 
   it('opens the version-bound upload sheet for managers', () => {
     renderWorkDialog(catalogWork(), { canManage: true })
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
     fireEvent.click(screen.getByRole('button', { name: '上传新版本' }))
     expect(screen.getByText('版本 2').parentElement).toHaveAttribute('title', '将作为「City Book」的新版本上传')
   })

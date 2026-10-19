@@ -195,6 +195,44 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
     dismissCooldownRef.current = false
   }, [])
 
+  useEffect(() => {
+    if (isTouch) return
+    const updateFloatingHover = (clientX: number, clientY: number, buttons: number, hasSelection: boolean, target?: EventTarget | null) => {
+      if (locked || sidebarOpen) return
+      const inZone = clientX <= 70 && clientY >= 48 && clientY <= 380
+      const overDock = target instanceof Node && Boolean(dockRef.current?.contains(target))
+      if (dismissCooldownRef.current) {
+        if (!inZone && !overDock) dismissCooldownRef.current = false
+        return
+      }
+      if (justDismissed) return
+      if (buttons || hasSelection || window.getSelection()?.type === 'Range') return
+      if (inZone || overDock) {
+        setHovered(true)
+        setFloatingActive(true)
+      } else if (hovered) setHovered(false)
+    }
+    const onPointerMove = (event: PointerEvent) => updateFloatingHover(event.clientX, event.clientY, event.buttons, false, event.target)
+    const onFramePointerMove = (event: Event) => {
+      const detail = (event as CustomEvent<{ clientX: number; clientY: number; buttons: number; hasSelection: boolean }>).detail
+      if (detail) updateFloatingHover(detail.clientX, detail.clientY, detail.buttons, detail.hasSelection)
+    }
+    const onWindowLeave = () => {
+      setHovered(false)
+      dismissCooldownRef.current = false
+    }
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('reader-pointermove', onFramePointerMove)
+    window.addEventListener('pointerleave', onWindowLeave)
+    window.addEventListener('blur', onWindowLeave)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('reader-pointermove', onFramePointerMove)
+      window.removeEventListener('pointerleave', onWindowLeave)
+      window.removeEventListener('blur', onWindowLeave)
+    }
+  }, [isTouch, locked, sidebarOpen, justDismissed, hovered])
+
   // Once mouse leaves the floating dock, allow fade out before dropping floating state
   useEffect(() => {
     if (!hovered && floatingActive && !sidebarOpen) {
@@ -367,18 +405,12 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
       onPointerMove={handleHoverPointerMove}
       onPointerLeave={handleHoverPointerLeave}
     >
-      {!isTouch && !locked && !sidebarOpen && (
-        <div
-          data-testid="reader-floating-hover-zone"
-          className="pointer-events-auto absolute left-0 top-12 z-40 h-[332px] w-[70px]"
-        />
-      )}
       {toolDock}
       {navigationPanel}
       {sidebarOpen && !isTouch && (
         <div
           data-testid="reader-sidebar-resize-handle"
-          className="group absolute left-full top-0 z-50 h-full w-2.5 reader-resize-cursor"
+          className="group absolute right-0 top-0 z-50 h-full w-2.5 reader-resize-cursor"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}

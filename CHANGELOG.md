@@ -13,15 +13,19 @@ All notable changes to Bookdock are documented here.
 ### Changed
 
 - Automatic and manual timing can be enabled independently, used together, or both disabled while keeping history and retroactive entry available. Both timers share a configurable suspension grace period, excluding time spent away.
-- Reading captures survive page changes, refreshes, and temporary connection failures. Permanently rejected records remain available to retry without blocking other books, and overlapping timed activity is counted only once per account.
+- Reading captures survive page changes, refreshes, and temporary connection failures. Rejected records remain stored without blocking other books, and overlapping timed activity is counted only once per account.
 - Reading statistics split known active intervals across local days and hours; a per-book reading day requires at least one minute. Historical reading volume and untouched record precision are preserved when content grows or records are corrected.
 - WebDAV and S3 book reads use verified partial downloads when supported, reuse concurrent downloads, and fall back to whole-file caching when partial reads fail or small remote reads are slow.
 - Reader startup waits for the fonts needed by visible text and avoids flashing a loading indicator during fast opens. If font preparation fails, reading can continue with a fallback font and a notice.
 - Animation now respects the operating system's reduced-motion preference across the whole app, instead of only on a handful of hand-marked elements.
 - Loading screens announce themselves to screen readers and expose their busy state.
+- Scrolling reader headers and footers use compact, opaque labels, leaving empty positions clear of the text. Paginated information fits within page margins without an extra band when all its fields are disabled.
+- Book details provide direct access to reading data. The review shortcut opens your existing review or a new composer; publishing, converting a collected book to a personal book, and uploading another version move into More actions.
+- Reader saves and background recovery stay quiet, without save-status warnings or retry buttons over the text.
 
 ### Fixed
 
+- Hidden reader controls no longer intercept text selection or link clicks through invisible hover areas. Sidebar resizing and floating controls keep their hit areas within their actual bounds.
 - Opening a book no longer shows the book's own plain layout (white page, book typography) for a few seconds before the reader's theme and typography appear. The reader now waits until the section really carries the reader stylesheet, and repairs a section whose load was superseded instead of displaying it unstyled.
 - Text replacement rules are resolved before the reader opens, so a book no longer rebuilds itself (re-parsing and re-locating) right after the first page appears.
 - Rebuilding the reader for a text replacement or a Chinese conversion now covers the reading area while it is rebuilt, instead of briefly showing an empty or unstyled page.
@@ -752,15 +756,19 @@ All notable changes to Bookdock are documented here.
 #### 变更
 
 - 自动记录与手动计时可分别开启、同时使用或全部关闭；关闭后仍可查看历史和补录。两种计时共用可配置的离开宽限，离开期间不计时。
-- 阅读采集可在页面切换、刷新和临时断网后恢复；不可自动恢复的失败记录保留并可重试，不阻塞其他书籍保存，同一账号的重叠有效时段只计一次。
+- 阅读采集可在页面切换、刷新和临时断网后恢复；失败记录保留且不阻塞其他书籍保存，同一账号的重叠有效时段只计一次。
 - 已知有效时段按记录时的本地日期与小时拆分，单书单日累计至少一分钟才计为阅读日；内容增长或纠正记录时，保留历史阅读量与未修改字段的原精度。
 - WebDAV 和 S3 读取在支持时使用经过校验的分段下载，合并并发下载；分段读取失败或远端小段读取过慢时，回退为整文件缓存。
 - 阅读器启动时等待可见正文所需的字体，快速打开时避免加载提示一闪而过；字体准备失败时会提示并使用替代字体继续阅读。
 - 应用内的动画现在遵循操作系统的“减少动态效果”偏好，不再只作用于少数手工标记的元素。
 - 加载界面会向屏幕阅读器播报自身状态，并标记为忙碌状态。
+- 滚动阅读的页眉页脚改为紧凑的不透明信息标签，空位置不再遮挡正文；翻页信息栏复用页边距，整栏字段均关闭时不额外占用空间。
+- 书籍详情可直接进入阅读数据；书评快捷入口打开自己的已有书评或新建编辑器，发布、转存为个人书籍和上传新版本移入“更多操作”。
+- 阅读保存与后台恢复保持安静，不再在正文上显示保存状态警告或重试按钮。
 
 #### 修复
 
+- 阅读器隐藏的控制栏不再通过透明热区拦截选字和链接点击；侧栏拖动把手与浮动控件的操作范围收紧到实际边界内。
 - 打开书籍时不再先显示书籍自带的朴素排版（白底、书籍字号与缩进）再突然变成阅读器排版。阅读器会等正文确实带上阅读器样式后再显示；加载被取代的章节时也会补上样式，不再露出无主题页面。
 - 文本替换规则在阅读器打开前就绪，书籍不再在首屏之后重建自身（重新解析并重新定位）。
 - 文本替换或简繁转换触发阅读器重建时，阅读区会被加载层覆盖，不再短暂露出空白或未排版的页面。

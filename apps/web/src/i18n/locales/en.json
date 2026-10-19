@@ -1129,8 +1129,6 @@
     "manualTimerResume": "Resume",
     "manualTimerTerminate": "Click to save, hold to discard",
     "manualTimerRemaining": "{{duration}} left",
-    "readingSavePending": "Reading records pending. Retry",
-    "readingSaveStorageFailed": "Local save failed. Keep this page open and retry",
     "manualTimerTransferred": "Continued on another device",
     "manualTimerSummary": "Read for {{duration}}",
     "manualTimerDiscarded": "Session discarded",

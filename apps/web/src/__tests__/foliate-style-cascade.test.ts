@@ -172,4 +172,43 @@ describe('FoliateReader computed-style cascade compatibility', () => {
     expect(doc.querySelector('h2')?.hasAttribute('data-bd-chapter-title')).toBe(true)
     expect(doc.querySelectorAll('[data-bd-chapter-title]')).toHaveLength(1)
   })
+
+  it('forwards iframe pointer coordinates without consuming events and removes the listener with the section', () => {
+    const reader = new FoliateReader('', '', undefined, 'epub')
+    const frame = document.createElement('iframe')
+    document.body.append(frame)
+    const doc = frame.contentDocument!
+    frame.getBoundingClientRect = () => ({ left: 20, top: 30, right: 620, bottom: 830, width: 600, height: 800, x: 20, y: 30, toJSON: () => ({}) })
+    const container = document.createElement('div')
+    document.body.append(container)
+    ;(reader as any).container = container
+    const contents = [{ doc, index: 0 }]
+    const renderer = { getContents: () => contents }
+    ;(reader as any).view = { renderer, getProgressOf: () => undefined }
+    const forwarded = vi.fn()
+    window.addEventListener('reader-pointermove', forwarded)
+
+    ;(reader as any).syncDoc()
+    const move = new Event('pointermove', { cancelable: true })
+    Object.defineProperties(move, {
+      clientX: { value: 12 },
+      clientY: { value: 18 },
+      buttons: { value: 0 },
+      pointerType: { value: 'mouse' },
+    })
+    doc.dispatchEvent(move)
+
+    expect(forwarded).toHaveBeenCalledOnce()
+    expect(forwarded.mock.calls[0]?.[0].detail).toMatchObject({ clientX: 32, clientY: 48, hasSelection: false })
+    expect(move.defaultPrevented).toBe(false)
+
+    contents.length = 0
+    ;(reader as any).syncDoc()
+    doc.dispatchEvent(new Event('pointermove'))
+    expect(forwarded).toHaveBeenCalledOnce()
+
+    window.removeEventListener('reader-pointermove', forwarded)
+    frame.remove()
+    container.remove()
+  })
 })

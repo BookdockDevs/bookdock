@@ -35,6 +35,7 @@ import { getReviewTotalCount } from '@/features/reviews/lib/review-count'
 import ReviewDetailView from '@/features/reviews/components/ReviewDetailView'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import { useReviewBookContext, useReviewWorkContext } from '@/features/reviews/hooks/useReviews'
+import { visibleReviews } from '@/features/reviews/lib/review-select'
 
 interface BookDetailDialogProps {
   book: BookListItem | null
@@ -158,17 +159,19 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const bookCanReview = Boolean(!readOnly && bookReviewComposer?.eligible && bookReviewComposer.bookVersionId)
   const bookOwnReview = bookReviewContext?.own ?? null
 
-  const activeWorkReview = useMemo(() => {
-    if (!activeReviewId || !workReviewContext || !Array.isArray(workReviewContext.reviews)) return null
-    if (workReviewContext.own?.id === activeReviewId) return workReviewContext.own
-    return workReviewContext.reviews.find((r) => r.id === activeReviewId) ?? null
-  }, [activeReviewId, workReviewContext])
+  // The review detail pane opens whatever the surfaces below it show, so the
+  // lookup runs against the same union the list and the preview use.
+  const workReviewList = useMemo(() => visibleReviews(workOwnReview, workReviewContext?.reviews), [workOwnReview, workReviewContext])
+  const activeWorkReview = useMemo(
+    () => (activeReviewId ? workReviewList.find((r) => r.id === activeReviewId) ?? null : null),
+    [activeReviewId, workReviewList],
+  )
 
-  const activeBookReview = useMemo(() => {
-    if (!activeReviewId || !bookReviewContext || !Array.isArray(bookReviewContext.reviews)) return null
-    if (bookReviewContext.own?.id === activeReviewId) return bookReviewContext.own
-    return bookReviewContext.reviews.find((r) => r.id === activeReviewId) ?? null
-  }, [activeReviewId, bookReviewContext])
+  const bookReviewList = useMemo(() => visibleReviews(bookOwnReview, bookReviewContext?.reviews), [bookOwnReview, bookReviewContext])
+  const activeBookReview = useMemo(
+    () => (activeReviewId ? bookReviewList.find((r) => r.id === activeReviewId) ?? null : null),
+    [activeReviewId, bookReviewList],
+  )
 
   function renderModalTitle(subView: 'detail' | 'reviews' | 'review-detail', defaultTitle: React.ReactNode, reviewTotal?: number) {
     if (subView === 'reviews') {
@@ -383,10 +386,15 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           },
         ]
         : []
-    if (user && workVersionId) workMenuItems.push({ key: 'reading-data', label: _('readingData.data'), icon: <path d="M4 19V9m8 10V4m8 15v-7" />, onSelect: () => {
-      onClose()
-      void navigate({ to: '/archive', search: { bookId: workVersionId, bookView: 'data' } })
-    } })
+    // The reading data lives in the action row, not in the overflow: it is a
+    // drill-in, not a maintenance task. The archive reads the book version,
+    // so the selected version's content id is what it needs.
+    const openWorkReadingData = user && workVersion?.bookVersionId
+      ? () => {
+          onClose()
+          void navigate({ to: '/archive', search: { bookId: workVersion.bookVersionId, bookView: 'data' } })
+        }
+      : undefined
     return (
       <>
         <Modal
@@ -423,6 +431,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
                 if (ids.length > 0) pendingWorkVersionRef.current = ids
               }}
               moreActions={workMenuItems}
+              onOpenReadingData={openWorkReadingData}
               onOpenAllReviews={() => setReviewSubView('reviews')}
               onOpenReviewDetail={(r) => {
                 setActiveReviewId(r.id)
@@ -512,11 +521,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   // would rewrite the shared revision, so the server refuses them too. `source`
   // is the right test for that: it is set for a B and for a library read, and
   // absent for A/C.
-  // 0.4.0: a library version read *without* collecting it has no private card,
-  // so every private-library affordance (edit, delete, shelf, tags) is hidden
-  // and the view offers the collect action instead.
   const isLibraryOwned = Boolean(displayBook.source)
-  const isLibraryRead = displayBook.collected === false
   const shelfName = currentShelfId
     ? (shelvesData?.data ?? []).find((s) => s.id === currentShelfId)?.name ?? book.shelfName ?? undefined
     : undefined
@@ -560,10 +565,12 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
       ]
       : []
 
-  if (user) privateMenuItems.push({ key: 'reading-data', label: _('readingData.data'), icon: <path d="M4 19V9m8 10V4m8 15v-7" />, onSelect: () => {
-    onClose()
-    void navigate({ to: '/archive', search: { bookId: displayBook.id, bookView: 'data' } })
-  } })
+  const openPrivateReadingData = user
+    ? () => {
+        onClose()
+        void navigate({ to: '/archive', search: { bookId: displayBook.id, bookView: 'data' } })
+      }
+    : undefined
 
   return (
     <>
@@ -681,9 +688,9 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           ) : (
             <BookDetailView
               book={displayBook}
-              // A library read has no private card, so everything private-only
-              // (edit, delete, shelf, tags) is read-only until it is collected.
-              readOnly={readOnly || isLibraryRead}
+              // Archive links can open readable shared versions without a
+              // private card; their personal-library actions must stay hidden.
+              readOnly={readOnly || displayBook.collected === false}
               detail={detail}
               shelfName={shelfName}
               currentShelfId={currentShelfId}
@@ -692,6 +699,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
               memberTags={memberTags}
               isLoading={detailLoading || !detail}
               moreActions={privateMenuItems}
+              onOpenReadingData={openPrivateReadingData}
               onEdit={enterEdit}
               onDelete={onDelete}
               onOpenAllReviews={() => setReviewSubView('reviews')}

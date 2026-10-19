@@ -1456,6 +1456,7 @@ export class Paginator extends HTMLElement {
             --_max-column-count-spread: var(--_max-column-count);
             --_half-gap: calc(var(--_gap) / 2);
             display: grid;
+            position: relative;
             background-color: var(--_background-color, Canvas);
             grid-template-columns: minmax(0, 1fr);
             grid-template-rows:
@@ -1517,6 +1518,9 @@ export class Paginator extends HTMLElement {
                Scoped to scrolled mode to leave the paginated
                page-turn path un-composited. */
             transform: translateZ(0);
+            padding-top: max(var(--_margin-top), calc(var(--_header-band, 0px) + env(safe-area-inset-top, 0px)));
+            padding-bottom: max(var(--_margin-bottom), var(--_footer-band, 0px));
+            box-sizing: border-box;
         }
         :host([flow="scrolled"]) #container.vertical {
             flex-direction: row;
@@ -1531,23 +1535,47 @@ export class Paginator extends HTMLElement {
             box-sizing: border-box;
             padding: 0 max(16px, min(28px, var(--_gutter, 16px)));
         }
-        :is(#header, #footer)[data-layout="center-only"] {
-            grid-template-columns: 1fr;
+        :host([flow="scrolled"]) #top {
+            grid-template-rows: 0 minmax(0, 1fr) 0;
         }
-        :is(#header, #footer)[data-layout="center-only"] > :first-child,
-        :is(#header, #footer)[data-layout="center-only"] > :last-child {
+        :host([flow="scrolled"]) :is(#header, #footer) {
+            position: absolute;
+            left: 0;
+            right: 0;
+            z-index: 2;
+            height: auto;
+            min-height: 0;
+            padding: 0 max(16px, min(28px, var(--_gutter, 16px)));
+            pointer-events: none;
+        }
+        :host([flow="scrolled"]) #header { top: env(safe-area-inset-top, 0px); }
+        :host([flow="scrolled"]) #footer { bottom: 0; }
+        :host([flow="scrolled"]) :is(#header, #footer) > * {
+            pointer-events: none;
+            padding: 0;
+        }
+        :host([flow="scrolled"]) #footer > * { padding-bottom: env(safe-area-inset-bottom, 0px); }
+        :host([flow="scrolled"]) :is(#header, #footer) > * > *:empty {
             display: none;
         }
-        :is(#header, #footer)[data-layout="center-only"] > :nth-child(2) {
-            max-width: 82%;
-            margin: 0 auto;
+        :host([flow="scrolled"]) :is(#header, #footer) > * > * {
+            display: inline-block;
+            width: auto;
+            max-width: 100%;
+            padding: 2px 5px;
+            border-radius: 3px;
+            background: var(--_background-color, Canvas);
+            color: color-mix(in srgb, currentColor 65%, var(--_background-color, Canvas));
+            opacity: 1;
         }
-        :is(#header, #footer)[data-layout="sides-only"] {
-            grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+        :host([flow="scrolled"]) #header > :first-child,
+        :host([flow="scrolled"]) #header > :last-child,
+        :host([flow="scrolled"]) #footer > :first-child,
+        :host([flow="scrolled"]) #footer > :last-child {
+            justify-content: flex-end;
         }
-        :is(#header, #footer)[data-layout="sides-only"] > :nth-child(2) {
-            display: none;
-        }
+        :host([flow="scrolled"]) :is(#header, #footer) > :first-child { justify-content: flex-start; }
+        :host([flow="scrolled"]) :is(#header, #footer) > :nth-child(2) { justify-content: center; }
         #header {
             grid-row: 1;
             height: max(var(--_margin-top), var(--_header-band, 0px));
@@ -1562,12 +1590,9 @@ export class Paginator extends HTMLElement {
         :host(:not([show-footer])) #footer {
             display: none;
         }
-        :host([show-header]) #top {
-            --_header-band: 32px;
-        }
-        :host([show-footer]) #top {
-            --_footer-band: calc(32px + env(safe-area-inset-bottom, 0px));
-        }
+        :host([show-header]) #top[data-header-active] { --_header-band: var(--_marginal-band, 32px); }
+        :host([show-footer]) #top[data-footer-active] { --_footer-band: calc(var(--_marginal-band, 32px) + env(safe-area-inset-bottom, 0px)); }
+        :host([flow="scrolled"][show-footer]) #top[data-footer-active] { --_footer-band: calc(var(--_marginal-band, 32px) + env(safe-area-inset-bottom, 0px)); }
         :is(#header, #footer) > * {
             display: flex;
             align-items: center;
@@ -1838,7 +1863,7 @@ export class Paginator extends HTMLElement {
                 this.render()
                 break
             case 'background-color':
-                this.#top.style.backgroundColor = value ?? ''
+                this.#top.style.setProperty('--_background-color', value || 'Canvas')
                 break
             case 'show-header':
             case 'show-footer':
@@ -2254,23 +2279,17 @@ export class Paginator extends HTMLElement {
     }
     #setMarginalTexts() {
         if (this.heads) {
-            const h0 = this.#headerText[0] ?? ''
-            const h1 = this.#headerText[1] ?? ''
-            const h2 = this.#headerText[2] ?? ''
             for (const [i, el] of this.heads.entries())
                 el.textContent = this.#headerText[i] ?? ''
-            this.#header.dataset.layout = !h0 && !h2 ? 'center-only' : !h1 ? 'sides-only' : 'three-up'
+            this.#header.dataset.layout = 'three-up'
         }
         if (this.feet) {
-            const f0 = this.#footerText[0] ?? ''
-            const f1 = this.#footerText[1] ?? ''
-            const f2 = this.#footerText[2] ?? ''
             for (const [i, el] of this.feet.entries())
                 el.textContent = this.#footerText[i] ?? ''
-            this.#footer.dataset.layout = !f0 && !f2 ? 'center-only' : !f1 ? 'sides-only' : 'three-up'
+            this.#footer.dataset.layout = 'three-up'
         }
     }
-    setMarginals({ header, footer, fontSize } = {}) {
+    setMarginals({ header, footer, fontSize, configuredHeader, configuredFooter } = {}) {
         if (header !== undefined)
             this.#headerText = Array.isArray(header) ? header : [header]
         if (footer !== undefined)
@@ -2279,6 +2298,14 @@ export class Paginator extends HTMLElement {
             fontSize === 0
                 ? this.#top.style.removeProperty('--_marginal-font-size')
                 : this.#top.style.setProperty('--_marginal-font-size', `${fontSize}px`)
+        if (configuredHeader !== undefined)
+            this.#top.toggleAttribute('data-header-active', configuredHeader.some(Boolean))
+        if (configuredFooter !== undefined)
+            this.#top.toggleAttribute('data-footer-active', configuredFooter.some(Boolean))
+        if (fontSize !== undefined) {
+            const renderedFontSize = fontSize || 12
+            this.#top.style.setProperty('--_marginal-band', `${Math.max(28, Math.ceil(renderedFontSize * 1.4 + 6))}px`)
+        }
         this.#setMarginalTexts()
     }
     render() {

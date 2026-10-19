@@ -55,6 +55,30 @@ describe('foliate paginator renderer contract', () => {
     expect(shadowText).not.toContain('calc(var(--_max-inline-size) * var(--_max-column-count-spread))')
   })
 
+  it('floats scroll marginals without covering empty slots and sizes page rails from configured fields', () => {
+    const renderer = document.createElement('foliate-paginator') as InstanceType<typeof Paginator>
+    const top = renderer.shadowRoot?.querySelector('#top') as HTMLElement
+
+    renderer.setMarginals({
+      header: ['', 'A title', ''],
+      footer: ['', '', ''],
+      fontSize: 24,
+      configuredHeader: [false, true, false],
+      configuredFooter: [false, false, false],
+    })
+
+    expect(top.hasAttribute('data-header-active')).toBe(true)
+    expect(top.hasAttribute('data-footer-active')).toBe(false)
+    expect(top.style.getPropertyValue('--_marginal-band')).toBe('40px')
+    renderer.setMarginals({ header: ['', '', ''], configuredHeader: [false, false, false] })
+    expect(top.hasAttribute('data-header-active')).toBe(false)
+    expect(top.style.getPropertyValue('--_marginal-band')).toBe('40px')
+    expect(renderer.shadowRoot?.textContent).toContain('grid-template-rows: 0 minmax(0, 1fr) 0;')
+    expect(renderer.shadowRoot?.textContent).toContain('> * > *:empty')
+    expect(renderer.shadowRoot?.textContent).toContain('padding-top: max(var(--_margin-top), calc(var(--_header-band, 0px) + env(safe-area-inset-top, 0px)))')
+    expect(renderer.shadowRoot?.textContent).not.toContain('padding-inline-start: max(var(--_margin-top)')
+  })
+
   it('honors explicit page column counts on narrow viewports', () => {
     expect(resolvePaginatedColumnCount('paginated', 1, 874, 1250)).toBe(1)
     expect(resolvePaginatedColumnCount('paginated', 2, 874, 1250)).toBe(2)

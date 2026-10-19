@@ -14,6 +14,8 @@ import { useAuthStore } from '@/stores/auth.store'
 
 import { useReviewAction } from '../hooks/useReviews'
 import { reviewExcerpt } from '../lib/markdown'
+import { reviewIconPaths } from '../lib/review-icon'
+import { visibleReviews } from '../lib/review-select'
 import ReviewTime from './ReviewTime'
 import StarRating from './StarRating'
 
@@ -221,12 +223,7 @@ export default function AllReviewsView({
   }, [activeTab, showMine])
 
   // Combine own review with shared reviews for 'all' tab if not already included
-  const allReviews = useMemo(() => {
-    const shared = Array.isArray(reviewsList) ? reviewsList : []
-    if (!own) return [...shared]
-    if (shared.some((r) => r.id === own.id)) return [...shared]
-    return [own, ...shared]
-  }, [own, reviewsList])
+  const allReviews = useMemo(() => visibleReviews(own, reviewsList), [own, reviewsList])
 
   // Filter based on activeTab
   const filteredReviews = useMemo(() => {
@@ -366,9 +363,8 @@ export default function AllReviewsView({
               onClick={own ? () => onOpenEdit(own) : onOpenCompose}
               className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {reviewIconPaths}
               </svg>
               <span>{own ? _('review.editReview') : _('review.writeReview')}</span>
             </button>

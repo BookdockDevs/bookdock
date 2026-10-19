@@ -313,9 +313,10 @@
 
 35. **`paginator.js` / marginal grid dimensions**
     - 对应版本：当前上游 paginator 的 `#top` CSS grid 与 Bookdock 页眉/页脚信息栏。
-    - 需求：页眉必须在第一页可见，页脚必须与正文物理分离；开启信息栏后，正文不能按全高排版再被信息栏覆盖，也不能生成隐式列。
-    - 实现：`#top` 使用 header/content/footer 三行，`#header`/`#footer` 横跨完整宽度，`#container` 只占中间 row；顶部/底部用户边距由 shell 轨道只保留一次，`View` 以中间 viewport 的真实尺寸排版。基础主题背景由 `#top` 承担，分页章节背景层的 `#background` 只占中间 row，避免书源白色背景覆盖信息栏。三栏 L/C/R 固定，不随分页列数、竖排或 RTL 改变；移除第一页 `visibility` 隐藏逻辑。
-    - 影响/验证：信息栏成为独立布局 chrome，page/scroll/continuous 共用同一几何契约；`foliate-paginator.test.ts` 固化三行、全宽、三栏和背景层约束，浏览器已确认黑色主题下 page 模式的页眉页脚不再出现白条。
+    - 需求：分页页眉必须在第一页可见且位于正文外；scroll/continuous 标签不应占据整行或挡住正文，也不能因空字段拦截指针。
+    - 实现：page 模式保留 header/content/footer 三行，栏高取用户 margin 与已配置字段所需字号高度的最大值；三个字段均为 none 时无额外信息栏最小高度。scroll/continuous 用零高栏轨道，三槽标签浮在正文上，空槽透明且 pointer-transparent；滚动区在物理顶部/底部复用用户 margin 和当前标签 clearance，竖排沿用相同物理 margin。基础主题背景由 `#top` 承担，三栏物理 L/C/R 在所有方向稳定；移除第一页 `visibility` 隐藏逻辑。
+    - 浮动标签只在实际文字周围使用不透明阅读主题底色，不使用背景模糊或整体透明度；次要文字色单独混合，避免正文透入标签。
+    - 影响/验证：分页正文不会被栏位覆盖，滚动正文能越过浮动标签且空字段不拦截。`foliate-paginator.test.ts` 覆盖配置字段/字号几何和滚动边距契约；浏览器验证需覆盖三栏、空栏点击穿透、滚动首尾与竖排方向。
 
 36. **`paginator.js` / explicit page column count**
     - 对应版本：Bookdock page-columns setting 与 v0.2.2 paginator 的 non-zero `max-column-count` 语义。

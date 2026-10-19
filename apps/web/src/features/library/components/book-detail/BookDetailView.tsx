@@ -5,7 +5,7 @@ import i18n from 'i18next'
 
 import type { BookDetailRes, BookListItem, ReadStatus, Review } from '@bookdock/shared'
 
-import { ApiError, apiPatch } from '@/api/client'
+import { apiPatch } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -14,7 +14,7 @@ import { notify } from '@/lib/notifications'
 import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
 import { copyCover, downloadCover } from '../../download'
-import { useCollectBook, useForkBook } from '../../hooks'
+import { useForkBook } from '../../hooks'
 import { getHiddenCause } from '../../hidden-status'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import BookCover from '../BookCover'
@@ -32,6 +32,7 @@ import { ActionIcon, FilterChip, GroupLabel } from './ui'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import ReviewPreviewSection from '@/features/reviews/components/ReviewPreviewSection'
 import { useReviewBookContext } from '@/features/reviews/hooks/useReviews'
+import { reviewIconPaths } from '@/features/reviews/lib/review-icon'
 
 interface BookDetailViewProps {
   book: BookListItem
@@ -44,6 +45,8 @@ interface BookDetailViewProps {
   memberTags: Array<{ id: string; name: string }>
   isLoading?: boolean
   moreActions?: MoreActionsMenuItem[]
+  /** Drill into the personal reading data; absent when there is none to show. */
+  onOpenReadingData?: () => void
   onOpenAllReviews?: () => void
   onOpenReviewDetail?: (review: Review) => void
   onEdit: () => void
@@ -63,6 +66,7 @@ export default function BookDetailView({
   memberTags,
   isLoading,
   moreActions,
+  onOpenReadingData,
   onOpenAllReviews,
   onOpenReviewDetail,
   onEdit,
@@ -73,7 +77,6 @@ export default function BookDetailView({
   const _ = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const collectBook = useCollectBook()
   const forkBook = useForkBook()
 
   const displayBook = detail ?? book
@@ -92,6 +95,49 @@ export default function BookDetailView({
   const reviewComposer = reviewContext?.composer
   const canReview = Boolean(!readOnly && reviewComposer?.eligible && reviewComposer.bookVersionId)
   const ownReview = reviewContext?.own
+
+  // The review glyph carries no state: it opens the caller's own review when
+  // there is one and the composer when there is not.
+  function openReviewAction() {
+    if (ownReview) onOpenReviewDetail?.(ownReview)
+    else setReviewEditorOpen(true)
+  }
+
+  // Publishing and forking happen once per book, so they wait in the overflow
+  // menu instead of taking a slot beside edit and download.
+  const overflowItems: MoreActionsMenuItem[] = [
+    ...(!readOnly && onPublish
+      ? [{
+          key: 'publish',
+          label: _('library.publish'),
+          icon: (
+            <>
+              <path d="M12 17V3" />
+              <path d="m7 8 5-5 5 5" />
+              <path d="M5 21h14" />
+            </>
+          ),
+          onSelect: () => onPublish(displayBook),
+        }]
+      : []),
+    ...(isPrivateB && !displayBook.sourceUnavailable
+      ? [{
+          key: 'fork',
+          label: _('library.forkLocal'),
+          icon: (
+            <>
+              <circle cx="12" cy="18" r="3" />
+              <circle cx="6" cy="6" r="3" />
+              <circle cx="18" cy="6" r="3" />
+              <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
+              <path d="M12 12v3" />
+            </>
+          ),
+          onSelect: () => setForkConfirmOpen(true),
+        }]
+      : []),
+    ...(moreActions ?? []),
+  ]
 
   function metadataEdit(field: EditableMetadataField, label: string) {
     if (readOnly || (!canEditBookmeta && field !== 'title' && field !== 'authors')) return undefined
@@ -279,44 +325,6 @@ export default function BookDetailView({
         )}
         actions={(
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            {displayBook.collected === false && !displayBook.ownsSource && displayBook.source?.libraryBookVersionId && (
-              <button
-                type="button"
-                onClick={() => collectBook.mutate({
-                  libraryId: displayBook.source!.libraryId,
-                  versionLinkId: displayBook.source!.libraryBookVersionId!,
-                }, {
-                  onSuccess: (res) => {
-                    notify[res.data.alreadyExists ? 'info' : 'success'](
-                      res.data.alreadyExists ? _('library.collectAlready') : _('library.collectSuccess'),
-                    )
-                    void queryClient.invalidateQueries({ queryKey: ['books'] })
-                  },
-                  onError: (err) => {
-                    if (err instanceof ApiError && err.code === 'ALREADY_OWNS_SOURCE') {
-                      notify.info(_('library.collectAlready'))
-                      void queryClient.invalidateQueries({ queryKey: ['books'] })
-                      return
-                    }
-                    notify.error(getUserErrorNotification(err, 'library.collectFailed'))
-                  },
-                })}
-                disabled={collectBook.isPending}
-                className="rounded-full bg-stone-900 px-2.5 py-1 text-[11px] font-medium text-white transition-colors hover:bg-stone-700 disabled:opacity-60 dark:bg-stone-100 dark:text-stone-900"
-              >
-                {_('library.collect')}
-              </button>
-            )}
-            {displayBook.ownsSource && (
-              <button
-                type="button"
-                disabled
-                className="rounded-full bg-stone-900 px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-60 dark:bg-stone-100 dark:text-stone-900"
-              >
-                {_('library.collected')}
-              </button>
-            )}
-
             {displayBook.hasUnreadUpdate && (
               <span
                 className="inline-flex items-center gap-1.5 rounded-full bg-blue-50/80 px-2.5 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
@@ -342,7 +350,7 @@ export default function BookDetailView({
               {hasProgress ? _('library.continueReading') : _('library.startReading')}
             </Button>
             <div className="flex flex-1 items-center gap-1.5">
-              {/* Action order: edit, download, review, publish, fork, visibility, more, delete. */}
+              {/* Action order: edit, download, review, reading data, visibility, more, delete. */}
               {!readOnly && (
                 <ActionIcon secondary label={_('library.edit')} onClick={onEdit}>
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -355,40 +363,15 @@ export default function BookDetailView({
               {canReview && (
                 <ActionIcon
                   secondary
-                  className={ownReview ? 'text-amber-500 hover:text-amber-600 dark:text-amber-400' : undefined}
-                  label={ownReview ? _('review.editReview') : _('review.rateOrReview')}
-                  title={ownReview ? _('review.editReview') : _('review.rateOrReview')}
-                  onClick={() => setReviewEditorOpen(true)}
+                  label={_('review.reviewsTitle')}
+                  onClick={openReviewAction}
                 >
-                  <path
-                    d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-                    fill={ownReview ? 'currentColor' : 'none'}
-                  />
+                  {reviewIconPaths}
                 </ActionIcon>
               )}
-              {!readOnly && onPublish && (
-                <ActionIcon
-                  secondary
-                  label={_('library.publish')}
-                  onClick={() => onPublish(displayBook)}
-                >
-                  <path d="M12 17V3" />
-                  <path d="m7 8 5-5 5 5" />
-                  <path d="M5 21h14" />
-                </ActionIcon>
-              )}
-              {isPrivateB && !displayBook.sourceUnavailable && (
-                <ActionIcon
-                  secondary
-                  label={_('library.forkLocal')}
-                  onClick={() => setForkConfirmOpen(true)}
-                  disabled={forkBook.isPending}
-                >
-                  <circle cx="12" cy="18" r="3" />
-                  <circle cx="6" cy="6" r="3" />
-                  <circle cx="18" cy="6" r="3" />
-                  <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
-                  <path d="M12 12v3" />
+              {onOpenReadingData && (
+                <ActionIcon secondary label={_('readingData.data')} onClick={onOpenReadingData}>
+                  <path d="M4 19V9m8 10V4m8 15v-7" />
                 </ActionIcon>
               )}
               {!readOnly && hiddenCause && (
@@ -425,8 +408,8 @@ export default function BookDetailView({
                   )}
                 </ActionIcon>
               )}
-              {!readOnly && moreActions && moreActions.length > 0 && (
-                <MoreActionsMenu items={moreActions} />
+              {!readOnly && overflowItems.length > 0 && (
+                <MoreActionsMenu items={overflowItems} />
               )}
               {!readOnly && <div className="ml-auto">
                 <ActionIcon label={displayBook.source ? _('library.removeFromLibrary') : _('library.delete')} danger onClick={() => onDelete(book)}>
@@ -449,7 +432,13 @@ export default function BookDetailView({
 
       <MetaGrid rows={metaRows} isLoading={isLoading} />
 
-      <ReviewPreviewSection context={reviewContext} onViewAll={() => onOpenAllReviews?.()} onOpenReview={onOpenReviewDetail} />
+      <ReviewPreviewSection
+        context={reviewContext}
+        canReview={canReview}
+        onCompose={() => setReviewEditorOpen(true)}
+        onViewAll={() => onOpenAllReviews?.()}
+        onOpenReview={onOpenReviewDetail}
+      />
 
       {reviewEditorOpen && reviewComposer?.bookVersionId && (
         <ReviewEditor

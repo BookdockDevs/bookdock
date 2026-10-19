@@ -2001,24 +2001,30 @@ describe('appendTxtBookContent', () => {
   })
 
   it('keeps chapter dates when a re-toc re-derives the same chapters', async () => {
-    const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
-    await appendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
-    // A chapter with no stored time reads as the revision it lives in, so the
-    // effective date - not the stored field - is what must survive a rewrite.
-    const revisionAt = async () => db.select({ createdAt: schema.contentRevisions.createdAt }).from(schema.contentRevisions)
-      .where(eq(schema.contentRevisions.bookVersionId, book.id)).orderBy(desc(schema.contentRevisions.revisionNo)).get()!.createdAt
-    const effective = async () => {
-      const resolved = await getBook(ownerId, book.id)
-      const fallback = resolved.contentUpdatedAt
-      return (resolved.meta.chapters as Array<{ id: string; addedAt?: number }>).map((c) => [c.id, c.addedAt ?? fallback])
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const uploadedAt = Date.UTC(2026, 0, 2)
+      const appendedAt = Date.UTC(2026, 0, 3)
+      vi.setSystemTime(uploadedAt)
+      const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
+      vi.setSystemTime(appendedAt)
+      await appendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
+      // A chapter without its own date inherits its revision's date.
+      const effective = async () => {
+        const resolved = await getBook(ownerId, book.id)
+        return (resolved.meta.chapters as Array<{ id: string; addedAt?: number }>)
+          .map((chapter) => [chapter.id, chapter.addedAt ?? resolved.contentUpdatedAt])
+      }
+      const before = await effective()
+      expect(before.map((chapter) => chapter[1])).toEqual([uploadedAt, uploadedAt, appendedAt])
+
+      // ZIP timestamps can change the blob; chapter dates must survive regardless.
+      vi.setSystemTime(Date.UTC(2026, 0, 4))
+      await reTocBook(ownerId, book.id)
+      expect(await effective()).toEqual(before)
+    } finally {
+      vi.useRealTimers()
     }
-
-    const before = await effective()
-    await reTocBook(ownerId, book.id)
-
-    expect(await effective()).toEqual(before)
-    // Re-reading the same file changes no bytes, so it stays the same revision.
-    expect(await revisionAt()).toBeLessThanOrEqual(before[before.length - 1]![1])
   })
 
   it('merges content without a recognized chapter title into the last chapter', async () => {

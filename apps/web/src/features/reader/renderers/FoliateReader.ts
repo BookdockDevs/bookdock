@@ -1701,6 +1701,7 @@ export class FoliateReader implements BookReader {
   private resizeObserver: ResizeObserver | null = null
   private lastScrollVPad = -1
   private activeDocs = new Set<Document>()
+  private marginalPointerListeners = new Map<Document, (event: PointerEvent) => void>()
   // The last reader stylesheet that was handed to the renderer; reused when a
   // section document has to be styled directly.
   private appStyleSheet = ''
@@ -2248,6 +2249,8 @@ export class FoliateReader implements BookReader {
         header: composeMarginalLine(this.marginalConfig.header, ctx),
         footer: composeMarginalLine(this.marginalConfig.footer, ctx),
         fontSize: this.marginalConfig.fontSize,
+        configuredHeader: this.marginalConfig.header.map((field) => field !== 'none'),
+        configuredFooter: this.marginalConfig.footer.map((field) => field !== 'none'),
       })
     } catch {
       // renderer not ready
@@ -4334,12 +4337,17 @@ export class FoliateReader implements BookReader {
   private syncDoc() {
     try {
       const contents = this.view?.renderer?.getContents?.() as Array<{ doc: Document; index: number }> | undefined
-      if (!contents?.length) return
+      if (!contents) return
 
       const docs = new Set<Document>(contents.map((c) => c.doc).filter(Boolean))
       for (const doc of this.activeDocs) {
         if (!docs.has(doc)) {
           doc.removeEventListener('click', this.handleDocInteraction)
+          const pointerListener = this.marginalPointerListeners.get(doc)
+          if (pointerListener) {
+            doc.removeEventListener('pointermove', pointerListener)
+            this.marginalPointerListeners.delete(doc)
+          }
           this.unwatchFrameFocus(doc.defaultView)
           // A section that is gone takes its repaired stylesheet with it.
           this.repairedStyles.get(doc)?.remove()
@@ -4394,6 +4402,22 @@ export class FoliateReader implements BookReader {
           onMediaError: (detail) => this.emit('mediaError', detail),
         })
         doc.addEventListener('click', this.handleDocInteraction)
+        const pointerListener = (event: PointerEvent) => {
+          if (!doc.defaultView?.frameElement || event.pointerType === 'touch') return
+          const frameRect = doc.defaultView.frameElement.getBoundingClientRect()
+          const parentWindow = this.container?.ownerDocument.defaultView
+          parentWindow?.dispatchEvent(new CustomEvent('reader-pointermove', {
+            detail: {
+              clientX: frameRect.left + event.clientX,
+              clientY: frameRect.top + event.clientY,
+              buttons: event.buttons,
+              pointerType: event.pointerType,
+              hasSelection: doc.getSelection()?.type === 'Range',
+            },
+          }))
+        }
+        doc.addEventListener('pointermove', pointerListener)
+        this.marginalPointerListeners.set(doc, pointerListener)
         if (doc.defaultView) this.watchFrameFocus(doc.defaultView)
         const handler = () => this.handleSelection(doc, index)
         const selectionChangeHandler = () => this.handleSelectionChange(doc)
@@ -4510,6 +4534,8 @@ export class FoliateReader implements BookReader {
     try { this.view?.remove() } catch { /* ignore */ }
     for (const doc of this.activeDocs) {
       doc.removeEventListener('click', this.handleDocInteraction)
+      const pointerListener = this.marginalPointerListeners.get(doc)
+      if (pointerListener) doc.removeEventListener('pointermove', pointerListener)
       const sel = this.selectionDocs.get(doc)
       if (sel) {
         doc.removeEventListener('mouseup', sel.handler)
@@ -4521,6 +4547,7 @@ export class FoliateReader implements BookReader {
       }
     }
     this.selectionDocs.clear()
+    this.marginalPointerListeners.clear()
     this.activeDocs.clear()
     this.repairedStyles.clear()
     this.mediaOverlaySections.clear()

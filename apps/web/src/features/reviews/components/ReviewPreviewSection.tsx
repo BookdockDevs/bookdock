@@ -6,29 +6,31 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 
 import { reviewExcerptLines } from '../lib/markdown'
-import { hasReviewBody, pickFeaturedReview } from '../lib/review-select'
+import { reviewIconPaths } from '../lib/review-icon'
+import { hasReviewBody, pickFeaturedReview, visibleReviews } from '../lib/review-select'
 import StarRating from './StarRating'
 
 export interface ReviewPreviewSectionProps {
   context: ReviewBookContext | null | undefined
+  /** Whether the caller may write a review here. */
+  canReview?: boolean
+  onCompose?: () => void
   onViewAll: () => void
   onOpenReview?: (review: Review) => void
 }
 
-export default function ReviewPreviewSection({ context, onViewAll, onOpenReview }: ReviewPreviewSectionProps) {
+export default function ReviewPreviewSection({ context, canReview = false, onCompose, onViewAll, onOpenReview }: ReviewPreviewSectionProps) {
   const _ = useTranslation()
 
   if (!context || !Array.isArray(context.reviews)) return null
 
   const { reviews, own } = context
 
-  // Total visible reviews count
-  const allReviews: Review[] = own && !reviews.some((r) => r.id === own.id)
-    ? [own, ...reviews]
-    : [...reviews]
-
   // The capsule and list entry count visible rows, not rated shared rows:
   // a private own review must never hide other visible reviews.
+  const allReviews: Review[] = visibleReviews(own, reviews)
+
+  // Total visible reviews count
   const totalCount = allReviews.length
 
   if (allReviews.length === 0) {
@@ -56,7 +58,7 @@ export default function ReviewPreviewSection({ context, onViewAll, onOpenReview 
 
   return (
     <section className="mt-5" aria-label={_('review.reviewsTitle')}>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <h4 className="text-base font-bold text-stone-900 dark:text-stone-100">
             {_('review.reviewsTitle')}
@@ -67,30 +69,45 @@ export default function ReviewPreviewSection({ context, onViewAll, onOpenReview 
             </span>
           )}
         </div>
-        {showListEntry && (
-          <button
-            type="button"
-            onClick={onViewAll}
-            className="group inline-flex items-center gap-0.5 text-xs text-stone-500 transition-colors hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
-          >
-            <span>{_('review.viewAll')}</span>
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="transition-transform group-hover:translate-x-0.5"
+        <div className="flex shrink-0 items-center gap-3">
+          {/* Writing a review belongs here; the action row only offers the
+              shortcut that opens this section. */}
+          {canReview && !own && onCompose && (
+            <button
+              type="button"
+              onClick={onCompose}
+              className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
             >
-              <path d="m9 18 6-6-6-6" />
-            </svg>
-          </button>
-        )}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {reviewIconPaths}
+              </svg>
+              <span>{_('review.writeReview')}</span>
+            </button>
+          )}
+          {showListEntry && (
+            <button
+              type="button"
+              onClick={onViewAll}
+              className="group inline-flex items-center gap-0.5 text-xs text-stone-500 transition-colors hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
+            >
+              <span>{_('review.viewAll')}</span>
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="transition-transform group-hover:translate-x-0.5"
+              >
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
-
       <div
         role="button"
         tabIndex={0}

@@ -1121,8 +1121,6 @@
     "manualTimerResume": "继续",
     "manualTimerTerminate": "点击保存，长按丢弃",
     "manualTimerRemaining": "剩余 {{duration}}",
-    "readingSavePending": "阅读记录待保存，点击重试",
-    "readingSaveStorageFailed": "阅读记录暂存失败，请保持页面打开并重试",
     "manualTimerTransferred": "已在其他设备接续",
     "manualTimerSummary": "本次阅读 {{duration}}",
     "manualTimerDiscarded": "已丢弃本次记录",

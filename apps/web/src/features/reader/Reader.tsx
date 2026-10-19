@@ -122,6 +122,8 @@ export default function Reader() {
   const [headerSummon, setHeaderSummon] = useState(false)
   const [footerSummon, setFooterSummon] = useState(false)
   const [cornerDwell, setCornerDwell] = useState(false)
+  const headerHotRef = useRef(false)
+  const footerHotRef = useRef(false)
   const headerLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const footerLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -166,6 +168,50 @@ export default function Reader() {
   // top/bottom controls are driven by the middle-tap chromePinned alone.
   const isTouch = useIsTouch()
   const [isSelectingText, setIsSelectingText] = useState(false)
+  useEffect(() => {
+    if (isTouch) return
+    const updateHotZones = (clientX: number, clientY: number, buttons: number, hasSelection = false, target?: EventTarget | null) => {
+      if (buttons || hasSelection || window.getSelection()?.type === 'Range') return
+      const canvas = document.querySelector('[data-reader-canvas]')
+      const rect = canvas?.getBoundingClientRect()
+      const insideCanvas = rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+      const overDialog = target instanceof Element && Boolean(target.closest('[role="dialog"]'))
+      const currentReadingMode = useUiStore.getState().readingMode
+      const inHeader = Boolean(insideCanvas && !overDialog && rect && clientY <= rect.top + 48
+        && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
+      const inFooter = Boolean(insideCanvas && !overDialog && rect && clientY >= rect.bottom - 48
+        && clientX >= rect.left
+        && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
+      if (inHeader !== headerHotRef.current) {
+        headerHotRef.current = inHeader
+        if (inHeader) onHeaderEnter()
+        else onHeaderLeave()
+      }
+      if (inFooter !== footerHotRef.current) {
+        footerHotRef.current = inFooter
+        if (inFooter) onFooterEnter()
+        else onFooterLeave()
+      }
+    }
+    const onPointerMove = (event: PointerEvent) => updateHotZones(event.clientX, event.clientY, event.buttons, false, event.target)
+    const clearHotZones = () => updateHotZones(-1, -1, 0)
+    const onFramePointerMove = (event: Event) => {
+      const detail = (event as CustomEvent<{ clientX: number; clientY: number; buttons: number; hasSelection: boolean }>).detail
+      if (detail) updateHotZones(detail.clientX, detail.clientY, detail.buttons, detail.hasSelection)
+    }
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('reader-pointermove', onFramePointerMove)
+    window.addEventListener('pointerleave', clearHotZones)
+    window.addEventListener('blur', clearHotZones)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('reader-pointermove', onFramePointerMove)
+      window.removeEventListener('pointerleave', clearHotZones)
+      window.removeEventListener('blur', clearHotZones)
+      headerHotRef.current = false
+      footerHotRef.current = false
+    }
+  }, [isTouch, onHeaderEnter, onHeaderLeave, onFooterEnter, onFooterLeave])
   useEffect(() => {
     function onPointerUp() {
       setIsSelectingText(false)
@@ -1625,25 +1671,14 @@ export default function Reader() {
               guestReadOnly={isGuest}
             />
           <div
+            data-reader-canvas
             className="relative flex flex-1 flex-col transition-[margin] duration-150 will-change-[margin]"
             style={{
               marginRight: isIdeaSidebarOpen ? `${ideaSidebarWidth}px` : undefined,
             }}
           >
-            {/* Top hover zone: hot strip + header hover with 180ms grace period.
-                Touch: no hot strip — pinned (middle tap) is the only reveal. */}
+            {/* Top controls float over the reader; desktop summoning follows pointer position. */}
             <div className="absolute inset-x-0 top-0 z-50 pointer-events-none">
-              {!isTouch && (
-                <div
-                  className={cn(
-                    'absolute inset-x-0 top-0 h-12',
-                    isSelectingText ? 'pointer-events-none' : 'pointer-events-auto',
-                    readingMode === 'scroll' ? 'right-5' : 'right-0',
-                  )}
-                  onPointerEnter={isTouch || isSelectingText ? undefined : onHeaderEnter}
-                  onPointerLeave={isTouch ? undefined : onHeaderLeave}
-                />
-              )}
               <div
                 className={cn('absolute inset-x-0 top-0', headerVisible ? 'pointer-events-auto' : 'pointer-events-none')}
                 onPointerEnter={isTouch ? undefined : onHeaderEnter}
@@ -1680,7 +1715,9 @@ export default function Reader() {
               className={cn(
                 'flex-1',
                 readingMode === 'page' ? 'overflow-hidden' : 'overflow-y-auto',
-                isTouch && 'pb-[calc(6rem+env(safe-area-inset-bottom))]',
+                isTouch && readingMode === 'scroll' && mobileDockVisible && footerVisible && 'pb-[calc(6.5rem+2*env(safe-area-inset-bottom))]',
+                isTouch && readingMode === 'scroll' && mobileDockVisible && !footerVisible && 'pb-[calc(3.5rem+env(safe-area-inset-bottom))]',
+                isTouch && readingMode === 'scroll' && !mobileDockVisible && footerVisible && 'pb-[calc(3rem+env(safe-area-inset-bottom))]',
               )}
             />
             <AutoReadingProgressBar readingMode={readingMode} />
@@ -1801,24 +1838,12 @@ export default function Reader() {
                 )}
               </div>
             )}
-            {/* Bottom chrome: hot strip (carved out around the corners) summons
-                the footer; corner zones sustain it and carry the capsules, which
-                lift together with the footer via zone translate. Summon handlers
-                sit on the strip+footer wrapper, which has a real hit area so
-                moving between its controls does not cause a false leave.
+            {/* Bottom controls float over the reader; desktop summoning follows pointer position.
+                Capsules retain their own small interactive hit areas.
                 Touch: summon/dwell stay inert (no sticky hover, no tap
                 interception); the footer follows chromePinned alone. The
                 mobile tool dock occupies the row below this progress strip. */}
             <div className="absolute inset-x-0 bottom-0 z-40 pointer-events-none">
-              <div
-                className={cn(
-                  'absolute bottom-0 left-0 h-12',
-                  readingMode === 'scroll' ? 'right-5' : 'right-0',
-                  !isTouch && !isSelectingText ? 'pointer-events-auto' : 'pointer-events-none',
-                )}
-                onPointerEnter={isTouch || isSelectingText ? undefined : onFooterEnter}
-                onPointerLeave={isTouch ? undefined : onFooterLeave}
-              />
               <div
                 data-toast-obstacle={footerVisible && !isSelectingText ? '' : undefined}
                 className={cn('absolute inset-x-0 bottom-0', footerVisible && !isSelectingText ? 'pointer-events-auto' : 'pointer-events-none')}
@@ -1844,22 +1869,22 @@ export default function Reader() {
               {(historyCaps.canBack || historyCaps.canForward) && (
                 <div
                   className={cn(
-                    'absolute left-0 z-[60] h-24 w-28 transition-[bottom,translate] duration-300',
+                    'pointer-events-none absolute left-0 z-[60] h-24 w-28 transition-[bottom,translate] duration-300',
                     mobileDockVisible
                       ? 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))]'
                       : 'bottom-0',
                     footerVisible
-                      ? '-translate-y-12 pointer-events-auto'
+                      ? '-translate-y-12'
                       : 'translate-y-full pointer-events-none',
                   )}
-                  onPointerEnter={isTouch ? undefined : () => setCornerDwell(true)}
-                  onPointerLeave={isTouch ? undefined : () => setCornerDwell(false)}
                 >
                   <HistoryCapsule
                     canBack={historyCaps.canBack}
                     canForward={historyCaps.canForward}
                     onBack={onHistoryBack}
                     onForward={onHistoryForward}
+                    onPointerEnter={isTouch ? undefined : () => setCornerDwell(true)}
+                    onPointerLeave={isTouch ? undefined : () => setCornerDwell(false)}
                   />
                 </div>
               )}

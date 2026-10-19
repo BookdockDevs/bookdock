@@ -11,6 +11,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import ReviewPreviewSection from '@/features/reviews/components/ReviewPreviewSection'
 import { useReviewWorkContext } from '@/features/reviews/hooks/useReviews'
+import { reviewIconPaths } from '@/features/reviews/lib/review-icon'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -46,6 +47,7 @@ import CatalogUploadSheet from './CatalogUploadSheet'
 export default function WorkDetailBody({
   work, library, canManage, canCollect, canContribute = false, onClose,
   selectedVersionId, onSelectVersion, onVersionsUploaded, moreActions,
+  onOpenReadingData,
   onOpenAllReviews,
   onOpenReviewDetail,
 }: {
@@ -64,6 +66,8 @@ export default function WorkDetailBody({
   onSelectVersion: (versionLinkId: string) => void
   onVersionsUploaded: (versionLinkIds: string[]) => void
   moreActions?: MoreActionsMenuItem[]
+  /** Drill into the personal reading data; absent when there is none to show. */
+  onOpenReadingData?: () => void
   onOpenAllReviews?: () => void
   onOpenReviewDetail?: (review: Review) => void
   onClose: () => void
@@ -96,11 +100,39 @@ export default function WorkDetailBody({
   const reviewComposer = reviewContext?.composer
   const canReview = Boolean(reviewComposer?.eligible && reviewComposer.bookVersionId)
   const ownReview = reviewContext?.own
+
+  // The review glyph carries no state: it opens the caller's own review when
+  // there is one and the composer when there is not.
+  function openReviewAction() {
+    if (ownReview) onOpenReviewDetail?.(ownReview)
+    else setReviewEditorOpen(true)
+  }
   function metadataEdit(field: EditableMetadataField, label: string) {
     if (!canManage || !selected) return undefined
     return () => setMetadataField({ field, label, versionId: selected.id })
   }
   const [uploadOpen, setUploadOpen] = useState(false)
+
+  // Uploading a version is a once-per-version job, so it waits in the overflow
+  // menu instead of taking a slot beside edit and download.
+  const overflowItems: MoreActionsMenuItem[] = [
+    ...((canManage || canContribute)
+      ? [{
+          key: 'upload-version',
+          label: _('library.uploadNewVersion'),
+          icon: (
+            <>
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="12" y1="18" x2="12" y2="12" />
+              <line x1="9" y1="15" x2="15" y2="15" />
+            </>
+          ),
+          onSelect: () => setUploadOpen(true),
+        }]
+      : []),
+    ...(moreActions ?? []),
+  ]
 
   const hasCoverImage = Boolean(selected?.effective.coverKey || selected?.format === 'epub')
   // The two hides resolve independently (see the Hidden boundary in
@@ -351,7 +383,7 @@ export default function WorkDetailBody({
               {_('library.startReading')}
             </Button>
             <div className="flex flex-1 items-center gap-1.5">
-              {/* Action order: collect, download, edit, review, upload new version, visibility, more, delete. */}
+              {/* Action order: collect, edit, download, review, reading data, visibility, more, delete. */}
               {canCollect && (
                 <ActionIcon
                   secondary
@@ -391,27 +423,15 @@ export default function WorkDetailBody({
               {canReview && (
                 <ActionIcon
                   secondary
-                  className={ownReview ? 'text-amber-500 hover:text-amber-600 dark:text-amber-400' : undefined}
-                  label={ownReview ? _('review.editReview') : _('review.rateOrReview')}
-                  title={ownReview ? _('review.editReview') : _('review.rateOrReview')}
-                  onClick={() => setReviewEditorOpen(true)}
+                  label={_('review.reviewsTitle')}
+                  onClick={openReviewAction}
                 >
-                  <path
-                    d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-                    fill={ownReview ? 'currentColor' : 'none'}
-                  />
+                  {reviewIconPaths}
                 </ActionIcon>
               )}
-              {(canManage || canContribute) && (
-                <ActionIcon
-                  secondary
-                  label={_('library.uploadNewVersion')}
-                  onClick={() => setUploadOpen(true)}
-                >
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="12" y1="18" x2="12" y2="12" />
-                  <line x1="9" y1="15" x2="15" y2="15" />
+              {onOpenReadingData && (
+                <ActionIcon secondary label={_('readingData.data')} onClick={onOpenReadingData}>
+                  <path d="M4 19V9m8 10V4m8 15v-7" />
                 </ActionIcon>
               )}
               {canManage && (
@@ -454,8 +474,8 @@ export default function WorkDetailBody({
                   </ActionIcon>
                 )
               )}
-              {moreActions && moreActions.length > 0 && (
-                <MoreActionsMenu items={moreActions} />
+              {overflowItems.length > 0 && (
+                <MoreActionsMenu items={overflowItems} />
               )}
               {(canManage || selected.maintainable) && (
                 <div className="ml-auto">
@@ -485,7 +505,13 @@ export default function WorkDetailBody({
 
       <MetaGrid rows={metaRows} />
 
-      <ReviewPreviewSection context={reviewContext} onViewAll={() => onOpenAllReviews?.()} onOpenReview={onOpenReviewDetail} />
+      <ReviewPreviewSection
+        context={reviewContext}
+        canReview={canReview}
+        onCompose={() => setReviewEditorOpen(true)}
+        onViewAll={() => onOpenAllReviews?.()}
+        onOpenReview={onOpenReviewDetail}
+      />
 
       {reviewEditorOpen && reviewComposer?.bookVersionId && (
         <ReviewEditor
