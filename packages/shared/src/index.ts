@@ -200,9 +200,7 @@ export type {
   ReadingRecordBookDetailRes,
   ReadingSessionItem,
   ReadingSessionUpdateReq,
-  ReadingDetailManualItem,
-  ReadingDetailAutoDayItem,
-  ReadingDetailItem,
+  ReadingRecordConflictDetails,
   ReadingRecordTagItem,
   AnnotationCreateReq,
   AnnotationUpdateReq,
@@ -244,8 +242,6 @@ export {
   readingProgressUpdateSchema,
   readingRecordCreateSchema,
   readingSessionUpdateSchema,
-  readingSessionListSchema,
-  readingDetailListSchema,
   readingRecordRangeSchema,
   readingRecordHourlySchema,
   settingsUpdateSchema,
@@ -313,6 +309,9 @@ export {
 } from './schema'
 
 export { ErrorCode, ErrorHttpStatus } from './errors'
+export * from './reading-ledger'
+export { calendarDateSchema, isOrderedReadingRange, readingRangeShape, readingRangeSchema } from './reading-range'
+export type { ReadingRange } from './reading-range'
 
 export type {
   Library,

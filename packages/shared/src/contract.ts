@@ -468,7 +468,7 @@ export interface SettingsRes {
   /** Cover fill mode inside a grid card. */
   coverFit?: 'crop' | 'full'
   /** Reading-time accounting: automatic heuristics, manual timer pill, or off (no reading data) */
-  readingTimerMode?: 'auto' | 'manual' | 'off'
+  readingTimerMode?: 'auto' | 'manual' | 'both' | 'off'
   manualTimerGraceMinutes?: 1 | 5 | 10 | 30
   ttsEngine?: 'system' | 'edge' | 'service'
   ttsServiceId?: string | null
@@ -1456,6 +1456,18 @@ export interface ReadingProgressRes {
 }
 
 export interface ReadingRecordCreateReq {
+  replaceSessionIds?: string[]
+  expectedUserId?: string
+  requestId?: string
+  deviceId?: string
+  source?: 'auto' | 'manual' | 'retroactive'
+  timezone?: string
+  fragments?: import('./reading-ledger').ReadingTimeFragment[]
+  coverage?: import('./reading-ledger').ReadingCoverageInterval[]
+  revisionId?: string
+  wordCount?: number
+  continuous?: boolean
+  finished?: boolean
   bookId: string
   /** Local calendar day of the session start, 'YYYY-MM-DD' */
   date: string
@@ -1491,13 +1503,20 @@ export interface ReadingSessionItem {
   endChapterIndex: number | null
 }
 
+export interface ReadingRecordConflictDetails {
+  conflictingSessionIds: string[]
+  hasUnreplaceableConflicts: boolean
+}
+
 export interface ReadingSessionUpdateReq {
+  continuous?: boolean
+  timezone?: string
   durationSeconds?: number
-  startedAt?: number
+  startedAt?: number | null
   endedAt?: number
   date?: string
-  startFraction?: number
-  endFraction?: number
+  startFraction?: number | null
+  endFraction?: number | null
   startChapterIndex?: number
   endChapterIndex?: number
   startCfi?: string
@@ -1514,6 +1533,17 @@ export interface ReadingRecordMonthlyComparison {
 }
 
 export interface ReadingRecordSummaryRes {
+  firstRecordedDate?: string
+  scope?: {
+    longestStreak: number
+    totalSeconds: number
+    totalBooks: number
+    totalDays: number
+    finishedBooks: number
+    finishedRounds: number
+    totalWordsRead: number
+    wordsPartial?: boolean
+  }
   totalSeconds: number
   totalBooks: number
   totalDays: number
@@ -1541,6 +1571,8 @@ export interface ReadingRecordHourlyItem {
   /** Client-local hour of day, 0-23 */
   hour: number
   durationSeconds: number
+  /** Distinct calendar days in the range that had reading during this hour */
+  days?: number
 }
 
 export interface ReadingRecordBookItem {
@@ -1550,7 +1582,7 @@ export interface ReadingRecordBookItem {
   coverKey: string | null
   progress: number
   durationSeconds: number
-  /** Distinct days with recorded reading in the range */
+  /** Distinct days with at least sixty seconds of reading for this book in the range. */
   days: number
   readStatus: ReadStatus
 }
@@ -1560,27 +1592,12 @@ export interface ReadingRecordBookDetailRes {
   records: ReadingRecordDailyItem[]
 }
 
-/** Manual session row of the per-book mixed detail feed (same fields as the session list) */
-export interface ReadingDetailManualItem extends Omit<ReadingSessionItem, 'startedAt'> {
-  kind: 'manual'
-  /** Null for retroactive entries recorded without a start time */
-  startedAt: number | null
-}
-
-/** Auto-mode day row of the mixed detail feed: the day's total minus its manual sessions */
-export interface ReadingDetailAutoDayItem {
-  kind: 'autoDay'
-  /** Client-local calendar day, 'YYYY-MM-DD' */
-  date: string
-  durationSeconds: number
-}
-
-export type ReadingDetailItem = ReadingDetailManualItem | ReadingDetailAutoDayItem
-
 export interface ReadingRecordTagItem {
   tagId: string
   name: string
   durationSeconds: number
+  /** Distinct book count having this tag in the range */
+  bookCount?: number
 }
 
 export type ReplacementCreateReq = {

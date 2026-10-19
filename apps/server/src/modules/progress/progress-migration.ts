@@ -1,11 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { and, eq } from 'drizzle-orm'
+import { and, eq, ne } from 'drizzle-orm'
 
 import { config } from '../../config'
 import type { getDb } from '../../db/client'
-import { bookStates, bookVersions, libraryMigrationLog } from '../../db/schema'
+import { bookStates, bookVersions, libraryMigrationLog, readingArchives, readingSessions } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { unionLength } from '../../lib/intervals'
 import { log } from '../../lib/logger'
@@ -142,38 +142,45 @@ export async function importProgressFiles(db: ReturnType<typeof getDb>): Promise
             updatedAt: bookStates.updatedAt,
           }).from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookVersionId))).get()
 
-          if (existing) {
-            if (existing.progressData === null || existing.progressData === undefined) {
-              db.update(bookStates).set({
+          if (existing?.progressData != null) {
+            report.skipped += 1
+            continue
+          }
+          if (!existing && !db.select({ id: bookVersions.id }).from(bookVersions).where(eq(bookVersions.id, bookVersionId)).get()) {
+            report.anomalies.push({ file: fileKey, reason: `Version ${bookVersionId} does not exist in database` })
+            continue
+          }
+          db.transaction((tx) => {
+            if (existing) {
+              tx.update(bookStates).set({
                 progressData: data,
                 readFraction,
                 updatedAt: Math.max(existing.updatedAt, updatedAt),
               }).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookVersionId))).run()
-              report.imported += 1
             } else {
-              // Existing progressData is already present in DB: do not overwrite!
-              report.skipped += 1
+              tx.insert(bookStates).values({
+                userId, bookVersionId, readStatus: 'reading',
+                percent: typeof data.percent === 'number' ? data.percent : 0,
+                cfi: typeof data.cfi === 'string' ? data.cfi : null,
+                chapter: typeof data.chapter === 'string' ? data.chapter : null,
+                progressData: data, readFraction, updatedAt,
+              }).run()
             }
-          } else {
-            // Check if version exists
-            const version = db.select({ id: bookVersions.id }).from(bookVersions).where(eq(bookVersions.id, bookVersionId)).get()
-            if (!version) {
-              report.anomalies.push({ file: fileKey, reason: `Version ${bookVersionId} does not exist in database` })
-              continue
+            // SQL migration runs before legacy files are imported. Preserve that
+            // missing baseline only while no precise ledger contributions exist.
+            const archive = tx.select().from(readingArchives).where(and(
+              eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, bookVersionId),
+            )).get()
+            const canonical = tx.select({ id: readingSessions.id }).from(readingSessions).where(and(
+              eq(readingSessions.userId, userId), eq(readingSessions.bookId, bookVersionId), ne(readingSessions.source, 'legacy'),
+            )).get()
+            if (archive && archive.legacyIntervals.length === 0 && !canonical) {
+              tx.update(readingArchives).set({ legacyIntervals: data.intervals ?? [] }).where(and(
+                eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, bookVersionId),
+              )).run()
             }
-            db.insert(bookStates).values({
-              userId,
-              bookVersionId,
-              readStatus: 'reading',
-              percent: typeof data.percent === 'number' ? data.percent : 0,
-              cfi: typeof data.cfi === 'string' ? data.cfi : null,
-              chapter: typeof data.chapter === 'string' ? data.chapter : null,
-              progressData: data,
-              readFraction,
-              updatedAt,
-            }).run()
-            report.imported += 1
-          }
+          })
+          report.imported += 1
         }
       }
     }

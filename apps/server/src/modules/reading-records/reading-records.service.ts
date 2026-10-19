@@ -1,7 +1,7 @@
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, notInArray, or, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNull, lt, lte, notInArray, sql } from 'drizzle-orm'
 
 import type {
-  ReadingDetailItem,
+  ReadingRange,
   ReadingRecordBookDetailRes,
   ReadingRecordBookItem,
   ReadingRecordCreateReq,
@@ -15,103 +15,23 @@ import type {
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookStates, bookVersions, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags, readingRecords, readingSessions } from '../../db/schema'
-import { createId } from '../../lib/id'
-import { mergeProgressIntervalInTx, readProgressFile } from '../../lib/progress-file'
-import { assertReadableBook, getBook } from '../books/books.service'
-import { loadLibraryHiddenTaxonomy } from '../libraries/library-query'
+import { bookStates, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags, readingArchives, readingRecords, readingRounds, readingSessions } from '../../db/schema'
+import { readProgressFile } from '../../lib/progress-file'
+import { getBook } from '../books/books.service'
+import { unionLength } from '../../lib/intervals'
+import { hiddenBookVersionIds } from './reading-visibility'
 import { isProgressMigrationCompleted } from '../progress/progress-migration'
 import { AppError } from '../../middleware/error'
-
-/**
- * Version ids hidden from the owner's default stats views (private vault).
- * Aggregates exclude these rows unless the caller reveals them; per-book
- * endpoints keep their own assertReadableBook flag instead.
- */
-function hiddenBookVersionIds(db: ReturnType<typeof getDb>, userId: string): string[] {
-  const library = db.select({ id: libraries.id }).from(libraries)
-    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-  if (!library) return []
-  const taxonomy = loadLibraryHiddenTaxonomy(db, library.id)
-  const hiddenWorkConditions: SQL[] = [eq(libraryBooks.hidden, true)]
-  if (taxonomy.hiddenCategoryIds.length > 0) {
-    hiddenWorkConditions.push(inArray(libraryBooks.categoryId, taxonomy.hiddenCategoryIds))
-  }
-  if (taxonomy.hiddenTagIds.length > 0) {
-    hiddenWorkConditions.push(sql`EXISTS (
-      SELECT 1 FROM ${libraryBookTags} AS stats_hidden_tag
-      INNER JOIN ${libraryTags} AS stats_hidden_name ON stats_hidden_name.id = stats_hidden_tag.tag_id
-      WHERE stats_hidden_tag.library_book_id = ${libraryBooks.id}
-        AND stats_hidden_tag.tag_id IN ${taxonomy.hiddenTagIds}
-    )`)
-  }
-  const works = db.select({ id: libraryBooks.id }).from(libraryBooks)
-    .where(and(eq(libraryBooks.libraryId, library.id), or(...hiddenWorkConditions))).all()
-  if (works.length === 0) return []
-  return db.select({ bookVersionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
-    .where(inArray(libraryBookVersions.libraryBookId, works.map((w) => w.id)))
-    .all().map((row) => row.bookVersionId)
-}
-
-function versionIdIfMigrated(bookId: string): string | null {
-  const db = getDb()
-  return db.select({ id: bookVersions.id }).from(bookVersions).where(eq(bookVersions.id, bookId)).get()?.id ?? null
-}
+import { addLedgerReading, deleteLedgerSession, ensureReadingArchive, updateLedgerSession } from './reading-ledger.service'
+import { splitReadingTime } from './time-fragments'
+import { readingTimestampBounds } from '../../lib/reading-range'
 
 export async function addReadingTime(userId: string, body: ReadingRecordCreateReq, showHidden = false) {
-  await assertReadableBook(userId, body.bookId, showHidden)
-  const db = getDb()
-  // New rows bind the version when the book already migrated; history keeps
-  // flowing through bookId either way (0.3 id reuse).
-  const bookVersionId = versionIdIfMigrated(body.bookId)
-
-  if (body.startFraction !== undefined && body.endFraction !== undefined && !isProgressMigrationCompleted(db)) {
-    await readProgressFile(userId, body.bookId)
-  }
-
-  db.transaction((tx) => {
-    tx.insert(readingRecords).values({
-      id: createId('rr'),
-      userId,
-      bookId: body.bookId,
-      bookVersionId,
-      date: body.date,
-      durationSeconds: body.durationSeconds,
-    }).onConflictDoUpdate({
-      target: [readingRecords.userId, readingRecords.bookId, readingRecords.date],
-      set: { durationSeconds: sql`${readingRecords.durationSeconds} + ${body.durationSeconds}` },
-    }).run()
-    tx.insert(readingSessions).values({
-      id: createId('rs'),
-      userId,
-      bookId: body.bookId,
-      bookVersionId,
-      date: body.date,
-      // Explicit null = retroactive entry without a known start time
-      startedAt: body.startedAt === undefined ? Date.now() : body.startedAt,
-      durationSeconds: body.durationSeconds,
-      endedAt: body.endedAt,
-      startCfi: body.startCfi,
-      endCfi: body.endCfi,
-      startFraction: body.startFraction,
-      endFraction: body.endFraction,
-      startChapterIndex: body.startChapterIndex,
-      endChapterIndex: body.endChapterIndex,
-    }).run()
-    // Retroactive entries may carry an explicit read range: merge it into the
-    // book's interval union atomically within the same transaction.
-    if (body.startFraction !== undefined && body.endFraction !== undefined) {
-      mergeProgressIntervalInTx(tx as unknown as ReturnType<typeof getDb>, userId, body.bookId, [body.startFraction, body.endFraction])
-    }
-  })
-
-  return db.select().from(readingRecords).where(and(
-    eq(readingRecords.userId, userId),
-    eq(readingRecords.bookId, body.bookId),
-    eq(readingRecords.date, body.date),
-  )).get()
+  const session = await addLedgerReading(userId, body, showHidden)
+  return getDb().select().from(readingRecords).where(and(
+    eq(readingRecords.userId, userId), eq(readingRecords.bookId, body.bookId), eq(readingRecords.date, body.date),
+  )).get() ?? session
 }
-
 const DAY_MS = 24 * 3600 * 1000
 
 function dayMs(date: string): number {
@@ -144,6 +64,21 @@ function weekStart(date: string): string {
 
 async function computeTotalWordsRead(userId: string, showHidden = false): Promise<number> {
   const db = getDb()
+  const archives = db.select().from(readingArchives).where(eq(readingArchives.userId, userId)).all()
+  if (archives.length) {
+    const hidden = new Set(showHidden ? [] : hiddenBookVersionIds(db, userId))
+    const sessions = db.select().from(readingSessions).where(eq(readingSessions.userId, userId)).all()
+    let words = 0
+    for (const archive of archives) {
+      if (hidden.has(archive.bookVersionId)) continue
+      words += unionLength(archive.legacyIntervals) * (archive.legacyWordCount ?? 0)
+    }
+    for (const session of sessions) {
+      if (hidden.has(session.bookId)) continue
+      words += session.coverage.reduce((sum, [start, end]) => sum + Math.abs(end - start), 0) * (session.wordCount ?? 0)
+    }
+    return Math.round(words)
+  }
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
   if (!library) return 0
@@ -212,7 +147,7 @@ async function computeTotalWordsRead(userId: string, showHidden = false): Promis
   return Math.round(total)
 }
 
-export async function getSummary(userId: string, today: string, showHidden = false): Promise<ReadingRecordSummaryRes> {
+export async function getSummary(userId: string, today: string, showHidden = false, range: ReadingRange = {}): Promise<ReadingRecordSummaryRes> {
   const db = getDb()
   const hiddenIds = showHidden ? [] : hiddenBookVersionIds(db, userId)
   const visibleRecords = hiddenIds.length > 0 ? notInArray(readingRecords.bookId, hiddenIds) : undefined
@@ -224,8 +159,9 @@ export async function getSummary(userId: string, today: string, showHidden = fal
   const todayRow = db.select({
     todaySeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
   }).from(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.date, today), visibleRecords)).get()!
-  const dates = db.selectDistinct({ date: readingRecords.date }).from(readingRecords)
-    .where(and(eq(readingRecords.userId, userId), visibleRecords)).orderBy(readingRecords.date).all()
+  const dates = db.select({ date: readingRecords.date }).from(readingRecords)
+    .where(and(eq(readingRecords.userId, userId), visibleRecords)).groupBy(readingRecords.date)
+    .having(sql`sum(${readingRecords.durationSeconds}) >= 60`).orderBy(readingRecords.date).all()
     .map((r) => r.date)
   const streak = computeStreak(dates, today)
 
@@ -282,8 +218,10 @@ export async function getSummary(userId: string, today: string, showHidden = fal
   const previousBooks = new Set<string>()
   const currentDays = new Set<string>()
   const previousDays = new Set<string>()
+  const comparisonDays = new Map<string, number>()
 
   for (const r of comparisonRows) {
+    comparisonDays.set(r.date, (comparisonDays.get(r.date) ?? 0) + r.durationSeconds)
     if (r.date >= thisMonthFrom && r.date <= thisMonthTo) {
       currentPeriodSeconds += r.durationSeconds
       currentBooks.add(r.bookId)
@@ -295,6 +233,8 @@ export async function getSummary(userId: string, today: string, showHidden = fal
       previousDays.add(r.date)
     }
   }
+  for (const date of currentDays) if ((comparisonDays.get(date) ?? 0) < 60) currentDays.delete(date)
+  for (const date of previousDays) if ((comparisonDays.get(date) ?? 0) < 60) previousDays.delete(date)
 
   const monthlyComparison: ReadingRecordMonthlyComparison = {
     currentPeriodSeconds,
@@ -306,8 +246,45 @@ export async function getSummary(userId: string, today: string, showHidden = fal
   }
 
   const totalWordsRead = await computeTotalWordsRead(userId, showHidden)
+  const scopedDays = await getDaily(userId, range, showHidden)
+  const scopedBooks = db.select({ count: sql<number>`count(distinct ${readingRecords.bookId})` }).from(readingRecords)
+    .where(rangeConditions(userId, range, hiddenIds)).get()!.count
+  const finishBounds = readingTimestampBounds(range)
+  const finished = db.select().from(readingRounds).where(and(
+    eq(readingRounds.userId, userId), eq(readingRounds.status, 'finished'),
+    finishBounds.from !== undefined ? gte(readingRounds.endedAt, finishBounds.from) : undefined,
+    finishBounds.until !== undefined ? lt(readingRounds.endedAt, finishBounds.until) : undefined,
+    hiddenIds.length ? notInArray(readingRounds.bookVersionId, hiddenIds) : undefined,
+  )).all()
+  const scopedSessions = db.select().from(readingSessions).where(and(
+    eq(readingSessions.userId, userId),
+    hiddenIds.length ? notInArray(readingSessions.bookId, hiddenIds) : undefined,
+  )).all()
+  let scopedWords = 0
+  for (const session of scopedSessions) {
+    const words = session.coverage.reduce((sum, [a, b]) => sum + Math.abs(b - a), 0) * (session.wordCount ?? 0)
+    if (session.fragments.length && session.timezone) {
+      const slices = splitReadingTime(session.fragments, session.timezone)
+      const total = slices.reduce((sum, slice) => sum + slice.durationSeconds, 0)
+      const selected = slices.filter((slice) => (!range.from || slice.date >= range.from) && (!range.to || slice.date <= range.to))
+        .reduce((sum, slice) => sum + slice.durationSeconds, 0)
+      if (total > 0) scopedWords += words * selected / total
+    } else if ((!range.from || session.date >= range.from) && (!range.to || session.date <= range.to)) scopedWords += words
+  }
   return {
     ...totals,
+    firstRecordedDate: dates[0],
+    totalDays: dates.length,
+    scope: {
+      longestStreak: computeStreak(scopedDays.filter((day) => day.durationSeconds >= 60).map((day) => day.date), today).longest,
+      totalSeconds: scopedDays.reduce((sum, day) => sum + day.durationSeconds, 0),
+      totalBooks: scopedBooks,
+      totalDays: scopedDays.filter((day) => day.durationSeconds >= 60).length,
+      finishedBooks: new Set(finished.map((round) => round.bookVersionId)).size,
+      finishedRounds: finished.length,
+      totalWordsRead: !range.from && !range.to ? totalWordsRead : Math.round(scopedWords),
+      wordsPartial: Boolean(range.from || range.to) && scopedSessions.some((session) => session.source === 'legacy' && !session.coverage.length),
+    },
     todaySeconds: todayRow.todaySeconds,
     currentStreak: streak.current,
     longestStreak: streak.longest,
@@ -345,25 +322,31 @@ export async function getDaily(userId: string, range: { from?: string; to?: stri
 export async function getHourly(userId: string, range: { from?: string; to?: string; bookId?: string }, tzOffset: number, showHidden = false): Promise<ReadingRecordHourlyItem[]> {
   const db = getDb()
   const hiddenIds = showHidden ? [] : hiddenBookVersionIds(db, userId)
-  const hour = sql<number>`cast(strftime('%H', ${readingSessions.startedAt} / 1000 - ${tzOffset} * 60, 'unixepoch') as integer)`
-  return db.select({
-    hour,
-    durationSeconds: sql<number>`sum(${readingSessions.durationSeconds})`,
-  }).from(readingSessions)
-    .where(and(
-      eq(readingSessions.userId, userId),
-      // Retroactive entries without a start time have no hour to attribute to
-      isNotNull(readingSessions.startedAt),
-      range.from ? gte(readingSessions.date, range.from) : undefined,
-      range.to ? lte(readingSessions.date, range.to) : undefined,
-      range.bookId ? eq(readingSessions.bookId, range.bookId) : undefined,
-      hiddenIds.length > 0 ? notInArray(readingSessions.bookId, hiddenIds) : undefined,
-    ))
-    .groupBy(hour)
-    .orderBy(hour)
-    .all()
+  const rows = db.select().from(readingSessions).where(and(
+    eq(readingSessions.userId, userId),
+    range.bookId ? eq(readingSessions.bookId, range.bookId) : undefined,
+    hiddenIds.length ? notInArray(readingSessions.bookId, hiddenIds) : undefined,
+  )).all()
+  const hours = new Map<number, { durationSeconds: number; days: Set<string> }>()
+  for (const row of rows) {
+    if (row.fragments.length && row.timezone) {
+      for (const slice of splitReadingTime(row.fragments, row.timezone)) {
+        if ((range.from && slice.date < range.from) || (range.to && slice.date > range.to)) continue
+        const cur = hours.get(slice.hour) ?? { durationSeconds: 0, days: new Set<string>() }
+        cur.durationSeconds += slice.durationSeconds
+        cur.days.add(slice.date)
+        hours.set(slice.hour, cur)
+      }
+    } else if (row.source === 'legacy' && row.startedAt != null && (!range.from || row.date >= range.from) && (!range.to || row.date <= range.to)) {
+      const hour = new Date(row.startedAt - tzOffset * 60_000).getUTCHours()
+      const cur = hours.get(hour) ?? { durationSeconds: 0, days: new Set<string>() }
+      cur.durationSeconds += row.durationSeconds
+      cur.days.add(row.date)
+      hours.set(hour, cur)
+    }
+  }
+  return [...hours].sort(([a], [b]) => a - b).map(([hour, { durationSeconds, days }]) => ({ hour, durationSeconds, days: days.size }))
 }
-
 export async function getByBook(userId: string, range: { from?: string; to?: string }, showHidden = false): Promise<ReadingRecordBookItem[]> {
   const db = getDb()
   const totals = db.select({
@@ -371,7 +354,7 @@ export async function getByBook(userId: string, range: { from?: string; to?: str
     progress: sql<number>`coalesce(${bookStates.percent}, 0)`,
     readStatus: sql<ReadingRecordBookItem['readStatus']>`coalesce(${bookStates.readStatus}, 'reading')`,
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
-    days: sql<number>`count(distinct ${readingRecords.date})`,
+    days: sql<number>`count(distinct CASE WHEN ${readingRecords.durationSeconds} >= 60 THEN ${readingRecords.date} END)`,
   }).from(readingRecords)
     .leftJoin(bookStates, and(eq(bookStates.bookVersionId, readingRecords.bookId), eq(bookStates.userId, userId)))
     .where(rangeConditions(userId, range, showHidden ? [] : hiddenBookVersionIds(db, userId)))
@@ -411,63 +394,26 @@ export async function getByBook(userId: string, range: { from?: string; to?: str
       return { ...row, title: book.title, author: book.author, coverKey: book.coverKey }
     } catch (error) {
       if (!(error instanceof AppError) || !['BOOK_NOT_FOUND', 'BOOK_FILE_MISSING', 'FORBIDDEN'].includes(error.code)) throw error
-      return { ...row, title: 'Unavailable book', author: '', coverKey: null }
+      const archive = db.select().from(readingArchives).where(and(eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, row.bookId))).get()
+      return { ...row, title: archive?.title ?? 'Unavailable book', author: archive?.author ?? '', coverKey: null }
     }
   }))
 }
 
-export async function getBookRecords(userId: string, bookId: string, showHidden = false): Promise<ReadingRecordBookDetailRes> {
-  await assertReadableBook(userId, bookId, showHidden)
+export async function getBookRecords(userId: string, bookId: string, showHidden = false, range: ReadingRange = {}): Promise<ReadingRecordBookDetailRes> {
+  await ensureReadingArchive(userId, bookId, showHidden)
   const db = getDb()
   const total = db.select({
     totalSeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
-  }).from(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId))).get()!
+  }).from(readingRecords).where(and(eq(readingRecords.bookId, bookId), rangeConditions(userId, range))).get()!
   const records = db.select({
     date: readingRecords.date,
     durationSeconds: readingRecords.durationSeconds,
   }).from(readingRecords)
-    .where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId)))
+    .where(and(eq(readingRecords.bookId, bookId), rangeConditions(userId, range)))
     .orderBy(desc(readingRecords.date))
     .all()
   return { totalSeconds: total.totalSeconds, records }
-}
-
-// Manual-session maintenance (manual-reading-timer.md §7): edits and deletes
-// only touch the session row and the daily aggregate — the progress interval
-// union is intentionally left stale (see the design doc's decision record).
-type DbLike = Pick<
-  ReturnType<typeof getDb>,
-  'insert' | 'select' | 'update' | 'delete'
->
-
-function adjustAggregate(
-  tx: DbLike,
-  userId: string,
-  bookId: string,
-  date: string,
-  deltaSeconds: number,
-) {
-  if (deltaSeconds > 0) {
-    tx.insert(readingRecords).values({
-      id: createId('rr'), userId, bookId, date, durationSeconds: deltaSeconds,
-    }).onConflictDoUpdate({
-      target: [readingRecords.userId, readingRecords.bookId, readingRecords.date],
-      set: { durationSeconds: sql`${readingRecords.durationSeconds} + ${deltaSeconds}` },
-    }).run()
-    return
-  }
-  if (deltaSeconds < 0) {
-    const row = tx.select().from(readingRecords).where(and(
-      eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId), eq(readingRecords.date, date),
-    )).get()
-    if (!row) return
-    const next = row.durationSeconds + deltaSeconds
-    if (next <= 0) {
-      tx.delete(readingRecords).where(eq(readingRecords.id, row.id)).run()
-    } else {
-      tx.update(readingRecords).set({ durationSeconds: next }).where(eq(readingRecords.id, row.id)).run()
-    }
-  }
 }
 
 type SessionRow = typeof readingSessions.$inferSelect
@@ -477,8 +423,6 @@ function toSessionItem(row: SessionRow): ReadingSessionItem {
     id: row.id,
     bookId: row.bookId,
     date: row.date,
-    // Null only for retroactive no-time entries, which the session list never
-    // includes; the mixed detail feed types startedAt as nullable.
     startedAt: row.startedAt as number,
     durationSeconds: row.durationSeconds,
     endedAt: row.endedAt,
@@ -491,119 +435,13 @@ function toSessionItem(row: SessionRow): ReadingSessionItem {
   }
 }
 
-export function getSessionOrThrow(userId: string, sessionId: string): SessionRow {
-  const db = getDb()
-  const row = db.select().from(readingSessions).where(and(
-    eq(readingSessions.id, sessionId),
-    eq(readingSessions.userId, userId),
-  )).get()
-  if (!row) throw new AppError('SESSION_NOT_FOUND')
-  return row
-}
-
-export async function listSessions(userId: string, bookId: string, limit: number, offset: number, showHidden = false): Promise<ReadingSessionItem[]> {
-  await assertReadableBook(userId, bookId, showHidden)
-  const db = getDb()
-  // Manual sessions only: auto-mode blocks are heuristic fragments without
-  // exact bounds and are immutable — they never appear in the session list.
-  // Retroactive entries without a start time surface in the mixed detail feed
-  // instead of this session list.
-  return db.select().from(readingSessions)
-    .where(and(
-      eq(readingSessions.userId, userId),
-      eq(readingSessions.bookId, bookId),
-      isNotNull(readingSessions.endedAt),
-      isNotNull(readingSessions.startedAt),
-    ))
-    .orderBy(desc(readingSessions.startedAt))
-    .limit(limit)
-    .offset(offset)
-    .all()
-    .map(toSessionItem)
-}
-
 export async function updateSession(userId: string, sessionId: string, body: ReadingSessionUpdateReq): Promise<ReadingSessionItem> {
-  const db = getDb()
-  const existing = getSessionOrThrow(userId, sessionId)
-  if (existing.endedAt === null) throw new AppError('VALIDATION_ERROR', 'auto-mode sessions are immutable')
-  const startedAt = body.startedAt ?? existing.startedAt
-  const endedAt = body.endedAt ?? existing.endedAt ?? startedAt
-  const durationSeconds = body.durationSeconds ?? existing.durationSeconds
-  const date = body.date ?? existing.date
-
-  db.transaction((tx) => {
-    tx.update(readingSessions).set({
-      startedAt,
-      endedAt,
-      date,
-      durationSeconds,
-      ...(body.startCfi !== undefined ? { startCfi: body.startCfi } : {}),
-      ...(body.endCfi !== undefined ? { endCfi: body.endCfi } : {}),
-      ...(body.startFraction !== undefined ? { startFraction: body.startFraction } : {}),
-      ...(body.endFraction !== undefined ? { endFraction: body.endFraction } : {}),
-      ...(body.startChapterIndex !== undefined ? { startChapterIndex: body.startChapterIndex } : {}),
-      ...(body.endChapterIndex !== undefined ? { endChapterIndex: body.endChapterIndex } : {}),
-    }).where(eq(readingSessions.id, sessionId)).run()
-    if (date === existing.date) {
-      adjustAggregate(tx, userId, existing.bookId, date, durationSeconds - existing.durationSeconds)
-    } else {
-      adjustAggregate(tx, userId, existing.bookId, existing.date, -existing.durationSeconds)
-      adjustAggregate(tx, userId, existing.bookId, date, durationSeconds)
-    }
-  })
-  return toSessionItem(getSessionOrThrow(userId, sessionId))
+  return toSessionItem(updateLedgerSession(userId, sessionId, body))
 }
 
 export async function deleteSession(userId: string, sessionId: string): Promise<void> {
-  const db = getDb()
-  const existing = getSessionOrThrow(userId, sessionId)
-  if (existing.endedAt === null) throw new AppError('VALIDATION_ERROR', 'auto-mode sessions are immutable')
-  db.transaction((tx) => {
-    tx.delete(readingSessions).where(eq(readingSessions.id, sessionId)).run()
-    adjustAggregate(tx, userId, existing.bookId, existing.date, -existing.durationSeconds)
-  })
+  deleteLedgerSession(userId, sessionId)
 }
-
-/**
- * Mixed per-book detail feed: manual sessions (editable) + auto-mode day rows
- * (read-only), merged newest-first and paginated after the merge. An auto day
- * row's duration is the day's aggregate minus that day's manual sessions, so
- * retroactive entries never double-count; days fully covered by manual
- * sessions produce no auto row.
- */
-export async function getBookDetail(userId: string, bookId: string, limit: number, offset: number, showHidden = false): Promise<ReadingDetailItem[]> {
-  await assertReadableBook(userId, bookId, showHidden)
-  const db = getDb()
-  const manualRows = db.select().from(readingSessions)
-    .where(and(
-      eq(readingSessions.userId, userId),
-      eq(readingSessions.bookId, bookId),
-      isNotNull(readingSessions.endedAt),
-    ))
-    .all()
-  const manualSecondsByDate = new Map<string, number>()
-  const manualItems: ReadingDetailItem[] = manualRows.map((row) => {
-    manualSecondsByDate.set(row.date, (manualSecondsByDate.get(row.date) ?? 0) + row.durationSeconds)
-    return { kind: 'manual', ...toSessionItem(row), startedAt: row.startedAt }
-  })
-  const dayRows = db.select({
-    date: readingRecords.date,
-    durationSeconds: readingRecords.durationSeconds,
-  }).from(readingRecords)
-    .where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId)))
-    .all()
-  const autoItems: ReadingDetailItem[] = []
-  for (const day of dayRows) {
-    const autoSeconds = day.durationSeconds - (manualSecondsByDate.get(day.date) ?? 0)
-    if (autoSeconds > 0) autoItems.push({ kind: 'autoDay', date: day.date, durationSeconds: autoSeconds })
-  }
-  const sortKey = (item: ReadingDetailItem): number =>
-    item.kind === 'manual' ? item.startedAt ?? dayMs(item.date) : dayMs(item.date)
-  const merged = [...manualItems, ...autoItems]
-    .sort((a, b) => sortKey(b) - sortKey(a) || (a.kind === 'manual' ? -1 : 1))
-  return merged.slice(offset, offset + limit)
-}
-
 /** Reading time grouped by tag; untagged books are excluded (no 'uncategorized' bucket) */
 export async function getByTag(userId: string, range: { from?: string; to?: string }, showHidden = false): Promise<ReadingRecordTagItem[]> {
   const db = getDb()
@@ -611,12 +449,13 @@ export async function getByTag(userId: string, range: { from?: string; to?: stri
     tagId: libraryBookTags.tagId,
     name: libraryTags.name,
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
+    bookCount: sql<number>`count(distinct ${readingRecords.bookId})`,
   }).from(readingRecords)
     .innerJoin(libraryBookVersions, eq(readingRecords.bookId, libraryBookVersions.bookVersionId))
     .innerJoin(libraryBookTags, eq(libraryBookTags.libraryBookId, libraryBookVersions.libraryBookId))
     .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
     .where(rangeConditions(userId, range, showHidden ? [] : hiddenBookVersionIds(db, userId)))
     .groupBy(libraryBookTags.tagId, libraryTags.name)
-    .orderBy(desc(sql`sum(${readingRecords.durationSeconds})`))
+    .orderBy(desc(sql`count(distinct ${readingRecords.bookId})`), desc(sql`sum(${readingRecords.durationSeconds})`))
     .all()
 }

@@ -38,8 +38,8 @@ function StopwatchIcon({ className = 'h-4 w-4' }: { className?: string }) {
 function PauseIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <rect x="6" y="4" width="4" height="16" rx="1" />
-      <rect x="14" y="4" width="4" height="16" rx="1" />
+      <rect x="6" y="4" width="3.5" height="16" rx="1.5" />
+      <rect x="14.5" y="4" width="3.5" height="16" rx="1.5" />
     </svg>
   )
 }
@@ -55,7 +55,7 @@ function PlayIcon() {
 function StopIcon() {
   return (
     <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <rect x="6" y="6" width="12" height="12" rx="1.5" />
+      <rect x="5.5" y="5.5" width="13" height="13" rx="2" />
     </svg>
   )
 }
@@ -108,7 +108,7 @@ function StopHoldButton({ title, onTerminate, onDiscard }: StopHoldButtonProps) 
       onPointerLeave={cancelPress}
       onPointerCancel={cancelPress}
       title={title}
-      className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-red-500/10 hover:text-red-500"
+      className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-red-500/15 hover:text-red-500"
     >
       <svg
         viewBox="0 0 24 24"
@@ -136,14 +136,11 @@ function StopHoldButton({ title, onTerminate, onDiscard }: StopHoldButtonProps) 
 }
 
 const actionBtn =
-  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-[var(--bd-read-text)]'
+  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-[var(--bd-read-text)]'
 
 /**
- * Manual reading timer pill (manual-reading-timer.md §2 v2), bottom-right
- * floating. Idle = single round button; running = icon-less time capsule,
- * as small as possible, with pause/stop sliding out on hover / focus / tap
- * (max-w transition, tap toggles as the touch fallback); suspended = grace
- * countdown with resume/stop. Stop = save; long-press = discard.
+ * Manual reading timer pill, bottom-right floating.
+ * Unified h-11 capsule styling with soft elevation and backdrop blur.
  */
 export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
   const _ = useTranslation()
@@ -153,7 +150,7 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
 
   useEffect(() => {
     if (!lastSummary) return
-    notify.success({ key: 'reader.manualTimerSummary', params: { duration: formatDuration(lastSummary.durationSeconds * 1000) } })
+
     clearSummary()
   }, [lastSummary, clearSummary])
 
@@ -163,7 +160,7 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
         <button
           onClick={() => start()}
           title={_('reader.manualTimerStart')}
-          className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] text-[var(--bd-read-sub)] shadow-xl transition-colors hover:text-[var(--bd-read-text)]"
+          className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 text-[var(--bd-read-sub)] shadow-lg backdrop-blur-md transition-all hover:text-[var(--bd-read-text)] active:scale-95"
         >
           <StopwatchIcon />
         </button>
@@ -174,8 +171,12 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
   const stopButton = (
     <StopHoldButton
       title={_('reader.manualTimerTerminate')}
-      onTerminate={terminate}
+      onTerminate={() => {
+        setExpanded(false)
+        terminate()
+      }}
       onDiscard={() => {
+        setExpanded(false)
         discard()
         notify.info({ key: 'reader.manualTimerDiscarded' })
       }}
@@ -187,30 +188,32 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
       <div className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
         <div
           className={cn(
-            'group flex h-11 items-center rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] shadow-xl',
-            expanded ? 'pl-0.5 pr-2.5' : 'px-2.5',
+            'group flex h-11 items-center rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 shadow-lg backdrop-blur-md transition-all',
+            expanded ? 'pl-2 pr-4' : 'px-4',
           )}
         >
           <div
             className={cn(
               'flex items-center gap-0.5 overflow-hidden transition-all duration-200',
               expanded
-                ? 'mr-1 max-w-24'
-                : 'max-w-0 group-hover:max-w-24 group-focus-within:max-w-24',
+                ? 'mr-1.5 max-w-24 opacity-100'
+                : 'max-w-0 opacity-0 group-hover:mr-1.5 group-hover:max-w-24 group-hover:opacity-100 group-focus-within:mr-1.5 group-focus-within:max-w-24 group-focus-within:opacity-100',
             )}
           >
             <button type="button" onClick={pause} title={_('reader.manualTimerPause')} className={actionBtn}>
               <PauseIcon />
             </button>
             {stopButton}
+            <div className="mx-1 h-4 w-px shrink-0 bg-[var(--bd-read-accent)]/50" />
           </div>
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
             title={expanded ? undefined : _('reader.manualTimerPause')}
-            className="flex h-full items-center text-sm tabular-nums text-[var(--bd-read-text)]"
+            className="flex h-full items-center gap-2 text-sm font-medium tabular-nums text-[var(--bd-read-text)] select-none"
           >
-            {formatDuration(elapsedMs)}
+            <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500/90 shadow-sm animate-pulse" />
+            <span>{formatDuration(elapsedMs)}</span>
           </button>
         </div>
       </div>
@@ -218,35 +221,39 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
   }
 
   return (
-    <div className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
+    <div title={timer.transferred ? _('reader.manualTimerTransferred') : undefined} className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
       <div
         className={cn(
-          'group flex h-11 items-center rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-3 shadow-xl',
-          expanded ? 'pl-1' : '',
+          'group flex h-11 items-center rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 shadow-lg backdrop-blur-md transition-all',
+          expanded ? 'pl-2 pr-4' : 'px-4',
         )}
       >
         <div
           className={cn(
             'flex items-center gap-0.5 overflow-hidden transition-all duration-200',
             expanded
-              ? 'mr-1 max-w-24'
-              : 'max-w-0 group-hover:max-w-24 group-focus-within:max-w-24',
+              ? 'mr-1.5 max-w-24 opacity-100'
+              : 'max-w-0 opacity-0 group-hover:mr-1.5 group-hover:max-w-24 group-hover:opacity-100 group-focus-within:mr-1.5 group-focus-within:max-w-24 group-focus-within:opacity-100',
           )}
         >
           <button type="button" onClick={resume} title={_('reader.manualTimerResume')} className={actionBtn}>
             <PlayIcon />
           </button>
           {stopButton}
+          <div className="mx-1 h-4 w-px shrink-0 bg-[var(--bd-read-accent)]/50" />
         </div>
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
-          className="flex h-full items-center text-[var(--bd-read-sub)]"
+          className="flex h-full items-center gap-2 text-sm font-medium tabular-nums text-[var(--bd-read-sub)] select-none"
         >
-          <span className="min-w-[3.25rem] text-right text-sm tabular-nums text-[var(--bd-read-sub)]">
-            {phase === 'suspended'
-              ? _('reader.manualTimerRemaining', { duration: formatDuration(graceMs) })
-              : formatDuration(elapsedMs)}
+          <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500/90 shadow-sm" />
+          <span className="min-w-[3.25rem] text-right">
+            {timer.transferred && expanded
+              ? _('reader.manualTimerTransferred')
+              : phase === 'suspended'
+                ? _('reader.manualTimerRemaining', { duration: formatDuration(graceMs) })
+                : formatDuration(elapsedMs)}
           </span>
         </button>
       </div>

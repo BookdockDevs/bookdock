@@ -17,6 +17,7 @@ import {
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { readingCompatibleRevisions } from '../../lib/reading-coverage'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
 import { blobKey, coverThumbnailKey, detectImageExtension, generateCoverThumbnail } from '../../lib/cover'
@@ -1106,7 +1107,7 @@ export async function resetCatalogVersionMetadata(
           id: newRevisionId, bookVersionId: link.bookVersionId, revisionNo: latestRevision.revisionNo + 1,
           blobKey: latestRevision.blobKey, size: latestRevision.size,
           wordCount: latestRevision.wordCount, chapterCount: latestRevision.chapterCount,
-          meta: { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsedBookmeta },
+          meta: { ...((latestRevision.meta ?? {}) as Record<string, unknown>), readingCompatibleRevisions: readingCompatibleRevisions(latestRevision.meta, latestRevision.id), bookmeta: parsedBookmeta },
           createdAt: Date.now(),
         }).run()
         tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })

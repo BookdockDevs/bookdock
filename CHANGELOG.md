@@ -4,8 +4,17 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Per-book reading data with a calendar, daily trends, time-of-day distribution, retroactive entries, and record editing/deletion without moving the reader's saved position.
+- Week, month, year, and all-time archive views with date drill-down and matching book, note, and reading statistics.
+- Personal reading history remains available after the original book is removed or becomes inaccessible. Reading data can be backed up/restored as JSON or exported as CSV, for one book or the whole account.
+
 ### Changed
 
+- Automatic and manual timing can be enabled independently, used together, or both disabled while keeping history and retroactive entry available. Both timers share a configurable suspension grace period, excluding time spent away.
+- Reading captures survive page changes, refreshes, and temporary connection failures. Permanently rejected records remain available to retry without blocking other books, and overlapping timed activity is counted only once per account.
+- Reading statistics split known active intervals across local days and hours; a per-book reading day requires at least one minute. Historical reading volume and untouched record precision are preserved when content grows or records are corrected.
 - WebDAV and S3 book reads use verified partial downloads when supported, reuse concurrent downloads, and fall back to whole-file caching when partial reads fail or small remote reads are slow.
 - Reader startup waits for the fonts needed by visible text and avoids flashing a loading indicator during fast opens. If font preparation fails, reading can continue with a fallback font and a notice.
 - Animation now respects the operating system's reduced-motion preference across the whole app, instead of only on a handful of hand-marked elements.
@@ -26,6 +35,11 @@ All notable changes to Bookdock are documented here.
 - Storage migration and restore actions report failures instead of failing silently.
 - The WebDAV import queue always releases its lock when a run finishes, so cancelling or closing the panel no longer leaves importing permanently stuck.
 - Moving a book to another category in a shared library now reports a failure instead of silently doing nothing.
+
+### Upgrade notes
+
+- Back up the complete `DATA_DIR` before upgrading. Migration 0052 converts existing reading history to the new model automatically; downgrading requires the pre-upgrade data and matching previous release.
+- Existing reading time and coverage are retained. Older records without detailed time or position information remain historical totals; the upgrade does not invent missing hourly activity or per-record coverage. Reading-data JSON exports do not replace a complete instance backup.
 
 ## [0.6.0] - 2026-10-16
 
@@ -723,8 +737,17 @@ All notable changes to Bookdock are documented here.
 
 ### [Unreleased]
 
+#### 新增
+
+- 单书阅读数据页提供阅读日历、每日趋势、时段分布、补录与记录编辑／删除，维护记录不改变阅读器保存的位置。
+- 档案支持周、月、年和全部时间范围，可下钻到具体日期，书籍、笔记与阅读统计使用同一范围。
+- 原书删除或不可访问后，个人阅读档案仍保留；支持单书或全账号阅读数据的 JSON 备份／恢复与 CSV 导出。
+
 #### 变更
 
+- 自动记录与手动计时可分别开启、同时使用或全部关闭；关闭后仍可查看历史和补录。两种计时共用可配置的离开宽限，离开期间不计时。
+- 阅读采集可在页面切换、刷新和临时断网后恢复；不可自动恢复的失败记录保留并可重试，不阻塞其他书籍保存，同一账号的重叠有效时段只计一次。
+- 已知有效时段按记录时的本地日期与小时拆分，单书单日累计至少一分钟才计为阅读日；内容增长或纠正记录时，保留历史阅读量与未修改字段的原精度。
 - WebDAV 和 S3 读取在支持时使用经过校验的分段下载，合并并发下载；分段读取失败或远端小段读取过慢时，回退为整文件缓存。
 - 阅读器启动时等待可见正文所需的字体，快速打开时避免加载提示一闪而过；字体准备失败时会提示并使用替代字体继续阅读。
 - 应用内的动画现在遵循操作系统的“减少动态效果”偏好，不再只作用于少数手工标记的元素。
@@ -745,6 +768,11 @@ All notable changes to Bookdock are documented here.
 - 存储迁移与还原操作会提示失败，不再静默失败。
 - WebDAV 导入队列在一轮任务结束时必定释放占用，取消或关闭面板不再导致导入永久卡住。
 - 在共享书库中把书籍移动到其他分类时，失败会提示，不再静默无反应。
+
+#### 升级说明
+
+- 升级前完整备份 `DATA_DIR`。迁移 0052 随启动自动转换已有阅读历史；降级需要一起恢复升级前的数据与对应旧版本。
+- 旧阅读时长与覆盖会保留；缺少详细时间或位置依据的记录仍作为历史汇总，不推测缺失的小时活动或逐条覆盖。阅读数据 JSON 导出不能替代完整实例备份。
 
 ### [0.6.0] - 2026-10-16
 

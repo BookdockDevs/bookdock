@@ -1,3 +1,4 @@
+import { retryReadingRecords } from '@/features/reader/lib/reading-record-queue'
 import DownloadDialogHost from '@/features/library/components/DownloadDialogHost'
 import { useEffect, type ReactNode } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -13,6 +14,10 @@ import { SettingsSync } from './SettingsSync'
 export default function AppProviders({ children }: { children?: ReactNode }) {
   const effectiveTheme = useUiStore((s) => s.systemTheme)
   const setSystemTheme = useUiStore((s) => s.setSystemTheme)
+
+  useEffect(() => {
+    void retryReadingRecords()
+  }, [])
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')

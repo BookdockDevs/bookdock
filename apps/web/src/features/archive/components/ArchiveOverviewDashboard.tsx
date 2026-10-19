@@ -1,60 +1,170 @@
-import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 
-import type { ArchiveRecordType } from '@bookdock/shared'
+import type { ArchiveRecordType, ReadingRange } from '@bookdock/shared'
 
 import { BookmarkOutlineIcon, BulbIcon, ChatBubbleIcon, HighlighterIcon } from '@/features/reader/components/annotation-icons'
-import BookTimeList from '@/features/stats/components/BookTimeList'
-import HourDistribution from '@/features/stats/components/HourDistribution'
-import PeriodBarChart from '@/features/stats/components/PeriodBarChart'
-import SummaryCards from '@/features/stats/components/SummaryCards'
-import TagDistribution from '@/features/stats/components/TagDistribution'
-import YearHeatmap from '@/features/stats/components/YearHeatmap'
-import { periodRange, shiftPeriod, type StatsPeriod } from '@/features/stats/date-utils'
+import Stats from '@/features/stats/Stats'
+import { DeltaDisplay } from '@/features/stats/components/SummaryCards'
+import { periodDelta, periodRange, shiftPeriod, type DayRange, type DeltaInfo, type StatsPeriod } from '@/features/stats/date-utils'
 import { useTranslation } from '@/hooks/useTranslation'
+import { cn } from '@/lib/utils'
 import type { ArchiveSearch } from '@/routes/archive'
 
-import { useArchiveOverview } from '../hooks'
+import { localDateString } from '@/api/hooks/reading-records'
+import QueryErrorState from '@/components/ui/QueryErrorState'
+
+import { resolveArchiveScope } from '../archive-scope'
+import { useArchiveOverview, usePreviousArchiveOverview } from '../hooks'
 
 interface ArchiveOverviewDashboardProps {
+  query?: ReadingRange
   baseSearch: ArchiveSearch
   onSelectType?: (type: ArchiveRecordType) => void
   onBack?: () => void
   showBack?: boolean
+  period?: StatsPeriod
+  range?: DayRange
+  selectedDate?: string | null
+  selectedTag?: string | null
+  onSelectTag?: (tag: string) => void
+  selectedReadStatus?: string | null
+  onSelectReadStatus?: (status: string) => void
+  onPeriodChange?: (period: StatsPeriod) => void
+  onShift?: (delta: number) => void
+  onDrillMonth?: (d: Date) => void
+  onSelectDate?: (date: string) => void
+  hideControls?: boolean
 }
 
 export default function ArchiveOverviewDashboard({
+  query: externalQuery,
   baseSearch,
   onSelectType,
   onBack,
   showBack = false,
+  period,
+  range,
+  selectedDate,
+  selectedTag,
+  onSelectTag,
+  selectedReadStatus,
+  onSelectReadStatus,
+  onPeriodChange,
+  onShift,
+  onDrillMonth,
+  onSelectDate,
+  hideControls = false,
 }: ArchiveOverviewDashboardProps) {
   const _ = useTranslation()
-  const overview = useArchiveOverview()
-  const [period, setPeriod] = useState<StatsPeriod>('week')
-  const [anchor, setAnchor] = useState(() => new Date())
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
-  const range = periodRange(period, anchor)
+  const resolved = resolveArchiveScope({
+    period,
+    anchor: range ? localDateString(range.from) : undefined,
+    date: selectedDate ?? undefined,
+  })
+  const query = externalQuery ?? resolved.query
+  const activeRange = range ?? resolved.range
+  const isAll = !query.from && !query.to
+  const isScoped = !isAll && period !== undefined && period !== 'all' && !selectedDate
+  const prevRange = isScoped ? periodRange(period, shiftPeriod(period, activeRange.from, -1)) : null
+  const prevScope = prevRange ? resolveArchiveScope({ period, anchor: localDateString(prevRange.from), timezone: query.timezone }) : null
+  const overview = useArchiveOverview(query)
+  const prevOverview = usePreviousArchiveOverview(prevScope?.query, isScoped)
+  const counts = overview.data?.data.counts
+  const prevCounts = prevOverview.data?.data.counts
 
-  const changePeriod = (p: StatsPeriod) => {
-    setPeriod(p)
-    setAnchor(new Date())
-    setSelectedDate(null)
+  function calcNoteDelta(current: number | undefined, previous: number | undefined, unit: string): DeltaInfo | undefined {
+    if (!isScoped || current === undefined || previous === undefined || !period) return undefined
+    return periodDelta(current, previous, (v) => `${v} ${unit}`, _, period)
   }
 
-  const drillToMonth = (d: Date) => {
-    setAnchor(d)
-    setPeriod('month')
-    setSelectedDate(null)
-  }
-
-  const counts = overview.data?.data.counts ?? { highlights: 0, bookmarks: 0, ideas: 0, reviews: 0 }
-  const noteCards: Array<{ type: ArchiveRecordType; label: string; value: number; icon: React.ReactNode }> = [
-    { type: 'highlight', label: _('archive.highlights'), value: counts.highlights, icon: <HighlighterIcon size={18} /> },
-    { type: 'bookmark', label: _('archive.bookmarks'), value: counts.bookmarks, icon: <BookmarkOutlineIcon size={18} /> },
-    { type: 'idea', label: _('archive.ideas'), value: counts.ideas, icon: <BulbIcon size={18} /> },
-    { type: 'review', label: _('archive.reviews'), value: counts.reviews, icon: <ChatBubbleIcon size={18} strokeWidth={1.8} /> },
+  const noteCards: Array<{
+    type: ArchiveRecordType
+    label: string
+    value: number | undefined
+    delta?: DeltaInfo
+    icon: React.ReactNode
+    iconBgClass: string
+  }> = [
+    {
+      type: 'highlight',
+      label: _('archive.highlights'),
+      value: counts?.highlights,
+      delta: calcNoteDelta(counts?.highlights, prevCounts?.highlights, _('archive.notesUnit') || '条'),
+      icon: <HighlighterIcon size={16} />,
+      iconBgClass: 'bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400',
+    },
+    {
+      type: 'bookmark',
+      label: _('archive.bookmarks'),
+      value: counts?.bookmarks,
+      delta: calcNoteDelta(counts?.bookmarks, prevCounts?.bookmarks, '个'),
+      icon: <BookmarkOutlineIcon size={16} />,
+      iconBgClass: 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400',
+    },
+    {
+      type: 'idea',
+      label: _('archive.ideas'),
+      value: counts?.ideas,
+      delta: calcNoteDelta(counts?.ideas, prevCounts?.ideas, _('archive.notesUnit') || '条'),
+      icon: <BulbIcon size={16} />,
+      iconBgClass: 'bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400',
+    },
+    {
+      type: 'review',
+      label: _('archive.reviews'),
+      value: counts?.reviews,
+      delta: calcNoteDelta(counts?.reviews, prevCounts?.reviews, '篇'),
+      icon: <ChatBubbleIcon size={16} strokeWidth={1.8} />,
+      iconBgClass: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400',
+    },
   ]
+
+  const isOverviewLoading = overview.isLoading && !overview.data
+
+  const notesSection = overview.isError && !counts ? (
+    <QueryErrorState isRetrying={overview.isFetching} onRetry={() => void overview.refetch()} />
+  ) : (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+      {noteCards.map((card) => (
+        <Link
+          key={card.type}
+          to="/archive"
+          search={{ ...baseSearch, type: card.type }}
+          // Keep the recorded archive exit source across this in-feature move.
+          state={(previous) => ({ ...previous })}
+          onClick={() => onSelectType?.(card.type)}
+          role="button"
+          className="group flex flex-col rounded-xl bg-stone-50/70 p-3.5 transition-colors hover:bg-stone-100/70 sm:p-4 dark:bg-stone-800/40 dark:hover:bg-stone-800/60"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-stone-500 dark:text-stone-400">
+              {card.label}
+            </span>
+            <div className={cn('flex h-7 w-7 items-center justify-center rounded-lg transition-transform group-hover:scale-105', card.iconBgClass)}>
+              {card.icon}
+            </div>
+          </div>
+          <div className="mt-2.5">
+            {isOverviewLoading ? (
+              <div className="space-y-1.5">
+                <div className="h-6 w-12 animate-pulse rounded bg-stone-200/70 dark:bg-stone-800 motion-reduce:animate-none" />
+                {isScoped && (
+                  <div className="h-4.5 w-14 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/80 motion-reduce:animate-none" />
+                )}
+              </div>
+            ) : (
+              <>
+                <p className="text-xl font-bold tabular-nums tracking-tight text-stone-900 sm:text-2xl dark:text-stone-50">
+                  {card.value ?? '—'}
+                </p>
+                <DeltaDisplay delta={card.delta} isScoped={isScoped} />
+              </>
+            )}
+          </div>
+        </Link>
+      ))}
+    </div>
+  )
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -78,63 +188,23 @@ export default function ArchiveOverviewDashboard({
         </div>
       )}
 
-      {/* 笔记资产一体化通栏 */}
-      <section
-        role="region"
-        aria-label={_('archive.overview')}
-        className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white shadow-2xs dark:border-stone-800 dark:bg-stone-900/60"
-      >
-        <div className="grid grid-cols-2 divide-y divide-stone-100 sm:grid-cols-4 sm:divide-x sm:divide-y-0 dark:divide-stone-800/80">
-          {noteCards.map((card) => (
-            <Link
-              key={card.type}
-              to="/archive"
-              search={{ ...baseSearch, type: card.type, page: 1 }}
-              // Keep the recorded archive exit source across this in-feature move.
-              state={(previous) => ({ ...previous })}
-              onClick={() => onSelectType?.(card.type)}
-              role="button"
-              className="group flex items-center justify-between p-4 transition-colors hover:bg-stone-50/80 dark:hover:bg-stone-800/40"
-            >
-              <div className="space-y-0.5">
-                <span className="text-xs font-medium text-stone-500 dark:text-stone-400">
-                  {card.label}
-                </span>
-                <p className="text-2xl font-bold tabular-nums tracking-tight text-stone-900 dark:text-stone-50">
-                  {card.value}
-                </p>
-              </div>
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-500 transition-colors group-hover:bg-stone-200/80 group-hover:text-stone-700 dark:bg-stone-800 dark:text-stone-400 dark:group-hover:bg-stone-700 dark:group-hover:text-stone-200">
-                {card.icon}
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {/* 习惯与时长统计 */}
-      <SummaryCards />
-
-      <PeriodBarChart
+      <Stats
+        hideHeader
+        query={query}
+        notesSection={notesSection}
         period={period}
         range={range}
         selectedDate={selectedDate}
-        onPeriodChange={changePeriod}
-        onShift={(delta) => {
-          setAnchor((a) => shiftPeriod(period, a, delta))
-          setSelectedDate(null)
-        }}
-        onDrillMonth={drillToMonth}
-        onSelectDate={setSelectedDate}
+        selectedTag={selectedTag}
+        onSelectTag={onSelectTag}
+        selectedReadStatus={selectedReadStatus}
+        onSelectReadStatus={onSelectReadStatus}
+        onPeriodChange={onPeriodChange}
+        onShift={onShift}
+        onDrillMonth={onDrillMonth}
+        onSelectDate={onSelectDate}
+        hideControls={hideControls}
       />
-
-      <YearHeatmap selectedDate={selectedDate} onSelectDate={setSelectedDate} />
-
-      <HourDistribution date={selectedDate} period={period} range={range} />
-
-      <BookTimeList date={selectedDate} period={period} range={range} />
-
-      <TagDistribution date={selectedDate} period={period} range={range} />
     </div>
   )
 }

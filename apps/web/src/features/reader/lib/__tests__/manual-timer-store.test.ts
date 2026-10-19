@@ -3,8 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiPost, apiPut } from '@/api/client'
 import { queryClient } from '@/lib/query-client'
 import { useUiStore } from '@/stores/ui.store'
+import { useAuthStore } from '@/stores/auth.store'
+import { claimReadingTimer } from '../reading-timer-lease'
 
 import { useManualTimerStore, resetManualTimerTicker, sessionDurationMs, type ManualSession } from '../manual-timer-store'
+
+vi.mock('../reading-timer-lease', () => ({ claimReadingTimer: vi.fn().mockResolvedValue(true), releaseReadingTimer: vi.fn(), readingDeviceId: () => 'device-test' }))
 
 vi.mock('@/api/client', () => ({
   apiPost: vi.fn().mockResolvedValue(undefined),
@@ -29,6 +33,9 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(1785000000000)
   resetManualTimerTicker()
+  localStorage.clear()
+  useAuthStore.setState({ user: null })
+  useAuthStore.setState({ user: { id: 'user-1', username: 'reader', role: 'user' } })
   useUiStore.setState({ manualTimerGraceMinutes: 5 })
   useManualTimerStore.setState({ sessions: {}, now: Date.now(), lastSummary: null })
   mockPost.mockClear()
@@ -41,6 +48,19 @@ afterEach(() => {
 })
 
 describe('manual timer state machine', () => {
+  it('preserves available progress through incomplete events', async () => {
+    useManualTimerStore.getState().updatePosition('book-a', { ...POS, revisionId: 'revision-1', wordCount: 1000 })
+    useManualTimerStore.getState().start('book-a', { cfi: null, fraction: null })
+    vi.setSystemTime(1785000060000)
+    useManualTimerStore.getState().updatePosition('book-a', { cfi: null, fraction: null })
+    expect(session().lastFraction).toBe(0.25)
+    useManualTimerStore.getState().updatePosition('book-a', { ...POS, fraction: 0.5, segmentStart: 0.25 })
+    useManualTimerStore.getState().terminate('book-a')
+    await vi.waitFor(() => expect(mockPost).toHaveBeenCalledWith('/reading-records', expect.objectContaining({
+      source: 'manual', durationSeconds: 60, startFraction: 0.25, endFraction: 0.5,
+      revisionId: 'revision-1', wordCount: 1000, coverage: [[0.25, 0.5]],
+    })))
+  })
   it('start creates a running session with the given start position', () => {
     useManualTimerStore.getState().start('book-a', POS)
     expect(session()).toMatchObject({ phase: 'running', startCfi: POS.cfi, startFraction: 0.25, lastCfi: POS.cfi })
@@ -104,7 +124,7 @@ describe('manual timer state machine', () => {
     expect(sessionDurationMs(session(), 1785000040000)).toBe(40_000)
   })
 
-  it('terminate clears the session and reports the interval + exact bounds', async () => {
+  it('terminate writes a recoverable contribution without changing reader position', async () => {
     useManualTimerStore.getState().start('book-a', POS)
     vi.setSystemTime(1785000060000) // +60s
     useManualTimerStore.getState().updatePosition('book-a', { cfi: 'epubcfi(/6/4!/4/8)', fraction: 0.5, chapterIndex: 4 })
@@ -112,12 +132,7 @@ describe('manual timer state machine', () => {
     expect(useManualTimerStore.getState().sessions['book-a']).toBeUndefined()
 
     await vi.waitFor(() => {
-      expect(mockPut).toHaveBeenCalledWith('/progress/book-a', {
-        percent: 50,
-        fraction: 0.5,
-        segmentStartFraction: 0.25,
-        cfi: 'epubcfi(/6/4!/4/8)',
-      })
+      expect(mockPut).not.toHaveBeenCalled()
       expect(mockPost).toHaveBeenCalledWith('/reading-records', expect.objectContaining({
         bookId: 'book-a',
         date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
@@ -132,18 +147,18 @@ describe('manual timer state machine', () => {
       }))
     })
     await vi.waitFor(() => {
-      expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ['reading-sessions'] })
       expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ['reading-records'] })
     })
   })
 
-  it('skips the progress PUT when no start fraction was captured', async () => {
+  it('preserves explicitly timed reading without requiring a position', async () => {
     useManualTimerStore.getState().start('book-a', { cfi: null, fraction: null })
+    vi.setSystemTime(1785000001000)
     useManualTimerStore.getState().terminate('book-a')
     expect(mockPut).not.toHaveBeenCalled()
-    await vi.waitFor(() => {
-      expect(mockPost).toHaveBeenCalledTimes(1)
-    })
+    await vi.waitFor(() => expect(mockPost).toHaveBeenCalledWith('/reading-records', expect.objectContaining({ source: 'manual', durationSeconds: 1 })))
+    expect(mockPost.mock.calls[0][1]).not.toHaveProperty('startFraction')
+    expect(session()).toBeUndefined()
   })
 
   it('discard drops the session with no network writes, no summary and no invalidations', async () => {
@@ -156,6 +171,45 @@ describe('manual timer state machine', () => {
     expect(mockPut).not.toHaveBeenCalled()
     expect(mockPost).not.toHaveBeenCalled()
     expect(mockInvalidate).not.toHaveBeenCalled()
+  })
+
+  it('captures effective fragments while excluding suspension', async () => {
+    const timer = useManualTimerStore.getState()
+    timer.start('book-a', POS)
+    vi.setSystemTime(1785000010000)
+    timer.pause('book-a')
+    vi.setSystemTime(1785000070000)
+    timer.resume('book-a')
+    vi.setSystemTime(1785000090000)
+    timer.terminate('book-a')
+    await vi.waitFor(() => expect(mockPost).toHaveBeenCalledWith('/reading-records', expect.objectContaining({
+      durationSeconds: 30, fragments: [
+        { startedAt: 1785000000000, endedAt: 1785000010000 },
+        { startedAt: 1785000070000, endedAt: 1785000090000 },
+      ],
+    })))
+  })
+
+  it('does not cover skipped navigation or reading while paused', () => {
+    const timer = useManualTimerStore.getState()
+    timer.start('book-a', POS)
+    timer.updatePosition('book-a', { cfi: 'next', fraction: 0.26, segmentStart: 0.25 })
+    timer.updatePosition('book-a', { cfi: 'jump', fraction: 0.8, segmentStart: 0.8 })
+    timer.pause('book-a')
+    timer.updatePosition('book-a', { cfi: 'paused', fraction: 0.81, segmentStart: 0.8 })
+    expect(session().coverage).toEqual([[0.25, 0.26]])
+  })
+
+  it('ignores an outdated denied claim after the user resumes', async () => {
+    let denyOld!: (granted: boolean) => void
+    vi.mocked(claimReadingTimer).mockImplementationOnce(() => new Promise((resolve) => { denyOld = resolve }))
+    const timer = useManualTimerStore.getState()
+    timer.start('book-a', POS)
+    timer.pause('book-a')
+    timer.resume('book-a')
+    denyOld(false)
+    await Promise.resolve()
+    expect(session().phase).toBe('running')
   })
 
   it('discard on a missing session is a no-op', () => {

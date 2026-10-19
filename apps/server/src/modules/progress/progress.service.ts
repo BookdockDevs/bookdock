@@ -2,7 +2,7 @@ import { eq, and } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import { bookStates } from '../../db/schema'
 import { assertReadableBook } from '../books/books.service'
-import { mergeInterval, unionLength, type FractionInterval } from '../../lib/intervals'
+import { mergeInterval, unionLength } from '../../lib/intervals'
 import { readProgressFile, type ProgressFileData } from '../../lib/progress-file'
 import { isProgressMigrationCompleted } from './progress-migration'
 import type { RateSample } from '@bookdock/shared'
@@ -47,7 +47,7 @@ export async function upsertProgress(userId: string, bookId: string, data: { cfi
 
     const existing = row?.progressData as ProgressFileData | null
 
-    let intervals = existing?.intervals ?? [[0, data.fraction ?? data.percent / 100] as FractionInterval]
+    let intervals = existing?.intervals ?? []
     if (data.fraction !== undefined && data.segmentStartFraction !== undefined) {
       let start = data.segmentStartFraction
       let end = data.fraction

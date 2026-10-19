@@ -1,46 +1,48 @@
 import { create } from 'zustand'
 
-import { apiPost, apiPut } from '@/api/client'
-import { withReveal } from '@/lib/reveal-hidden'
-import { READING_RECORDS_KEY, READING_SESSIONS_KEY, localDateString } from '@/api/hooks/reading-records'
-import { queryClient } from '@/lib/query-client'
-import { useUiStore } from '@/stores/ui.store'
+import type { ReadingRecordCreateReq } from '@bookdock/shared'
 
-/**
- * Manual reading timer (manual-reading-timer.md): the user controls the
- * session boundary with the pill instead of the auto heuristics. Sessions are
- * keyed by bookId and survive Reader unmounts (book switch) so a session keeps
- * its grace countdown and can be resumed on re-entry.
- *
- * Lifecycle:
- * - start(): capture start position, phase=running
- * - pause()/resume(): user-controlled stop/continue (time freezes)
- * - suspend(): leaving the page/reader — grace countdown starts; on expiry the
- *   session terminates with the last known position
- * - terminate(): writes the interval (progress PUT) + the exact session bounds
- *   (records POST with endedAt/startCfi/endCfi), then clears the session
- * - pagehide terminates immediately so a closed tab never loses the session
- */
+import { localDateString } from '@/api/hooks/reading-records'
+import { useAuthStore } from '@/stores/auth.store'
+
+import { addReadingCoverage } from './reading-coverage'
+import { newReadingRequestId, queueReadingRecord, readingTimezone, useReadingSaveState } from './reading-record-queue'
+import { readingTimerGraceExpiresAt } from './reading-timer-grace'
+import { claimReadingTimer, readingDeviceId, releaseReadingTimer } from './reading-timer-lease'
+
 export type ManualTimerPhase = 'idle' | 'running' | 'paused' | 'suspended'
+
+interface TimerPosition {
+  cfi: string | null
+  fraction: number | null
+  chapterIndex?: number | null
+  segmentStart?: number
+  revisionId?: string
+  wordCount?: number
+}
 
 export interface ManualSession {
   bookId: string
+  userId: string
+  requestId: string
+  timezone: string
+  date: string
   phase: 'running' | 'paused' | 'suspended'
-  /** Session start (unixtime ms) — the accounting origin for date + startedAt */
   startedAt: number
-  /** Time counted so far, excluding the current running stretch */
   elapsedMs: number
-  /** When the current running stretch started (phase=running only) */
   lastResumeAt: number | null
-  /** When the session entered suspension (grace countdown base) */
   suspendedAt: number | null
   startCfi: string | null
   startFraction: number | null
   startChapterIndex: number | null
-  /** Latest known position — the end point of the session when it terminates */
   lastCfi: string | null
   lastFraction: number | null
   lastChapterIndex: number | null
+  fragments: Array<{ startedAt: number; endedAt: number }>
+  coverage: Array<[number, number]>
+  revisionId?: string
+  wordCount?: number
+  transferred?: boolean
 }
 
 export interface ManualTimerSummary {
@@ -52,86 +54,107 @@ interface ManualTimerStore {
   sessions: Record<string, ManualSession>
   now: number
   lastSummary: ManualTimerSummary | null
-  start: (bookId: string, pos: { cfi: string | null; fraction: number | null; chapterIndex?: number | null }) => void
+  start: (bookId: string, pos: TimerPosition) => void
   pause: (bookId: string) => void
-  resume: (bookId: string) => void
+  resume: (bookId: string, explicit?: boolean) => void
   suspend: (bookId: string) => void
   terminate: (bookId: string) => void
   discard: (bookId: string) => void
-  updatePosition: (bookId: string, pos: { cfi: string | null; fraction: number | null; chapterIndex?: number | null }) => void
+  updatePosition: (bookId: string, pos: TimerPosition) => void
   tick: (now: number) => void
+  restore: () => void
   clearSummary: () => void
 }
 
 export function sessionDurationMs(session: ManualSession, now: number): number {
-  const running = session.phase === 'running' && session.lastResumeAt !== null
-    ? now - session.lastResumeAt
-    : 0
-  return session.elapsedMs + Math.max(0, running)
+  return session.elapsedMs + (session.phase === 'running' && session.lastResumeAt !== null
+    ? Math.max(0, now - session.lastResumeAt) : 0)
 }
 
 export function graceLeftMs(session: ManualSession, now: number): number {
   if (session.phase !== 'suspended' || session.suspendedAt === null) return 0
-  const graceMs = useUiStore.getState().manualTimerGraceMinutes * 60_000
-  return Math.max(0, session.suspendedAt + graceMs - now)
+  return Math.max(0, readingTimerGraceExpiresAt(session.suspendedAt) - now)
 }
 
-async function writeTermination(session: ManualSession) {
-  const now = Date.now()
-  const durationSeconds = Math.max(1, Math.round(sessionDurationMs(session, now) / 1000))
-  const endFraction = session.lastFraction ?? session.startFraction
-  const endCfi = session.lastCfi
-  const date = localDateString(new Date(session.startedAt))
-  if (session.startFraction !== null) {
-    await apiPut(withReveal(`/progress/${session.bookId}`), {
-      percent: Number(((endFraction ?? 0) * 100).toFixed(2)),
-      fraction: endFraction ?? 0,
-      segmentStartFraction: session.startFraction,
-      ...(endCfi ? { cfi: endCfi } : {}),
-    }).catch(() => undefined)
+function freeze(session: ManualSession, now: number): ManualSession {
+  if (session.phase !== 'running' || session.lastResumeAt === null) return session
+  return {
+    ...session,
+    elapsedMs: sessionDurationMs(session, now),
+    lastResumeAt: null,
+    fragments: now > session.lastResumeAt
+      ? [...session.fragments, { startedAt: session.lastResumeAt, endedAt: now }]
+      : session.fragments,
   }
-  await apiPost(withReveal('/reading-records'), {
-    bookId: session.bookId,
-    date,
-    durationSeconds,
+}
+
+function sessionRecord(session: ManualSession): ReadingRecordCreateReq | null {
+  if (Math.round(session.elapsedMs / 1000) <= 0) return null
+  return {
+    requestId: session.requestId, deviceId: readingDeviceId(), source: 'manual',
+    bookId: session.bookId, date: session.date, durationSeconds: Math.round(session.elapsedMs / 1000),
     startedAt: session.startedAt,
-    endedAt: now,
+    endedAt: session.fragments.at(-1)?.endedAt ?? session.startedAt,
+    timezone: session.timezone, fragments: session.fragments, coverage: session.coverage,
+    revisionId: session.revisionId, wordCount: session.wordCount,
     ...(session.startCfi ? { startCfi: session.startCfi } : {}),
-    ...(endCfi ? { endCfi } : {}),
+    ...(session.lastCfi ? { endCfi: session.lastCfi } : {}),
     ...(session.startFraction !== null ? { startFraction: session.startFraction } : {}),
-    // endFraction is independent of startFraction: a session started before
-    // any relocate (e.g. immediately after mount) still ends with a position
-    ...(endFraction !== null ? { endFraction } : {}),
+    ...(session.lastFraction !== null ? { endFraction: session.lastFraction } : {}),
     ...(session.startChapterIndex !== null ? { startChapterIndex: session.startChapterIndex } : {}),
     ...(session.lastChapterIndex !== null ? { endChapterIndex: session.lastChapterIndex } : {}),
-  }).catch(() => undefined)
-  queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
-  queryClient.invalidateQueries({ queryKey: READING_SESSIONS_KEY })
-  queryClient.invalidateQueries({ queryKey: ['progress', session.bookId], refetchType: 'none' })
+  }
 }
 
 let ticker: ReturnType<typeof setInterval> | null = null
+let restoredUser: string | null = null
+let lastLeaseAt = 0
+const positions = new Map<string, TimerPosition>()
+const claimVersions = new Map<string, number>()
+const sessionsKey = (userId: string) => `bd-reading-manual:${userId}:${readingDeviceId()}`
 
 function ensureTicker() {
   if (ticker !== null) return
-  ticker = setInterval(() => {
-    useManualTimerStore.getState().tick(Date.now())
-  }, 1000)
+  ticker = setInterval(() => useManualTimerStore.getState().tick(Date.now()), 1000)
 }
 
-function stopTickerIfIdle() {
-  if (ticker !== null && Object.keys(useManualTimerStore.getState().sessions).length === 0) {
-    clearInterval(ticker)
-    ticker = null
-  }
-}
-
-/** Test hook: drop the module-level ticker so fake-timer suites start clean */
 export function resetManualTimerTicker() {
-  if (ticker !== null) {
-    clearInterval(ticker)
-    ticker = null
+  if (ticker !== null) clearInterval(ticker)
+  ticker = null
+}
+
+function persistSessions() {
+  const userId = useAuthStore.getState().user?.id
+  if (!userId) return
+  const sessions = Object.fromEntries(Object.entries(useManualTimerStore.getState().sessions)
+    .filter(([, item]) => item.userId === userId)
+    .map(([id, item]) => {
+      const snapshot = freeze(item, Date.now())
+      return [id, { ...snapshot, phase: item.phase === 'running' ? 'suspended' : item.phase,
+        suspendedAt: item.phase === 'running' ? Date.now() : item.suspendedAt,
+        expiresAt: item.phase === 'paused' ? null : readingTimerGraceExpiresAt(item.phase === 'running' ? Date.now() : item.suspendedAt ?? Date.now()),
+        pendingRecord: sessionRecord(snapshot),
+      }]
+    }))
+  try {
+    localStorage.setItem(sessionsKey(userId), JSON.stringify(sessions))
+  } catch {
+    useReadingSaveState.setState({ storageFailed: true })
   }
+}
+
+function acquireManual(bookId: string, requestId: string, explicit = false) {
+  const version = (claimVersions.get(bookId) ?? 0) + 1
+  claimVersions.set(bookId, version)
+  void claimReadingTimer('manual', explicit).then((granted) => {
+    if (claimVersions.get(bookId) !== version) return
+    const session = useManualTimerStore.getState().sessions[bookId]
+    if (granted || session?.requestId !== requestId || session.phase !== 'running'
+      || session.userId !== useAuthStore.getState().user?.id) return
+    useManualTimerStore.setState((state) => ({ sessions: {
+      ...state.sessions, [bookId]: { ...freeze(session, Date.now()), phase: 'paused', transferred: true },
+    } }))
+  })
 }
 
 export const useManualTimerStore = create<ManualTimerStore>((set, get) => ({
@@ -139,135 +162,152 @@ export const useManualTimerStore = create<ManualTimerStore>((set, get) => ({
   now: Date.now(),
   lastSummary: null,
 
+  restore: () => {
+    const userId = useAuthStore.getState().user?.id ?? null
+    if (restoredUser === userId) return
+    restoredUser = userId
+    positions.clear()
+    claimVersions.clear()
+    let sessions: Record<string, ManualSession> = {}
+    if (userId) {
+      try {
+        const stored = JSON.parse(localStorage.getItem(sessionsKey(userId)) ?? '{}')
+        for (const [id, item] of Object.entries(stored)) {
+          const session = item as ManualSession
+          if (session.userId === userId && Array.isArray(session.fragments) && typeof session.requestId === 'string') sessions[id] = session
+        }
+      } catch {
+        sessions = {}
+      }
+    }
+    set({ sessions, lastSummary: null, now: Date.now() })
+    if (Object.keys(sessions).length) {
+      ensureTicker()
+      get().tick(Date.now())
+    } else {
+      resetManualTimerTicker()
+    }
+  },
+
   start: (bookId, pos) => {
-    if (get().sessions[bookId]) return
+    const userId = useAuthStore.getState().user?.id
+    if (!userId || get().sessions[bookId]) return
+    pos = positions.get(bookId) ?? pos
+    for (const session of Object.values(get().sessions)) {
+      if (session.phase === 'running') get().suspend(session.bookId)
+    }
     const now = Date.now()
-    set((s) => ({
-      sessions: {
-        ...s.sessions,
-        [bookId]: {
-          bookId,
-          phase: 'running',
-          startedAt: now,
-          elapsedMs: 0,
-          lastResumeAt: now,
-          suspendedAt: null,
-          startCfi: pos.cfi,
-          startFraction: pos.fraction,
-          startChapterIndex: pos.chapterIndex ?? null,
-          lastCfi: pos.cfi,
-          lastFraction: pos.fraction,
-          lastChapterIndex: pos.chapterIndex ?? null,
-        },
-      },
-    }))
+    const requestId = newReadingRequestId()
+    set((state) => ({ sessions: { ...state.sessions, [bookId]: {
+      bookId, userId, requestId, timezone: readingTimezone(), date: localDateString(new Date(now)), phase: 'running', startedAt: now,
+      elapsedMs: 0, lastResumeAt: now, suspendedAt: null,
+      startCfi: pos.cfi, startFraction: pos.fraction, startChapterIndex: pos.chapterIndex ?? null,
+      lastCfi: pos.cfi, lastFraction: pos.fraction, lastChapterIndex: pos.chapterIndex ?? null,
+      fragments: [], coverage: [], revisionId: pos.revisionId, wordCount: pos.wordCount,
+    } } }))
     ensureTicker()
+    acquireManual(bookId, requestId, true)
   },
 
   pause: (bookId) => {
     const session = get().sessions[bookId]
-    if (!session || session.phase !== 'running' || session.lastResumeAt === null) return
-    const lastResumeAt = session.lastResumeAt
-    set((s) => ({
-      sessions: {
-        ...s.sessions,
-        [bookId]: {
-          ...session,
-          phase: 'paused',
-          elapsedMs: session.elapsedMs + (Date.now() - lastResumeAt),
-          lastResumeAt: null,
-        },
-      },
-    }))
+    claimVersions.set(bookId, (claimVersions.get(bookId) ?? 0) + 1)
+    if (!session || session.phase !== 'running') return
+    set((state) => ({ sessions: { ...state.sessions, [bookId]: { ...freeze(session, Date.now()), phase: 'paused' } } }))
+    releaseReadingTimer()
   },
 
-  resume: (bookId) => {
+  resume: (bookId, explicit = true) => {
     const session = get().sessions[bookId]
-    if (!session || session.phase === 'running') return
-    const now = Date.now()
-    set((s) => ({
-      sessions: {
-        ...s.sessions,
-        [bookId]: {
-          ...session,
-          phase: 'running',
-          lastResumeAt: now,
-          suspendedAt: null,
-        },
-      },
-    }))
+    claimVersions.set(bookId, (claimVersions.get(bookId) ?? 0) + 1)
+    if (!session || session.phase === 'running' || session.userId !== useAuthStore.getState().user?.id) return
+    if (session.phase === 'suspended' && graceLeftMs(session, Date.now()) === 0) {
+      get().terminate(bookId)
+      return
+    }
+    for (const other of Object.values(get().sessions)) {
+      if (other.bookId !== bookId && other.phase === 'running') get().suspend(other.bookId)
+    }
+    set((state) => ({ sessions: { ...state.sessions, [bookId]: {
+      ...session, phase: 'running', lastResumeAt: Date.now(), suspendedAt: null, transferred: false,
+    } } }))
+    acquireManual(bookId, session.requestId, explicit)
   },
 
   suspend: (bookId) => {
     const session = get().sessions[bookId]
-    if (!session || session.phase !== 'running' || session.lastResumeAt === null) return
-    const lastResumeAt = session.lastResumeAt
+    claimVersions.set(bookId, (claimVersions.get(bookId) ?? 0) + 1)
+    if (!session || session.phase !== 'running') return
     const now = Date.now()
-    set((s) => ({
-      sessions: {
-        ...s.sessions,
-        [bookId]: {
-          ...session,
-          phase: 'suspended',
-          elapsedMs: session.elapsedMs + (now - lastResumeAt),
-          lastResumeAt: null,
-          suspendedAt: now,
-        },
-      },
-    }))
+    set((state) => ({ sessions: { ...state.sessions, [bookId]: {
+      ...freeze(session, now), phase: 'suspended', suspendedAt: now,
+    } } }))
+    releaseReadingTimer()
   },
 
   terminate: (bookId) => {
-    const session = get().sessions[bookId]
-    if (!session) return
-    set((s) => {
-      const { [bookId]: _gone, ...rest } = s.sessions
-      return { sessions: rest, lastSummary: { bookId, durationSeconds: Math.max(1, Math.round(sessionDurationMs(session, Date.now()) / 1000)) } }
+    claimVersions.set(bookId, (claimVersions.get(bookId) ?? 0) + 1)
+    const current = get().sessions[bookId]
+    if (!current) return
+    const session = freeze(current, Date.now())
+    const durationSeconds = Math.round(session.elapsedMs / 1000)
+    // Persist the queued write before removing the recoverable live session.
+    const record = sessionRecord(session)
+    if (record) queueReadingRecord(session.userId, record)
+    set((state) => {
+      const { [bookId]: _removed, ...sessions } = state.sessions
+      return { sessions, lastSummary: durationSeconds > 0 ? { bookId, durationSeconds } : null }
     })
-    void writeTermination(session)
-    stopTickerIfIdle()
+    if (current.phase === 'running') releaseReadingTimer()
+    if (!Object.keys(get().sessions).length) resetManualTimerTicker()
   },
 
-  // Long-press discard (Pill v2): drops the session with no network writes —
-  // fully isolated from terminate()'s writeTermination path
   discard: (bookId) => {
-    if (!get().sessions[bookId]) return
-    set((s) => {
-      const { [bookId]: _gone, ...rest } = s.sessions
-      return { sessions: rest }
+    claimVersions.set(bookId, (claimVersions.get(bookId) ?? 0) + 1)
+    const session = get().sessions[bookId]
+    if (!session) return
+    set((state) => {
+      const { [bookId]: _removed, ...sessions } = state.sessions
+      return { sessions }
     })
-    stopTickerIfIdle()
+    if (session.phase === 'running') releaseReadingTimer()
+    if (!Object.keys(get().sessions).length) resetManualTimerTicker()
   },
 
   updatePosition: (bookId, pos) => {
+    if (pos.fraction === null || !Number.isFinite(pos.fraction) || pos.fraction < 0 || pos.fraction > 1) return
+    positions.set(bookId, pos)
     const session = get().sessions[bookId]
     if (!session) return
-    if (pos.cfi === session.lastCfi && pos.fraction === session.lastFraction) return
-    set((s) => ({
-      sessions: {
-        ...s.sessions,
-        [bookId]: {
-          ...session,
-          lastCfi: pos.cfi,
-          lastFraction: pos.fraction,
-          lastChapterIndex: pos.chapterIndex ?? session.lastChapterIndex,
-        },
-      },
-    }))
+    let coverage = session.coverage
+    if (session.phase === 'running' && pos.fraction !== null && session.lastFraction !== null
+      && pos.segmentStart !== undefined && pos.segmentStart !== pos.fraction) {
+      coverage = addReadingCoverage(coverage, session.lastFraction, pos.fraction)
+    }
+    set((state) => ({ sessions: { ...state.sessions, [bookId]: {
+      ...session, lastCfi: pos.cfi, lastFraction: pos.fraction,
+      lastChapterIndex: pos.chapterIndex ?? session.lastChapterIndex, coverage,
+      revisionId: session.revisionId ?? pos.revisionId, wordCount: session.wordCount ?? pos.wordCount,
+    } } }))
   },
 
   tick: (now) => {
-    const { sessions } = get()
-    let expired: string | null = null
-    for (const session of Object.values(sessions)) {
-      if (session.phase === 'suspended' && graceLeftMs(session, now) === 0) {
-        expired = session.bookId
-        break
+    set({ now })
+    for (const session of Object.values(get().sessions)) {
+      if (session.phase === 'suspended' && graceLeftMs(session, now) === 0) get().terminate(session.bookId)
+    }
+    if (now - lastLeaseAt >= 10_000) {
+      lastLeaseAt = now
+      for (const session of Object.values(get().sessions)) {
+        if (session.phase === 'running') acquireManual(session.bookId, session.requestId)
       }
     }
-    set({ now })
-    if (expired !== null) get().terminate(expired)
   },
 
   clearSummary: () => set({ lastSummary: null }),
 }))
+
+useManualTimerStore.subscribe(persistSessions)
+useAuthStore.subscribe((state, previous) => {
+  if (state.user?.id !== previous.user?.id) useManualTimerStore.getState().restore()
+})

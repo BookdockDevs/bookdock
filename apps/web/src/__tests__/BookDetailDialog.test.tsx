@@ -1273,9 +1273,13 @@ describe('BookDetailDialog more actions', () => {
     expect(screen.getByRole('button', { name: '追加内容' })).toBeInTheDocument()
   })
 
-  it('does not show more actions for a non-TXT book', () => {
+  it('opens reading data for a non-TXT book without showing TXT maintenance actions', () => {
     render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
-    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    expect(screen.queryByRole('button', { name: '更换目录规则' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '追加内容' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '阅读数据' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/archive', search: { bookId: book.id, bookView: 'data' } })
   })
 })
 

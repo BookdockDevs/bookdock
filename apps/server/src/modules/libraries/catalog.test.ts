@@ -1067,6 +1067,7 @@ describe('shared library catalog', () => {
   it('pushes the linked private draft to its city version', async () => {
     const draft = await uploadBook(ownerId, txtFile('draft.txt', '第一章\n草稿'))
     const pub = await publishPrivateBook(ownerId, libraryId, { bookId: draft.book.id })
+    const previousDraftRevision = db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.bookVersionId, draft.book.id)).get()!
     await appendTxtBookContent(ownerId, draft.book.id, '第二章\n续写')
 
     const result = await pushPrivateToVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId)
@@ -1077,6 +1078,8 @@ describe('shared library catalog', () => {
     const draftLatest = db.select().from(schema.contentRevisions)
       .where(eq(schema.contentRevisions.bookVersionId, draft.book.id))
       .orderBy(desc(schema.contentRevisions.revisionNo)).get()!
+    expect(draftLatest.meta.readingCompatibleRevisions).toEqual(expect.arrayContaining([previousDraftRevision.id]))
+    expect(rows[1]!.meta.readingCompatibleRevisions).toBeUndefined()
     expect(rows).toHaveLength(2)
     expect(rows[1]!.blobKey).toBe(draftLatest.blobKey)
     // The base advances with the push, so the next identical push is a no-op.
@@ -1196,6 +1199,7 @@ describe('shared library catalog', () => {
       .sort((a, b) => a.revisionNo - b.revisionNo)
     expect(rows).toHaveLength(2)
     expect(rows[1]!.blobKey).not.toBe(rows[0]!.blobKey)
+    expect(rows[1]!.meta.readingCompatibleRevisions).toEqual(expect.arrayContaining([rows[0]!.id]))
     // Actor progress rescales; the other holder keeps percent, loses the stale CFI.
       expect(db.select().from(schema.bookStates).where(and(eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, created.bookVersionId))).get()!.progressData).toMatchObject({ chapter: null })
       const memberProgress = db.select().from(schema.bookStates).where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, created.bookVersionId))).get()!.progressData!

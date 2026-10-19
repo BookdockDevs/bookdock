@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 
 import TimerPill from './TimerPill'
+import ReadingSaveIndicator from './ReadingSaveIndicator'
 import TtsPill from './TtsPill'
 import MediaOverlayPill from './MediaOverlayPill'
 import type { ReaderPlaybackCoordinator } from '../lib/playback-coordinator'
@@ -28,6 +29,7 @@ export default function ReaderFooterControls({
 }: ReaderFooterControlsProps) {
   return (
     <div
+      data-reader-corner-control=""
       data-toast-obstacle={footerVisible ? 'contents' : undefined}
       className={cn(
         'absolute right-0 z-[60] flex h-24 w-max max-w-[calc(100vw-1rem)] items-end justify-end gap-2 pr-3 pb-3 transition-[bottom,translate] duration-300 pointer-events-none sm:pr-4',
@@ -39,7 +41,8 @@ export default function ReaderFooterControls({
       onPointerEnter={isTouch ? undefined : onPointerEnter}
       onPointerLeave={isTouch ? undefined : onPointerLeave}
     >
-      {readingTimerMode === 'manual' && <TimerPill bookId={bookId} inline />}
+      <ReadingSaveIndicator />
+      {(readingTimerMode === 'manual' || readingTimerMode === 'both') && <TimerPill bookId={bookId} inline />}
       <TtsPill inline />
       {coordinator && <MediaOverlayPill coordinator={coordinator} inline />}
     </div>

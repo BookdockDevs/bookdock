@@ -62,7 +62,8 @@ function makeLegacyIdentity() {
       db.$client.exec(statement.replaceAll('REFERENCES `books`', 'REFERENCES `book_versions`'))
     }
   }
-  db.$client.exec(`DROP TABLE IF EXISTS storage_connections;
+  db.$client.exec(`DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims;
+    DROP TABLE IF EXISTS storage_connections;
     DROP TABLE content_files;
     DROP TABLE content_upload_drafts;
     DROP TABLE interaction_notifications;

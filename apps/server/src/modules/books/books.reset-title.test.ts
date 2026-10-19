@@ -162,6 +162,7 @@ describe('resetBookMetadata metadata normalization', () => {
       .orderBy(desc(schema.contentRevisions.revisionNo)).all()
     expect(rows).toHaveLength(2)
     expect(rows[0]!.blobKey).toBe(rows[1]!.blobKey)
+    expect(rows[0]!.meta.readingCompatibleRevisions).toEqual(expect.arrayContaining([rows[1]!.id]))
     expect((rows[1]!.meta as Record<string, unknown>).bookmeta).toMatchObject({ publisher: 'Bogus' })
     expect((rows[0]!.meta as Record<string, unknown>).bookmeta).not.toMatchObject({ publisher: 'Bogus' })
   })

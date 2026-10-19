@@ -48,6 +48,7 @@ vi.mock('@/features/reader/state/reader-state', () => ({
 
 vi.mock('@/api/hooks/reading-records', () => ({
   useReadingSummary: vi.fn(),
+  usePreviousReadingSummary: vi.fn().mockReturnValue({ data: undefined, isLoading: false, isError: false }),
 }))
 
 vi.mock('@/stores/auth.store', () => {

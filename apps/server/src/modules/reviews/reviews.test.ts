@@ -872,7 +872,7 @@ describe('book reviews', () => {
   it('adds file persistence to populated review/notification structures without rewriting legacy bodies', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: '  **literal**\n', bodyFormat: 'plain', visibility: 'shared' })
     await createReviewComment('member', review.id, { body: 'before files', requestId: 'before_files_123456789' })
-    sqlite.exec('DROP TABLE content_files; DROP TABLE content_upload_drafts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
+    sqlite.exec('DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
     await client.runDatabaseMigrations(db)
     expect((await getReviewDiscussion('author', review.id)).review).toMatchObject({ body: '  **literal**\n', bodyFormat: 'plain', files: [] })
     expect((await unreadNotificationCount('author')).count).toBe(1)
@@ -910,7 +910,7 @@ describe('book reviews', () => {
 
   it('upgrades populated stage-one review structures into notification persistence', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: 'baseline', visibility: 'shared' })
-    sqlite.exec("DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
+    sqlite.exec("DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
     await client.runDatabaseMigrations(db)
     expect(db.select().from(schema.bookReviews).get()?.id).toBe(review.id)
     await createReviewComment('member', review.id, { body: 'upgrade event', requestId: 'upgrade_12345678901' })

@@ -156,7 +156,7 @@ interface UiState {
 
   // Reading-time accounting: automatic heuristics, the manual timer pill,
   // or off — no reading data is recorded and the reader stats tab is hidden
-  readingTimerMode: 'auto' | 'manual' | 'off'
+  readingTimerMode: 'auto' | 'manual' | 'both' | 'off'
   manualTimerGraceMinutes: 1 | 5 | 10 | 30
   ttsEngine: TtsEngine
   ttsServiceId: string | null
@@ -167,7 +167,7 @@ interface UiState {
   autoReadingMode: AutoReadingMode
   autoReadingSpeed: number
   autoReadingProgressBar: boolean
-  setReadingTimerMode: (v: 'auto' | 'manual' | 'off') => void
+  setReadingTimerMode: (v: 'auto' | 'manual' | 'both' | 'off') => void
   setManualTimerGraceMinutes: (v: 1 | 5 | 10 | 30) => void
   setTtsEngine: (v: TtsEngine) => void
   setTtsServiceId: (v: string | null) => void
@@ -313,10 +313,10 @@ function getInitialReadingThemeMode(): ReadingThemeMode {
 
 const MANUAL_GRACE_OPTIONS = [1, 5, 10, 30] as const
 
-function getInitialTimerMode(): 'auto' | 'manual' | 'off' {
+function getInitialTimerMode(): 'auto' | 'manual' | 'both' | 'off' {
   if (typeof window === 'undefined') return 'auto'
   const stored = localStorage.getItem('bd-reading-timer-mode')
-  return stored === 'manual' || stored === 'off' ? stored : 'auto'
+  return stored === 'manual' || stored === 'both' || stored === 'off' ? stored : 'auto'
 }
 
 function getInitialGraceMinutes(): 1 | 5 | 10 | 30 {

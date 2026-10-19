@@ -1,18 +1,13 @@
 import { useState } from 'react'
 
 import Modal from '@/components/ui/Modal'
+import Toggle from '@/components/ui/Toggle'
+import ReadingTransferControls from '@/features/archive/components/ReadingTransferControls'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 
-const TIMER_MODES = ['auto', 'manual', 'off'] as const
 const GRACE_MINUTES = [1, 5, 10, 30] as const
-
-const MODE_LABELS: Record<(typeof TIMER_MODES)[number], string> = {
-  auto: 'settings.readingTimerModeAuto',
-  manual: 'settings.readingTimerModeManual',
-  off: 'settings.readingTimerModeOff',
-}
 
 const GRACE_LABELS: Record<(typeof GRACE_MINUTES)[number], string> = {
   1: 'settings.readingTimerGrace1',
@@ -21,13 +16,37 @@ const GRACE_LABELS: Record<(typeof GRACE_MINUTES)[number], string> = {
   30: 'settings.readingTimerGrace30',
 }
 
-export default function StatsSettingsButton() {
+interface StatsSettingsButtonProps {
+  bookId?: string
+  onBookDeleted?: () => void
+}
+
+export default function StatsSettingsButton({ bookId, onBookDeleted }: StatsSettingsButtonProps = {}) {
   const _ = useTranslation()
   const [open, setOpen] = useState(false)
   const readingTimerMode = useUiStore((s) => s.readingTimerMode)
   const setReadingTimerMode = useUiStore((s) => s.setReadingTimerMode)
   const manualTimerGraceMinutes = useUiStore((s) => s.manualTimerGraceMinutes)
   const setManualTimerGraceMinutes = useUiStore((s) => s.setManualTimerGraceMinutes)
+
+  const isAuto = readingTimerMode === 'auto' || readingTimerMode === 'both'
+  const isManual = readingTimerMode === 'manual' || readingTimerMode === 'both'
+
+  function handleAutoChange(checked: boolean) {
+    if (checked) {
+      setReadingTimerMode(isManual ? 'both' : 'auto')
+    } else {
+      setReadingTimerMode(isManual ? 'manual' : 'off')
+    }
+  }
+
+  function handleManualChange(checked: boolean) {
+    if (checked) {
+      setReadingTimerMode(isAuto ? 'both' : 'manual')
+    } else {
+      setReadingTimerMode(isAuto ? 'auto' : 'off')
+    }
+  }
 
   return (
     <>
@@ -57,53 +76,56 @@ export default function StatsSettingsButton() {
       {open && (
         <Modal title={_('stats.settings')} onClose={() => setOpen(false)} size="default">
           <div className="divide-y divide-stone-100 py-1 dark:divide-stone-800">
-            {/* Reading Timer Mode */}
-            <div className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+            {/* 1. 自动记录阅读时长 */}
+            <div className="flex items-center justify-between gap-4 py-3.5">
               <div className="min-w-0 pr-4">
                 <p className="text-sm font-medium text-stone-800 dark:text-stone-200">
-                  {_('settings.readingTimerMode')}
+                  {_('settings.readingTimerAuto')}
                 </p>
                 <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
-                  {_('settings.readingTimerModeHint')}
+                  {_('settings.readingTimerAutoHint')}
                 </p>
               </div>
-              <div
-                className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800"
-                role="group"
-                aria-label={_('settings.readingTimerMode')}
-              >
-                {TIMER_MODES.map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    aria-pressed={readingTimerMode === mode}
-                    onClick={() => setReadingTimerMode(mode)}
-                    className={cn(
-                      'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all',
-                      readingTimerMode === mode
-                        ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-                    )}
-                  >
-                    {_(MODE_LABELS[mode])}
-                  </button>
-                ))}
-              </div>
+              <Toggle
+                checked={isAuto}
+                onChange={handleAutoChange}
+                ariaLabel={_('settings.readingTimerAuto')}
+              />
             </div>
 
-            {/* Grace Minutes (if manual) */}
-            {readingTimerMode === 'manual' && (
-              <div className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+            {/* 2. 显示手动计时按钮 */}
+            <div className="py-3.5">
+              <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0 pr-4">
                   <p className="text-sm font-medium text-stone-800 dark:text-stone-200">
-                    {_('settings.readingTimerGrace')}
+                    {_('settings.readingTimerManual')}
                   </p>
                   <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
+                    {_('settings.readingTimerManualHint')}
+                  </p>
+                </div>
+                <Toggle
+                  checked={isManual}
+                  onChange={handleManualChange}
+                  ariaLabel={_('settings.readingTimerManual')}
+                />
+              </div>
+
+            </div>
+
+            {/* Automatic and manual timers share the same suspension grace. */}
+            {(isAuto || isManual) && (
+              <div className="mt-3 flex flex-col gap-2 rounded-xl bg-stone-50/80 p-3 sm:flex-row sm:items-center sm:justify-between dark:bg-stone-800/60">
+                <div className="min-w-0 pr-2">
+                  <p className="text-xs font-medium text-stone-700 dark:text-stone-300">
+                    {_('settings.readingTimerGrace')}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-stone-400 dark:text-stone-500">
                     {_('settings.readingTimerGraceHint')}
                   </p>
                 </div>
                 <div
-                  className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800"
+                  className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-200/60 p-0.5 dark:bg-stone-800"
                   role="group"
                   aria-label={_('settings.readingTimerGrace')}
                 >
@@ -114,7 +136,7 @@ export default function StatsSettingsButton() {
                       aria-pressed={manualTimerGraceMinutes === m}
                       onClick={() => setManualTimerGraceMinutes(m)}
                       className={cn(
-                        'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all',
+                        'flex h-6.5 items-center justify-center rounded-md px-2.5 text-xs font-medium transition-all cursor-pointer',
                         manualTimerGraceMinutes === m
                           ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-700 dark:text-stone-100'
                           : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
@@ -126,6 +148,25 @@ export default function StatsSettingsButton() {
                 </div>
               </div>
             )}
+
+            {/* 3. 阅读数据管理 */}
+            <div className="py-3.5">
+              <div className="mb-3">
+                <p className="text-sm font-medium text-stone-800 dark:text-stone-200">
+                  {bookId ? _('readingData.bookDataManagement') : _('readingData.dataManagement')}
+                </p>
+                <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
+                  {bookId ? _('readingData.bookDataManagementHint') : _('readingData.dataManagementHint')}
+                </p>
+              </div>
+              <ReadingTransferControls
+                bookId={bookId}
+                onDeleteArchive={() => {
+                  setOpen(false)
+                  onBookDeleted?.()
+                }}
+              />
+            </div>
           </div>
         </Modal>
       )}

@@ -35,7 +35,6 @@ function seed(queryClient: QueryClient) {
   queryClient.setQueryData(['libraries', 'lib-1', 'tags'], { data: [] })
   queryClient.setQueryData(['archive', 'overview'], { data: {} })
   queryClient.setQueryData(['reading-records', 'summary', 'today'], { data: {} })
-  queryClient.setQueryData(['reading-sessions', 'infinite', 'b1'], { pages: [], pageParams: [] })
   queryClient.setQueryData(['progress', 'b1'], { data: {} })
 }
 
@@ -137,7 +136,6 @@ describe('book changes refresh the taxonomy counts beside them', () => {
 
     expect(invalidated(queryClient, ['archive', 'overview'])).toBe(true)
     expect(invalidated(queryClient, ['reading-records', 'summary', 'today'])).toBe(true)
-    expect(invalidated(queryClient, ['reading-sessions', 'infinite', 'b1'])).toBe(true)
     expect(invalidated(queryClient, ['progress', 'b1'])).toBe(true)
   })
 

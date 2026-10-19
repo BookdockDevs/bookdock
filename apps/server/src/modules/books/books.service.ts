@@ -9,6 +9,7 @@ import {
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
   libraryMemberships, users as usersTable, tocRules,
   highlights, ideas, bookmarks, aiThreads, textReplacements,
+  readingArchives, readingRecords, readingRounds, readingSessions, readingWriteReceipts,
 } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
@@ -33,6 +34,7 @@ import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-ep
 import { sha256 } from '../../lib/hash'
 import { normalizeBookTitle } from '../../lib/book-title'
 import { countWords } from '../../lib/word-count'
+import { readingCompatibleRevisions } from '../../lib/reading-coverage'
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey, detectImageExtension, blobKey, generateCoverThumbnail } from '../../lib/cover'
 import { log } from '../../lib/logger'
@@ -1675,6 +1677,7 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
   const book = await getActiveBook(userId, bookId, { showHidden: true })
   const meta: Record<string, unknown> = {
     ...book.meta,
+    readingCompatibleRevisions: readingCompatibleRevisions(book.meta, book.revisionId),
     chapters: prepared.metaChapters,
     wordCount: prepared.newWordCount,
     txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION,
@@ -1857,6 +1860,7 @@ async function rebuildTocBook(
     wordCount,
     txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION,
   }
+  delete meta.readingCompatibleRevisions
   if (excludedChapterIds.length > 0) meta.tocExcludedChapterIds = excludedChapterIds
   else delete meta.tocExcludedChapterIds
   const leadingExcludedId = rawChapters[0] ? txtChapterId(rawChapters[0]) : null
@@ -2493,6 +2497,7 @@ async function rebuildCityToc(
     wordCount,
     txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION,
   }
+  delete meta.readingCompatibleRevisions
   if (excludedChapterIds.length > 0) meta.tocExcludedChapterIds = excludedChapterIds
   else delete meta.tocExcludedChapterIds
   const leadingExcludedId = rawChapters[0] ? txtChapterId(rawChapters[0]) : null
@@ -2702,6 +2707,7 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
     assertMutableContent(kind)
   }
   if (data.readStatus !== undefined || data.progress !== undefined) {
+    db.transaction(() => {
     const state = db.select({
       readStatus: bookStates.readStatus,
       percent: bookStates.percent,
@@ -2720,6 +2726,15 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
         percent: data.progress ?? 0, cfi: null, chapter: null, lastReadAt: null, updatedAt: now,
       }).run()
     }
+    if (data.readStatus === 'finished' || data.readStatus === 'abandoned' || data.readStatus === 'reading') {
+      const latest = db.select().from(readingRounds).where(and(eq(readingRounds.userId, userId), eq(readingRounds.bookVersionId, bookId)))
+        .orderBy(desc(readingRounds.ordinal)).get()
+      if (latest) db.update(readingRounds).set({
+        status: data.readStatus,
+        endedAt: data.readStatus === 'reading' ? null : now,
+      }).where(eq(readingRounds.id, latest.id)).run()
+    }
+    })
   }
   if (data.pinned !== undefined) {
     db.update(libraryBookVersions).set({ pinnedAt: data.pinned ? now : null }).where(eq(libraryBookVersions.id, libraryBookVersionId)).run()
@@ -2980,7 +2995,7 @@ export async function resetBookMetadata(userId: string, bookId: string, opts?: {
         id: newRevisionId, bookVersionId: bookId, revisionNo: latestRevision.revisionNo + 1,
         blobKey: latestRevision.blobKey, size: latestRevision.size,
         wordCount: latestRevision.wordCount, chapterCount: latestRevision.chapterCount,
-        meta: { ...((latestRevision.meta ?? {}) as Record<string, unknown>), bookmeta: parsedBookmeta },
+        meta: { ...((latestRevision.meta ?? {}) as Record<string, unknown>), readingCompatibleRevisions: readingCompatibleRevisions(latestRevision.meta, latestRevision.id), bookmeta: parsedBookmeta },
         createdAt: Date.now(),
       }).run()
       tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
@@ -3245,6 +3260,7 @@ export async function pushPrivateToVersion(
   for (const key of ['coverPaletteId', 'coverSuppressed'] as const) {
     if (baseMeta[key] !== undefined) meta[key] = baseMeta[key]
   }
+  delete meta.readingCompatibleRevisions
   const updatedAt = Date.now()
   const nextRevisionNo = (targetLatest?.revisionNo ?? 0) + 1
   const newRevisionId = createId('rev')
@@ -3432,6 +3448,7 @@ export async function appendCityVersionContent(
     .where(eq(libraryBooks.id, libraryBookId)).get()!
   const meta: Record<string, unknown> = {
     ...latestMeta,
+    readingCompatibleRevisions: readingCompatibleRevisions(latestMeta, latest.id),
     chapters: metaChapters,
     wordCount: newWordCount,
     txtArtifactVersion: TXT_EPUB_ARTIFACT_VERSION,
@@ -3674,6 +3691,11 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
     tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
     if (opts?.deleteUserData) {
       for (const versionId of versionIds) {
+        tx.update(readingWriteReceipts).set({ status: 'deleted' }).where(and(eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.bookVersionId, versionId))).run()
+        tx.delete(readingSessions).where(and(eq(readingSessions.userId, userId), eq(readingSessions.bookId, versionId))).run()
+        tx.delete(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, versionId))).run()
+        tx.delete(readingRounds).where(and(eq(readingRounds.userId, userId), eq(readingRounds.bookVersionId, versionId))).run()
+        tx.delete(readingArchives).where(and(eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, versionId))).run()
         tx.delete(highlights).where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, versionId))).run()
         tx.delete(ideas).where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, versionId), isNull(ideas.sharedLibraryId), isNull(ideas.sourceLibraryBookVersionId))).run()
         tx.delete(bookmarks).where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, versionId))).run()

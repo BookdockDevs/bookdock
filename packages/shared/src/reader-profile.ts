@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { isOrderedReadingRange, readingRangeShape } from './reading-range'
+
 import type { AnnotationRes } from './contract'
 import type { BookFormat, ReadStatus } from './constants'
 import type { MyReviewEntry, Review } from './review'
@@ -36,13 +38,40 @@ export interface ReaderProfile {
 export const archiveRecordTypeSchema = z.enum(['highlight', 'bookmark', 'idea', 'review'])
 export type ArchiveRecordType = z.infer<typeof archiveRecordTypeSchema>
 
+export const archiveSortSchema = z.enum([
+  'recent',
+  'earliest',
+  'most',
+  'fewest',
+  'reading-time',
+  'reading-time-asc',
+  'title-asc',
+  'title-desc',
+])
+export type ArchiveSort = z.infer<typeof archiveSortSchema>
+
+export function parseArchiveRecordTypes(typeStr?: string | null): ArchiveRecordType[] {
+  if (!typeStr || typeStr === 'all') return []
+  const allowed = new Set<string>(['highlight', 'bookmark', 'idea', 'review'])
+  return typeStr.split(',').map((s) => s.trim()).filter((s): s is ArchiveRecordType => allowed.has(s))
+}
+
+export function parseArchiveReadStatuses(statusStr?: string | null): ReadStatus[] {
+  if (!statusStr || statusStr === 'all') return []
+  const allowed = new Set<string>(['reading', 'finished', 'wishlist', 'idle', 'abandoned'])
+  return statusStr.split(',').map((s) => s.trim()).filter((s): s is ReadStatus => allowed.has(s))
+}
+
 export const archiveBooksQuerySchema = z.object({
+  ...readingRangeShape,
   search: z.string().trim().max(200).optional(),
-  type: archiveRecordTypeSchema.optional(),
-  sort: z.enum(['recent', 'earliest', 'most', 'fewest', 'title-asc', 'title-desc']).default('recent'),
+  type: z.string().trim().optional(),
+  readStatus: z.string().trim().optional(),
+  tag: z.string().trim().max(100).optional(),
+  sort: archiveSortSchema.default('recent'),
   page: z.coerce.number().int().min(1).max(100000).default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
-})
+}).refine(isOrderedReadingRange, { message: 'Range ends before it starts', path: ['to'] })
 export type ArchiveBooksQuery = z.infer<typeof archiveBooksQuerySchema>
 
 export interface ArchiveCounts {
@@ -50,6 +79,7 @@ export interface ArchiveCounts {
   bookmarks: number
   ideas: number
   reviews: number
+  total: number
 }
 
 export interface ArchiveBookItem {
@@ -64,14 +94,18 @@ export interface ArchiveBookItem {
   ideas: number
   reviews: number
   total: number
+  durationSeconds?: number
+  readingDays?: number
+  progress?: number
+  /** Max created_at across live annotations/reviews, scoped to the requested type. */
   lastRecordAt: number | null
-  /** Min created_at across the book's live annotations and owned reviews. */
+  /** Min created_at across live annotations/reviews, scoped to the requested type. */
   firstRecordAt: number | null
 }
 
 export interface ArchiveOverview {
   counts: ArchiveCounts
-  recent: ArchiveBookItem[]
+  totalBooks: number
 }
 
 export interface ArchiveBookDetail {

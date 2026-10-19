@@ -22,6 +22,7 @@ import { DialogLayoutContext } from '@/components/ui/dialog-layout-context'
 
 import { useReaderRenderer } from './hooks/useReaderRenderer'
 import { useReadingTimer } from './hooks/useReadingTimer'
+import { useManualTimerStore } from './lib/manual-timer-store'
 import { useIsTouch } from './hooks/useIsTouch'
 import { useReaderState } from './state/reader-state'
 import { RendererContext } from './hooks/useReaderApi'
@@ -171,6 +172,16 @@ export default function Reader() {
     }
     window.addEventListener('pointerup', onPointerUp)
     return () => window.removeEventListener('pointerup', onPointerUp)
+  }, [])
+  useEffect(() => {
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target as HTMLElement | null
+      if (!target?.closest?.('[data-reader-corner-control]')) {
+        setCornerDwell(false)
+      }
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => window.removeEventListener('pointerdown', onPointerDown)
   }, [])
   const footerVisibleRef = useRef(false)
   const footerVisible = chromePinned || footerSummon || (footerVisibleRef.current && cornerDwell)
@@ -662,11 +673,10 @@ export default function Reader() {
     return () => clearTimeout(timer)
   }, [readerReady, contentUrl])
 
-  // Count only time after the book has actually rendered; the manual timer
-  // mode disables auto recording entirely (sessions belong to the pill)
+  // Both mode uses automatic capture until the manual timer takes ownership.
   const readingTimerMode = useUiStore((s) => s.readingTimerMode)
   const { flush: flushReadingTimer, ping: pingReadingTimer } = useReadingTimer(
-    !isGuest && readingTimerMode === 'auto' ? (readerReady ? id : undefined) : undefined,
+    !isGuest && (readingTimerMode === 'auto' || readingTimerMode === 'both') ? (readerReady ? id : undefined) : undefined,
   )
   const saveProgressAsync = progressMutation.mutateAsync
   useEffect(() => registerBeforeHideHiddenReader(async () => {
@@ -693,7 +703,7 @@ export default function Reader() {
     }
   }), [authUser?.id, bookQuery.data, saveProgressAsync, flushReadingTimer, navigate])
   // Warm the sidebar stats tab's queries so first open is instant
-  usePrefetchBookReadingStats(isGuest || readingTimerMode === 'off' ? undefined : id)
+  usePrefetchBookReadingStats(isGuest ? undefined : id)
 
   // Per-chapter word counts for the info-bar field; must precede useReaderRenderer
   const chapterWordCounts = useMemo(() => {
@@ -725,23 +735,42 @@ export default function Reader() {
     setProgressStartOver(false)
   }, [id, setReplaceTarget])
 
+  const dismissChrome = useCallback(() => {
+    keepChromePinnedRef.current = false
+    setChromePinned(false)
+    setHeaderSummon(false)
+    setFooterSummon(false)
+    setCornerDwell(false)
+    footerVisibleRef.current = false
+    if (headerLeaveTimerRef.current) {
+      clearTimeout(headerLeaveTimerRef.current)
+      headerLeaveTimerRef.current = null
+    }
+    if (footerLeaveTimerRef.current) {
+      clearTimeout(footerLeaveTimerRef.current)
+      footerLeaveTimerRef.current = null
+    }
+    setSettingsOpen(false)
+    const dismissibleSidebarOpen = sidebarOpen && (isTouch || !toolbarLocked)
+    if (dismissibleSidebarOpen) setSidebarOpen(false)
+  }, [isTouch, setSidebarOpen, sidebarOpen, toolbarLocked])
+
   // One definition of "toggle the reading chrome", shared by the middle-tap
   // gesture and the space key: the dismissal rules (locked desktop sidebar is
   // persistent) are subtle enough that a second copy would drift.
   const toggleChrome = useCallback(() => {
     keepChromePinnedRef.current = false
-    // Tap-to-toggle: anything visible (pinned bars, the settings popover,
+    // Tap-to-toggle: anything visible (pinned bars, summoned bars, settings popover,
     // or a dismissible sidebar) closes on tap. A locked desktop sidebar is
     // persistent and must not participate in reading-chrome dismissal.
     const dismissibleSidebarOpen = sidebarOpen && (isTouch || !toolbarLocked)
-    if (chromePinned || settingsOpen || dismissibleSidebarOpen) {
-      setChromePinned(false)
-      setSettingsOpen(false)
-      if (dismissibleSidebarOpen) setSidebarOpen(false)
+    const isShowing = chromePinned || headerVisible || footerVisible || settingsOpen || dismissibleSidebarOpen
+    if (isShowing) {
+      dismissChrome()
     } else {
       setChromePinned(true)
     }
-  }, [chromePinned, isTouch, setSidebarOpen, settingsOpen, sidebarOpen, toolbarLocked])
+  }, [chromePinned, headerVisible, footerVisible, settingsOpen, sidebarOpen, isTouch, toolbarLocked, dismissChrome])
 
   const settingsSync = useSettingsSyncStore()
   const resolvedBoundPresetId = useUiStore((s) => s.boundPresetId)
@@ -813,7 +842,10 @@ export default function Reader() {
       navInFlightRef.current = false
       setPendingNavChapter(null)
       setNavError(null)
-      if (e.source !== 'tts' && !keepChromePinnedRef.current) setChromePinned(false)
+      if (e.source !== 'tts' && !keepChromePinnedRef.current) {
+        setChromePinned(false)
+        setCornerDwell(false)
+      }
       const activeNoteEditor = useReaderState.getState().noteEditorRange
       const chapterChanged = Boolean(
         (e.chapterHref && currentChapterHref && e.chapterHref !== currentChapterHref) ||
@@ -822,7 +854,6 @@ export default function Reader() {
       if (chapterChanged) {
         if (!activeNoteEditor) setSelection(null)
       }
-      if (e.source !== 'tts') pingReadingTimer()
       setPercent(e.percent)
       setCurrentContentCfi(e.contentCfi ?? null)
       currentCfiRef.current = e.cfi
@@ -851,9 +882,8 @@ export default function Reader() {
       // TTS maintains its own position and must not overwrite the user's
       // reading progress while it moves the renderer internally.
       if (e.source === 'tts') return
-      // Manual timer mode owns the read intervals (one interval per manual
-      // session) — the auto SegmentTracker must not create its own
-      const segmentStartFraction = readingTimerMode === 'auto' && e.fraction !== undefined
+      // Navigation-aware coverage belongs to the record, independently of position saves.
+      const segmentStartFraction = readingTimerMode !== 'off' && e.fraction !== undefined
         ? trackPosition(segmentTrackerRef.current, e.fraction)
         : undefined
       const now = Date.now()
@@ -864,7 +894,11 @@ export default function Reader() {
         ? { fraction: e.fraction, at: now }
         : undefined
       if (sample) lastSampleAtRef.current = now
-      scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, segmentStartFraction, sample })
+      const readingPosition = { cfi: e.cfi, fraction: e.fraction, segmentStart: segmentStartFraction,
+        revisionId: bookQuery.data?.data.revisionId ?? undefined, wordCount: bookQuery.data?.data.meta?.wordCount ?? undefined }
+      pingReadingTimer(readingPosition)
+      useManualTimerStore.getState().updatePosition(id, { ...readingPosition, fraction: e.fraction ?? null, chapterIndex: e.chapterIndex })
+      scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, sample })
     },
     onSelected: (e) => {
       setIsSelectingText(false)
@@ -1081,8 +1115,7 @@ export default function Reader() {
     const ui = useUiStore.getState()
     resetForBook(
       !isTouch && ui.toolbarLocked && ui.sidebarRememberedOpen,
-      // A remembered stats tab is dead weight once recording is off
-      ui.readingTimerMode === 'off' && ui.navTabRemembered === 'stats' ? 'toc' : ui.navTabRemembered,
+      ui.navTabRemembered,
     )
     // chapterCount starts empty; the effect below syncs it when chapters arrive
     segmentTrackerRef.current = createSegmentTracker()
@@ -1629,6 +1662,9 @@ export default function Reader() {
             <div
               ref={containerCallbackRef}
               data-reader-viewport
+              onPointerDown={() => {
+                setCornerDwell(false)
+              }}
               className={cn(
                 'flex-1',
                 readingMode === 'page' ? 'overflow-hidden' : 'overflow-y-auto',

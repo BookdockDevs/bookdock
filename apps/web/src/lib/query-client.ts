@@ -48,7 +48,7 @@ useAuthStore.subscribe((state, previous) => {
 
 useUiStore.subscribe((state, previous) => {
   if (state.revealHidden === previous.revealHidden) return
-  const prefixes = ['books', 'book', 'shelves', 'tags', 'chapters', 'progress', 'annotations', 'reading-records', 'reading-sessions', 'batch-selection']
+  const prefixes = ['books', 'book', 'shelves', 'tags', 'chapters', 'progress', 'annotations', 'reading-records', 'batch-selection']
   const filters = { predicate: (query: { queryKey: readonly unknown[] }) => prefixes.includes(String(query.queryKey[0])) }
   // Cancel first so an older hidden-inclusive response cannot repopulate a reset cache.
   void queryClient.cancelQueries(filters)

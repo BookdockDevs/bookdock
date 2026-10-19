@@ -2,6 +2,30 @@
 
 Bookdock is a self-hosted e-book library and reader. This context defines the canonical product language for user feedback, books, table-of-contents rules, and reading behavior so the same concept is named consistently across the library, reader, settings, and authentication flows.
 
+## Reading History
+
+**Archive time scope**:
+The selected calendar period or day shared by archive metrics, participating books and note details. Notes belong to their creation day in the viewing timezone; reading belongs to the dates recorded with its reading facts.
+
+**Participating book**:
+A distinct book version with reading time or a live note in the archive time scope. A book with notes alone is not a book read during that scope.
+
+**Reading archive**:
+A user's durable history for a particular book version, independent of whether the original book remains available.
+_Avoid_: treating a source file as the owner of personal history.
+
+**Reading round**:
+One explicitly started reading of a version, ending when the reader declares it finished or abandoned. A reread starts another round; ending a timer does not.
+_Avoid_: session when referring to an entire reading of a book.
+
+**Reading session**:
+One automatic, manually timed or retroactively declared reading entry within a round. Its elapsed clock span can include pauses, while its effective reading time excludes them.
+_Avoid_: round when referring to a timed activity.
+
+**Read coverage**:
+The union of content ranges actually recorded as read in a round, independent of the current restore position and repeat reading volume.
+_Avoid_: current progress when referring to coverage.
+
 ## User Feedback
 
 **Notification**:

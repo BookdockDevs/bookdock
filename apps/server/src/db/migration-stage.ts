@@ -7,6 +7,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 export const BOOK_RETIREMENT_TIMESTAMP = 1791700000000
 export const LEGACY_IDENTITY_RETIREMENT_TAG = '0040_retire_legacy_identity'
 export const IDEA_DISCUSSION_TAG = '0041_idea_discussion'
+export const READING_LEDGER_TAG = '0052_reading_ledger'
 export const BOOK_STATE_PROGRESS_TAG = '0051_book_state_progress'
 
 interface JournalEntry {
@@ -75,7 +76,7 @@ export function migrateBeforeBookRetirementIncluding(
   options: Parameters<typeof migrate>[1],
   includeTags: string[],
 ) {
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG])
   migrateWithTagFilter(
     db,
     options,
