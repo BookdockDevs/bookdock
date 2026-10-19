@@ -645,7 +645,11 @@ export default function Reader() {
 
   const [bookReady, setBookReady] = useState(false)
   const [readyContentUrl, setReadyContentUrl] = useState<string | null>(null)
-  const readerReady = bookReady && readyContentUrl === contentUrl
+  // The view is torn down and rebuilt for content replacements and Chinese
+  // conversion. While that happens the reading area is empty, so the loading
+  // surface has to come back — it is keyed to the renderer, not to the file.
+  const [viewRebuilding, setViewRebuilding] = useState(false)
+  const readerReady = bookReady && readyContentUrl === contentUrl && !viewRebuilding
   // kind=parse: renderer onError, the file itself failed to load
   const [loadError, setLoadError] = useState<{ kind: 'parse' } | null>(null)
   // Slow-network hint: the Range path has no global time budget, so a load
@@ -718,8 +722,11 @@ export default function Reader() {
   // before the renderer mounts (replacements apply at section load time), so
   // this effect is declared before useReaderRenderer. Cleared on unmount and
   // book switch so rules never leak into another book's reader.
-  const { data: replacementsData } = useBookReplacements(id)
+  // A late-arriving rule set would rebuild the whole view after the first
+  // paint (close + open + re-navigate), so the renderer waits for it.
+  const { data: replacementsData, isError: replacementsError } = useBookReplacements(id)
   const replacementRules = useMemo(() => replacementsData?.data ?? [], [replacementsData])
+  const replacementsReady = replacementsData !== undefined || replacementsError
   useEffect(() => {
     setActiveReplacements(replacementRules)
     return () => setActiveReplacements([])
@@ -777,7 +784,7 @@ export default function Reader() {
   const settingsReady = isGuest || (settingsSync.userId === authUser?.id && settingsSync.ready)
   const settingsFailed = !isGuest && settingsSync.userId === authUser?.id && settingsSync.failed
   const { containerRef, renderer, fontStack, fontCss, preparationFailed, retryPreparation } = useReaderRenderer({
-    ready: settingsReady && resolvedBoundPresetId === boundPresetId,
+    ready: settingsReady && resolvedBoundPresetId === boundPresetId && replacementsReady,
     url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
     bookId: id,
     format: bookQuery.data?.data?.format,
@@ -788,6 +795,7 @@ export default function Reader() {
     initialFraction: initialFractionRef.current,
     settings: effectiveSettings,
     onFontFallback: () => notify.warning({ key: 'reader.fontLoadFallback' }, { dedupeKey: `reader-font:${id}` }),
+    onViewRebuilding: (pending) => setViewRebuilding(pending),
     chapterWordCounts,
     onRendered: () => {
       setBookReady(true)
@@ -1029,6 +1037,10 @@ export default function Reader() {
   })
 
   const playbackCoordinator = useMemo(() => new ReaderPlaybackCoordinator(), [])
+
+  // A renderer that is replaced (book switch, settings flip) must not leave
+  // the loading surface stuck over a reader that is already gone.
+  useEffect(() => { setViewRebuilding(false) }, [renderer])
 
   useEffect(() => {
     if (deepLinkHandled.current || !readerReady || !renderer) return
@@ -1707,7 +1719,7 @@ export default function Reader() {
               // Solid theme background: the foliate iframe behind is blank
               // white until its theme styles are injected — without this the
               // loading overlay would flash white on every reader open
-              <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[var(--bd-read-page-bg)] text-sm text-[var(--bd-read-sub)]">
+              <div data-testid="reader-loading-surface" className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[var(--bd-read-page-bg)] text-sm text-[var(--bd-read-sub)]">
                 {settingsFailed || preparationFailed ? (
                   <div className="pointer-events-auto flex flex-col items-center gap-3">
                     <span>{_('errors.loadFailed')}</span>

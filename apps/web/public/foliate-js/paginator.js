@@ -728,14 +728,19 @@ class View {
                 settled = true
                 clearTimeout(timer)
                 const doc = this.document
-                afterLoad?.(doc)
+                // afterLoad reports whether the section is still current. A
+                // superseded load skips the style injection, and showing that
+                // frame would paint the section with the book's own CSS only
+                // (no theme, no reader typography). Keep it hidden instead:
+                // the caller destroys the stale view right after.
+                const current = afterLoad?.(doc) !== false
                 this.#disposeDynamicResources?.()
                 this.#disposeDynamicResources = observeDynamicResources?.(doc) ?? null
 
                 this.#iframe.setAttribute('aria-label', doc.title)
                 // Keep the iframe laid out while scripts initialize their canvas.
                 // display:none would make container measurements zero.
-                this.#iframe.style.visibility = 'visible'
+                this.#iframe.style.visibility = current ? 'visible' : 'hidden'
                 const { vertical, rtl } = getDirection(doc)
                 this.docBackground = getBackground(doc)
                 doc.body.style.background = 'none'
@@ -792,7 +797,9 @@ class View {
 
                 this.#contentRange.selectNodeContents(doc.body)
                 const layout = beforeRender?.({ vertical, rtl })
-                this.#iframe.style.visibility = 'visible'
+                // A stale section never becomes visible: it carries no reader
+                // styles, so showing it would flash the raw book layout.
+                this.#iframe.style.visibility = current ? 'visible' : 'hidden'
                 this.render(layout)
                 bgRendered = true
                 this.#observer.observe(doc.body)
@@ -3648,7 +3655,7 @@ export class Paginator extends HTMLElement {
             if (src) {
                 const view = this.#createView(index)
                 const afterLoad = doc => {
-                    if (!isCurrent()) return
+                    if (!isCurrent()) return false
                     if (doc.head) {
                         const $styleBefore = doc.createElement('style')
                         doc.head.prepend($styleBefore)
@@ -3659,6 +3666,7 @@ export class Paginator extends HTMLElement {
                         this.#styleMap.set(doc, [$styleBefore, $style])
                     }
                     onLoad?.({ doc, index })
+                    return true
                 }
                 const beforeRender = this.#beforeRender.bind(this)
                 try {
@@ -3814,6 +3822,7 @@ export class Paginator extends HTMLElement {
                 }
                 this.setStyles(this.#styles)
                 this.dispatchEvent(new CustomEvent('load', { detail: { doc, index } }))
+                return true
             }
             // Adjacent sections reuse the primary view's cached layout
             // — they must NOT call #beforeRender, which would modify

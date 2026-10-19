@@ -255,6 +255,14 @@ export function ttsViewportAction(
 const PARSE_CACHE_MAX = 6
 const parseCache = new Map<string, Promise<any>>()
 
+// The reader stylesheet reaches a section document through the paginator's
+// per-section <style> element. A superseded section load skips that
+// injection, and the document then renders the book's own CSS alone (white
+// page, book typography, no theme). The injected sheet carries this marker
+// so the host can tell a styled document from a bare one and repair it
+// before the reader becomes visible.
+const APP_STYLE_MARKER = '--bd-app-style'
+
 // Books at or below this size are downloaded whole up front: foliate's
 // paginator unloads a section on every chapter switch in non-continuous mode,
 // so the Range path would pay one network RTT (100-300ms on slow networks)
@@ -1693,6 +1701,13 @@ export class FoliateReader implements BookReader {
   private resizeObserver: ResizeObserver | null = null
   private lastScrollVPad = -1
   private activeDocs = new Set<Document>()
+  // The last reader stylesheet that was handed to the renderer; reused when a
+  // section document has to be styled directly.
+  private appStyleSheet = ''
+  // Documents whose stylesheet the paginator never wrote (a superseded
+  // section load). They get the same sheet injected directly, so a bare
+  // section can never be shown.
+  private repairedStyles = new Map<Document, HTMLStyleElement>()
   private selectionDocs = new Map<Document, { index: number; handler: () => void; selectionChangeHandler: () => void; startHandler: () => void; dblHandler: () => void; keyForwardHandler: (e: KeyboardEvent) => void }>()
   private selectionActive = false
   private selectionDismissPending = false
@@ -2419,6 +2434,13 @@ export class FoliateReader implements BookReader {
       const startupIntent = this.navigationIntent
       const startupCfi = this.lastCfi
       const contents = this.view?.renderer?.getContents?.() ?? []
+      // The visible section must carry the reader stylesheet before the
+      // reader is revealed. A bare section renders the book's own CSS (white
+      // page, book typography) — and the font wait below would find no
+      // @import to wait for, so it could not hold the reveal back either.
+      for (const content of contents) {
+        this.ensureDocumentStyles((content as { doc?: Document }).doc)
+      }
       const currentDoc = contents.find((content: { index: number }) => content.index === this.currentSectionIndex)?.doc
       if (currentDoc) {
         const fontsReady = await waitForReaderFonts(currentDoc, this.startupAbort.signal, this.container?.getBoundingClientRect())
@@ -2430,6 +2452,11 @@ export class FoliateReader implements BookReader {
         if (startupCfi && startupIntent === this.navigationIntent) await this.display(startupCfi, { internal: true })
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
         if (this.destroyed) return
+        // The re-navigation may have replaced the visible section; style it
+        // before the reader is shown.
+        for (const content of this.view?.renderer?.getContents?.() ?? []) {
+          this.ensureDocumentStyles((content as { doc?: Document }).doc)
+        }
       }
       // Initial view creation and saved-position navigation can move focus
       // between the host document and book iframes. Do not let that startup
@@ -3099,20 +3126,32 @@ export class FoliateReader implements BookReader {
     this.clearTtsHighlight()
     const cfi = this.lastCfi
     const fraction = this.lastFraction
-    try { this.view.close() } catch { /* partial init */ }
-    if (this.destroyed) return
-    await applyTocConversion(this.book, this.conversion)
-    await this.view.open(this.book)
-    if (this.destroyed) return
-    this.emitTocReady()
-    // close() drops the renderer element, so renderer-level attributes and
-    // styles must be re-applied.
-    this.applyAllSettings()
+    // The view is gone while it is rebuilt: the host must cover the reading
+    // area again, otherwise the empty/bare frame is shown as-is.
+    this.emit('viewRebuilding', { pending: true })
     try {
-      if (cfi) await this.display(cfi, { internal: true })
-      else if (fraction != null) await this.view.goToFraction(fraction)
-    } catch {
-      // position may no longer resolve after conversion
+      try { this.view.close() } catch { /* partial init */ }
+      if (this.destroyed) return
+      await applyTocConversion(this.book, this.conversion)
+      await this.view.open(this.book)
+      if (this.destroyed) return
+      this.emitTocReady()
+      // close() drops the renderer element, so renderer-level attributes and
+      // styles must be re-applied.
+      this.applyAllSettings()
+      try {
+        if (cfi) await this.display(cfi, { internal: true })
+        else if (fraction != null) await this.view.goToFraction(fraction)
+      } catch {
+        // position may no longer resolve after conversion
+      }
+      // The rebuilt view starts from an empty renderer: the sections that
+      // come back must be styled before the reader is shown again.
+      for (const content of this.view?.renderer?.getContents?.() ?? []) {
+        this.ensureDocumentStyles((content as { doc?: Document }).doc)
+      }
+    } finally {
+      if (!this.destroyed) this.emit('viewRebuilding', { pending: false })
     }
   }
 
@@ -4302,6 +4341,9 @@ export class FoliateReader implements BookReader {
         if (!docs.has(doc)) {
           doc.removeEventListener('click', this.handleDocInteraction)
           this.unwatchFrameFocus(doc.defaultView)
+          // A section that is gone takes its repaired stylesheet with it.
+          this.repairedStyles.get(doc)?.remove()
+          this.repairedStyles.delete(doc)
           const sel = this.selectionDocs.get(doc)
           if (sel) {
             doc.removeEventListener('pointerdown', sel.startHandler)
@@ -4318,6 +4360,10 @@ export class FoliateReader implements BookReader {
       }
       for (const { doc, index } of contents) {
         if (!doc || this.activeDocs.has(doc)) continue
+        // A section whose load was superseded never received the reader
+        // stylesheet; style it here so it cannot render the book's own CSS
+        // alone (white page, book typography) before the reader is shown.
+        this.ensureDocumentStyles(doc)
         this.applyFixedLayoutDocumentStyles(doc)
         const isDarkTheme = !isLightCssColor(this.theme.bg)
         const scheme = isDarkTheme ? 'dark' : 'light'
@@ -4476,6 +4522,7 @@ export class FoliateReader implements BookReader {
     }
     this.selectionDocs.clear()
     this.activeDocs.clear()
+    this.repairedStyles.clear()
     this.mediaOverlaySections.clear()
     this.listeners = []
     this.view = null
@@ -5082,6 +5129,7 @@ export class FoliateReader implements BookReader {
         --bd-theme-bg: ${this.theme.bg};
         --bd-theme-text: ${this.theme.text};
         --bd-theme-primary: ${this.theme.primary ?? this.theme.text};
+        ${APP_STYLE_MARKER}: 1;
         color-scheme: ${isDarkTheme ? 'dark' : 'light'};
       }`
     const inlineThemeStyles = `
@@ -5152,7 +5200,62 @@ export class FoliateReader implements BookReader {
         padding-right: ${this.readingMode === 'page' ? 0 : this.paragraph.horizontalPadding}px !important;
       }
     `
+    this.appStyleSheet = css
     this.view.renderer.setStyles(css)
+    this.syncRepairedStyles()
+  }
+
+  /** Whether the document carries the reader stylesheet. The marker is read
+   *  from the computed style; documents without a browsing context (detached
+   *  or test documents) are checked through the sheet content instead. */
+  private documentHasAppStyles(doc: Document | null | undefined): boolean {
+    if (!doc?.documentElement) return false
+    try {
+      const value = doc.defaultView?.getComputedStyle(doc.documentElement).getPropertyValue(APP_STYLE_MARKER)
+      if (value?.trim() === '1') return true
+    } catch {
+      // detached document: fall through to the sheet scan
+    }
+    // Documents without a browsing context cannot be inspected through
+    // getComputedStyle; the marker in the sheet itself is enough there.
+    for (const style of Array.from(doc.querySelectorAll('style'))) {
+      if (style.textContent?.includes(APP_STYLE_MARKER)) return true
+    }
+    return false
+  }
+
+  /** Make sure the section document carries the reader stylesheet. The
+   *  paginator injects it into every section it keeps in its style map; a
+   *  section whose load was superseded is not in that map, so the sheet is
+   *  injected here instead. Returns whether the document is styled. */
+  private ensureDocumentStyles(doc: Document | null | undefined): boolean {
+    if (!doc) return true
+    // Fixed-layout books are styled through their own renderer path; the
+    // reflowable sheet must not be injected into them.
+    if (this.view?.isFixedLayout) return true
+    if (this.documentHasAppStyles(doc)) return true
+    if (!this.appStyleSheet) return false
+    let el = this.repairedStyles.get(doc)
+    if (!el) {
+      el = doc.createElement('style')
+      el.dataset.bdAppStyle = 'repaired'
+      doc.head?.appendChild(el)
+      this.repairedStyles.set(doc, el)
+    }
+    el.textContent = this.appStyleSheet
+    return this.documentHasAppStyles(doc)
+  }
+
+  /** Keep the repaired sheets in sync with the current settings. */
+  private syncRepairedStyles() {
+    if (this.repairedStyles.size === 0) return
+    for (const [doc, el] of this.repairedStyles) {
+      if (!doc.isConnected) {
+        this.repairedStyles.delete(doc)
+        continue
+      }
+      el.textContent = this.appStyleSheet
+    }
   }
 
   private emit<K extends keyof RendererEvents>(type: K, data?: Parameters<RendererEvents[K]>[0]) {

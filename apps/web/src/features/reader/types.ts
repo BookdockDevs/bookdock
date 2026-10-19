@@ -144,6 +144,12 @@ export interface RendererEvents {
   instantAnnotation: (e: SelectionInfo) => void
   rendered: () => void
   fontFallback: () => void
+  /**
+   * The view is torn down and rebuilt (content replacements, Chinese
+   * conversion). The reading area is empty while it is rebuilt, so the host
+   * has to cover it again instead of showing the bare frame.
+   */
+  viewRebuilding: (e: { pending: boolean }) => void
   tocReady: (items: { label: string; href: string; level?: number }[]) => void
   /**
    * Fired after a user-initiated jump (TOC/note/search/progress-drag) actually

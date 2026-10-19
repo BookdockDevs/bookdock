@@ -40,6 +40,8 @@ interface UseReaderRendererOptions {
   onInstantAnnotation?: (e: Parameters<RendererEvents['instantAnnotation']>[0]) => void
   onRendered?: () => void
   onFontFallback?: () => void
+  /** The view is torn down and rebuilt; the host must cover the reading area. */
+  onViewRebuilding?: (pending: boolean) => void
   onError?: (err: Error) => void
   onTocReady?: (items: { label: string; href: string; level?: number }[]) => void
   onJumpConfirmed?: (e: { cfi: string }) => void
@@ -75,6 +77,7 @@ export function useReaderRenderer({
   onInstantAnnotation,
   onRendered,
   onFontFallback,
+  onViewRebuilding,
   onError,
   onTocReady,
   onJumpConfirmed,
@@ -169,6 +172,7 @@ export function useReaderRenderer({
   const onInstantAnnotationRef = useRef(onInstantAnnotation)
   const onRenderedRef = useRef(onRendered)
   const onFontFallbackRef = useRef(onFontFallback)
+  const onViewRebuildingRef = useRef(onViewRebuilding)
   const onErrorRef = useRef(onError)
   const onTocReadyRef = useRef(onTocReady)
   const onJumpConfirmedRef = useRef(onJumpConfirmed)
@@ -212,6 +216,7 @@ export function useReaderRenderer({
   onInstantAnnotationRef.current = onInstantAnnotation
   onRenderedRef.current = onRendered
   onFontFallbackRef.current = onFontFallback
+  onViewRebuildingRef.current = onViewRebuilding
   onErrorRef.current = onError
   onTocReadyRef.current = onTocReady
   onJumpConfirmedRef.current = onJumpConfirmed
@@ -308,6 +313,7 @@ export function useReaderRenderer({
     const unsubInstantAnnotation = newRenderer.on('instantAnnotation', (e) => { if (isCurrentRenderer()) onInstantAnnotationRef.current?.(e) })
     const unsubRendered = newRenderer.on('rendered', () => { if (isCurrentRenderer()) onRenderedRef.current?.() })
     const unsubFontFallback = newRenderer.on('fontFallback', () => { if (isCurrentRenderer()) onFontFallbackRef.current?.() })
+    const unsubViewRebuilding = newRenderer.on('viewRebuilding', (e) => { if (isCurrentRenderer()) onViewRebuildingRef.current?.(e.pending) })
     const unsubToc = newRenderer.on('tocReady', (items) => { if (isCurrentRenderer()) onTocReadyRef.current?.(items) })
     const unsubJumpConfirmed = newRenderer.on('jumpConfirmed', (e) => { if (isCurrentRenderer()) onJumpConfirmedRef.current?.(e) })
     const unsubNavigatePending = newRenderer.on('navigatePending', (e) => { if (isCurrentRenderer()) onNavigatePendingRef.current?.(e) })
@@ -332,6 +338,7 @@ export function useReaderRenderer({
       unsubInstantAnnotation()
       unsubRendered()
       unsubFontFallback()
+      unsubViewRebuilding()
       unsubToc()
       unsubJumpConfirmed()
       unsubNavigatePending()
@@ -360,23 +367,28 @@ export function useReaderRenderer({
     void renderer.display(initialCfi, { internal: true })
   }, [renderer, initialCfi])
 
+  // The renderer is part of the dependency list on purpose: the mount itself
+  // applies the settings before any section exists, so the stylesheet only
+  // reaches the loaded sections when these effects replay once the renderer
+  // is live. Without that, a freshly loaded section could keep the book's own
+  // CSS until the next settings change.
   useEffect(() => {
     const current = rendererRef.current
     if (!current) return
     current.applyReadingTheme({ bg: theme.pageBg, text: theme.text, primary: theme.primary })
-  }, [theme])
+  }, [theme, renderer])
 
   useEffect(() => {
     const current = rendererRef.current
     if (!current) return
     current.applyFont({ fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
-  }, [fontFamily, cjkFontFamily, fontStack, fontCss, fontSize, lineHeight, fontWeight, overrideBookFont])
+  }, [fontFamily, cjkFontFamily, fontStack, fontCss, fontSize, lineHeight, fontWeight, overrideBookFont, renderer])
 
   useEffect(() => {
     const current = rendererRef.current
     if (!current) return
     current.applyParagraphStyle({ paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout })
-  }, [paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout])
+  }, [paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout, renderer])
 
   useEffect(() => {
     const current = rendererRef.current

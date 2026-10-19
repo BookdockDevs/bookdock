@@ -22,6 +22,9 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Opening a book no longer shows the book's own plain layout (white page, book typography) for a few seconds before the reader's theme and typography appear. The reader now waits until the section really carries the reader stylesheet, and repairs a section whose load was superseded instead of displaying it unstyled.
+- Text replacement rules are resolved before the reader opens, so a book no longer rebuilds itself (re-parsing and re-locating) right after the first page appears.
+- Rebuilding the reader for a text replacement or a Chinese conversion now covers the reading area while it is rebuilt, instead of briefly showing an empty or unstyled page.
 - Refreshing library, shelf, and tag views preserves known names or shows local loading and retry states instead of briefly showing a default or unrelated title.
 - Opening a shared-library link no longer loads personal books or exposes personal actions while the requested library is unresolved. Filter corrections and scroll restoration wait for the matching view.
 - Recently Read shows a loading placeholder and retry after initial failures instead of silently disappearing while books load.
@@ -758,6 +761,9 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 打开书籍时不再先显示书籍自带的朴素排版（白底、书籍字号与缩进）再突然变成阅读器排版。阅读器会等正文确实带上阅读器样式后再显示；加载被取代的章节时也会补上样式，不再露出无主题页面。
+- 文本替换规则在阅读器打开前就绪，书籍不再在首屏之后重建自身（重新解析并重新定位）。
+- 文本替换或简繁转换触发阅读器重建时，阅读区会被加载层覆盖，不再短暂露出空白或未排版的页面。
 - 刷新书库、书架或标签页面时，保留已知名称，或显示局部加载与重试状态，不再短暂显示默认名称或无关标题。
 - 打开共享书库链接时，先确认目标书库，再决定列表和操作权限；等待期间不请求个人书籍、不显示个人操作，也不提前调整筛选或恢复滚动位置。
 - 最近阅读在首次加载和失败时提供局部加载与重试反馈，不再突然插入页面或静默消失。

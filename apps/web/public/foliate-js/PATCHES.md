@@ -184,6 +184,13 @@
     - 做法：`#display`（目标未加载分支）和 `#goTo` 复用分支里，落点前在分页模式下销毁所有非目标视图（滚动模式按 primary 偏移算锚点，天生免疫，不动）。容器当时还处在 fade 中，load 已成功，所以无闪烁、不影响失败回滚；fraction 锚点（翻页、进度恢复）本来就是 target-relative，不受影响；短首节需要的前邻由既有 needsPrev/fill 重建。
     - 影响/验证：只影响分页模式的跳转落点；`foliate-paginator.test.ts` 通过；浏览器验收：目录在 序章/第 2 章/第 5 章之间互跳，spread 恒为目标章节开头（短首节配下一章，长章节配后续章节）。
 
+22. **`paginator.js` / 被取代的 section load 不再露出裸帧**
+    - 对应上游：submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4` 的 `View.load` 与 `Paginator.#display`。
+    - 需求：`#display` 的 `afterLoad` 在 `isCurrent()` 为假时（新导航已接管）会跳过样式注入，但 `View.load` 之后仍无条件把 iframe 置为 `visibility: visible`。这一帧没有阅读器样式（只有书籍自带 CSS：白底、书籍字号与缩进），一旦被显示就是一次“裸页”闪动。
+    - 做法：`afterLoad` 返回是否仍然是当前帧；`View.load` 只在当前帧才把 iframe 置为可见，被取代的帧保持隐藏并交由调用方销毁。
+    - 不能只放适配层：iframe 可见性与 section 装载代次都在 paginator 私有状态里，宿主无法在 React 层阻止某一帧被显示。
+    - 影响/验证：只影响被取代帧的可见性，不改变导航、CFI 与正常帧的样式注入；`foliate-paginator.test.ts` 与 Reader 样式注入测试覆盖。
+
 ### 2.3 EPUB 资源和元数据
 
 16. **`epub.js` / `Resources` 和 `EPUB` metadata/resource loader**
