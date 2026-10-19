@@ -45,6 +45,13 @@ function renderHeader(overrides = {}) {
 }
 
 describe('LibraryHeader', () => {
+  it('shows a local skeleton instead of a default name while the title is unresolved', () => {
+    renderHeader({ title: undefined, titleLoading: true })
+
+    expect(screen.getByTestId('library-title-skeleton')).toBeInTheDocument()
+    expect(screen.queryByText('library.allBooks')).toBeNull()
+  })
+
   it('submits search input only on Enter', async () => {
     renderHeader()
     fireEvent.change(screen.getByPlaceholderText('library.searchPlaceholder'), { target: { value: 'dune' } })

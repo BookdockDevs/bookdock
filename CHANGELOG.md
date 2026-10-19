@@ -22,6 +22,9 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Refreshing library, shelf, and tag views preserves known names or shows local loading and retry states instead of briefly showing a default or unrelated title.
+- Opening a shared-library link no longer loads personal books or exposes personal actions while the requested library is unresolved. Filter corrections and scroll restoration wait for the matching view.
+- Recently Read shows a loading placeholder and retry after initial failures instead of silently disappearing while books load.
 - Opening a book now applies saved reading settings before displaying its text, preventing a temporary default layout while preferences load. Failed initial settings or font-list loads offer a retry.
 - Books can open correctly when a stored file size differs from the actual file size, including previously cached files.
 - Uploading the same TXT file in different accounts or libraries no longer overwrites another generated book; repeated uploads within the same library still reuse the existing book.
@@ -755,6 +758,9 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 刷新书库、书架或标签页面时，保留已知名称，或显示局部加载与重试状态，不再短暂显示默认名称或无关标题。
+- 打开共享书库链接时，先确认目标书库，再决定列表和操作权限；等待期间不请求个人书籍、不显示个人操作，也不提前调整筛选或恢复滚动位置。
+- 最近阅读在首次加载和失败时提供局部加载与重试反馈，不再突然插入页面或静默消失。
 - 打开书籍时先应用已保存的阅读设置，再显示正文，避免偏好加载期间短暂显示默认排版；首次加载设置或字体列表失败时可重试。
 - 修复记录的文件大小与实际大小不一致时书籍无法正常打开的问题，包括已有本地缓存的文件。
 - 修复不同账号或书库上传相同 TXT 时，生成的书籍文件可能互相覆盖的问题；同一书库内重复上传仍复用已有书籍。

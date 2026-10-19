@@ -3,6 +3,7 @@ import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query'
 import { ApiError } from '@/api/client'
 import { isAccessRevocationError } from '@/lib/error-message'
 import { fetchSettings, seedSettingsQuery } from '@/lib/settings-cache'
+import { clearLibraryNamesSnapshot } from '@/lib/library-name-cache'
 import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
 
@@ -12,6 +13,7 @@ export const queryClient = new QueryClient({
       if (isAccessRevocationError(error)) {
         // Access revoked: evict cached data while preserving error status and error object
         query.setState({ data: undefined })
+        clearLibraryNamesSnapshot(useAuthStore.getState().user?.id)
       }
     },
   }),

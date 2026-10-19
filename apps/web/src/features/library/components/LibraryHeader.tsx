@@ -33,6 +33,7 @@ interface LibraryHeaderProps {
   onToggleSelectMode?: () => void
   onOpenNavigation?: () => void
   title?: string
+  titleLoading?: boolean
   bookCount?: number
   onResetMetadataFilter?: () => void
   /** A shared library's list; see ViewMenu's catalogMode. */
@@ -41,7 +42,7 @@ interface LibraryHeaderProps {
   categoryScope?: LibrarySearch['categoryScope']
 }
 
-export default function LibraryHeader({ navSearch, view, query, searchNames, searchContext, searchError, onSearchSubmit, onSearchClear, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, searchNames, searchContext, searchError, onSearchSubmit, onSearchClear, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, titleLoading = false, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope }: LibraryHeaderProps) {
   const _ = useTranslation()
 
   return (
@@ -63,7 +64,7 @@ export default function LibraryHeader({ navSearch, view, query, searchNames, sea
           )}
           <div className="min-w-0">
             <h1 className="truncate font-serif text-2xl font-semibold text-stone-900 dark:text-stone-50">
-              {title ?? _('library.allBooks')}
+              {titleLoading ? <span aria-hidden="true" data-testid="library-title-skeleton" className="inline-block h-7 w-48 animate-pulse rounded bg-stone-200/70 align-middle motion-reduce:animate-none dark:bg-stone-800/70" /> : title ?? _('library.allBooks')}
             </h1>
             {(bookCount !== undefined || onResetMetadataFilter) && (
               <div className="mt-1 flex items-center gap-4">

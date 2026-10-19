@@ -30,8 +30,9 @@ import { adoptArchiveExitRestore, editSearchControls, expressionDisplay, keepsSe
 
 import { ApiError } from '@/api/client'
 import { notify } from '@/lib/notifications'
-import { getUserErrorNotification } from '@/lib/error-message'
+import { getUserErrorNotification, isAccessRevocationError } from '@/lib/error-message'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import { readLibraryNames, readTaxonomyNames } from '@/lib/library-name-cache'
 
 import { indexRoute, type LibrarySearch } from '@/routes/index'
 
@@ -97,6 +98,7 @@ export default function Library() {
   const libraryPageSize = useUiStore((s) => s.libraryPageSize)
   const pageSize = libraryPageSize || 24
   const user = useAuthStore((s) => s.user)
+  const userId = user?.id
   const isGuest = !user
   // Private-surface upload gate: the instance switch closes it for ordinary
   // members (fail-open while the instance query loads; the server enforces).
@@ -132,11 +134,16 @@ export default function Library() {
   // library. A shared ?trash=1 URL for a non-owner falls back to the normal
   // catalog via the `trash` guard below.
   const requestedLibraryId = !isGuest ? (search.libraryId ?? null) : null
-  const { data: librariesData } = useLibraries({ enabled: !isGuest })
+  const librariesQuery = useLibraries({ enabled: !isGuest })
+  const librariesData = librariesQuery.data
   const libraries = useMemo(() => librariesData?.data ?? [], [librariesData])
+  const cachedLibraryNames = useMemo(() => userId && !librariesData && !isAccessRevocationError(librariesQuery.error) ? readLibraryNames(userId) : [], [userId, librariesData, librariesQuery.error])
   const privateLibraryName = isGuest
     ? _('library.allBooks')
-    : (libraries.find((library) => library.type === 'private')?.name || _('library.myLibrary'))
+    : (libraries.find((library) => library.type === 'private')?.name || cachedLibraryNames.find((library) => library.type === 'private')?.name || (librariesQuery.isError && !librariesData ? '—' : _('library.myLibrary')))
+  const privateLibraryNameLoading = !isGuest && !librariesData && !librariesQuery.isError && !cachedLibraryNames.some((library) => library.type === 'private')
+  const privateLibraryNameFailed = !isGuest && !requestedLibraryId && !librariesData && librariesQuery.isError && !cachedLibraryNames.some((library) => library.type === 'private')
+  const privateLibrariesFailed = !isGuest && !requestedLibraryId && !librariesData && librariesQuery.isError
   const activeLibrary = requestedLibraryId
     ? (libraries.find((library) => library.id === requestedLibraryId && library.type === 'shared') ?? null)
     : null
@@ -146,8 +153,8 @@ export default function Library() {
   // per-library relation query resolves later.
   const activeLibraryIsOwner = activeLibrary?.relation === 'owner'
   const trash = !isGuest && (search.trash ?? false) && (!activeLibrary || activeLibraryIsOwner)
-  const privateTrashEnabled = useTrashEnabled({ enabled: !isGuest })
-  const privateTrashCapBytes = useTrashCapBytes({ enabled: !isGuest })
+  const privateTrashEnabled = useTrashEnabled({ enabled: !isGuest && !requestedLibraryId })
+  const privateTrashCapBytes = useTrashCapBytes({ enabled: !isGuest && !requestedLibraryId })
   // Per-library switch (owner sees the value, others get null); private rows
   // never carry it. Defaults mirror the private trash: on / unlimited.
   const libraryTrashEnabled = activeLibrary ? (activeLibrary.trashEnabled ?? true) : privateTrashEnabled
@@ -169,6 +176,9 @@ export default function Library() {
   // Shared-library context (4.7): the selection lives in the URL so refresh
   // and bookmarks reproduce it; the server stays authoritative on access.
   // Guests keep the private view until Phase 6 wires anonymous browsing.
+  const libraryContextUnresolved = !!requestedLibraryId && !activeLibrary
+  const libraryContextPending = libraryContextUnresolved && !librariesData && !librariesQuery.isError
+  const libraryContextError = libraryContextUnresolved && !librariesData && librariesQuery.isError
   const libraryStale = !!requestedLibraryId && librariesData !== undefined && !activeLibrary
   const [manageTarget, setManageTarget] = useState<LibraryListItem | null>(null)
   const [joinTarget, setJoinTarget] = useState<Library | null>(null)
@@ -535,7 +545,7 @@ export default function Library() {
     showHidden: revealHidden,
     // Server rejects trash queries while the feature is off; the redirect
     // effect below swaps the URL out before the next render settles.
-  }, { enabled: (!trash || trashEnabled) && !activeLibrary })
+  }, { enabled: (!trash || trashEnabled) && !activeLibrary && !requestedLibraryId })
 
   // 0.4.0: a shared library is not a second page. It is the same list, same
   // search, same sort, same paging and same category/tag filters - read from
@@ -633,18 +643,26 @@ export default function Library() {
   const canContribute = activeLibrary?.type === 'shared'
     && libraryRelation === 'member'
     && activeLibrary.allowMemberUpload === true
-  const canUpload = !isGuest && (activeLibrary ? (isLibraryManager || canContribute) : userUploadAllowed)
+  const canUpload = !isGuest && !libraryContextUnresolved && (activeLibrary ? (isLibraryManager || canContribute) : userUploadAllowed)
   const setUploadOpenIfAllowed = useCallback((open: boolean) => {
     if (canUpload) setUploadOpen(open)
   }, [canUpload])
 
-  const searchAuthors = useLibrarySearchAuthors(activeLibrary?.id ?? null, trash, revealHidden)
-  const shelvesQuery = useShelves()
-  const tagsQuery = useTags()
+  const searchAuthors = useLibrarySearchAuthors(activeLibrary?.id ?? null, trash, revealHidden, { enabled: !libraryContextUnresolved })
+  const shelvesQuery = useShelves({ enabled: !requestedLibraryId })
+  const tagsQuery = useTags({ enabled: !requestedLibraryId })
   const libraryCategoriesQuery = useLibraryCategories(activeLibrary?.id ?? null)
   const libraryTagsQuery = useLibraryTags(activeLibrary?.id ?? null)
+  const visibleTaxonomyError = activeLibrary
+    ? libraryCategoriesQuery.isError || libraryTagsQuery.isError
+    : !requestedLibraryId && (shelvesQuery.isError || tagsQuery.isError)
   const shelvesData = shelvesQuery.data
   const tagsData = tagsQuery.data
+  const taxonomyRevoked = isAccessRevocationError(shelvesQuery.error) || isAccessRevocationError(tagsQuery.error)
+    || isAccessRevocationError(libraryCategoriesQuery.error) || isAccessRevocationError(libraryTagsQuery.error)
+  const cachedTaxonomyNames = useMemo(() => userId && !taxonomyRevoked
+    ? readTaxonomyNames(userId, requestedLibraryId)
+    : { categories: [], tags: [] }, [userId, requestedLibraryId, taxonomyRevoked])
   // Local mirror of the shelf order: dnd-kit clears its drag state in the same
   // event as our onDragEnd, but the react-query cache update lands a render
   // later — without this the rows would flash back to the old order for a
@@ -673,20 +691,34 @@ export default function Library() {
   // The active category's name must resolve against the library in context: a
   // category id from one library means nothing in the other.
   const activeShelfName = shelfId
-    ? (activeLibrary
-      ? libraryCategoriesQuery.data?.data.find((c) => c.id === shelfId)?.name
-      : shelvesData?.data.find((s) => s.id === shelfId)?.name)
+    ? (requestedLibraryId
+      ? libraryCategoriesQuery.data
+        ? libraryCategoriesQuery.data.data.find((c) => c.id === shelfId)?.name
+        : cachedTaxonomyNames.categories.find((c) => c.id === shelfId)?.name
+      : shelvesData
+        ? shelvesData.data.find((s) => s.id === shelfId)?.name
+        : cachedTaxonomyNames.categories.find((s) => s.id === shelfId)?.name)
     : undefined
   const activeTagName = tagId
-    ? (activeLibrary
-      ? libraryTagsQuery.data?.data.find((tag) => tag.id === tagId)?.name
-      : tagsData?.data.find((tag) => tag.id === tagId)?.name)
+    ? (requestedLibraryId
+      ? libraryTagsQuery.data
+        ? libraryTagsQuery.data.data.find((tag) => tag.id === tagId)?.name
+        : cachedTaxonomyNames.tags.find((tag) => tag.id === tagId)?.name
+      : tagsData
+        ? tagsData.data.find((tag) => tag.id === tagId)?.name
+        : cachedTaxonomyNames.tags.find((tag) => tag.id === tagId)?.name)
     : undefined
   const metadataFilter = author
     ? { kind: 'author' as const, value: author }
     : series
       ? { kind: 'series' as const, value: series }
       : null
+  const requestedLibraryName = cachedLibraryNames.find((library) => library.id === requestedLibraryId)?.name
+  const filterNameUnknown = Boolean((shelfId && shelfId !== 'none' && !activeShelfName) || (tagId && !activeTagName))
+  const filterNamePending = Boolean(
+    (shelfId && shelfId !== 'none' && !activeShelfName && (requestedLibraryId ? libraryCategoriesQuery.isLoading : shelvesQuery.isLoading))
+    || (tagId && !activeTagName && (requestedLibraryId ? libraryTagsQuery.isLoading : tagsQuery.isLoading)),
+  )
   const viewTitle = trash
     ? _('library.trash')
     : shelfId === 'none'
@@ -695,7 +727,10 @@ export default function Library() {
         ? _('library.authorFilterTitle', { name: metadataFilter.value })
           : metadataFilter?.kind === 'series'
             ? _('library.seriesFilterTitle', { name: metadataFilter.value })
-            : (activeShelfName ?? activeTagName ?? activeLibrary?.name ?? privateLibraryName)
+            : (activeShelfName ?? activeTagName ?? (filterNameUnknown || privateLibraryNameFailed ? '' : activeLibrary?.name ?? (requestedLibraryId ? requestedLibraryName : privateLibraryName)))
+  const viewTitleLoading = filterNamePending
+    || (!requestedLibraryId && !shelfId && !tagId && !trash && privateLibraryNameLoading)
+    || (libraryContextUnresolved && !viewTitle)
 
   const hasActiveFilter = Boolean(
     query || search.expression || author || series || format || readStatus,
@@ -735,7 +770,7 @@ export default function Library() {
                     : query
                       ? _('library.searchDocumentTitle', { query })
                       : _('app.name')
-  usePageTitle(libraryDocumentTitle)
+  usePageTitle(libraryContextUnresolved || viewTitleLoading ? _('app.name') : libraryDocumentTitle)
 
   useEffect(() => {
     if (!selectionActive) return
@@ -814,6 +849,7 @@ export default function Library() {
     searchScrollRestore.current = adopted.restore
   }, [location, search])
   useLayoutEffect(() => {
+    if (libraryContextUnresolved) return
     const restore = searchScrollRestore.current
     if (!restore) return
     // A stale request (e.g. adopted, then the search moved on before the
@@ -825,7 +861,7 @@ export default function Library() {
     if (listLoading || (activeLibrary ? catalogQuery.isPlaceholderData : booksPlaceholder)) return
     searchScrollRestore.current = undefined
     window.scrollTo({ top: restore.top, behavior: 'instant' })
-  }, [search, listLoading, activeLibrary, catalogQuery.isPlaceholderData, booksPlaceholder])
+  }, [search, listLoading, activeLibrary, catalogQuery.isPlaceholderData, booksPlaceholder, libraryContextUnresolved])
   function exitSearch() {
     const saved = location.state.librarySearchReturn
     const target = searchExitTarget(search, saved)
@@ -870,10 +906,11 @@ export default function Library() {
   // A shared/bookmarked ?trash=1 URL must not dead-end when the feature is
   // switched off (e.g. in another tab): bounce back to the plain library.
   useEffect(() => {
+    if (libraryContextUnresolved) return
     if (trash && !trashEnabled) {
       navSearch({ trash: undefined })
     }
-  }, [trash, trashEnabled, navSearch])
+  }, [libraryContextUnresolved, trash, trashEnabled, navSearch])
 
   // The server confirmed this library is no longer visible (left, deleted,
   // access revoked): bounce to the first available library instead of
@@ -896,15 +933,17 @@ export default function Library() {
   // the URL is corrected rather than quietly ignored (see library-filters for
   // the rule and why the sort is replaced instead of cleared).
   useEffect(() => {
+    if (libraryContextUnresolved) return
     if (!activeLibrary) return
     const patch = libraryUrlCorrection({ readStatus: search.status ?? null, sortBy, sortOrder })
     if (Object.keys(patch).length > 0) navSearch(patch)
-  }, [activeLibrary, search.status, sortBy, sortOrder, navSearch])
+  }, [libraryContextUnresolved, activeLibrary, search.status, sortBy, sortOrder, navSearch])
 
   useEffect(() => {
+    if (libraryContextUnresolved) return
     const patch = pageRangeCorrection(total, currentPage, totalPages, listLoading, activeLibrary ? catalogQuery.isPlaceholderData : booksPlaceholder)
     if (Object.keys(patch).length) navSearch(patch)
-  }, [total, currentPage, totalPages, navSearch, listLoading, activeLibrary, catalogQuery.isPlaceholderData, booksPlaceholder])
+  }, [libraryContextUnresolved, total, currentPage, totalPages, navSearch, listLoading, activeLibrary, catalogQuery.isPlaceholderData, booksPlaceholder])
 
   // A shelf or tag can leave the sidebar while the URL still names it - hidden
   // again, unhidden, or deleted - and the server would keep filtering by an id
@@ -918,7 +957,7 @@ export default function Library() {
     ? libraryCategoriesQuery.isError || libraryTagsQuery.isError
     : shelvesQuery.isError || tagsQuery.isError
   useEffect(() => {
-    if (taxonomyLoading || taxonomyFailed) return
+    if (libraryContextUnresolved || taxonomyLoading || taxonomyFailed) return
     const patch = vanishedFilterCorrection({
       shelfId: search.shelf ?? null,
       tagId: search.tag ?? null,
@@ -926,7 +965,7 @@ export default function Library() {
       tagIds: tags.map((tag) => tag.id),
     })
     if (Object.keys(patch).length > 0) navSearch(patch)
-  }, [taxonomyLoading, taxonomyFailed, search.shelf, search.tag, shelves, tags, navSearch])
+  }, [libraryContextUnresolved, taxonomyLoading, taxonomyFailed, search.shelf, search.tag, shelves, tags, navSearch])
 
   // Uncategorized is a virtual view: staying on it after the last book is
   // moved/deleted away is a dead end, so leave back to all books. A view
@@ -934,6 +973,7 @@ export default function Library() {
   // URLs must not be bounced.
   const uncategorizedEmptyOnEntryRef = useRef<boolean | null>(null)
   useEffect(() => {
+    if (libraryContextUnresolved) return
     if (shelfId !== 'none') {
       uncategorizedEmptyOnEntryRef.current = null
       return
@@ -946,7 +986,7 @@ export default function Library() {
       uncategorizedEmptyOnEntryRef.current = null
       navSearch({ shelf: undefined })
     }
-  }, [shelfId, listLoading, hasLoadedTotal, total, navSearch])
+  }, [libraryContextUnresolved, shelfId, listLoading, hasLoadedTotal, total, navSearch])
 
   const gridColumns = useUiStore((s) => s.gridColumns)
   const recentlyReadStyle = prefsReady ? (libraryPrefs?.recentlyReadStyle ?? 'off') : 'off'
@@ -957,6 +997,7 @@ export default function Library() {
   const [dynColumns, setDynColumns] = useState(lastKnownDynColumns)
 
   useLayoutEffect(() => {
+    if (libraryContextUnresolved) return
     if (gridColumns !== 'auto') return
     const el = containerRef.current
     if (!el) return
@@ -976,7 +1017,7 @@ export default function Library() {
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [gridColumns])
+  }, [gridColumns, libraryContextUnresolved])
 
   const columns = gridColumns === 'auto' ? dynColumns : Number(gridColumns)
 
@@ -997,9 +1038,41 @@ export default function Library() {
 
 
 
+  if (libraryContextUnresolved) {
+    const cachedTitle = viewTitle
+    const contextState = libraryContextPending ? 'pending' : libraryContextError ? 'error' : 'missing'
+    return (
+      <div className="flex min-h-screen bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100" data-library-context={contextState}>
+        <aside className="hidden w-60 shrink-0 flex-col border-r border-stone-200/60 px-3 pt-5 md:flex dark:border-stone-800/50" aria-busy={contextState === 'pending'}>
+          <div className="mb-8 flex items-center gap-2.5 px-2">
+            <span className="h-8 w-8 rounded-lg bg-stone-200 dark:bg-stone-800" aria-hidden="true" />
+            <span className="font-serif text-base font-semibold">{_('app.name')}</span>
+          </div>
+          <div className={`mb-3 h-12 rounded-xl bg-stone-200/60 dark:bg-stone-800/60 ${contextState === 'pending' ? 'animate-pulse motion-reduce:animate-none' : ''}`} aria-hidden="true" />
+          <div className={`h-8 rounded-lg bg-stone-200/60 dark:bg-stone-800/60 ${contextState === 'pending' ? 'animate-pulse motion-reduce:animate-none' : ''}`} aria-hidden="true" />
+        </aside>
+        <main className="flex min-w-0 flex-1 flex-col px-3 py-5 sm:px-4 sm:py-8 md:px-8">
+          <header className="mb-6 md:mb-8">
+            {cachedTitle ? <h1 className="truncate font-serif text-2xl font-semibold">{cachedTitle}</h1> : contextState === 'pending' ? <div data-testid="library-title-skeleton" aria-hidden="true" className="h-8 w-48 animate-pulse rounded bg-stone-200/70 motion-reduce:animate-none dark:bg-stone-800/70" /> : <h1 className="truncate font-serif text-2xl font-semibold">—</h1>}
+          </header>
+          <div className="flex-1" aria-busy={contextState === 'pending'}>
+            {contextState === 'pending' && <InitialLoading view={view} columns={columns} />}
+            {contextState === 'error' && <QueryErrorState isRetrying={librariesQuery.isFetching} onRetry={() => void librariesQuery.refetch()} />}
+            {contextState === 'missing' && (
+              <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
+                <p className="text-sm text-stone-500 dark:text-stone-400">{_('library.libraryUnavailable')}</p>
+                <button type="button" onClick={() => handleSwitchLibrary(null)} className="rounded-lg border border-stone-200 bg-white px-3.5 py-2 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300">{_('library.backToPrivate')}</button>
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <DndContext sensors={sensors} collisionDetection={pointerWithin} autoScroll={false} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
-      <div className="flex min-h-screen bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
+      <div className="flex min-h-screen bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100" data-library-context="resolved">
         {/* The sidebar is always there (0.4.0): switching library is a sidebar
             row, so it changes what the rows below it mean rather than replacing
             the page the way the old standalone library view did. */}
@@ -1021,6 +1094,9 @@ export default function Library() {
           settleTagId={settleTagId}
           libraries={libraries}
           activeLibraryId={activeLibrary?.id ?? null}
+          activeLibraryName={privateLibraryName}
+          activeLibraryNameLoading={privateLibraryNameLoading && !requestedLibraryId}
+          librariesResolved={isGuest || librariesData !== undefined}
           onSelectLibrary={handleSwitchLibrary}
           onManageLibrary={setManageTarget}
           onJoinLibrary={setJoinTarget}
@@ -1062,7 +1138,8 @@ export default function Library() {
           selectionActive={selectionActive}
           onToggleSelectMode={isGuest || (activeLibrary && !isLibraryManager) ? undefined : toggleSelectionMode}
           onOpenNavigation={() => setMobileNavOpen(true)}
-          title={viewTitle}
+          title={viewTitleLoading ? undefined : viewTitle}
+          titleLoading={viewTitleLoading}
           bookCount={hasLoadedTotal ? total : undefined}
           onResetMetadataFilter={metadataFilter ? () => navSearch({ author: undefined, series: undefined }) : undefined}
         />
@@ -1071,16 +1148,23 @@ export default function Library() {
 
         {!trash && <LibraryContextBar search={search} navSearch={navSearch} onClear={clearActiveFilters} />}
 
-        {(shelvesQuery.isError || tagsQuery.isError || (prefsError && !prefsReady)) && !catalogGone && (
+        {(privateLibrariesFailed || visibleTaxonomyError || (prefsError && !prefsReady)) && !catalogGone && (
           <QueryErrorState
             className="py-4"
-            isRetrying={shelvesQuery.isFetching || tagsQuery.isFetching || prefsFetching}
-            onRetry={() => Promise.all([shelvesQuery.refetch(), tagsQuery.refetch(), refetchPrefs()])}
+            isRetrying={(privateLibrariesFailed && librariesQuery.isFetching) || (activeLibrary
+              ? libraryCategoriesQuery.isFetching || libraryTagsQuery.isFetching
+              : !requestedLibraryId && (shelvesQuery.isFetching || tagsQuery.isFetching)) || prefsFetching}
+            onRetry={() => Promise.all([
+              ...(privateLibrariesFailed ? [librariesQuery.refetch()] : []),
+              ...(activeLibrary ? [libraryCategoriesQuery.refetch(), libraryTagsQuery.refetch()] : []),
+              ...(!requestedLibraryId ? [shelvesQuery.refetch(), tagsQuery.refetch()] : []),
+              ...(!prefsReady ? [refetchPrefs()] : []),
+            ])}
           />
         )}
 
-        {!isGuest && !activeLibrary && readingStatsEnabled && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
-        {!isGuest && !activeLibrary && recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle as Exclude<RecentlyReadStyle, 'off'>} />}
+        {!isGuest && !requestedLibraryId && readingStatsEnabled && !trash && !query && !metadataFilter && !selectionActive && <ReadingStatsCard />}
+        {!isGuest && !requestedLibraryId && recentlyReadStyle !== 'off' && !trash && !query && !metadataFilter && !selectionActive && <RecentlyRead style={recentlyReadStyle as Exclude<RecentlyReadStyle, 'off'>} />}
 
         <div
           ref={containerRef}

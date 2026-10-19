@@ -163,6 +163,14 @@ function showTagsPanel() {
 }
 
 describe('LibrarySidebar', () => {
+  it('shows the cached private display name without opening stale switcher rows', () => {
+    mockHooks()
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} libraries={[]} activeLibraryName="Personal shelf" librariesResolved={false} />)
+
+    expect(screen.getByText('Personal shelf')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '切换书库' })).toBeDisabled()
+  })
+
   it('shows panel tabs with an empty hint to read-only guests', () => {
     mockHooks({ uncategorizedTotal: 0 })
 

@@ -39,11 +39,13 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } fro
 import { READING_RECORDS_KEY } from '@/api/hooks/reading-records'
 import { tocBasePath, invalidateCityVersionQueries, type TocTarget } from '@/api/hooks/useTocRules'
 import { useAuthStore } from '@/stores/auth.store'
+import { getAuthSessionRevision } from '@/stores/auth.store'
 import { withReveal } from '@/lib/reveal-hidden'
 import i18n from '@/i18n/i18n'
 import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { fetchSettings, readStoredSettings, writeStoredSettings } from '@/lib/settings-cache'
+import { saveLibrariesSnapshot, saveLibraryCategoriesSnapshot, saveLibraryTagsSnapshot, saveShelvesSnapshot, saveTagsSnapshot } from '@/lib/library-name-cache'
 
 export interface UseBooksParams {
   page: number
@@ -313,9 +315,18 @@ export function useTrashCapBytes(options: { enabled?: boolean } = {}): number | 
  * "manage" per row without a request per library.
  */
 export function useLibraries(options?: { enabled?: boolean }) {
+  const user = useAuthStore((state) => state.user)
   return useQuery({
     queryKey: ['libraries'],
-    queryFn: () => apiGet<{ data: LibraryListItem[] }>('/libraries'),
+    queryFn: async ({ signal }) => {
+      const userId = user?.id
+      const sessionRevision = getAuthSessionRevision()
+      const result = await apiGet<{ data: LibraryListItem[] }>('/libraries', signal)
+      if (!signal.aborted && userId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) {
+        saveLibrariesSnapshot(userId, result.data)
+      }
+      return result
+    },
     enabled: options?.enabled ?? true,
   })
 }
@@ -331,17 +342,35 @@ export function useLibraryRelation(libraryId: string | null, options?: { enabled
 
 /** Shared-library taxonomy for browsing; keyed per library so switching never leaks rows. */
 export function useLibraryCategories(libraryId: string | null, options?: { enabled?: boolean }) {
+  const user = useAuthStore((state) => state.user)
   return useQuery({
     queryKey: ['libraries', libraryId, 'categories'],
-    queryFn: () => apiGet<{ data: Category[] }>(`/libraries/${libraryId}/categories`),
+    queryFn: async ({ signal }) => {
+      const userId = user?.id
+      const sessionRevision = getAuthSessionRevision()
+      const result = await apiGet<{ data: Category[] }>(`/libraries/${libraryId}/categories`, signal)
+      if (!signal.aborted && userId && libraryId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) {
+        saveLibraryCategoriesSnapshot(userId, libraryId, result.data)
+      }
+      return result
+    },
     enabled: (options?.enabled ?? true) && !!libraryId,
   })
 }
 
 export function useLibraryTags(libraryId: string | null, options?: { enabled?: boolean }) {
+  const user = useAuthStore((state) => state.user)
   return useQuery({
     queryKey: ['libraries', libraryId, 'tags'],
-    queryFn: () => apiGet<{ data: LibraryTag[] }>(`/libraries/${libraryId}/tags`),
+    queryFn: async ({ signal }) => {
+      const userId = user?.id
+      const sessionRevision = getAuthSessionRevision()
+      const result = await apiGet<{ data: LibraryTag[] }>(`/libraries/${libraryId}/tags`, signal)
+      if (!signal.aborted && userId && libraryId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) {
+        saveLibraryTagsSnapshot(userId, libraryId, result.data)
+      }
+      return result
+    },
     enabled: (options?.enabled ?? true) && !!libraryId,
   })
 }
@@ -1632,21 +1661,33 @@ export function useEmptyTrash() {
   })
 }
 
-export function useShelves(): QueryObserverResult<{ data: ShelfListItem[] }> {
+export function useShelves(options?: { enabled?: boolean }): QueryObserverResult<{ data: ShelfListItem[] }> {
   const user = useAuthStore((state) => state.user)
   return useQuery({
-    enabled: Boolean(user),
+    enabled: Boolean(user) && (options?.enabled ?? true),
     queryKey: ['shelves'],
-    queryFn: () => apiGet<{ data: ShelfListItem[] }>(withReveal('/shelves')),
+    queryFn: async ({ signal }) => {
+      const userId = user?.id
+      const sessionRevision = getAuthSessionRevision()
+      const result = await apiGet<{ data: ShelfListItem[] }>(withReveal('/shelves'), signal)
+      if (!signal.aborted && userId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) saveShelvesSnapshot(userId, result.data)
+      return result
+    },
   })
 }
 
-export function useTags(): QueryObserverResult<{ data: TagListItem[] }> {
+export function useTags(options?: { enabled?: boolean }): QueryObserverResult<{ data: TagListItem[] }> {
   const user = useAuthStore((state) => state.user)
   return useQuery({
-    enabled: Boolean(user),
+    enabled: Boolean(user) && (options?.enabled ?? true),
     queryKey: ['tags'],
-    queryFn: () => apiGet<{ data: TagListItem[] }>(withReveal('/tags')),
+    queryFn: async ({ signal }) => {
+      const userId = user?.id
+      const sessionRevision = getAuthSessionRevision()
+      const result = await apiGet<{ data: TagListItem[] }>(withReveal('/tags'), signal)
+      if (!signal.aborted && userId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) saveTagsSnapshot(userId, result.data)
+      return result
+    },
   })
 }
 
@@ -2100,10 +2141,10 @@ export function useMoveBooksToShelf() {
   })
 }
 
-export function useLibrarySearchAuthors(libraryId: string | null, trash: boolean, showHidden: boolean) {
+export function useLibrarySearchAuthors(libraryId: string | null, trash: boolean, showHidden: boolean, options?: { enabled?: boolean }) {
   const user = useAuthStore((state) => state.user)
   return useQuery({
-    enabled: Boolean(user),
+    enabled: Boolean(user) && (options?.enabled ?? true),
     queryKey: ['library-search-authors', libraryId, trash, showHidden],
     queryFn: () => apiGet<{ data: string[] }>(`${libraryId ? `/libraries/${libraryId}/search-authors` : '/books/search-authors'}?trash=${trash ? '1' : '0'}&showHidden=${showHidden ? '1' : '0'}`),
     staleTime: 0,

@@ -64,6 +64,24 @@ afterEach(() => {
 })
 
 describe('RecentlyRead covers style', () => {
+  it('reserves a local skeleton while the first request is pending', () => {
+    vi.mocked(useBooks).mockReturnValue({ data: undefined, isLoading: true, isError: false } as ReturnType<typeof useBooks>)
+    render(<RecentlyRead style="covers" />)
+
+    expect(screen.getByRole('heading', { name: '最近阅读' }).parentElement).toHaveAttribute('aria-busy', 'true')
+    expect(screen.queryByText('library.noResults')).toBeNull()
+  })
+
+  it('shows a retry state after an initial failure', () => {
+    const refetch = vi.fn()
+    vi.mocked(useBooks).mockReturnValue({ data: undefined, isLoading: false, isError: true, isFetching: false, refetch } as ReturnType<typeof useBooks>)
+    render(<RecentlyRead style="cards" />)
+
+    screen.getByRole('button', { name: '重试' }).click()
+    expect(refetch).toHaveBeenCalledOnce()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+  })
+
   it('renders titles and progress percent, hiding the percent at 0%', () => {
     render(<RecentlyRead style="covers" />)
 

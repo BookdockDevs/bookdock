@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 
+import { clearLibraryNamesSnapshot } from '@/lib/library-name-cache'
 import { clearStoredSettings } from '@/lib/settings-cache'
 import { useUiStore } from './ui.store'
 
@@ -33,11 +34,22 @@ function readStoredUser(): AuthState['user'] {
   }
 }
 
+let authSessionRevision = 0
+
+export function getAuthSessionRevision(): number {
+  return authSessionRevision
+}
+
 // The session lives in an HttpOnly cookie; the store only mirrors the user profile for
 // UI display so a reload does not flash logged-out chrome before /auth/me resolves.
 export const useAuthStore = create<AuthState>((set) => ({
   user: readStoredUser(),
   setAuth: (user) => {
+    const previousUser = useAuthStore.getState().user
+    if (!previousUser || previousUser.id !== user.id || previousUser.role !== user.role) {
+      authSessionRevision += 1
+      clearLibraryNamesSnapshot()
+    }
     if (typeof window !== 'undefined') {
       localStorage.setItem('bd-user', JSON.stringify(user))
     }
@@ -47,6 +59,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   updateUser: (patch) => {
     set((state) => {
       if (!state.user) return state
+      if (patch.role !== undefined && patch.role !== state.user.role) {
+        authSessionRevision += 1
+        clearLibraryNamesSnapshot()
+      }
       const user = { ...state.user, ...patch }
       if (typeof window !== 'undefined') {
         localStorage.setItem('bd-user', JSON.stringify(user))
@@ -55,6 +71,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     })
   },
   clearAuth: () => {
+    authSessionRevision += 1
+    clearLibraryNamesSnapshot()
     if (!useAuthStore.getState().user) return
     // Drop the session before resetting preferences: the settings subscription
     // skips syncing while logged out, so the reset below stays local and can

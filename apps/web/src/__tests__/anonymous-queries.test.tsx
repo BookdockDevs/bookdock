@@ -29,7 +29,7 @@ it('pauses personal queries while anonymous and resumes them after login', async
 
   act(() => useAuthStore.setState({ user: { id: 'member', username: 'member', role: 'member', avatarKey: null } }))
   await waitFor(() => expect(result.current.tags.isSuccess && result.current.shelves.isSuccess).toBe(true))
-  expect(apiGet).toHaveBeenCalledWith('/shelves')
-  expect(apiGet).toHaveBeenCalledWith('/tags')
+  expect(apiGet).toHaveBeenCalledWith('/shelves', expect.any(AbortSignal))
+  expect(apiGet).toHaveBeenCalledWith('/tags', expect.any(AbortSignal))
   client.clear()
 })

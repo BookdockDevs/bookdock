@@ -64,6 +64,9 @@ interface LibrarySidebarProps {
    */
   libraries?: LibraryListItem[]
   activeLibraryId?: string | null
+  activeLibraryName?: string
+  activeLibraryNameLoading?: boolean
+  librariesResolved?: boolean
   onSelectLibrary?: (libraryId: string | null) => void
   onManageLibrary?: (library: LibraryListItem) => void
   /** Opens the join flow for a library the reader can see but has not joined. */
@@ -106,7 +109,7 @@ function TaxonomyEmptyState({ type, inLibrary }: TaxonomyEmptyStateProps) {
   )
 }
 
-const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries, onOpenNotifications, notificationButtonRef, librarySearch }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, activeLibraryName, activeLibraryNameLoading = false, librariesResolved = true, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries, onOpenNotifications, notificationButtonRef, librarySearch }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const [session, setSession] = useState(() => (sessionKey ? navigationSessions.get(sessionKey) : undefined) ?? { panel: (directory || 'categories') as 'categories' | 'tags', expanded: [] as string[], scroll: {} as Record<string, number> })
@@ -340,6 +343,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
 
       <LibrarySection
         libraries={libraries ?? []} activeLibraryId={activeLibraryId}
+        activeLibraryName={activeLibraryName}
+        activeNameLoading={activeLibraryNameLoading}
+        namesReady={librariesResolved}
         onSelect={(id) => { onSelectLibrary?.(id); onMobileClose?.() }}
         onSelectPrivate={() => { onSelectLibrary?.(null); onMobileClose?.() }}
         onPrefetchPrivate={() => onPrefetchNavigation?.({ shelf: undefined, tag: undefined, status: undefined, trash: undefined }, null)}
@@ -503,7 +509,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
                   />
                 )
               })}
-              {shelves.length === 0 && (
+              {shelves.length === 0 && !(inLibrary ? categoriesQuery.isError && !categoriesQuery.data : shelvesError && !shelvesData) && (
                 <TaxonomyEmptyState
                   type="categories"
                   inLibrary={inLibrary}
@@ -516,7 +522,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
               onEdit={() => setTagDialog({ tagId: tag.id, initialName: tag.name })} onDelete={() => setDeleteTagTarget(tag)}
               onTogglePin={() => activeLibraryId ? updateLibraryTag.mutate({ libraryId: activeLibraryId, tagId: tag.id, patch: { pinned: !tag.pinned } }) : toggleTagPin.mutate({ id: tag.id, pinned: !tag.pinned })}
               onToggleHidden={() => activeLibraryId ? updateLibraryTag.mutate({ libraryId: activeLibraryId, tagId: tag.id, patch: { hidden: !tag.hidden } }) : toggleTagHidden.mutate({ id: tag.id, hidden: !tag.hidden })} />)}
-            {tags.length === 0 && (
+            {tags.length === 0 && !(inLibrary ? libraryTagsQuery.isError && !libraryTagsQuery.data : tagsError && !tagsData) && (
               <TaxonomyEmptyState
                 type="tags"
                 inLibrary={inLibrary}
@@ -722,10 +728,13 @@ function EyeOffIcon() {
 }
 
 function LibrarySection({
-  libraries, activeLibraryId, onSelect, onSelectPrivate, onPrefetchPrivate, onManage, onRenamePrivate, onJoin, onExplore, disabled,
+  libraries, activeLibraryId, activeLibraryName, activeNameLoading, namesReady = true, onSelect, onSelectPrivate, onPrefetchPrivate, onManage, onRenamePrivate, onJoin, onExplore, disabled,
 }: {
   libraries: LibraryListItem[]
   activeLibraryId: string | null
+  activeLibraryName?: string
+  activeNameLoading?: boolean
+  namesReady?: boolean
   onSelect?: (libraryId: string | null) => void
   /** Leaving library context also drops shelf/tag/status filters, as before. */
   onSelectPrivate?: () => void
@@ -766,12 +775,13 @@ function LibrarySection({
   const privateActive = activeLibraryId === null
   const activeLibrary = libraries.find((library) => library.id === activeLibraryId)
   const activeIsPrivate = privateActive || activeLibrary?.type === 'private'
-  const activeName = activeLibrary?.name || privateLibrary?.name || _('library.myLibrary')
+  const activeName = activeLibrary?.name || privateLibrary?.name || activeLibraryName || _('library.myLibrary')
 
   return (
     <div ref={dropdownRef} className="relative mb-3.5">
       <button
         type="button"
+        disabled={activeNameLoading || !namesReady}
         aria-label={_('library.switchLibrary')}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -797,7 +807,7 @@ function LibrarySection({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100 leading-tight">
-            {activeName}
+            {activeNameLoading ? <span data-testid="library-switcher-name-skeleton" aria-hidden="true" className="inline-block h-4 w-28 animate-pulse rounded bg-stone-300/70 align-middle motion-reduce:animate-none dark:bg-stone-700/70" /> : activeName}
           </div>
         </div>
         <svg width="16" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={cn("mr-0.5 shrink-0 transition-colors", open ? "text-stone-700 dark:text-stone-200" : "text-stone-500 group-hover:text-stone-700 dark:text-stone-400 dark:group-hover:text-stone-200")}>
@@ -833,7 +843,7 @@ function LibrarySection({
                   <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
                     <SolidBookIcon className="h-4 w-4" />
                   </div>
-                  <span className="truncate">{privateLibrary?.name || _(disabled ? 'library.allBooks' : 'library.myLibrary')}</span>
+                  <span className="truncate">{privateLibrary?.name || activeLibraryName || _(disabled ? 'library.allBooks' : 'library.myLibrary')}</span>
                 </span>
               </button>
             )}
