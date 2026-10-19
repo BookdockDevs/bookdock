@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 
+import type { ReadingRange } from '@bookdock/shared'
+
 import { useBookReadingRecords } from '@/api/hooks/reading-records'
 import { useBook } from '@/features/library/hooks'
 import { formatDuration } from '@/lib/format-duration'
@@ -8,16 +10,18 @@ import { formatRelativeTime } from '@/features/reader/components/format-relative
 
 interface BookStatsMicroCardProps {
   bookVersionId: string
+  range?: ReadingRange
 }
 
-export default function BookStatsMicroCard({ bookVersionId }: BookStatsMicroCardProps) {
+export default function BookStatsMicroCard({ bookVersionId, range }: BookStatsMicroCardProps) {
   const _ = useTranslation()
-  const recordsQuery = useBookReadingRecords(bookVersionId)
+  const recordsQuery = useBookReadingRecords(bookVersionId, { range })
   const bookQuery = useBook(bookVersionId)
 
   const book = bookQuery.data?.data
   const records = recordsQuery.data?.data
 
+  const bounded = Boolean(range?.from || range?.to)
   const totalSeconds = records?.totalSeconds ?? 0
   const progressPercent = useMemo(() => {
     if (book?.progress == null) return 0
@@ -26,7 +30,7 @@ export default function BookStatsMicroCard({ bookVersionId }: BookStatsMicroCard
 
   const distinctDays = useMemo(() => {
     if (!records?.records) return 0
-    return records.records.filter((r) => r.durationSeconds > 0).length
+    return records.records.filter((r) => r.durationSeconds >= 60).length
   }, [records?.records])
 
   const firstDate = useMemo(() => {
@@ -53,8 +57,8 @@ export default function BookStatsMicroCard({ bookVersionId }: BookStatsMicroCard
 
   return (
     <div className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white shadow-2xs dark:border-stone-800 dark:bg-stone-900/60">
-      <div className="grid grid-cols-2 divide-y divide-stone-100 sm:grid-cols-4 sm:divide-x sm:divide-y-0 dark:divide-stone-800/80">
-        {/* 本书用时 */}
+      <div className={`grid grid-cols-2 divide-y divide-stone-100 sm:divide-x sm:divide-y-0 dark:divide-stone-800/80 ${bounded ? 'sm:grid-cols-2' : 'sm:grid-cols-4'}`}>
+        {/* Duration and qualifying days follow the archive scope. */}
         <div className="flex flex-col justify-center p-3.5 sm:p-4">
           <span className="text-xs font-medium text-stone-500 dark:text-stone-400">
             {_('archive.bookDuration', { defaultValue: '本书用时' })}
@@ -64,17 +68,17 @@ export default function BookStatsMicroCard({ bookVersionId }: BookStatsMicroCard
           </span>
         </div>
 
-        {/* 当前进度 */}
-        <div className="flex flex-col justify-center p-3.5 sm:p-4">
+        {/* Current reading position is lifetime context. */}
+        {!bounded && <div className="flex flex-col justify-center p-3.5 sm:p-4">
           <span className="text-xs font-medium text-stone-500 dark:text-stone-400">
             {_('archive.readingProgress', { defaultValue: '阅读进度' })}
           </span>
           <span className="mt-1 text-xl sm:text-2xl font-bold tabular-nums tracking-tight text-stone-900 dark:text-stone-50">
             {progressPercent}%
           </span>
-        </div>
+        </div>}
 
-        {/* 阅读天数 */}
+        {/* Reading days in scope. */}
         <div className="flex flex-col justify-center p-3.5 sm:p-4">
           <span className="text-xs font-medium text-stone-500 dark:text-stone-400">
             {_('archive.readingDays', { defaultValue: '阅读天数' })}
@@ -84,8 +88,8 @@ export default function BookStatsMicroCard({ bookVersionId }: BookStatsMicroCard
           </span>
         </div>
 
-        {/* 最近阅读 / 历程 */}
-        <div className="flex flex-col justify-center p-3.5 sm:p-4">
+        {/* Last-read position is lifetime context. */}
+        {!bounded && <div className="flex flex-col justify-center p-3.5 sm:p-4">
           <span className="text-xs font-medium text-stone-500 dark:text-stone-400">
             {_('archive.recentActivity', { defaultValue: '最近阅读' })}
           </span>
@@ -97,7 +101,7 @@ export default function BookStatsMicroCard({ bookVersionId }: BookStatsMicroCard
               {_('archive.firstReadAt', { date: firstDate, defaultValue: `初读于 ${firstDate}` })}
             </span>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   )

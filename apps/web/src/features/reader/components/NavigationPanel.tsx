@@ -15,8 +15,6 @@ import { ExpandingSearchBar } from './ExpandingSearchBar'
 import { clearSearchHistory, loadSearchHistory, pushSearchTerm, saveSearchHistory } from '../lib/search-history'
 import { formatCardExcerpt } from '../lib/book-search'
 import { markEscConsumed } from '../lib/esc-consumed'
-import { useBookReadingRecords } from '@/api/hooks/reading-records'
-import { formatDuration } from '@/lib/format-duration'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import AnnotationExportDialog from './AnnotationExportDialog'
@@ -220,8 +218,6 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const annotationsQuery = useAnnotations(bookId, { enabled: !guestReadOnly })
   const { data: annotations } = annotationsQuery
   const chaptersQuery = useBookChapters(bookId)
-  const statsRecordsQuery = useBookReadingRecords(bookId, { enabled: !guestReadOnly })
-  const statsTotalSeconds = statsRecordsQuery.data?.data?.totalSeconds ?? 0
 
   const listRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
@@ -1123,11 +1119,6 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           ) : tab === 'stats' ? (
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="text-sm font-semibold text-current">{_('reader.stats')}</span>
-              {statsTotalSeconds > 0 && (
-                <span className="inline-flex items-center rounded-full bg-stone-500/10 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-[var(--bd-read-sub)]">
-                  {formatDuration(statsTotalSeconds, _)}
-                </span>
-              )}
             </div>
           ) : (
             <span className="text-sm font-semibold text-current">

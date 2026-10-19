@@ -13,8 +13,8 @@ import {
  * Binds the manual reading timer (manual-reading-timer.md) to the current
  * book: tracks the live position for session end bounds, resumes a suspended
  * session on re-entry, suspends on visibilitychange/unmount (grace countdown
- * runs module-level, surviving Reader unmounts), and terminates on pagehide so
- * a closed tab never loses the session.
+ * runs module-level, surviving Reader unmounts). Pagehide suspends and persists
+ * captured fragments so refreshing never counts the time away.
  */
 export function useManualTimer(bookId: string | undefined) {
   const session = useManualTimerStore((s) => (bookId ? s.sessions[bookId] : undefined))
@@ -36,15 +36,15 @@ export function useManualTimer(bookId: string | undefined) {
     return renderer.on('relocated', (e) => {
       const pos = { cfi: e.cfi ?? null, fraction: e.fraction ?? null, chapterIndex: e.chapterIndex ?? null }
       lastPosRef.current = pos
-      useManualTimerStore.getState().updatePosition(bookId, pos)
     })
   }, [bookId, renderer])
 
   // Grace re-entry: a suspended session for this book resumes on mount
   useEffect(() => {
     if (!bookId) return
+    useManualTimerStore.getState().restore()
     const existing = useManualTimerStore.getState().sessions[bookId]
-    if (existing?.phase === 'suspended') useManualTimerStore.getState().resume(bookId)
+    if (existing?.phase === 'suspended' && document.visibilityState !== 'hidden') useManualTimerStore.getState().resume(bookId, false)
   }, [bookId])
 
   useEffect(() => {
@@ -54,11 +54,11 @@ export function useManualTimer(bookId: string | undefined) {
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         store().suspend(id)
-      } else {
-        store().resume(id)
+      } else if (store().sessions[id]?.phase === 'suspended') {
+        store().resume(id, false)
       }
     }
-    const onPageHide = () => store().terminate(id)
+    const onPageHide = () => store().suspend(id)
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('pagehide', onPageHide)
     return () => {
@@ -77,6 +77,7 @@ export function useManualTimer(bookId: string | undefined) {
 
   return {
     phase,
+    transferred: session?.transferred ?? false,
     elapsedMs: durationMs,
     graceMs,
     graceMinutes,

@@ -1,9 +1,10 @@
 import { useEffect } from 'react'
 
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type {
-  ReadingDetailItem,
+  ReadingLedgerRes,
+  ReadingRange,
   ReadingRecordBookDetailRes,
   ReadingRecordBookItem,
   ReadingRecordCreateReq,
@@ -11,7 +12,6 @@ import type {
   ReadingRecordHourlyItem,
   ReadingRecordSummaryRes,
   ReadingRecordTagItem,
-  ReadingSessionItem,
   ReadingSessionUpdateReq,
 } from '@bookdock/shared'
 
@@ -25,11 +25,27 @@ export function localDateString(d = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function useReadingSummary() {
-  const today = localDateString()
+export function useReadingSummary(from?: string, to?: string, timezone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const params = new URLSearchParams({ today, timezone })
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
   return useQuery({
-    queryKey: [...READING_RECORDS_KEY, 'summary', today],
-    queryFn: () => apiGet<{ data: ReadingRecordSummaryRes }>(withReveal(`/reading-records/summary?today=${today}`)),
+    queryKey: [...READING_RECORDS_KEY, 'summary', today, from, to, timezone],
+    queryFn: () => apiGet<{ data: ReadingRecordSummaryRes }>(withReveal(`/reading-records/summary?${params}`)),
+  })
+}
+
+export function usePreviousReadingSummary(from?: string, to?: string, timezone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const params = new URLSearchParams({ today, timezone })
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  const enabled = Boolean(from && to)
+  return useQuery({
+    queryKey: [...READING_RECORDS_KEY, 'summary-prev', today, from, to, timezone],
+    queryFn: () => apiGet<{ data: ReadingRecordSummaryRes }>(withReveal(`/reading-records/summary?${params}`)),
+    enabled,
   })
 }
 
@@ -75,56 +91,36 @@ export function useReadingHourly(from?: string, to?: string, bookId?: string) {
   })
 }
 
-export function useBookReadingRecords(bookId: string | undefined, options: { enabled?: boolean } = {}) {
+export function useBookReadingRecords(bookId: string | undefined, options: { enabled?: boolean; range?: ReadingRange } = {}) {
+  const params = new URLSearchParams()
+  if (options.range?.from) params.set('from', options.range.from)
+  if (options.range?.to) params.set('to', options.range.to)
+  if (options.range?.timezone) params.set('timezone', options.range.timezone)
+  const query = params.toString()
   return useQuery({
-    queryKey: [...READING_RECORDS_KEY, 'book', bookId],
-    queryFn: () => apiGet<{ data: ReadingRecordBookDetailRes }>(withReveal(`/reading-records/book/${bookId}`)),
+    queryKey: [...READING_RECORDS_KEY, 'book', bookId, ...(query ? [query] : [])],
+    queryFn: () => apiGet<{ data: ReadingRecordBookDetailRes }>(withReveal(`/reading-records/book/${bookId}${query ? `?${query}` : ''}`)),
     enabled: !!bookId && options.enabled !== false,
   })
 }
 
-export function useAddReadingTime() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: ReadingRecordCreateReq) => apiPost(withReveal('/reading-records'), body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY }),
-  })
-}
-
-/** Retroactive entry from the reader sidebar; also refreshes progress because start/end fractions merge into read intervals */
+/** Refresh coverage-derived views after a retroactive entry without moving the reader position. */
 export function useAddReadingRecord(bookId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: ReadingRecordCreateReq) => apiPost(withReveal('/reading-records'), body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
-      queryClient.invalidateQueries({ queryKey: READING_SESSIONS_KEY })
       queryClient.invalidateQueries({ queryKey: ['progress', bookId] })
+      queryClient.invalidateQueries({ queryKey: ['archive'] })
     },
   })
 }
 
-const DETAIL_PAGE_SIZE = 50
-
-/** Mixed per-book detail feed (manual sessions + auto day rows), newest first */
-export function useReadingDetailInfinite(bookId: string | undefined) {
-  return useInfiniteQuery({
-    queryKey: [...READING_RECORDS_KEY, 'detail', bookId],
-    queryFn: ({ pageParam }) =>
-      apiGet<{ data: ReadingDetailItem[] }>(withReveal(`/reading-records/book/${bookId}/detail?limit=${DETAIL_PAGE_SIZE}&offset=${pageParam as number}`)),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.data.length === DETAIL_PAGE_SIZE ? allPages.length * DETAIL_PAGE_SIZE : undefined,
-    enabled: !!bookId,
-  })
-}
-
-export const READING_SESSIONS_KEY = ['reading-sessions']
-
 /**
  * Warm the per-book stats queries at reader mount so the sidebar stats tab
- * renders instantly on first open (book + progress are already fetched by the
- * reader itself). Pass undefined to skip (timer mode off hides the tab anyway).
+ * renders from the same cache as its ledger and total-duration consumers.
+ * Pass undefined for guest readers.
  */
 export function usePrefetchBookReadingStats(bookId: string | undefined) {
   const queryClient = useQueryClient()
@@ -134,35 +130,12 @@ export function usePrefetchBookReadingStats(bookId: string | undefined) {
       queryKey: [...READING_RECORDS_KEY, 'book', bookId],
       queryFn: () => apiGet<{ data: ReadingRecordBookDetailRes }>(withReveal(`/reading-records/book/${bookId}`)),
     })
-    void queryClient.prefetchInfiniteQuery({
-      queryKey: [...READING_RECORDS_KEY, 'detail', bookId],
-      queryFn: ({ pageParam }) =>
-        apiGet<{ data: ReadingDetailItem[] }>(withReveal(`/reading-records/book/${bookId}/detail?limit=${DETAIL_PAGE_SIZE}&offset=${pageParam as number}`)),
-      initialPageParam: 0,
+    void queryClient.prefetchQuery({
+      queryKey: [...READING_RECORDS_KEY, 'ledger', bookId],
+      queryFn: () => apiGet<{ data: ReadingLedgerRes }>(withReveal(`/reading-records/book/${bookId}/ledger`)),
     })
   }, [bookId, queryClient])
 }
-
-export function useReadingSessionsInfinite(bookId: string | undefined) {
-  const params = (offset: number) => {
-    const p = new URLSearchParams()
-    if (bookId) p.set('bookId', bookId)
-    p.set('limit', String(SESSION_PAGE_SIZE))
-    if (offset > 0) p.set('offset', String(offset))
-    return p.toString()
-  }
-  return useInfiniteQuery({
-    queryKey: [...READING_SESSIONS_KEY, 'infinite', bookId],
-    queryFn: ({ pageParam }) =>
-      apiGet<{ data: ReadingSessionItem[] }>(withReveal(`/reading-records/sessions?${params(pageParam as number)}`)),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.data.length === SESSION_PAGE_SIZE ? allPages.length * SESSION_PAGE_SIZE : undefined,
-    enabled: !!bookId,
-  })
-}
-
-const SESSION_PAGE_SIZE = 50
 
 export function useUpdateSession() {
   const queryClient = useQueryClient()
@@ -170,8 +143,9 @@ export function useUpdateSession() {
     mutationFn: ({ id, body }: { id: string; body: ReadingSessionUpdateReq }) =>
       apiPut(`/reading-records/sessions/${id}`, body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: READING_SESSIONS_KEY })
       queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
+      queryClient.invalidateQueries({ queryKey: ['archive'] })
+      queryClient.invalidateQueries({ queryKey: ['progress'] })
     },
   })
 }
@@ -181,8 +155,31 @@ export function useDeleteSession() {
   return useMutation({
     mutationFn: (id: string) => apiDelete(`/reading-records/sessions/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: READING_SESSIONS_KEY })
       queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
+      queryClient.invalidateQueries({ queryKey: ['archive'] })
+      queryClient.invalidateQueries({ queryKey: ['progress'] })
+    },
+  })
+}
+
+export function useReadingLedger(bookId: string) {
+  return useQuery({
+    queryKey: [...READING_RECORDS_KEY, 'ledger', bookId],
+    queryFn: () => apiGet<{ data: ReadingLedgerRes }>(withReveal(`/reading-records/book/${bookId}/ledger`)),
+    enabled: !!bookId,
+  })
+}
+
+export function useReadingRound(bookId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (action: 'reread' | 'continue' | 'finish' | 'abandon') => apiPost(`/reading-records/book/${bookId}/round`, { action }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['book', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['progress', bookId] })
+      void queryClient.invalidateQueries({ queryKey: ['archive'] })
     },
   })
 }

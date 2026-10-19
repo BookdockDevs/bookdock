@@ -304,14 +304,14 @@ describe('progress service', () => {
   it('should swap reversed segment bounds', async () => {
     await upsertProgress(ownerId, bookId, { percent: 10, fraction: 0.1, segmentStartFraction: 0.2 })
     const loaded = await getProgress(ownerId, bookId)
-    expect(loaded!.readFraction).toBeCloseTo(0.2)
+    expect(loaded!.readFraction).toBeCloseTo(0.1)
   })
 
-  it('initializes coverage from percent when fraction is unavailable', async () => {
+  it('does not infer read coverage from a saved position', async () => {
     await upsertProgress(ownerId, bookId, { percent: 30 })
     const loaded = await getProgress(ownerId, bookId)
     expect(loaded!.fraction).toBeNull()
-    expect(loaded!.readFraction).toBeCloseTo(0.3)
+    expect(loaded!.readFraction).toBe(0)
   })
 
   it('merges concurrent disjoint intervals without losing data', async () => {
@@ -375,7 +375,34 @@ describe('progress service', () => {
       readFraction: schema.bookStates.readFraction,
     }).from(schema.bookStates).where(eq(schema.bookStates.bookVersionId, bookId)).get()!
     expect(state.percent).toBe(25)
-    expect(state.readFraction).toBeCloseTo(0.35)
+    expect(state.readFraction).toBeCloseTo(0.1)
+  })
+
+  it.each(['legacy', 'manual'] as const)('preserves imported file coverage as a baseline only before canonical %s facts', async (source) => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bookdock-ledger-progress-'))
+    try {
+      const driver = new LocalFsDriver(path.join(tmpDir, 'files'))
+      vi.spyOn(storage, 'getStorage').mockReturnValue(driver)
+      db.insert(schema.readingArchives).values({
+        userId: ownerId, bookVersionId: bookId, title: 'Archived', createdAt: 1, updatedAt: 1,
+      }).run()
+      db.insert(schema.readingSessions).values({
+        id: createId('rs'), userId: ownerId, bookId, bookVersionId: bookId,
+        date: '2026-10-01', durationSeconds: 60, source,
+      }).run()
+      await driver.put(`progress/${ownerId}/${bookId}.json`, Buffer.from(JSON.stringify({
+        percent: 40, intervals: [[0, 0.4]], updatedAt: 1000,
+      })))
+      const report = await importProgressFiles(db)
+      expect(report.imported).toBe(1)
+      const archive = db.select().from(schema.readingArchives).where(eq(schema.readingArchives.userId, ownerId)).get()!
+      expect(archive.legacyIntervals).toEqual(source === 'legacy' ? [[0, 0.4]] : [])
+      const state = db.select().from(schema.bookStates).where(eq(schema.bookStates.bookVersionId, bookId)).get()!
+      expect(state.progressData?.intervals).toEqual([[0, 0.4]])
+      expect((await importProgressFiles(db)).imported).toBe(0)
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    }
   })
 
   it('imports legacy progress from real LocalFsDriver storage layout without missing files', async () => {

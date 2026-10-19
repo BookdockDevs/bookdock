@@ -1,148 +1,69 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import StatsPanel from '../features/reader/components/StatsPanel'
-import { useBookReadingRecords } from '@/api/hooks/reading-records'
+import type { ReadingLedgerRes } from '@bookdock/shared'
 
-vi.mock('@/api/hooks/reading-records', () => ({
-  useBookReadingRecords: vi.fn(),
-  localDateString: (d: Date) => d.toISOString().slice(0, 10),
+import StatsPanel from '@/features/reader/components/StatsPanel'
+
+const state = vi.hoisted(() => ({ ledger: null as ReadingLedgerRes | null, error: false, retry: vi.fn() }))
+vi.mock('@/api/hooks/reading-records', async (original) => ({
+  ...await original<typeof import('@/api/hooks/reading-records')>(),
+  useReadingLedger: () => ({ data: { data: state.ledger }, isPending: false, isError: state.error, isFetching: false, refetch: state.retry }),
+  useDeleteSession: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
-
-vi.mock('@/features/reader/components/ReadingDetailList', () => ({
-  default: () => <div data-testid="reading-detail-list">Mock ReadingDetailList</div>,
+vi.mock('@tanstack/react-router', () => ({ Link: ({ children, search, to, ...props }: { children: React.ReactNode; to: string; search: unknown }) => <a href={to} data-search={JSON.stringify(search)} {...props}>{children}</a> }))
+vi.mock('@/features/library/hooks', () => ({
+  useBook: () => ({ data: null, isPending: false, isError: false }),
 }))
+vi.mock('@/features/reader/components/AddRecordDialog', () => ({ default: () => <div data-testid="quick-add" /> }))
 
-vi.mock('@/api/client', () => ({
-  apiGet: vi.fn().mockImplementation((url: string) => {
-    if (url.includes('/books/')) {
-      return Promise.resolve({ data: { id: 'book-1', title: 'Test Book', meta: { wordCount: 100000 } } })
-    }
-    if (url.includes('/progress/')) {
-      return Promise.resolve({ data: { fraction: 0.5, readFraction: 0.5, rateSamples: [] } })
-    }
-    return Promise.resolve({ data: null })
-  }),
-}))
+beforeEach(() => {
+  vi.clearAllMocks()
+  state.error = false
+  state.ledger = {
+    bookId: 'b1', title: 'A book', author: 'An author', sourceAvailable: true, currentRoundId: 'r2', coverage: 0.25, totalSeconds: 9000,
+    legacyCoverage: true, legacyDaily: [{ date: '2026-10-16', durationSeconds: 3600 }], legacyIntervals: [[0, 0.1]], legacyWordCount: 10000,
+    rounds: [
+      { id: 'r2', ordinal: 2, status: 'reading', startedAt: Date.parse('2026-10-18T10:00:00Z'), endedAt: null, coverage: 0.25, totalSeconds: 120, wordCount: 10000, legacyCoverage: false },
+      { id: 'r1', ordinal: 1, status: 'finished', startedAt: Date.parse('2026-10-16T10:00:00Z'), endedAt: Date.parse('2026-10-17T10:00:00Z'), coverage: 1, totalSeconds: 8880, wordCount: 10000, legacyCoverage: true },
+    ],
+    sessions: [{ id: 's1', roundId: 'r2', source: 'auto', date: '2026-10-18', startedAt: null, endedAt: null, durationSeconds: 120, startFraction: 0, endFraction: 0.25, wordCount: 10000, coverage: [[0, 0.25]], fragments: [], timezone: 'Asia/Shanghai' }],
+  }
+})
 
-function renderWithClient(ui: React.ReactElement, queryClient?: QueryClient) {
-  const client =
-    queryClient ??
-    new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-      },
-    })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
-}
-
-describe('StatsPanel', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-09-11T12:00:00Z'))
+describe('reader statistics overview', () => {
+  it('shows combined history without exposing reading rounds', () => {
+    render(<StatsPanel bookId="b1" />)
+    expect(within(screen.getByText('reader.statsProgress').parentElement!).getByText('25%')).toBeInTheDocument()
+    expect(within(screen.getByText('reader.statsReadingDays').parentElement!).getByText('2')).toBeInTheDocument()
+    expect(screen.getByText(/readingData.roundOrdinal/)).toBeInTheDocument()
+    expect(screen.queryByText('readingData.legacyHint')).not.toBeInTheDocument()
+    expect(screen.queryByText('reader.statsTrend30')).not.toBeInTheDocument()
+    expect(screen.getByText('reader.detailRecords')).toBeInTheDocument()
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
+  it('offers the shared quick entry', () => {
+    render(<StatsPanel bookId="b1" />)
+    fireEvent.click(screen.getByText('reader.detailAdd'))
+    expect(screen.getByTestId('quick-add')).toBeInTheDocument()
   })
 
-  it('renders warm empty state when there are no reading records', () => {
-    vi.mocked(useBookReadingRecords).mockReturnValue({
-      data: {
-        data: {
-          bookId: 'book-1',
-          totalSeconds: 0,
-          records: [],
-        },
-      },
-      isError: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any)
-
-    renderWithClient(<StatsPanel bookId="book-1" />)
-
+  it('keeps quick entry available for empty history', () => {
+    state.ledger!.totalSeconds = 0
+    state.ledger!.legacyDaily = []
+    state.ledger!.legacyIntervals = []
+    state.ledger!.rounds = []
+    state.ledger!.sessions = []
+    render(<StatsPanel bookId="b1" />)
     expect(screen.getByText('reader.statsEmptyTitle')).toBeInTheDocument()
     expect(screen.getByText('reader.statsEmptyDesc')).toBeInTheDocument()
-    expect(screen.getByTestId('reading-detail-list')).toBeInTheDocument()
   })
 
-  it('renders KPI cards and 30-day trend chart when records exist', async () => {
-    vi.mocked(useBookReadingRecords).mockReturnValue({
-      data: {
-        data: {
-          bookId: 'book-1',
-          totalSeconds: 7200, // 2 hours
-          records: [
-            { date: '2026-09-10', durationSeconds: 3600 },
-            { date: '2026-09-11', durationSeconds: 3600 },
-          ],
-        },
-      },
-      isError: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any)
-
-    renderWithClient(<StatsPanel bookId="book-1" />)
-
-    // KPI cards
-    expect(screen.getByText('reader.statsTotalTime')).toBeInTheDocument()
-    expect(screen.getAllByText('reader.statsProgress').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('reader.statsReadingDays')).toBeInTheDocument()
-    expect(screen.getByText('reader.statsStartDate')).toBeInTheDocument()
-
-    // Values in KPI cards
-    expect(await screen.findByText('50')).toBeInTheDocument() // Progress value
-    expect(screen.getAllByText('2').length).toBeGreaterThanOrEqual(1) // Reading days & total hours
-    expect(screen.getByText('2026-09-10')).toBeInTheDocument() // Start date
-
-    // 30-day trend chart
-    expect(screen.getByText('reader.statsTrend30')).toBeInTheDocument()
-    expect(screen.getByText('reader.stats30DaysAgo')).toBeInTheDocument()
-    expect(screen.getByText('reader.statsToday')).toBeInTheDocument()
-
-    // Words & ETA section
-    expect(await screen.findByText('reader.statsWordsRead')).toBeInTheDocument()
-    expect(screen.getByText(/5万字/)).toBeInTheDocument()
-    expect(screen.getByTestId('reading-detail-list')).toBeInTheDocument()
-  })
-
-  it('updates trend header on bar hover', () => {
-    vi.mocked(useBookReadingRecords).mockReturnValue({
-      data: {
-        data: {
-          bookId: 'book-1',
-          totalSeconds: 3600,
-          records: [
-            { date: '2026-09-11', durationSeconds: 3600 },
-          ],
-        },
-      },
-      isError: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any)
-
-    renderWithClient(<StatsPanel bookId="book-1" />)
-
-    const bars = screen.getAllByRole('img')
-    expect(bars.length).toBe(30)
-
-    // Find the bar with non-zero duration (the one with title containing 2026-09-11)
-    const activeBar = bars.find((b) => b.getAttribute('title')?.includes('2026-09-11'))
-    expect(activeBar).toBeDefined()
-
-    if (activeBar) {
-      fireEvent.mouseEnter(activeBar)
-      // Tooltip header displays date and duration
-      expect(screen.getByText(/09-11 · /)).toBeInTheDocument()
-
-      fireEvent.mouseLeave(activeBar)
-      // Restores to default daily avg
-      expect(screen.getByText(/reader\.statsDailyAvg/)).toBeInTheDocument()
-    }
+  it('uses an explicit retry state when the ledger cannot be loaded', () => {
+    state.error = true
+    render(<StatsPanel bookId="b1" />)
+    expect(screen.queryByText('reader.statsProgress')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button'))
+    expect(state.retry).toHaveBeenCalledOnce()
   })
 })

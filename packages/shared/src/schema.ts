@@ -1,11 +1,14 @@
 import { z } from 'zod'
 
+import { isOrderedReadingRange, readingRangeShape } from './reading-range'
+
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
 import { BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, LIBRARY_SORT_MODES, RECENTLY_READ_STYLES } from './contract'
 import { ANNOTATION_MAX_TEXT_LENGTH, BOOKMARK_CONTEXT_MAX_LENGTH, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 import { authorListSchema } from './library'
 import { contentFileAssociationSchema } from './content-file'
+import { readingCoverageSchema, readingDateSchema, readingTimeFragmentSchema, readingTimezoneSchema } from './reading-ledger'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
 
@@ -57,8 +60,20 @@ export const readingProgressUpdateSchema = z.object({
 })
 
 export const readingRecordCreateSchema = z.object({
+  replaceSessionIds: z.array(z.string().min(1).max(100)).max(1000).optional(),
+  expectedUserId: z.string().min(1).max(100).optional(),
+  requestId: z.string().min(1).max(100).optional(),
+  deviceId: z.string().min(1).max(100).optional(),
+  source: z.enum(['auto', 'manual', 'retroactive']).optional(),
+  timezone: readingTimezoneSchema.optional(),
+  fragments: z.array(readingTimeFragmentSchema).max(10000).optional(),
+  coverage: z.array(readingCoverageSchema).max(10000).optional(),
+  revisionId: z.string().min(1).max(100).optional(),
+  wordCount: z.number().int().nonnegative().optional(),
+  continuous: z.boolean().optional(),
+  finished: z.boolean().optional(),
   bookId: z.string().min(1),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: readingDateSchema,
   durationSeconds: z.number().int().min(1).max(24 * 3600),
   // Explicit null = retroactive manual entry without a known start time
   // (hour-of-day stats skip it); omitted = server receive time
@@ -74,58 +89,53 @@ export const readingRecordCreateSchema = z.object({
   endFraction: z.number().min(0).max(1).optional(),
   startChapterIndex: z.number().int().min(0).optional(),
   endChapterIndex: z.number().int().min(0).optional(),
-}).refine((v) => v.startedAt !== null || v.endedAt !== undefined, {
+}).refine((v) => v.source !== 'auto' || (v.startFraction !== undefined && v.endFraction !== undefined), {
+  message: 'Automatic captures require both progress bounds', path: ['endFraction'],
+}).refine((v) => v.source !== 'retroactive' || ((v.startFraction === undefined) === (v.endFraction === undefined)), {
+  message: 'Retroactive progress requires both bounds or neither', path: ['endFraction'],
+}).refine((v) => v.source !== 'retroactive' || v.startFraction === undefined || v.endFraction === undefined || v.endFraction >= v.startFraction, {
+  message: 'Retroactive end progress must not precede start progress', path: ['endFraction'],
+}).refine((v) => !v.continuous || typeof v.startedAt === 'number', {
+  message: 'Continuous reading requires a start time', path: ['startedAt'],
+}).refine((v) => (!(v.fragments?.length) && !v.continuous) || v.timezone !== undefined, {
+  message: 'Timed reading requires a timezone', path: ['timezone'],
+}).refine((v) => v.startedAt !== null || v.endedAt !== undefined || v.source === 'retroactive', {
   // A retroactive entry without any time must still be an ended (editable,
   // listed) manual session, not an immutable auto-mode block
   message: 'endedAt is required when startedAt is null',
   path: ['endedAt'],
-}).refine((v) => v.startFraction === undefined || v.endFraction === undefined || v.endFraction >= v.startFraction, {
-  message: 'endFraction must be >= startFraction',
-  path: ['endFraction'],
 })
 
 export const readingSessionUpdateSchema = z.object({
+  continuous: z.boolean().optional(),
+  timezone: readingTimezoneSchema.optional(),
   durationSeconds: z.number().int().min(1).max(24 * 3600).optional(),
-  startedAt: z.number().int().positive().optional(),
+  startedAt: z.number().int().positive().nullable().optional(),
   endedAt: z.number().int().positive().optional(),
   // Client-local calendar day of the (possibly new) session start; required
   // when startedAt changes so the daily aggregate is re-attributed correctly
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  startFraction: z.number().min(0).max(1).optional(),
-  endFraction: z.number().min(0).max(1).optional(),
+  startFraction: z.number().min(0).max(1).nullable().optional(),
+  endFraction: z.number().min(0).max(1).nullable().optional(),
   startChapterIndex: z.number().int().min(0).optional(),
   endChapterIndex: z.number().int().min(0).optional(),
   startCfi: z.string().min(1).optional(),
   endCfi: z.string().min(1).optional(),
-}).refine((v) => v.startedAt === undefined || v.endedAt === undefined || v.endedAt >= v.startedAt, {
+}).refine((v) => v.startedAt == null || v.endedAt === undefined || v.endedAt >= v.startedAt, {
   message: 'endedAt must be after startedAt',
   path: ['endedAt'],
-}).refine((v) => v.startFraction === undefined || v.endFraction === undefined || v.endFraction >= v.startFraction, {
-  message: 'endFraction must be >= startFraction',
-  path: ['endFraction'],
 })
 
-export const readingSessionListSchema = z.object({
-  bookId: z.string().min(1),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
+export const readingRecordRangeSchema = z.object(readingRangeShape).refine(isOrderedReadingRange, {
+  message: 'Range ends before it starts', path: ['to'],
 })
 
-export const readingDetailListSchema = z.object({
-  limit: z.coerce.number().int().min(1).max(200).default(50),
-  offset: z.coerce.number().int().min(0).default(0),
-})
-
-export const readingRecordRangeSchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-})
-
-export const readingRecordHourlySchema = readingRecordRangeSchema.extend({
-  // Client timezone offset in minutes behind UTC (Date#getTimezoneOffset)
+export const readingRecordHourlySchema = z.object({
+  ...readingRangeShape,
+  // Legacy clients may still supply a fixed offset for records without a zone.
   tzOffset: z.coerce.number().int().min(-840).max(840).default(0),
   bookId: z.string().min(1).optional(),
-})
+}).refine(isOrderedReadingRange, { message: 'Range ends before it starts', path: ['to'] })
 
 // Flat reading preferences are deliberately absent: they travel inside
 // `readingConfig`. The 40+ flat duplicates that used to be declared here were
@@ -139,7 +149,7 @@ export const settingsUpdateSchema = z.object({
   })).optional(),
   fontOrder: z.array(z.string().min(1).max(100)).optional(),
   coverFit: z.enum(['crop', 'full']).optional(),
-  readingTimerMode: z.enum(['auto', 'manual', 'off']).optional(),
+  readingTimerMode: z.enum(['auto', 'manual', 'both', 'off']).optional(),
   manualTimerGraceMinutes: z.union([z.literal(1), z.literal(5), z.literal(10), z.literal(30)]).optional(),
   ttsEngine: z.enum(['system', 'edge', 'service']).optional(),
   ttsServiceId: z.string().nullable().optional(),

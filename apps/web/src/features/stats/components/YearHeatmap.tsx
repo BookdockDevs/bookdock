@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { heatmapWeeks } from '../date-utils'
 
 interface YearHeatmapProps {
+  year?: number
   selectedDate: string | null
   onSelectDate: (date: string) => void
 }
@@ -23,9 +24,8 @@ function levelClass(seconds: number, max: number): string {
   return 'bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-400 dark:hover:bg-emerald-300'
 }
 
-export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapProps) {
+export default function YearHeatmap({ year = new Date().getFullYear(), selectedDate, onSelectDate }: YearHeatmapProps) {
   const _ = useTranslation()
-  const year = new Date().getFullYear()
   const dailyQuery = useReadingDaily(`${year}-01-01`, `${year}-12-31`)
   const { data } = dailyQuery
   const secondsByDate = useMemo(() => new Map((data?.data ?? []).map((i) => [i.date, i.durationSeconds])), [data])
@@ -64,7 +64,7 @@ export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapP
   return (
     <section className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-xs sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+        <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">
           <span>{_('stats.yearHeatmap')}</span>
           <span className="font-normal tabular-nums text-stone-400 dark:text-stone-500"> · {year}</span>
         </h2>
@@ -116,7 +116,7 @@ export default function YearHeatmap({ selectedDate, onSelectDate }: YearHeatmapP
                     type="button"
                     data-testid={`heat-${date}`}
                     title={`${date}: ${formatDuration(secondsByDate.get(date) ?? 0, _)}`}
-                    onClick={() => onSelectDate(date)}
+                    onClick={() => onSelectDate(selectedDate === date ? '' : date)}
                     className={cn(
                       'h-3 w-3 rounded-[2.5px] transition-transform hover:scale-125 focus:outline-hidden',
                       isHeatmapLoading ? 'bg-stone-200/50 dark:bg-stone-800/80' : levelClass(secondsByDate.get(date) ?? 0, max),

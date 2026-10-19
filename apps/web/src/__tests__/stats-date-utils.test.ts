@@ -4,7 +4,9 @@ import {
   eachDay,
   fillDailyDays,
   formatPeriodLabel,
+  formatDisplayPeriodLabel,
   heatmapWeeks,
+  isFutureOrCurrentPeriod,
   periodRange,
   shiftPeriod,
 } from '../features/stats/date-utils'
@@ -128,5 +130,66 @@ describe('formatPeriodLabel', () => {
   it('formats month and year', () => {
     expect(formatPeriodLabel('month', periodRange('month', new Date(2026, 6, 30)))).toBe('2026.7')
     expect(formatPeriodLabel('year', periodRange('year', new Date(2026, 6, 30)))).toBe('2026')
+  })
+})
+
+describe('isFutureOrCurrentPeriod', () => {
+  it('identifies current and future weeks correctly', () => {
+    const fixedNow = new Date(2026, 9, 15) // Thu Oct 15 2026
+    const currentWeek = periodRange('week', fixedNow)
+    expect(isFutureOrCurrentPeriod('week', currentWeek, fixedNow)).toBe(true)
+
+    const pastWeek = periodRange('week', new Date(2026, 9, 5))
+    expect(isFutureOrCurrentPeriod('week', pastWeek, fixedNow)).toBe(false)
+
+    const futureWeek = periodRange('week', new Date(2026, 9, 22))
+    expect(isFutureOrCurrentPeriod('week', futureWeek, fixedNow)).toBe(true)
+  })
+
+  it('identifies current and future months correctly', () => {
+    const fixedNow = new Date(2026, 9, 15) // Oct 2026
+    const currentMonth = periodRange('month', fixedNow)
+    expect(isFutureOrCurrentPeriod('month', currentMonth, fixedNow)).toBe(true)
+
+    const pastMonth = periodRange('month', new Date(2026, 8, 1))
+    expect(isFutureOrCurrentPeriod('month', pastMonth, fixedNow)).toBe(false)
+  })
+
+  it('identifies current and future years correctly', () => {
+    const fixedNow = new Date(2026, 9, 15)
+    const currentYear = periodRange('year', fixedNow)
+    expect(isFutureOrCurrentPeriod('year', currentYear, fixedNow)).toBe(true)
+
+    const pastYear = periodRange('year', new Date(2025, 0, 1))
+    expect(isFutureOrCurrentPeriod('year', pastYear, fixedNow)).toBe(false)
+  })
+
+  it('always returns true for all period', () => {
+    expect(isFutureOrCurrentPeriod('all', periodRange('all', new Date()))).toBe(true)
+  })
+})
+
+describe('formatDisplayPeriodLabel', () => {
+  it('formats week label in Chinese and English', () => {
+    const range = periodRange('week', new Date(2026, 9, 15)) // Oct 12 - 18
+    expect(formatDisplayPeriodLabel('week', range, { lang: 'zh-CN' })).toBe('10月12日～18日')
+    expect(formatDisplayPeriodLabel('week', range, { lang: 'en' })).toBe('10.12 - 10.18')
+  })
+
+  it('formats month and year in Chinese and English', () => {
+    const monthRange = periodRange('month', new Date(2026, 9, 15))
+    expect(formatDisplayPeriodLabel('month', monthRange, { lang: 'zh-CN' })).toBe('2026年10月')
+    expect(formatDisplayPeriodLabel('month', monthRange, { lang: 'en' })).toBe('2026.10')
+
+    const yearRange = periodRange('year', new Date(2026, 9, 15))
+    expect(formatDisplayPeriodLabel('year', yearRange, { lang: 'zh-CN' })).toBe('2026年')
+    expect(formatDisplayPeriodLabel('year', yearRange, { lang: 'en' })).toBe('2026')
+  })
+
+  it('formats all mode with year range from firstRecordedDate', () => {
+    const allRange = periodRange('all', new Date())
+    const curYear = new Date().getFullYear()
+    expect(formatDisplayPeriodLabel('all', allRange, { lang: 'zh-CN', firstRecordedDate: '2020-04-10' })).toBe(`2020年～${curYear}年`)
+    expect(formatDisplayPeriodLabel('all', allRange, { lang: 'en', firstRecordedDate: '2020-04-10' })).toBe(`2020 - ${curYear}`)
   })
 })

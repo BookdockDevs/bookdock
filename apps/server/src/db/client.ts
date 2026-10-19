@@ -8,6 +8,7 @@ import { generateLibraryInviteToken, isLibraryInviteToken } from '../lib/token'
 import * as schema from './schema'
 import { config } from '../config'
 import { migrateBeforeBookRetirement } from './migration-stage'
+import { repairReadingLedgerSchema } from './reading-ledger-repair'
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
@@ -303,6 +304,7 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
 
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
   migrate(db, { migrationsFolder })
+  repairReadingLedgerSchema(db)
   const { importProgressFiles } = await import('../modules/progress/progress-migration')
   await importProgressFiles(db)
 }
@@ -512,6 +514,8 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
     db.transaction(() => {
     for (const spec of specs) {
       if (!tables.has(spec.table)) continue
+      // Ledger identities intentionally outlive their source book versions.
+      if (tables.has('reading_archives') && (spec.table === 'reading_records' || spec.table === 'reading_sessions')) continue
       const refs = db.all(sql.raw(`PRAGMA foreign_key_list("${spec.table}")`)) as Array<{ from: string; table: string }>
       if (refs.some((ref) => ref.from === 'book_id' && ref.table === 'book_versions')) continue
       const orphans = db.get<{ count: number }>(sql.raw(

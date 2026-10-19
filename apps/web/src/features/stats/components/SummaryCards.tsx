@@ -1,32 +1,40 @@
 import type { ReactNode } from 'react'
 
-import { useReadingSummary } from '@/api/hooks/reading-records'
+import type { ReadingRange } from '@bookdock/shared'
+
+import { localDateString, usePreviousReadingSummary, useReadingSummary } from '@/api/hooks/reading-records'
+import { resolveArchiveScope } from '@/features/archive/archive-scope'
+import { useArchiveOverview, usePreviousArchiveOverview } from '@/features/archive/hooks'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { isAccessRevocationError } from '@/lib/error-message'
 import { formatDuration } from '@/lib/format-duration'
 import { cn } from '@/lib/utils'
 
-interface DeltaInfo {
-  text: string
-  positive: boolean
-  negative: boolean
-}
+import { periodDelta, periodRange, shiftPeriod, type DayRange, type DeltaInfo, type StatsPeriod } from '../date-utils'
 
-function periodDelta(
-  current: number,
-  previous: number,
-  format: (v: number) => string,
-  _: (key: string, options?: Record<string, string | number>) => string,
-  vsKey: string,
-): DeltaInfo {
-  const diff = current - previous
-  const delta = diff === 0 ? _('stats.noChange') : `${diff > 0 ? '+' : '-'}${format(Math.abs(diff))}`
-  return {
-    text: _(vsKey, { delta }),
-    positive: diff > 0,
-    negative: diff < 0,
+export function DeltaDisplay({ delta, isScoped }: { delta?: DeltaInfo; isScoped?: boolean }) {
+  if (delta) {
+    return (
+      <div className="mt-1 flex h-4.5 items-center text-[11px] leading-none text-stone-400 dark:text-stone-500">
+        <span className="truncate">{delta.text}</span>
+        {delta.direction === 'up' && (
+          <span className="ml-0.5 shrink-0 font-bold text-rose-500 dark:text-rose-400" aria-hidden="true">
+            ↑
+          </span>
+        )}
+        {delta.direction === 'down' && (
+          <span className="ml-0.5 shrink-0 font-bold text-emerald-500 dark:text-emerald-400" aria-hidden="true">
+            ↓
+          </span>
+        )}
+      </div>
+    )
   }
+  if (isScoped) {
+    return <div className="mt-1 h-4.5" aria-hidden="true" />
+  }
+  return null
 }
 
 function formatWords(n: number, _: (key: string, options?: Record<string, string | number>) => string): string {
@@ -44,79 +52,121 @@ interface CardItem {
   key: string
   label: string
   value: string
-  sub?: string
   delta?: DeltaInfo
   icon: ReactNode
   iconBgClass: string
-  hero?: boolean
+  isLoading?: boolean
 }
 
-export default function SummaryCards() {
+interface SummaryCardsProps {
+  query?: ReadingRange
+  period?: StatsPeriod
+  range?: DayRange
+  selectedDate?: string | null
+  selectedReadStatus?: string | null
+  onSelectReadStatus?: (status: string) => void
+}
+
+export default function SummaryCards({
+  period = 'all',
+  query: externalQuery,
+  range,
+  selectedDate,
+  selectedReadStatus,
+  onSelectReadStatus,
+}: SummaryCardsProps) {
   const _ = useTranslation()
-  const summaryQuery = useReadingSummary()
+  const resolved = resolveArchiveScope({ period, anchor: range ? localDateString(range.from) : undefined, date: selectedDate ?? undefined })
+  const query = externalQuery ?? resolved.query
+  const activeRange = range ?? resolved.range
+  const isAll = !query.from && !query.to
+  const isScoped = !isAll && period !== 'all' && !selectedDate
+  const prevRange = isScoped ? periodRange(period, shiftPeriod(period, activeRange.from, -1)) : null
+  const prevScope = prevRange ? resolveArchiveScope({ period, anchor: localDateString(prevRange.from), timezone: query.timezone }) : null
+  const summaryQuery = useReadingSummary(query.from, query.to, query.timezone)
+  const prevSummaryQuery = usePreviousReadingSummary(prevScope?.query.from, prevScope?.query.to, prevScope?.query.timezone)
+  const overviewQuery = useArchiveOverview(query)
+  const prevOverviewQuery = usePreviousArchiveOverview(prevScope?.query, isScoped)
   const { data } = summaryQuery
   const s = data?.data
-  const mc = s?.monthlyComparison
+  const scope = s?.scope
+  const prevScopeData = prevSummaryQuery.data?.data.scope
+  const counts = overviewQuery.data?.data.counts
+  const prevCounts = prevOverviewQuery.data?.data.counts
+  const totalNotes = counts?.total ?? (counts ? counts.highlights + counts.bookmarks + counts.ideas + counts.reviews : undefined)
+  const prevNotes = prevCounts?.total ?? (prevCounts ? prevCounts.highlights + prevCounts.bookmarks + prevCounts.ideas + prevCounts.reviews : undefined)
+  const isArchiveLoading = overviewQuery.isLoading && !counts
 
   if (summaryQuery.isError && (!s || isAccessRevocationError(summaryQuery.error))) {
     return (
       <QueryErrorState
-        className="col-span-full rounded-2xl border border-stone-200 bg-white px-4 dark:border-stone-800 dark:bg-stone-900"
+        className="col-span-full rounded-xl border border-stone-200 bg-white px-4 dark:border-stone-800 dark:bg-stone-900"
         isRetrying={summaryQuery.isFetching}
         onRetry={() => summaryQuery.refetch()}
       />
     )
   }
 
+  const displaySeconds = isAll ? s?.totalSeconds : scope?.totalSeconds
+  const displayWords = isAll ? s?.totalWordsRead : scope?.totalWordsRead
+  const displayDays = isAll ? s?.totalDays : scope?.totalDays
+  const displayBooks = isAll ? s?.totalBooks : scope?.totalBooks
+  const finishedCount = scope?.finishedBooks
+  const avgSeconds = displaySeconds !== undefined && displayDays !== undefined
+    ? displayDays > 0 ? Math.round(displaySeconds / displayDays) : 0
+    : undefined
+  const streak = isAll ? s?.currentStreak : scope?.longestStreak
+
+  function calcDelta(current: number | undefined, previous: number | undefined, format: (v: number) => string): DeltaInfo | undefined {
+    if (!isScoped || current === undefined || previous === undefined) return undefined
+    return periodDelta(current, previous, format, _, period)
+  }
+
   const cards: CardItem[] = [
+    // 1. 阅读时长
     {
       key: 'totalTime',
       label: _('stats.totalTime'),
-      value: s ? formatDuration(s.totalSeconds, _) : '-',
-      sub: s ? `${_('stats.today')} ${formatDuration(s.todaySeconds, _)}` : undefined,
-      delta: mc
-        ? periodDelta(mc.currentPeriodSeconds, mc.previousPeriodSeconds, (v) => formatDuration(v, _), _, 'stats.vsLastMonth')
-        : undefined,
+      value: displaySeconds !== undefined ? formatDuration(displaySeconds, _) : '—',
+      delta: calcDelta(displaySeconds, prevScopeData?.totalSeconds, (v) => formatDuration(v, _)),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
         </svg>
       ),
-      iconBgClass: 'bg-stone-100 text-stone-800 dark:bg-stone-800 dark:text-stone-100',
-      hero: true,
+      iconBgClass: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400',
     },
+    // 2. 平均阅读时间
     {
-      key: 'streak',
-      label: _('stats.streak'),
-      value: s ? `${s.currentStreak} ${_('stats.days')}` : '-',
-      sub: s && s.longestStreak > 0 ? `${_('stats.streakLongest')} ${s.longestStreak} ${_('stats.days')}` : undefined,
+      key: 'avgTime',
+      label: _('stats.avgReadingTime'),
+      value: avgSeconds !== undefined ? formatDuration(avgSeconds, _) : '—',
+      delta: calcDelta(
+        avgSeconds,
+        prevScopeData && prevScopeData.totalDays > 0 ? Math.round(prevScopeData.totalSeconds / prevScopeData.totalDays) : 0,
+        (v) => formatDuration(v, _),
+      ),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+          <path d="M12 2v4" />
+          <path d="M12 18v4" />
+          <path d="m4.93 4.93 2.83 2.83" />
+          <path d="m16.24 16.24 2.83 2.83" />
+          <path d="M2 12h4" />
+          <path d="M18 12h4" />
+          <path d="m4.93 19.07 2.83-2.83" />
+          <path d="m16.24 7.76 2.83-2.83" />
         </svg>
       ),
-      iconBgClass: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300',
+      iconBgClass: 'bg-teal-50 text-teal-600 dark:bg-teal-950/60 dark:text-teal-400',
     },
-    {
-      key: 'totalWords',
-      label: _('stats.totalWords'),
-      value: s ? formatWords(s.totalWordsRead, _) : '-',
-      sub: _('stats.cumulativeRead'),
-      icon: (
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-        </svg>
-      ),
-      iconBgClass: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300',
-    },
+    // 3. 阅读天数
     {
       key: 'totalDays',
       label: _('stats.totalDays'),
-      value: s ? `${s.totalDays} ${_('stats.days')}` : '-',
-      delta: mc
-        ? periodDelta(mc.currentPeriodDays, mc.previousPeriodDays, (v) => `${v} ${_('stats.days')}`, _, 'stats.vsLastMonth')
-        : undefined,
+      value: displayDays !== undefined ? `${displayDays} ${_('stats.days')}` : '—',
+      delta: calcDelta(displayDays, prevScopeData?.totalDays, (v) => `${v} ${_('stats.days')}`),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
@@ -125,15 +175,27 @@ export default function SummaryCards() {
           <line x1="3" x2="21" y1="10" y2="10" />
         </svg>
       ),
-      iconBgClass: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300',
+      iconBgClass: 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400',
     },
+    // 4. 连续阅读
     {
-      key: 'totalBooks',
-      label: _('stats.totalBooks'),
-      value: s ? String(s.totalBooks) : '-',
-      delta: mc
-        ? periodDelta(mc.currentPeriodBooks, mc.previousPeriodBooks, (v) => _('stats.booksUnit', { n: v }), _, 'stats.vsLastMonth')
-        : undefined,
+      key: 'streak',
+      label: _(isAll ? 'stats.streakCurrent' : 'stats.streakLongest'),
+      value: streak !== undefined ? `${streak} ${_('stats.days')}` : '—',
+      delta: calcDelta(streak, prevScopeData?.longestStreak, (v) => `${v} ${_('stats.days')}`),
+      icon: (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+        </svg>
+      ),
+      iconBgClass: 'bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400',
+    },
+    // 5. 阅读字数
+    {
+      key: 'totalWords',
+      label: _('stats.totalWords'),
+      value: displayWords !== undefined ? formatWords(displayWords, _) : '—',
+      delta: calcDelta(displayWords, prevScopeData?.totalWordsRead, (v) => formatWords(v, _)),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
@@ -141,40 +203,57 @@ export default function SummaryCards() {
           <path d="M6 10h10" />
         </svg>
       ),
-      iconBgClass: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300',
+      iconBgClass: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400',
     },
+    // 6. 读过的书
     {
-      key: 'thisWeek',
-      label: _('stats.thisWeek'),
-      value: s ? formatDuration(s.weekSeconds, _) : '-',
-      delta: s ? periodDelta(s.weekSeconds, s.prevWeekSeconds, (v) => formatDuration(v, _), _, 'stats.vsLastWeek') : undefined,
+      key: 'totalBooks',
+      label: _('stats.totalBooks'),
+      value: displayBooks !== undefined ? String(displayBooks) : '—',
+      delta: calcDelta(displayBooks, prevScopeData?.totalBooks, (v) => _('stats.booksUnit', { n: v })),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <line x1="18" y1="20" x2="18" y2="10" />
-          <line x1="12" y1="20" x2="12" y2="4" />
-          <line x1="6" y1="20" x2="6" y2="14" />
+          <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <polyline points="9 22 9 12 15 12 15 22" />
         </svg>
       ),
-      iconBgClass: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300',
+      iconBgClass: 'bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400',
     },
+    // 7. 读完的书
     {
-      key: 'thisMonth',
-      label: _('stats.thisMonth'),
-      value: s ? formatDuration(s.monthSeconds, _) : '-',
-      delta: s ? periodDelta(s.monthSeconds, s.prevMonthSeconds, (v) => formatDuration(v, _), _, 'stats.vsPrevMonth') : undefined,
+      key: 'finishedBooks',
+      label: _('stats.finishedBooks'),
+      value: finishedCount !== undefined ? String(finishedCount) : '—',
+      delta: calcDelta(finishedCount, prevScopeData?.finishedBooks, (v) => _('stats.booksUnit', { n: v })),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
         </svg>
       ),
-      iconBgClass: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300',
+      iconBgClass: 'bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400',
+    },
+    // 8. 笔记 (汇总划线、书签、想法与书评)
+    {
+      key: 'totalNotes',
+      label: _('stats.totalNotes'),
+      value: totalNotes !== undefined ? String(totalNotes) : '—',
+      delta: calcDelta(totalNotes, prevNotes, (v) => `${v} ${_('archive.notesUnit') || '条'}`),
+      isLoading: isArchiveLoading,
+      icon: (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </svg>
+      ),
+      iconBgClass: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-950/60 dark:text-cyan-400',
     },
   ]
 
   const isSummaryLoading = summaryQuery.isLoading && !s
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4" aria-busy={isSummaryLoading}>
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 sm:gap-4" aria-busy={isSummaryLoading}>
       {summaryQuery.isError && s && !isAccessRevocationError(summaryQuery.error) && (
         <div className="col-span-full flex items-center justify-between rounded-xl border border-amber-200/80 bg-amber-500/10 px-3.5 py-2 text-xs text-amber-700 dark:border-amber-800/80 dark:bg-amber-500/20 dark:text-amber-300">
           <span>{_('stats.revalidateFailed') || '数据刷新失败，正在显示缓存数据'}</span>
@@ -188,58 +267,71 @@ export default function SummaryCards() {
           </button>
         </div>
       )}
-      {cards.map((c) => (
-        <section
-          key={c.key}
-          className={cn(
-            'flex flex-col justify-between rounded-2xl border border-stone-200/70 bg-white p-4 shadow-2xs transition-shadow hover:border-stone-300 dark:border-stone-800/80 dark:bg-stone-900/60 dark:hover:border-stone-700',
-            c.hero && 'col-span-2',
-          )}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-stone-500 dark:text-stone-400">{c.label}</span>
-            <div className={cn('flex h-7 w-7 items-center justify-center rounded-lg', c.iconBgClass)}>
-              {c.icon}
-            </div>
-          </div>
+      {cards.map((c) => {
+        const isClickable = c.key === 'finishedBooks' && Boolean(onSelectReadStatus)
+        const isSelected = c.key === 'finishedBooks' && selectedReadStatus === 'finished'
 
-          <div className="mt-3">
-            {isSummaryLoading ? (
-              <div className="space-y-2">
-                <div className="h-7 w-20 animate-pulse rounded bg-stone-200/70 dark:bg-stone-800 motion-reduce:animate-none" />
-                <div className="h-3.5 w-14 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/80 motion-reduce:animate-none" />
+        const cardContent = (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="truncate text-xs font-medium text-stone-500 dark:text-stone-400">
+                {c.label}
+                {isSelected && <span className="ml-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400">✓</span>}
+              </span>
+              <div className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-lg', c.iconBgClass)}>
+                {c.icon}
               </div>
-            ) : (
-              <>
-                <p className={cn('font-bold tracking-tight tabular-nums text-stone-900 dark:text-stone-100', c.hero ? 'text-2xl sm:text-3xl' : 'text-xl sm:text-2xl')}>
-                  {c.value}
-                </p>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  {c.sub && (
-                    <span className="text-xs text-stone-400 dark:text-stone-500">
-                      {c.sub}
-                    </span>
-                  )}
-                  {c.delta && (
-                    <span
-                      className={cn(
-                        'inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-none',
-                        c.delta.positive
-                          ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                          : c.delta.negative
-                            ? 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400'
-                            : 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400',
-                      )}
-                    >
-                      {c.delta.text}
-                    </span>
+            </div>
+
+            <div className="mt-2.5">
+              {isSummaryLoading || c.isLoading ? (
+                <div className="space-y-1.5">
+                  <div className="h-6 w-16 animate-pulse rounded bg-stone-200/70 dark:bg-stone-800 motion-reduce:animate-none" />
+                  {isScoped && (
+                    <div className="h-4.5 w-14 animate-pulse rounded bg-stone-200/50 dark:bg-stone-800/80 motion-reduce:animate-none" />
                   )}
                 </div>
-              </>
-            )}
+              ) : (
+                <>
+                  <p className="text-xl font-bold tracking-tight tabular-nums text-stone-900 sm:text-2xl dark:text-stone-100">
+                    {c.value}
+                  </p>
+                  <DeltaDisplay delta={c.delta} isScoped={isScoped} />
+                </>
+              )}
+            </div>
+          </>
+        )
+
+        if (isClickable) {
+          return (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => onSelectReadStatus?.(isSelected ? 'all' : 'finished')}
+              title={isSelected ? '取消筛选已读完书籍' : '筛选已读完书籍'}
+              aria-pressed={isSelected}
+              className={cn(
+                'flex flex-col rounded-xl p-3.5 text-left transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 sm:p-4',
+                isSelected
+                  ? 'border border-rose-400/80 bg-rose-50/80 ring-2 ring-rose-400/60 shadow-xs dark:border-rose-700 dark:bg-rose-950/40 dark:ring-rose-500/50'
+                  : 'bg-stone-50/70 hover:bg-stone-100/70 dark:bg-stone-800/40 dark:hover:bg-stone-800/60',
+              )}
+            >
+              {cardContent}
+            </button>
+          )
+        }
+
+        return (
+          <div
+            key={c.key}
+            className="flex flex-col rounded-xl bg-stone-50/70 p-3.5 transition-colors hover:bg-stone-100/70 sm:p-4 dark:bg-stone-800/40 dark:hover:bg-stone-800/60"
+          >
+            {cardContent}
           </div>
-        </section>
-      ))}
+        )
+      })}
     </div>
   )
 }

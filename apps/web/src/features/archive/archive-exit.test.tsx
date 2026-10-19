@@ -1,5 +1,6 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react'
 import {
   createMemoryHistory,
   createRootRoute,
@@ -13,6 +14,8 @@ import type { LibrarySearch } from '@/routes/index'
 import type { ArchiveSearch } from '@/routes/archive'
 import Archive from '@/features/archive/Archive'
 import { archiveEntryState } from '@/features/archive/archive-return'
+import { localDateString } from '@/api/hooks/reading-records'
+import { resolveArchiveScope } from '@/features/archive/archive-scope'
 import { archiveScrollKey, saveArchiveScrollRecord } from '@/features/archive/archive-scroll'
 import { useAuthStore } from '@/stores/auth.store'
 import i18n from '@/i18n/i18n'
@@ -22,7 +25,7 @@ vi.mock('@/features/archive/hooks', async (importOriginal) => {
   return {
     ...actual,
     useArchiveOverview: () => ({
-      data: { data: { counts: { highlights: 1, bookmarks: 0, ideas: 0, reviews: 0 }, recent: [] } },
+      data: { data: { counts: { highlights: 1, bookmarks: 0, ideas: 0, reviews: 0, total: 1 }, totalBooks: 1 } },
       isLoading: false,
       isError: false,
     }),
@@ -54,7 +57,7 @@ vi.mock('@/features/stats/components/StatsSettingsButton', () => ({ default: () 
 vi.mock('@/features/stats/components/BookTimeList', () => ({ default: () => null }))
 vi.mock('@/features/stats/components/HourDistribution', () => ({ default: () => null }))
 vi.mock('@/features/stats/components/PeriodBarChart', () => ({ default: () => null }))
-vi.mock('@/features/stats/components/SummaryCards', () => ({ default: () => null }))
+vi.mock('@/features/stats/components/SummaryCards', () => ({ default: () => null, DeltaDisplay: () => null }))
 vi.mock('@/features/stats/components/TagDistribution', () => ({ default: () => null }))
 vi.mock('@/features/stats/components/YearHeatmap', () => ({ default: () => null }))
 
@@ -169,7 +172,8 @@ describe('Archive top-bar exit (real component)', () => {
     await router.load()
 
     // Same-view return (e.g. reader back): the entry was recorded on leave.
-    saveArchiveScrollRecord(archiveScrollKey({}), { left: 0, main: 0, win: 150 })
+    const { period, anchor, query } = resolveArchiveScope({})
+    saveArchiveScrollRecord(archiveScrollKey({ period, anchor: localDateString(anchor), timezone: query.timezone }), { left: 0, main: 0, win: 150 })
     await act(async () => {
       await router.navigate({ to: '/archive' })
     })
@@ -181,3 +185,8 @@ describe('Archive top-bar exit (real component)', () => {
     expect(sessionStorage.getItem('bd-archive-scroll')).toBeNull()
   })
 })
+
+function render(ui: React.ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return baseRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}

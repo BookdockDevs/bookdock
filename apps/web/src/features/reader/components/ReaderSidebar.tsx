@@ -35,8 +35,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   const sidebarWidth = useUiStore((s) => s.sidebarWidth)
   const setSidebarWidth = useUiStore((s) => s.setSidebarWidth)
   const setNavTabRemembered = useUiStore((s) => s.setNavTabRemembered)
-  const readingTimerMode = useUiStore((s) => s.readingTimerMode)
-  const statsDisabled = guestReadOnly || readingTimerMode === 'off'
+  const statsDisabled = guestReadOnly
 
   const SIDEBAR_MIN = 200
   const SIDEBAR_MAX = 640

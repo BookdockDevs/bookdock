@@ -19,16 +19,18 @@ const STORAGE_KEY = 'bd-archive-scroll'
  */
 export function archiveScrollKey(search: ArchiveSearch): string {
   return JSON.stringify([
+    search.period ?? 'week',
+    search.anchor ?? null,
+    search.date ?? null,
+    search.timezone ?? null,
     search.tab ?? null,
-    search.view ?? null,
     search.bookId ?? null,
-    search.from ?? null,
     search.bookType ?? null,
+    search.bookView ?? null,
     search.bookSort ?? null,
     search.q ?? null,
     search.type ?? null,
     search.sort ?? null,
-    search.page ?? null,
   ])
 }
 

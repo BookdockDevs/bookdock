@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
-import type { AccessTokenPermission, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
+import type { ReadingTimeFragment, ReadingCoverageInterval, AccessTokenPermission, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
 import type { ProgressFileData } from '../lib/progress-file'
 
 export const users = sqliteTable('users', {
@@ -247,9 +247,9 @@ export const tocRules = sqliteTable('toc_rules', {
 export const readingRecords = sqliteTable('reading_records', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
-  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
-  // Client-local calendar day of the session start ('YYYY-MM-DD'), one row per user+book+day
+  bookId: text('book_id').notNull(),
+  bookVersionId: text('book_version_id'),
+  // Calendar day attributed by the reading ledger ('YYYY-MM-DD'), one row per user+book+day
   date: text('date').notNull(),
   durationSeconds: integer('duration_seconds').notNull().default(0),
 }, (table) => ({
@@ -258,24 +258,62 @@ export const readingRecords = sqliteTable('reading_records', {
   versionIdx: index('reading_records_book_version_idx').on(table.bookVersionId),
 }))
 
-// Fine-grained session detail: one row per reported reading block, kept for
-// hour-of-day distribution stats. reading_records stays the daily aggregate.
-// Manual-mode sessions (manual reading timer) fill the bounds below — the
-// exact start/end time (endedAt) and position recorded in every display unit:
-// cfi (precise anchor), fraction (0-1, percent is derived) and chapter index
-// (label resolved from revision metadata at display time). Auto-mode blocks leave
-// them all NULL and are immutable.
+export const readingArchives = sqliteTable('reading_archives', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull(),
+  title: text('title').notNull(),
+  author: text('author').notNull().default(''),
+  legacyIntervals: text('legacy_intervals', { mode: 'json' }).$type<ReadingCoverageInterval[]>().notNull().default([]),
+  legacyDaily: text('legacy_daily', { mode: 'json' }).$type<{ date: string; durationSeconds: number }[]>().notNull().default([]),
+  legacyWordCount: integer('legacy_word_count'),
+  legacyRevisionId: text('legacy_revision_id'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.bookVersionId] }),
+}))
+
+export const readingRounds = sqliteTable('reading_rounds', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull(),
+  ordinal: integer('ordinal').notNull(),
+  status: text('status', { enum: ['reading', 'finished', 'abandoned'] }).notNull().default('reading'),
+  startedAt: integer('started_at').notNull(),
+  endedAt: integer('ended_at'),
+}, (table) => ({
+  userVersionOrdinalIdx: uniqueIndex('reading_rounds_user_version_ordinal_idx').on(table.userId, table.bookVersionId, table.ordinal),
+  activeIdx: uniqueIndex('reading_rounds_active_idx').on(table.userId, table.bookVersionId).where(sql`${table.status} = 'reading'`),
+}))
+
+export const readingTimerClaims = sqliteTable('reading_timer_claims', {
+  userId: text('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  deviceId: text('device_id').notNull(),
+  mode: text('mode', { enum: ['auto', 'manual'] }).notNull(),
+  activityAt: integer('activity_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+})
+
 export const readingSessions = sqliteTable('reading_sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookId: text('book_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
-  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
-  // Client-local calendar day of the session start ('YYYY-MM-DD')
+  bookId: text('book_id').notNull(),
+  bookVersionId: text('book_version_id'),
+  // Calendar day attributed by the reading ledger ('YYYY-MM-DD')
   date: text('date').notNull(),
   // Nullable for retroactive manual entries recorded without a start time
   startedAt: integer('started_at'),
   durationSeconds: integer('duration_seconds').notNull().default(0),
   endedAt: integer('ended_at'),
+  requestId: text('request_id'),
+  bodyHash: text('body_hash'),
+  source: text('source', { enum: ['auto', 'manual', 'retroactive', 'legacy'] }).notNull().default('legacy'),
+  roundId: text('round_id').references(() => readingRounds.id, { onDelete: 'cascade' }),
+  timezone: text('timezone'),
+  fragments: text('fragments', { mode: 'json' }).$type<ReadingTimeFragment[]>().notNull().default([]),
+  coverage: text('coverage', { mode: 'json' }).$type<ReadingCoverageInterval[]>().notNull().default([]),
+  revisionId: text('revision_id'),
+  wordCount: integer('word_count'),
   startCfi: text('start_cfi'),
   endCfi: text('end_cfi'),
   startFraction: real('start_fraction'),
@@ -283,8 +321,22 @@ export const readingSessions = sqliteTable('reading_sessions', {
   startChapterIndex: integer('start_chapter_index'),
   endChapterIndex: integer('end_chapter_index'),
 }, (table) => ({
+  userRequestIdx: uniqueIndex('reading_sessions_user_request_idx').on(table.userId, table.requestId),
+  roundIdx: index('reading_sessions_round_idx').on(table.roundId),
   userDateIdx: index('reading_sessions_user_date_idx').on(table.userId, table.date),
   versionIdx: index('reading_sessions_book_version_idx').on(table.bookVersionId),
+}))
+
+export const readingWriteReceipts = sqliteTable('reading_write_receipts', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  requestId: text('request_id').notNull(),
+  bookVersionId: text('book_version_id').notNull(),
+  bodyHash: text('body_hash').notNull(),
+  sessionId: text('session_id').references(() => readingSessions.id, { onDelete: 'set null' }),
+  status: text('status', { enum: ['accepted', 'skipped', 'deleted'] }).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.requestId] }),
+  versionIdx: index('reading_write_receipts_user_version_idx').on(table.userId, table.bookVersionId),
 }))
 
 // Library foundation (Phase 1): structure only, no data migration yet.

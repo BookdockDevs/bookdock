@@ -21,8 +21,8 @@ const STATS_KEYS = ['tagDistribution', 'emptyTags', 'tagOther']
 type Mock = ReturnType<typeof vi.fn>
 
 const TAGS: ReadingRecordTagItem[] = [
-  { tagId: 't1', name: '科幻', durationSeconds: 3600 },
-  { tagId: 't2', name: '文学', durationSeconds: 1200 },
+  { tagId: 't1', name: '科幻', durationSeconds: 3600, bookCount: 3 },
+  { tagId: 't2', name: '文学', durationSeconds: 1200, bookCount: 1 },
 ]
 
 function renderChart() {
@@ -44,17 +44,18 @@ describe('TagDistribution', () => {
     ;(useReadingByTag as Mock).mockReturnValue({ data: { data: TAGS } })
   })
 
-  it('renders the legend with names, durations and percentages', () => {
-    const { container } = renderChart()
-    expect(screen.getByText('stats.tagDistribution')).toBeInTheDocument()
+  it('renders tag quantity pills with book counts', () => {
+    renderChart()
+    expect(screen.getByText(/stats.tagDistribution/)).toBeInTheDocument()
     expect(screen.getByText('科幻')).toBeInTheDocument()
     expect(screen.getByText('文学')).toBeInTheDocument()
-    expect(screen.getByText('75%')).toBeInTheDocument()
-    expect(screen.getByText('25%')).toBeInTheDocument()
-    expect(container.querySelectorAll('circle')).toHaveLength(2)
+    expect(screen.getByRole('meter', { name: '科幻' })).toHaveAttribute('aria-valuenow', '3')
+    expect(screen.getByRole('meter', { name: '文学' })).toHaveAttribute('aria-valuenow', '1')
+    expect(screen.getByText('3')).toBeInTheDocument()
+    expect(screen.getByText('1')).toBeInTheDocument()
   })
 
-  it('merges the tail into an "other" slice beyond 8 tags', () => {
+  it('keeps individual tags visible beyond eight entries', () => {
     const many: ReadingRecordTagItem[] = Array.from({ length: 10 }, (_, i) => ({
       tagId: `t${i}`,
       name: `Tag ${i}`,
@@ -63,9 +64,11 @@ describe('TagDistribution', () => {
     ;(useReadingByTag as Mock).mockReturnValue({ data: { data: many } })
     const { container } = renderChart()
     expect(screen.getByText('Tag 7')).toBeInTheDocument()
-    expect(screen.queryByText('Tag 8')).not.toBeInTheDocument()
-    expect(screen.getByText('stats.tagOther')).toBeInTheDocument()
-    expect(container.querySelectorAll('circle')).toHaveLength(9)
+    expect(screen.getByText('Tag 8')).toBeInTheDocument()
+    expect(screen.getByText('Tag 9')).toBeInTheDocument()
+    expect(screen.queryByText('stats.tagOther')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('meter')).toHaveLength(10)
+    expect(container.querySelectorAll('circle')).toHaveLength(0)
   })
 
   it('shows the guidance empty state without tagged reading', () => {

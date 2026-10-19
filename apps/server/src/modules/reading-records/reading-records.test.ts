@@ -20,14 +20,12 @@ import {
   addReadingTime,
   computeStreak,
   deleteSession,
-  getBookDetail,
   getBookRecords,
   getByBook,
   getByTag,
   getDaily,
   getHourly,
   getSummary,
-  listSessions,
   updateSession,
 } from './reading-records.service'
 
@@ -191,24 +189,26 @@ describe('reading-records service', () => {
 
     const summary = await getSummary(ownerId, '2026-07-31')
     expect(summary).toEqual({
+      firstRecordedDate: '2026-07-29',
       totalSeconds: 650,
       totalBooks: 2,
-      totalDays: 3,
+      totalDays: 2,
       todaySeconds: 50,
-      currentStreak: 3,
-      longestStreak: 3,
+      currentStreak: 2,
+      longestStreak: 2,
       // All records fall inside the current week (Mon 2026-07-27) and month
       weekSeconds: 650,
       prevWeekSeconds: 0,
       monthSeconds: 650,
       prevMonthSeconds: 0,
       totalWordsRead: 0,
+      scope: { longestStreak: 2, totalSeconds: 650, totalBooks: 2, totalDays: 2, totalWordsRead: 0, wordsPartial: false, finishedBooks: 0, finishedRounds: 0 },
       monthlyComparison: {
         currentPeriodSeconds: 650,
         previousPeriodSeconds: 0,
         currentPeriodBooks: 2,
         previousPeriodBooks: 0,
-        currentPeriodDays: 3,
+        currentPeriodDays: 2,
         previousPeriodDays: 0,
       },
     })
@@ -299,23 +299,6 @@ describe('reading-records service', () => {
     })
   })
 
-  it('lists manual sessions per book, newest first, with limit/offset; auto blocks excluded', async () => {
-    for (const [i, startedAt] of [1785000000000, 1785003600000, 1785007200000].entries()) {
-      await addReadingTime(ownerId, {
-        bookId, date: '2026-07-30', durationSeconds: 60 + i, startedAt, endedAt: startedAt + 60000,
-      })
-    }
-    // auto block must never appear in the session list
-    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 45 })
-    await addReadingTime(ownerId, { bookId: book2Id, date: '2026-07-30', durationSeconds: 60, startedAt: 1785007200000, endedAt: 1785007260000 })
-    const all = await listSessions(ownerId, bookId, 50, 0)
-    expect(all).toHaveLength(3)
-    expect(all[0].startedAt).toBe(1785007200000)
-    expect(all[2].startedAt).toBe(1785000000000)
-    const page = await listSessions(ownerId, bookId, 2, 1)
-    expect(page.map((s) => s.startedAt)).toEqual([1785003600000, 1785000000000])
-  })
-
   it('updateSession adjusts the same-day aggregate by the duration delta', async () => {
     await addReadingTime(ownerId, {
       bookId, date: '2026-07-30', durationSeconds: 600, startedAt: 1785000000000, endedAt: 1785000600000,
@@ -356,13 +339,13 @@ describe('reading-records service', () => {
     expect(record.durationSeconds).toBe(200)
   })
 
-  it('rejects editing or deleting auto-mode sessions and foreign sessions', async () => {
-    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 60 })
+  it('allows deleting auto-mode sessions but rejects editing them and accessing foreign sessions', async () => {
+    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 60, source: 'auto' })
     const auto = db.select().from(schema.readingSessions).get()!
     await expect(updateSession(ownerId, auto.id, { durationSeconds: 120 }))
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-    await expect(deleteSession(ownerId, auto.id))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await deleteSession(ownerId, auto.id)
+    expect(db.select().from(schema.readingSessions).where(eq(schema.readingSessions.id, auto.id)).get()).toBeUndefined()
 
     await addReadingTime(ownerId, {
       bookId, date: '2026-07-30', durationSeconds: 60, startedAt: 1785000000000, endedAt: 1785000600000,
@@ -373,14 +356,16 @@ describe('reading-records service', () => {
       .rejects.toMatchObject({ code: 'SESSION_NOT_FOUND' })
   })
 
-  it('reports days read and readStatus per book', async () => {
+  it('counts per-book reading days after sixty seconds while retaining shorter durations', async () => {
     await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 60 })
     await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 90 })
     await addReadingTime(ownerId, { bookId, date: '2026-07-31', durationSeconds: 30 })
 
     const byBook = await getByBook(ownerId, {})
     expect(byBook).toHaveLength(1)
-    expect(byBook[0]).toMatchObject({ days: 2, readStatus: 'reading' })
+    expect(byBook[0]).toMatchObject({ days: 1, durationSeconds: 180, readStatus: 'reading' })
+    await addReadingTime(ownerId, { bookId, date: '2026-07-31', durationSeconds: 30 })
+    expect((await getByBook(ownerId, {}))[0]).toMatchObject({ days: 2, durationSeconds: 210 })
   })
 
   it('returns per-book totals and descending daily records', async () => {
@@ -404,19 +389,19 @@ describe('reading-records service', () => {
 
     const utc = await getHourly(ownerId, {}, 0)
     expect(utc).toEqual([
-      { hour: 2, durationSeconds: 70 },
-      { hour: 15, durationSeconds: 150 },
+      { hour: 2, durationSeconds: 70, days: 1 },
+      { hour: 15, durationSeconds: 150, days: 1 },
     ])
 
     // UTC+8 (getTimezoneOffset() = -480): 15:00 UTC -> 23:00 local
     const utc8 = await getHourly(ownerId, {}, -480)
     expect(utc8).toEqual([
-      { hour: 10, durationSeconds: 70 },
-      { hour: 23, durationSeconds: 150 },
+      { hour: 10, durationSeconds: 70, days: 1 },
+      { hour: 23, durationSeconds: 150, days: 1 },
     ])
 
     const ranged = await getHourly(ownerId, { from: '2026-07-30', to: '2026-07-30' }, 0)
-    expect(ranged).toEqual([{ hour: 15, durationSeconds: 150 }])
+    expect(ranged).toEqual([{ hour: 15, durationSeconds: 150, days: 1 }])
   })
 
   it('filters hourly distribution by bookId', async () => {
@@ -426,18 +411,18 @@ describe('reading-records service', () => {
 
     const all = await getHourly(ownerId, {}, 0)
     expect(all).toEqual([
-      { hour: 15, durationSeconds: 100 },
-      { hour: 21, durationSeconds: 250 },
+      { hour: 15, durationSeconds: 100, days: 1 },
+      { hour: 21, durationSeconds: 250, days: 1 },
     ])
 
     const bookOnly = await getHourly(ownerId, { bookId: book2Id }, 0)
-    expect(bookOnly).toEqual([{ hour: 21, durationSeconds: 250 }])
+    expect(bookOnly).toEqual([{ hour: 21, durationSeconds: 250, days: 1 }])
 
     const otherUser = await getHourly(otherId, { bookId: book2Id }, 0)
     expect(otherUser).toEqual([])
   })
 
-  it('stores retroactive entries with null startedAt and skips them in hourly/session views', async () => {
+  it('stores retroactive entries with null startedAt and skips them in hourly views', async () => {
     await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 600, startedAt: null, endedAt: 1785000600000 })
 
     const session = db.select().from(schema.readingSessions).get()!
@@ -449,8 +434,6 @@ describe('reading-records service', () => {
 
     // no start time → no hour to attribute to
     expect(await getHourly(ownerId, {}, 0)).toEqual([])
-    // Session entries require a start time for hour attribution.
-    expect(await listSessions(ownerId, bookId, 50, 0)).toEqual([])
   })
 
   it('merges retroactive start/end fractions into the interval union without touching the position', async () => {
@@ -480,14 +463,14 @@ describe('reading-records service', () => {
     })
     const saved = await loadProgressFile(files, ownerId, bookId)
     expect(saved.intervals).toEqual([[0.2, 0.35]])
-    expect(saved.cfi).toBeNull()
+    expect(saved.cfi ?? null).toBeNull()
     expect(saved.percent).toBe(0)
   })
 
   it('rejects invalid retroactive payloads at the schema level', () => {
     const base = { bookId: 'b1', date: '2026-07-30', durationSeconds: 600 }
-    // endFraction must be >= startFraction
-    expect(readingRecordCreateSchema.safeParse({ ...base, startFraction: 0.5, endFraction: 0.4 }).success).toBe(false)
+    // Backward reading preserves a valid recorded traversal.
+    expect(readingRecordCreateSchema.safeParse({ ...base, startFraction: 0.5, endFraction: 0.4 }).success).toBe(true)
     expect(readingRecordCreateSchema.safeParse({ ...base, startFraction: 0.4, endFraction: 0.5 }).success).toBe(true)
     // duration must be positive
     expect(readingRecordCreateSchema.safeParse({ ...base, durationSeconds: 0 }).success).toBe(false)
@@ -496,35 +479,6 @@ describe('reading-records service', () => {
     expect(readingRecordCreateSchema.safeParse({ ...base, startedAt: null, endedAt: 1785000600000 }).success).toBe(true)
     // existing auto-report shape stays valid
     expect(readingRecordCreateSchema.safeParse({ ...base, startedAt: 1785000000000 }).success).toBe(true)
-  })
-
-  it('returns the mixed detail feed: auto days net of manual sessions, newest first, paginated', async () => {
-    // auto blocks on two days
-    await addReadingTime(ownerId, { bookId, date: '2026-07-29', durationSeconds: 300, startedAt: Date.UTC(2026, 6, 29, 10) })
-    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 500, startedAt: Date.UTC(2026, 6, 30, 10) })
-    // a manual session adds to the 07-30 total → auto day is 700 - 200 = 500
-    await addReadingTime(ownerId, {
-      bookId, date: '2026-07-30', durationSeconds: 200,
-      startedAt: Date.UTC(2026, 6, 30, 20), endedAt: Date.UTC(2026, 6, 30, 20) + 200_000,
-    })
-    // retroactive no-time entry: 07-31 is fully manual → no auto row for it
-    await addReadingTime(ownerId, { bookId, date: '2026-07-31', durationSeconds: 100, startedAt: null, endedAt: 1785000600000 })
-
-    const feed = await getBookDetail(ownerId, bookId, 50, 0)
-    expect(feed).toHaveLength(4)
-    expect(feed[0]).toMatchObject({ kind: 'manual', date: '2026-07-31', startedAt: null, durationSeconds: 100 })
-    expect(feed[1]).toMatchObject({ kind: 'manual', date: '2026-07-30', startedAt: Date.UTC(2026, 6, 30, 20), durationSeconds: 200 })
-    expect(feed[2]).toEqual({ kind: 'autoDay', date: '2026-07-30', durationSeconds: 500 })
-    expect(feed[3]).toEqual({ kind: 'autoDay', date: '2026-07-29', durationSeconds: 300 })
-
-    // offset/limit slice the merged list
-    const page = await getBookDetail(ownerId, bookId, 2, 2)
-    expect(page).toEqual([
-      { kind: 'autoDay', date: '2026-07-30', durationSeconds: 500 },
-      { kind: 'autoDay', date: '2026-07-29', durationSeconds: 300 },
-    ])
-
-    await expect(getBookDetail(otherId, bookId, 50, 0)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
   })
 
   it('reports week-over-week and month-over-month totals around client-local boundaries', async () => {
@@ -583,14 +537,14 @@ describe('reading-records service', () => {
 
     const byTag = await getByTag(ownerId, {})
     expect(byTag).toEqual([
-      { tagId: tagB, name: 'Tech', durationSeconds: 900 },
-      { tagId: tagA, name: 'Fiction', durationSeconds: 577 },
+      { tagId: tagB, name: 'Tech', durationSeconds: 900, bookCount: 1 },
+      { tagId: tagA, name: 'Fiction', durationSeconds: 577, bookCount: 1 },
     ])
 
     const ranged = await getByTag(ownerId, { from: '2026-07-01', to: '2026-07-31' })
     expect(ranged).toEqual([
-      { tagId: tagB, name: 'Tech', durationSeconds: 900 },
-      { tagId: tagA, name: 'Fiction', durationSeconds: 500 },
+      { tagId: tagB, name: 'Tech', durationSeconds: 900, bookCount: 1 },
+      { tagId: tagA, name: 'Fiction', durationSeconds: 500, bookCount: 1 },
     ])
 
     expect(await getByTag(otherId, {})).toEqual([])
@@ -641,7 +595,7 @@ describe('reading-records service', () => {
     expect(summary.totalWordsRead).toBe(1400)
   })
 
-  it('rolls back atomically if interval merge fails in addReadingTime', async () => {
+  it('rolls back sessions and aggregates atomically if projection persistence fails', async () => {
     const b = createId('book')
     db.insert(schema.books).values({
       id: b,
@@ -656,9 +610,8 @@ describe('reading-records service', () => {
     }).run()
     seedVersion(db, ownerId, b, 100, 'Atomic Book')
 
-    const spy = vi.spyOn(progressFile, 'mergeProgressIntervalInTx').mockImplementationOnce(() => {
-      throw new Error('injected interval merge failure')
-    })
+    db.run(sql.raw(`CREATE TRIGGER reading_projection_failure BEFORE INSERT ON reading_records
+      WHEN NEW.book_id = '${b}' BEGIN SELECT RAISE(ABORT, 'injected projection failure'); END`))
 
     await expect(addReadingTime(ownerId, {
       bookId: b,
@@ -666,7 +619,7 @@ describe('reading-records service', () => {
       durationSeconds: 300,
       startFraction: 0.1,
       endFraction: 0.2,
-    })).rejects.toThrow('injected interval merge failure')
+    })).rejects.toThrow('injected projection failure')
 
     // Neither readingRecords nor readingSessions should have been committed
     const records = db.select().from(schema.readingRecords).where(eq(schema.readingRecords.bookId, b)).all()
@@ -674,7 +627,7 @@ describe('reading-records service', () => {
     const sessions = db.select().from(schema.readingSessions).where(eq(schema.readingSessions.bookId, b)).all()
     expect(sessions).toHaveLength(0)
 
-    spy.mockRestore()
+    db.run(sql.raw('DROP TRIGGER reading_projection_failure'))
   })
 
   it('does not touch storage.exists for unread books across repeated getSummary requests', async () => {
@@ -692,4 +645,21 @@ describe('reading-records service', () => {
     expect(spyExists).not.toHaveBeenCalled()
     spyExists.mockRestore()
   })
+  it('uses scoped qualifying dates for streaks and viewing-zone boundaries for completed rounds', async () => {
+    for (const date of ['2026-07-28', '2026-07-29', '2026-07-31']) {
+      await addReadingTime(ownerId, { bookId, date, durationSeconds: 120 })
+    }
+    await addReadingTime(ownerId, { bookId: book2Id, date: '2026-07-31', durationSeconds: 30 })
+    db.update(schema.readingRounds).set({ status: 'finished', endedAt: Date.parse('2026-07-30T17:00:00Z') }).where(eq(schema.readingRounds.bookVersionId, bookId)).run()
+    db.update(schema.readingRounds).set({ status: 'finished', endedAt: Date.parse('2026-07-31T16:00:00Z') }).where(eq(schema.readingRounds.bookVersionId, book2Id)).run()
+    const range = { from: '2026-07-29', to: '2026-07-31', timezone: 'Asia/Shanghai' }
+    const summary = await getSummary(ownerId, '2026-07-31', false, range)
+    expect(summary.longestStreak).toBe(2)
+    expect(summary.scope).toMatchObject({ longestStreak: 1, totalSeconds: 270, totalDays: 2, finishedBooks: 1, finishedRounds: 1 })
+    const detail = await getBookRecords(ownerId, bookId, false, range)
+    expect(detail.totalSeconds).toBe(240)
+    expect(detail.records.map((record) => record.date)).toEqual(['2026-07-31', '2026-07-29'])
+    expect((await getSummary(otherId, '2026-07-31', false, range)).scope).toMatchObject({ longestStreak: 0, totalSeconds: 0, finishedRounds: 0 })
+  })
+
 })

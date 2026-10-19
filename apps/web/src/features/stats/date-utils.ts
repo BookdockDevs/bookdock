@@ -1,6 +1,6 @@
 import { localDateString } from '@/api/hooks/reading-records'
 
-export type StatsPeriod = 'week' | 'month' | 'year'
+export type StatsPeriod = 'week' | 'month' | 'year' | 'all'
 
 export interface DayRange {
   from: Date
@@ -14,6 +14,7 @@ function startOfDay(d: Date): Date {
 /** Calendar range containing `anchor`; weeks start on Monday. */
 export function periodRange(period: StatsPeriod, anchor: Date): DayRange {
   const a = startOfDay(anchor)
+  if (period === 'all') return { from: new Date(1970, 0, 1), to: new Date() }
   if (period === 'week') {
     const mondayOffset = (a.getDay() + 6) % 7
     const from = new Date(a)
@@ -40,6 +41,48 @@ export function shiftPeriod(period: StatsPeriod, anchor: Date, delta: number): D
   }
   if (period === 'month') return new Date(a.getFullYear(), a.getMonth() + delta, 1)
   return new Date(a.getFullYear() + delta, 0, 1)
+}
+
+export interface DeltaInfo {
+  text: string
+  direction: 'up' | 'down' | 'neutral'
+}
+
+export function periodDelta(
+  current: number,
+  previous: number,
+  format: (v: number) => string,
+  _: (key: string, options?: Record<string, string | number>) => string,
+  period: StatsPeriod,
+): DeltaInfo {
+  const diff = current - previous
+  const vsPeriodKey =
+    period === 'week'
+      ? 'stats.vsLastWeekPrefix'
+      : period === 'month'
+        ? 'stats.vsPrevMonthPrefix'
+        : period === 'year'
+          ? 'stats.vsLastYearPrefix'
+          : 'stats.vsPrevPeriodPrefix'
+  const prefix =
+    _(vsPeriodKey) ||
+    (period === 'week' ? '较上周' : period === 'month' ? '较上月' : period === 'year' ? '较上年' : '较上周期')
+
+  if (diff === 0) {
+    const noChangeText = _('stats.noChange') || '无变化'
+    const space = prefix.endsWith(' ') ? '' : ' '
+    return {
+      text: `${prefix}${space}${noChangeText}`,
+      direction: 'neutral',
+    }
+  }
+
+  const sign = diff > 0 ? '+' : '-'
+  const formattedVal = format(Math.abs(diff))
+  return {
+    text: `${prefix}${sign}${formattedVal}`,
+    direction: diff > 0 ? 'up' : 'down',
+  }
 }
 
 export function eachDay(from: Date, to: Date): Date[] {
@@ -86,8 +129,67 @@ export function heatmapWeeks(year: number): (string | null)[][] {
 }
 
 export function formatPeriodLabel(period: StatsPeriod, range: DayRange): string {
+  if (period === 'all') return 'All'
   const { from, to } = range
   if (period === 'year') return `${from.getFullYear()}`
   if (period === 'month') return `${from.getFullYear()}.${from.getMonth() + 1}`
   return `${from.getFullYear()}.${from.getMonth() + 1}.${from.getDate()} - ${to.getMonth() + 1}.${to.getDate()}`
+}
+
+/** Checks if range has reached or exceeded current period (prevents future navigation) */
+export function isFutureOrCurrentPeriod(period: StatsPeriod, range: DayRange, now = new Date()): boolean {
+  if (period === 'all') return true
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (period === 'week') {
+    return range.to.getTime() >= today.getTime()
+  }
+  if (period === 'month') {
+    return (
+      range.from.getFullYear() > today.getFullYear() ||
+      (range.from.getFullYear() === today.getFullYear() && range.from.getMonth() >= today.getMonth())
+    )
+  }
+  if (period === 'year') {
+    return range.from.getFullYear() >= today.getFullYear()
+  }
+  return false
+}
+
+export function formatDisplayPeriodLabel(
+  period: StatsPeriod,
+  range: DayRange,
+  options?: { lang?: string; firstRecordedDate?: string },
+): string {
+  const isZh = !options?.lang || options.lang.startsWith('zh')
+  const currentYear = new Date().getFullYear()
+
+  if (period === 'all') {
+    const firstYear = options?.firstRecordedDate ? parseInt(options.firstRecordedDate.slice(0, 4), 10) : currentYear
+    if (firstYear < currentYear) {
+      return isZh ? `${firstYear}年～${currentYear}年` : `${firstYear} - ${currentYear}`
+    }
+    return isZh ? `${currentYear}年` : `${currentYear}`
+  }
+
+  const { from, to } = range
+  if (period === 'year') {
+    return isZh ? `${from.getFullYear()}年` : `${from.getFullYear()}`
+  }
+
+  if (period === 'month') {
+    return isZh ? `${from.getFullYear()}年${from.getMonth() + 1}月` : `${from.getFullYear()}.${from.getMonth() + 1}`
+  }
+
+  // Week
+  if (isZh) {
+    if (from.getFullYear() === to.getFullYear() && from.getMonth() === to.getMonth()) {
+      return `${from.getMonth() + 1}月${from.getDate()}日～${to.getDate()}日`
+    }
+    if (from.getFullYear() === to.getFullYear()) {
+      return `${from.getMonth() + 1}月${from.getDate()}日～${to.getMonth() + 1}月${to.getDate()}日`
+    }
+    return `${from.getFullYear()}年${from.getMonth() + 1}月${from.getDate()}日～${to.getFullYear()}年${to.getMonth() + 1}月${to.getDate()}日`
+  }
+
+  return `${from.getMonth() + 1}.${from.getDate()} - ${to.getMonth() + 1}.${to.getDate()}`
 }

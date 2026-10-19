@@ -57,7 +57,7 @@ describe('account-local hidden display', () => {
   it('drops hidden-inclusive cached reads and cancels their late responses', async () => {
     useAuthStore.getState().setAuth(alice)
     await toggleRevealHidden()
-    const prefixes = ['books', 'book', 'shelves', 'tags', 'chapters', 'progress', 'annotations', 'reading-records', 'reading-sessions', 'batch-selection']
+    const prefixes = ['books', 'book', 'shelves', 'tags', 'chapters', 'progress', 'annotations', 'reading-records', 'batch-selection']
     for (const prefix of prefixes) queryClient.setQueryData([prefix, 'test'], { hidden: true })
     queryClient.setQueryData(['libraries', 'shared', 'catalog'], { shared: true })
     let resolve!: (value: string) => void

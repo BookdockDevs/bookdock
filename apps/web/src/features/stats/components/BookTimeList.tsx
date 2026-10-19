@@ -1,10 +1,12 @@
+import { Link } from '@tanstack/react-router'
+
 import { localDateString, useReadingByBook } from '@/api/hooks/reading-records'
+import { resolveArchiveScope } from '@/features/archive/archive-scope'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 
 import StatsBookCover from './StatsBookCover'
-import { formatPeriodLabel } from '../date-utils'
 import type { DayRange, StatsPeriod } from '../date-utils'
 
 interface BookTimeListProps {
@@ -15,12 +17,10 @@ interface BookTimeListProps {
 
 export default function BookTimeList({ date, period, range }: BookTimeListProps) {
   const _ = useTranslation()
-  const from = date ?? localDateString(range.from)
-  const to = date ?? localDateString(range.to)
+  const { from, to } = resolveArchiveScope({ period, anchor: localDateString(range.from), date: date ?? undefined }).query
   const booksQuery = useReadingByBook(from, to)
   const { data } = booksQuery
   const items = data?.data ?? []
-  const scopeLabel = date ?? formatPeriodLabel(period, range)
 
   if (booksQuery.isError) {
     return (
@@ -36,7 +36,7 @@ export default function BookTimeList({ date, period, range }: BookTimeListProps)
     <section className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-xs sm:p-6 dark:border-stone-800 dark:bg-stone-900">
       <h2 className="mb-4 text-sm font-semibold text-stone-900 dark:text-stone-100">
         <span>{_('stats.bookRanking')}</span>
-        <span className="font-normal tabular-nums text-stone-400 dark:text-stone-500"> · {scopeLabel}</span>
+        {date && <span className="font-normal tabular-nums text-stone-400 dark:text-stone-500"> · {date}</span>}
       </h2>
       {isBooksLoading ? (
         <div className="flex flex-col gap-3">
@@ -67,7 +67,7 @@ export default function BookTimeList({ date, period, range }: BookTimeListProps)
               <StatsBookCover item={item} />
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5 text-sm font-medium">
-                  <span className="truncate">{item.title}</span>
+                  <Link to="/archive" search={{ bookId: item.bookId, bookView: 'data' }} state={(previous) => ({ ...previous })} className="truncate hover:underline">{item.title}</Link>
                   <span className="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-normal text-stone-500 dark:bg-stone-800 dark:text-stone-400">
                     {_(`library.readStatus${item.readStatus[0].toUpperCase()}${item.readStatus.slice(1)}`)}
                   </span>

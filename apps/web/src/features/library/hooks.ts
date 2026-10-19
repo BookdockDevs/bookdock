@@ -36,7 +36,7 @@ import {
 } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
-import { READING_RECORDS_KEY, READING_SESSIONS_KEY } from '@/api/hooks/reading-records'
+import { READING_RECORDS_KEY } from '@/api/hooks/reading-records'
 import { tocBasePath, invalidateCityVersionQueries, type TocTarget } from '@/api/hooks/useTocRules'
 import { useAuthStore } from '@/stores/auth.store'
 import { withReveal } from '@/lib/reveal-hidden'
@@ -246,7 +246,6 @@ export function invalidatePermanentlyDeletedBookQueries(queryClient: QueryClient
     queryClient.invalidateQueries({ queryKey: ['book'] }),
     queryClient.invalidateQueries({ queryKey: ['archive'] }),
     queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY }),
-    queryClient.invalidateQueries({ queryKey: READING_SESSIONS_KEY }),
     queryClient.invalidateQueries({ queryKey: ['progress'] }),
     queryClient.invalidateQueries({ queryKey: ['annotations'] }),
     queryClient.invalidateQueries({ queryKey: ['note-archive'] }),

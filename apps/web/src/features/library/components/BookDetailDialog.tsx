@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
+
+import { useAuthStore } from '@/stores/auth.store'
 
 import type { BookListItem, CatalogBook, Library, Review } from '@bookdock/shared'
 
@@ -51,6 +54,8 @@ interface BookDetailDialogProps {
 export default function BookDetailDialog({ book, work: workContext = null, readOnly = false, onClose, onDelete, onPublish }: BookDetailDialogProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const user = useAuthStore((state) => state.user)
   const workQuery = useCatalogBookDetail(workContext?.library.id ?? null, workContext?.work.id ?? null)
   const work = workContext ? { ...workContext, work: workQuery.data?.data ?? workContext.work } : null
 
@@ -378,6 +383,10 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           },
         ]
         : []
+    if (user && workVersionId) workMenuItems.push({ key: 'reading-data', label: _('readingData.data'), icon: <path d="M4 19V9m8 10V4m8 15v-7" />, onSelect: () => {
+      onClose()
+      void navigate({ to: '/archive', search: { bookId: workVersionId, bookView: 'data' } })
+    } })
     return (
       <>
         <Modal
@@ -550,6 +559,11 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
         },
       ]
       : []
+
+  if (user) privateMenuItems.push({ key: 'reading-data', label: _('readingData.data'), icon: <path d="M4 19V9m8 10V4m8 15v-7" />, onSelect: () => {
+    onClose()
+    void navigate({ to: '/archive', search: { bookId: displayBook.id, bookView: 'data' } })
+  } })
 
   return (
     <>

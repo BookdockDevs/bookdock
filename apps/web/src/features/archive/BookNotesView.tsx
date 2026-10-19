@@ -3,8 +3,10 @@ import { useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 
-import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq, ArchiveRecordType, Review } from '@bookdock/shared'
+import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq, ArchiveRecordType, ReadingRange, Review } from '@bookdock/shared'
 
+import { ApiError } from '@/api/client'
+import { useReadingLedger } from '@/api/hooks/reading-records'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -43,7 +45,7 @@ import { useAuthStore } from '@/stores/auth.store'
 
 import { useArchiveBookDetail } from './hooks'
 import { hasReadableText, readStatusLabel } from './components/archive-helpers'
-import BookStatsMicroCard from './components/BookStatsMicroCard'
+import BookReadingData from './components/BookReadingData'
 import HighlightFilterMenu from './components/HighlightFilterMenu'
 import SortMenu from './components/SortMenu'
 
@@ -52,13 +54,15 @@ type BookSort = NonNullable<ArchiveSearch['bookSort']>
 
 const TABS: BookTab[] = ['all', 'highlight', 'bookmark', 'idea', 'review']
 
-export default function BookNotesView({ bookVersionId, bookType, bookSort, onChange, onBack, hideBack = false }: {
+export default function BookNotesView({ bookVersionId, bookView = 'notes', bookType, bookSort, onChange, onBack, hideBack = false, range }: {
   bookVersionId: string
+  bookView?: 'data' | 'notes'
   bookType: BookTab
   bookSort: BookSort
-  onChange: (next: Partial<Pick<ArchiveSearch, 'bookType' | 'bookSort'>>) => void
+  onChange: (next: Partial<Pick<ArchiveSearch, 'bookType' | 'bookSort' | 'bookView'>>) => void
   onBack: () => void
   hideBack?: boolean
+  range?: ReadingRange
 }) {
   const _ = useTranslation()
   const navigate = useNavigate()
@@ -80,10 +84,11 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
   const [colorFilter, setColorFilter] = useState<Set<string>>(new Set())
   const [styleFilter, setStyleFilter] = useState<Set<AnnotationStyle>>(new Set())
 
+  const ledger = useReadingLedger(bookVersionId)
   const book = useBook(bookVersionId)
   const hasProgress = (book.data?.data.progress ?? 0) > 0
-  const chapters = useBookChapters(bookVersionId)
-  const detail = useArchiveBookDetail(bookVersionId)
+  const chapters = useBookChapters(bookVersionId, bookView === 'notes')
+  const detail = useArchiveBookDetail(bookVersionId, bookView === 'notes', range)
   // Composer context for the review editor; fetched only while editing so
   // opening a review detail stays a zero-extra-request action.
   const reviewBookContext = useReviewBookContext(bookVersionId, editingReviewId !== null)
@@ -157,8 +162,8 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
     ]
     const asc = normalizedSort === 'time-asc'
     return list.sort((a, b) => {
-      const timeA = a.item.updatedAt ?? a.item.createdAt ?? 0
-      const timeB = b.item.updatedAt ?? b.item.createdAt ?? 0
+      const timeA = a.item.createdAt ?? 0
+      const timeB = b.item.createdAt ?? 0
       const diff = asc ? timeA - timeB : timeB - timeA
       return diff || a.item.id.localeCompare(b.item.id)
     })
@@ -351,7 +356,7 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
     // 时间语义：
     // - 有标题或正文的书评：显示 updatedAt
     // - 纯评分记录：显示 createdAt
-    const timeValue = isRatingOnly ? review.createdAt : (review.updatedAt ?? review.createdAt)
+    const timeValue = review.createdAt
 
     if (isRatingOnly) {
       return (
@@ -680,7 +685,7 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
   }
 
   return (
-    <div className="flex w-full max-w-3xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <div className="flex flex-col gap-3">
         {!hideBack && (
           <div className="flex items-center gap-2 border-b border-stone-200/70 pb-2.5 lg:hidden dark:border-stone-800/70">
@@ -708,53 +713,95 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
               <div className="h-4 w-32 animate-pulse rounded bg-stone-500/10" />
             </div>
           </div>
-        ) : book.isError ? (
+        ) : book.isError && ledger.data?.data && book.error instanceof ApiError && (book.error.status === 404 || book.error.status === 403) ? (
+          <div><h2 className="text-xl font-bold">{ledger.data.data.title}</h2><p className="mt-1 text-sm text-stone-500">{ledger.data.data.author} · {_('readingData.sourceUnavailable')}</p></div>
+        ) : book.isError && !book.data ? (
           <QueryErrorState isRetrying={book.isFetching} onRetry={() => void book.refetch()} />
         ) : (
-          <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
-            <div
-              onClick={() => setBookDetailOpen(true)}
-              className="group/cover shrink-0 cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.99]"
-              title={_('library.bookDetails')}
-            >
-              <BookCover book={book.data.data} size="card" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h2
+          <div className="flex items-center justify-between gap-4">
+            {/* 左侧：封面 + 书名 + 作者状态（为未来分类标签预留良好延展空间） */}
+            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+              <div
                 onClick={() => setBookDetailOpen(true)}
-                className="cursor-pointer truncate text-xl font-bold tracking-tight text-stone-900 transition-colors hover:text-stone-600 dark:text-stone-50 dark:hover:text-stone-300"
+                className="group/cover shrink-0 cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.99]"
                 title={_('library.bookDetails')}
               >
-                {book.data.data.title}
-              </h2>
-              <p className="mt-0.5 truncate text-sm text-stone-500 dark:text-stone-400">
-                {[book.data.data.author, readStatusLabel(book.data.data.readStatus, _)].filter(Boolean).join(' · ')}
-              </p>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                <Button
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => {
-                    void navigate({ to: '/books/$id', params: { id: bookVersionId } })
-                  }}
+                <BookCover book={book.data.data} size="card" />
+              </div>
+              <div className="min-w-0">
+                <h2
+                  onClick={() => setBookDetailOpen(true)}
+                  className="cursor-pointer truncate text-xl font-bold tracking-tight text-stone-900 transition-colors hover:text-stone-600 dark:text-stone-50 dark:hover:text-stone-300"
+                  title={_('library.bookDetails')}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                  </svg>
-                  {hasProgress ? _('library.continueReading') : _('library.startReading')}
-                </Button>
+                  {book.data.data.title}
+                </h2>
+                <p className="mt-1 truncate text-sm text-stone-500 dark:text-stone-400">
+                  {[book.data.data.author, readStatusLabel(book.data.data.readStatus, _)].filter(Boolean).join(' · ')}
+                </p>
+              </div>
+            </div>
+
+            {/* 右侧：同列分层（上层继续阅读主操作，下层视图切换滑块） */}
+            <div className="flex flex-col items-end gap-2.5 shrink-0">
+              <Button
+                size="sm"
+                className="gap-1.5 rounded-full px-3.5 h-8 text-xs font-medium cursor-pointer shadow-2xs"
+                onClick={() => {
+                  void navigate({ to: '/books/$id', params: { id: bookVersionId } })
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                </svg>
+                <span>{hasProgress ? _('library.continueReading') : _('library.startReading')}</span>
+              </Button>
+
+              {/* 视图切换器（数据 / 笔记） */}
+              <div
+                role="tablist"
+                aria-label={_('readingData.views')}
+                className="inline-flex items-center rounded-xl bg-stone-100 p-0.5 dark:bg-stone-800/80"
+              >
                 <button
                   type="button"
-                  onClick={() => setBookDetailOpen(true)}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-stone-200/90 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 dark:border-stone-700/80 dark:bg-stone-900/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                  role="tab"
+                  aria-selected={bookView === 'data'}
+                  onClick={() => onChange({ bookView: 'data' })}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium transition-all cursor-pointer select-none',
+                    bookView === 'data'
+                      ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-900 dark:text-stone-100 font-semibold'
+                      : 'text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200',
+                  )}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="16" x2="12" y2="12" />
-                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="20" x2="18" y2="10" />
+                    <line x1="12" y1="20" x2="12" y2="4" />
+                    <line x1="6" y1="20" x2="6" y2="14" />
                   </svg>
-                  {_('library.bookDetails')}
+                  <span>{_('readingData.viewData')}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bookView === 'notes'}
+                  onClick={() => onChange({ bookView: 'notes' })}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium transition-all cursor-pointer select-none',
+                    bookView === 'notes'
+                      ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-900 dark:text-stone-100 font-semibold'
+                      : 'text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200',
+                  )}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                  <span>{_('readingData.viewNotes')}</span>
                 </button>
               </div>
             </div>
@@ -762,8 +809,7 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
         )}
       </div>
 
-      <BookStatsMicroCard bookVersionId={bookVersionId} />
-
+      {bookView === 'data' ? <BookReadingData key={bookVersionId} bookId={bookVersionId} onDeleted={onBack} /> : <>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200/70 pb-2 dark:border-stone-800/70">
         <div role="tablist" aria-label={_('archive.filterByType')} className="flex min-w-0 max-w-full flex-wrap items-center gap-1">
           {TABS.map((t) => (
@@ -774,9 +820,9 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
               aria-selected={tab === t}
               onClick={() => onChange({ bookType: t })}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60',
+                'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 cursor-pointer',
                 tab === t
-                  ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
+                  ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 shadow-2xs'
                   : 'text-stone-500 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
               )}
             >
@@ -909,7 +955,7 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
                       {reviews.length}
                     </span>
                   </div>
-                  <ul className="flex max-w-3xl flex-col gap-3">
+                  <ul className="flex w-full flex-col gap-3">
                     {reviews.map(renderReviewItem)}
                   </ul>
                 </section>
@@ -938,7 +984,7 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
                         {group.list.length}
                       </span>
                     </div>
-                    <ul className="flex max-w-3xl flex-col gap-3">
+                    <ul className="flex w-full flex-col gap-3">
                       {group.list.map(renderAnnotationItem)}
                     </ul>
                   </section>
@@ -955,7 +1001,7 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
                       {reviews.length}
                     </span>
                   </div>
-                  <ul className="flex max-w-3xl flex-col gap-3">
+                  <ul className="flex w-full flex-col gap-3">
                     {reviews.map(renderReviewItem)}
                   </ul>
                 </section>
@@ -970,7 +1016,7 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
               <p className="py-10 text-center text-sm text-stone-500 dark:text-stone-400">{_('archive.noRecords')}</p>
             ) : (
               <section aria-label={_('archive.recentRecords')}>
-                <ul className="flex max-w-3xl flex-col gap-3">
+                <ul className="flex w-full flex-col gap-3">
                   {timeRecords.map((record) =>
                     record.kind === 'review'
                       ? renderReviewItem(record.item as Review)
@@ -982,6 +1028,8 @@ export default function BookNotesView({ bookVersionId, bookType, bookSort, onCha
           )}
         </div>
       )}
+
+      </>}
 
       {selectExportOpen && (
         <AnnotationExportDialog

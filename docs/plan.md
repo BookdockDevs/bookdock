@@ -45,6 +45,7 @@ The following are intentionally excluded from this Web milestone: brightness con
 - Interaction notifications: persisted comment/reply/like events with idempotent writes and permission-filtered reads implemented for v0.6.0
 - Archive center: per-book note/review archives plus permission-projected reader profiles implemented for v0.6.0
 - Reading statistics: month-to-date vs previous-month comparison and single-query summary cards implemented for v0.6.0
+- Reading data (unreleased): independent automatic/manual timing, shared suspension grace, durable capture/retry, account-wide overlap reconciliation, retained personal archives, scoped calendars/trends, record correction, and reading-data JSON backup/restore plus CSV export
 - Progress storage cutover: SQLite-authoritative progress with one-shot file import; loading/error/empty semantics hardened across library, settings, stats, and notes in v0.6.0
 - External storage: WebDAV and S3-compatible browsing/import, tiered book storage with a bounded local cache, historical-book migration, and restore-to-local controls implemented for v0.5.0
 - AI retrieval: on-demand chapter search within spoiler prevention bounds replaces persistent chunk indexes in v0.5.0
@@ -68,5 +69,5 @@ FTS5 is conditional: it will be considered only if real library scale shows that
 - PDF/OCR, MOBI/AZW3, and CBZ/CBR support
 - Kubernetes/Helm and complex self-healing orchestration
 - Full public social networks, external community ratings/reviews, and public discovery feeds (source-bound idea discussion within shared libraries is supported as of v0.4.4; work-anchored book reviews and interaction notifications stay library-scoped with no public feed)
-- An in-app backup center before its data scope, consistency, security, and rollback model are designed
+- A full-instance in-app backup center before its data scope, consistency, security, and rollback model are designed. Reading-data JSON backup/restore is limited to personal reading facts; it does not back up book files, notes, settings, or the complete instance
 

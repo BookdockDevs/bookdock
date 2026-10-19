@@ -1,181 +1,73 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, act } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+
+import type { ArchiveOverview, ReadingRange } from '@bookdock/shared'
 
 import i18n from '@/i18n/i18n'
 
-import AllRecordsView from './AllRecordsView'
-import RecordsHome from './RecordsHome'
+import ArchiveOverviewDashboard from './components/ArchiveOverviewDashboard'
 import SortMenu from './components/SortMenu'
 import { archiveCountParts, hasReadableText } from './components/archive-helpers'
 
 vi.mock('@tanstack/react-router', () => ({
-  Link: ({ children, search }: { children: React.ReactNode; search?: unknown }) => (
-    <span data-search={search ? JSON.stringify(search) : undefined}>{children}</span>
+  Link: ({ children, search, onClick, role }: { children: React.ReactNode; search?: unknown; onClick?: () => void; role?: string }) => (
+    <a href="#" role={role} data-search={JSON.stringify(search)} onClick={onClick}>{children}</a>
   ),
 }))
 
+vi.mock('@/features/stats/Stats', () => ({
+  default: ({ notesSection, query }: { notesSection?: React.ReactNode; query?: ReadingRange }) => (
+    <div data-testid="reading-statistics" data-query={JSON.stringify(query)}>{notesSection}</div>
+  ),
+}))
 const mockOverview = vi.fn()
-const mockBooks = vi.fn()
-
 vi.mock('./hooks', () => ({
-  useArchiveOverview: (...args: Array<unknown>) => mockOverview(...args),
-  useArchiveBooks: (...args: Array<unknown>) => mockBooks(...args),
-  useArchiveBookDetail: () => ({ data: undefined, isPending: true, isError: false }),
+  useArchiveOverview: (...args: unknown[]) => mockOverview(...args),
+  usePreviousArchiveOverview: vi.fn(() => ({ data: undefined, isLoading: false })),
 }))
 
-const BOOK_ONE = {
-  bookVersionId: 'v1',
-  title: 'Book One',
-  author: 'Author A',
-  coverKey: null,
-  format: 'epub',
-  readStatus: 'finished',
-  highlights: 75,
-  bookmarks: 2,
-  ideas: 5,
-  reviews: 1,
-  total: 83,
-  lastRecordAt: 200,
-  firstRecordAt: 100,
-}
+beforeEach(async () => { await i18n.changeLanguage('zh-CN') })
 
-const BOOK_TWO = {
-  bookVersionId: 'v2',
-  title: 'Book Two',
-  author: 'Author B',
-  coverKey: null,
-  format: 'txt',
-  readStatus: 'reading',
-  highlights: 8,
-  bookmarks: 0,
-  ideas: 2,
-  reviews: 0,
-  total: 10,
-  lastRecordAt: 100,
-  firstRecordAt: 50,
-}
-
-describe('RecordsHome', () => {
-  beforeEach(async () => {
-    await i18n.changeLanguage('zh-CN')
-    mockOverview.mockReset()
-    mockOverview.mockReturnValue({
-      data: {
-        data: {
-          counts: { highlights: 83, bookmarks: 2, ideas: 7, reviews: 1 },
-          recent: [BOOK_ONE, BOOK_TWO],
-        },
-      },
-      isPending: false,
-      isError: false,
-    })
-  })
-
-  it('renders real counts and recent books without hardcoded numbers', () => {
-    const { container } = render(<RecordsHome baseSearch={{}} onOpenChild={vi.fn()} />)
+describe('ArchiveOverviewDashboard', () => {
+  it('uses the same period, selected-day and all-history scope for notes and reading metrics', () => {
+    mockOverview.mockImplementation((query?: ReadingRange) => ({ data: { data: { counts: { highlights: query?.from === query?.to ? 6 : 83, bookmarks: 2, ideas: 7, reviews: 1, total: query?.from === query?.to ? 16 : 93 }, totalBooks: 12 } } }))
+    const period = { from: '2026-10-01', to: '2026-10-31', timezone: 'Asia/Shanghai' }
+    const { rerender } = render(<ArchiveOverviewDashboard baseSearch={{}} query={period} />)
     expect(screen.getByText('83')).toBeInTheDocument()
-    expect(screen.getAllByText('2').length).toBeGreaterThan(1)
+    expect(mockOverview).toHaveBeenLastCalledWith(period)
+    expect(JSON.parse(screen.getByTestId('reading-statistics').getAttribute('data-query')!)).toEqual(period)
+
+    const day = { ...period, from: '2026-10-18', to: '2026-10-18' }
+    rerender(<ArchiveOverviewDashboard baseSearch={{}} query={day} />)
+    expect(screen.getByText('6')).toBeInTheDocument()
+    expect(mockOverview).toHaveBeenLastCalledWith(day)
+    expect(JSON.parse(screen.getByTestId('reading-statistics').getAttribute('data-query')!)).toEqual(day)
+
+    const all = { timezone: 'Asia/Shanghai' }
+    rerender(<ArchiveOverviewDashboard baseSearch={{}} query={all} period="all" />)
+    expect(mockOverview).toHaveBeenLastCalledWith(all)
+    expect(JSON.parse(screen.getByTestId('reading-statistics').getAttribute('data-query')!)).toEqual(all)
+  })
+
+  it('does not display zero notes when the scoped count request has no data', () => {
+    mockOverview.mockReturnValue({ isPending: false, isError: false })
+    render(<ArchiveOverviewDashboard baseSearch={{}} />)
+    expect(screen.getAllByText('—')).toHaveLength(4)
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
+  })
+
+  it('uses the live overview counts and sends type changes to the current sidebar', () => {
+    const overview: ArchiveOverview = { counts: { highlights: 83, bookmarks: 2, ideas: 7, reviews: 1, total: 93 }, totalBooks: 12 }
+    mockOverview.mockReturnValue({ data: { data: overview }, isPending: false, isError: false })
+    const onSelectType = vi.fn()
+    render(<ArchiveOverviewDashboard baseSearch={{ sort: 'most' }} onSelectType={onSelectType} />)
+    expect(screen.getByText('83')).toBeInTheDocument()
     expect(screen.getByText('7')).toBeInTheDocument()
-    expect(screen.getByText('Book One')).toBeInTheDocument()
-    const body = container.textContent ?? ''
-    expect(body).toContain('划线 75')
-    expect(body).toContain('书签 2')
-    expect(body).toContain('想法 5')
-    expect(body).toContain('书评 1')
-    expect(body).toContain('划线 8')
-    expect(body).not.toContain('条划线')
-    expect(body).not.toContain('个书签')
-    expect(body).not.toContain('篇书评')
-    expect(body).not.toContain('书签 0')
-    expect(body).not.toContain('书评 0')
-    expect(screen.getByText('查看全部')).toBeInTheDocument()
-  })
-
-  it('shows the empty state when nothing was recorded', () => {
-    mockOverview.mockReturnValue({
-      data: { data: { counts: { highlights: 0, bookmarks: 0, ideas: 0, reviews: 0 }, recent: [] } },
-      isPending: false,
-      isError: false,
-    })
-    render(<RecordsHome baseSearch={{}} onOpenChild={vi.fn()} />)
-    expect(screen.getByText('还没有阅读记录，去读一本书并留下第一条划线吧')).toBeInTheDocument()
-  })
-})
-
-describe('AllRecordsView', () => {
-  const onChange = vi.fn()
-  const onBack = vi.fn()
-
-  beforeEach(async () => {
-    await i18n.changeLanguage('zh-CN')
-    vi.useFakeTimers()
-    onChange.mockClear()
-    onBack.mockClear()
-    mockBooks.mockReturnValue({
-      data: { data: { entries: [BOOK_ONE, BOOK_TWO], page: 1, hasMore: false } },
-      isPending: false,
-      isError: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    })
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('switching the type tab notifies the parent so filtering takes effect', () => {
-    render(<AllRecordsView params={{ q: '', type: 'all', sort: 'recent', page: 1 }} baseSearch={{}} onChange={onChange} onOpenBook={vi.fn()} onBack={onBack} />)
-    fireEvent.click(screen.getByRole('tab', { name: '书评' }))
-    expect(onChange).toHaveBeenCalledWith({ type: 'review', page: 1 })
-  })
-
-  it('opens the sort menu and picks a new order', () => {    render(<AllRecordsView params={{ q: '', type: 'all', sort: 'recent', page: 1 }} baseSearch={{}} onChange={onChange} onOpenBook={vi.fn()} onBack={onBack} />)
-    fireEvent.click(screen.getByRole('button', { name: '最近记录' }))
-    expect(screen.getByRole('menu')).toBeInTheDocument()
-    expect(screen.getAllByRole('menuitemradio')).toHaveLength(6)
-    fireEvent.click(screen.getByRole('menuitemradio', { name: '最早记录' }))
-    expect(onChange).toHaveBeenCalledWith({ sort: 'earliest', page: 1 })
-  })
-
-  it('passes the active type filter to the book detail link', () => {
-    render(<AllRecordsView params={{ q: '', type: 'bookmark', sort: 'recent', page: 1 }} baseSearch={{}} onChange={onChange} onOpenBook={vi.fn()} onBack={onBack} />)
-    const link = screen.getByText('Book One').closest('[data-search]')
-    expect(link).not.toBeNull()
-    expect(JSON.parse(link!.getAttribute('data-search')!)).toMatchObject({
-      view: 'book',
-      bookId: 'v1',
-      from: 'all',
-      bookType: 'bookmark',
-    })
-  })
-
-  it('passes bookType all when entering from the unfiltered list', () => {
-    render(<AllRecordsView params={{ q: '', type: 'all', sort: 'recent', page: 1 }} baseSearch={{}} onChange={onChange} onOpenBook={vi.fn()} onBack={onBack} />)
-    const link = screen.getByText('Book One').closest('[data-search]')
-    expect(JSON.parse(link!.getAttribute('data-search')!)).toMatchObject({ bookType: 'all' })
-  })
-
-  it('typing in search notifies the parent after a debounce', () => {
-    render(<AllRecordsView params={{ q: '', type: 'all', sort: 'recent', page: 1 }} baseSearch={{}} onChange={onChange} onOpenBook={vi.fn()} onBack={onBack} />)
-    fireEvent.change(screen.getByPlaceholderText('搜索书名'), { target: { value: 'One' } })
-    expect(onChange).not.toHaveBeenCalled()
-    act(() => {
-      vi.advanceTimersByTime(300)
-    })
-    expect(onChange).toHaveBeenCalledWith({ q: 'One', page: 1 })
-  })
-
-  it('shows the no-match state when filters hide every book', () => {
-    mockBooks.mockReturnValue({
-      data: { data: { entries: [], page: 1, hasMore: false } },
-      isPending: false,
-      isError: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    })
-    render(<AllRecordsView params={{ q: 'missing', type: 'all', sort: 'recent', page: 1 }} baseSearch={{}} onChange={onChange} onOpenBook={vi.fn()} onBack={onBack} />)
-    expect(screen.getByText('没有找到匹配的书籍')).toBeInTheDocument()
+    const card = screen.getByRole('button', { name: /书签 2/ })
+    expect(JSON.parse(card.getAttribute('data-search')!)).toEqual({ sort: 'most', type: 'bookmark' })
+    fireEvent.click(card)
+    expect(onSelectType).toHaveBeenCalledWith('bookmark')
+    expect(screen.getByTestId('reading-statistics')).toBeInTheDocument()
   })
 })
 

@@ -1,17 +1,19 @@
 import type { LibrarySearch } from '@/routes/index'
 
 /**
- * Where the archive top bar exits to: the library home exactly as it was
- * when the archive was entered (filters, sort, selection included, since
- * they all live in the captured search), plus the window scroll to restore
- * afterwards. Recorded once at entry and forwarded unchanged by every
- * in-archive navigation — navigating without `state` resets history state,
- * which would otherwise lose the exit source on the first internal move.
+ * Where the archive top bar exits to: the library home or reader view
+ * exactly as it was when the archive was entered, plus the window scroll
+ * to restore afterwards. Recorded once at entry and forwarded unchanged
+ * by every in-archive navigation — navigating without `state` resets history
+ * state, which would otherwise lose the exit source on the first internal move.
  */
 export interface ArchiveReturn {
-  search: LibrarySearch
+  to?: string
+  search?: LibrarySearch
   scrollTop: number
 }
+
+export type ArchiveSource = LibrarySearch | { to: string }
 
 declare module '@tanstack/react-router' {
   interface HistoryState {
@@ -31,6 +33,14 @@ declare module '@tanstack/react-router' {
  * source. Absent stays absent for in-archive moves, so direct opens keep
  * falling back to the library home.
  */
-export function archiveEntryState(source: LibrarySearch, scrollTop: number, previous?: ArchiveReturn): { archiveReturn: ArchiveReturn } {
-  return { archiveReturn: previous ?? { search: source, scrollTop } }
+export function archiveEntryState(
+  source: ArchiveSource,
+  scrollTop: number,
+  previous?: ArchiveReturn,
+): { archiveReturn: ArchiveReturn } {
+  if (previous) return { archiveReturn: previous }
+  if ('to' in source) {
+    return { archiveReturn: { to: source.to, scrollTop } }
+  }
+  return { archiveReturn: { search: source, scrollTop } }
 }
