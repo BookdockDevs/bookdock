@@ -17,9 +17,10 @@ import { getDb } from '../../db/client'
 import { syncContentFiles } from '../../db/content-files'
 import { bookReviewComments, bookReviewLikes, bookReviews, libraries, libraryBooks, libraryBookVersions, users } from '../../db/schema'
 import { createId } from '../../lib/id'
+import { capturePrivateArchiveSnapshots, savePersonalBookSnapshot } from '../../lib/personal-book-archive'
 import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { AppError, isUniqueViolation } from '../../middleware/error'
-import { assertReadableBook } from '../books/books.service'
+import { getBook, assertReadableBook } from '../books/books.service'
 import { resolveSharedVersionRead } from '../libraries/library-access'
 import {
   assertSourceWorkReadable,
@@ -296,7 +297,7 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
       bodyFormat,
       visibility: 'private' as const,
       readListingId: null,
-      readBookVersionId: null,
+      readBookVersionId: input.bookVersionId,
       readRevisionId: null,
       createdAt: now,
       updatedAt: now,
@@ -305,6 +306,7 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
     try {
       db.transaction((tx) => {
         tx.insert(bookReviews).values(row).run()
+        capturePrivateArchiveSnapshots(tx as unknown as ReturnType<typeof getDb>, [input.bookVersionId])
         syncContentFiles(tx, { userId, domain: 'review', targetId: row.id, bookVersionId: input.bookVersionId, draftId: input.draftId, ...files })
       })
     } catch (error) {
@@ -337,9 +339,12 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
     updatedAt: now,
     editedAt: null,
   }
+  const snapshot = held ? null : await getBook(userId, input.bookVersionId)
   try {
     db.transaction((tx) => {
       tx.insert(bookReviews).values(row).run()
+      if (snapshot) savePersonalBookSnapshot(tx as unknown as ReturnType<typeof getDb>, userId, input.bookVersionId, snapshot)
+      else capturePrivateArchiveSnapshots(tx as unknown as ReturnType<typeof getDb>, [input.bookVersionId])
       syncContentFiles(tx, { userId, domain: 'review', targetId: row.id, bookVersionId: input.bookVersionId, draftId: input.draftId, ...files })
     })
   } catch (error) {

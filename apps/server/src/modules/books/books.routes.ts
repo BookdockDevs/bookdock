@@ -375,7 +375,7 @@ booksRoutes.delete('/:id', async (c) => {
   if (isCollected) {
     await deleteBook(user.id, id, { deleteUserData })
   } else if (isTrashEnabled(user.id)) {
-    await trashBook(user.id, id)
+    await trashBook(user.id, id, { deleteUserData })
   } else {
     await deleteBook(user.id, id, { deleteUserData })
   }

@@ -26,6 +26,14 @@ _Avoid_: round when referring to a timed activity.
 The union of content ranges actually recorded as read in a round, independent of the current restore position and repeat reading volume.
 _Avoid_: current progress when referring to coverage.
 
+**Source unavailable**:
+The state of a retained archive whose original book can no longer be read. The personal notes, reviews and reading facts remain available; only the original text and its position are gone.
+_Avoid_: reporting a lost source as an error, or hiding the retained content with it.
+
+**Personal cleanup**:
+The owner's decision to erase their own reading records, notes and reviews for one removed book. It applies to that owner only, and it is remembered while the book sits in the trash.
+_Avoid_: deleting the book, or clearing another reader's data.
+
 ## User Feedback
 
 **Notification**:

@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import type { BookFormat } from './constants'
+
 import { calendarDateSchema, readingTimezoneSchema } from './reading-range'
 
 export { readingTimezoneSchema } from './reading-range'
@@ -54,6 +56,8 @@ export interface ReadingLedgerSession {
 }
 
 export interface ReadingLedgerRes {
+  format?: BookFormat | null
+  coverKey?: string | null
   bookId: string
   title: string
   author: string

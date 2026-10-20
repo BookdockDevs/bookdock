@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 
 import { invalidatePermanentlyDeletedBookQueries, useLibraryCategories, useLibraryTags, useShelves, useTags } from '../hooks'
 import { categoryChoices } from '../taxonomy'
+import ClearBookDataOption from './ClearBookDataOption'
 import { READ_STATUS_OPTIONS } from './read-status'
 
 interface SelectionBarProps {
@@ -198,6 +199,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
       'library.batchRestoreSucceeded',
       'library.batchActionRestore',
     )
+    void invalidatePermanentlyDeletedBookQueries(queryClient)
     if (ok) onComplete()
   }
 
@@ -648,10 +650,9 @@ function BatchDeleteDialog({ ids, items, libraryId, trashEnabled, onRetainSelect
 
   async function handleDelete() {
     setDeleting(true)
-    const byId = new Map(items.map((item) => [item.id, item]))
     const results = await settleBatch(ids, (id) => libraryId
       ? apiDelete(`/libraries/${libraryId}/books/${id}`)
-      : apiDelete(`/books/${id}${byId.get(id)?.kind === 'shared' && deleteUserData ? '?deleteUserData=true' : ''}`))
+      : apiDelete(`/books/${id}${deleteUserData ? '?deleteUserData=true' : ''}`))
     const failed = results.filter((r) => r.status === 'rejected').length
     const succeeded = results.length - failed
     void queryClient.invalidateQueries({ queryKey: ['books'] })
@@ -692,12 +693,7 @@ function BatchDeleteDialog({ ids, items, libraryId, trashEnabled, onRetainSelect
             <>
               {ownedCount > 0 && <p>{_(trashEnabled ? 'library.batchDeleteOwnedTrash' : 'library.batchDeleteOwnedPermanent', { count: ownedCount })}</p>}
               {collectedCount > 0 && <p>{_('library.batchDeleteCollected', { count: collectedCount })}</p>}
-              {collectedCount > 0 && (
-                <label className="flex items-start gap-2 text-xs">
-                  <input type="checkbox" checked={deleteUserData} onChange={(event) => setDeleteUserData(event.target.checked)} />
-                  {_('library.clearUserDataOnRemove')}
-                </label>
-              )}
+              <ClearBookDataOption checked={deleteUserData} onChange={setDeleteUserData} deferred={trashEnabled && collectedCount === 0} />
             </>
           )}
         </div>

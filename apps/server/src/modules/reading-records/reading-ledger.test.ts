@@ -14,6 +14,10 @@ import { migrateBeforeBookRetirement } from '../../db/migration-stage'
 import * as schema from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import * as books from '../books/books.service'
+import * as storage from '../../storage'
+import { getOverview, listBooks } from '../archive/archive.service'
+import { getDaily, getSummary } from './reading-records.service'
+import { noteArchive } from '../annotations/note-archive.service'
 import { addLedgerReading, changeReadingRound, claimReadingTimer, deleteLedgerSession, deleteReadingArchive, exportReadingTransfer, getReadingLedger, importReadingTransfer, releaseReadingTimer, updateLedgerSession } from './reading-ledger.service'
 
 const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../db/migrations')
@@ -47,6 +51,52 @@ describe('reading ledger service', () => {
   })
 
   afterEach(() => { vi.restoreAllMocks(); sqlite.close() })
+
+  it.each([
+    [false, 'delete'], [true, 'delete'], [true, 'empty'], [true, 'expired'], [true, 'capacity'],
+  ] as const)('keeps private trash data recoverable before final cleanup (%s, %s)', async (deleteUserData, purge) => {
+    vi.spyOn(storage, 'getStorage').mockReturnValue({ exists: async () => false } as unknown as ReturnType<typeof storage.getStorage>)
+    db.insert(schema.libraries).values({ id: 'private', userId: 'u1', type: 'private', name: 'Private', createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.libraryBooks).values({ id: 'work', libraryId: 'private', userId: 'u1', title: 'Book', meta: { bookmeta: { publisher: 'Publisher' } }, createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.libraryBookVersions).values({ id: 'link', libraryId: 'private', libraryBookId: 'work', bookVersionId: 'v1', kind: 'personal', createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.contentRevisions).values({ id: 'rev', bookVersionId: 'v1', revisionNo: 1, blobKey: 'book.epub', size: 1, createdAt: 1 }).run()
+    db.insert(schema.readingArchives).values({ userId: 'u2', bookVersionId: 'v1', title: 'Other snapshot', createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.highlights).values({ id: 'highlight', userId: 'u1', bookVersionId: 'v1', cfiRange: 'cfi', text: 'Quote', createdAt: 1, updatedAt: 1 }).run()
+    await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-02', source: 'manual', durationSeconds: 71, requestId: 'trash-record' })
+    await addLedgerReading('u2', { bookId: 'v1', date: '2026-10-02', source: 'manual', durationSeconds: 42 })
+    await expect(books.trashBook('u2', 'v1', { deleteUserData: true })).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
+    await books.trashBook('u1', 'v1', { deleteUserData })
+    expect(db.select().from(schema.readingSessions).all()).toHaveLength(2)
+    expect(db.select().from(schema.highlights).all()).toHaveLength(1)
+    expect((await getOverview('u1')).totalBooks).toBe(deleteUserData ? 0 : 1)
+    expect((await getOverview('u1')).counts.highlights).toBe(deleteUserData ? 0 : 1)
+    expect((await listBooks('u1', { page: 1, pageSize: 20 })).entries).toHaveLength(deleteUserData ? 0 : 1)
+    expect(await getDaily('u1', {}, true)).toHaveLength(deleteUserData ? 0 : 2)
+    expect((await getSummary('u1', '2026-10-02', true)).totalSeconds).toBe(deleteUserData ? 0 : 111)
+    expect((await noteArchive('u1', { page: 1, pageSize: 20 })).entries).toHaveLength(deleteUserData ? 0 : 1)
+    if (deleteUserData) await expect(getReadingLedger('u1', 'v1', true)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
+    else expect((await getReadingLedger('u1', 'v1')).totalSeconds).toBe(111)
+    expect((await exportReadingTransfer('u1')).archives).toHaveLength(1)
+    await books.restoreBook('u1', 'v1')
+    expect((await getReadingLedger('u1', 'v1')).totalSeconds).toBe(111)
+    expect((await getOverview('u1')).totalBooks).toBe(1)
+    expect(db.select().from(schema.libraryBooks).get()?.meta).toEqual({ bookmeta: { publisher: 'Publisher' } })
+    await books.trashBook('u1', 'v1', { deleteUserData })
+    if (purge === 'empty') await books.emptyTrash('u1')
+    else if (purge === 'expired') {
+      db.update(schema.libraryBooks).set({ deletedAt: Date.now() - 2 * 86400_000 }).run()
+      await books.purgeExpiredTrash('u1', 1)
+    } else if (purge === 'capacity') {
+      db.update(schema.bookVersions).set({ size: 100 }).run()
+      await books.purgeTrashToCapacity('u1', 1)
+    } else await books.deleteBook('u1', 'v1')
+    for (const table of [schema.readingArchives, schema.readingSessions, schema.readingRecords, schema.readingRounds]) {
+      expect(db.select().from(table).all().filter((row) => row.userId === 'u1')).toHaveLength(deleteUserData ? 0 : table === schema.readingRecords ? 2 : 1)
+      expect(db.select().from(table).all().filter((row) => row.userId === 'u2')).toHaveLength(1)
+    }
+    expect(db.select().from(schema.readingWriteReceipts).get()?.status).toBe(deleteUserData ? 'deleted' : 'accepted')
+    expect(sqlite.pragma('foreign_key_check')).toEqual([])
+  })
 
   it.each(['auto', 'manual', 'retroactive'] as const)('validates and persists complete %s capture facts', async (source) => {
     const body = readingRecordCreateSchema.parse({ bookId: 'v1', source, date: '2026-10-02', durationSeconds: 60,

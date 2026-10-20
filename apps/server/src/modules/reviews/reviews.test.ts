@@ -260,7 +260,7 @@ describe('book reviews', () => {
     expect(db.select().from(schema.bookReviewComments).where(eq(schema.bookReviewComments.id, commentId)).get()?.editedAt).not.toBeNull()
   })
 
-  it('keeps pure private reviews author-only and cascades with their work', async () => {
+  it('keeps pure private reviews author-only after their work is deleted', async () => {
     const review = await createReview('author', { bookVersionId: 'va', rating: 5, body: 'mine' })
     expect(review).toMatchObject({ visibility: 'private', privateLibraryBookId: 'aw', source: null, provenance: null })
     await expect(createReview('author', { bookVersionId: 'va', rating: 4 })).rejects.toMatchObject({
@@ -275,7 +275,7 @@ describe('book reviews', () => {
     await expect(getReviewDiscussion('owner', review.id)).rejects.toMatchObject({ code: 'REVIEW_NOT_FOUND' })
     expect((await myReviews('author')).entries).toHaveLength(1)
     await deleteBook('author', 'va')
-    expect((await myReviews('author')).entries).toHaveLength(0)
+    expect((await myReviews('author')).entries).toHaveLength(1)
   })
 
   it('shares one review across two collected versions of one source work, counted once', async () => {
@@ -804,7 +804,7 @@ describe('book reviews', () => {
     expect(idea.images?.[0].id).toBe(file.id)
     expect((await readableContentFile('member', file.id)).ideaId).toBe(idea.id)
     db.update(schema.libraryBookVersions).set({ status: 'draft' }).where(eq(schema.libraryBookVersions.id, 'l1')).run()
-    for (const viewer of ['member', 'outsider', 'author']) await expect(readableContentFile(viewer, file.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
+    for (const viewer of ['member', 'outsider']) await expect(readableContentFile(viewer, file.id)).rejects.toMatchObject({ code: 'CONTENT_FILE_NOT_FOUND' })
     db.update(schema.libraryBookVersions).set({ status: 'published' }).where(eq(schema.libraryBookVersions.id, 'l1')).run()
     expect((await readableContentFile('member', file.id)).id).toBe(file.id)
     await updateAnnotation('author', idea.id, { visibility: 'private' })

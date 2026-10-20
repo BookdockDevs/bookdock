@@ -7,7 +7,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { describe, expect, it } from 'vitest'
 
 import { retargetBookIdReferences } from './client'
-import { migrateBeforeBookRetirement, migrateWithTagFilter, READING_LEDGER_TAG } from './migration-stage'
+import { migrateBeforeBookRetirement, migrateWithTagFilter, PERSONAL_ARCHIVE_TAG, READING_LEDGER_TAG } from './migration-stage'
 import * as schema from './schema'
 
 const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
@@ -18,7 +18,9 @@ function databaseBeforeLedger() {
   const db = drizzle(sqlite, { schema })
   migrateBeforeBookRetirement(db, { migrationsFolder })
   retargetBookIdReferences(db)
-  migrateWithTagFilter(db, { migrationsFolder }, (entry) => entry.tag !== READING_LEDGER_TAG)
+  // The personal-archive migration extends the ledger tables, so both wait for
+  // the ledger migration that creates them.
+  migrateWithTagFilter(db, { migrationsFolder }, (entry) => entry.tag !== READING_LEDGER_TAG && entry.tag !== PERSONAL_ARCHIVE_TAG)
   return { sqlite, db }
 }
 

@@ -11,9 +11,11 @@ import { useManualTimerStore, resetManualTimerTicker, sessionDurationMs, type Ma
 vi.mock('../reading-timer-lease', () => ({ claimReadingTimer: vi.fn().mockResolvedValue(true), releaseReadingTimer: vi.fn(), readingDeviceId: () => 'device-test' }))
 
 vi.mock('@/api/client', () => ({
-  apiPost: vi.fn().mockResolvedValue(undefined),
+  apiPost: vi.fn().mockResolvedValue({ data: { durationSeconds: 60 } }),
   apiPut: vi.fn().mockResolvedValue(undefined),
 }))
+
+vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn() } }))
 
 vi.mock('@/lib/query-client', () => ({
   queryClient: { invalidateQueries: vi.fn() },

@@ -3,11 +3,13 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { sql } from 'drizzle-orm'
 
 export const BOOK_RETIREMENT_TIMESTAMP = 1791700000000
 export const LEGACY_IDENTITY_RETIREMENT_TAG = '0040_retire_legacy_identity'
 export const IDEA_DISCUSSION_TAG = '0041_idea_discussion'
 export const READING_LEDGER_TAG = '0052_reading_ledger'
+export const PERSONAL_ARCHIVE_TAG = '0053_personal_archive'
 export const BOOK_STATE_PROGRESS_TAG = '0051_book_state_progress'
 
 interface JournalEntry {
@@ -82,6 +84,12 @@ export function migrateBeforeBookRetirementIncluding(
     options,
     (entry) => entry.when < BOOK_RETIREMENT_TIMESTAMP || include.has(entry.tag),
   )
+  // Partial legacy fixtures omit optional discussion tables required by 0053,
+  // but current service projections still need the archive metadata columns.
+  if (!include.has('0053_personal_archive')) {
+    db.run(sql`ALTER TABLE reading_archives ADD COLUMN format TEXT`)
+    db.run(sql`ALTER TABLE reading_archives ADD COLUMN cover_key TEXT`)
+  }
 }
 
 /**

@@ -2,6 +2,30 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Personal highlights, bookmarks, ideas and private reviews now stay in your archive after the original book file is deleted.
+- Retained books keep their title, author, format and cover in the archive, shown as source unavailable instead of failing to open.
+- Removing a book from your library, or deleting it, now offers to clear your personal data for that book: reading records, notes and more.
+
+### Changed
+
+- Archived notes, reviews and reading statistics leave out a book as soon as you choose personal-data cleanup, and come back when you restore it from the trash.
+- Permanent deletion, emptying the trash and automatic cleanup honor that choice and remove only your own data for the book.
+- Batch deletion applies the personal-data choice to owned books as well as collected ones.
+- Manual timing confirms that the reading record was saved only after the server accepts it, and reading times below one minute are shown in seconds.
+- Jumping to an annotation in the reader always aligns the passage near the top of the page, instead of leaving it where it happens to be.
+
+### Fixed
+
+- The archive no longer labels a note's position as unavailable when the book itself is gone; only the jump back to the original text is disabled.
+
+### Upgrade notes
+
+- Back up the complete `DATA_DIR` before upgrading. Migration 0053 keeps your notes, reviews, comments and likes, and stops deleting them when a book is removed. Downgrading requires the pre-upgrade data with the matching previous release.
+
 ## [0.6.1] - 2026-10-20
 
 ### Highlights
@@ -750,6 +774,30 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [Unreleased]
+
+#### 新增
+
+- 个人划线、书签、想法与私密书评在原书文件被删除后仍保留在归档中心。
+- 保留的书籍在归档中心继续显示书名、作者、格式与封面，并标注原书不可用，而不是直接打开失败。
+- 从个人书库移出或删除书籍时，可以同时选择清理这本书的个人数据，包括阅读记录、笔记等。
+
+#### 变更
+
+- 选择清理个人数据后，归档笔记、书评与阅读统计会先隐藏该书；从回收站恢复后重新出现。
+- 彻底删除、清空回收站与自动清理都会遵循该选择，并且只清除你本人在这本书上的数据。
+- 批量删除同样应用个人数据清理选择，个人书籍与收藏书籍一视同仁。
+- 手动计时在服务端确认保存后才提示阅读记录已保存，不足一分钟的阅读时长改为按秒显示。
+- 阅读器内跳转标注时始终把目标位置对齐到页面上方，不再因为目标恰好在可视区域而原地不动。
+
+#### 修复
+
+- 原书已不存在时，归档笔记不再标注历史位置不可用，仅禁用跳转到原文的入口。
+
+#### 升级说明
+
+- 升级前完整备份 `DATA_DIR`。迁移 0053 会保留你的笔记、书评、评论与点赞，并停止在书籍删除时一并清除；降级需要恢复升级前的数据并使用对应旧版本。
 
 ### [0.6.1] - 2026-10-20
 

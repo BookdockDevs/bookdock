@@ -8,7 +8,7 @@ A self-hosted web e-book library. pnpm monorepo — `@bookdock/shared` (contract
 |---|---|
 | [`../CHANGELOG.md`](../CHANGELOG.md) | User-facing release history and version-specific upgrade notes |
 | [`architecture.md`](./architecture.md) | Authoritative architecture blueprint (design principles, module layout, schema, API, ADRs) |
-| [Reading data](./architecture.md#reading-ledger-maturity-2026-10-18) | Current reading-history ownership, timing, correction, statistics, and transfer boundaries |
+| [Reading data](./architecture.md#reading-ledger-maturity-2026-10-18) | Current reading-history ownership, timing, correction, statistics, transfer, and personal-archive retention boundaries |
 | [`plan.md`](./plan.md) | Curated public roadmap (P0/P1/P2/P3) |
 
 The planned companion browser extension is documented in [`local/extension/00-index.md`](./local/extension/00-index.md). Its competitor research is indexed at [`local/research/browser-extensions/00-index.md`](./local/research/browser-extensions/00-index.md).

@@ -263,6 +263,8 @@ export const readingArchives = sqliteTable('reading_archives', {
   bookVersionId: text('book_version_id').notNull(),
   title: text('title').notNull(),
   author: text('author').notNull().default(''),
+  format: text('format').$type<'epub' | 'txt' | null>(),
+  coverKey: text('cover_key'),
   legacyIntervals: text('legacy_intervals', { mode: 'json' }).$type<ReadingCoverageInterval[]>().notNull().default([]),
   legacyDaily: text('legacy_daily', { mode: 'json' }).$type<{ date: string; durationSeconds: number }[]>().notNull().default([]),
   legacyWordCount: integer('legacy_word_count'),
@@ -660,7 +662,7 @@ export const bookStates = sqliteTable('book_states', {
 export const highlights = sqliteTable('highlights', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookVersionId: text('book_version_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull(),
   revisionId: text('revision_id'),
   cfiRange: text('cfi_range').notNull(),
   cfiAnchor: text('cfi_anchor'),
@@ -681,7 +683,7 @@ export const highlights = sqliteTable('highlights', {
 export const bookmarks = sqliteTable('bookmarks', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookVersionId: text('book_version_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull(),
   revisionId: text('revision_id'),
   cfi: text('cfi'),
   chapter: text('chapter'),
@@ -699,7 +701,7 @@ export const bookmarks = sqliteTable('bookmarks', {
 export const ideas = sqliteTable('ideas', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  bookVersionId: text('book_version_id').references(() => bookVersions.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id'),
   cfiRange: text('cfi_range'),
   cfiAnchor: text('cfi_anchor'),
   color: text('color').notNull().default('yellow'),
@@ -753,7 +755,7 @@ export const ideaCommentLikes = sqliteTable('idea_comment_likes', {
 export const bookReviews = sqliteTable('book_reviews', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  privateLibraryBookId: text('private_library_book_id').references(() => libraryBooks.id, { onDelete: 'cascade' }),
+  privateLibraryBookId: text('private_library_book_id'),
   sourceLibraryId: text('source_library_id'),
   sourceLibraryBookId: text('source_library_book_id'),
   // Integer halves 1–10 (0.5–5 stars); null = unrated, never zero.

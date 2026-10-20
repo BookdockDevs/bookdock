@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import type { LibraryRelation } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
+import { capturePrivateArchiveSnapshots } from '../../lib/personal-book-archive'
 import { blobKeyReferenced, deleteBlobRowIfUnreferenced } from '../../db/blob-refs'
 import { bookVersions, contentRevisions, instance, libraries, libraryBooks, libraryBookVersions, libraryMemberships } from '../../db/schema'
 import { coverThumbnailKey } from '../../lib/cover'
@@ -545,6 +546,7 @@ export async function deleteOrphanedBookVersions(versionIds: string[], opts?: { 
   const storage = getStorage()
   const doomed = versionIds.filter((id) => !db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
     .where(eq(libraryBookVersions.bookVersionId, id)).get())
+  capturePrivateArchiveSnapshots(db, doomed)
   const keys = [...(opts?.coverKeys ?? [])]
   for (const versionId of doomed) {
     for (const revision of db.select().from(contentRevisions).where(eq(contentRevisions.bookVersionId, versionId)).all()) {

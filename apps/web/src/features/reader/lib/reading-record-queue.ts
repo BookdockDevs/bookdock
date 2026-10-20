@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import type { ReadingRecordCreateReq } from '@bookdock/shared'
 
 import { ApiError, apiPost } from '@/api/client'
+import { notify } from '@/lib/notifications'
 import { queryClient } from '@/lib/query-client'
 import { withReveal } from '@/lib/reveal-hidden'
 import { useAuthStore } from '@/stores/auth.store'
@@ -20,6 +21,7 @@ const inFlight = new Set<string>()
 const unpersisted = new Set<string>()
 const memory = new Map<string, ReadingRecordCreateReq[]>()
 const rejected = new Map<string, Set<string>>()
+const saveNotifications = new Map<string, { userId: string; remaining: Set<string>; saved: boolean }>()
 
 function read(userId: string): ReadingRecordCreateReq[] {
   if (unpersisted.has(userId)) return memory.get(userId) ?? []
@@ -49,9 +51,15 @@ function persist(userId: string, records: ReadingRecordCreateReq[]) {
   }
 }
 
-export function queueReadingRecord(userId: string, record: ReadingRecordCreateReq) {
+export function queueReadingRecord(userId: string, record: ReadingRecordCreateReq, notifyOnSave = false) {
   const records = read(userId)
-  const added = splitReadingRecord(record).filter((chunk) => !records.some((item) => item.requestId === chunk.requestId))
+  const chunks = splitReadingRecord(record)
+  if (notifyOnSave && record.requestId) {
+    saveNotifications.set(`${userId}:${record.requestId}`, {
+      userId, remaining: new Set(chunks.map((chunk) => chunk.requestId!)), saved: false,
+    })
+  }
+  const added = chunks.filter((chunk) => !records.some((item) => item.requestId === chunk.requestId))
   if (added.length) {
     persist(userId, [...records, ...added])
   }
@@ -95,8 +103,10 @@ export async function retryReadingRecords(explicit = false) {
         useReadingSaveState.setState({ saveFailed: true })
         continue
       }
+      let accepted = false
       try {
-        await apiPost(withReveal('/reading-records'), { ...record, expectedUserId: userId })
+        const result = await apiPost<{ data: { durationSeconds: number; skipped?: boolean; deleted?: boolean } }>(withReveal('/reading-records'), { ...record, expectedUserId: userId })
+        accepted = Boolean(result.data && !result.data.skipped && !result.data.deleted && result.data.durationSeconds > 0)
       } catch (error) {
         // The durable entry remains available for explicit or online retries.
         if (useAuthStore.getState().user?.id === userId) useReadingSaveState.setState({ saveFailed: true })
@@ -109,6 +119,15 @@ export async function retryReadingRecords(explicit = false) {
         break
       }
       persist(userId, read(userId).filter((item) => item.requestId !== record.requestId))
+      for (const [key, notification] of saveNotifications) {
+        if (notification.userId !== userId || !record.requestId || !notification.remaining.delete(record.requestId)) continue
+        notification.saved ||= accepted
+        if (notification.remaining.size > 0) continue
+        saveNotifications.delete(key)
+        if (notification.saved && useAuthStore.getState().user?.id === userId) {
+          notify.success({ key: 'reader.manualTimerSaved' })
+        }
+      }
       if (useAuthStore.getState().user?.id === userId) {
         void queryClient.invalidateQueries({ queryKey: ['reading-records'] })
         void queryClient.invalidateQueries({ queryKey: ['progress', record.bookId], refetchType: 'none' })

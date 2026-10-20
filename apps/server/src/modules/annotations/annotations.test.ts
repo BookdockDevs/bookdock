@@ -20,7 +20,7 @@ function createTestDb() {
   const db = drizzle(sqlite, { schema })
   // Pre-retirement base plus the current discussion and managed-file tables,
   // tag so later migrations cannot silently leave this schema behind.
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [IDEA_DISCUSSION_TAG, '0042_storage_connections', '0043_storage_backend', '0046_book_reviews', '0048_content_files', '0049_review_title', '0050_content_file_order'])
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [IDEA_DISCUSSION_TAG, '0042_storage_connections', '0043_storage_backend', '0046_book_reviews', '0048_content_files', '0049_review_title', '0050_content_file_order', '0051_book_state_progress', '0052_reading_ledger', '0053_personal_archive'])
   return db
 }
 
@@ -73,6 +73,7 @@ describe('annotations service', () => {
       description: '', visibility: null, createdAt: now, updatedAt: now,
     }).run()
     db.insert(schema.bookVersions).values({ id: bookId, format: 'txt', size: 100, createdAt: now, updatedAt: now }).run()
+    db.insert(schema.contentRevisions).values({ id: createId('rev'), bookVersionId: bookId, revisionNo: 1, blobKey: 'test.txt', size: 100, createdAt: now }).run()
     const libraryBookId = createId('lb')
     db.insert(schema.libraryBooks).values({
       id: libraryBookId, libraryId, userId: ownerId, title: 'Test Book', createdAt: now, updatedAt: now,

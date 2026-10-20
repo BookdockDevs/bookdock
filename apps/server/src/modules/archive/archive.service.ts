@@ -31,15 +31,47 @@ import {
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { readingTimestampBounds } from '../../lib/reading-range'
+import { coverThumbnailKey } from '../../lib/cover'
+import { getStorage } from '../../storage'
 import { toRes } from '../annotations/annotations.service'
 import { ideaRevision } from '../annotations/idea-access'
-import { assertReadableBook, getBook } from '../books/books.service'
+import { assertReadableBook, bufferFromStream, getBook, getBookCoverContent } from '../books/books.service'
+import { pendingBookDataDeletionVersionIds } from '../libraries/library-query'
 import { projectReview, sourceWorkOf } from '../reviews/review-access'
 
 type ReviewRow = typeof bookReviews.$inferSelect
 
+export async function getArchiveCover(userId: string, bookVersionId: string) {
+  const db = getDb()
+  if (pendingBookDataDeletionVersionIds(db, userId).includes(bookVersionId)) throw new AppError('BOOK_NOT_FOUND')
+  const archive = db.select().from(readingArchives).where(and(eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, bookVersionId))).get()
+  if (!archive) throw new AppError('BOOK_NOT_FOUND')
+  let readable = false
+  try {
+    await getBook(userId, bookVersionId)
+    readable = true
+  } catch (error) {
+    if (!(error instanceof AppError) || !['BOOK_NOT_FOUND', 'BOOK_FILE_MISSING', 'FORBIDDEN'].includes(error.code)) throw error
+  }
+  if (readable) {
+    const current = await getBookCoverContent(userId, bookVersionId)
+    if (!current) throw new AppError('BOOK_NOT_FOUND')
+    return current
+  }
+  if (!archive.coverKey) throw new AppError('BOOK_NOT_FOUND')
+  const storage = getStorage()
+  const thumbnail = coverThumbnailKey(archive.coverKey)
+  const key = await storage.exists(thumbnail) ? thumbnail : archive.coverKey
+  if (!await storage.exists(key)) throw new AppError('BOOK_NOT_FOUND')
+  const ext = key.split('.').at(-1)?.toLowerCase()
+  const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : ext === 'svg' ? 'image/svg+xml' : 'image/jpeg'
+  return { data: await bufferFromStream(await storage.get(key)), contentType }
+}
+
 async function countOwned(userId: string, range: ReadingRange): Promise<ArchiveCounts> {
   const db = getDb()
+  const excluded = pendingBookDataDeletionVersionIds(db, userId)
+  const visibleVersion = excluded.length ? sql`(book_version_id IS NULL OR book_version_id NOT IN (${sql.join(excluded.map((id) => sql`${id}`), sql`, `)}))` : sql`1 = 1`
   const bounds = readingTimestampBounds(range)
   const inRange = (column: typeof highlights.createdAt | typeof bookmarks.createdAt | typeof ideas.createdAt | typeof bookReviews.createdAt) => [
     bounds.from !== undefined ? gte(column, bounds.from) : undefined,
@@ -47,12 +79,23 @@ async function countOwned(userId: string, range: ReadingRange): Promise<ArchiveC
   ]
   const own = (table: typeof highlights | typeof bookmarks | typeof ideas) =>
     db.select({ n: sql<number>`count(*)` }).from(table)
-      .where(and(eq(table.userId, userId), isNull(table.deletedAt), ...inRange(table.createdAt))).get()!.n
+      .where(and(eq(table.userId, userId), isNull(table.deletedAt), visibleVersion, ...inRange(table.createdAt))).get()!.n
   const h = own(highlights)
   const b = own(bookmarks)
   const i = own(ideas)
-  const r = db.select({ n: sql<number>`count(*)` }).from(bookReviews)
+  let r = db.select({ n: sql<number>`count(*)` }).from(bookReviews)
     .where(and(eq(bookReviews.userId, userId), ...inRange(bookReviews.createdAt))).get()!.n
+  if (excluded.length > 0) {
+    const reviewRows = db.select().from(bookReviews)
+      .where(and(eq(bookReviews.userId, userId), ...inRange(bookReviews.createdAt))).all()
+    const versions = reviewVersions(userId, reviewRows)
+    const hiddenReviews = new Set<string>()
+    const visibleReviews = new Set<string>()
+    for (const [versionId, rows] of versions) {
+      for (const row of rows) (excluded.includes(versionId) ? hiddenReviews : visibleReviews).add(row.id)
+    }
+    r = reviewRows.filter((row) => !hiddenReviews.has(row.id) || visibleReviews.has(row.id)).length
+  }
   return {
     highlights: h,
     bookmarks: b,
@@ -238,6 +281,7 @@ function rawTallies(userId: string, type?: ArchiveBooksQuery['type'], range: Rea
       }
     }
   }
+  for (const id of pendingBookDataDeletionVersionIds(db, userId)) tallies.delete(id)
   return tallies
 }
 
@@ -287,11 +331,11 @@ async function enrichBooks(userId: string, tallies: Map<string, VersionTally>): 
   return Promise.all(
     versionIds.map(async (versionId) => {
       const tally = tallies.get(versionId)!
-      const format = formats.get(versionId) ?? 'txt'
+      const format = formats.get(versionId) ?? snapshots.get(versionId)?.format ?? 'txt'
       const privateCard = privateCards.get(versionId)
       let title: string | null = privateCard?.title ?? null
       let author: string | null = privateCard?.author ?? null
-      let coverKey: string | null = privateCard?.coverKey ?? null
+      let coverKey: string | null = privateCard?.coverKey ?? snapshots.get(versionId)?.coverKey ?? null
 
       if (!privateCard) {
         try {
@@ -472,6 +516,7 @@ export async function listBooks(userId: string, query: ArchiveBooksQuery) {
 
 export async function getBookDetail(userId: string, bookVersionId: string, range: ReadingRange = {}): Promise<ArchiveBookDetail> {
   const db = getDb()
+  if (pendingBookDataDeletionVersionIds(db, userId).includes(bookVersionId)) throw new AppError('BOOK_NOT_FOUND')
   const bounds = readingTimestampBounds(range)
   let readable = true
   try {
@@ -480,41 +525,38 @@ export async function getBookDetail(userId: string, bookVersionId: string, range
     if (!(error instanceof AppError)) throw error
     readable = false
   }
-  let annotations: AnnotationRes[] = []
-  if (readable) {
-    const [hl, bm, ideaRows] = await Promise.all([
-      db.select().from(highlights)
-        .where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, bookVersionId), isNull(highlights.deletedAt),
-          bounds.from !== undefined ? gte(highlights.createdAt, bounds.from) : undefined,
-          bounds.until !== undefined ? lt(highlights.createdAt, bounds.until) : undefined))
-        .orderBy(desc(highlights.createdAt), desc(highlights.id)).all(),
-      db.select().from(bookmarks)
-        .where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, bookVersionId), isNull(bookmarks.deletedAt),
-          bounds.from !== undefined ? gte(bookmarks.createdAt, bounds.from) : undefined,
-          bounds.until !== undefined ? lt(bookmarks.createdAt, bounds.until) : undefined))
-        .orderBy(desc(bookmarks.createdAt), desc(bookmarks.id)).all(),
-      db.select().from(ideas)
-        .where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, bookVersionId), isNull(ideas.deletedAt),
-          bounds.from !== undefined ? gte(ideas.createdAt, bounds.from) : undefined,
-          bounds.until !== undefined ? lt(ideas.createdAt, bounds.until) : undefined))
-        .orderBy(desc(ideas.createdAt), desc(ideas.id)).all(),
-    ])
-    const currentRevisionId = ideaRevision(userId, bookVersionId)?.id ?? null
-    annotations = [
-      ...hl.map((row) => ({
-        ...toRes('highlight', row),
-        locationAvailable: row.relocation !== 'unresolved' && (!row.revisionId || row.revisionId === currentRevisionId),
-      })),
-      ...bm.map((row) => ({
-        ...toRes('bookmark', row),
-        locationAvailable: !row.revisionId || row.revisionId === currentRevisionId,
-      })),
-      ...ideaRows.map((row) => ({
-        ...toRes('idea', row),
-        locationAvailable: !row.revisionId || !currentRevisionId || row.revisionId === currentRevisionId,
-      })),
-    ]
-  }
+  const [hl, bm, ideaRows] = await Promise.all([
+    db.select().from(highlights)
+      .where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, bookVersionId), isNull(highlights.deletedAt),
+        bounds.from !== undefined ? gte(highlights.createdAt, bounds.from) : undefined,
+        bounds.until !== undefined ? lt(highlights.createdAt, bounds.until) : undefined))
+      .orderBy(desc(highlights.createdAt), desc(highlights.id)).all(),
+    db.select().from(bookmarks)
+      .where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, bookVersionId), isNull(bookmarks.deletedAt),
+        bounds.from !== undefined ? gte(bookmarks.createdAt, bounds.from) : undefined,
+        bounds.until !== undefined ? lt(bookmarks.createdAt, bounds.until) : undefined))
+      .orderBy(desc(bookmarks.createdAt), desc(bookmarks.id)).all(),
+    db.select().from(ideas)
+      .where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, bookVersionId), isNull(ideas.deletedAt),
+        bounds.from !== undefined ? gte(ideas.createdAt, bounds.from) : undefined,
+        bounds.until !== undefined ? lt(ideas.createdAt, bounds.until) : undefined))
+      .orderBy(desc(ideas.createdAt), desc(ideas.id)).all(),
+  ])
+  const currentRevisionId = ideaRevision(userId, bookVersionId)?.id ?? null
+  const annotations: AnnotationRes[] = [
+    ...hl.map((row) => ({
+      ...toRes('highlight', row),
+      locationAvailable: readable && row.relocation !== 'unresolved' && (!row.revisionId || row.revisionId === currentRevisionId),
+    })),
+    ...bm.map((row) => ({
+      ...toRes('bookmark', row),
+      locationAvailable: readable && (!row.revisionId || row.revisionId === currentRevisionId),
+    })),
+    ...ideaRows.map((row) => ({
+      ...toRes('idea', row),
+      locationAvailable: readable && (!row.revisionId || !currentRevisionId || row.revisionId === currentRevisionId),
+    })),
+  ]
 
   // Targeted review matching for this specific bookVersionId instead of scanning all user reviews
   const userPrivateBookIds = db.select({ id: libraryBooks.id })

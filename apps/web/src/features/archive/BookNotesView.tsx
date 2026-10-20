@@ -86,8 +86,14 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
 
   const ledger = useReadingLedger(bookVersionId)
   const book = useBook(bookVersionId)
+  const sourceUnavailable = book.isError && book.error instanceof ApiError && (book.error.status === 404 || book.error.status === 403)
+  const archivedBook = sourceUnavailable && ledger.data?.data ? {
+    id: bookVersionId, title: ledger.data.data.title, author: ledger.data.data.author,
+    format: ledger.data.data.format ?? 'txt', coverKey: ledger.data.data.coverKey ?? null,
+  } : null
+  const displayedBook = sourceUnavailable ? archivedBook : book.data?.data
   const hasProgress = (book.data?.data.progress ?? 0) > 0
-  const chapters = useBookChapters(bookVersionId, bookView === 'notes')
+  const chapters = useBookChapters(bookVersionId, bookView === 'notes' && !sourceUnavailable)
   const detail = useArchiveBookDetail(bookVersionId, bookView === 'notes', range)
   // Composer context for the review editor; fetched only while editing so
   // opening a review detail stays a zero-extra-request action.
@@ -192,7 +198,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   // SPA navigation (not a native anchor): a full-document load would reset
   // the router history index and break the reader's page-level back button.
   function jumpLink(a: AnnotationRes): { to: '/books/$id'; params: { id: string }; search: { annotation: string } } | null {
-    if (a.locationAvailable === false) return null
+    if (sourceUnavailable || a.locationAvailable === false) return null
     return { to: '/books/$id', params: { id: bookVersionId }, search: { annotation: a.id } }
   }
 
@@ -325,12 +331,9 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
     )
   }
 
-  function renderItemTimeMeta(timeValue: number, hasPosition = true) {
+  function renderItemTimeMeta(timeValue: number) {
     return (
       <div className={cn('flex shrink-0 items-center gap-1.5 pt-0.5', selectionMode && 'pr-7')}>
-        {!hasPosition && (
-          <span className="text-xs text-amber-700 dark:text-amber-400">{_('profileArchive.positionUnavailable')}</span>
-        )}
         <span
           title={formatFullDateTime(_, timeValue)}
           className="text-xs tabular-nums text-stone-400 dark:text-stone-500"
@@ -502,7 +505,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
                           : quote
                       })()}
                     </div>
-                    {renderItemTimeMeta(a.createdAt, !!jumpLink(a))}
+                    {renderItemTimeMeta(a.createdAt)}
                   </div>
                 </div>
               </div>
@@ -566,7 +569,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
                           <span className="text-sm text-stone-500 dark:text-stone-400">{_('reader.bookmark')}</span>
                         )}
                       </div>
-                      {renderItemTimeMeta(a.createdAt, !!jumpLink(a))}
+                      {renderItemTimeMeta(a.createdAt)}
                     </div>
 
                     {customBookmark && hasReadableText(a.contextText) && (
@@ -639,7 +642,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
                         <span className="text-xs text-stone-400">{_('archive.idea')}</span>
                       )}
                     </div>
-                    {renderItemTimeMeta(a.createdAt, !!jumpLink(a))}
+                    {renderItemTimeMeta(a.createdAt)}
                   </div>
 
                   {a.images && a.images.length > 0 && (
@@ -713,50 +716,50 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
               <div className="h-4 w-32 animate-pulse rounded bg-stone-500/10" />
             </div>
           </div>
-        ) : book.isError && ledger.data?.data && book.error instanceof ApiError && (book.error.status === 404 || book.error.status === 403) ? (
-          <div><h2 className="text-xl font-bold">{ledger.data.data.title}</h2><p className="mt-1 text-sm text-stone-500">{ledger.data.data.author} · {_('readingData.sourceUnavailable')}</p></div>
-        ) : book.isError && !book.data ? (
+        ) : book.isError && !archivedBook && !book.data ? (
           <QueryErrorState isRetrying={book.isFetching} onRetry={() => void book.refetch()} />
         ) : (
           <div className="flex items-center justify-between gap-4">
             {/* 左侧：封面 + 书名 + 作者状态（为未来分类标签预留良好延展空间） */}
             <div className="flex items-center gap-3 sm:gap-4 min-w-0">
               <div
-                onClick={() => setBookDetailOpen(true)}
-                className="group/cover shrink-0 cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.99]"
-                title={_('library.bookDetails')}
+                onClick={sourceUnavailable ? undefined : () => setBookDetailOpen(true)}
+                className={cn('group/cover shrink-0', !sourceUnavailable && 'cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.99]')}
+                title={sourceUnavailable ? undefined : _('library.bookDetails')}
               >
-                <BookCover book={book.data.data} size="card" />
+                <BookCover book={displayedBook!} size="card" coverSrc={sourceUnavailable ? (displayedBook?.coverKey ? `/api/v1/archive/books/${encodeURIComponent(bookVersionId)}/cover?v=${encodeURIComponent(displayedBook.coverKey)}` : null) : undefined} />
               </div>
               <div className="min-w-0">
                 <h2
-                  onClick={() => setBookDetailOpen(true)}
-                  className="cursor-pointer truncate text-xl font-bold tracking-tight text-stone-900 transition-colors hover:text-stone-600 dark:text-stone-50 dark:hover:text-stone-300"
-                  title={_('library.bookDetails')}
+                  onClick={sourceUnavailable ? undefined : () => setBookDetailOpen(true)}
+                  className={cn('truncate text-xl font-bold tracking-tight text-stone-900 dark:text-stone-50', !sourceUnavailable && 'cursor-pointer transition-colors hover:text-stone-600 dark:hover:text-stone-300')}
+                  title={sourceUnavailable ? undefined : _('library.bookDetails')}
                 >
-                  {book.data.data.title}
+                  {displayedBook?.title}
                 </h2>
                 <p className="mt-1 truncate text-sm text-stone-500 dark:text-stone-400">
-                  {[book.data.data.author, readStatusLabel(book.data.data.readStatus, _)].filter(Boolean).join(' · ')}
+                  {[displayedBook?.author, sourceUnavailable ? _('archive.sourceUnavailable') : readStatusLabel(book.data!.data.readStatus, _)].filter(Boolean).join(' · ')}
                 </p>
               </div>
             </div>
 
             {/* 右侧：同列分层（上层继续阅读主操作，下层视图切换滑块） */}
             <div className="flex flex-col items-end gap-2.5 shrink-0">
-              <Button
-                size="sm"
-                className="gap-1.5 rounded-full px-3.5 h-8 text-xs font-medium cursor-pointer shadow-2xs"
-                onClick={() => {
-                  void navigate({ to: '/books/$id', params: { id: bookVersionId } })
-                }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                </svg>
-                <span>{hasProgress ? _('library.continueReading') : _('library.startReading')}</span>
-              </Button>
+              {!sourceUnavailable && (
+                <Button
+                  size="sm"
+                  className="gap-1.5 rounded-full px-3.5 h-8 text-xs font-medium cursor-pointer shadow-2xs"
+                  onClick={() => {
+                    void navigate({ to: '/books/$id', params: { id: bookVersionId } })
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                  </svg>
+                  <span>{hasProgress ? _('library.continueReading') : _('library.startReading')}</span>
+                </Button>
+              )}
 
               {/* 视图切换器（数据 / 笔记） */}
               <div
@@ -1042,7 +1045,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
       )}
       {openReview && (
         <Modal
-          title={book.data?.data.title ?? _('review.sourceGoneTitle')}
+          title={displayedBook?.title ?? _('review.sourceGoneTitle')}
           onClose={() => {
             setOpenReviewId(null)
             void detail.refetch()
@@ -1090,8 +1093,9 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
         <IdeaDetailModal
           ideaId={openIdeaId}
           bookVersionId={bookVersionId}
-          title={book.data?.data.title ?? _('review.sourceGoneTitle')}
+          title={displayedBook?.title ?? _('review.sourceGoneTitle')}
           theme="app"
+          sourceAvailable={!sourceUnavailable}
           onClose={() => { setOpenIdeaId(null); void detail.refetch() }}
           onShare={(entry) => shareItem(entry.annotation)}
           onEdit={(entry) => { setOpenIdeaId(null); startEdit(entry.annotation.id) }}

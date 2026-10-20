@@ -3,15 +3,18 @@ import { and, eq, sql } from 'drizzle-orm'
 import type { ArchivePage, ArchiveQuery, NoteArchiveEntry } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookmarks, highlights, ideas, libraries, libraryBooks, libraryBookVersions } from '../../db/schema'
+import { bookmarks, highlights, ideas, libraries, libraryBooks, libraryBookVersions, readingArchives } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { assertReadableBook } from '../books/books.service'
+import { pendingBookDataDeletionVersionIds } from '../libraries/library-query'
 import { toRes } from './annotations.service'
 import { assertIdeaSource, ideaRevision } from './idea-access'
 
 export async function noteArchive(userId: string, query: ArchiveQuery): Promise<ArchivePage<NoteArchiveEntry>> {
   const db = getDb()
-  const filter = query.bookId ? sql`AND book_version_id = ${query.bookId}` : sql``
+  const excluded = pendingBookDataDeletionVersionIds(db, userId)
+  const pendingFilter = excluded.length ? sql`AND (book_version_id IS NULL OR book_version_id NOT IN (${sql.join(excluded.map((id) => sql`${id}`), sql`, `)}))` : sql``
+  const filter = sql`${query.bookId ? sql`AND book_version_id = ${query.bookId}` : sql``} ${pendingFilter}`
   const rows = db.all<{ id: string; kind: 'highlight' | 'bookmark' | 'idea' }>(sql`
     SELECT id, kind FROM (
       SELECT id, 'highlight' AS kind, updated_at FROM highlights WHERE user_id = ${userId} AND deleted_at IS NULL ${filter}
@@ -26,7 +29,7 @@ export async function noteArchive(userId: string, query: ArchiveQuery): Promise<
     const table = item.kind === 'highlight' ? highlights : item.kind === 'bookmark' ? bookmarks : ideas
     const row = db.select().from(table).where(and(eq(table.id, item.id), eq(table.userId, userId))).get()!
     const annotation = { ...toRes(item.kind, row), revisionId: row.revisionId }
-    let bookTitle: string | null = null
+    let bookTitle: string | null = row.bookVersionId ? db.select().from(readingArchives).where(and(eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, row.bookVersionId))).get()?.title ?? null : null
     let locationStatus: NoteArchiveEntry['locationStatus'] = 'source-unavailable'
     try {
       if (!row.bookVersionId) throw new AppError('BOOK_NOT_FOUND')
@@ -40,7 +43,7 @@ export async function noteArchive(userId: string, query: ArchiveQuery): Promise<
         .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
         .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'), eq(libraryBookVersions.bookVersionId, row.bookVersionId))).get()
       // A lost holding does not grant a substitute source or a new title.
-      bookTitle = held?.work.title ?? null
+      bookTitle = held?.work.title ?? bookTitle
       const revision = ideaRevision(userId, row.bookVersionId)
       locationStatus = annotation.cfiRange && (!('relocation' in row) || row.relocation !== 'unresolved') && (!annotation.revisionId || annotation.revisionId === revision?.id)
         ? 'available' : 'position-unavailable'

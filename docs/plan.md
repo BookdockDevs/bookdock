@@ -46,6 +46,7 @@ The following are intentionally excluded from this Web milestone: brightness con
 - Archive center: per-book note/review archives plus permission-projected reader profiles implemented for v0.6.0
 - Reading statistics: month-to-date vs previous-month comparison and single-query summary cards implemented for v0.6.0
 - Reading data: independent automatic/manual timing, shared suspension grace, durable capture/retry, account-wide overlap reconciliation, retained personal archives, scoped calendars/trends, record correction, and reading-data JSON backup/restore plus CSV export implemented for v0.6.1
+- Personal archive retention: source-independent notes, private reviews and reading facts with owner-scoped title/format/cover snapshots, plus an explicit personal-data cleanup choice on removal and deletion (unreleased)
 - Reader reliability: themed startup, recoverable remote reads, compact scrolling header/footer labels, and unobstructed text selection implemented for v0.6.1
 - Progress storage cutover: SQLite-authoritative progress with one-shot file import; loading/error/empty semantics hardened across library, settings, stats, and notes in v0.6.0
 - External storage: WebDAV and S3-compatible browsing/import, tiered book storage with a bounded local cache, historical-book migration, and restore-to-local controls implemented for v0.5.0

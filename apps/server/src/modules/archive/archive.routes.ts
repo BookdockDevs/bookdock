@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { archiveBooksQuerySchema, readingRangeSchema } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
-import { getBookDetail, getOverview, listBooks } from './archive.service'
+import { getArchiveCover, getBookDetail, getOverview, listBooks } from './archive.service'
 
 const archiveRoutes = new Hono()
 
@@ -35,6 +35,12 @@ archiveRoutes.get('/books/:bookVersionId', async (c) => {
   const parsed = readingRangeSchema.safeParse(c.req.query())
   if (!parsed.success) throw new AppError('VALIDATION_ERROR')
   return c.json({ data: await getBookDetail(user.id, c.req.param('bookVersionId'), parsed.data) })
+})
+
+archiveRoutes.get('/books/:bookVersionId/cover', async (c) => {
+  const user = c.get('user')!
+  const cover = await getArchiveCover(user.id, c.req.param('bookVersionId'))
+  return c.body(new Uint8Array(cover.data), 200, { 'Content-Type': cover.contentType, 'Cache-Control': 'private, no-store' })
 })
 
 export default archiveRoutes

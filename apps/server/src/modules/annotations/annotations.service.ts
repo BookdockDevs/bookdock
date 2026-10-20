@@ -5,8 +5,9 @@ import { publishedContentFiles, syncContentFiles } from '../../db/content-files'
 import { bookmarks, contentFiles, highlights, ideas, ideaComments, ideaLikes, settings } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { savePersonalBookSnapshot } from '../../lib/personal-book-archive'
 import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
-import { assertReadableBook } from '../books/books.service'
+import { assertReadableBook, getBook } from '../books/books.service'
 import type { AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
 import { assertIdeaSource, IDEA_VISIBILITY_KEY, ideaComposerContext, ideaRevision, privateIdeaLink, readableIdea } from './idea-access'
 
@@ -178,9 +179,11 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
   // with read rights may annotate, with or without collecting first. Guests
   // never reach here (mutations are guest-refused at the guard).
   await assertReadableBook(userId, bookId, showHidden)
+  const snapshot = await getBook(userId, bookId, { showHidden })
   const now = Date.now()
   if (data.type === 'highlight') {
     return db.transaction((tx) => {
+      savePersonalBookSnapshot(tx as unknown as ReturnType<typeof getDb>, userId, bookId, snapshot)
       if (data.replaceAnnotationIds && data.replaceAnnotationIds.length > 0) {
         tx.update(highlights).set({ deletedAt: now, updatedAt: now }).where(and(
           inArray(highlights.id, data.replaceAnnotationIds),
@@ -231,6 +234,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     })
   }
   if (data.type === 'bookmark') {
+    savePersonalBookSnapshot(db, userId, bookId, snapshot)
     const existing = db.select().from(bookmarks)
       .where(and(
         eq(bookmarks.userId, userId),
@@ -295,6 +299,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     deletedAt: null,
   }
   db.transaction((tx) => {
+    savePersonalBookSnapshot(tx as unknown as ReturnType<typeof getDb>, userId, bookId, snapshot)
     tx.insert(ideas).values(row).run()
     syncContentFiles(tx, { userId, domain: 'idea', targetId: row.id, bookVersionId: bookId, draftId: data.draftId, ids: data.imageIds ?? [], imageIds: data.imageIds ?? [] })
     if (context.eligible) {

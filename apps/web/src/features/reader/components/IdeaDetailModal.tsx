@@ -19,7 +19,7 @@ import IdeaDiscussionPanel from './IdeaDiscussionPanel'
  * scoped to this subtree so the shared card renders identically without any
  * reader-file changes.
  */
-export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose, onShare, onEdit, onDelete, initialTab, focusCommentId, theme = 'reader' }: {
+export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose, onShare, onEdit, onDelete, initialTab, focusCommentId, theme = 'reader', sourceAvailable = true }: {
   ideaId: string
   bookVersionId: string
   title: string
@@ -29,6 +29,7 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
   onDelete?: (entry: IdeaEntry) => void
   initialTab?: 'comments' | 'likes'
   focusCommentId?: string
+  sourceAvailable?: boolean
   theme?: 'reader' | 'app'
 }) {
   const _ = useTranslation()
@@ -60,9 +61,9 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
     liked: idea.liked,
     likeCount: idea.likeCount,
     commentCount: idea.commentCount,
-    locationAvailable: idea.locationAvailable,
+    locationAvailable: sourceAvailable && idea.locationAvailable !== false,
   }
-  const jumpHref = idea.locationAvailable !== false
+  const jumpHref = sourceAvailable && idea.locationAvailable !== false
     ? `/books/${encodeURIComponent(bookVersionId)}?annotation=${encodeURIComponent(idea.annotation.id)}`
     : null
   return (

@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, apiPost } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
+import { notify } from '@/lib/notifications'
 import { queueReadingRecord, retryReadingRecords, useReadingSaveState } from '../reading-record-queue'
 
 vi.mock('@/api/client', async (original) => ({ ...await original<typeof import('@/api/client')>(), apiPost: vi.fn().mockResolvedValue({}) }))
 vi.mock('@/lib/query-client', () => ({ queryClient: { invalidateQueries: vi.fn() } }))
+vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn() } }))
 
 const record = {
   bookId: 'book-1', date: '2026-10-18', durationSeconds: 60,
@@ -21,6 +23,29 @@ beforeEach(() => {
 })
 
 describe('durable reading writes', () => {
+  it('notifies manual completion only after server acceptance, including a failed first attempt', async () => {
+    vi.mocked(apiPost).mockRejectedValueOnce(new Error('offline'))
+    queueReadingRecord('reader-1', { ...record, requestId: 'notify-retry' }, true)
+    await vi.waitFor(() => expect(useReadingSaveState.getState().saveFailed).toBe(true))
+    expect(notify.success).not.toHaveBeenCalled()
+    vi.mocked(apiPost).mockResolvedValueOnce({ data: { durationSeconds: 2.836 } })
+    await retryReadingRecords()
+    expect(notify.success).toHaveBeenCalledExactlyOnceWith({ key: 'reader.manualTimerSaved' })
+    await retryReadingRecords()
+    expect(notify.success).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps automatic saves and skipped manual replays quiet', async () => {
+    vi.mocked(apiPost).mockResolvedValue({ data: { durationSeconds: 60 } })
+    queueReadingRecord('reader-1', { ...record, requestId: 'quiet-auto', source: 'auto' })
+    await vi.waitFor(() => expect(useReadingSaveState.getState().pending).toBe(0))
+    vi.mocked(apiPost).mockResolvedValueOnce({ data: { durationSeconds: 0, skipped: true } })
+    queueReadingRecord('reader-1', { ...record, requestId: 'skipped-manual' }, true)
+    await vi.waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(useReadingSaveState.getState().pending).toBe(0))
+    expect(notify.success).not.toHaveBeenCalled()
+  })
+
   it('retains terminal rejections without blocking later books, and retries them only explicitly', async () => {
     vi.mocked(apiPost).mockRejectedValueOnce(new ApiError('VALIDATION_ERROR', 'invalid', undefined, 400))
     const rejectedRecord = { ...record, requestId: 'terminal-record' }

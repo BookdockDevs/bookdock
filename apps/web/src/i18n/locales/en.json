@@ -627,7 +627,9 @@
     "removeFromLibrary": "Remove from Library",
     "removeConfirm": "Remove \"{{title}}\" from your personal library?",
     "removeConfirmBare": "Remove {{title}} from your personal library?",
-    "clearUserDataOnRemove": "Clear my personal data as well (highlights, notes, AI chats, replacements, and progress)",
+    "clearUserDataOnRemove": "Also clear my personal data for this book",
+    "clearUserDataOnRemoveDescription": "Reading records, notes and more are cleared when the book is permanently deleted.",
+    "clearUserDataOnRemoveImmediate": "Reading records, notes and more. This cannot be undone.",
     "bookRemovedFromLibrary": "Removed \"{{title}}\" from library",
     "details": "Details",
     "bookDetails": "Book details",
@@ -1131,6 +1133,7 @@
     "manualTimerRemaining": "{{duration}} left",
     "manualTimerTransferred": "Continued on another device",
     "manualTimerSummary": "Read for {{duration}}",
+    "manualTimerSaved": "Reading record saved",
     "manualTimerDiscarded": "Session discarded",
     "detailRecords": "Reading log",
     "detailAdd": "Add entry",
@@ -2411,6 +2414,7 @@
     "next": "Next"
   },
   "archive": {
+    "sourceUnavailable": "Source unavailable",
     "allArchives": "All archives",
     "title": "Reading archive",
     "back": "Back",

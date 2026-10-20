@@ -1621,6 +1621,7 @@ export function useRestoreBook() {
     mutationFn: ({ id }: { id: string; title: string }) => apiPost<{ data: null }>(`/books/${id}/restore`),
     onSuccess: (_, { title }) => {
       for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
+      void invalidatePermanentlyDeletedBookQueries(queryClient)
       notify.success({ key: 'library.bookRestored', params: { title } })
     },
     onError: (error) => {

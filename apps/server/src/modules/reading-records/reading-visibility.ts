@@ -2,7 +2,11 @@ import { and, eq, inArray, or, sql, type SQL } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import { libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags } from '../../db/schema'
-import { loadLibraryHiddenTaxonomy } from '../libraries/library-query'
+import { loadLibraryHiddenTaxonomy, pendingBookDataDeletionVersionIds } from '../libraries/library-query'
+
+export function excludedReadingBookVersionIds(db: ReturnType<typeof getDb>, userId: string, showHidden = false): string[] {
+  return [...new Set([...pendingBookDataDeletionVersionIds(db, userId), ...(showHidden ? [] : hiddenBookVersionIds(db, userId))])]
+}
 /**
  * Version ids hidden from the owner's default stats views (private vault).
  * Aggregates exclude these rows unless the caller reveals them; per-book

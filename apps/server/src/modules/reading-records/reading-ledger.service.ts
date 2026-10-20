@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { and, desc, eq, lte } from 'drizzle-orm'
+import { and, desc, eq, lte, sql } from 'drizzle-orm'
 
 import type { ReadingCoverageInterval, ReadingLedgerRes, ReadingRecordConflictDetails, ReadingRecordCreateReq, ReadingSessionUpdateReq, ReadingTimerClaim, ReadingTransfer, ReadingTransferPreview } from '@bookdock/shared'
 
@@ -13,7 +13,7 @@ import { readProgressFile } from '../../lib/progress-file'
 import { projectReadingCoverage, readingCompatibleRevisions, type ReadingCoverageBasis } from '../../lib/reading-coverage'
 import { getBook } from '../books/books.service'
 import { mergeTimeFragments, splitReadingTime } from './time-fragments'
-import { hiddenBookVersionIds } from './reading-visibility'
+import { excludedReadingBookVersionIds } from './reading-visibility'
 
 type Db = ReturnType<typeof getDb>
 type Session = typeof readingSessions.$inferSelect
@@ -36,9 +36,9 @@ function ownArchive(tx: Db, userId: string, bookId: string) {
   return archive
 }
 
-export async function ensureReadingArchive(userId: string, bookId: string, showHidden = false) {
+export async function ensureReadingArchive(userId: string, bookId: string, showHidden = false, includePendingDeletion = false) {
   const db = getDb()
-  if (!showHidden && hiddenBookVersionIds(db, userId).includes(bookId)) throw new AppError('BOOK_NOT_FOUND')
+  if (!includePendingDeletion && excludedReadingBookVersionIds(db, userId, showHidden).includes(bookId)) throw new AppError('BOOK_NOT_FOUND')
   const existing = db.select().from(readingArchives).where(archiveWhere(userId, bookId)).get()
   if (existing) return existing
   const book = await getBook(userId, bookId, { showHidden })
@@ -46,7 +46,7 @@ export async function ensureReadingArchive(userId: string, bookId: string, showH
   const state = db.select().from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
   const now = Date.now()
   db.insert(readingArchives).values({
-    userId, bookVersionId: bookId, title: book.title, author: book.author,
+    userId, bookVersionId: bookId, title: book.title, author: book.author, format: book.format, coverKey: book.coverKey,
     legacyIntervals: state?.progressData?.intervals ?? [],
     legacyWordCount: typeof book.meta?.wordCount === 'number' ? book.meta.wordCount : null,
     legacyRevisionId: db.select({ id: contentRevisions.id }).from(contentRevisions).where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).get()?.id ?? null,
@@ -243,8 +243,8 @@ export async function addLedgerReading(userId: string, body: ReadingRecordCreate
   })
 }
 
-export async function getReadingLedger(userId: string, bookId: string, showHidden = false): Promise<ReadingLedgerRes> {
-  const archive = await ensureReadingArchive(userId, bookId, showHidden)
+export async function getReadingLedger(userId: string, bookId: string, showHidden = false, includePendingDeletion = false): Promise<ReadingLedgerRes> {
+  const archive = await ensureReadingArchive(userId, bookId, showHidden, includePendingDeletion)
   const db = getDb()
   let sourceAvailable = false
   try { await getBook(userId, bookId, { showHidden }); sourceAvailable = true } catch (error) {
@@ -270,7 +270,7 @@ export async function getReadingLedger(userId: string, bookId: string, showHidde
     }
   })
   return {
-    bookId, title: archive.title, author: archive.author, sourceAvailable,
+    bookId, title: archive.title, author: archive.author, format: archive.format, coverKey: archive.coverKey, sourceAvailable,
     currentRoundId: rounds[0]?.id ?? null, legacyCoverage: archive.legacyIntervals.length > 0,
     rounds, coverage: rounds[0]?.coverage ?? unionLength(projectedLegacy.intervals),
     legacyRevisionId: archive.legacyRevisionId, projectedLegacyIntervals: projectedLegacy.intervals, unalignedCoverage: rounds.some((round) => round.unalignedCoverage) || projectedLegacy.unaligned,
@@ -403,7 +403,14 @@ export function deleteReadingArchive(userId: string, bookId: string) {
     tx.delete(readingSessions).where(sessionWhere(userId, bookId)).run()
     tx.delete(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId))).run()
     tx.delete(readingRounds).where(roundWhere(userId, bookId)).run()
-    tx.delete(readingArchives).where(archiveWhere(userId, bookId)).run()
+    const hasNotes = tx.get(sql`SELECT 1 FROM highlights WHERE user_id = ${userId} AND book_version_id = ${bookId} AND deleted_at IS NULL
+      UNION ALL SELECT 1 FROM bookmarks WHERE user_id = ${userId} AND book_version_id = ${bookId} AND deleted_at IS NULL
+      UNION ALL SELECT 1 FROM ideas WHERE user_id = ${userId} AND book_version_id = ${bookId} AND deleted_at IS NULL
+      UNION ALL SELECT 1 FROM book_reviews WHERE user_id = ${userId} AND read_book_version_id = ${bookId} LIMIT 1`)
+    if (hasNotes) {
+      tx.update(readingArchives).set({ legacyIntervals: [], legacyDaily: [], legacyWordCount: null, legacyRevisionId: null })
+        .where(archiveWhere(userId, bookId)).run()
+    } else tx.delete(readingArchives).where(archiveWhere(userId, bookId)).run()
     const state = tx.select().from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
     if (state) tx.update(bookStates).set({ readFraction: 0, ...(state.progressData ? { progressData: { ...state.progressData, intervals: [] } } : {}) })
       .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
@@ -417,7 +424,7 @@ export async function exportReadingTransfer(userId: string, bookId?: string): Pr
     .filter((row) => !allArchiveIds.has(row.bookVersionId) && (!bookId || row.bookVersionId === bookId))
     .map((row) => ({ bookId: row.bookVersionId, requestId: row.requestId, bodyHash: row.bodyHash, status: row.status === 'accepted' && row.sessionId === null ? 'deleted' as const : row.status, sessionId: row.sessionId }))
   return { version: 1, detachedReceipts, archives: await Promise.all(archives.map(async (archive) => {
-    const ledger = await getReadingLedger(userId, archive.bookVersionId)
+    const ledger = await getReadingLedger(userId, archive.bookVersionId, true, true)
     return { bookId: archive.bookVersionId, title: archive.title, author: archive.author, legacyIntervals: archive.legacyIntervals, legacyDaily: archive.legacyDaily, legacyWordCount: archive.legacyWordCount, legacyRevisionId: archive.legacyRevisionId, rounds: ledger.rounds, sessions: ledger.sessions.map(({ progressScale: _progressScale, ...session }) => session),
       receipts: getDb().select({ requestId: readingWriteReceipts.requestId, bodyHash: readingWriteReceipts.bodyHash, sessionId: readingWriteReceipts.sessionId, status: readingWriteReceipts.status })
         .from(readingWriteReceipts).where(and(eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.bookVersionId, archive.bookVersionId))).all().map((row) => ({ ...row, status: row.status === 'accepted' && row.sessionId === null ? 'deleted' as const : row.status })),

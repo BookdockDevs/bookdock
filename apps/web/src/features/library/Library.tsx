@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/auth.store'
 
 import { normalizeLibrarySearch, readLibrarySearchExpression } from '@bookdock/shared'
 
+import ClearBookDataOption from './components/ClearBookDataOption'
 import { adoptArchiveExitRestore, editSearchControls, expressionDisplay, keepsSearchSession, searchExitTarget, searchProjection, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
 
 import { ApiError } from '@/api/client'
@@ -84,7 +85,6 @@ function estimateDynColumns(): number {  if (typeof window === 'undefined') retu
 }
 
 let lastKnownDynColumns = typeof window !== 'undefined' ? estimateDynColumns() : 4
-const CLEAR_USER_DATA_STORAGE_KEY = 'bookdock:clear_user_data_on_remove'
 
 export default function Library() {
   const _ = useTranslation()
@@ -247,14 +247,9 @@ export default function Library() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<BookListItem | null>(null)
-  const [clearUserDataOnRemove, setClearUserDataOnRemove] = useState(() => {
-    try {
-      return localStorage.getItem(CLEAR_USER_DATA_STORAGE_KEY) === 'true'
-    } catch {
-      return false
-    }
-  })
+  const [clearUserDataOnRemove, setClearUserDataOnRemove] = useState(false)
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<BookListItem | null>(null)
+  useEffect(() => { setClearUserDataOnRemove(false) }, [deleteTarget, permanentDeleteTarget])
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false)
   const [libraryPermanentTarget, setLibraryPermanentTarget] = useState<CatalogBook | null>(null)
   const [detailTarget, setDetailTarget] = useState<BookListItem | null>(null)
@@ -1545,20 +1540,7 @@ export default function Library() {
                       ? _('library.removeConfirmBare', { title })
                       : _('library.removeConfirm', { title })}
                   </div>
-                  <label className="mt-3 flex items-start gap-2 cursor-pointer select-none text-xs text-stone-600 dark:text-stone-300">
-                    <input
-                      type="checkbox"
-                      checked={clearUserDataOnRemove}
-                      onChange={(e) => {
-                        setClearUserDataOnRemove(e.target.checked)
-                        try {
-                          localStorage.setItem(CLEAR_USER_DATA_STORAGE_KEY, e.target.checked ? 'true' : 'false')
-                        } catch {}
-                      }}
-                      className="mt-0.5 rounded border-stone-300 text-stone-900 focus:ring-stone-500 dark:border-stone-600 dark:bg-stone-800 dark:checked:bg-stone-200 dark:checked:text-stone-900"
-                    />
-                    <span>{_('library.clearUserDataOnRemove')}</span>
-                  </label>
+                  <ClearBookDataOption checked={clearUserDataOnRemove} onChange={setClearUserDataOnRemove} />
                 </div>
               }
               confirmLabel={_('library.removeFromLibrary')}
@@ -1581,16 +1563,19 @@ export default function Library() {
         <ConfirmDialog
           title={trashEnabled ? _('library.deleteBook') : _('library.permanentDelete')}
           message={
-            trashEnabled ? (
-              (deleteTarget.title ?? '').startsWith('《')
-                ? _('library.deleteConfirmBare', { title: deleteTarget.title ?? '' })
-                : _('library.deleteConfirm', { title: deleteTarget.title ?? '' })
-            ) : (
-              <>
-                {_('library.permanentDeleteConfirm')}
-                <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{deleteTarget.title ?? ''}</span>
-              </>
-            )
+            <div>
+              {trashEnabled ? (
+                (deleteTarget.title ?? '').startsWith('《')
+                  ? _('library.deleteConfirmBare', { title: deleteTarget.title ?? '' })
+                  : _('library.deleteConfirm', { title: deleteTarget.title ?? '' })
+              ) : (
+                <>
+                  {_('library.permanentDeleteConfirm')}
+                  <span className="mt-1 block truncate text-stone-700 dark:text-stone-200">{deleteTarget.title ?? ''}</span>
+                </>
+              )}
+              <ClearBookDataOption checked={clearUserDataOnRemove} onChange={setClearUserDataOnRemove} deferred={trashEnabled} />
+            </div>
           }
           confirmLabel={trashEnabled ? _('library.delete') : _('library.permanentDelete')}
           confirmVariant="danger"
@@ -1603,7 +1588,7 @@ export default function Library() {
           onConfirm={() => {
             const target = deleteTarget
             setDeleteTarget(null)
-            void deleteBook.mutateAsync({ id: target.id, title: target.title, isCollected: false }).catch(() => undefined)
+            void deleteBook.mutateAsync({ id: target.id, title: target.title, isCollected: false, deleteUserData: clearUserDataOnRemove }).catch(() => undefined)
           }}
         />
         )

@@ -53,10 +53,14 @@ function formatSessionDateTimeRange(session: ReadingLedgerSession): string {
 }
 
 function formatCardDuration(seconds: number, translate: ReturnType<typeof useTranslation>): string {
-  if (seconds <= 0) return translate('readingData.compactMinutes', { n: 0 })
-  const totalMin = Math.round(seconds / 60)
+  const total = Math.max(0, Math.floor(seconds))
+  if (total < 60) return translate('stats.durationSeconds', { s: total })
+  const totalMin = Math.floor(total / 60)
+  const remainingSeconds = total % 60
   if (totalMin < 60) {
-    return translate('readingData.compactMinutes', { n: Math.max(1, totalMin) })
+    return remainingSeconds > 0
+      ? translate('readingData.minuteSecond', { m: totalMin, s: remainingSeconds })
+      : translate('readingData.compactMinutes', { n: totalMin })
   }
   const h = Math.floor(totalMin / 60)
   const m = totalMin % 60

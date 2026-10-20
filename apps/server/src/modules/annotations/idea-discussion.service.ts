@@ -7,6 +7,8 @@ import { ideaCommentLikes, ideaComments, ideaLikes, ideas, users } from '../../d
 import { createId } from '../../lib/id'
 import { findCommentReceipt, recordInteractionNotification, saveCommentReceipt } from '../../lib/interaction-notifications'
 import { AppError } from '../../middleware/error'
+import { pendingBookDataDeletionVersionIds } from '../libraries/library-query'
+import { assertReadableBook } from '../books/books.service'
 import { assertIdeaSource, readableIdea } from './idea-access'
 import { toRes } from './annotations.service'
 
@@ -64,8 +66,19 @@ export async function listReaderIdeas(userId: string | null, source: { libraryId
 }
 
 export async function getIdeaDiscussion(userId: string | null, ideaId: string, revisionId?: string): Promise<IdeaDiscussion> {
-  const { row, manager } = await readableIdea(userId, ideaId)
+  const { row, manager } = await readableIdea(userId, ideaId, true)
   const db = getDb()
+  if (userId === row.userId && row.bookVersionId && pendingBookDataDeletionVersionIds(db, userId).includes(row.bookVersionId)) throw new AppError('ANNOTATION_NOT_FOUND')
+  let sourceReadable = false
+  if (row.bookVersionId) {
+    try {
+      if (row.sharedLibraryId) await assertIdeaSource(userId, row)
+      else await assertReadableBook(userId, row.bookVersionId)
+      sourceReadable = true
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error
+    }
+  }
   const rows = db.select().from(ideaComments).where(eq(ideaComments.ideaId, row.id)).orderBy(asc(ideaComments.createdAt), asc(sql`rowid`)).all()
 
   const commentIds = rows.map((comment) => comment.id)
@@ -132,7 +145,7 @@ export async function getIdeaDiscussion(userId: string | null, ideaId: string, r
     likeCount: ideaLikesList.length,
     liked: ideaLikesList.some((like) => like.userId === userId),
     commentCount: rows.filter((c) => !c.deletedAt).length,
-    locationAvailable: !row.cfiRange ? false : !row.revisionId || !revisionId ? true : row.revisionId === revisionId,
+    locationAvailable: sourceReadable && !!row.cfiRange && (!row.revisionId || !revisionId || row.revisionId === revisionId),
   }
   return { idea: ideaProjected, comments, likers }
 }

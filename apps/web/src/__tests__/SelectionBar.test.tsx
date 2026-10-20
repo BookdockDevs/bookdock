@@ -156,11 +156,11 @@ describe('SelectionBar', () => {
     const dialog = screen.getByRole('alertdialog')
     expect(within(dialog).getByText('library.batchDeleteOwnedTrash')).toBeInTheDocument()
     expect(within(dialog).getByText('library.batchDeleteCollected')).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('checkbox'))
+    fireEvent.click(within(dialog).getByRole('switch'))
     fireEvent.click(within(dialog).getByRole('button', { name: 'library.batchDelete' }))
 
     await waitFor(() => expect(apiDelete).toHaveBeenCalledTimes(2))
-    expect(apiDelete).toHaveBeenCalledWith('/books/a')
+    expect(apiDelete).toHaveBeenCalledWith('/books/a?deleteUserData=true')
     expect(apiDelete).toHaveBeenCalledWith('/books/b?deleteUserData=true')
   })
 
@@ -172,6 +172,19 @@ describe('SelectionBar', () => {
     expect(screen.getByText('library.batchDeleteSharedTrash')).toBeInTheDocument()
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'library.batchDelete' }))
     await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/libraries/lib1/books/w1'))
+  })
+
+  it.each([true, false])('offers personal cleanup for owned books with trash enabled: %s', async (trashEnabled) => {
+    selectionItems = [item('owned')]
+    render(<SelectionBar selectedIds={['owned']} trashEnabled={trashEnabled} onClear={vi.fn()} />, { wrapper })
+    await clickReady('library.batchDelete')
+    const dialog = screen.getByRole('alertdialog')
+    const option = within(dialog).getByRole('switch', { name: 'library.clearUserDataOnRemove' })
+    expect(option).toHaveAttribute('aria-checked', 'false')
+    expect(within(dialog).getByText(trashEnabled ? 'library.clearUserDataOnRemoveDescription' : 'library.clearUserDataOnRemoveImmediate')).toBeInTheDocument()
+    fireEvent.click(option)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'library.batchDelete' }))
+    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/books/owned?deleteUserData=true'))
   })
 
   it('keeps only failed identities selected after a partial update', async () => {

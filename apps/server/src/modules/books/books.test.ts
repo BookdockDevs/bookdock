@@ -69,7 +69,7 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, ['0041_idea_discussion', '0042_storage_connections', '0043_storage_backend', '0044_storage_s3', '0046_book_reviews', '0048_content_files'])
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, ['0041_idea_discussion', '0042_storage_connections', '0043_storage_backend', '0044_storage_s3', '0046_book_reviews', '0048_content_files', '0049_review_title', '0050_content_file_order', '0051_book_state_progress', '0052_reading_ledger', '0053_personal_archive'])
   return db
 }
 

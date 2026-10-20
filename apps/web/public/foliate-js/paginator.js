@@ -3055,25 +3055,9 @@ export class Paginator extends HTMLElement {
             const mapped = mapper(rect)
             const viewOffset = this.#getViewOffset(this.#primaryIndex)
             const targetStart = viewOffset + mapped.left
-            const targetEnd = viewOffset + mapped.right
-            const targetSize = Math.max(0, targetEnd - targetStart)
             const viewportSize = this.size
 
             if (reason === 'navigation' || reason === 'selection') {
-                const currentStart = this.#renderedStart
-                const currentEnd = this.#renderedEnd
-                const topBuffer = viewportSize * 0.1
-                const bottomBuffer = viewportSize * 0.1
-                const isComfortablyVisible = targetStart >= currentStart + topBuffer
-                    && (targetEnd <= currentEnd - bottomBuffer
-                        || (targetStart <= currentStart + viewportSize * 0.45 && targetSize > viewportSize * 0.7))
-
-                if (isComfortablyVisible) {
-                    this.#scrollBounds = [currentStart, this.atStart ? 0 : viewportSize, this.atEnd ? 0 : viewportSize]
-                    this.#afterScroll(reason)
-                    return
-                }
-
                 // Align target to optical upper third (~28% of viewport height)
                 const opticalOffset = viewportSize * 0.28
                 const offset = Math.max(0, targetStart - opticalOffset)

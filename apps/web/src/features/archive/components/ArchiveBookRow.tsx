@@ -138,6 +138,7 @@ export default function ArchiveBookRow({
         <BookCover
           book={{ id: book.bookVersionId, title: book.title ?? '', format: book.format, coverKey: book.coverKey }}
           size="sm"
+          coverSrc={book.coverKey ? `/api/v1/archive/books/${encodeURIComponent(book.bookVersionId)}/cover?v=${encodeURIComponent(book.coverKey)}` : undefined}
         />
       </div>
       <div className="min-w-0 flex-1 flex flex-col justify-center gap-1">

@@ -65,12 +65,21 @@ export async function ideaComposerContext(userId: string, bookId: string): Promi
   }
 }
 
-export async function readableIdea(userId: string | null, id: string) {
+export async function readableIdea(userId: string | null, id: string, allowRetained = false) {
   const row = getDb().select().from(ideas).where(and(eq(ideas.id, id), isNull(ideas.deletedAt))).get()
   if (!row) throw new AppError('ANNOTATION_NOT_FOUND')
   if (row.visibility === 'private') {
     if (userId !== row.userId) throw new AppError('ANNOTATION_NOT_FOUND')
     return { row, manager: false }
+  }
+  if (allowRetained && userId === row.userId) {
+    try {
+      const read = await assertIdeaSource(userId, row)
+      return { row, manager: read.relation === 'owner' || read.relation === 'admin' }
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error
+      return { row, manager: false }
+    }
   }
   const read = await assertIdeaSource(userId, row)
   return { row, manager: read.relation === 'owner' || read.relation === 'admin' }

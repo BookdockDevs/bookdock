@@ -23,7 +23,7 @@ export async function readableContentFile(userId: string | null, id: string) {
   if (!row || !row.ready) throw new AppError('CONTENT_FILE_NOT_FOUND')
   try {
     if (row.reviewId) await readableReview(userId, row.reviewId)
-    else if (row.ideaId) await readableIdea(userId, row.ideaId)
+    else if (row.ideaId) await readableIdea(userId, row.ideaId, row.userId === userId)
     else if (row.userId !== userId) throw new AppError('CONTENT_FILE_NOT_FOUND')
   } catch (error) {
     if (error instanceof AppError) throw new AppError('CONTENT_FILE_NOT_FOUND')

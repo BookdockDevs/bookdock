@@ -9,7 +9,7 @@ import {
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
   libraryMemberships, users as usersTable, tocRules,
   highlights, ideas, bookmarks, aiThreads, textReplacements,
-  readingArchives, readingRecords, readingRounds, readingSessions, readingWriteReceipts,
+  readingArchives, readingRecords, readingRounds, readingSessions, readingWriteReceipts, bookReviews,
 } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
@@ -35,6 +35,7 @@ import { sha256 } from '../../lib/hash'
 import { normalizeBookTitle } from '../../lib/book-title'
 import { countWords } from '../../lib/word-count'
 import { readingCompatibleRevisions } from '../../lib/reading-coverage'
+import { capturePrivateArchiveSnapshots } from '../../lib/personal-book-archive'
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey, detectImageExtension, blobKey, generateCoverThumbnail } from '../../lib/cover'
 import { log } from '../../lib/logger'
@@ -1240,7 +1241,7 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
   if (userId === null) return resolveLibraryRead(null, bookId)
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
-  if (!library) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  if (!library) return resolveLibraryRead(userId, bookId)
   const lbv = db.select().from(libraryBookVersions)
     .where(and(eq(libraryBookVersions.libraryId, library.id), eq(libraryBookVersions.bookVersionId, bookId))).get()
   // Not in the private library at all: the only other way in is a library the
@@ -3520,18 +3521,26 @@ export async function appendCityVersionContent(
   return { revisionId: newRevisionId, revisionNo: nextRevisionNo }
 }
 
-export async function trashBook(userId: string, bookId: string) {
+export async function trashBook(userId: string, bookId: string, opts?: { deleteUserData?: boolean }) {
   const db = getDb()
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()!
+  capturePrivateArchiveSnapshots(db, db.select({ id: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+    .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all().map((row) => row.id))
   const now = Date.now()
-  db.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+  db.update(libraryBooks).set({
+    deletedAt: now, updatedAt: now,
+    meta: { ...work.meta, pendingUserDataDeletion: opts?.deleteUserData === true },
+  }).where(eq(libraryBooks.id, libraryBookId)).run()
 }
 
 export async function restoreBook(userId: string, bookId: string) {
   const db = getDb()
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()!
+  const { pendingUserDataDeletion: _pending, ...meta } = work.meta
   const now = Date.now()
-  db.update(libraryBooks).set({ deletedAt: null, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+  db.update(libraryBooks).set({ deletedAt: null, updatedAt: now, meta }).where(eq(libraryBooks.id, libraryBookId)).run()
 }
 
 export async function emptyTrash(userId: string) {
@@ -3663,9 +3672,12 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
   // exactly the card you most need to remove. The route discards this value.
   const book = await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true, showHidden: true })
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
+  const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()!
+  const deleteUserData = opts?.deleteUserData === true || (work.deletedAt !== null && work.meta.pendingUserDataDeletion === true)
 
   const versionIds = db.select({ id: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
     .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all().map((row) => row.id)
+  capturePrivateArchiveSnapshots(db, versionIds)
   const revisionKeys = versionIds.length > 0
     ? db.select({ blobKey: contentRevisions.blobKey }).from(contentRevisions)
       .where(inArray(contentRevisions.bookVersionId, versionIds)).all().map((row) => row.blobKey)
@@ -3686,10 +3698,14 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
   // library lists anymore goes with its revisions (dependents cascade).
   const removedVersionIds: string[] = []
   db.transaction((tx) => {
+    if (deleteUserData) {
+      tx.delete(bookReviews).where(and(eq(bookReviews.userId, userId), isNull(bookReviews.sourceLibraryId),
+        or(eq(bookReviews.privateLibraryBookId, libraryBookId), inArray(bookReviews.readBookVersionId, versionIds)))).run()
+    }
     tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
-    if (opts?.deleteUserData) {
+    if (deleteUserData) {
       for (const versionId of versionIds) {
         tx.update(readingWriteReceipts).set({ status: 'deleted' }).where(and(eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.bookVersionId, versionId))).run()
         tx.delete(readingSessions).where(and(eq(readingSessions.userId, userId), eq(readingSessions.bookId, versionId))).run()
@@ -3718,7 +3734,7 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
         tx.update(libraryBookVersions).set({ pinnedRevisionId: null })
           .where(eq(libraryBookVersions.pinnedRevisionId, row.id)).run()
       }
-      // Reading states, highlights, records and AI rows follow via cascade.
+      // Content-bound states, highlights and AI rows follow via cascade.
       tx.delete(bookVersions).where(eq(bookVersions.id, versionId)).run()
       removedVersionIds.push(versionId)
     }
@@ -3742,7 +3758,7 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
   for (const versionId of removedVersionIds) {
     await deleteProgressFile(userId, versionId)
   }
-  if (opts?.deleteUserData) {
+  if (deleteUserData) {
     for (const versionId of versionIds) {
       if (!removedVersionIds.includes(versionId)) {
         await deleteProgressFile(userId, versionId).catch(() => undefined)
@@ -3755,7 +3771,7 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
       .where(eq(libraryBooks.coverKey, coverKey)).get()
     const versionCoverRefs = db.select({ count: sql<number>`count(*)` }).from(libraryBookVersions)
       .where(eq(libraryBookVersions.coverKey, coverKey)).get()
-    if ((coverRefs?.count ?? 0) === 0 && (versionCoverRefs?.count ?? 0) === 0) {
+    if ((coverRefs?.count ?? 0) === 0 && (versionCoverRefs?.count ?? 0) === 0 && !blobKeyReferenced(coverKey)) {
       if (await storage.exists(coverKey)) await storage.delete(coverKey)
       const thumbKey = coverThumbnailKey(coverKey)
       if (await storage.exists(thumbKey)) {

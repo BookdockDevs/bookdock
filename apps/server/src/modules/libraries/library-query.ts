@@ -4,6 +4,16 @@ import { bookVersions, contentRevisions, libraryBookTags, libraryBooks, libraryB
 import type { getDb } from '../../db/client'
 import type { CategoryScope, HiddenReason, HiddenVia } from '@bookdock/shared'
 
+export function pendingBookDataDeletionVersionIds(db: ReturnType<typeof getDb>, userId: string): string[] {
+  return db.select({ id: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
+    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+    .where(and(
+      eq(libraryBooks.userId, userId),
+      sql`${libraryBooks.deletedAt} IS NOT NULL`,
+      sql`json_extract(${libraryBooks.meta}, '$.pendingUserDataDeletion') = 1`,
+    )).all().map((row) => row.id)
+}
+
 /**
  * Query dimensions a library's book list can be filtered and ordered by (0.4.0).
  *

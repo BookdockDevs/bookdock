@@ -598,7 +598,9 @@
     "removeFromLibrary": "移出书库",
     "removeConfirm": "确定将「{{title}}」从个人书库移出吗？",
     "removeConfirmBare": "确定将{{title}}从个人书库移出吗？",
-    "clearUserDataOnRemove": "同时清空我的个人数据（划线笔记、AI 对话、替换规则与阅读进度）",
+    "clearUserDataOnRemove": "同时清理个人数据",
+    "clearUserDataOnRemoveDescription": "包括阅读记录、笔记等，随书籍彻底删除。",
+    "clearUserDataOnRemoveImmediate": "包括阅读记录、笔记等，清理后无法恢复。",
     "bookRemovedFromLibrary": "已将《{{title}}》移出书库",
     "details": "详情",
     "bookDetails": "书籍详情",
@@ -1123,6 +1125,7 @@
     "manualTimerRemaining": "剩余 {{duration}}",
     "manualTimerTransferred": "已在其他设备接续",
     "manualTimerSummary": "本次阅读 {{duration}}",
+    "manualTimerSaved": "阅读记录已保存",
     "manualTimerDiscarded": "已丢弃本次记录",
     "detailRecords": "阅读明细",
     "detailAdd": "补录",
@@ -2385,6 +2388,7 @@
     "next": "下一页"
   },
   "archive": {
+    "sourceUnavailable": "原书不可用",
     "allArchives": "全部档案",
     "title": "阅读档案",
     "back": "返回",

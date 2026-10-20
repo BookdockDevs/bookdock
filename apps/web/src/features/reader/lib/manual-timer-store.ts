@@ -253,7 +253,7 @@ export const useManualTimerStore = create<ManualTimerStore>((set, get) => ({
     const durationSeconds = Math.round(session.elapsedMs / 1000)
     // Persist the queued write before removing the recoverable live session.
     const record = sessionRecord(session)
-    if (record) queueReadingRecord(session.userId, record)
+    if (record) queueReadingRecord(session.userId, record, true)
     set((state) => {
       const { [bookId]: _removed, ...sessions } = state.sessions
       return { sessions, lastSummary: durationSeconds > 0 ? { bookId, durationSeconds } : null }

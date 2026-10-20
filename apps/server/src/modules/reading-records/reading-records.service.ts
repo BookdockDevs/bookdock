@@ -19,7 +19,7 @@ import { bookStates, contentRevisions, libraries, libraryBooks, libraryBookTags,
 import { readProgressFile } from '../../lib/progress-file'
 import { getBook } from '../books/books.service'
 import { unionLength } from '../../lib/intervals'
-import { hiddenBookVersionIds } from './reading-visibility'
+import { excludedReadingBookVersionIds } from './reading-visibility'
 import { isProgressMigrationCompleted } from '../progress/progress-migration'
 import { AppError } from '../../middleware/error'
 import { addLedgerReading, deleteLedgerSession, ensureReadingArchive, updateLedgerSession } from './reading-ledger.service'
@@ -66,7 +66,7 @@ async function computeTotalWordsRead(userId: string, showHidden = false): Promis
   const db = getDb()
   const archives = db.select().from(readingArchives).where(eq(readingArchives.userId, userId)).all()
   if (archives.length) {
-    const hidden = new Set(showHidden ? [] : hiddenBookVersionIds(db, userId))
+    const hidden = new Set(excludedReadingBookVersionIds(db, userId, showHidden))
     const sessions = db.select().from(readingSessions).where(eq(readingSessions.userId, userId)).all()
     let words = 0
     for (const archive of archives) {
@@ -83,7 +83,7 @@ async function computeTotalWordsRead(userId: string, showHidden = false): Promis
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
   if (!library) return 0
 
-  const skips = showHidden ? [] : hiddenBookVersionIds(db, userId)
+  const skips = excludedReadingBookVersionIds(db, userId, showHidden)
   const skipsSet = new Set(skips)
 
   const versionRows = db.selectDistinct({ versionId: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
@@ -149,7 +149,7 @@ async function computeTotalWordsRead(userId: string, showHidden = false): Promis
 
 export async function getSummary(userId: string, today: string, showHidden = false, range: ReadingRange = {}): Promise<ReadingRecordSummaryRes> {
   const db = getDb()
-  const hiddenIds = showHidden ? [] : hiddenBookVersionIds(db, userId)
+  const hiddenIds = excludedReadingBookVersionIds(db, userId, showHidden)
   const visibleRecords = hiddenIds.length > 0 ? notInArray(readingRecords.bookId, hiddenIds) : undefined
   const totals = db.select({
     totalSeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
@@ -312,7 +312,7 @@ export async function getDaily(userId: string, range: { from?: string; to?: stri
     date: readingRecords.date,
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
   }).from(readingRecords)
-    .where(rangeConditions(userId, range, showHidden ? [] : hiddenBookVersionIds(db, userId)))
+    .where(rangeConditions(userId, range, excludedReadingBookVersionIds(db, userId, showHidden)))
     .groupBy(readingRecords.date)
     .orderBy(readingRecords.date)
     .all()
@@ -321,7 +321,7 @@ export async function getDaily(userId: string, range: { from?: string; to?: stri
 /** Hour-of-day distribution from session detail rows; tzOffset is minutes behind UTC (Date#getTimezoneOffset). */
 export async function getHourly(userId: string, range: { from?: string; to?: string; bookId?: string }, tzOffset: number, showHidden = false): Promise<ReadingRecordHourlyItem[]> {
   const db = getDb()
-  const hiddenIds = showHidden ? [] : hiddenBookVersionIds(db, userId)
+  const hiddenIds = excludedReadingBookVersionIds(db, userId, showHidden)
   const rows = db.select().from(readingSessions).where(and(
     eq(readingSessions.userId, userId),
     range.bookId ? eq(readingSessions.bookId, range.bookId) : undefined,
@@ -357,7 +357,7 @@ export async function getByBook(userId: string, range: { from?: string; to?: str
     days: sql<number>`count(distinct CASE WHEN ${readingRecords.durationSeconds} >= 60 THEN ${readingRecords.date} END)`,
   }).from(readingRecords)
     .leftJoin(bookStates, and(eq(bookStates.bookVersionId, readingRecords.bookId), eq(bookStates.userId, userId)))
-    .where(rangeConditions(userId, range, showHidden ? [] : hiddenBookVersionIds(db, userId)))
+    .where(rangeConditions(userId, range, excludedReadingBookVersionIds(db, userId, showHidden)))
     .groupBy(readingRecords.bookId)
     .orderBy(desc(sql`sum(${readingRecords.durationSeconds})`))
     .all()
@@ -454,7 +454,7 @@ export async function getByTag(userId: string, range: { from?: string; to?: stri
     .innerJoin(libraryBookVersions, eq(readingRecords.bookId, libraryBookVersions.bookVersionId))
     .innerJoin(libraryBookTags, eq(libraryBookTags.libraryBookId, libraryBookVersions.libraryBookId))
     .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
-    .where(rangeConditions(userId, range, showHidden ? [] : hiddenBookVersionIds(db, userId)))
+    .where(rangeConditions(userId, range, excludedReadingBookVersionIds(db, userId, showHidden)))
     .groupBy(libraryBookTags.tagId, libraryTags.name)
     .orderBy(desc(sql`count(distinct ${readingRecords.bookId})`), desc(sql`sum(${readingRecords.durationSeconds})`))
     .all()
