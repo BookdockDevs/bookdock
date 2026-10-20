@@ -20,6 +20,7 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Opening a book keeps the reader theme, font size and spacing applied even when external fonts load slowly or time out, preventing a temporary white page with the book's original formatting.
 - The archive no longer labels a note's position as unavailable when the book itself is gone; only the jump back to the original text is disabled.
 
 ### Upgrade notes
@@ -793,6 +794,7 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 打开书籍时，即使外部字体加载缓慢或超时，正文仍保持阅读主题、字号与间距，不再短暂显示白底和书籍原始排版。
 - 原书已不存在时，归档笔记不再标注历史位置不可用，仅禁用跳转到原文的入口。
 
 #### 升级说明

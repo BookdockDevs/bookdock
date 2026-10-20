@@ -810,6 +810,10 @@ the first `rendered` event. Only the selected fonts are awaited in the chapter d
 a bounded fallback; initial navigation settles before content is exposed, timers start or
 progress writes resume. Cached account settings remain usable during background refresh;
 uncached failures expose retry rather than mounting with unknown preferences.
+Core reader CSS is synchronous and independent of external font imports. A font
+timeout may reveal fallback glyphs, but never unstyled book content. Connected
+chapter documents must expose the computed reader-style marker before reveal;
+the final document and font stylesheet are rechecked after startup navigation.
 
 ### Reader book-style boundary
 

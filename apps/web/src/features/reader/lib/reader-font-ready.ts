@@ -1,4 +1,4 @@
-/** Wait for styles and the visible chapter's glyphs, not every font in the library. */
+/** Wait for font styles and visible glyphs; core reader CSS is independent. */
 export async function waitForReaderFonts(doc: Document, signal: AbortSignal, viewport?: { top: number; bottom: number }): Promise<boolean> {
   if (!doc.fonts?.load || signal.aborted) return true
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -14,23 +14,28 @@ export async function waitForReaderFonts(doc: Document, signal: AbortSignal, vie
     const started = performance.now()
     // A frame lets newly injected @import rules participate in style/font readiness.
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-    const imports = Array.from(doc.querySelectorAll('style')).filter((style) => style.textContent?.includes('@import'))
+    const imports = Array.from(doc.querySelectorAll<HTMLStyleElement>('style[data-bd-reader-fonts]'))
+      .filter((style) => style.textContent?.includes('@import'))
     await Promise.all(imports.map((style) => {
-      const rules = style.sheet?.cssRules
-      const loaded = rules && Array.from(rules).every((rule) => {
-        if (rule.type !== 3) return true
-        const sheet = (rule as CSSImportRule).styleSheet
-        if (!sheet) return false
-        try { return Boolean(sheet.cssRules) } catch { return true }
-      })
-      if (loaded) return
+      // The style load event covers nested and cross-origin imports. CSSOM
+      // access alone cannot prove those resources have finished loading.
+      if (style.dataset.loadState === 'loaded') return
+      if (style.dataset.loadState === 'error') throw new Error('Reader font stylesheet failed')
       return new Promise<void>((resolve) => {
-        const finish = () => resolve()
+        const finish = () => {
+          style.removeEventListener('load', finish)
+          style.removeEventListener('error', fail)
+          resolve()
+        }
+        const fail = () => {
+          cancelled = true
+          finish()
+        }
         style.addEventListener('load', finish, { once: true })
-        style.addEventListener('error', finish, { once: true })
+        style.addEventListener('error', fail, { once: true })
         cleanups.push(() => {
           style.removeEventListener('load', finish)
-          style.removeEventListener('error', finish)
+          style.removeEventListener('error', fail)
           resolve()
         })
       })

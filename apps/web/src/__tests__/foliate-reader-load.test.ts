@@ -503,7 +503,7 @@ describe('FoliateReader book-style overrides', () => {
     expect(reader.getSectionTocLabels()).toEqual(['序章', '第一章'])
   })
 
-  it('places imported reader fonts before ordinary stylesheet rules', () => {
+  it('keeps imported reader fonts out of the core stylesheet', () => {
     const reader = new FoliateReader('')
     const setStyles = vi.fn()
     ;(reader as any).view = { renderer: { setStyles } }
@@ -512,7 +512,9 @@ describe('FoliateReader book-style overrides', () => {
     ;(reader as any).applyStyles()
 
     const css = String(setStyles.mock.calls[0]?.[0] ?? '')
-    expect(css.indexOf('@import url("reader.css");')).toBeLessThan(css.indexOf('--bd-font-size'))
+    expect(css).not.toContain('@import')
+    expect(css).toContain('--bd-font-size')
+    expect((reader as any).fontStyleSheet).toBe('@import url("reader.css");')
   })
 
   it('injects legacy cover reset and video compatibility CSS rules', () => {

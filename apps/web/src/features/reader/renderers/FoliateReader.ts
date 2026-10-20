@@ -1705,6 +1705,8 @@ export class FoliateReader implements BookReader {
   // The last reader stylesheet that was handed to the renderer; reused when a
   // section document has to be styled directly.
   private appStyleSheet = ''
+  private fontStyleSheet = ''
+  private fontStyles = new Map<Document, HTMLStyleElement>()
   // Documents whose stylesheet the paginator never wrote (a superseded
   // section load). They get the same sheet injected directly, so a bare
   // section can never be shown.
@@ -2436,31 +2438,12 @@ export class FoliateReader implements BookReader {
       }
       const startupIntent = this.navigationIntent
       const startupCfi = this.lastCfi
-      const contents = this.view?.renderer?.getContents?.() ?? []
-      // The visible section must carry the reader stylesheet before the
-      // reader is revealed. A bare section renders the book's own CSS (white
-      // page, book typography) — and the font wait below would find no
-      // @import to wait for, so it could not hold the reveal back either.
-      for (const content of contents) {
-        this.ensureDocumentStyles((content as { doc?: Document }).doc)
-      }
-      const currentDoc = contents.find((content: { index: number }) => content.index === this.currentSectionIndex)?.doc
-      if (currentDoc) {
-        const fontsReady = await waitForReaderFonts(currentDoc, this.startupAbort.signal, this.container?.getBoundingClientRect())
-        if (this.destroyed) return
-        if (!fontsReady) {
-          console.warn('[FoliateReader] font preparation failed or timed out; using available fallback fonts')
-          this.emit('fontFallback')
-        }
-        if (startupCfi && startupIntent === this.navigationIntent) await this.display(startupCfi, { internal: true })
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-        if (this.destroyed) return
-        // The re-navigation may have replaced the visible section; style it
-        // before the reader is shown.
-        for (const content of this.view?.renderer?.getContents?.() ?? []) {
-          this.ensureDocumentStyles((content as { doc?: Document }).doc)
-        }
-      }
+      const prepared = await this.prepareVisibleContents()
+      if (this.destroyed) return
+      if (startupCfi && startupIntent === this.navigationIntent) await this.display(startupCfi, { internal: true })
+      // Navigation and settings changes can replace the prepared document.
+      await this.prepareVisibleContents(prepared)
+      if (this.destroyed) return
       // Initial view creation and saved-position navigation can move focus
       // between the host document and book iframes. Do not let that startup
       // choreography consume the first real user click; subsequent focus
@@ -4352,6 +4335,8 @@ export class FoliateReader implements BookReader {
           // A section that is gone takes its repaired stylesheet with it.
           this.repairedStyles.get(doc)?.remove()
           this.repairedStyles.delete(doc)
+          this.fontStyles.get(doc)?.remove()
+          this.fontStyles.delete(doc)
           const sel = this.selectionDocs.get(doc)
           if (sel) {
             doc.removeEventListener('pointerdown', sel.startHandler)
@@ -4550,6 +4535,7 @@ export class FoliateReader implements BookReader {
     this.marginalPointerListeners.clear()
     this.activeDocs.clear()
     this.repairedStyles.clear()
+    this.fontStyles.clear()
     this.mediaOverlaySections.clear()
     this.listeners = []
     this.view = null
@@ -5180,10 +5166,8 @@ export class FoliateReader implements BookReader {
       font[color="rgb(0,0,0)"], font[color="rgb(0, 0, 0)"] {
         color: var(--bd-theme-text) !important;
       }`
-    // fontCss (@import/@font-face) must precede all rules or the at-rules
-    // are ignored; the paginator re-lays out on document.fonts.ready
+    // External imports must never delay the core theme and layout rules.
     const css = `
-      ${fontCss}
       ${fontVariables}
       ${forceBookdockFont
         ? `html body {
@@ -5228,8 +5212,34 @@ export class FoliateReader implements BookReader {
       }
     `
     this.appStyleSheet = css
+    this.fontStyleSheet = fontCss
     this.view.renderer.setStyles(css)
     this.syncRepairedStyles()
+    for (const content of this.view.renderer.getContents?.() ?? []) {
+      this.ensureDocumentStyles(content.doc)
+    }
+  }
+
+  private async prepareVisibleContents(prepared?: { doc: Document; fontCss: string }) {
+    while (!this.destroyed) {
+      const contents = this.view?.renderer?.getContents?.() ?? []
+      for (const content of contents) {
+        if (!this.ensureDocumentStyles(content.doc)) throw new Error('Reader styles are not ready')
+      }
+      if (this.view?.isFixedLayout) return
+      const doc = contents.find((content: { index: number }) => content.index === this.currentSectionIndex)?.doc as Document | undefined
+      if (!doc) throw new Error('Reader chapter is not ready')
+      if (doc === prepared?.doc && this.fontStyleSheet === prepared.fontCss) return prepared
+      const snapshot = { doc, fontCss: this.fontStyleSheet }
+      const fontsReady = await waitForReaderFonts(doc, this.startupAbort.signal, this.container?.getBoundingClientRect())
+      if (this.destroyed) return
+      if (!fontsReady) {
+        console.warn('[FoliateReader] font preparation failed or timed out; using available fallback fonts')
+        this.emit('fontFallback')
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      prepared = snapshot
+    }
   }
 
   /** Whether the document carries the reader stylesheet. The marker is read
@@ -5239,9 +5249,9 @@ export class FoliateReader implements BookReader {
     if (!doc?.documentElement) return false
     try {
       const value = doc.defaultView?.getComputedStyle(doc.documentElement).getPropertyValue(APP_STYLE_MARKER)
-      if (value?.trim() === '1') return true
+      if (doc.defaultView) return value?.trim() === '1'
     } catch {
-      // detached document: fall through to the sheet scan
+      if (doc.defaultView) return false
     }
     // Documents without a browsing context cannot be inspected through
     // getComputedStyle; the marker in the sheet itself is enough there.
@@ -5260,6 +5270,23 @@ export class FoliateReader implements BookReader {
     // Fixed-layout books are styled through their own renderer path; the
     // reflowable sheet must not be injected into them.
     if (this.view?.isFixedLayout) return true
+    if (this.fontStyleSheet) {
+      const fontStyle = this.fontStyles.get(doc)
+      if (!fontStyle || fontStyle.textContent !== this.fontStyleSheet) {
+        fontStyle?.remove()
+        const next = doc.createElement('style')
+        next.dataset.bdReaderFonts = ''
+        this.fontStyles.set(doc, next)
+        next.dataset.loadState = this.fontStyleSheet.includes('@import') ? 'loading' : 'loaded'
+        next.onload = () => { next.dataset.loadState = 'loaded' }
+        next.onerror = () => { next.dataset.loadState = 'error' }
+        next.textContent = this.fontStyleSheet
+        doc.head?.prepend(next)
+      }
+    } else {
+      this.fontStyles.get(doc)?.remove()
+      this.fontStyles.delete(doc)
+    }
     if (this.documentHasAppStyles(doc)) return true
     if (!this.appStyleSheet) return false
     let el = this.repairedStyles.get(doc)
@@ -5269,7 +5296,7 @@ export class FoliateReader implements BookReader {
       doc.head?.appendChild(el)
       this.repairedStyles.set(doc, el)
     }
-    el.textContent = this.appStyleSheet
+    if (el.textContent !== this.appStyleSheet) el.textContent = this.appStyleSheet
     return this.documentHasAppStyles(doc)
   }
 
@@ -5281,7 +5308,7 @@ export class FoliateReader implements BookReader {
         this.repairedStyles.delete(doc)
         continue
       }
-      el.textContent = this.appStyleSheet
+      if (el.textContent !== this.appStyleSheet) el.textContent = this.appStyleSheet
     }
   }
 
