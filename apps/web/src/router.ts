@@ -12,6 +12,7 @@ import { settingsRoute } from './routes/settings'
 import { archiveRoute } from './routes/archive'
 import { statsRoute } from './routes/stats'
 import { updatePreviewRoute } from './routes/update-preview'
+import DefaultPending from '@/components/layout/DefaultPending'
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -28,7 +29,13 @@ const routeTree = rootRoute.addChildren([
   ...(import.meta.env.DEV ? [updatePreviewRoute] : []),
 ])
 
-export const router = createRouter({ routeTree })
+export const router = createRouter({
+  routeTree,
+  defaultPreload: 'intent',
+  defaultPendingMs: 0,
+  defaultPendingMinMs: 0,
+  defaultPendingComponent: DefaultPending,
+})
 
 declare module '@tanstack/react-router' {
   interface Register {

@@ -1,4 +1,4 @@
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useRouter } from '@tanstack/react-router'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
@@ -51,6 +51,7 @@ function ProfileIcon() {
 export default function AccountMenu() {
   const _ = useTranslation()
   const navigate = useNavigate()
+  const router = useRouter({ warn: false })
   const user = useAuthStore((s) => s.user)
   const { data: instanceData } = useInstanceInfo()
   const logout = useLogout()
@@ -93,6 +94,9 @@ export default function AccountMenu() {
         onClick={() => {
           void navigate({ to: '/profile' })
         }}
+        onPointerEnter={() => {
+          void router?.preloadRoute?.({ to: '/profile' })
+        }}
         onContextMenu={(e) => {
           e.preventDefault()
           menu.openFromEvent(e)
@@ -123,6 +127,9 @@ export default function AccountMenu() {
           onClick={() => {
             menu.close()
             void navigate({ to: '/profile' })
+          }}
+          onPointerEnter={() => {
+            void router?.preloadRoute?.({ to: '/profile' })
           }}
           className={menuItemClass}
         >

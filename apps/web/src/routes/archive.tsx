@@ -4,6 +4,7 @@ import type { ArchiveRecordType, ArchiveBooksQuery } from '@bookdock/shared'
 import { calendarDateSchema, readingTimezoneSchema } from '@bookdock/shared'
 
 import type { ArchiveScopeSearch } from '@/features/archive/archive-scope'
+import ArchivePending from '@/features/archive/components/ArchivePending'
 
 import { rootRoute } from './__root'
 
@@ -64,4 +65,5 @@ export const archiveRoute = createRoute({
     }
   },
   component: lazyRouteComponent(() => import('@/features/archive/Archive')),
+  pendingComponent: ArchivePending,
 })

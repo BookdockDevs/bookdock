@@ -29,6 +29,7 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Fixed page transition delay and two-phase loading waterfalls by setting TanStack Router's pending threshold to zero, enabling intent preloading on hover, adding matching pending skeletons for the reading archive and notification center, and hooking sidebar and account navigation into router preloading.
 - Reader immediately clears and suppresses header and footer summon states while any fullscreen modal or overlay is active, preventing accidental toolbar reveal when moving the mouse near top or bottom edges.
 - Opening replacement rules from reader settings no longer leaves the reader header stuck open.
 - Switching between shelf, category and tag navigation clears the previous dimension and pagination while retaining additional filters and existing link meanings.
@@ -818,6 +819,7 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 修复子页面跳转卡顿与二次加载瀑布流：将 TanStack Router 挂起等待阈值设为零以消除点击无响应延迟，开启悬浮预加载，为“阅读档案”与“通知中心”补齐专属框架骨架屏，并将侧栏与账号菜单升级至标准路由预加载。
 - 阅读器在打开任意全屏弹窗或遮罩时，立即清除并静默顶栏/底栏召唤状态，避免鼠标滑动到页面边缘时误触发栏位显隐。
 - 从阅读设置打开替换规则弹窗时，顶栏不再因设置态残留而保持常显。
 - 切换书架、分类与标签导航时清除前一维度条件及分页，保留附加筛选与旧链接语义。

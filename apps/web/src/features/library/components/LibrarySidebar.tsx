@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useRouter } from '@tanstack/react-router'
 
 import { useDndContext, useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -90,6 +90,7 @@ interface LibrarySidebarProps {
 const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, categoryId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, privateLibraryId = null, activeLibraryName, activeLibraryNameLoading = false, librariesResolved = true, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries, onOpenNotifications, notificationButtonRef, librarySearch }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
+  const router = useRouter({ warn: false })
   const [session, setSession] = useState(() => (sessionKey ? navigationSessions.get(sessionKey) : undefined) ?? { panel: (directory || (activeLibraryId ? 'categories' : 'shelves')) as 'shelves' | 'categories' | 'tags', expanded: [] as string[], scroll: {} as Record<string, number> })
   const panel = session.panel
   const remember = useCallback((patch: Partial<typeof session>) => setSession((previous) => {
@@ -536,7 +537,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
             }
           }}
           onPointerEnter={() => {
-            void import('@/features/archive/Archive')
+            void router?.preloadRoute?.({ to: '/archive' })
           }}
         />}
         <NavItem
@@ -552,7 +553,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
             void navigate({ to: '/settings' })
           }}
           onPointerEnter={() => {
-            void import('@/features/settings/Settings')
+            void router?.preloadRoute?.({ to: '/settings' })
           }}
         />
         <AccountMenu />

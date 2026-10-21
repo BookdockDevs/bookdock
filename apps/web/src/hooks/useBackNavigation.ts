@@ -14,7 +14,7 @@ export function canNavigateBack(): boolean {
 }
 
 export function useBackNavigation(fallback = '/') {
-  const router = useRouter()
+  const router = useRouter({ warn: false })
   const navigate = useNavigate()
 
   return useCallback(

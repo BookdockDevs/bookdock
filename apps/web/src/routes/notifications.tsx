@@ -1,5 +1,6 @@
 import { createRoute, lazyRouteComponent } from '@tanstack/react-router'
 
+import NotificationCenterPending from '@/features/notifications/components/NotificationCenterPending'
 import { rootRoute } from './__root'
 
 export const notificationsRoute = createRoute({
@@ -9,4 +10,5 @@ export const notificationsRoute = createRoute({
     id: typeof search.id === 'string' ? search.id : undefined,
   }),
   component: lazyRouteComponent(() => import('@/features/notifications/NotificationCenter')),
+  pendingComponent: NotificationCenterPending,
 })
