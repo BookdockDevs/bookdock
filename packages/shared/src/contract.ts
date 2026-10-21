@@ -1356,6 +1356,10 @@ export interface BookDetailRes extends BookListItem {
   filePath: string
   meta: BookMeta
   readerSettings: ReaderBookSettings
+  tagIds?: string[]
+  cfi?: string | null
+  chapter?: string | null
+  readFraction?: number
   /**
    * Stage 5: shared versions published from this private book, for the merged
    * publish dialog. Empty for anything that was never a publish source.

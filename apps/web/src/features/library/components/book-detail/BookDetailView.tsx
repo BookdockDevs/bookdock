@@ -41,6 +41,7 @@ interface BookDetailViewProps {
   categoryName?: string
   memberTags: Array<{ id: string; name: string }>
   isLoading?: boolean
+  reviewContext?: import('@bookdock/shared').ReviewBookContext | null
   moreActions?: MoreActionsMenuItem[]
   /** Drill into the personal reading data; absent when there is none to show. */
   onOpenReadingData?: () => void
@@ -59,6 +60,7 @@ export default function BookDetailView({
   categoryName,
   memberTags,
   isLoading,
+  reviewContext: reviewContextProp,
   moreActions,
   onOpenReadingData,
   onOpenAllReviews,
@@ -84,8 +86,8 @@ export default function BookDetailView({
   const [coverEditing, setCoverEditing] = useState(false)
   const canEditBookmeta = !readOnly && !displayBook.source && Boolean(detail)
   const [reviewEditorOpen, setReviewEditorOpen] = useState(false)
-  const reviewQuery = useReviewBookContext(book?.id ?? null)
-  const reviewContext = reviewQuery.data?.data
+  const reviewQuery = useReviewBookContext(reviewContextProp !== undefined ? null : (book?.id ?? null))
+  const reviewContext = reviewContextProp !== undefined ? reviewContextProp : reviewQuery.data?.data
   const reviewComposer = reviewContext?.composer
   const canReview = Boolean(!readOnly && reviewComposer?.eligible && reviewComposer.bookVersionId)
   const ownReview = reviewContext?.own

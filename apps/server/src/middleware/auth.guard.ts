@@ -7,7 +7,7 @@ import type { AccessTokenPermission } from '@bookdock/shared'
 
 import { getDb } from '../db/client'
 import { users } from '../db/schema'
-import { getInstanceSettings, isInstanceOwner, refreshSessionIfNeeded, resetInstanceCache, resolveSession, revokeSession } from '../modules/auth/auth.service'
+import { getInstanceSettings, invalidateSessionCache, isInstanceOwner, refreshSessionIfNeeded, resetInstanceCache, resolveSession, revokeSession } from '../modules/auth/auth.service'
 import { resolveLegadoAccessKey } from '../modules/books/legado-access.service'
 import { resolveAccessToken } from '../modules/tokens/tokens.service'
 import { isLegadoAccessKeyEnabled } from '../modules/settings/settings.service'
@@ -70,6 +70,7 @@ export function invalidateUserCache(userId?: string) {
 /** Test helper: drop all auth-related caches (user and instance configuration). */
 export function resetAuthCaches() {
   userCache.clear()
+  invalidateSessionCache()
   resetInstanceCache()
 }
 

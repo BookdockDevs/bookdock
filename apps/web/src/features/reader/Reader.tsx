@@ -715,14 +715,21 @@ export default function Reader() {
   }
   // Success only: a failed progress fetch must not be latched as "no saved
   // progress" — the reader shows a retry/start-over prompt until it resolves
-  if (initialCfiRef.current === undefined && progressQuery.isSuccess) {
-    const data = progressQuery.data?.data
-    initialCfiRef.current = data?.cfi ?? ''
-    // Book-level fraction fallback: used when no CFI was saved (stale after
-    // a re-TOC) and by the renderer when the saved CFI fails to resolve
-    // (content is unchanged, so the fraction still lands on the same text).
-    initialFractionRef.current = data && data.percent > 0 ? data.fraction ?? data.percent / 100 : undefined
-    restoreGateRef.current?.arm()
+  if (initialCfiRef.current === undefined) {
+    if (progressQuery.isSuccess) {
+      const data = progressQuery.data?.data
+      initialCfiRef.current = data?.cfi ?? ''
+      // Book-level fraction fallback: used when no CFI was saved (stale after
+      // a re-TOC) and by the renderer when the saved CFI fails to resolve
+      // (content is unchanged, so the fraction still lands on the same text).
+      initialFractionRef.current = data && data.percent > 0 ? data.fraction ?? data.percent / 100 : undefined
+      restoreGateRef.current?.arm()
+    } else if (bookQuery.data?.data && bookQuery.data.data.cfi !== undefined) {
+      const bData = bookQuery.data.data
+      initialCfiRef.current = bData.cfi ?? ''
+      initialFractionRef.current = bData.progress && bData.progress > 0 ? (bData.readFraction ?? bData.progress / 100) : undefined
+      restoreGateRef.current?.arm()
+    }
   }
 
   const [bookReady, setBookReady] = useState(false)

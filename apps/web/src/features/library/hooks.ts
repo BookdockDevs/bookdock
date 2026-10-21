@@ -2118,17 +2118,19 @@ export function useUpdateBookMembership() {
   })
 }
 
-export function useBookMembership(bookId: string | null) {
+export function useBookMembership(bookId: string | null, options: { shelves?: boolean; tags?: boolean } = {}) {
+  const checkShelves = options.shelves ?? false
+  const checkTags = options.tags ?? true
   return {
     shelves: useQuery({
       queryKey: ['books', bookId, 'shelves'],
       queryFn: () => apiGet<{ data: string | null }>(`/books/${bookId}/shelves`),
-      enabled: Boolean(bookId),
+      enabled: Boolean(bookId && checkShelves),
     }),
     tags: useQuery({
       queryKey: ['books', bookId, 'tags'],
       queryFn: () => apiGet<{ data: string[] }>(`/books/${bookId}/tags`),
-      enabled: Boolean(bookId),
+      enabled: Boolean(bookId && checkTags),
     }),
   }
 }

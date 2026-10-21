@@ -77,21 +77,40 @@ export async function listNotifications(userId: string, query: NotificationQuery
   return { entries: entries.slice(0, query.pageSize), page: query.page, hasMore: entries.length > query.pageSize }
 }
 
+const unreadCountCache = new Map<string, { count: number; at: number }>()
+const UNREAD_COUNT_TTL = 15_000
+
+export function invalidateUnreadNotificationCount(userId?: string) {
+  if (userId) unreadCountCache.delete(userId)
+  else unreadCountCache.clear()
+}
+
 export function deleteNotification(userId: string, id: string) {
+  invalidateUnreadNotificationCount(userId)
   getDb().delete(interactionNotifications)
     .where(and(eq(interactionNotifications.id, id), eq(interactionNotifications.userId, userId))).run()
 }
 
 export async function unreadNotificationCount(userId: string) {
+  const cached = unreadCountCache.get(userId)
+  const now = Date.now()
+  if (cached && now - cached.at < UNREAD_COUNT_TTL) {
+    return { count: cached.count }
+  }
+
   const db = getDb()
   const raw = db.select({ count: sql<number>`count(*)` })
     .from(interactionNotifications)
     .where(and(eq(interactionNotifications.userId, userId), isNull(interactionNotifications.readAt)))
     .get()
-  if (!raw || raw.count === 0) return { count: 0 }
+  if (!raw || raw.count === 0) {
+    unreadCountCache.set(userId, { count: 0, at: now })
+    return { count: 0 }
+  }
 
   let count = 0
   for await (const _entry of availableNotifications(userId, true)) count += 1
+  unreadCountCache.set(userId, { count, at: now })
   return { count }
 }
 
@@ -102,11 +121,13 @@ export async function notificationTarget(userId: string, id: string): Promise<No
 }
 
 export function markNotificationRead(userId: string, id: string, read: boolean) {
+  invalidateUnreadNotificationCount(userId)
   getDb().update(interactionNotifications).set({ readAt: read ? Date.now() : null })
     .where(and(eq(interactionNotifications.id, id), eq(interactionNotifications.userId, userId))).run()
 }
 
 export async function markAllNotificationsRead(userId: string) {
+  invalidateUnreadNotificationCount(userId)
   const db = getDb()
   let ids: string[] = []
   // Scan all rows: read-state writes must not move the unread offset underneath us.

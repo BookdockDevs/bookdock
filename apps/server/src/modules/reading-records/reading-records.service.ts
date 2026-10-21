@@ -325,8 +325,12 @@ export async function getDaily(userId: string, range: { from?: string; to?: stri
 export async function getHourly(userId: string, range: { from?: string; to?: string; bookId?: string }, tzOffset: number, showHidden = false): Promise<ReadingRecordHourlyItem[]> {
   const db = getDb()
   const hiddenIds = excludedReadingBookVersionIds(db, userId, showHidden)
+  const sessionFrom = range.from ? shiftDays(range.from, -1) : undefined
+  const sessionTo = range.to ? shiftDays(range.to, 1) : undefined
   const rows = db.select().from(readingSessions).where(and(
     eq(readingSessions.userId, userId),
+    sessionFrom ? gte(readingSessions.date, sessionFrom) : undefined,
+    sessionTo ? lte(readingSessions.date, sessionTo) : undefined,
     range.bookId ? eq(readingSessions.bookId, range.bookId) : undefined,
     hiddenIds.length ? notInArray(readingSessions.bookId, hiddenIds) : undefined,
   )).all()
@@ -501,7 +505,10 @@ export async function getByTag(userId: string, range: ReadingRange, showHidden =
 
 export async function getByCategory(userId: string, range: ReadingRange, showHidden = false): Promise<ReadingRecordCategoryItem[]> {
   const { db, facts, holdings } = readingTaxonomyFacts(userId, range, showHidden)
-  const categories = db.select().from(libraryCategories).all()
+  const libraryIds = [...new Set([...holdings.values()].map((h) => h.libraryId))]
+  const categories = libraryIds.length > 0
+    ? db.select().from(libraryCategories).where(inArray(libraryCategories.libraryId, libraryIds)).all()
+    : []
   const categoryMap = new Map(categories.map((category) => [category.id, category]))
   const groups = new Map<string | null, ReadingRecordCategoryItem>()
   for (const fact of facts) {

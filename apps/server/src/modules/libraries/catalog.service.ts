@@ -546,7 +546,7 @@ export async function listLibraryVersionEntries(
   const pageSize = Math.min(100, Math.max(1, params.pageSize ?? CATALOG_PAGE_SIZE))
   // Latest-revision meta, so description/series/cover palette follow the
   // content the reader will actually open.
-  const revMeta = (jsonPath: string) => sql`json_extract((SELECT ${contentRevisions.meta} FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1), ${jsonPath})`
+  const revMeta = (jsonPath: string) => sql`(SELECT json_extract(${contentRevisions.meta}, ${jsonPath}) FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1)`
   const effTitle = sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title})`
   const effAuthor = sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author})`
 

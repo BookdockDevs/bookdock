@@ -14,6 +14,7 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- Enhanced backend performance and response aggregation across core modules: `BookDetailRes` now includes shelf name, tags, and reading position directly in book details to eliminate sequential request waterfalls and layout shifting; session validation is cached in-memory with write-invalidation; SQLite connections use `busy_timeout`, `synchronous = NORMAL`, and a 20MB cache size; unread notification counts are cached with event-driven invalidation; and book search and list queries push JSON extraction inside the subquery to minimize payload evaluation overhead.
 - The personal-library sidebar separates shelves, categories and tags. Books without a shelf appear under Not on a shelf, independently of Uncategorized books.
 - Book details display and edit categories and tags; shelf organization remains available from the library and batch organizer.
 - Redesigned book detail category and tag pickers into compact popover attributes: category picker supports two-level hierarchy with viewport-aware auto-flip, inline category creation, and collapsible template suggestions; tag picker uses removable selected pills paired with a searchable multi-select popover and inline creation.
@@ -802,6 +803,7 @@ All notable changes to Bookdock are documented here.
 
 #### 变更
 
+- 全项目核心后端性能审计与响应聚合优化：书籍详情接口直接携带书架名称、标签与阅读定位进度，消除多阶段请求瀑布与弹窗内容跳动；认证守卫引入会话 Token 内存缓存与精准失效机制，消除并发接口重复查询会话表；SQLite 数据库连接配置 `busy_timeout`、WAL `synchronous = NORMAL` 与 20MB 页面缓存提升高并发写入稳定性；通知未读数轮询引入带事件失效的轻量缓存，避免全量实体扫描；列表与搜索查询将 JSON 提取下推至子查询内部，降低元数据传输与解析开销。
 - 私库侧栏分为书架、分类与标签；未分配书架的书籍显示在“未入架”，与“未分类”独立。
 - 书籍详情展示和编辑分类与标签；书架整理继续从书库首页和批量整理入口操作。
 - 书籍详情中的分类与标签编辑交互重构为紧凑属性弹层：分类选择器支持两级层级树与视口自适应翻转、行内新建分类以及折叠式推荐分类；标签选择器支持已选标签直接快捷移除，结合支持即时过滤和行内新建的多选弹层。

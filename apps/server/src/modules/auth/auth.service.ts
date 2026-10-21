@@ -159,29 +159,59 @@ export function createSession(userId: string): { token: string; sessionId: strin
   return { token, sessionId: row.id, expiresAt: row.expiresAt }
 }
 
+const sessionCache = new Map<string, { identity: SessionIdentity; at: number }>()
+const SESSION_CACHE_TTL = 30_000
+
+export function invalidateSessionCache(token?: string) {
+  if (token) {
+    sessionCache.delete(hashSessionToken(token))
+  } else {
+    sessionCache.clear()
+  }
+}
+
 export function resolveSession(token: string): SessionIdentity | null {
+  const tokenHash = hashSessionToken(token)
+  const now = Date.now()
+  const hit = sessionCache.get(tokenHash)
+  if (hit && now - hit.at < SESSION_CACHE_TTL) {
+    if (hit.identity.expiresAt > now) {
+      return hit.identity
+    }
+    sessionCache.delete(tokenHash)
+  }
+
   const db = getDb()
-  const row = db.select().from(sessions).where(eq(sessions.tokenHash, hashSessionToken(token))).get()
-  if (!row) return null
-  if (row.expiresAt <= Date.now()) {
-    db.delete(sessions).where(eq(sessions.id, row.id)).run()
+  const row = db.select().from(sessions).where(eq(sessions.tokenHash, tokenHash)).get()
+  if (!row) {
+    sessionCache.delete(tokenHash)
     return null
   }
-  return { userId: row.userId, sessionId: row.id, expiresAt: row.expiresAt }
+  if (row.expiresAt <= now) {
+    db.delete(sessions).where(eq(sessions.id, row.id)).run()
+    sessionCache.delete(tokenHash)
+    return null
+  }
+  const identity: SessionIdentity = { userId: row.userId, sessionId: row.id, expiresAt: row.expiresAt }
+  sessionCache.set(tokenHash, { identity, at: now })
+  return identity
 }
 
 /** Extend sessions inside the refresh window; true means the cookie must be re-issued. */
 export function refreshSessionIfNeeded(sessionId: string, expiresAt: number): boolean {
   if (expiresAt - Date.now() > SESSION_REFRESH_WITHIN_MS) return false
   getDb().update(sessions).set({ expiresAt: Date.now() + SESSION_TTL_MS }).where(eq(sessions.id, sessionId)).run()
+  sessionCache.clear()
   return true
 }
 
 export function revokeSession(token: string): void {
+  sessionCache.delete(hashSessionToken(token))
   getDb().delete(sessions).where(eq(sessions.tokenHash, hashSessionToken(token))).run()
 }
 
 export function revokeUserSessions(userId: string): void {
+  sessionCache.clear()
   getDb().delete(sessions).where(eq(sessions.userId, userId)).run()
   invalidateUserCache(userId)
 }

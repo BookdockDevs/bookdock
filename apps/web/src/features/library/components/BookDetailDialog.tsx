@@ -68,7 +68,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const displayBook: BookListItem = detail ?? book!
   const bookmeta = detail?.meta?.bookmeta
 
-  const { tags: memTags } = useBookMembership(book?.id ?? null)
+  const { tags: memTags } = useBookMembership(book?.id ?? null, { tags: !detail?.tagIds })
   const { data: librariesData } = useLibraries()
   const privateLibraryId = librariesData?.data.find((library) => library.type === 'private')?.id ?? null
   const categoriesData = useLibraryCategories(privateLibraryId)
@@ -282,7 +282,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setCategorySel({ categoryId: displayBook.categoryId ?? null })
     setTagSel(
       new Set(
-        memTags.data?.data ??
+        detail?.tagIds ??
+          memTags.data?.data ??
           (tagsData?.data ?? [])
             .filter((t) => (book.tags ?? []).includes(t.name))
             .map((t) => t.id),
@@ -521,7 +522,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
 
   if (!book) return null
 
-  const tagIds = memTags.data?.data ? new Set(memTags.data.data) : null
+  const tagIds = detail?.tagIds ? new Set(detail.tagIds) : (memTags.data?.data ? new Set(memTags.data.data) : null)
   // 7.x: a collected B keeps its own metadata editable, but its content belongs
   // to the library — appending, re-chaptering and resetting derived metadata
   // would rewrite the shared revision, so the server refuses them too. `source`

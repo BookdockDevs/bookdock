@@ -141,7 +141,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   if (!library) return { data: [], page, pageSize, total: 0, totalSize: 0 }
   // Latest-revision meta as a scalar subquery: content-derived fields
   // (description/series/cover palette) always follow the current revision.
-  const revMeta = (jsonPath: string) => sql`json_extract((SELECT ${contentRevisions.meta} FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1), ${jsonPath})`
+  const revMeta = (jsonPath: string) => sql`(SELECT json_extract(${contentRevisions.meta}, ${jsonPath}) FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id} ORDER BY ${contentRevisions.revisionNo} DESC LIMIT 1)`
   const effTitle = sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title})`
   const effAuthor = sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author})`
   const effReadStatus = sql<string>`coalesce(${bookStates.readStatus}, 'reading')`
@@ -1215,9 +1215,17 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
   const state = userId === null ? undefined : db.select({
     readStatus: bookStates.readStatus,
     percent: bookStates.percent,
+    cfi: bookStates.cfi,
+    chapter: bookStates.chapter,
+    readFraction: bookStates.readFraction,
     lastReadAt: bookStates.lastReadAt,
   }).from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
+  const tagRows = db.select({ id: libraryTags.id, name: libraryTags.name })
+    .from(libraryBookTags)
+    .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
+    .where(eq(libraryBookTags.libraryBookId, work.id))
+    .all()
   const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
   const hiddenDetail = getWorkHiddenDetail(db, granted.library.id, work)
   return {
@@ -1245,6 +1253,16 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     lastReadAt: state?.lastReadAt ?? null,
     deletedAt: null,
     shelfId: null,
+    shelfName: null,
+    categoryId: work.categoryId,
+    categoryName: work.categoryId
+      ? db.select({ name: libraryCategories.name }).from(libraryCategories).where(eq(libraryCategories.id, work.categoryId)).get()?.name ?? null
+      : null,
+    tagIds: tagRows.map((t) => t.id),
+    tags: tagRows.map((t) => t.name),
+    cfi: state?.cfi ?? null,
+    chapter: state?.chapter ?? null,
+    readFraction: state?.readFraction ?? 0,
     hidden: work.hidden,
     effectiveHidden: hiddenDetail.reason !== null,
     hiddenReason: hiddenDetail.reason,
@@ -1321,9 +1339,20 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
   const state = db.select({
     readStatus: bookStates.readStatus,
     percent: bookStates.percent,
+    cfi: bookStates.cfi,
+    chapter: bookStates.chapter,
+    readFraction: bookStates.readFraction,
     lastReadAt: bookStates.lastReadAt,
   }).from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
+  const tagRows = db.select({ id: libraryTags.id, name: libraryTags.name })
+    .from(libraryBookTags)
+    .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
+    .where(eq(libraryBookTags.libraryBookId, lb.id))
+    .all()
+  const shelfRow = lb.shelfId
+    ? db.select({ name: shelves.name }).from(shelves).where(eq(shelves.id, lb.shelfId)).get()
+    : null
   const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
   const meta = revisionMeta
   // 7.7: the UI needs to know a card is library-owned (hide content edits) and
@@ -1359,10 +1388,16 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     lastReadAt: state?.lastReadAt ?? null,
     deletedAt: lb.deletedAt ?? null,
     shelfId: lb.shelfId,
+    shelfName: shelfRow?.name ?? null,
     categoryId: lb.categoryId,
     categoryName: lb.categoryId
       ? db.select({ name: libraryCategories.name }).from(libraryCategories).where(eq(libraryCategories.id, lb.categoryId)).get()?.name ?? null
       : null,
+    tagIds: tagRows.map((t) => t.id),
+    tags: tagRows.map((t) => t.name),
+    cfi: state?.cfi ?? null,
+    chapter: state?.chapter ?? null,
+    readFraction: state?.readFraction ?? 0,
     // Work-level hide; surfaced so the vault reveal mode can badge the row.
     hidden: lb.hidden,
     effectiveHidden: hiddenDetail.reason !== null,

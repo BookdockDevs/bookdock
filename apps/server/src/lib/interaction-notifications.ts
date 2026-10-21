@@ -6,6 +6,7 @@ import type { NotificationDomain, NotificationEvent } from '@bookdock/shared'
 
 import type { getDb } from '../db/client'
 import { interactionNotifications, interactionReceipts } from '../db/schema'
+import { invalidateUnreadNotificationCount } from '../modules/notifications/notifications.service'
 import { AppError } from '../middleware/error'
 import { createId } from './id'
 
@@ -18,6 +19,7 @@ export function recordInteractionNotification(db: WriteDb, input: {
   if (!input.userId || input.userId === input.actorId) return
   db.insert(interactionNotifications).values({ ...input, userId: input.userId, id: createId('ntf'), createdAt: Date.now() })
     .onConflictDoNothing().run()
+  invalidateUnreadNotificationCount(input.userId)
 }
 
 export function findCommentReceipt(db: WriteDb, userId: string, domain: NotificationDomain, targetId: string,
