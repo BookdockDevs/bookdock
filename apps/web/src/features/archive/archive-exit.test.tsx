@@ -74,13 +74,18 @@ function buildRouter(history: ReturnType<typeof createMemoryHistory>) {
     validateSearch: (search: Record<string, unknown>) => search as LibrarySearch,
     component: () => null,
   })
+  const profile = createRoute({
+    getParentRoute: () => root,
+    path: 'profile',
+    component: () => null,
+  })
   const archive = createRoute({
     getParentRoute: () => root,
     path: 'archive',
     validateSearch: (search: Record<string, unknown>) => search as ArchiveSearch,
     component: Archive,
   })
-  return createRouter({ routeTree: root.addChildren([index, archive]), history })
+  return createRouter({ routeTree: root.addChildren([index, profile, archive]), history })
 }
 
 afterEach(() => {
@@ -163,6 +168,33 @@ describe('Archive top-bar exit (real component)', () => {
     const saved = JSON.parse(sessionStorage.getItem('bd-archive-scroll')!)
     expect(saved.key).toContain('night')
     expect(saved.positions).toMatchObject({ left: 250, main: 400, win: expect.any(Number) })
+  })
+
+  it('traverses back to the original profile entry without duplicating it', async () => {
+    const history = createMemoryHistory({ initialEntries: ['/', '/profile'] })
+    const router = buildRouter(history)
+    await router.load()
+
+    await act(async () => {
+      await router.navigate({
+        to: '/archive',
+        search: { view: 'overview' },
+        state: () => ({
+          archiveReturn: { to: '/profile', scrollTop: 0, sourceHistoryIndex: 1 },
+        }),
+      })
+    })
+    render(<RouterProvider router={router} />)
+    expect(await screen.findByText('阅读档案')).toBeInTheDocument()
+
+    fireEvent.click(within(screen.getByText('阅读档案').closest('header')!).getByLabelText('返回'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/profile'))
+    expect(router.state.location.state.__TSR_index).toBe(1)
+
+    await act(async () => {
+      router.history.back()
+    })
+    expect(router.state.location.pathname).toBe('/')
   })
 
   it('restores a saved same-view position when the archive remounts', async () => {

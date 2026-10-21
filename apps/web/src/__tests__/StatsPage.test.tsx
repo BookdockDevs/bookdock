@@ -98,7 +98,7 @@ const STATS_KEYS = [
 
 type Mock = ReturnType<typeof vi.fn>
 
-const hasText = (s: string) => screen.getAllByText((_, el) => el?.textContent === s).length > 0
+const hasText = (s: string) => screen.getAllByText((_, el) => el?.textContent?.replace(/\s+/g, '') === s.replace(/\s+/g, '')).length > 0
 
 describe('Stats page', () => {
   const today = new Date()

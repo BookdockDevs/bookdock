@@ -10,6 +10,12 @@ function render(element: ReactElement) {
 
 import type { AnnotationRes } from '@bookdock/shared'
 
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to, search, onClick, className }: { children: React.ReactNode; to: string; search?: { userId?: string }; onClick?: React.MouseEventHandler<HTMLAnchorElement>; className?: string }) => (
+    <a href={`${to}${search?.userId ? `?userId=${search.userId}` : ''}`} onClick={onClick} className={className}>{children}</a>
+  ),
+}))
+
 import { IdeaOverlay, type IdeaEntry } from '../features/reader/components/IdeaOverlay'
 import { useUiStore } from '../stores/ui.store'
 
@@ -32,7 +38,7 @@ function makeAnnotation(overrides?: Partial<AnnotationRes>): AnnotationRes {
 }
 
 function renderOverlay(props?: Partial<Parameters<typeof IdeaOverlay>[0]>) {
-  const entry: IdeaEntry = { annotation: makeAnnotation(), own: true }
+  const entry: IdeaEntry = { annotation: makeAnnotation(), authorId: 'u1', authorName: 'Reader', own: true }
   return render(
     <IdeaOverlay bookId="book1"
       entries={[entry]}
@@ -75,6 +81,19 @@ describe('IdeaOverlay', () => {
     })
 
     expect(document.querySelector('img')).toHaveAttribute('src', '/api/v1/avatars/ab/abc123.png')
+  })
+
+  it('links the idea author from both the card and detail header without opening the idea', () => {
+    renderOverlay()
+
+    const cardAuthor = screen.getByRole('link', { name: 'Reader' })
+    expect(cardAuthor).toHaveAttribute('href', '/profile?userId=u1')
+    fireEvent.click(cardAuthor)
+    expect(screen.queryByText(/annotation\.publishedAt/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
+    const detailAuthor = screen.getByRole('link', { name: 'Reader' })
+    expect(detailAuthor).toHaveAttribute('href', '/profile?userId=u1')
   })
 
   it('refreshes the selected idea avatar and actions when entries change', () => {

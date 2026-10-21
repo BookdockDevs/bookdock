@@ -1,11 +1,12 @@
-import { memo } from 'react'
-import { Link } from '@tanstack/react-router'
+import { memo, useCallback, type MouseEvent } from 'react'
+import { Link, useLocation, useNavigate, useRouter } from '@tanstack/react-router'
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { formatDuration } from '@/lib/format-duration'
 import { useAutoReadingSession } from '../hooks/useAutoReadingSession'
 import { useTtsSession } from '../hooks/useTtsSession'
+import { isReaderReturn } from '../reader-return'
 import { SettingsPopover } from './SettingsPopover'
 import { SettingsPanel } from './SettingsPanel'
 import TtsPanel from './TtsPanel'
@@ -67,7 +68,32 @@ interface ReaderHeaderProps {
 
 export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, cleanReadingSupported, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onCloseSettings, onCloseTts, onCloseAutoReading, onTtsStart, onAutoReadingStart, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const _ = useTranslation()
-  const onBack = useBackNavigation('/')
+  const navigate = useNavigate()
+  const router = useRouter({ warn: false })
+  const location = useLocation()
+  const onHistoryBack = useBackNavigation('/')
+  const readerReturn = isReaderReturn(location.state.readerReturn) ? location.state.readerReturn : undefined
+  const onBack = useCallback((event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.button !== 0 || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
+    if (!readerReturn) {
+      onHistoryBack(event)
+      return
+    }
+    const currentHistoryIndex = location.state.__TSR_index
+    if (readerReturn.sourceHistoryIndex !== undefined && currentHistoryIndex !== undefined && readerReturn.sourceHistoryIndex < currentHistoryIndex) {
+      event.preventDefault()
+      router.history.go(readerReturn.sourceHistoryIndex - currentHistoryIndex)
+      return
+    }
+    event.preventDefault()
+    void navigate({
+      to: readerReturn.to,
+      search: readerReturn.search,
+      replace: true,
+      resetScroll: false,
+      state: (previous) => ({ ...previous, readerReturn: undefined }),
+    })
+  }, [location.state.__TSR_index, navigate, onHistoryBack, readerReturn, router])
   const { state: ttsState } = useTtsSession()
   const { state: autoReadingState } = useAutoReadingSession()
   const ttsActive = ttsState.status === 'starting' || ttsState.status === 'playing' || ttsState.status === 'paused'

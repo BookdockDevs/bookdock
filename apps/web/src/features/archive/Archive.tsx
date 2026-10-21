@@ -1,5 +1,5 @@
 import { useEffect, useRef, type MouseEvent } from 'react'
-import { Link, useLocation, useNavigate, useSearch } from '@tanstack/react-router'
+import { Link, useLocation, useNavigate, useRouter, useSearch } from '@tanstack/react-router'
 
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -20,6 +20,7 @@ export default function Archive() {
   const _ = useTranslation()
   usePageTitle(_('archive.title'))
   const navigate = useNavigate()
+  const router = useRouter({ warn: false })
   const search = useSearch({ from: '/archive' })
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
@@ -113,21 +114,24 @@ export default function Archive() {
 
   // Exit the whole archive feature: internal moves (overview, single book,
   // filters, sort) push history entries, so a single history.back() cannot
-  // exit — return to the recorded entry source instead. Replace swaps only
-  // the current entry, leaving earlier archive entries behind for normal
-  // per-entry browser back. The library restores the requested scroll below
-  // once its own list is rendered; nothing scrolls here, where the
-  // destination would still show skeletons.
+  // exit — traverse directly to the recorded source index instead. The
+  // source entry already carries the library scroll request, and the library
+  // restores it below once its own list is rendered; nothing scrolls here,
+  // where the destination would still show skeletons. Entries without a
+  // usable source index retain the explicit replace fallback below.
   const exitArchive = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.button !== 0 || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
     event.preventDefault()
     const recorded = location.state.archiveReturn
     const searchReturn = location.state.librarySearchReturn
-    // Preserve the library search session across the exit: clearing the
-    // search on the library must still restore its pre-search filters, page
-    // and scroll position. The snapshot's back flag cannot survive — archive
-    // entries were pushed after the search entry, so stepping back would no
-    // longer reach the pre-search page; force the explicit restore path.
+    const currentHistoryIndex = location.state.__TSR_index
+    if (recorded?.sourceHistoryIndex !== undefined && recorded.sourceHistoryIndex < currentHistoryIndex) {
+      router.history.go(recorded.sourceHistoryIndex - currentHistoryIndex)
+      return
+    }
+    // Preserve the library search session across the explicit fallback:
+    // clearing the search on the library must still restore its pre-search
+    // filters, page and scroll position.
     const state = (previous: typeof location.state) => ({
       ...previous,
       archiveReturn: undefined,
@@ -160,7 +164,7 @@ export default function Archive() {
   }
 
   const hasSelectedBook = Boolean(search.bookId)
-  const isMobileStatsView = !hasSelectedBook && search.tab === 'stats'
+  const isMobileOverviewView = !hasSelectedBook && search.view === 'overview'
 
   return (
     <div className="flex w-full flex-col min-h-screen lg:h-screen lg:max-h-screen lg:min-h-0 lg:overflow-hidden">
@@ -214,7 +218,7 @@ export default function Archive() {
             liveScroll.current.left = event.currentTarget.scrollTop
           }}
           className={
-            hasSelectedBook || isMobileStatsView
+            hasSelectedBook || isMobileOverviewView
               ? 'hidden lg:flex lg:w-[340px] lg:shrink-0 lg:h-full lg:flex-col lg:overflow-y-auto lg:border-r lg:border-stone-200/70 lg:bg-stone-50/50 lg:px-4 lg:py-4 dark:lg:border-stone-800/70 dark:lg:bg-stone-900/20'
               : 'flex h-full flex-col p-4 sm:p-5 lg:w-[340px] lg:shrink-0 lg:overflow-y-auto lg:border-r lg:border-stone-200/70 lg:bg-stone-50/50 lg:px-4 lg:py-4 dark:lg:border-stone-800/70 dark:lg:bg-stone-900/20'
           }
@@ -225,8 +229,8 @@ export default function Archive() {
             baseSearch={scopedSearch}
             range={query}
             onChange={(next) => patch(next)}
-            onSelectOverview={() => patch({ bookId: undefined, tab: 'stats' })}
-            onSelectBook={(bookId) => patch({ bookId, tab: undefined })}
+            onSelectOverview={() => patch({ bookId: undefined, view: 'overview' })}
+            onSelectBook={(bookId) => patch({ bookId, view: undefined })}
           />
         </div>
 
@@ -237,7 +241,7 @@ export default function Archive() {
             liveScroll.current.main = event.currentTarget.scrollTop
           }}
           className={
-            hasSelectedBook || isMobileStatsView
+            hasSelectedBook || isMobileOverviewView
               ? 'flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 lg:py-8 lg:pl-8 lg:pr-[max(2rem,calc((100vw-72rem)/2+2rem))]'
               : 'hidden lg:block lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:py-8 lg:pl-8 lg:pr-[max(2rem,calc((100vw-72rem)/2+2rem))]'
           }
@@ -260,9 +264,9 @@ export default function Archive() {
             <div className="w-full max-w-3xl">
               <ArchiveOverviewDashboard
                 baseSearch={scopedSearch}
-                showBack={isMobileStatsView}
-                onBack={() => patch({ tab: undefined })}
-                onSelectType={(type) => patch({ type, tab: undefined })}
+                showBack={isMobileOverviewView}
+                onBack={() => patch({ view: undefined })}
+                onSelectType={(type) => patch({ type, view: undefined })}
                 period={period}
                 range={range}
                 selectedDate={selectedDate}

@@ -5,6 +5,8 @@ import type { ReviewDiscussion } from '@bookdock/shared'
 
 import ReviewDiscussionPanel from './ReviewDiscussionPanel'
 
+vi.mock('@tanstack/react-router', () => import('@/__tests__/mocks/router-link'))
+
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 
 const discussion: ReviewDiscussion = {

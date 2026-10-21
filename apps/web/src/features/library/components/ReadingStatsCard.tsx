@@ -13,7 +13,8 @@ export default function ReadingStatsCard() {
   return (
     <section className="mb-8">
       <Link
-        to="/stats"
+        to="/archive"
+        search={{ view: 'overview' }}
         className="flex items-center gap-4 rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-stone-200/70 transition-all hover:shadow-md sm:gap-8 sm:px-5 dark:bg-stone-900/90 dark:ring-1 dark:ring-white/10 dark:hover:ring-white/20 dark:hover:shadow-black/40"
       >
         <span className="flex flex-col gap-0.5">

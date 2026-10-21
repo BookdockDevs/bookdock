@@ -576,6 +576,37 @@ describe('auth module', () => {
     })
   })
 
+  describe('updateBio', () => {
+    it('stores a trimmed short plain-text bio and returns it', async () => {
+      const id = await insertUser(db, { username: 'bio-user', password: 'password123' })
+      const app = createAuthApp({ id, username: 'bio-user', role: 'member' })
+      const res = await app.request('/api/v1/auth/bio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bio: '  A short introduction  ' }),
+      })
+      expect(res.status).toBe(200)
+      expect((await res.json()).data.bio).toBe('A short introduction')
+      expect(db.select({ bio: schema.users.bio }).from(schema.users).where(eq(schema.users.id, id)).get()?.bio).toBe('A short introduction')
+    })
+
+    it('rejects anonymous and overlong bios', async () => {
+      const anonymous = new Hono()
+      anonymous.onError(errorHandler)
+      anonymous.use('/api/v1/auth/*', async (c, next) => {
+        c.set('user', null)
+        c.set('guest', true)
+        return next()
+      })
+      anonymous.route('/api/v1/auth', authRoutes)
+      expect((await anonymous.request('/api/v1/auth/bio', { method: 'POST', body: JSON.stringify({ bio: 'bio' }) })).status).toBe(401)
+
+      const id = await insertUser(db, { username: 'long-bio', password: 'password123' })
+      const app = createAuthApp({ id, username: 'long-bio', role: 'member' })
+      expect((await app.request('/api/v1/auth/bio', { method: 'POST', body: JSON.stringify({ bio: 'x'.repeat(501) }) })).status).toBe(400)
+    })
+  })
+
   describe('updateTimezone', () => {
     it('stores the reported zone and reads it back', async () => {
       const id = await insertUser(db, { username: 'ivan', password: 'password123' })

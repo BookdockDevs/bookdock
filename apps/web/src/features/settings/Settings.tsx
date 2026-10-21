@@ -57,19 +57,17 @@ export default function Settings() {
   )
   const canAccessAdmin = isOwner || hasManageableLibraries
   const search = useSearch({ from: '/settings' })
-  const [active, setActive] = useState<SectionId>(search.section ?? 'general')
+  const navigate = useNavigate({ from: '/settings' })
+  const active = search.section ?? 'general'
   const [visitedSections, setVisitedSections] = useState<Set<SectionId>>(() => new Set([search.section ?? 'general']))
   const [showBackToTop, setShowBackToTop] = useState(false)
 
   useEffect(() => {
-    if (search.section) {
-      setActive(search.section)
-      setVisitedSections((prev) => (prev.has(search.section!) ? prev : new Set(prev).add(search.section!)))
-    }
+    setVisitedSections((prev) => (prev.has(active) ? prev : new Set(prev).add(active)))
     if (search.section === 'reading' && search.focus === 'tts') {
       window.requestAnimationFrame(() => document.getElementById('tts-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     }
-  }, [search.focus, search.section])
+  }, [active, search.focus, search.section])
 
   useEffect(() => {
     const handleScroll = () => {
@@ -80,8 +78,12 @@ export default function Settings() {
   }, [])
 
   const handleSectionChange = (id: SectionId) => {
-    setActive(id)
-    setVisitedSections((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+    void navigate({
+      search: (prev) => ({ ...prev, section: id, focus: undefined }),
+      state: (prev) => prev,
+      replace: true,
+      resetScroll: false,
+    })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -309,9 +311,17 @@ export default function Settings() {
               {isOwner && <InstanceSettingsSection />}
               {isOwner && <StorageBackendSection />}
               <UserManagementSection
-                initialTab={!isOwner ? 'library' : search.userTab}
-                initialLibraryId={search.libraryId}
+                tab={!isOwner ? 'library' : search.userTab ?? 'instance'}
+                libraryId={search.libraryId}
                 lockTab={!isOwner ? 'library' : undefined}
+                onContextChange={(userTab, libraryId) => {
+                  void navigate({
+                    search: (prev) => ({ ...prev, userTab, libraryId }),
+                    state: (prev) => prev,
+                    replace: true,
+                    resetScroll: false,
+                  })
+                }}
               />
             </div>
           )}

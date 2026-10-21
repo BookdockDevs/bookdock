@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useProfileSettingsState } from '@/features/library/hooks'
 import { useReaderProfile } from '@/features/reviews/hooks/useReviews'
-import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useAuthStore } from '@/stores/auth.store'
 
 import ProfileAccountSection from './components/ProfileAccountSection'
@@ -21,82 +20,71 @@ export default function Profile() {
   const user = useAuthStore((s) => s.user)
   const search = useSearch({ from: '/profile' })
   const publicView = Boolean(search.userId && search.userId !== user?.id)
-  const reader = useReaderProfile(publicView ? search.userId : undefined)
+  const targetUserId = publicView ? search.userId : user?.id
+  const reader = useReaderProfile(targetUserId)
   const isGuest = !user
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const {
-    profile,
-    isReady: profileReady,
-    isError: profileError,
-    isFetching: profileFetching,
-    refetch: refetchProfile,
-  } = useProfileSettingsState()
-  const showStats = profileReady && profile?.showStats !== false
-  const showShowcase = profileReady && profile?.showShowcase !== false
   const onBack = useBackNavigation('/')
 
   useEffect(() => {
-    if (isGuest && !publicView) void navigate({ to: '/' })
-  }, [isGuest, publicView, navigate])
+    if (isGuest) void navigate({ to: '/' })
+  }, [isGuest, navigate])
 
-  if (publicView) {
-    return <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6">
-      <div className="flex items-center justify-between"><Link to="/" className="text-sm text-stone-500 transition-colors hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200">{_('profile.back')}</Link></div>
-      {reader.isPending ? <div role="status" aria-label={_('common.loading') || 'Loading'} className="h-24 animate-pulse rounded-2xl bg-stone-500/10 motion-reduce:animate-none" />
-        : reader.isError ? <QueryErrorState isRetrying={reader.isFetching} onRetry={() => void reader.refetch()} />
-        : reader.data && <>
-          <h1 className="text-xl font-bold text-stone-900 dark:text-stone-100">{reader.data.data.author.name}</h1>
-        </>}
-    </div>
+  if (!user) return null
+
+  if (reader.isPending) {
+    return <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6"><div className="h-44 animate-pulse rounded-2xl bg-stone-500/10 motion-reduce:animate-none" /></div>
   }
 
-  if (!user || isGuest) return null
+  if (reader.isError || !reader.data) {
+    return <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6"><QueryErrorState isRetrying={reader.isFetching} onRetry={() => void reader.refetch()} /></div>
+  }
+
+  const data = reader.data.data
+  const isOwner = !publicView && (data.isOwner ?? true)
+
+  if (publicView) {
+    return (
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6">
+        <header className="flex items-center justify-between gap-3 border-b border-stone-200/70 pb-3 dark:border-stone-800/70">
+          <Link to="/" onClick={onBack} aria-label={_('profile.back')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200" title={_('profile.back')}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>
+          </Link>
+          <h1 className="flex-1 text-xl font-bold tracking-tight text-stone-900 sm:text-2xl dark:text-stone-50">{_('profile.title')}</h1>
+          <span aria-hidden="true" className="h-8 w-8 shrink-0" />
+        </header>
+
+        <ProfileAccountSection profile={data.author} editable={false} />
+        {data.visibility === 'private' ? (
+          <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 p-8 text-center text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900/30 dark:text-stone-400">{_('profile.private')}</div>
+        ) : (
+          <>
+            {data.showStats && <ProfileStatsSection summary={data.summary} />}
+            {data.showShowcase && <ProfileReadingShowcase books={data.currentlyReading} readerReturn={{ to: '/profile', search: { userId: search.userId } }} showBrowseLink={false} />}
+          </>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6">
-      <header className="flex items-center gap-3 border-b border-stone-200/70 pb-3 dark:border-stone-800/70">
-        <Link
-          to="/"
-          onClick={onBack}
-          aria-label={_('profile.back')}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-          title={_('profile.back')}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 12H5" />
-            <path d="m12 19-7-7 7-7" />
-          </svg>
+      <header className="flex items-center justify-between gap-3 border-b border-stone-200/70 pb-3 dark:border-stone-800/70">
+        <Link to="/" onClick={onBack} aria-label={_('profile.back')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200" title={_('profile.back')}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>
         </Link>
         <h1 className="flex-1 text-xl font-bold tracking-tight text-stone-900 sm:text-2xl dark:text-stone-50">{_('profile.title')}</h1>
+        <button type="button" aria-label={_('profile.settings')} title={_('profile.settings')} onClick={() => setSettingsOpen(true)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-300">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 0-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 0-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+        </button>
       </header>
 
-      <ProfileAccountSection onOpenSettings={() => setSettingsOpen(true)} />
+      <ProfileAccountSection profile={data.author} />
 
-      {!profileReady ? (
-        profileError ? (
-          <QueryErrorState
-            className="rounded-2xl border border-stone-200 bg-white p-6 dark:border-stone-800 dark:bg-stone-900"
-            isRetrying={profileFetching}
-            onRetry={() => void refetchProfile()}
-          />
-        ) : (
-          <div className="space-y-6" aria-busy="true">
-            <div className="h-44 animate-pulse rounded-2xl bg-stone-500/10 motion-reduce:animate-none" />
-          </div>
-        )
-      ) : (
-        <>
-          {showStats && <ProfileStatsSection />}
-          {showShowcase && <ProfileReadingShowcase />}
-          {!showStats && !showShowcase && (
-            <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 p-8 text-center text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900/30 dark:text-stone-400">
-              {_('profile.allModulesHidden')}
-            </div>
-          )}
-        </>
-      )}
+      {data.showStats !== false && <ProfileStatsSection summary={data.summary} showArchiveLink />}
+      {data.showShowcase !== false && <ProfileReadingShowcase books={data.currentlyReading} readerReturn={{ to: '/profile' }} />}
 
-      <ProfileSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {isOwner && <ProfileSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }

@@ -6,6 +6,8 @@ import type { IdeaDiscussion } from '@bookdock/shared'
 import IdeaDiscussionPanel from '../features/reader/components/IdeaDiscussionPanel'
 import { useAuthStore } from '../stores/auth.store'
 
+vi.mock('@tanstack/react-router', () => import('@/__tests__/mocks/router-link'))
+
 const mocks = vi.hoisted(() => ({ mutate: vi.fn(), data: null as IdeaDiscussion | null }))
 vi.mock('../features/reader/hooks/useIdeas', () => ({
   useIdeaDiscussion: () => ({ data: { data: mocks.data }, isPending: false, isError: false }),

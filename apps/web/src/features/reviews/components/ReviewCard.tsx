@@ -1,14 +1,11 @@
 import { useState } from 'react'
 
-import { Link } from '@tanstack/react-router'
-
 import type { Review } from '@bookdock/shared'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { ChatBubbleIcon, HeartIcon, LockIcon, PencilIcon, TrashIcon } from '@/features/reader/components/annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from '@/features/reader/components/format-relative-time'
 import { useTranslation } from '@/hooks/useTranslation'
-import { avatarUrl } from '@/lib/avatar'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
@@ -19,6 +16,7 @@ import { reviewExcerpt } from '../lib/markdown'
 import ReviewDiscussionPanel from './ReviewDiscussionPanel'
 import ReviewMarkdown from './ReviewMarkdown'
 import StarRating from './StarRating'
+import ProfileIdentityLink from '@/features/profile/components/ProfileIdentityLink'
 
 const EXCERPT_LENGTH = 220
 
@@ -45,8 +43,6 @@ export default function ReviewCard({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const likeAction = useReviewAction(review.id)
   const deleteReview = useDeleteReview()
-
-  const authorAvatar = avatarUrl(review.author.avatarKey)
 
   function toggleLike() {
     if (!user || likeAction.isPending) return
@@ -75,16 +71,10 @@ export default function ReviewCard({
   return (
     <article className="rounded-xl border border-stone-200/70 bg-white/60 p-3.5 dark:border-stone-800/70 dark:bg-stone-900/40">
       <div className="flex items-start gap-2.5">
-        {authorAvatar ? (
-          <img src={authorAvatar} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
-        ) : (
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-sm font-medium text-stone-500 dark:text-stone-400">
-            {review.author.name.slice(0, 1)}
-          </span>
-        )}
+        <ProfileIdentityLink userId={review.author.id} name={review.author.name} avatarKey={review.author.avatarKey} className="inline-flex shrink-0 items-center" avatarClassName="h-8 w-8" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <Link to="/profile" search={{ userId: review.author.id }} className="text-sm font-medium text-stone-800 hover:underline dark:text-stone-100">{review.author.name}</Link>
+            <ProfileIdentityLink userId={review.author.id} name={review.author.name} avatarKey={review.author.avatarKey} className="text-sm font-medium text-stone-800 hover:underline dark:text-stone-100" avatarClassName="hidden" />
             {review.own && (
               <span className="rounded bg-stone-500/15 px-1.5 py-px text-[10px] text-stone-500 dark:text-stone-400">
                 {_('review.ownBadge')}

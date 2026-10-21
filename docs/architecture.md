@@ -20,7 +20,7 @@ Reading rounds and current content coverage are lifetime context, not period fac
 
 Archive sidebar ordering is annotation-based: recent/earliest use the maximum/minimum creation time of live highlights, bookmarks, ideas and owned reviews; most/fewest use their counts. A selected annotation type scopes both ordering keys and book eligibility. Reading-only archives remain in the unfiltered list, with null annotation timestamps placed last in both time orders; they count as zero in count orders. Reading activity, archive maintenance and annotation edits never advance these timestamps. All ties use title ascending, then version ID. Title ordering includes reading-only archives normally. Rows without annotations show an explicit no-notes label.
 
-Archive overview exposes counts and an independent `totalBooks`: distinct versions in the owner's complete archive (live notes/reviews or retained reading archives), unaffected by sidebar filters, search or pagination. The sidebar's infinite book query is the only archive book-list consumer; overview does not fetch or return a second recent-book preview. The replaced archive home/list and mixed reader-detail views have no parallel API contracts or background prefetches. Archive URL and scroll identity include only active view/filter state; ignored historical `view`, `from` and page-number parameters are discarded while book IDs and legacy sort aliases remain usable.
+Archive overview exposes counts and an independent `totalBooks`: distinct versions in the owner's complete archive (live notes/reviews or retained reading archives), unaffected by sidebar filters, search or pagination. The sidebar's infinite book query is the only archive book-list consumer; overview does not fetch or return a second recent-book preview. The replaced archive home/list and mixed reader-detail views have no parallel API contracts or background prefetches. Archive URL and scroll identity include only active view/filter state. The optional `view=overview` state selects the overview dashboard on mobile while the default view remains the archive records list; `from` and page-number parameters are discarded while book IDs and legacy sort aliases remain usable.
 
 Personal reading history is independent of content availability and reader position. A user-owned `reading_archives` row identifies a book version by a plain provenance id, retains that user's permitted title/author snapshot and irreducible legacy coverage, and survives version deletion. `reading_rounds` is user-owned, numbered within a version, with at most one ongoing round. Explicit finish/abandon closes it; reread opens another, while timer save alone does not finish a round. Retroactive entries always target the current round. Reopening a completed book for reference does not imply a new round.
 
@@ -210,10 +210,21 @@ renderer must still resolve the stored position. A failed deep-link resolution,
 including an unsupported historical TXT position, reports an unavailable reading
 position and keeps the current page. It never guesses a replacement location.
 
-The existing `/profile` page remains the owner's account and reading dashboard.
-An optional `userId` search parameter selects another reader: that projection
-exposes only their account display identity and currently readable library-visible
-reviews, never private notes, private reviews, or personal statistics.
+The existing `/profile` page remains the account and reading dashboard. An
+optional `userId` search parameter selects another reader, but the page and its
+homepage projection are authenticated-only; guest access to the instance does
+not grant profile access. The target user's profile setting is an ACL: by
+default a profile is public, while an explicit private choice is retained. A
+private profile viewed by another account projects only avatar and username.
+Public profiles may independently project the reading overview and currently
+reading modules; both default to enabled and their disabled choices are
+retained. The owner always sees their own bio and reading data regardless of
+these public-module settings. The server performs the visibility decision and
+the book ACL before serializing the response, so a profile never grants new
+content, cover, download, or reading access. Public overview responses contain
+only aggregate numbers and never private book identifiers or counts. The
+projection exposes currently readable library-visible reviews only on the
+review archive surface, never private notes or private reviews.
 The owner's global notes archive includes existing highlights, bookmarks and
 ideas, filters by exact BookVersion and uses bounded newest-first pagination.
 It is authenticated and author-only. Notes survive source access loss according
@@ -368,8 +379,10 @@ and is absent from copied links (which clear only the linked search).
 
 ### Page back navigation v1
 
-Page-level back affordances (bare left arrows on reader, stats, settings and
-the private profile) return to the in-app source page when the router
+Settings navigation uses the existing `/settings` search parameters: `section` selects the settings section, while `userTab` and `libraryId` select the user-management context. User-driven context changes replace the current history entry and preserve its history state, so returning from a profile restores the same settings context without adding a history entry for every tab switch. Switching sections clears the one-shot `focus` target; mounted-section bookkeeping remains local UI state.
+
+Page-level back affordances (bare left arrows on reader, archive overview, settings and
+profile pages) return to the in-app source page when the router
 history proves one exists, otherwise they navigate to the agreed fallback
 (the library home `/` by default). The proof is TanStack Router's
 `history.canGoBack()`, i.e. `__TSR_index !== 0`: every entry since the
@@ -385,23 +398,21 @@ state (like the search return snapshot above) survives same-tab refresh but
 is absent from direct opens, copied links and new tabs, which therefore take
 the fallback. Fallback navigation uses `replace: true` so the dead-end page
 does not stay behind the fallback as a return loop.
-The archive top bar is an explicit exit, not a single history step:
-in-archive moves (overview, single book, filters, sort) push entries, so one
-`back()` could never leave the feature. Entering from the library sidebar
-records the library search and its window scroll once in history state
-(`archiveReturn`); every in-archive navigation forwards all history state
-unchanged (navigating without `state` resets it). The top bar replaces back
-to the recorded search and hands the scroll request to the library
-(`archiveExitScroll`), which adopts it once per entry and applies it through
-its existing list-ready gate — a blind scroll at navigation time would clamp
-against skeletons, and in-library moves clear the request. Replace swaps only
-the current entry, leaving earlier archive entries behind for normal
-per-entry browser back. The exit also preserves the library search session
-snapshot when one rides along, downgrading its `back` flag — archive pushes
-broke the snapshot's one-step-back assumption, so clearing the search
-afterwards takes the explicit restore path with the original filters, page
-and scroll position. Entries without a record (direct opens, `/stats`
-redirects) fall back to `/`.
+The archive top bar is an explicit exit from the archive session, not a single
+history step: in-archive moves (overview, single book, filters, sort) push
+entries, so one `back()` could never leave the feature. Entering the archive
+records the source history index, destination/search context and window scroll
+once in `archiveReturn`; every in-archive navigation forwards all history state
+unchanged (navigating without `state` resets it). When that source index is
+still valid in the same SPA history, the top bar traverses directly back to
+the original source entry, so it never creates a duplicate profile or library
+entry. The library consumes the source entry's `archiveExitScroll` through its
+existing list-ready gate; a blind scroll at navigation time would clamp
+against skeletons, and in-library moves clear the request. The original
+`librarySearchReturn` snapshot remains on the source entry, so search cleanup
+can use its normal back path after archive entries have been skipped. Direct
+opens, copied links, refreshes without a usable source index, and other
+record-less entries fall back to `/` with replace.
 Archive interior scroll (both desktop containers plus window) is saved by
 scroll listeners into a ref — DOM refs are already detached when unmount
 cleanups run — and restored on a same-view return with a bounded retry that
@@ -409,10 +420,21 @@ never mistakes a static skeleton for a settled layout; retries cancel on
 unmount so they cannot scroll a page that is already gone.
 In-feature back (archive book view to list, dialog sub-views) navigates to
 the parent view with its context instead of stepping history, so it never
-exits the feature. Buttons explicitly labelled with a destination
-(`reader.back`, `profile.back`: 返回书库) always navigate to that
-destination. In-reader location back/forward and footnote return are separate
+exits the feature. Buttons explicitly labelled with a destination (`reader.back`:
+返回书库) always navigate to that destination. Profile pages use the
+page-level history back affordance for both the owner and visitor views, with
+`/` only as the direct-entry fallback. In-reader location back/forward and footnote return are separate
 from page back and never share its affordance.
+Reader entries opened from a profile carry an explicit `readerReturn` history
+state with the profile route, source history index and visitor `userId` when
+applicable. The reader header traverses directly to that source index before
+falling back to generic history, so returning does not create a duplicate
+profile entry or depend on a stale intermediate history entry. Profile reading
+cards use an explicit router navigation for the same-tab primary click while
+retaining their generated anchor for modified or new-tab clicks; this avoids a
+TanStack Router transition-state update leaving the URL and mounted reader
+outlet out of sync. Direct reader links and non-profile sources retain the
+generic history/fallback behavior.
 Name suggestions keep focus in the input: Up/Down cycles the active option,
 Enter accepts an active option (otherwise submits), Tab accepts the active or
 first option, and Escape dismisses the list. Accepting resumes live search;
@@ -624,7 +646,7 @@ Conventions:
 - `Book(id, userId, title, author, authors, format, filePath, coverKey?, size, meta, createdAt, updatedAt, deletedAt?, shelfId?)` — `shelfId` is the book's single shelf (FK `shelves.id`, `ON DELETE SET NULL`); `null` = 未分类 (a legitimate state). A book belongs to at most one shelf. `authors` is the full author list (`string[]`, max 10); `author` mirrors `authors[0] ?? ''` as a derived-at-write scalar so sort/filter/search keep working on one indexed column, exactly like `books.title`.
 - `Shelf(id, userId, name, sortOrder, createdAt, updatedAt, pinned)` — `name` is unique per user after trimming surrounding whitespace; `updatedAt` records membership changes only, `pinned` is an orthogonal sidebar pin-to-top flag, and both are included in sidebar list responses
 - `Tag(id, userId, name, sortOrder, createdAt, updatedAt, pinned)` — user-defined order for the library sidebar; new tags are appended and the list endpoint returns this order; `name` is unique per user after trimming surrounding whitespace. `updatedAt` records membership changes only, and `pinned` is an orthogonal pin-to-top flag
-- `Settings(id, userId, key, value)` — the `ui` value holds only `{ fontPreferences?, fontOrder?, coverFit?, readingTimerMode?, manualTimerGraceMinutes?, ttsEngine?, ttsServiceId?, ttsVoiceId?, ttsRate?, ttsAutoNext?, ttsFollow?, readingConfig?, customThemes? }`. `fontPreferences` is keyed by stable system/builtin/uploaded font ids and `fontOrder` is a list of those ids; these preferences control display name, visibility, and display order without turning non-file fonts into database rows. `readingConfig` is the sole carrier of reading preferences — the 46 flat reading fields (typography, layout, margins, chrome, theme ids, primary + CJK fonts) travel inside it as a `{ global, presets[] }` snapshot, so the `ui` row must not grow flat copies of them; the historical 43 flat duplicates were accepted by the schema, persisted, and then never read back, and their bounds/enums had already drifted from the client. A newly added key must be backfilled by `READING_PROFILE_DEFAULTS` (or the static/derived rule in `resolveProfileSnapshot` for the three `readingMode` mirror fields) or every config blob written before that key existed resolves it to `undefined`. A `profile` value carries `{ showStats?, showShowcase?, isPublic? }` for the owner's own profile page; these are display preferences only — the server enforces no profile visibility, so `isPublic` decides what the owner sees on their own page and is not an access control.
+- `Settings(id, userId, key, value)` — the `ui` value holds only `{ fontPreferences?, fontOrder?, coverFit?, readingTimerMode?, manualTimerGraceMinutes?, ttsEngine?, ttsServiceId?, ttsVoiceId?, ttsRate?, ttsAutoNext?, ttsFollow?, readingConfig?, customThemes? }`. `fontPreferences` is keyed by stable system/builtin/uploaded font ids and `fontOrder` is a list of those ids; these preferences control display name, visibility, and display order without turning non-file fonts into database rows. `readingConfig` is the sole carrier of reading preferences — the 46 flat reading fields (typography, layout, margins, chrome, theme ids, primary + CJK fonts) travel inside it as a `{ global, presets[] }` snapshot, so the `ui` row must not grow flat copies of them; the historical 43 flat duplicates were accepted by the schema, persisted, and then never read back, and their bounds/enums had already drifted from the client. A newly added key must be backfilled by `READING_PROFILE_DEFAULTS` (or the static/derived rule in `resolveProfileSnapshot` for the three `readingMode` mirror fields) or every config blob written before that key existed resolves it to `undefined`. A `profile` value carries `{ showStats?, showShowcase?, showPublicStats?, showPublicShowcase?, isPublic? }`: `isPublic` is the server-enforced homepage ACL (default public), while `showPublicStats` and `showPublicShowcase` independently gate the public reading overview and currently-reading modules (both default enabled). The legacy `showStats` and `showShowcase` values remain as a fallback for previously saved explicit off choices, but the owner view always returns its complete overview and currently-reading data. Public projections expose only aggregate overview numbers and viewer-readable reading books; public homepage access does not grant content, download, or cover permission.
 
 **Setting ownership.** Every setting has exactly one owner, and localStorage is only ever the device's cache of it, never a second source of truth. Reading preferences are owned by `readingConfig`; library-home and library-view preferences by the `library` value; profile-page preferences by the `profile` value. The split between per-user and device-level follows the surface that owns the control: preferences on the library/library-management cards follow the user, while view preferences inside a reader or profile panel (notes sort and display types, share-card cosmetics, sidebar scroll offsets, reader toolbar/sidebar width, grid columns, page size) are device-level and deliberately stay in localStorage. `bd-notes-sort` and `bd-share-card-prefs` carry that decision in code comments; keep new panel-level preferences consistent with them. `bd-reader-sidebar-scroll-v1` is the one device-level key keyed by book id, so a shared browser shows another account's scroll offset for a book — cosmetic only, no data crosses. Device-level keys are the ones logout must preserve; logout clears the rest, because a shared browser would otherwise hand one account another's reading and profile preferences. The `library` value carries library-management preferences (`{ normalizeTitle?, shelfSort?, tagSort?, bookSort?, view?, hiddenLibraryIds?, libraryOrder?, gridCardFields?, readingStatsEnabled?, recentlyReadStyle? }`; omitted values use defaults): sidebar sort preferences support manual/name/book-count/recently-added/recently-updated modes and direction, while book-list sort/view defaults are saved per user. `gridCardFields` is the per-user set of fields a grid card renders (`title`/`author`/`progress`) and is the single source of truth for card text — there is no separate "card text on/off" flag, because the two used to be kept in sync by a setter side effect and the flag was synced while the set was not, so a card's text preference silently failed to follow the user across devices. `readingStatsEnabled` and `recentlyReadStyle` (`off`/`covers`/`cards`) gate the reading-stats banner and the recently-read shelf on the library home. `PUT /settings` merges the `library` object as a whole (`{ ...current, ...library }`), never a hand-written field list: an allowlist silently drops any field added to the contract but forgotten here. `hiddenLibraryIds` is a per-user sidebar preference, not an ACL: a joined shared library id listed there is dropped from that user's sidebar rows while the API keeps listing it, and Settings → 我的书库 still lists it with a 显示 action in the row menu, so hiding can never strand a library. The personal library is deliberately not hideable — it is the way back to your own books — and the sidebar ignores any stale id naming it. `libraryOrder` is the reader's manual order for the joined shared libraries, stored per user (a column on `libraries` would be global and would move every reader's sidebar). `GET /libraries` returns shared libraries by when *this* reader joined — the membership row's `createdAt`, or the library's own for an owner — oldest first; `libraryOrder` is applied over that in the client, and ids it does not mention (a library joined after the last drag) keep the join-time order and land at the bottom, which mirrors the `max(sortOrder) + 1` rule shelves use. Settings → 我的书库 renders the same order and offers a reset back to the join-time default. The library view resolves explicit URL state, then per-user server settings, then built-in defaults; dragging a shelf/tag returns that sidebar to manual mode. The device-localStorage tier sits between the server and the defaults **for guests only** — a guest cannot persist settings, so it is their only writable layer, but a signed-in user reading that tier would inherit whatever the previous session on a shared browser left behind (a guest's sort order becoming the owner's default), so signed-in users skip it entirely. While title normalization is on, upload/metadata reset preserves embedded title/author values and fills each missing field from the file name (`lib/book-title.ts` strips noise brackets, site suffixes and author markers, and prefers leading `《X》`), so `books.title` remains the single derived-at-write source. `GET /settings` also injects the effective instance-level `uploadMaxBytes` (owner-editable via `instance`, falling back to the `UPLOAD_MAX_BYTES` env default) for client-side display and pre-check; `settingsUpdateSchema` strips it from PUT bodies so it is never persisted.
 - `InstanceSettings(key, value)` — instance-level KV, no userId (see ADR-12)
@@ -1297,7 +1319,7 @@ apps/web/src/
     login.tsx              # GET /login → Login
     setup.tsx              # GET /setup → Setup (first-run wizard)
     books.$id.tsx          # GET /books/$id → Reader (lazy)
-    stats.tsx              # /stats redirects to /archive?tab=stats
+    archive.tsx            # GET /archive → reading archive records/overview
   api/
     client.ts              # fetch wrapper (baseURL=/api/v1, auth header, error normalization)
   features/

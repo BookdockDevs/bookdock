@@ -58,11 +58,7 @@ settingsRoutes.put('/', async (c) => {
     updateLibrarySettings(user.id, { ...getLibrarySettings(user.id), ...library })
   }
   if (profile) {
-    const mergedProfile: ProfileSettings = {
-      showStats: profile.showStats ?? getProfileSettings(user.id).showStats,
-      showShowcase: profile.showShowcase ?? getProfileSettings(user.id).showShowcase,
-      isPublic: profile.isPublic ?? getProfileSettings(user.id).isPublic,
-    }
+    const mergedProfile: ProfileSettings = { ...getProfileSettings(user.id), ...profile }
     updateProfileSettings(user.id, mergedProfile)
   }
   if (integrations) {

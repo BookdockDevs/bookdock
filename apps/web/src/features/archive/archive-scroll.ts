@@ -23,7 +23,7 @@ export function archiveScrollKey(search: ArchiveSearch): string {
     search.anchor ?? null,
     search.date ?? null,
     search.timezone ?? null,
-    search.tab ?? null,
+    search.view ?? null,
     search.bookId ?? null,
     search.bookType ?? null,
     search.bookView ?? null,
@@ -61,7 +61,7 @@ function readRecord(): ArchiveScrollRecord | null {
 /**
  * Remember where an archive view was scrolled to. Written when leaving the
  * archive (any destination); session storage keeps it tab-local so direct
- * opens, copied links and new tabs never inherit it, while a same-tab
+ * opens, copied links and new tabs never inherit it, while a same-view
  * refresh keeps it.
  */
 export function saveArchiveScrollRecord(key: string, positions: ArchiveScrollPositions): void {

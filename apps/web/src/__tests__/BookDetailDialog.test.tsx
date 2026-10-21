@@ -61,7 +61,8 @@ vi.mock('../features/library/download', () => ({
   downloadOriginalTxt: vi.fn(),
 }))
 
-vi.mock('@tanstack/react-router', () => ({
+vi.mock('@tanstack/react-router', async () => ({
+  ...await import('@/__tests__/mocks/router-link'),
   useNavigate: () => navigateMock,
 }))
 

@@ -3119,6 +3119,10 @@ export class FoliateReader implements BookReader {
     return this.cleanReading && canUseCleanReading(this.bookFormat, this.view?.isFixedLayout ? 'pre-paginated' : undefined)
   }
 
+  private shouldForceBookdockFont(): boolean {
+    return this.font.overrideBookFont || this.shouldApplyCleanReading()
+  }
+
   applyPageWidth(width: number) {
     this.pageWidth = width
     this.emit('readingSettingsChanged')
@@ -4647,7 +4651,7 @@ export class FoliateReader implements BookReader {
     const fontCss = this.font.fontCss ?? ''
     const isDarkTheme = !isLightCssColor(this.theme.bg)
     const cleanReadingActive = this.shouldApplyCleanReading()
-    const forceBookdockFont = cleanReadingActive || this.font.overrideBookFont
+    const forceBookdockFont = this.shouldForceBookdockFont()
     const forceBookdockLayout = cleanReadingActive || this.shouldForceBookLayout()
     const chapterTitleStyles = forceBookdockLayout ? `
       ${this.bookFormat === 'txt' ? 'body > h1:first-child' : '[data-bd-chapter-title]'} {
@@ -5368,6 +5372,9 @@ export class FoliateReader implements BookReader {
       if (!doc) throw new Error('Reader chapter is not ready')
       if (doc === prepared?.doc && this.fontStyleSheet === prepared.fontCss) return prepared
       const snapshot = { doc, fontCss: this.fontStyleSheet }
+      // When book typography remains authoritative, a slow or device-specific
+      // book font must not be reported as a failed Bookdock font.
+      if (!this.shouldForceBookdockFont()) return snapshot
       const fontsReady = await waitForReaderFonts(doc, this.startupAbort.signal, this.container?.getBoundingClientRect())
       if (this.destroyed) return
       if (!fontsReady) {

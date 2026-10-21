@@ -6,6 +6,7 @@ import { localDateString, usePreviousReadingSummary, useReadingSummary } from '@
 import { resolveArchiveScope } from '@/features/archive/archive-scope'
 import { useArchiveOverview, usePreviousArchiveOverview } from '@/features/archive/hooks'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import { FormattedStatValue } from '@/features/profile/components/ProfileStatsSection'
 import { useTranslation } from '@/hooks/useTranslation'
 import { isAccessRevocationError } from '@/lib/error-message'
 import { formatDuration } from '@/lib/format-duration'
@@ -149,14 +150,9 @@ export default function SummaryCards({
       ),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M12 2v4" />
-          <path d="M12 18v4" />
-          <path d="m4.93 4.93 2.83 2.83" />
-          <path d="m16.24 16.24 2.83 2.83" />
-          <path d="M2 12h4" />
-          <path d="M18 12h4" />
-          <path d="m4.93 19.07 2.83-2.83" />
-          <path d="m16.24 7.76 2.83-2.83" />
+          <line x1="10" x2="14" y1="2" y2="2" />
+          <line x1="12" x2="12" y1="14" y2="8" />
+          <circle cx="12" cy="14" r="8" />
         </svg>
       ),
       iconBgClass: 'bg-teal-50 text-teal-600 dark:bg-teal-950/60 dark:text-teal-400',
@@ -198,9 +194,9 @@ export default function SummaryCards({
       delta: calcDelta(displayWords, prevScopeData?.totalWordsRead, (v) => formatWords(v, _)),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
-          <path d="M6 6h10" />
-          <path d="M6 10h10" />
+          <polyline points="4 7 4 4 20 4 20 7" />
+          <line x1="9" x2="15" y1="20" y2="20" />
+          <line x1="12" x2="12" y1="4" y2="20" />
         </svg>
       ),
       iconBgClass: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400',
@@ -209,12 +205,12 @@ export default function SummaryCards({
     {
       key: 'totalBooks',
       label: _('stats.totalBooks'),
-      value: displayBooks !== undefined ? String(displayBooks) : '—',
+      value: displayBooks !== undefined ? _('stats.booksUnit', { n: displayBooks }) : '—',
       delta: calcDelta(displayBooks, prevScopeData?.totalBooks, (v) => _('stats.booksUnit', { n: v })),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-          <polyline points="9 22 9 12 15 12 15 22" />
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5Z" />
+          <path d="M10 2v8l3-2 3 2V2" />
         </svg>
       ),
       iconBgClass: 'bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400',
@@ -223,7 +219,7 @@ export default function SummaryCards({
     {
       key: 'finishedBooks',
       label: _('stats.finishedBooks'),
-      value: finishedCount !== undefined ? String(finishedCount) : '—',
+      value: finishedCount !== undefined ? _('stats.booksUnit', { n: finishedCount }) : '—',
       delta: calcDelta(finishedCount, prevScopeData?.finishedBooks, (v) => _('stats.booksUnit', { n: v })),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -237,7 +233,7 @@ export default function SummaryCards({
     {
       key: 'totalNotes',
       label: _('stats.totalNotes'),
-      value: totalNotes !== undefined ? String(totalNotes) : '—',
+      value: totalNotes !== undefined ? `${totalNotes} ${_('archive.notesUnit') || '条'}` : '—',
       delta: calcDelta(totalNotes, prevNotes, (v) => `${v} ${_('archive.notesUnit') || '条'}`),
       isLoading: isArchiveLoading,
       icon: (
@@ -293,8 +289,8 @@ export default function SummaryCards({
                 </div>
               ) : (
                 <>
-                  <p className="text-xl font-bold tracking-tight tabular-nums text-stone-900 sm:text-2xl dark:text-stone-100">
-                    {c.value}
+                  <p className="text-xl tabular-nums text-stone-900 sm:text-2xl dark:text-stone-100">
+                    <FormattedStatValue text={c.value} />
                   </p>
                   <DeltaDisplay delta={c.delta} isScoped={isScoped} />
                 </>
@@ -315,7 +311,7 @@ export default function SummaryCards({
                 'flex flex-col rounded-xl p-3.5 text-left transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 sm:p-4',
                 isSelected
                   ? 'border border-rose-400/80 bg-rose-50/80 ring-2 ring-rose-400/60 shadow-xs dark:border-rose-700 dark:bg-rose-950/40 dark:ring-rose-500/50'
-                  : 'bg-stone-50/70 hover:bg-stone-100/70 dark:bg-stone-800/40 dark:hover:bg-stone-800/60',
+                  : 'bg-stone-50/90 ring-1 ring-stone-900/5 hover:bg-stone-100/90 dark:bg-stone-800/40 dark:hover:bg-stone-800/60 dark:ring-white/5',
               )}
             >
               {cardContent}
@@ -326,7 +322,7 @@ export default function SummaryCards({
         return (
           <div
             key={c.key}
-            className="flex flex-col rounded-xl bg-stone-50/70 p-3.5 transition-colors hover:bg-stone-100/70 sm:p-4 dark:bg-stone-800/40 dark:hover:bg-stone-800/60"
+            className="flex flex-col rounded-xl bg-stone-50/90 ring-1 ring-stone-900/5 p-3.5 transition-colors hover:bg-stone-100/90 sm:p-4 dark:bg-stone-800/40 dark:hover:bg-stone-800/60 dark:ring-white/5"
           >
             {cardContent}
           </div>

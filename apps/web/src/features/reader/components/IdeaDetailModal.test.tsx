@@ -6,6 +6,8 @@ import type { AnnotationRes } from '@bookdock/shared'
 
 import IdeaDetailModal from './IdeaDetailModal'
 
+vi.mock('@tanstack/react-router', () => import('@/__tests__/mocks/router-link'))
+
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 vi.mock('./IdeaDiscussionPanel', () => ({ default: () => <div>Retained discussion</div> }))
 vi.mock('../hooks/useIdeas', () => ({

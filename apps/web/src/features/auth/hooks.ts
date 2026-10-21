@@ -11,6 +11,7 @@ import type {
   RegisterReq,
   RegisterRes,
   UpdateInstanceReq,
+  UpdateBioReq,
   UpdateUserReq,
   UpdateUsernameReq,
 } from '@bookdock/shared'
@@ -84,6 +85,18 @@ export function useUpdateUsername() {
     onSuccess: (res) => {
       updateUser({ username: res.data.username })
       void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
+    },
+  })
+}
+
+export function useUpdateBio() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: UpdateBioReq) => apiPost<{ data: { bio: string } }>('/auth/bio', body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
+      void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
     },
   })
 }
@@ -96,6 +109,7 @@ export function useUploadAvatar() {
     onSuccess: (res) => {
       updateUser({ avatarKey: res.data.avatarKey })
       void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
       void queryClient.invalidateQueries({ queryKey: ADMIN_USERS_QUERY_KEY })
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey[0] === 'libraries' && queryKey[2] === 'members' })
     },
@@ -110,6 +124,7 @@ export function useDeleteAvatar() {
     onSuccess: () => {
       updateUser({ avatarKey: null })
       void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
       void queryClient.invalidateQueries({ queryKey: ADMIN_USERS_QUERY_KEY })
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey[0] === 'libraries' && queryKey[2] === 'members' })
     },

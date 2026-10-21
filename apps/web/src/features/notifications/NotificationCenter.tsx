@@ -9,6 +9,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification, isAccessRevocationError } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { avatarUrl } from '@/lib/avatar'
 import { useAuthStore } from '@/stores/auth.store'
 
 import NotificationDetailModal from './components/NotificationDetailModal'
@@ -50,11 +51,14 @@ export default function NotificationCenter() {
         )}
         <ul className="space-y-2">{list.data.data.entries.map((entry) => <li key={entry.id} className="rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-900">
           <div className="flex items-start gap-3">
-            <Link to="/notifications" search={{ ...search, id: entry.id }} className="min-w-0 flex-1">
-              <p className="text-sm text-stone-900 dark:text-stone-100"><span className="font-medium">{entry.actor.name}</span> {_(notificationActionKey(entry))}{!entry.readAt && <span data-testid="notification-unread-dot" className="ml-2 inline-block h-2 w-2 rounded-full bg-red-500" aria-label={_('notificationCenter.unread')} />}</p>
-              <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-sm text-stone-500 dark:text-stone-400">{entry.preview}</p>
-              <time className="mt-1 block text-xs text-stone-400 dark:text-stone-500">{formatRelativeTime(_, entry.createdAt)}</time>
-            </Link>
+            <Link to="/profile" search={{ userId: entry.actor.id }} className="shrink-0" aria-label={entry.actor.name}>{avatarUrl(entry.actor.avatarKey) ? <img src={avatarUrl(entry.actor.avatarKey)} alt="" className="h-8 w-8 rounded-full object-cover" /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-100 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300">{entry.actor.name.slice(0, 1)}</span>}</Link>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-stone-900 dark:text-stone-100"><Link to="/profile" search={{ userId: entry.actor.id }} className="font-medium hover:underline">{entry.actor.name}</Link> {_(notificationActionKey(entry))}{!entry.readAt && <span data-testid="notification-unread-dot" className="ml-2 inline-block h-2 w-2 rounded-full bg-red-500" aria-label={_('notificationCenter.unread')} />}</p>
+              <Link to="/notifications" search={{ ...search, id: entry.id }}>
+                <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-sm text-stone-500 dark:text-stone-400">{entry.preview}</p>
+                <time className="mt-1 block text-xs text-stone-400 dark:text-stone-500">{formatRelativeTime(_, entry.createdAt)}</time>
+              </Link>
+            </div>
             <Button size="sm" variant="ghost" disabled={read.isPending} onClick={() => read.mutate({ id: entry.id, read: entry.readAt === null }, { onError: (error) => notify.error(getUserErrorNotification(error, 'notificationCenter.readFailed')) })}>{_(entry.readAt === null ? 'notificationCenter.markRead' : 'notificationCenter.markUnread')}</Button>
           </div>
         </li>)}</ul>

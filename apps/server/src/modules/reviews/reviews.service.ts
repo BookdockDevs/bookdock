@@ -1,8 +1,10 @@
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm'
 
 import type {
   ArchiveQuery,
   MyReviewEntry,
+  ProfileReadingBook,
+  ProfileReadingSummary,
   Review,
   ReviewAuthor,
   ReviewBookContext,
@@ -15,13 +17,16 @@ import { reviewFileReferences, reviewHalvesToRating, reviewRatingToHalves } from
 
 import { getDb } from '../../db/client'
 import { syncContentFiles } from '../../db/content-files'
-import { bookReviewComments, bookReviewLikes, bookReviews, libraries, libraryBooks, libraryBookVersions, users } from '../../db/schema'
+import { bookReviewComments, bookReviewLikes, bookReviews, bookStates, bookVersions, libraries, libraryBooks, libraryBookVersions, users } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { capturePrivateArchiveSnapshots, savePersonalBookSnapshot } from '../../lib/personal-book-archive'
 import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { AppError, isUniqueViolation } from '../../middleware/error'
 import { getBook, assertReadableBook } from '../books/books.service'
 import { resolveSharedVersionRead } from '../libraries/library-access'
+import { getProfileSettings } from '../settings/settings.service'
+import { getSummary } from '../reading-records/reading-records.service'
+import { excludedReadingBookVersionIds } from '../reading-records/reading-visibility'
 import {
   assertSourceWorkReadable,
   authorHoldingReadable,
@@ -498,11 +503,132 @@ export async function myReviews(userId: string, query: ArchiveQuery = { page: 1,
   return { entries, page: query.page, hasMore: rows.length > query.pageSize }
 }
 
-export async function readerProfile(viewerId: string | null, authorId: string, query: ArchiveQuery) {
+interface ReaderProfileOptions {
+  homepage?: boolean
+  today?: string
+}
+
+async function profileReadingBook(viewerId: string, bookVersionId: string, progress: number): Promise<ProfileReadingBook | null> {
   const db = getDb()
-  const author = db.select({ id: users.id, name: users.username, avatarKey: users.avatarKey })
+  const privateLibrary = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, viewerId), eq(libraries.type, 'private'))).get()
+  let link: typeof libraryBookVersions.$inferSelect | undefined
+  let work: typeof libraryBooks.$inferSelect | undefined
+
+  if (privateLibrary) {
+    link = db.select().from(libraryBookVersions)
+      .where(and(eq(libraryBookVersions.libraryId, privateLibrary.id), eq(libraryBookVersions.bookVersionId, bookVersionId))).get()
+    if (link) work = db.select().from(libraryBooks).where(eq(libraryBooks.id, link.libraryBookId)).get()
+  }
+
+  if (!link || !work) {
+    const sharedCandidates = db.select({ libraryId: libraryBookVersions.libraryId })
+      .from(libraryBookVersions)
+      .where(eq(libraryBookVersions.bookVersionId, bookVersionId)).all()
+    for (const candidate of sharedCandidates) {
+      try {
+        const read = await resolveSharedVersionRead(candidate.libraryId, bookVersionId, viewerId)
+        link = read.link
+        work = db.select().from(libraryBooks).where(eq(libraryBooks.id, link.libraryBookId)).get()
+        if (work) break
+      } catch (error) {
+        if (!(error instanceof AppError)) throw error
+      }
+    }
+  }
+
+  if (!link || !work) return null
+  const version = db.select({ format: bookVersions.format }).from(bookVersions).where(eq(bookVersions.id, bookVersionId)).get()
+  if (!version) return null
+  return {
+    id: bookVersionId,
+    title: link.title ?? work.title,
+    author: link.author ?? work.author,
+    format: version.format,
+    coverKey: link.coverKey ?? work.coverKey,
+    progress: Math.max(0, Math.min(100, progress)),
+  }
+}
+
+async function profileSummary(userId: string, today?: string): Promise<ProfileReadingSummary> {
+  const summary = await getSummary(userId, today && /^\d{4}-\d{2}-\d{2}$/.test(today) ? today : new Date().toISOString().slice(0, 10))
+  return {
+    totalSeconds: summary.totalSeconds,
+    totalWordsRead: summary.totalWordsRead,
+    totalBooks: summary.totalBooks,
+    finishedBooks: summary.scope?.finishedBooks ?? 0,
+    totalDays: summary.totalDays,
+    currentStreak: summary.currentStreak,
+    longestStreak: summary.longestStreak,
+  }
+}
+
+async function profileCurrentlyReading(viewerId: string, readerId: string): Promise<ProfileReadingBook[]> {
+  const db = getDb()
+  const hiddenIds = excludedReadingBookVersionIds(db, readerId)
+  const rows = db.select({
+    bookVersionId: bookStates.bookVersionId,
+    progress: bookStates.percent,
+    lastReadAt: bookStates.lastReadAt,
+    updatedAt: bookStates.updatedAt,
+  }).from(bookStates)
+    .where(and(
+      eq(bookStates.userId, readerId),
+      eq(bookStates.readStatus, 'reading'),
+      hiddenIds.length > 0 ? notInArray(bookStates.bookVersionId, hiddenIds) : undefined,
+    ))
+    .orderBy(desc(bookStates.lastReadAt), desc(bookStates.updatedAt), desc(bookStates.bookVersionId))
+    .limit(20).all()
+
+  const books: ProfileReadingBook[] = []
+  for (const row of rows) {
+    try {
+      await assertReadableBook(viewerId, row.bookVersionId)
+      const book = await profileReadingBook(viewerId, row.bookVersionId, row.progress)
+      if (book) books.push(book)
+      if (books.length >= 4) break
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error
+    }
+  }
+  return books
+}
+
+export async function readerProfile(viewerId: string | null, authorId: string, query: ArchiveQuery, options: ReaderProfileOptions = {}) {
+  const db = getDb()
+  const authorRow = db.select({ id: users.id, name: users.username, avatarKey: users.avatarKey, bio: users.bio, createdAt: users.createdAt })
     .from(users).where(eq(users.id, authorId)).get()
-  if (!author) throw new AppError('REVIEW_NOT_FOUND')
+  if (!authorRow) throw new AppError('REVIEW_NOT_FOUND')
+  const author = { id: authorRow.id, name: authorRow.name, avatarKey: authorRow.avatarKey }
+  if (options.homepage) {
+    if (!viewerId) throw new AppError('UNAUTHORIZED', 'Login required')
+    const isOwner = viewerId === authorId
+    const settings = getProfileSettings(authorId)
+    const isPublic = isOwner || settings.isPublic !== false
+    if (!isPublic) return { author, isOwner: false, visibility: 'private' as const, reviews: { entries: [], page: 1, hasMore: false } }
+    const showStats = settings.showPublicStats ?? settings.showStats !== false
+    const showShowcase = settings.showPublicShowcase ?? settings.showShowcase !== false
+    if (isOwner) {
+      return {
+        author: { ...author, bio: authorRow.bio, createdAt: authorRow.createdAt },
+        isOwner: true,
+        visibility: 'public' as const,
+        showStats: true,
+        summary: await profileSummary(authorId, options.today),
+        showShowcase: true,
+        currentlyReading: await profileCurrentlyReading(viewerId, authorId),
+        reviews: { entries: [], page: 1, hasMore: false },
+      }
+    }
+    return {
+      author: { ...author, bio: authorRow.bio, createdAt: authorRow.createdAt },
+      isOwner,
+      visibility: 'public' as const,
+      ...(showStats ? { showStats: true, summary: await profileSummary(authorId, options.today) } : { showStats: false }),
+      ...(showShowcase ? { showShowcase: true, currentlyReading: await profileCurrentlyReading(viewerId, authorId) } : { showShowcase: false }),
+      reviews: { entries: [], page: 1, hasMore: false },
+    }
+  }
   if (viewerId === authorId) return { author, reviews: await myReviews(authorId, query) }
   const entries: MyReviewEntry[] = []
   const skip = (query.page - 1) * query.pageSize

@@ -422,6 +422,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       const pub = allReaderIdeas.find((p) => p.annotation.id === a.id)
       return {
         annotation: a,
+        authorId: user?.id,
         authorName,
         authorAvatarKey: avatarKey,
         own: true,
@@ -434,6 +435,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
     })
     entries.push(...publicAtRange.filter((idea) => idea.annotation.cfiRange === target.cfiRange && !atRange.some((a) => a.id === idea.annotation.id)).map((idea) => ({
       annotation: idea.annotation,
+      authorId: idea.author.id,
       authorName: idea.author.name,
       authorAvatarKey: idea.author.avatarKey,
       own: false,

@@ -29,6 +29,7 @@ import { useIsTouch } from '../hooks/useIsTouch'
  */
 export interface IdeaEntry {
   annotation: AnnotationRes
+  authorId?: string
   authorName?: string
   authorAvatarKey?: string | null
   own?: boolean

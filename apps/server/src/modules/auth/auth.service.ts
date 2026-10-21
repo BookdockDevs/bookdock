@@ -318,6 +318,12 @@ export function changeUsername(userId: string, username: string): AccountRes {
   return { id: row.id, username: row.username, role: isInstanceOwner(row.id) ? 'owner' : 'member', avatarKey: row.avatarKey }
 }
 
+export function updateBio(userId: string, bio: string) {
+  const db = getDb()
+  db.update(users).set({ bio, updatedAt: Date.now() }).where(eq(users.id, userId)).run()
+  return { bio }
+}
+
 /**
  * Store the reader's IANA zone so server-rendered dates can mean something to
  * them. The Web app reports it because the browser already knows it; the field

@@ -47,9 +47,10 @@ export function useMyReviews(enabled = true, page = 1) {
 }
 
 export function useReaderProfile(userId: string | undefined, page = 1) {
+  const today = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
   return useQuery({
-    queryKey: ['reviews', 'author', userId, page],
-    queryFn: () => apiGet<{ data: ReaderProfile }>(`/reviews/author/${encodeURIComponent(userId!)}?page=${page}`),
+    queryKey: ['reviews', 'author', userId, page, 'profile', today],
+    queryFn: () => apiGet<{ data: ReaderProfile }>(`/reviews/author/${encodeURIComponent(userId!)}?page=${page}&profile=1&today=${today}`),
     enabled: Boolean(userId),
     staleTime: 30_000,
     refetchOnWindowFocus: true,

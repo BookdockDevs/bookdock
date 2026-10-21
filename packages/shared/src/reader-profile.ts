@@ -6,6 +6,25 @@ import type { AnnotationRes } from './contract'
 import type { BookFormat, ReadStatus } from './constants'
 import type { MyReviewEntry, Review } from './review'
 
+export interface ProfileReadingSummary {
+  totalSeconds: number
+  totalWordsRead: number
+  totalBooks: number
+  finishedBooks: number
+  totalDays: number
+  currentStreak: number
+  longestStreak: number
+}
+
+export interface ProfileReadingBook {
+  id: string
+  title: string
+  author: string
+  format: BookFormat
+  coverKey: string | null
+  progress: number
+}
+
 export const archiveQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(100000).default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
@@ -26,7 +45,13 @@ export interface NoteArchiveEntry {
 }
 
 export interface ReaderProfile {
-  author: { id: string; name: string; avatarKey: string | null }
+  author: { id: string; name: string; avatarKey: string | null; bio?: string; createdAt?: number }
+  isOwner?: boolean
+  visibility?: 'public' | 'private'
+  showStats?: boolean
+  showShowcase?: boolean
+  summary?: ProfileReadingSummary
+  currentlyReading?: ProfileReadingBook[]
   reviews: ArchivePage<MyReviewEntry>
 }
 

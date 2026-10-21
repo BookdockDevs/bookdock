@@ -1,12 +1,12 @@
 import type { Review } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { avatarUrl } from '@/lib/avatar'
 
 import ReviewDiscussionPanel from './ReviewDiscussionPanel'
 import ReviewMarkdown from './ReviewMarkdown'
 import ReviewTime from './ReviewTime'
 import StarRating from './StarRating'
+import ProfileIdentityLink from '@/features/profile/components/ProfileIdentityLink'
 
 export interface ReviewDetailViewProps {
   review: Review
@@ -17,25 +17,14 @@ export default function ReviewDetailView({
 }: ReviewDetailViewProps) {
   const _ = useTranslation()
 
-  const authorAvatar = avatarUrl(review.author.avatarKey)
-
   return (
     <article className="space-y-4">
       {/* Author bar */}
       <div className="flex items-start justify-between gap-3 border-b border-stone-100 pb-3 dark:border-stone-800">
         <div className="flex items-center gap-2.5">
-          {authorAvatar ? (
-            <img src={authorAvatar} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
-          ) : (
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-sm font-medium text-stone-600 dark:text-stone-400">
-              {review.author.name.slice(0, 1)}
-            </span>
-          )}
+          <ProfileIdentityLink userId={review.author.id} name={review.author.name} avatarKey={review.author.avatarKey} className="inline-flex items-center gap-2.5 text-sm font-medium text-stone-900 dark:text-stone-100" avatarClassName="h-9 w-9" />
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-stone-900 dark:text-stone-100">
-                {review.author.name}
-              </span>
               {review.own && (
                 <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">
                   {_('review.ownBadge')}

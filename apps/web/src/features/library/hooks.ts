@@ -1082,9 +1082,7 @@ export interface ProfileSettingsState {
   refetch: () => Promise<unknown>
 }
 
-/**
- * Per-user preferences for the owner's own profile page with readiness state.
- */
+/** Per-user profile settings with readiness state. */
 export function useProfileSettingsState(): ProfileSettingsState {
   const user = useAuthStore((state) => state.user)
   const isGuest = !user
@@ -1118,11 +1116,7 @@ export function useProfileSettingsState(): ProfileSettingsState {
   }
 }
 
-/**
- * Per-user preferences for the owner's own profile page. Display-only: the
- * server enforces no profile visibility, so these decide what the owner sees,
- * not who can see them.
- */
+/** Per-user profile settings used by the account settings dialog. */
 export function useProfileSettings(): NonNullable<SettingsRes['profile']> {
   return useProfileSettingsState().profile ?? {}
 }
@@ -1132,6 +1126,7 @@ export function useProfileSettings(): NonNullable<SettingsRes['profile']> {
  *  to guarantee localStorage and cache converge with server state. */
 export function useUpdateProfileSettings() {
   const queryClient = useQueryClient()
+  const userId = useAuthStore((state) => state.user?.id)
   const profileWriteQueueRef = useRef(Promise.resolve())
   const activeWritesCountRef = useRef(0)
 
@@ -1186,6 +1181,7 @@ export function useUpdateProfileSettings() {
       if (activeWritesCountRef.current === 0) {
         // Force refetchQueries to guarantee sync even when no active query observer exists
         void queryClient.refetchQueries({ queryKey: ['settings'] })
+        if (userId) void queryClient.invalidateQueries({ queryKey: ['reviews', 'author', userId] })
       }
     },
   })

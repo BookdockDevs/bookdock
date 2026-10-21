@@ -10,6 +10,8 @@ import AllReviewsView from './AllReviewsView'
 
 import { useAuthStore } from '@/stores/auth.store'
 
+vi.mock('@tanstack/react-router', () => import('@/__tests__/mocks/router-link'))
+
 vi.mock('@/hooks/useTranslation', () => ({
   useTranslation: () => (key: string, params?: Record<string, unknown>) => {
     if (params && 'count' in params) return `${key}:${params.count}`

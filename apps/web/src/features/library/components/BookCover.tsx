@@ -26,6 +26,8 @@ export interface CoverSource {
 interface BookCoverProps {
   book: CoverSource
   size?: 'sm' | 'md' | 'card'
+  showFormat?: boolean
+  className?: string
   coverSrc?: string | null
   coverPaletteId?: CoverPaletteId | null
 }
@@ -38,7 +40,7 @@ function displayTitle(title: string): string {
   return trimmed.replace(EXT_RE, '') || trimmed
 }
 
-export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId }: BookCoverProps) {
+export default function BookCover({ book, size = 'md', showFormat = true, className, coverSrc, coverPaletteId }: BookCoverProps) {
   const [error, setError] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const coverFit = useUiStore((s) => s.coverFit)
@@ -73,6 +75,7 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
             ? 'flex h-20 w-14 shrink-0 select-none flex-col'
             : 'flex aspect-[2/3] w-full select-none flex-col',
         palette.className,
+        className,
       )}
     >
       {isSm ? (
@@ -98,9 +101,7 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
               {title}
             </span>
           </div>
-          <span className="pb-1 text-center font-mono text-[8px] font-medium uppercase tracking-widest opacity-40">
-            {book.format}
-          </span>
+          {showFormat && <span className="pb-1 text-center font-mono text-[8px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
         </>
       ) : (
         <>
@@ -119,9 +120,7 @@ export default function BookCover({ book, size = 'md', coverSrc, coverPaletteId 
               {title}
             </span>
           </div>
-          <span className="pb-2 text-center font-mono text-[9px] font-medium uppercase tracking-widest opacity-40">
-            {book.format}
-          </span>
+          {showFormat && <span className="pb-2 text-center font-mono text-[9px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
         </>
       )}
 

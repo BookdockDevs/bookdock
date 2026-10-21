@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import i18n from '../i18n/i18n'
-import UserManagementSection from '../features/settings/components/UserManagementSection'
+import { useState } from 'react'
+import UserManagementSectionView from '../features/settings/components/UserManagementSection'
 import { formatDate } from '@/lib/format-date'
 import { useAdminUsers, useCreateUser, useDeleteUser, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
 import {
@@ -13,6 +14,14 @@ import {
 } from '@/features/library/hooks'
 import { useAuthStore } from '@/stores/auth.store'
 import type { AdminUserRes, LibraryListItem, LibraryMembersRes } from '@bookdock/shared'
+
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to, search, ...props }: {
+    children: React.ReactNode
+    to: string
+    search: { userId: string }
+  }) => <a {...props} href={`${to}?userId=${encodeURIComponent(search.userId)}`}>{children}</a>,
+}))
 
 vi.mock('@/features/auth/hooks', () => ({
   useAdminUsers: vi.fn(),
@@ -60,6 +69,11 @@ const MEMBERS: LibraryMembersRes = {
   ],
 }
 
+function UserManagementSection({ initialTab = 'instance' }: { initialTab?: 'instance' | 'library' }) {
+  const [context, setContext] = useState<{ tab: 'instance' | 'library'; libraryId?: string }>({ tab: initialTab })
+  return <UserManagementSectionView {...context} onContextChange={(tab, libraryId) => setContext({ tab, libraryId })} />
+}
+
 describe('UserManagementSection', () => {
   const mutateUser = vi.fn()
   const createUser = vi.fn()
@@ -86,6 +100,18 @@ describe('UserManagementSection', () => {
     ;(useSetLibraryMemberRole as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: setMemberRole })
     ;(useRemoveLibraryMember as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: removeMember })
     ;(useTransferLibrary as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: transferLibrary, reset: vi.fn() })
+  })
+
+  it.each(['instance', 'library'] as const)('links %s avatars and names to user profiles', (tab) => {
+    render(<UserManagementSection initialTab={tab} />)
+    for (const user of USERS) {
+      const link = screen.getByRole('link', { name: user.username })
+      expect(link).toHaveAttribute('href', `/profile?userId=${user.id}`)
+      expect(within(link).getByText(user.username.slice(0, 1).toUpperCase())).toBeInTheDocument()
+      const row = link.closest('tr')!
+      const action = within(row).queryByRole('button', { name: '更多操作' })
+      if (action) expect(link).not.toContainElement(action)
+    }
   })
 
   it.each(['instance', 'library'] as const)('retains a failed %s transfer and allows retry', async (tab) => {

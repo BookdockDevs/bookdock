@@ -9,7 +9,7 @@ import ArchivePending from '@/features/archive/components/ArchivePending'
 import { rootRoute } from './__root'
 
 export interface ArchiveSearch extends ArchiveScopeSearch {
-  tab?: 'records' | 'stats'
+  view?: 'overview'
   bookId?: string
   bookView?: 'data' | 'notes'
   bookType?: ArchiveRecordType | 'all'
@@ -50,7 +50,7 @@ export const archiveRoute = createRoute({
       anchor: calendarDateSchema.safeParse(search.anchor).success ? String(search.anchor) : undefined,
       date: calendarDateSchema.safeParse(search.date).success ? String(search.date) : undefined,
       timezone: readingTimezoneSchema.safeParse(search.timezone).success ? String(search.timezone) : undefined,
-      tab: search.tab === 'stats' ? 'stats' : undefined,
+      view: search.view === 'overview' ? 'overview' : undefined,
       bookId: typeof search.bookId === 'string' ? search.bookId : undefined,
       bookType: typeof search.bookType === 'string' && (RECORD_TYPES as string[]).includes(search.bookType)
         ? (search.bookType as ArchiveRecordType | 'all')

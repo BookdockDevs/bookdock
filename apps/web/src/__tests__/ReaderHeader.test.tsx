@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -8,22 +8,46 @@ import { AutoReadingSessionContext, IDLE_AUTO_READING_STATE } from '../features/
 import type { AutoReadingController } from '../features/reader/lib/auto-reading'
 import type { TtsController } from '../features/reader/lib/tts-controller'
 
+const { mockReaderGo, mockReaderNavigate, mockReaderLocation } = vi.hoisted(() => ({
+  mockReaderGo: vi.fn(),
+  mockReaderNavigate: vi.fn(),
+  mockReaderLocation: { state: {} as { __TSR_index?: number; readerReturn?: { to: '/profile'; sourceHistoryIndex?: number; search?: { userId?: string } } } },
+}))
+
 vi.mock('@/hooks/useTranslation', () => ({
   useTranslation: () => (key: string) => key,
 }))
 
 vi.mock('@tanstack/react-router', () => ({
-  Link: ({ children }: { children: ReactNode }) => <a href="/">{children}</a>,
-  useNavigate: () => vi.fn(),
+  Link: ({ children, onClick, ['aria-label']: ariaLabel }: { children: ReactNode; onClick?: React.MouseEventHandler<HTMLAnchorElement>; 'aria-label'?: string }) => <a href="/" aria-label={ariaLabel} onClick={onClick}>{children}</a>,
+  useNavigate: () => mockReaderNavigate,
+  useLocation: () => mockReaderLocation,
   useRouter: () => ({
     history: {
       canGoBack: () => false,
       back: vi.fn(),
+      go: mockReaderGo,
     },
   }),
 }))
 
 describe('ReaderHeader', () => {
+  beforeEach(() => {
+    mockReaderNavigate.mockReset()
+    mockReaderGo.mockReset()
+    mockReaderLocation.state = {}
+  })
+
+  it('returns to the profile source recorded on reader entry', () => {
+    mockReaderLocation.state = { __TSR_index: 2, readerReturn: { to: '/profile', sourceHistoryIndex: 1, search: { userId: 'reader' } } }
+    render(<ReaderHeader title="测试书籍" visible />)
+
+    fireEvent.click(screen.getByRole('link', { name: 'reader.backToPrevious' }))
+
+    expect(mockReaderGo).toHaveBeenCalledWith(-1)
+    expect(mockReaderNavigate).not.toHaveBeenCalled()
+  })
+
   it('renders bookmark icon filled when bookmark is active', () => {
     render(
       <ReaderHeader

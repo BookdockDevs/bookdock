@@ -7,6 +7,7 @@ import {
   registerSchema,
   setupSchema,
   updateInstanceSchema,
+  updateBioSchema,
   updateTimezoneSchema,
   updateUsernameSchema,
   type AccountRes,
@@ -19,6 +20,7 @@ import { requireOwner } from '../../middleware/auth.guard'
 import {
   changePassword,
   changeUsername,
+  updateBio,
   getInstanceInfo,
   isSetupRequired,
   login,
@@ -129,6 +131,19 @@ authRoutes.post('/username', async (c) => {
   }
   const account = changeUsername(user.id, parsed.data.username)
   return c.json({ data: account } satisfies { data: AccountRes })
+})
+
+authRoutes.post('/bio', async (c) => {
+  const user = c.get('user')
+  if (!user) {
+    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
+  }
+  const body = await c.req.json().catch(() => null)
+  const parsed = updateBioSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  return c.json({ data: updateBio(user.id, parsed.data.bio) })
 })
 
 authRoutes.put('/timezone', async (c) => {

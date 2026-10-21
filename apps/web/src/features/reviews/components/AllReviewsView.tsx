@@ -5,12 +5,12 @@ import type { Review, ReviewBookContext } from '@bookdock/shared'
 import SmartMenu, { menuItemClass } from '@/components/ui/SmartMenu'
 import { ChatBubbleIcon, CheckIcon, HeartIcon, LockIcon } from '@/features/reader/components/annotation-icons'
 import { useTranslation } from '@/hooks/useTranslation'
-import { avatarUrl } from '@/lib/avatar'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
+import ProfileIdentityLink from '@/features/profile/components/ProfileIdentityLink'
 
 import { useReviewAction } from '../hooks/useReviews'
 import { reviewExcerpt } from '../lib/markdown'
@@ -72,7 +72,6 @@ function ReviewItem({
   const user = useAuthStore((state) => state.user)
   const likeAction = useReviewAction(review.id)
 
-  const authorAvatar = avatarUrl(review.author.avatarKey)
   const excerpt = review.body ? reviewExcerpt(review.body, review.bodyFormat, 220) : ''
 
   function handleToggleLike(e: React.MouseEvent) {
@@ -109,16 +108,7 @@ function ReviewItem({
       {/* Row 1: Author, time, badges, rating, more menu */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          {authorAvatar ? (
-            <img src={authorAvatar} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
-          ) : (
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-xs font-medium text-stone-600 dark:text-stone-400">
-              {review.author.name.slice(0, 1)}
-            </span>
-          )}
-          <span className="text-sm font-medium text-stone-800 dark:text-stone-200">
-            {review.author.name}
-          </span>
+          <ProfileIdentityLink userId={review.author.id} name={review.author.name} avatarKey={review.author.avatarKey} stopPropagation className="inline-flex min-w-0 items-center gap-2.5 text-sm font-medium text-stone-800 dark:text-stone-200" avatarClassName="h-8 w-8" />
           {review.own && (
             <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400">
               {_('review.ownBadge')}

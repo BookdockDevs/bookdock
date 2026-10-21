@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 
 import type { IdeaEntry } from './IdeaOverlay'
 
@@ -49,6 +50,19 @@ export default function IdeaCard({
   const _ = useTranslation()
   const avatar = avatarUrl(entry.authorAvatarKey)
   const isPrivate = entry.annotation.visibility === 'private'
+  const authorName = entry.authorName ?? _('annotation.myNote')
+  const authorIdentity = (
+    <>
+      {avatar ? (
+        <img src={avatar} alt="" decoding="async" className={cn('rounded-full object-cover shrink-0', variant === 'flat' ? 'h-7 w-7' : 'h-8 w-8')} />
+      ) : (
+        <span className={cn('flex shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]', variant === 'flat' ? 'h-7 w-7' : 'h-8 w-8')}>
+          <BulbIcon size={variant === 'flat' ? 14 : 16} />
+        </span>
+      )}
+      <span className="truncate text-sm font-medium">{authorName}</span>
+    </>
+  )
 
   function handleContextMenu(e: React.MouseEvent) {
     e.preventDefault()
@@ -101,14 +115,7 @@ export default function IdeaCard({
       >
         <div className="relative">
           <div className="flex items-center gap-2.5">
-          {avatar ? (
-            <img src={avatar} alt="" decoding="async" className={cn('rounded-full object-cover shrink-0', variant === 'flat' ? 'h-7 w-7' : 'h-8 w-8')} />
-          ) : (
-            <span className={cn('flex shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]', variant === 'flat' ? 'h-7 w-7' : 'h-8 w-8')}>
-              <BulbIcon size={variant === 'flat' ? 14 : 16} />
-            </span>
-          )}
-          <span className="truncate text-sm font-medium">{entry.authorName ?? _('annotation.myNote')}</span>
+          {entry.authorId ? <Link to="/profile" search={{ userId: entry.authorId }} onClick={(event) => event.stopPropagation()} className="relative z-10 flex min-w-0 items-center gap-2.5">{authorIdentity}</Link> : authorIdentity}
           {variant !== 'flat' && (
             <span
               title={formatFullDateTime(_, entry.annotation.createdAt)}

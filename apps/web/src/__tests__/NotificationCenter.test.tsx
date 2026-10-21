@@ -16,9 +16,9 @@ import { useAuthStore } from '@/stores/auth.store'
 
 let search: { page: number; id?: string } = { page: 1 }
 const navigate = vi.fn()
-vi.mock('@tanstack/react-router', () => ({
+vi.mock('@tanstack/react-router', async () => ({
+  ...await import('@/__tests__/mocks/router-link'),
   useSearch: () => search, useNavigate: () => navigate,
-  Link: ({ children, to, search: params, ...props }: { children: React.ReactNode; to: string; search?: { id?: string } }) => <a href={to + (params?.id ? '?id=' + params.id : '')} {...props}>{children}</a>,
 }))
 vi.mock('@/api/client', () => ({ apiGet: vi.fn(), apiPut: vi.fn(), apiPost: vi.fn(), apiDelete: vi.fn() }))
 vi.mock('@/features/reader/components/IdeaDetailModal', () => ({ default: () => <p>Exact interaction</p> }))
@@ -55,7 +55,10 @@ describe('notification center', () => {
     fireEvent.click(screen.getByRole('button', { name: '标为已读' }))
     await waitFor(() => expect(screen.queryByTestId('notification-unread-dot')).not.toBeInTheDocument())
     expect(api.apiPut).toHaveBeenCalledWith('/notifications/event/read', { read: true })
-    expect(screen.getByRole('link', { name: /Reader/ })).toHaveAttribute('href', '/notifications?id=event')
+    const actorLinks = screen.getAllByRole('link', { name: 'Reader' })
+    expect(actorLinks).toHaveLength(2)
+    for (const link of actorLinks) expect(link).toHaveAttribute('href', '/profile?userId=actor')
+    expect(screen.getByRole('link', { name: /Visible reply/ })).toHaveAttribute('href', '/notifications?page=1&id=event')
   })
 
   it('shows only an unavailable state for stale or inaccessible target links', async () => {

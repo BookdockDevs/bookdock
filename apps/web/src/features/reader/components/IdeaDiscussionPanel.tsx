@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 
 import type { IdeaComment } from '@bookdock/shared'
 
@@ -206,13 +207,9 @@ export default function IdeaDiscussionPanel({
         )}
       >
         <div className="flex items-start gap-2.5">
-          {authorAvatar ? (
-            <img src={authorAvatar} alt="" className={cn('rounded-full object-cover shrink-0', isReply ? 'h-6 w-6' : 'h-7 w-7')} />
-          ) : (
-            <span className={cn('flex items-center justify-center rounded-full bg-stone-500/10 shrink-0 font-medium', tSub, isReply ? 'h-6 w-6 text-[10px]' : 'h-7 w-7 text-xs')}>
-              {comment.author.name.slice(0, 1)}
-            </span>
-          )}
+          <Link to="/profile" search={{ userId: comment.author.id }} onClick={(event) => event.stopPropagation()} className="shrink-0">
+            {authorAvatar ? <img src={authorAvatar} alt="" className={cn('rounded-full object-cover', isReply ? 'h-6 w-6' : 'h-7 w-7')} /> : <span className={cn('flex items-center justify-center rounded-full bg-stone-500/10 font-medium', tSub, isReply ? 'h-6 w-6 text-[10px]' : 'h-7 w-7 text-xs')}>{comment.author.name.slice(0, 1)}</span>}
+          </Link>
 
           <div
             className={cn('min-w-0 flex-1', user && 'cursor-pointer')}
@@ -224,7 +221,7 @@ export default function IdeaDiscussionPanel({
             }}
           >
             <div className="flex items-center gap-1.5 flex-wrap text-xs">
-              <span className={cn('font-medium', tText)}>{comment.author.name}</span>
+              <Link to="/profile" search={{ userId: comment.author.id }} onClick={(event) => event.stopPropagation()} className={cn('font-medium hover:underline', tText)}>{comment.author.name}</Link>
               {isAuthor && (
                 <span className={cn('rounded bg-stone-500/15 px-1 py-0.2 text-[10px] font-normal', tSub)}>
                   {_('comment.hostBadge')}
@@ -356,14 +353,16 @@ export default function IdeaDiscussionPanel({
                     key={liker.id}
                     className={cn('flex items-center gap-2 rounded-full border border-stone-200/70 bg-stone-500/5 px-2.5 py-1 text-xs dark:border-stone-800/70', tText)}
                   >
-                    {avatar ? (
-                      <img src={avatar} alt="" decoding="async" className="h-4 w-4 rounded-full object-cover" />
-                    ) : (
-                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-400/20 text-[9px] font-medium">
-                        {liker.name.slice(0, 1)}
-                      </span>
-                    )}
-                    <span>{liker.name}</span>
+                    <Link to="/profile" search={{ userId: liker.id }} onClick={(event) => event.stopPropagation()} aria-label={liker.name}>
+                      {avatar ? (
+                        <img src={avatar} alt="" decoding="async" className="h-4 w-4 rounded-full object-cover" />
+                      ) : (
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-400/20 text-[9px] font-medium">
+                          {liker.name.slice(0, 1)}
+                        </span>
+                      )}
+                    </Link>
+                    <Link to="/profile" search={{ userId: liker.id }} onClick={(event) => event.stopPropagation()}>{liker.name}</Link>
                   </div>
                 )
               })}

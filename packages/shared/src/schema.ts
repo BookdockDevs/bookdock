@@ -190,6 +190,8 @@ export const settingsUpdateSchema = z.object({
   profile: z.object({
     showStats: z.boolean().optional(),
     showShowcase: z.boolean().optional(),
+    showPublicStats: z.boolean().optional(),
+    showPublicShowcase: z.boolean().optional(),
     isPublic: z.boolean().optional(),
   }).optional(),
   integrations: z.object({
@@ -664,6 +666,10 @@ export const changePasswordSchema = z.object({
 
 export const updateUsernameSchema = z.object({
   username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH)),
+})
+
+export const updateBioSchema = z.object({
+  bio: z.string().trim().max(500),
 })
 
 /**

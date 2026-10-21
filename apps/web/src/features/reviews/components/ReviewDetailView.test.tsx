@@ -8,6 +8,8 @@ import { queryClient } from '@/lib/query-client'
 
 import ReviewDetailView from './ReviewDetailView'
 
+vi.mock('@tanstack/react-router', () => import('@/__tests__/mocks/router-link'))
+
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 vi.mock('./ReviewDiscussionPanel', () => ({ default: () => null }))
 

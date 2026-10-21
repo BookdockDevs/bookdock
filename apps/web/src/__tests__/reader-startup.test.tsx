@@ -35,35 +35,7 @@ describe('whole EPUB download', () => {
 })
 
 describe('chapter font readiness', () => {
-  it.each(['loading', 'loaded', 'error'])('tracks font import completion through load events: %s', async (state) => {
-    Object.defineProperty(document, 'fonts', { configurable: true, value: { load: vi.fn().mockResolvedValue([]) } })
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1 })
-    const style = document.createElement('style')
-    style.textContent = '@import url("https://example.com/fonts.css");'
-    style.dataset.bdReaderFonts = ''
-    style.dataset.loadState = state
-    document.head.appendChild(style)
-    try {
-      // An empty CSSOM, or an inaccessible/nested import, must not count as completion.
-      Object.defineProperty(style, 'sheet', { value: { cssRules: [] } })
-      const done = vi.fn()
-      const wait = waitForReaderFonts(document, new AbortController().signal).then(done)
-      if (state === 'loading') {
-        await act(async () => { await Promise.resolve() })
-        expect(done).not.toHaveBeenCalled()
-        expect(document.fonts.load).not.toHaveBeenCalled()
-        style.dispatchEvent(new Event('load'))
-      }
-      await wait
-      expect(done).toHaveBeenCalledWith(state !== 'error')
-    } finally {
-      style.remove()
-      Reflect.deleteProperty(document, 'fonts')
-    }
-  })
-
-  it('falls back when an import times out without waiting for a late load event', async () => {
-    vi.useFakeTimers()
+  it('loads visible glyphs without waiting for a style import event', async () => {
     Object.defineProperty(document, 'fonts', { configurable: true, value: { load: vi.fn().mockResolvedValue([]) } })
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1 })
     const style = document.createElement('style')
@@ -72,16 +44,22 @@ describe('chapter font readiness', () => {
     style.dataset.loadState = 'loading'
     document.head.appendChild(style)
     try {
-      const wait = waitForReaderFonts(document, new AbortController().signal)
-      await vi.advanceTimersByTimeAsync(8000)
-      expect(await wait).toBe(false)
-      style.dispatchEvent(new Event('load'))
-      await Promise.resolve()
-      expect(document.fonts.load).not.toHaveBeenCalled()
+      await expect(waitForReaderFonts(document, new AbortController().signal)).resolves.toBe(true)
+      expect(document.fonts.load).toHaveBeenCalled()
     } finally {
       style.remove()
       Reflect.deleteProperty(document, 'fonts')
     }
+  })
+
+  it('falls back when visible glyph loading times out', async () => {
+    vi.useFakeTimers()
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load: vi.fn(() => new Promise(() => {})) } })
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1 })
+    const wait = waitForReaderFonts(document, new AbortController().signal)
+    await vi.advanceTimersByTimeAsync(8000)
+    expect(await wait).toBe(false)
+    Reflect.deleteProperty(document, 'fonts')
   })
 
   it('waits for visible glyphs even while unrelated chapter fonts remain pending', async () => {

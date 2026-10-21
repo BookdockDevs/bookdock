@@ -11,7 +11,15 @@ vi.mock('@/features/auth/hooks', () => ({
   useUploadAvatar: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
   useDeleteAvatar: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useUpdateUsername: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useUpdateBio: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
   useChangePassword: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+}))
+
+vi.mock('@/features/reviews/hooks/useReviews', () => ({
+  useReaderProfile: vi.fn(() => ({
+    data: { data: { author: { bio: '' } } },
+    isPending: false,
+  })),
 }))
 
 // The settings dialog reads and writes profile preferences through these hooks.
@@ -56,12 +64,10 @@ describe('AccountSection', () => {
     expect(clickSpy).toHaveBeenCalled()
   })
 
-  it('triggers onOpenSettings when clicking the settings button', () => {
-    const onOpenSettings = vi.fn()
-    render(<AccountSection onOpenSettings={onOpenSettings} />)
+  it('keeps profile settings in the page header instead of the account card', () => {
+    render(<AccountSection />)
 
-    fireEvent.click(screen.getByRole('button', { name: '主页设置' }))
-    expect(onOpenSettings).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: '个人设置' })).not.toBeInTheDocument()
   })
 
   it('edits and saves the username in ProfileSettingsDialog', () => {
@@ -71,7 +77,7 @@ describe('AccountSection', () => {
 
     const input = screen.getByDisplayValue('tester')
     fireEvent.change(input, { target: { value: '  newname  ' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存资料' }))
     expect(updateUsername.mutateAsync).toHaveBeenCalledWith({ username: 'newname' })
   })
 

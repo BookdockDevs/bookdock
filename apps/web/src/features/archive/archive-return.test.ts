@@ -46,6 +46,18 @@ describe('archiveEntryState', () => {
     const previous = { search: { q: 'original' }, scrollTop: 100 }
     expect(archiveEntryState({ q: 'archive-view' }, 999, previous).archiveReturn).toBe(previous)
   })
+
+  it('records a profile entry as the archive exit destination', () => {
+    expect(archiveEntryState({ to: '/profile' }, 0, undefined, 4)).toEqual({
+      archiveReturn: { to: '/profile', scrollTop: 0, sourceHistoryIndex: 4 },
+    })
+  })
+
+  it('keeps the source index when archive navigation is entered from a library', () => {
+    expect(archiveEntryState(LIBRARY_SOURCE, 321, undefined, 7)).toEqual({
+      archiveReturn: { search: LIBRARY_SOURCE, scrollTop: 321, sourceHistoryIndex: 7 },
+    })
+  })
 })
 
 describe('archive top-bar exit', () => {
@@ -65,7 +77,7 @@ describe('archive top-bar exit', () => {
     // In-archive moves (overview, single book A, single book B) forward the
     // record instead of overwriting it — mirrors Archive.patch and the
     // archive Links, which push without touching the exit source.
-    const moves = [{ tab: 'stats' }, { bookId: 'book-a' }, { bookId: 'book-b' }]
+    const moves = [{ view: 'overview' }, { bookId: 'book-a' }, { bookId: 'book-b' }]
     for (const search of moves) {
       await act(async () => {
         await router.navigate({ to: '/archive', search, state: (previous) => ({ ...previous }) })

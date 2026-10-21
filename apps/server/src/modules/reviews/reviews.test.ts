@@ -130,6 +130,7 @@ describe('book reviews', () => {
     app.use('*', async (c, next) => {
       const id = c.req.header('x-test-user')
       c.set('user', id ? { id, username: id, role: 'member', avatarKey: null } : null)
+      c.set('guest', c.req.header('x-test-guest') === '1')
       await next()
     })
     app.route('/api/v1/annotations', annotationRoutes)
@@ -141,6 +142,69 @@ describe('book reviews', () => {
     db.insert(schema.ideas).values({ id: 'only-author', userId: 'author', bookVersionId: 'v1', cfiRange: 'txt:0', note: 'Private body', createdAt: now, updatedAt: now }).run()
     const response = await app.request('/api/v1/annotations/mine?userId=author', { headers: { 'x-test-user': 'admin' } })
     expect(await response.json()).toMatchObject({ data: { entries: [] } })
+  })
+
+  it('enforces homepage login, privacy, public modules, owner completeness, and book ACL filtering', async () => {
+    db.update(schema.users).set({ bio: 'A short public bio' }).where(eq(schema.users.id, 'author')).run()
+    db.insert(schema.bookStates).values([
+      { userId: 'author', bookVersionId: 'v1', readStatus: 'reading', percent: 25, lastReadAt: 30, updatedAt: 30 },
+      { userId: 'author', bookVersionId: 'v2', readStatus: 'reading', percent: 50, lastReadAt: 20, updatedAt: 20 },
+      { userId: 'author', bookVersionId: 'va', readStatus: 'reading', percent: 75, lastReadAt: 10, updatedAt: 10 },
+    ]).run()
+    db.insert(schema.settings).values({ id: 'author-profile', userId: 'author', key: 'profile', value: { isPublic: false } }).run()
+
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('*', async (c, next) => {
+      const id = c.req.header('x-test-user')
+      c.set('user', id ? { id, username: id, role: 'member', avatarKey: null } : null)
+      c.set('guest', c.req.header('x-test-guest') === '1')
+      await next()
+    })
+    app.route('/api/v1/reviews', reviewRoutes)
+
+    expect((await app.request('/api/v1/reviews/author/author?profile=1')).status).toBe(401)
+    expect((await app.request('/api/v1/reviews/author/author?profile=1', { headers: { 'x-test-guest': '1' } })).status).toBe(401)
+
+    const privateResponse = await app.request('/api/v1/reviews/author/author?profile=1', { headers: { 'x-test-user': 'member' } })
+    expect(await privateResponse.json()).toEqual({
+      data: {
+        author: { id: 'author', name: 'author', avatarKey: null },
+        isOwner: false,
+        visibility: 'private',
+        reviews: { entries: [], page: 1, hasMore: false },
+      },
+    })
+
+    const ownerPrivate = await readerProfile('author', 'author', { page: 1, pageSize: 20 }, { homepage: true, today: '2026-10-22' })
+    expect(ownerPrivate).toMatchObject({ isOwner: true, visibility: 'public', showStats: true, showShowcase: true })
+    expect(ownerPrivate.author).toMatchObject({ bio: 'A short public bio', createdAt: now })
+    expect(ownerPrivate.currentlyReading?.map((book) => book.id)).toEqual(['v1', 'v2', 'va'])
+
+    db.update(schema.settings).set({ value: { isPublic: true, showPublicStats: false, showPublicShowcase: true } }).where(eq(schema.settings.id, 'author-profile')).run()
+    const publicResponse = await app.request('/api/v1/reviews/author/author?profile=1', { headers: { 'x-test-user': 'member' } })
+    const publicPayload = (await publicResponse.json() as { data: Awaited<ReturnType<typeof readerProfile>> }).data
+    expect(publicPayload).toMatchObject({
+      visibility: 'public',
+      isOwner: false,
+      showStats: false,
+      showShowcase: true,
+      author: { bio: 'A short public bio', createdAt: now },
+    })
+    expect(publicPayload).not.toHaveProperty('summary')
+    expect(publicPayload.currentlyReading?.map((book) => book.id)).toEqual(['v1', 'v2'])
+    expect(publicPayload.currentlyReading?.some((book) => book.id === 'va')).toBe(false)
+
+    db.update(schema.settings).set({ value: { isPublic: true, showPublicStats: false, showPublicShowcase: false } }).where(eq(schema.settings.id, 'author-profile')).run()
+    const modulesOff = await readerProfile('member', 'author', { page: 1, pageSize: 20 }, { homepage: true, today: '2026-10-22' })
+    expect(modulesOff).toMatchObject({ showStats: false, showShowcase: false })
+    expect(modulesOff).not.toHaveProperty('summary')
+    expect(modulesOff).not.toHaveProperty('currentlyReading')
+
+    const ownerAfterPublicOff = await readerProfile('author', 'author', { page: 1, pageSize: 20 }, { homepage: true, today: '2026-10-22' })
+    expect(ownerAfterPublicOff).toMatchObject({ showStats: true, showShowcase: true })
+    expect(ownerAfterPublicOff.summary).toBeDefined()
+    expect(ownerAfterPublicOff.currentlyReading?.map((book) => book.id)).toEqual(['v1', 'v2', 'va'])
   })
 
   it('projects other profiles only through current shared work permissions', async () => {

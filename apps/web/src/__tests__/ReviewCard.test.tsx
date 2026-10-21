@@ -53,8 +53,11 @@ const REVIEW: Review = {
 describe('ReviewCard author link', () => {
   it('navigates to the public profile as an in-app route with the author id', () => {
     render(<ReviewCard review={REVIEW} />)
-    const link = screen.getByText('Author One').closest('a')!
-    expect(link.getAttribute('data-to')).toBe('/profile')
-    expect(JSON.parse(link.getAttribute('data-search')!)).toMatchObject({ userId: 'author-1' })
+    const links = screen.getAllByText('Author One').map((name) => name.closest('a')!)
+    expect(links).toHaveLength(2)
+    for (const link of links) {
+      expect(link.getAttribute('data-to')).toBe('/profile')
+      expect(JSON.parse(link.getAttribute('data-search')!)).toMatchObject({ userId: 'author-1' })
+    }
   })
 })

@@ -52,7 +52,12 @@ reviewRoutes.get('/mine', async (c) => {
 reviewRoutes.get('/author/:userId', async (c) => {
   const query = archiveQuerySchema.safeParse(c.req.query())
   if (!query.success) throw new AppError('VALIDATION_ERROR')
-  return c.json({ data: await readerProfile(c.get('user')?.id ?? null, c.req.param('userId'), query.data) })
+  const homepage = c.req.query('profile') === '1'
+  if (homepage && !c.get('user')) throw new AppError('UNAUTHORIZED')
+  return c.json({ data: await readerProfile(c.get('user')?.id ?? null, c.req.param('userId'), query.data, {
+    homepage,
+    today: c.req.query('today'),
+  }) })
 })
 
 reviewRoutes.post('/', async (c) => {

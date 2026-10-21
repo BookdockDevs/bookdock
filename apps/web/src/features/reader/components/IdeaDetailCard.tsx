@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Link } from '@tanstack/react-router'
 
 import { avatarUrl } from '@/lib/avatar'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -63,6 +64,19 @@ export default function IdeaDetailCard({
     : 'outline-none focus-visible:ring-1 focus-visible:ring-stone-400 dark:focus-visible:ring-stone-500'
   const surfaceBg = theme === 'reader' ? 'bg-[var(--bd-read-bg)]' : 'bg-white dark:bg-stone-900'
   const quote = quoteText ?? detail.annotation.text
+  const authorName = detail.authorName ?? _('annotation.myNote')
+  const authorIdentity = (
+    <>
+      {detailAvatarUrl ? (
+        <img src={detailAvatarUrl} alt="" decoding="async" className="h-7 w-7 shrink-0 rounded-full object-cover" />
+      ) : (
+        <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-500/10', subText)}>
+          <BulbIcon size={15} />
+        </span>
+      )}
+      <span className="truncate text-sm font-medium">{authorName}</span>
+    </>
+  )
   const header = (
       <div className={cn('flex items-center justify-between px-3 pt-3 pb-2 border-b border-stone-200/40 dark:border-stone-800/40', surface && `shrink-0 ${surfaceBg}`)}>
         <div className="flex items-center gap-2 min-w-0">
@@ -73,14 +87,7 @@ export default function IdeaDetailCard({
           >
             <ChevronLeftIcon />
           </button>
-          {detailAvatarUrl ? (
-            <img src={detailAvatarUrl} alt="" decoding="async" className="h-7 w-7 shrink-0 rounded-full object-cover" />
-          ) : (
-            <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-500/10', subText)}>
-              <BulbIcon size={15} />
-            </span>
-          )}
-          <span className="truncate text-sm font-medium">{detail.authorName ?? _('annotation.myNote')}</span>
+          {detail.authorId ? <Link to="/profile" search={{ userId: detail.authorId }} onClick={(event) => event.stopPropagation()} className="relative z-10 flex min-w-0 items-center gap-2">{authorIdentity}</Link> : authorIdentity}
         </div>
         <div className={cn('flex items-center gap-0.5 shrink-0 text-xs', subText)}>
           {onToggleLike && (

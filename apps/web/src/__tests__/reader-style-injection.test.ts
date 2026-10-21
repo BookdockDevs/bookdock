@@ -63,10 +63,11 @@ describe('reader stylesheet injection', () => {
     const second = bareChapter()
     let doc = first
     ;(reader as any).view.renderer.getContents = () => [{ doc, index: 0 }]
+    reader.applyFont({ ...(reader as any).font, overrideBookFont: true })
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       if (doc === first) {
         doc = second
-        reader.applyFont({ ...(reader as any).font, fontCss: '@font-face { font-family: Test; src: url("test.woff2"); }' })
+        reader.applyFont({ ...(reader as any).font, fontCss: '@font-face { font-family: Test; src: url("test.woff2"); }', overrideBookFont: true })
       }
       callback(0)
       return 1
@@ -86,7 +87,7 @@ describe('reader stylesheet injection', () => {
     const doc = bareChapter()
     Object.defineProperty(doc, 'fonts', { value: { load: vi.fn() } })
     ;(reader as any).view.renderer.getContents = () => [{ doc, index: 0 }]
-    reader.applyFont({ ...(reader as any).font, fontCss: '@import url("https://example.com/fonts.css");' })
+    reader.applyFont({ ...(reader as any).font, fontCss: '@import url("https://example.com/fonts.css");', overrideBookFont: true })
     const fallback = vi.fn()
     reader.on('fontFallback', fallback)
 
@@ -96,6 +97,23 @@ describe('reader stylesheet injection', () => {
     expect(fallback).toHaveBeenCalledOnce()
     expect((reader as any).documentHasAppStyles(doc)).toBe(true)
     expect(doc.querySelector('style[data-bd-app-style]')?.textContent).not.toContain('@import')
+  })
+
+  it('does not report a timeout for book-owned fonts when override is disabled', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1 })
+    const { reader } = readerWithStyles()
+    const doc = bareChapter()
+    Object.defineProperty(doc, 'fonts', { value: { load: vi.fn(() => new Promise<FontFace[]>(() => {})) } })
+    ;(reader as any).view.renderer.getContents = () => [{ doc, index: 0 }]
+    reader.applyFont({ ...(reader as any).font, fontCss: '@import url("https://example.com/fonts.css");', overrideBookFont: false })
+    const fallback = vi.fn()
+    reader.on('fontFallback', fallback)
+
+    const prepared = await (reader as any).prepareVisibleContents()
+
+    expect(prepared.doc).toBe(doc)
+    expect(fallback).not.toHaveBeenCalled()
+    expect(doc.fonts.load).not.toHaveBeenCalled()
   })
 
   it('applies core settings while a separate font import is pending and retains the font node on layout changes', () => {

@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, sanitizeUsername } from '@bookdock/shared'
@@ -224,19 +225,20 @@ function LibrarySelectDropdown({
 }
 
 interface UserManagementSectionProps {
-  initialTab?: 'instance' | 'library'
-  initialLibraryId?: string
+  tab: 'instance' | 'library'
+  libraryId?: string
   lockTab?: 'instance' | 'library'
+  onContextChange: (tab: 'instance' | 'library', libraryId: string | undefined) => void
 }
 
 export default function UserManagementSection({
-  initialTab = 'instance',
-  initialLibraryId,
+  tab: selectedTab,
+  libraryId: selectedLibraryId,
   lockTab,
-}: UserManagementSectionProps = {}) {
+  onContextChange,
+}: UserManagementSectionProps) {
   const _ = useTranslation()
-  const [tab, setTab] = useState<'instance' | 'library'>(lockTab ?? initialTab)
-  const [selectedLibraryId, setSelectedLibraryId] = useState<string | undefined>(initialLibraryId)
+  const tab = lockTab ?? selectedTab
   const [createOpen, setCreateOpen] = useState(false)
   const { data: librariesData } = useLibraries()
 
@@ -247,21 +249,6 @@ export default function UserManagementSection({
   const activeLibraryId = selectedLibraryId && sharedLibraries.some((l) => l.id === selectedLibraryId)
     ? selectedLibraryId
     : sharedLibraries[0]?.id
-
-  useEffect(() => {
-    if (lockTab) setTab(lockTab)
-    else if (initialTab) setTab(initialTab)
-  }, [initialTab, lockTab])
-
-  useEffect(() => {
-    if (initialLibraryId) setSelectedLibraryId(initialLibraryId)
-  }, [initialLibraryId])
-
-  useEffect(() => {
-    if (!selectedLibraryId && sharedLibraries[0]?.id) {
-      setSelectedLibraryId(sharedLibraries[0].id)
-    }
-  }, [selectedLibraryId, sharedLibraries])
 
   return (
     <SettingsCard
@@ -274,7 +261,7 @@ export default function UserManagementSection({
             <div className="flex h-8 items-center rounded-xl bg-stone-100 p-0.5 dark:bg-stone-800">
               <button
                 type="button"
-                onClick={() => setTab('instance')}
+                onClick={() => onContextChange('instance', activeLibraryId)}
                 className={cn(
                   'flex h-7 items-center rounded-lg px-2.5 text-xs font-medium transition-all',
                   tab === 'instance'
@@ -286,7 +273,7 @@ export default function UserManagementSection({
               </button>
               <button
                 type="button"
-                onClick={() => setTab('library')}
+                onClick={() => onContextChange('library', activeLibraryId)}
                 className={cn(
                   'flex h-7 items-center rounded-lg px-2.5 text-xs font-medium transition-all',
                   tab === 'library'
@@ -317,7 +304,7 @@ export default function UserManagementSection({
             <LibrarySelectDropdown
               libraries={sharedLibraries}
               selectedId={activeLibraryId}
-              onSelect={(id) => setSelectedLibraryId(id)}
+              onSelect={(id) => onContextChange(tab, id)}
               selectAriaLabel={_('admin.selectLibrary')}
             />
           )}
@@ -541,8 +528,10 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete
     <tr className="transition-colors hover:bg-stone-50/50 dark:hover:bg-stone-800/30">
       <td className="py-3 pl-4 pr-3 sm:pl-6">
         <span className="flex items-center gap-2.5 min-w-0">
-          <MemberAvatar username={user.username} avatarKey={user.avatarKey} isOwner={user.role === 'owner'} />
-          <span className="font-medium text-stone-800 dark:text-stone-100 truncate">{user.username}</span>
+          <Link to="/profile" search={{ userId: user.id }} aria-label={user.username} className="flex min-w-0 items-center gap-2.5 rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-blue-500">
+            <MemberAvatar username={user.username} avatarKey={user.avatarKey} isOwner={user.role === 'owner'} />
+            <span className="truncate font-medium text-stone-800 dark:text-stone-100">{user.username}</span>
+          </Link>
           {isSelf && <span className="ml-1 rounded bg-stone-100 px-1 py-0.5 text-[11px] text-stone-400 shrink-0 dark:bg-stone-800">{_('admin.self')}</span>}
         </span>
       </td>
@@ -999,8 +988,10 @@ function LibraryMembersView({
                 <tr className="transition-colors hover:bg-stone-50/50 dark:hover:bg-stone-800/30">
                   <td className="py-3 pl-4 pr-3 sm:pl-6">
                     <span className="flex items-center gap-2.5 min-w-0">
-                      <MemberAvatar username={owner.username} avatarKey={owner.avatarKey} isOwner />
-                      <span className="font-medium text-stone-800 dark:text-stone-100 truncate">{owner.username}</span>
+                      <Link to="/profile" search={{ userId: owner.id }} aria-label={owner.username} className="flex min-w-0 items-center gap-2.5 rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-blue-500">
+                        <MemberAvatar username={owner.username} avatarKey={owner.avatarKey} isOwner />
+                        <span className="truncate font-medium text-stone-800 dark:text-stone-100">{owner.username}</span>
+                      </Link>
                       {currentUser?.id === owner.id && (
                         <span className="ml-1 rounded bg-stone-100 px-1 py-0.5 text-[11px] text-stone-400 shrink-0 dark:bg-stone-800">{_('admin.self')}</span>
                       )}
@@ -1131,8 +1122,10 @@ function LibraryMemberRow({
     <tr className="transition-colors hover:bg-stone-50/50 dark:hover:bg-stone-800/30">
       <td className="py-3 pl-4 pr-3 sm:pl-6">
         <span className="flex items-center gap-2.5 min-w-0">
-          <MemberAvatar username={member.username} avatarKey={member.avatarKey} />
-          <span className="font-medium text-stone-800 dark:text-stone-100 truncate">{member.username}</span>
+          <Link to="/profile" search={{ userId: member.userId }} aria-label={member.username} className="flex min-w-0 items-center gap-2.5 rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-blue-500">
+            <MemberAvatar username={member.username} avatarKey={member.avatarKey} />
+            <span className="truncate font-medium text-stone-800 dark:text-stone-100">{member.username}</span>
+          </Link>
           {isSelf && (
             <span className="ml-1 rounded bg-stone-100 px-1 py-0.5 text-[11px] text-stone-400 shrink-0 dark:bg-stone-800">{_('admin.self')}</span>
           )}

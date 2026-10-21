@@ -134,7 +134,7 @@ export default function ArchiveOverviewDashboard({
           state={(previous) => ({ ...previous })}
           onClick={() => onSelectType?.(card.type)}
           role="button"
-          className="group flex flex-col rounded-xl bg-stone-50/70 p-3.5 transition-colors hover:bg-stone-100/70 sm:p-4 dark:bg-stone-800/40 dark:hover:bg-stone-800/60"
+          className="group flex flex-col rounded-xl bg-stone-50/90 ring-1 ring-stone-900/5 p-3.5 transition-colors hover:bg-stone-100/90 sm:p-4 dark:bg-stone-800/40 dark:hover:bg-stone-800/60 dark:ring-white/5"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-stone-500 dark:text-stone-400">

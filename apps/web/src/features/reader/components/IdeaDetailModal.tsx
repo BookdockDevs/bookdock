@@ -54,6 +54,7 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
   const idea = discussion.data.data.idea
   const entry: IdeaEntry = {
     annotation: idea.annotation,
+    authorId: idea.author.id,
     authorName: idea.author.name,
     authorAvatarKey: idea.author.avatarKey,
     own: idea.own,

@@ -251,6 +251,10 @@ export interface UpdateUsernameReq {
   username: string
 }
 
+export interface UpdateBioReq {
+  bio: string
+}
+
 export interface UpdateTimezoneReq {
   /** IANA zone id, or null/'' to fall back to UTC. */
   timezone: string | null
@@ -385,12 +389,15 @@ export interface LibrarySettings {
   recentlyReadStyle?: RecentlyReadStyle
 }
 
-/** What the owner's own profile page renders. Display preferences, not access control. */
+/** Profile display preferences and public homepage visibility controls. */
 export interface ProfileSettings {
+  /** Legacy owner-view preferences retained for stored settings compatibility. */
   showStats?: boolean
   showShowcase?: boolean
-  /** Hides the owner's own profile sections from the owner's view. The server
-   *  enforces no profile visibility, so this is not an ACL. */
+  /** Public homepage module controls. Omitted means enabled. */
+  showPublicStats?: boolean
+  showPublicShowcase?: boolean
+  /** Server-enforced public homepage ACL. Omitted means public. */
   isPublic?: boolean
 }
 
