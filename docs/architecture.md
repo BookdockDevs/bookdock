@@ -199,6 +199,10 @@ refreshes on focus, and local writes invalidate notification projections. Target
 views reuse existing cards and discussions, focusing the exact comment or like
 tab. Unresolvable reading positions never substitute a source.
 
+The short-lived unread-count cache is valid only for the same database connection
+and unchanged SQLite write count. Visibility, membership and target changes must
+invalidate cached counts even when they do not insert or update a notification.
+
 ### Reader profile v2
 
 Archive location availability is a source/revision eligibility check; the live
@@ -869,9 +873,10 @@ Chapter-title layout is a separate reader preference: alignment (start,
 center, or end), size relative to body text, and spacing above and below the
 title. The spacing uses body-text units, so changing title size alone does not
 change either gap. These preferences apply to generated TXT chapter headings
-in both reading modes. In EPUB they apply only with `overrideBookLayout` enabled
-and only to a heading that can be identified from the book's TOC; unmatched
-content keeps its authored style. They do not change in-body subheadings or
+in both reading modes. In EPUB they apply with `overrideBookLayout` or clean
+reading enabled and only to a heading that can be identified from the book's
+TOC; unmatched content keeps its authored style outside clean reading. They do
+not change in-body subheadings or
 page geometry. Existing reading profiles without these fields resolve to the
 generated TXT heading's previous appearance.
 
@@ -881,6 +886,28 @@ legacy content, and unsupported pagination remain renderer-controlled in both
 modes. Font family remains independently controlled by `overrideBookFont`,
 with TXT using the reader fallback because generated TXT content has no
 authored font family.
+
+`cleanReading` is a reading-profile boolean and follows the same effective
+resolution chain as the other profile keys: a user-scoped BookVersion override,
+the bound preset, the device active preset, then the global snapshot. Its
+effective value is passed into the renderer; the renderer never reads the
+profile store directly. It applies only to reflowable EPUBs. TXT keeps its
+existing generated-EPUB behavior, and fixed-layout EPUBs ignore the value and
+do not expose the control.
+
+For a reflowable EPUB, clean reading is a renderer input boundary rather than a
+post-render hide-only flag. The EPUB loader blocks stylesheets, fonts, image and
+audio/video resources before entry bytes are read, and the markup transform
+removes source style/resource attributes while retaining text, headings, links,
+footnotes, lists and tables. Bookdock's stylesheet then supplies the user's
+normal typography and layout settings, with simplified table structure and
+hidden media. Source presentation elements retain their positions in the body;
+their styles and resource references are cleared without removing the elements.
+Normal and clean parsed-book/resource caches are isolated; the
+raw chapter-text cache remains shared and unmodified so search, replacement,
+conversion, AI text and CFI/annotation text anchors keep their existing source
+order. Toggling the value rebuilds the existing view with the saved CFI/fraction
+and keeps the existing loading mask and stale-renderer guards.
 
 Reader theme selection separates the user's mode intent from the effective
 palette. The mode is `system`, `light`, or `dark`; `system` uses the user's

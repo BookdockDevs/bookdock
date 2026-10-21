@@ -91,6 +91,7 @@ export interface ReadingRecord {
  * mirroring the global ui.store model.
  */
 export interface ViewSettings {
+  cleanReading?: boolean
   fontSize?: number
   lineHeight?: number
   pageWidth?: number

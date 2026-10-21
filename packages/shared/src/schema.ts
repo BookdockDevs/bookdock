@@ -787,6 +787,7 @@ export const bookMetadataSchema = z.object({
 })
 
 export const viewSettingsSchema = z.object({
+  cleanReading: z.boolean().optional(),
   fontSize: z.number().min(12).max(64).optional(),
   lineHeight: z.number().min(1.2).max(2.5).optional(),
   pageWidth: z.number().min(0).max(1800).optional(),

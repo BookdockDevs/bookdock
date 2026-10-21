@@ -114,6 +114,8 @@ interface UiState {
   columnGapPage: number
 
   textAlignJustify: boolean
+  cleanReading: boolean
+  setCleanReading: (cleanReading: boolean) => void
   overrideBookFont: boolean
   overrideBookLayout: boolean
   /** Account-local display preference; never synced or used as authorization. */
@@ -452,6 +454,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   columnGapPage: initialColumnGapPage,
 
   textAlignJustify: getInitialBoolean('bd-text-align-justify', false),
+  cleanReading: READING_PROFILE_DEFAULTS.cleanReading,
   overrideBookFont: getInitialBoolean('bd-override-book-font', false),
   overrideBookLayout: getInitialBoolean('bd-override-book-layout', false),
   revealHidden: false,
@@ -802,6 +805,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   setTextAlignJustify: (textAlignJustify) => {
     setStorage('bd-text-align-justify', String(textAlignJustify))
     set({ textAlignJustify })
+  },
+  setCleanReading: (cleanReading) => {
+    set({ cleanReading })
   },
   setOverrideBookFont: (overrideBookFont) => {
     setStorage('bd-override-book-font', String(overrideBookFont))

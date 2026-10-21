@@ -1243,8 +1243,10 @@ describe('reader settings (per-book reading settings)', () => {
   it('stores user settings separately from the content revision', () => {
     expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 24 } })).toEqual({ viewSettings: { fontSize: 24 } })
     expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { lineHeight: 2.2 } })).toEqual({ viewSettings: { fontSize: 24, lineHeight: 2.2 } })
+    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { cleanReading: true } })).toEqual({ viewSettings: { fontSize: 24, lineHeight: 2.2, cleanReading: true } })
+    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { cleanReading: false } })).toEqual({ viewSettings: { fontSize: 24, lineHeight: 2.2, cleanReading: false } })
     expect(updateReaderBookSettings(ownerId, book.id, { boundPresetId: 'preset-a' })).toEqual({
-      viewSettings: { fontSize: 24, lineHeight: 2.2 },
+      viewSettings: { fontSize: 24, lineHeight: 2.2, cleanReading: false },
       boundPresetId: 'preset-a',
     })
     expect(metaOf().viewSettings).toBeUndefined()

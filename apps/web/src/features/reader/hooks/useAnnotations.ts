@@ -73,10 +73,15 @@ export function useCreateAnnotation(bookId: string) {
       queryClient.setQueryData<AnnotationsCache>(key, (old) => ({
         data: [...(old?.data ?? []).filter((a) => !replaced.has(a.id)), optimistic],
       }))
-      return { previous, optimisticId: optimistic.id }
+      return { replaced: previous?.data.filter((a) => replaced.has(a.id)) ?? [], optimisticId: optimistic.id }
     },
     onError: (_err, _body, context) => {
-      if (context?.previous) queryClient.setQueryData(key, context.previous)
+      if (!context) return
+      queryClient.setQueryData<AnnotationsCache>(key, (old) => {
+        const remaining = (old?.data ?? []).filter((a) => a.id !== context.optimisticId)
+        const ids = new Set(remaining.map((a) => a.id))
+        return { data: [...remaining, ...context.replaced.filter((a) => !ids.has(a.id))] }
+      })
     },
     onSuccess: (res, _body, context) => {
       queryClient.setQueryData<AnnotationsCache>(key, (old) =>

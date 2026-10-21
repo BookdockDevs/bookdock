@@ -645,6 +645,31 @@ describe('book reviews', () => {
     expect((await signed.request('/notifications?pageSize=500')).status).toBe(400)
   })
 
+  it('reuses unread counts until database writes change target access', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', body: 'visible', visibility: 'shared' })
+    await createReviewComment('outsider', review.id, { body: 'interaction' })
+    const select = vi.spyOn(db, 'select')
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    const projectedQueries = select.mock.calls.length
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    expect(select).toHaveBeenCalledTimes(projectedQueries)
+
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 15_000)
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    expect(select.mock.calls.length).toBeGreaterThan(projectedQueries)
+
+    await updateReview('author', review.id, { visibility: 'private' })
+    expect((await unreadNotificationCount('author')).count).toBe(0)
+    await updateReview('author', review.id, { visibility: 'shared' })
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+
+    const replacement = drizzle(sqlite, { schema })
+    vi.mocked(client.getDb).mockReturnValue(replacement)
+    const replacementSelect = vi.spyOn(replacement, 'select')
+    expect((await unreadNotificationCount('author')).count).toBe(1)
+    expect(replacementSelect).toHaveBeenCalled()
+  })
+
   it('omits private or inaccessible notification targets and restores retained read state', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: 'sensitive', visibility: 'shared' })
     await createReviewComment('outsider', review.id, { body: 'sensitive interaction' })

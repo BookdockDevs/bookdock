@@ -209,6 +209,9 @@ export interface TocItem {
 }
 
 export interface BookReader {
+  readonly isFixedLayout: boolean
+  /** Position to carry across a renderer replacement for the same book. */
+  getCurrentPosition?(): { cfi: string | null; fraction: number | null }
   mount(container: HTMLElement, initialTarget?: string, initialFraction?: number): Promise<void>
   display(target?: string, opts?: { internal?: boolean; showPending?: boolean }): Promise<void>
   next(): Promise<void>

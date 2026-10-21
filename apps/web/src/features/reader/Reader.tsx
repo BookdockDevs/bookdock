@@ -43,6 +43,7 @@ import { ReaderHeader } from './components/ReaderHeader'
 import { ReaderSidebar } from './components/ReaderSidebar'
 import { Ribbon } from './components/Ribbon'
 import { SelectionToolbar } from './components/SelectionToolbar'
+import { clearReaderSelection } from './lib/reader-selection'
 import { ImageContextMenu } from './components/ImageContextMenu'
 import ShareCardDialog from './components/share/ShareCardDialog'
 import { ProgressStrip } from './components/ProgressStrip'
@@ -56,8 +57,8 @@ import ReplacementForm from '../settings/components/ReplacementForm'
 import { ViewSettingsContext } from './view-settings-context'
 import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
 import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
-import type { PerBookSettingKey, GlobalViewSettings } from './lib/view-settings'
-import type { FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnotation, SelectionInfo } from './types'
+import type { PerBookSettingKey, PerBookSettingValue, GlobalViewSettings } from './lib/view-settings'
+import type { BookReader, FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnotation, SelectionInfo } from './types'
 import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
 import { ImageViewer } from './components/ImageViewer'
@@ -271,6 +272,7 @@ export default function Reader() {
   useEffect(() => {
     footerVisibleRef.current = footerVisible
   }, [footerVisible])
+  const rendererRef = useRef<BookReader | null>(null)
   const setSelection = useReaderState((s) => s.setSelection)
   const selection = useReaderState((s) => s.selection)
   const resetForBook = useReaderState((s) => s.resetForBook)
@@ -367,6 +369,7 @@ export default function Reader() {
 
   // --- Per-book reading settings (F1 layering) ---------------------------
   const fontSize = useUiStore((s) => s.fontSize)
+  const cleanReading = useUiStore((s) => s.cleanReading)
   const lineHeight = useUiStore((s) => s.lineHeight)
   const pageWidth = useUiStore((s) => s.pageWidth)
   const horizontalPadding = useUiStore((s) => s.horizontalPadding)
@@ -380,6 +383,7 @@ export default function Reader() {
   const pageHorizontalPadding = useUiStore((s) => s.pageHorizontalPadding)
   const pageVerticalPadding = useUiStore((s) => s.pageVerticalPadding)
   const globalSettings: GlobalViewSettings = useMemo(() => ({
+    cleanReading,
     fontSize,
     lineHeight,
     pageWidth,
@@ -395,11 +399,12 @@ export default function Reader() {
     pageVerticalPadding,
     readingMode,
   }), [
-    fontSize, lineHeight, pageWidth, horizontalPadding, verticalPadding, pageColumns, columnGap,
+    cleanReading, fontSize, lineHeight, pageWidth, horizontalPadding, verticalPadding, pageColumns, columnGap,
     scrollPageWidth, scrollHorizontalPadding, scrollVerticalPadding,
     pagePageWidth, pageHorizontalPadding, pageVerticalPadding, readingMode,
   ])
   const setFontSize = useUiStore((s) => s.setFontSize)
+  const setCleanReading = useUiStore((s) => s.setCleanReading)
   const setLineHeight = useUiStore((s) => s.setLineHeight)
   const setPageWidth = useUiStore((s) => s.setPageWidth)
   const setHorizontalPadding = useUiStore((s) => s.setHorizontalPadding)
@@ -407,7 +412,12 @@ export default function Reader() {
   const setPageColumns = useUiStore((s) => s.setPageColumns)
   const setColumnGap = useUiStore((s) => s.setColumnGap)
   const globalSetterForKey = useCallback(
-    (key: PerBookSettingKey, value: number) => {
+    <K extends PerBookSettingKey,>(key: K, value: PerBookSettingValue<K>) => {
+      if (key === 'cleanReading') {
+        if (typeof value === 'boolean') setCleanReading(value)
+        return
+      }
+      if (typeof value !== 'number') return
       switch (key) {
         case 'fontSize': setFontSize(value); break
         case 'lineHeight': setLineHeight(value); break
@@ -418,7 +428,7 @@ export default function Reader() {
         case 'columnGap': setColumnGap(value); break
       }
     },
-    [setFontSize, setLineHeight, setPageWidth, setHorizontalPadding, setVerticalPadding, setPageColumns, setColumnGap],
+    [setCleanReading, setFontSize, setLineHeight, setPageWidth, setHorizontalPadding, setVerticalPadding, setPageColumns, setColumnGap],
   )
 
   // Per-book settings belong to the current user and BookVersion, not to the
@@ -537,7 +547,7 @@ export default function Reader() {
       saveViewSettings(null)
     }
   }, [saveViewSettings])
-  const updateSetting = useCallback((key: PerBookSettingKey, value: number) => {
+  const updateSetting = useCallback(<K extends PerBookSettingKey,>(key: K, value: PerBookSettingValue<K>) => {
     if (perBookActiveRef.current) {
       saveViewSettings(viewSettingsDiffForKey(key, value, readingMode))
     } else {
@@ -902,7 +912,7 @@ export default function Reader() {
     },
     onError: () => setLoadError({ kind: 'parse' }),
     onFootnoteOpen: (entry) => {
-      setSelection(null)
+      clearReaderSelection(rendererRef.current)
       setSettingsOpen(false)
       setAutoReadingOpen(false)
       setFootnoteEntry(entry)
@@ -949,7 +959,7 @@ export default function Reader() {
         (e.chapterIndex !== undefined && currentChapterIndex !== null && e.chapterIndex !== currentChapterIndex),
       )
       if (chapterChanged) {
-        if (!activeNoteEditor) setSelection(null)
+        if (!activeNoteEditor) clearReaderSelection(rendererRef.current)
       }
       setPercent(e.percent)
       setCurrentContentCfi(e.contentCfi ?? null)
@@ -1026,10 +1036,10 @@ export default function Reader() {
         ?? publicMarkers.find((idea) => idea.annotation.cfiRange === e.cfiRange)?.annotation
       const isSameSelection = current?.cfiRange === e.cfiRange && Boolean(current?.isIdea) === (annotation?.type === 'note')
       if (!annotation || isSameSelection) {
-        rendererRef.current?.clearSelection()
-        setSelection(null)
+        clearReaderSelection(rendererRef.current)
         return
       }
+      rendererRef.current?.deselect()
       setSelection({
         cfiRange: e.cfiRange,
         text: annotation.text,
@@ -1121,9 +1131,24 @@ export default function Reader() {
         ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
       }, { onError: (err) => notify.error(getUserErrorNotification(err, 'annotation.saveFailed')) })
       // "选中即划" keeps the toolbar open so the fresh highlight can be restyled
-      if (!e.keepSelection) setSelection(null)
+      if (!e.keepSelection) clearReaderSelection(rendererRef.current)
     },
   })
+
+  // Renderer replacement briefly clears `renderer`; keep the last confirmed
+  // format capability so the open settings panel does not remove and recreate
+  // the clean-reading row during that transition.
+  const cleanReadingSupportRef = useRef({ bookId: '', supported: false })
+  const bookFormat = bookQuery.data?.data?.format
+  if (cleanReadingSupportRef.current.bookId !== id) {
+    cleanReadingSupportRef.current = { bookId: id, supported: false }
+  }
+  if (bookFormat !== 'epub') {
+    cleanReadingSupportRef.current.supported = false
+  } else if (renderer) {
+    cleanReadingSupportRef.current.supported = !renderer.isFixedLayout
+  }
+  const cleanReadingSupported = bookFormat === 'epub' && cleanReadingSupportRef.current.supported
 
   const playbackCoordinator = useMemo(() => new ReaderPlaybackCoordinator(), [])
 
@@ -1282,7 +1307,7 @@ export default function Reader() {
       if (isSelectionIdea(currentSelection, activeNoteEditor, annotations?.data, publicMarkers)) {
         return
       }
-      setSelection(null)
+      clearReaderSelection(rendererRef.current)
     }
     containerEl.addEventListener('content-click', handler)
     return () => {
@@ -1310,14 +1335,13 @@ export default function Reader() {
       const currentSelection = useReaderState.getState().selection
       const activeNoteEditor = useReaderState.getState().noteEditorRange
       if (!isSelectionIdea(currentSelection, activeNoteEditor, annotations?.data, publicMarkers)) {
-        setSelection(null)
+        clearReaderSelection(rendererRef.current)
       }
     }
     containerEl.addEventListener('scroll', onScroll, { passive: true })
     return () => containerEl.removeEventListener('scroll', onScroll)
   }, [containerEl, setSelection, annotations?.data, publicMarkers])
 
-  const rendererRef = useRef(renderer)
   useEffect(() => {
     rendererRef.current = renderer
   }, [renderer])
@@ -1368,8 +1392,7 @@ export default function Reader() {
         }
         return
       }
-      rendererRef.current?.clearSelection()
-      setSelection(null)
+      clearReaderSelection(rendererRef.current)
     })
     ro.observe(containerEl)
     return () => ro.disconnect()
@@ -1464,23 +1487,23 @@ export default function Reader() {
     if (!toolbarLocked) setSidebarOpen(false)
     setTtsOpen(false)
     setAutoReadingOpen(false)
-    setSelection(null)
+    clearReaderSelection(rendererRef.current)
     setSettingsOpen((v) => !v)
-  }, [setSelection, setSidebarOpen, toolbarLocked])
+  }, [setSidebarOpen, toolbarLocked])
 
   const onToggleTts = useCallback(() => {
     setSettingsOpen(false)
     setAutoReadingOpen(false)
-    setSelection(null)
+    clearReaderSelection(rendererRef.current)
     setTtsOpen((v) => !v)
-  }, [setSelection])
+  }, [])
 
   const onToggleAutoReading = useCallback(() => {
     setSettingsOpen(false)
     setTtsOpen(false)
-    setSelection(null)
+    clearReaderSelection(rendererRef.current)
     setAutoReadingOpen((v) => !v)
-  }, [setSelection])
+  }, [])
 
   // Starting playback means eyes on the text: starting from either panel drops
   // a pinned chrome along with the popover and retracts the header so the view
@@ -1569,6 +1592,10 @@ export default function Reader() {
         // handled the press. Progress is flushed on unmount.
         setTimeout(() => {
           if (e.defaultPrevented || consumeEscFlag()) return
+          if (useReaderState.getState().selection && !useReaderState.getState().noteEditorRange) {
+            clearReaderSelection(rendererRef.current)
+            return
+          }
           navigate({ to: '/' })
         }, 0)
         return
@@ -1736,9 +1763,13 @@ export default function Reader() {
                   autoReadingOpen={autoReadingOpen}
                   readingMode={readingMode}
                   bookId={id}
+                  cleanReadingSupported={cleanReadingSupported}
                   estimatedMinutes={estimatedMinutes}
                   onAddBookmark={isGuest ? undefined : onAddBookmark}
                   onToggleSettings={onToggleSettings}
+                  onCloseSettings={() => setSettingsOpen(false)}
+                  onCloseTts={() => setTtsOpen(false)}
+                  onCloseAutoReading={() => setAutoReadingOpen(false)}
                   onToggleTts={isGuest ? undefined : onToggleTts}
                   onToggleAutoReading={onToggleAutoReading}
                   onTtsStart={onTtsStart}

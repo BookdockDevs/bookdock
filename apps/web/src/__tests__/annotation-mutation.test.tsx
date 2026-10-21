@@ -31,3 +31,25 @@ describe('annotation length guard', () => {
     client.clear()
   })
 })
+
+
+describe('annotation create rollback', () => {
+  it('removes a failed first optimistic entry without discarding concurrent additions', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const key = ['annotations', 'book']
+    const other: AnnotationRes = { id: 'other', bookId: 'book', cfiRange: 'other-cfi', cfiAnchor: null, type: 'highlight', color: 'yellow', style: 'underline', text: 'Other quote', note: null, chapter: null, createdAt: 0, updatedAt: 0 }
+    vi.mocked(apiPost).mockImplementationOnce(async () => {
+      const optimistic = client.getQueryData<{ data: AnnotationRes[] }>(key)!
+      expect(optimistic.data[0].id).toMatch(/^temp-/)
+      client.setQueryData(key, { data: [...optimistic.data, other] })
+      throw new Error('Save failed')
+    })
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    const { result } = renderHook(() => useCreateAnnotation('book'), { wrapper })
+    await act(async () => {
+      await expect(result.current.mutateAsync({ type: 'highlight', cfiRange: 'cfi', text: 'Quote' })).rejects.toThrow('Save failed')
+    })
+    expect(client.getQueryData(key)).toEqual({ data: [other] })
+    client.clear()
+  })
+})

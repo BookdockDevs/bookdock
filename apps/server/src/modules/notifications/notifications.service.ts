@@ -77,7 +77,7 @@ export async function listNotifications(userId: string, query: NotificationQuery
   return { entries: entries.slice(0, query.pageSize), page: query.page, hasMore: entries.length > query.pageSize }
 }
 
-const unreadCountCache = new Map<string, { count: number; at: number }>()
+const unreadCountCache = new Map<string, { count: number; at: number; db: ReturnType<typeof getDb>; changes: number }>()
 const UNREAD_COUNT_TTL = 15_000
 
 export function invalidateUnreadNotificationCount(userId?: string) {
@@ -92,25 +92,29 @@ export function deleteNotification(userId: string, id: string) {
 }
 
 export async function unreadNotificationCount(userId: string) {
+  const db = getDb()
+  // Target visibility and source permissions can change without notification
+  // writes. A connection-local write count covers those paths without coupling
+  // every domain service to the notification cache.
+  const { changes } = db.get<{ changes: number }>(sql`SELECT total_changes() AS changes`)!
   const cached = unreadCountCache.get(userId)
   const now = Date.now()
-  if (cached && now - cached.at < UNREAD_COUNT_TTL) {
+  if (cached && cached.db === db && cached.changes === changes && now - cached.at < UNREAD_COUNT_TTL) {
     return { count: cached.count }
   }
 
-  const db = getDb()
   const raw = db.select({ count: sql<number>`count(*)` })
     .from(interactionNotifications)
     .where(and(eq(interactionNotifications.userId, userId), isNull(interactionNotifications.readAt)))
     .get()
   if (!raw || raw.count === 0) {
-    unreadCountCache.set(userId, { count: 0, at: now })
+    unreadCountCache.set(userId, { count: 0, at: now, db, changes })
     return { count: 0 }
   }
 
   let count = 0
   for await (const _entry of availableNotifications(userId, true)) count += 1
-  unreadCountCache.set(userId, { count, at: now })
+  unreadCountCache.set(userId, { count, at: now, db, changes })
   return { count }
 }
 

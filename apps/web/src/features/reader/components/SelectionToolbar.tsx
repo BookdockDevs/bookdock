@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
+import { clearReaderSelection } from '../lib/reader-selection'
 import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickCommands'
 import { useTtsSession } from '../hooks/useTtsSession'
 import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
@@ -46,7 +47,6 @@ interface SelectionToolbarProps {
 export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolbarProps) {
   const _ = useTranslation()
   const selection = useReaderState((s) => s.selection)
-  const setSelection = useReaderState((s) => s.setSelection)
   const setAiContext = useReaderState((s) => s.setAiContext)
   const setAiPendingCommand = useReaderState((s) => s.setAiPendingCommand)
   const currentChapter = useReaderState((s) => s.currentChapter)
@@ -71,6 +71,8 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const orphanedKeys = useReaderState((state) => state.orphanedAnnotationKeys)
   const { commands: aiCommands } = useAiQuickCommands()
 
+  const highlightPendingRef = useRef(false)
+  const [highlightPending, setHighlightPending] = useState(false)
   const [createdLocal, setCreatedLocal] = useState<AnnotationRes | null>(null)
   const [noteEditing, setNoteEditing] = useState(false)
   const [aiMenuAnchor, setAiMenuAnchor] = useState<{ left: number; top: number; bottom: number } | null>(null)
@@ -158,13 +160,14 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   if (!selection) return null
 
   function close() {
-    renderer?.clearSelection()
-    setSelection(null)
-    setNoteEditorRange(null)
+    clearReaderSelection(renderer)
   }
 
   async function highlight() {
-    if (!selection) return
+    if (!selection || highlightPendingRef.current) return
+    const snapshot = selection
+    highlightPendingRef.current = true
+    setHighlightPending(true)
     performance.mark('bd:hl:click')
     const last = getLastHighlightStyle()
     try {
@@ -186,14 +189,17 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       renderer?.deselect()
       const res = await promise
       performance.mark('bd:hl:post-done')
-      setCreatedLocal(res.data)
+      if (useReaderState.getState().selection === snapshot) setCreatedLocal(res.data)
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'annotation.saveFailed'))
+    } finally {
+      highlightPendingRef.current = false
+      setHighlightPending(false)
     }
   }
 
   async function restyle(patch: { color?: string; style?: AnnotationStyle }) {
-    if (!target) return
+    if (!target || highlightPendingRef.current || target.id.startsWith('temp-')) return
     const style = patch.style ?? target.style
     // Each style remembers its own color: switching styles restores that style's color
     const color = patch.color ?? (patch.style ? getStyleColor(style) : target.color)
@@ -208,7 +214,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
 
   async function removeAnnotation(id?: string) {
     const annotationId = id ?? target?.id
-    if (!annotationId) return
+    if (!annotationId || highlightPendingRef.current || annotationId.startsWith('temp-')) return
     try {
       await del.mutateAsync(annotationId)
       notify.success({ key: 'annotation.deleted' })
@@ -327,9 +333,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
     })
     setAiPendingCommand(command)
-    renderer?.deselect()
-    setSelection(null)
-    setNoteEditorRange(null)
+    clearReaderSelection(renderer)
     setAiMenuAnchor(null)
     setActiveNavTab('ai')
     setSidebarOpen(true)
@@ -344,9 +348,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
     })
     setAiPendingCommand(null)
-    renderer?.deselect()
-    setSelection(null)
-    setNoteEditorRange(null)
+    clearReaderSelection(renderer)
     setAiMenuAnchor(null)
     setActiveNavTab('ai')
     setSidebarOpen(true)
@@ -533,12 +535,15 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       {target && (
         <div
           ref={styleRef}
+          data-reader-selection-toolbar
+          onPointerDown={(event) => { if (event.button === 0 && event.pointerType !== 'touch' && (event.target as Element).closest('button')) event.preventDefault() }}
           className="fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_6px_rgba(0,0,0,0.06),0_6px_16px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{ left: bar.styleLeft, top: bar.styleTop, maxWidth: bar.styleWidth }}
         >
           {HIGHLIGHT_STYLES.map((s) => (
             <button
               key={s}
+              disabled={highlightPending || target.id.startsWith('temp-')}
               onClick={() => restyle({ style: s })}
               className={iconBtn(target.style === s)}
               title={_(STYLE_LABEL_KEYS[s])}
@@ -557,6 +562,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
             return (
               <button
                 key={c.name}
+                disabled={highlightPending || target.id.startsWith('temp-')}
                 onClick={() => restyle({ color: c.name })}
                 className={cn(
                   'flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform active:scale-90',
@@ -594,6 +600,8 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       )}
       <div
         ref={barRef}
+        data-reader-selection-toolbar
+        onPointerDown={(event) => { if (event.button === 0 && event.pointerType !== 'touch' && (event.target as Element).closest('button')) event.preventDefault() }}
         className="fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_8px_rgba(0,0,0,0.08),0_10px_25px_-5px_rgba(0,0,0,0.18)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{ left: bar.left, top: bar.top, maxWidth: bar.width }}
       >
@@ -601,6 +609,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           <button
             key={a.key}
             ref={a.key === 'ai-commands' ? aiMenuButtonRef : undefined}
+            disabled={(a.key === 'highlight' || a.key === 'delete' || a.key === 'note') && (highlightPending || Boolean(target?.id.startsWith('temp-')))}
             onClick={a.onClick}
             title={a.label}
             aria-haspopup={a.key === 'ai-commands' ? 'menu' : undefined}
@@ -614,6 +623,8 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
       {aiMenuAnchor && (
         <div
           ref={aiMenuRef}
+          data-reader-selection-toolbar
+          onPointerDown={(event) => { if (event.button === 0 && event.pointerType !== 'touch' && (event.target as Element).closest('button')) event.preventDefault() }}
           role="menu"
           data-testid="selection-ai-commands"
           aria-label={_('reader.aiQuickCommands')}

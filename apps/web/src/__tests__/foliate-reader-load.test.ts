@@ -19,6 +19,10 @@ import {
   resolveNavigationSectionIndex,
   sectionSpinePrefix,
   convertTocLabels,
+  sanitizeCleanReadingMarkup,
+  shouldSkipCleanReadingResource,
+  canUseCleanReading,
+  markEpubChapterTitle,
 } from '../features/reader/renderers/FoliateReader'
 import type { ReaderAnnotation } from '../features/reader/types'
 import type { TextReplacementRule } from '../features/reader/lib/text-replacements'
@@ -40,6 +44,15 @@ describe('personal marker theme changes', () => {
     reader.applyReadingTheme({ bg: '#101010', text: '#ffffff' })
 
     expect(repaint).toHaveBeenCalledExactlyOnceWith('marker|highlight', false)
+  })
+})
+
+describe('renderer replacement position', () => {
+  it('exposes the latest CFI and fraction for a same-book rebuild', () => {
+    const reader = new FoliateReader('')
+    ;(reader as any).lastCfi = 'chapter:4:0.375'
+    ;(reader as any).lastFraction = 0.42
+    expect(reader.getCurrentPosition?.()).toEqual({ cfi: 'chapter:4:0.375', fraction: 0.42 })
   })
 })
 
@@ -134,6 +147,67 @@ describe('selectZipLoadStrategy', () => {
 
   it('defaults to Range when the size is unknown', () => {
     expect(selectZipLoadStrategy(null)).toBe('range')
+  })
+})
+
+describe('clean reading resource and markup boundaries', () => {
+  it('recognizes a chapter title split by a line break without changing its source nodes', () => {
+    const doc = document.implementation.createHTMLDocument()
+    doc.body.innerHTML = '<div><img src="logo.png" /></div><h2><span><b>第253章</b><br />为了让他开心</span></h2><p>正文</p><h2>小节</h2>'
+    const heading = doc.querySelector('h2')!
+    const titleNodes = Array.from(heading.querySelector('span')!.childNodes)
+    markEpubChapterTitle(doc, '第253章 为了让他开心')
+    expect(heading.hasAttribute('data-bd-chapter-title')).toBe(true)
+    expect(Array.from(heading.querySelector('span')!.childNodes)).toEqual(titleNodes)
+    expect(doc.querySelector('p')!.hasAttribute('data-bd-chapter-title')).toBe(false)
+    expect(doc.querySelectorAll('h2')[1].hasAttribute('data-bd-chapter-title')).toBe(false)
+  })
+
+  it('keeps unmatched headings and blank labels unmarked', () => {
+    const doc = document.implementation.createHTMLDocument()
+    doc.body.innerHTML = '<h1></h1><h2>正文小节</h2><p>正文</p>'
+    markEpubChapterTitle(doc, '')
+    markEpubChapterTitle(doc, '第253章 为了让他开心')
+    expect(doc.querySelector('[data-bd-chapter-title]')).toBeNull()
+  })
+
+  it('keeps body element positions when removing source presentation', () => {
+    const source = '<html xmlns="http://www.w3.org/1999/xhtml"><head/><body><style>p { color: red; }</style><link rel="stylesheet" href="book.css"/><h2>Chapter</h2><p id="quote">Quoted text</p></body></html>'
+    const doc = new DOMParser().parseFromString(sanitizeCleanReadingMarkup(source), 'application/xhtml+xml')
+    expect(Array.from(doc.querySelector('body')!.children).map(el => el.localName)).toEqual(['style', 'link', 'h2', 'p'])
+    expect(doc.querySelector('style')!.textContent).toBe('')
+    expect(doc.querySelector('link')!.hasAttribute('href')).toBe(false)
+    expect(doc.querySelector('body')!.children[3].textContent).toBe('Quoted text')
+  })
+
+  it('supports only reflowable EPUBs', () => {
+    expect(canUseCleanReading('epub', 'reflowable')).toBe(true)
+    expect(canUseCleanReading('epub', 'pre-paginated')).toBe(false)
+    expect(canUseCleanReading('txt')).toBe(false)
+  })
+
+  it('skips styles, fonts and media but not chapter links', () => {
+    expect(shouldSkipCleanReadingResource('text/css', 'styles/book.css')).toBe(true)
+    expect(shouldSkipCleanReadingResource('font/woff2', 'fonts/book.woff2')).toBe(true)
+    expect(shouldSkipCleanReadingResource('image/jpeg', 'images/cover.jpg')).toBe(true)
+    expect(shouldSkipCleanReadingResource('application/xhtml+xml', 'chapter.xhtml')).toBe(false)
+    expect(shouldSkipCleanReadingResource('', 'notes/footnote.xhtml#n1')).toBe(false)
+  })
+
+  it('removes presentation and media resources while preserving text structure and links', () => {
+    const clean = sanitizeCleanReadingMarkup(`
+      <html xmlns="http://www.w3.org/1999/xhtml"><head>
+        <link rel="stylesheet" href="book.css"/><style>p { color: red }</style>
+      </head><body style="background: red"><h1>Chapter</h1>
+        <p style="font-weight: bold">Before <a href="note.xhtml#n1">footnote</a> after</p>
+        <img src="cover.jpg" alt="cover"/><table><tr><td>cell</td></tr></table>
+      </body></html>`, 'application/xhtml+xml')
+    expect(clean).toContain('Chapter')
+    expect(clean).toContain('href="note.xhtml#n1"')
+    expect(clean).toContain('<table>')
+    expect(clean).not.toContain('book.css')
+    expect(clean).not.toContain('color: red')
+    expect(clean).toContain('data-bd-clean-hidden')
   })
 })
 

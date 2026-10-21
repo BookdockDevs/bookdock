@@ -17,6 +17,7 @@ export function SettingsPopover({ open, onClose, children, toggleSelector = '[da
     function handleClickCapture(e: MouseEvent) {
       // Ignore clicks inside the popover
       if (ref.current?.contains(e.target as Node)) return
+      if ((e.target as Element).closest?.('[data-reader-selection-toolbar]')) return
       // Ignore clicks on the settings toggle button (avoids double-toggle)
       if ((e.target as HTMLElement).closest(toggleSelector)) return
       // Ignore clicks on the preset context menu — it is portaled to body to

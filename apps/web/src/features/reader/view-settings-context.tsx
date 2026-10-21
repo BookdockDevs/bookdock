@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react'
 
 import type { ViewSettings } from '@bookdock/shared'
 
-import type { EffectiveViewSettings, PerBookSettingKey } from './lib/view-settings'
+import type { EffectiveViewSettings, PerBookSettingKey, PerBookSettingValue } from './lib/view-settings'
 
 // Per-book reading-settings layer (F1). Provided by Reader.tsx; consumed by
 // SettingsPanel (display + writes) and the "仅本书" toggle. useReaderRenderer
@@ -12,7 +12,7 @@ export interface ViewSettingsContextValue {
   /** Whether changes to the supported settings apply to this book only */
   perBookActive: boolean
   setPerBookActive: (active: boolean) => void
-  updateSetting: (key: PerBookSettingKey, value: number) => void
+  updateSetting: <K extends PerBookSettingKey>(key: K, value: PerBookSettingValue<K>) => void
   /**
    * Raw per-book override diff (book.readerSettings.viewSettings). Preset creation
    * overlays it onto the snapshot so a preset made while 仅本书 is on captures

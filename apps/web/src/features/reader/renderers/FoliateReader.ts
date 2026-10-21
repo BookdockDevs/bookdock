@@ -717,6 +717,20 @@ export function keepEpubTextAlignment(doc: Document): void {
   })
 }
 
+export function markEpubChapterTitle(doc: Document, label: string): void {
+  const expected = label.replace(/\s+/g, ' ').trim()
+  if (!expected) return
+  const headings = doc.body?.querySelectorAll('h1, h2, h3, h4, h5, h6, p')
+  for (const heading of Array.from(headings ?? []).slice(0, 6)) {
+    // Read visual line breaks without changing the source nodes used by CFIs.
+    const title = heading.cloneNode(true) as Element
+    for (const br of title.querySelectorAll('br')) br.replaceWith(' ')
+    if (title.textContent?.replace(/\s+/g, ' ').trim() !== expected) continue
+    heading.setAttribute('data-bd-chapter-title', '')
+    break
+  }
+}
+
 export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEpubDocumentOptions): void {
   const view = doc.defaultView ?? (typeof window === 'undefined' ? null : window)
   if (!view) return
@@ -1363,21 +1377,56 @@ function attachTextPrefetch(book: any, loadText: (name: string) => Promise<unkno
   }
 }
 
-function getParsedBook(url: string, foliate: any, bookSize?: number): Promise<any> {
-  const cached = parseCache.get(url)
+export function shouldSkipCleanReadingResource(type = '', href = ''): boolean {
+  const normalizedType = type.toLowerCase().split(';', 1)[0].trim()
+  if (normalizedType === 'text/css' || normalizedType === 'text/css;') return true
+  if (normalizedType.startsWith('font/') || normalizedType === 'application/font-woff'
+    || normalizedType === 'application/font-woff2' || normalizedType === 'application/vnd.ms-opentype') return true
+  if (normalizedType.startsWith('image/') || normalizedType.startsWith('audio/') || normalizedType.startsWith('video/')) return true
+  if (normalizedType === 'application/vnd.apple.mpegurl' || normalizedType === 'application/x-mpegurl') return true
+  return /\.(?:avif|bmp|gif|jpe?g|png|svg|webp|ico|mp3|m4a|ogg|wav|flac|aac|mp4|m4v|mov|webm|ogv|woff2?|ttf|otf|eot)(?:[?#].*)?$/i.test(href)
+}
+
+export function canUseCleanReading(bookFormat: BookFormat, layout?: string): boolean {
+  return bookFormat === 'epub' && layout !== 'pre-paginated'
+}
+
+export function sanitizeCleanReadingMarkup(source: string, mediaType = 'application/xhtml+xml'): string {
+  const parserSource = source
+  const doc = new DOMParser().parseFromString(parserSource, mediaType as DOMParserSupportedType)
+  if (!doc.documentElement || doc.querySelector('parsererror')) return source
+
+  // Some books put presentation nodes in the body; retain their element
+  // positions so stripping presentation does not shift existing CFI paths.
+  for (const style of Array.from(doc.querySelectorAll('style'))) style.textContent = ''
+  for (const link of Array.from(doc.querySelectorAll('link'))) {
+    if (/\bstylesheet\b/i.test(link.getAttribute('rel') ?? '')) link.removeAttribute('href')
+  }
+  for (const element of Array.from(doc.querySelectorAll('[style]'))) element.removeAttribute('style')
+  for (const element of Array.from(doc.querySelectorAll('img, svg, video, audio, canvas, object, embed, iframe, source, track'))) {
+    for (const attribute of ['src', 'srcset', 'poster', 'data', 'href', 'xlink:href']) element.removeAttribute(attribute)
+    element.setAttribute('data-bd-clean-hidden', '')
+  }
+
+  return new XMLSerializer().serializeToString(doc)
+}
+
+function getParsedBook(url: string, foliate: any, bookSize?: number, cleanReading = false): Promise<any> {
+  const cacheKey = `${url}\u0000${cleanReading ? 'clean' : 'normal'}`
+  const cached = parseCache.get(cacheKey)
   if (cached) {
     // refresh recency
-    parseCache.delete(url)
-    parseCache.set(url, cached)
+    parseCache.delete(cacheKey)
+    parseCache.set(cacheKey, cached)
     return cached
   }
   const { EPUB } = foliate
   const promise = (async () => {
     const { map, entries, TextWriter, BlobWriter } = await openZipEntryMap(url, foliate, bookSize)
 
-    const load = (fn: (entry: any, type?: string) => any) => (name: string) => {
+    const load = (fn: (entry: any, type?: string) => any) => (name: string, type?: string) => {
       const entry = map.get(name)
-      return entry ? fn(entry) : null
+      return entry ? fn(entry, type) : null
     }
 
     const loadEntryData = async (entry: any, createWriter: () => any) => {
@@ -1400,19 +1449,25 @@ function getParsedBook(url: string, foliate: any, bookSize?: number): Promise<an
       load((entry: any) => loadEntryData(entry, () => new TextWriter())),
       { namespace: chapterTextNamespaceFromUrl(url) },
     ))
-    const loadBlob = memoizeLoadBlob(url, load((entry: any, type?: string) =>
-      loadEntryData(entry, () => new BlobWriter(type))))
+    let cleanResources = false
+    const loadBlob = memoizeLoadBlob(cacheKey, (name: string, type?: string) => {
+      if (cleanResources && shouldSkipCleanReadingResource(type, name)) return null
+      return load((entry: any, entryType?: string) =>
+        loadEntryData(entry, () => new BlobWriter(entryType)))(name, type)
+    })
     const getSize = (name: string) => map.get(name)?.uncompressedSize ?? 0
 
     const book = await new EPUB({ entries, loadText, loadBlob, getSize }).init()
+    cleanResources = cleanReading && canUseCleanReading('epub', book?.rendition?.layout)
+    attachBookDataTransform(book, cleanResources)
     attachTextPrefetch(book, loadText)
     return book
   })()
   // never cache a failure — the next mount must retry
   promise.catch(() => {
-    if (parseCache.get(url) === promise) parseCache.delete(url)
+    if (parseCache.get(cacheKey) === promise) parseCache.delete(cacheKey)
   })
-  parseCache.set(url, promise)
+  parseCache.set(cacheKey, promise)
   while (parseCache.size > PARSE_CACHE_MAX) {
     const oldest = parseCache.keys().next().value
     if (oldest === undefined) break
@@ -1503,18 +1558,28 @@ export function setAutoMarkSelectionMode(enabled: boolean) {
 }
 const CONVERTIBLE_MEDIA_TYPES = new Set(['application/xhtml+xml', 'text/html'])
 
-function attachBookDataTransform(book: any) {
+function attachBookDataTransform(book: any, cleanReading = false) {
   const target = book?.transformTarget as EventTarget | undefined
   if (!target || transformedBooks.has(book)) return
   transformedBooks.add(book)
   const isFixedLayout = book?.rendition?.layout === 'pre-paginated'
+  target.addEventListener('load', (event: Event) => {
+    if (!cleanReading || isFixedLayout) return
+    const detail = (event as CustomEvent).detail
+    if (!shouldSkipCleanReadingResource(detail?.type, detail?.href)) return
+    // Loader.loadItem checks this event before touching loadBlob. Returning a
+    // tiny data URL keeps dynamic resource observation ordered without reading
+    // the omitted ZIP entry or accidentally treating a body link as media.
+    detail.allow = true
+    detail.url = 'data:text/plain,'
+  })
   target.addEventListener('data', (event: Event) => {
     const detail = (event as CustomEvent).detail
     const mediaType = typeof detail?.type === 'string' ? detail.type.toLowerCase() : ''
     const isMarkup = CONVERTIBLE_MEDIA_TYPES.has(mediaType)
     const isStylesheet = mediaType === 'text/css'
-    const applyBookStyleTransform = !isFixedLayout && (isMarkup || isStylesheet)
-    const applyMarkupTransform = isMarkup && (conversionMode !== 'off' || activeReplacements.length > 0)
+    const applyBookStyleTransform = !isFixedLayout && !cleanReading && (isMarkup || isStylesheet)
+    const applyMarkupTransform = isMarkup && (cleanReading || conversionMode !== 'off' || activeReplacements.length > 0)
     if (!applyBookStyleTransform && !applyMarkupTransform) return
     const mode = conversionMode
     const rules = activeReplacements
@@ -1542,6 +1607,7 @@ function attachBookDataTransform(book: any) {
           : transformEpubMarkup(transformed, viewportWidth, viewportHeight, fontScale, transformOptions)
       }
       if (isMarkup) {
+        if (cleanReading) transformed = sanitizeCleanReadingMarkup(transformed, mediaType)
         // Text replacements run after book CSS normalization, and only markup
         // receives text conversion; images, fonts and CSS remain untouched.
         transformed = rules.length
@@ -1636,6 +1702,7 @@ export class FoliateReader implements BookReader {
   private bookId: string
   private bookSize?: number
   private bookFormat: BookFormat
+  private cleanReading = false
   private container: HTMLElement | null = null
   private view: any | null = null
   private book: any | null = null
@@ -2278,11 +2345,20 @@ export class FoliateReader implements BookReader {
   private destroyed = false
   private startupAbort = new AbortController()
 
-  constructor(url: string, bookId = '', bookSize?: number, bookFormat: BookFormat = 'epub') {
+  constructor(url: string, bookId = '', bookSize?: number, bookFormat: BookFormat = 'epub', cleanReading = false) {
     this.url = url
     this.bookId = bookId
     this.bookSize = bookSize
     this.bookFormat = bookFormat
+    this.cleanReading = cleanReading && canUseCleanReading(bookFormat)
+  }
+
+  get isFixedLayout(): boolean {
+    return this.view?.isFixedLayout === true
+  }
+
+  getCurrentPosition(): { cfi: string | null; fraction: number | null } {
+    return { cfi: this.lastCfi, fraction: this.lastFraction }
   }
 
   async mount(container: HTMLElement, initialTarget?: string, initialFraction?: number, onReady?: () => string | undefined) {
@@ -2301,7 +2377,7 @@ export class FoliateReader implements BookReader {
       }
       const tMount1 = performance.now()
 
-      const epub = await getParsedBook(this.url, foliate, this.bookSize)
+      const epub = await getParsedBook(this.url, foliate, this.bookSize, this.cleanReading)
       const tMount2 = performance.now()
       // StrictMode mounts twice: the first instance is destroyed while its
       // async mount is still in flight — bail out instead of becoming a
@@ -2314,7 +2390,7 @@ export class FoliateReader implements BookReader {
       // Point patches report their invalid ids here (P2); the module-level
       // listener is shared with the load-time data pipeline.
       setReplacementInvalidListener((ids) => this.emit('replacementInvalid', { ids }))
-      attachBookDataTransform(epub)
+      attachBookDataTransform(epub, this.cleanReading && canUseCleanReading(this.bookFormat, epub?.rendition?.layout))
       await applyTocConversion(epub, this.conversion)
 
       const view = document.createElement('foliate-view') as any
@@ -3030,13 +3106,17 @@ export class FoliateReader implements BookReader {
   applyParagraphStyle(cfg: ParagraphStyle) {
     this.paragraph = cfg
     this.emit('readingSettingsChanged')
-    for (const doc of this.activeDocs) setEpubParagraphWhitespace(doc, this.shouldForceBookLayout())
+    for (const doc of this.activeDocs) setEpubParagraphWhitespace(doc, this.shouldForceBookLayout() || this.shouldApplyCleanReading())
     this.applyStyles()
     this.updateLayout()
   }
 
   private shouldForceBookLayout(): boolean {
     return this.bookFormat === 'txt' || this.paragraph.overrideBookLayout
+  }
+
+  private shouldApplyCleanReading(): boolean {
+    return this.cleanReading && canUseCleanReading(this.bookFormat, this.view?.isFixedLayout ? 'pre-paginated' : undefined)
   }
 
   applyPageWidth(width: number) {
@@ -4369,18 +4449,10 @@ export class FoliateReader implements BookReader {
           // ignore
         }
         keepEpubTextAlignment(doc)
-        setEpubParagraphWhitespace(doc, this.shouldForceBookLayout())
+        setEpubParagraphWhitespace(doc, this.shouldForceBookLayout() || this.shouldApplyCleanReading())
         if (this.bookFormat === 'epub' && !this.view?.isFixedLayout) {
           const label = this.view?.getProgressOf?.(index)?.tocItem?.label
-          if (typeof label === 'string') {
-            const expected = label.replace(/\s+/g, ' ').trim()
-            const headings = doc.body?.querySelectorAll('h1, h2, h3, h4, h5, h6, p')
-            for (const heading of Array.from(headings ?? []).slice(0, 6)) {
-              if (heading.textContent?.replace(/\s+/g, ' ').trim() !== expected) continue
-              heading.setAttribute('data-bd-chapter-title', '')
-              break
-            }
-          }
+          if (typeof label === 'string') markEpubChapterTitle(doc, label)
         }
         normalizeEpubDocumentImages(doc, {
           section: this.book?.sections?.[index],
@@ -4574,8 +4646,9 @@ export class FoliateReader implements BookReader {
     this.lastScrollVPad = vPad
     const fontCss = this.font.fontCss ?? ''
     const isDarkTheme = !isLightCssColor(this.theme.bg)
-    const forceBookdockFont = this.font.overrideBookFont
-    const forceBookdockLayout = this.shouldForceBookLayout()
+    const cleanReadingActive = this.shouldApplyCleanReading()
+    const forceBookdockFont = cleanReadingActive || this.font.overrideBookFont
+    const forceBookdockLayout = cleanReadingActive || this.shouldForceBookLayout()
     const chapterTitleStyles = forceBookdockLayout ? `
       ${this.bookFormat === 'txt' ? 'body > h1:first-child' : '[data-bd-chapter-title]'} {
         text-align: ${this.paragraph.chapterTitleAlign} !important;
@@ -5131,6 +5204,69 @@ export class FoliateReader implements BookReader {
         background-color: var(--bd-theme-bg) !important;
       }`
       : ''
+    const cleanReadingStyles = cleanReadingActive ? `
+      body * {
+        color: inherit !important;
+        background: transparent !important;
+        border-color: transparent !important;
+        box-shadow: none !important;
+        text-shadow: none !important;
+        font-style: normal !important;
+        font-weight: inherit !important;
+        text-align: inherit !important;
+      }
+      body :is(strong, b, em, i, u, s, del, mark, small, big, font) {
+        font-style: normal !important;
+        font-weight: inherit !important;
+        text-decoration: none !important;
+      }
+      body :is(h1, h2, h3, h4, h5, h6):not([data-bd-chapter-title]) {
+        font-weight: 600 !important;
+        text-align: start !important;
+        text-indent: 0 !important;
+      }
+      p, blockquote, dd, li, div:not(:has(*:not(b, a, em, i, strong, u, span))) {
+        line-height: ${this.font.lineHeight} !important;
+        letter-spacing: ${this.paragraph.letterSpacing}px !important;
+        text-indent: ${this.paragraph.indent}em !important;
+        margin-bottom: ${this.paragraph.paragraphSpacing}em !important;
+        text-align: ${this.paragraph.textAlignJustify ? 'justify' : 'start'} !important;
+      }
+      a:any-link {
+        color: var(--bd-theme-primary) !important;
+        text-decoration: none !important;
+      }
+      table {
+        display: table !important;
+        width: auto !important;
+        max-width: 100% !important;
+        border-collapse: collapse !important;
+        table-layout: auto !important;
+      }
+      tr { display: table-row !important; }
+      td, th {
+        display: table-cell !important;
+        min-width: 2em;
+        padding: 0.25em 0.5em !important;
+        border: 1px solid color-mix(in srgb, var(--bd-theme-text) 35%, transparent) !important;
+        text-align: start !important;
+        vertical-align: top !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+      }
+      hr {
+        height: 0 !important;
+        border: 0 !important;
+        border-top: 1px solid currentColor !important;
+        background: transparent !important;
+      }
+      :is(img, svg, video, audio, canvas, object, embed, iframe, source, track),
+      [data-bd-clean-hidden] {
+        display: none !important;
+        visibility: hidden !important;
+        max-width: 0 !important;
+        max-height: 0 !important;
+      }` : ''
     const fontVariables = `
       html {
         --bd-serif: ${fontStack};
@@ -5203,6 +5339,7 @@ export class FoliateReader implements BookReader {
       ${contentOverflowStyles}
       ${themeCompatibilityStyles}
       ${templateCompatibilityStyles}
+      ${cleanReadingStyles}
       html { background-color: transparent !important; }
       body {
         padding-top: ${vPad}px !important;

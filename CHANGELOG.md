@@ -6,6 +6,7 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
+- Reflowable EPUBs offer clean reading with basic typography and hidden images and media. It supports reading presets and per-book overrides, and keeps your reading position when switched on or off.
 - Personal-library categories are now independent of shelves, with two-level paths and optional recommendations created only when you save a selection.
 - The reading-data API provides category breakdowns, including uncategorized reading history.
 - Personal highlights, bookmarks, ideas and private reviews now stay in your archive after the original book file is deleted.
@@ -15,6 +16,7 @@ All notable changes to Bookdock are documented here.
 ### Changed
 
 - Enhanced backend performance and response aggregation across core modules: `BookDetailRes` now includes shelf name, tags, and reading position directly in book details to eliminate sequential request waterfalls and layout shifting; session validation is cached in-memory with write-invalidation; SQLite connections use `busy_timeout`, `synchronous = NORMAL`, and a 20MB cache size; unread notification counts are cached with event-driven invalidation; and book search and list queries push JSON extraction inside the subquery to minimize payload evaluation overhead.
+- Reorganized the reader settings "Display" panel into three semantic groups: Reading Method, Text Display, and Reading Aids. Secondary options for headers, footers, and peer idea styling collapse cleanly when their toggles are off without occupying layout space or entering keyboard tab order, and secondary option buttons use a more compact style.
 - The personal-library sidebar separates shelves, categories and tags. Books without a shelf appear under Not on a shelf, independently of Uncategorized books.
 - Book details display and edit categories and tags; shelf organization remains available from the library and batch organizer.
 - Redesigned book detail category and tag pickers into compact popover attributes: category picker supports two-level hierarchy with viewport-aware auto-flip, inline category creation, and collapsible template suggestions; tag picker uses removable selected pills paired with a searchable multi-select popover and inline creation.
@@ -29,6 +31,10 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Unread notification counts refresh immediately when source access or target visibility changes, including when access is restored.
+- Clicking actions on the reader selection toolbar (such as highlighting, restyling, or note creation) no longer misidentifies clicks as outside events that unintentionally close open popovers or dismiss the top header.
+- Clearing reader selection or dismissing selection menus synchronously clears native browser text selection, highlights, and note editor ranges.
+- Annotation mutations add in-flight deduplication, guard against stale response race conditions overwriting current selection state, and roll back optimistic cache updates if the request fails.
 - Fixed page transition delay and two-phase loading waterfalls by setting TanStack Router's pending threshold to zero, enabling intent preloading on hover, adding matching pending skeletons for the reading archive and notification center, and hooking sidebar and account navigation into router preloading.
 - Reader immediately clears and suppresses header and footer summon states while any fullscreen modal or overlay is active, preventing accidental toolbar reveal when moving the mouse near top or bottom edges.
 - Opening replacement rules from reader settings no longer leaves the reader header stuck open.
@@ -796,6 +802,7 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
+- 可重排 EPUB 新增“纯净阅读”，使用基础文字排版并隐藏图片和音视频；支持阅读预设与仅本书设置，开关切换时保留阅读位置。
 - 私库分类与书架独立，支持两级分类路径；推荐分类仅在选用并保存后按需创建。
 - 阅读数据 API 新增分类分布，包含未分类的历史阅读数据。
 - 个人划线、书签、想法与私密书评在原书文件被删除后仍保留在归档中心。
@@ -805,6 +812,7 @@ All notable changes to Bookdock are documented here.
 #### 变更
 
 - 全项目核心后端性能审计与响应聚合优化：书籍详情接口直接携带书架名称、标签与阅读定位进度，消除多阶段请求瀑布与弹窗内容跳动；认证守卫引入会话 Token 内存缓存与精准失效机制，消除并发接口重复查询会话表；SQLite 数据库连接配置 `busy_timeout`、WAL `synchronous = NORMAL` 与 20MB 页面缓存提升高并发写入稳定性；通知未读数轮询引入带事件失效的轻量缓存，避免全量实体扫描；列表与搜索查询将 JSON 提取下推至子查询内部，降低元数据传输与解析开销。
+- 重构阅读设置中的“显示”菜单结构，按语义拆分为“阅读方式”、“正文显示”与“阅读辅助”三组；页眉、页脚与书友想法关闭时收起附属选项且不占用布局空间与键盘焦点顺序，简繁转换及展示方式等选项采用更紧凑的样式。
 - 私库侧栏分为书架、分类与标签；未分配书架的书籍显示在“未入架”，与“未分类”独立。
 - 书籍详情展示和编辑分类与标签；书架整理继续从书库首页和批量整理入口操作。
 - 书籍详情中的分类与标签编辑交互重构为紧凑属性弹层：分类选择器支持两级层级树与视口自适应翻转、行内新建分类以及折叠式推荐分类；标签选择器支持已选标签直接快捷移除，结合支持即时过滤和行内新建的多选弹层。
@@ -819,6 +827,10 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 来源访问权限或想法、书评可见性变化后，通知未读数立即刷新；恢复访问时也会重新计入保留的未读通知。
+- 点击选区划线工具栏（包括划线、样式切换与笔记入口）时不再误触发外部点击判定，避免意外关闭设置弹层或收起阅读器顶栏。
+- 关闭选区或清除选中文本时，同步清理浏览器原生选区高亮与相关气泡弹层。
+- 划线与标注操作增加防重复提交限制、旧请求竞态保护以及保存失败时的乐观缓存回滚机制。
 - 修复子页面跳转卡顿与二次加载瀑布流：将 TanStack Router 挂起等待阈值设为零以消除点击无响应延迟，开启悬浮预加载，为“阅读档案”与“通知中心”补齐专属框架骨架屏，并将侧栏与账号菜单升级至标准路由预加载。
 - 阅读器在打开任意全屏弹窗或遮罩时，立即清除并静默顶栏/底栏召唤状态，避免鼠标滑动到页面边缘时误触发栏位显隐。
 - 从阅读设置打开替换规则弹窗时，顶栏不再因设置态残留而保持常显。

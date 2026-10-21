@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useReaderRenderer } from '@/features/reader/hooks/useReaderRenderer'
 import { waitForReaderFonts } from '@/features/reader/lib/reader-font-ready'
-import { openZipFromWholeFile } from '@/features/reader/renderers/FoliateReader'
+import { FoliateReader, openZipFromWholeFile } from '@/features/reader/renderers/FoliateReader'
 import { useUiStore } from '@/stores/ui.store'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
@@ -142,6 +142,60 @@ describe('chapter font readiness', () => {
 })
 
 describe('reader mount preparation', () => {
+  it('keeps the current chapter when toggling clean reading after leaving the saved position', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(['fonts'], { data: [] })
+    const baseline = useUiStore.getState()
+    useUiStore.setState({ cleanReading: false })
+    const positions = new WeakMap<FoliateReader, { cfi: string | null; fraction: number | null }>()
+    const instances: FoliateReader[] = []
+    const mount = vi.spyOn(FoliateReader.prototype, 'mount').mockImplementation(async function (this: FoliateReader, _container, target, fraction, onReady) {
+      instances.push(this)
+      positions.set(this, { cfi: target ?? null, fraction: fraction ?? null })
+      onReady?.()
+    })
+    const display = vi.spyOn(FoliateReader.prototype, 'display').mockImplementation(async function (this: FoliateReader, target) {
+      positions.set(this, { cfi: target ?? null, fraction: null })
+      return true
+    })
+    const position = vi.spyOn(FoliateReader.prototype, 'getCurrentPosition').mockImplementation(function (this: FoliateReader) {
+      return positions.get(this) ?? { cfi: null, fraction: null }
+    })
+    const destroy = vi.spyOn(FoliateReader.prototype, 'destroy').mockImplementation(() => {})
+    function Harness({ bookId = 'book-a' }: { bookId?: string }) {
+      const { containerRef } = useReaderRenderer({
+        url: `/books/${bookId}/file`, bookId, format: 'epub', initialCfi: 'chapter:251:0.4', initialFraction: 0.5,
+      })
+      return <div ref={containerRef} />
+    }
+    const view = render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>)
+    try {
+      await waitFor(() => expect(mount).toHaveBeenCalledOnce())
+      const currentPosition = { cfi: 'chapter:252:0.2', fraction: 0.51 }
+      positions.set(instances[0], currentPosition)
+
+      act(() => { useUiStore.setState({ cleanReading: true }) })
+      await waitFor(() => expect(mount).toHaveBeenCalledTimes(2))
+      expect(mount.mock.calls[1].slice(1, 3)).toEqual([currentPosition.cfi, currentPosition.fraction])
+      expect(positions.get(instances[1])).toEqual(currentPosition)
+      expect(display).not.toHaveBeenCalled()
+
+      act(() => { useUiStore.setState({ cleanReading: false }) })
+      await waitFor(() => expect(mount).toHaveBeenCalledTimes(3))
+      expect(positions.get(instances[2])).toEqual(currentPosition)
+      expect(display).not.toHaveBeenCalled()
+
+      view.rerender(<QueryClientProvider client={client}><Harness bookId="book-b" /></QueryClientProvider>)
+      await waitFor(() => expect(mount).toHaveBeenCalledTimes(4))
+      expect(mount.mock.calls[3].slice(1, 3)).toEqual(['chapter:251:0.4', 0.5])
+    } finally {
+      view.unmount()
+      client.clear()
+      mount.mockRestore(); display.mockRestore(); position.mockRestore(); destroy.mockRestore()
+      useUiStore.setState(baseline)
+    }
+  })
+
   it('does not mount a chapter before account settings and the font catalog are ready', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))

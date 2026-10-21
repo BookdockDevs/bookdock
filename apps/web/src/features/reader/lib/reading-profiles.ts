@@ -14,6 +14,7 @@
 // behavior and theme references. Resource collections (custom themes, fonts)
 // are referenced by id, never snapshotted.
 export const READING_PROFILE_DEFAULTS = {
+  cleanReading: false,
   readingThemeMode: 'system',
   readingThemeId: 'night',
   lightReadingThemeId: 'paper',
@@ -64,6 +65,7 @@ export const READING_PROFILE_DEFAULTS = {
 } as const satisfies Record<ReadingProfileKey, unknown>
 
 export const READING_PROFILE_KEYS = [
+  'cleanReading',
   'readingThemeMode',
   'readingThemeId',
   'lightReadingThemeId',

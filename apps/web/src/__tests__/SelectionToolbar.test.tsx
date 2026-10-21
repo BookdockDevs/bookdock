@@ -197,6 +197,31 @@ describe('SelectionToolbar', () => {
     })
   })
 
+  it('prevents duplicate highlight submissions while saving', async () => {
+    let resolve!: (value: { data: AnnotationRes }) => void
+    createMutate.mockReturnValue(new Promise<{ data: AnnotationRes }>((done) => { resolve = done }))
+    setSelection()
+    render(<SelectionToolbar bookId="b1" />)
+    const button = screen.getByTitle('annotation.drawHighlight')
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(createMutate).toHaveBeenCalledOnce()
+    expect(button).toBeDisabled()
+    await act(async () => { resolve({ data: ANNOTATION }) })
+  })
+
+  it('does not apply an old highlight response to a new selection', async () => {
+    let resolve!: (value: { data: AnnotationRes }) => void
+    createMutate.mockReturnValue(new Promise<{ data: AnnotationRes }>((done) => { resolve = done }))
+    setSelection()
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('annotation.drawHighlight'))
+    setSelection('epubcfi(/6/8!/2)')
+    await act(async () => { resolve({ data: ANNOTATION }) })
+    expect(screen.getByTitle('annotation.drawHighlight')).toBeInTheDocument()
+    expect(useReaderState.getState().selection?.cfiRange).toBe('epubcfi(/6/8!/2)')
+  })
+
   it('transforms into the annotation state after highlighting', async () => {
     setSelection()
     render(<SelectionToolbar bookId="b1" />)

@@ -35,6 +35,22 @@ describe('SettingsPopover', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('keeps settings open when a selection toolbar action is clicked', () => {
+    const onClose = vi.fn()
+    const onHighlight = vi.fn()
+    render(
+      <>
+        <SettingsPopover open onClose={onClose}>settings</SettingsPopover>
+        <div data-reader-selection-toolbar>
+          <button onClick={onHighlight}>Highlight selection</button>
+        </div>
+      </>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Highlight selection' }))
+    expect(onHighlight).toHaveBeenCalledOnce()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it('does not close when clicking inside', () => {
     const onClose = vi.fn()
     render(

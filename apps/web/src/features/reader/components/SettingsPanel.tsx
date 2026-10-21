@@ -11,7 +11,7 @@ import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { useViewSettings } from '../view-settings-context'
 import { MARGINAL_FIELDS } from '../lib/marginals'
 import type { MarginalField } from '../types'
-import type { PerBookSettingKey } from '../lib/view-settings'
+import type { PerBookSettingKey, PerBookSettingValue } from '../lib/view-settings'
 import { buildFontOptions, ensureBuiltinFontLoaded, ensureBuiltinFontsLoaded, ensureUploadedFontLoaded, useFontLoaderStore, type FontOption } from '../fonts'
 import { useReaderState } from '../state/reader-state'
 import { DownloadIcon, SpinnerIcon } from './annotation-icons'
@@ -157,16 +157,19 @@ interface ButtonGroupProps<T extends string | number> {
   options: { value: T; label: string; icon?: React.ReactNode }[]
   value: T
   onChange: (value: T) => void
+  size?: 'default' | 'sm'
 }
 
 function FieldSelect({
   value,
   onChange,
   disabled = false,
+  ariaLabel,
 }: {
   value: MarginalField
   onChange: (v: MarginalField) => void
   disabled?: boolean
+  ariaLabel?: string
 }) {
   const _ = useTranslation()
   const isNone = value === 'none'
@@ -177,10 +180,10 @@ function FieldSelect({
         disabled={disabled}
         onChange={(e) => onChange(e.target.value as MarginalField)}
         className={cn(
-          'h-8 w-full appearance-none truncate bg-transparent pl-2 pr-5 text-center text-xs outline-none transition-colors cursor-pointer hover:bg-stone-500/10 focus-visible:bg-stone-500/10 disabled:cursor-not-allowed',
+          'h-7.5 w-full appearance-none truncate bg-transparent pl-2 pr-5 text-center text-xs outline-none transition-colors cursor-pointer hover:bg-stone-500/10 focus-visible:bg-stone-500/10 focus-visible:ring-1 focus-visible:ring-current/40 disabled:cursor-not-allowed',
           isNone ? 'font-normal text-[var(--bd-read-sub)] opacity-70' : 'font-medium text-current',
         )}
-        aria-label={_('reader.marginalField')}
+        aria-label={ariaLabel ?? _('reader.marginalField')}
       >
         {MARGINAL_FIELDS.map((f) => (
           <option key={f} value={f} className="bg-[var(--bd-read-bg)] text-[var(--bd-read-text)]">
@@ -204,10 +207,19 @@ function FieldSelect({
   )
 }
 
-function ButtonGroup<T extends string | number>({ options, value, onChange }: ButtonGroupProps<T>) {
+function ButtonGroup<T extends string | number>({
+  options,
+  value,
+  onChange,
+  size = 'default',
+}: ButtonGroupProps<T>) {
+  const isSm = size === 'sm'
   return (
     <div
-      className="grid gap-1 rounded-xl bg-stone-500/10 p-1 dark:bg-stone-500/15"
+      className={cn(
+        'grid bg-stone-500/10 dark:bg-stone-500/15',
+        isSm ? 'gap-0.5 rounded-lg p-0.5' : 'gap-1 rounded-xl p-1',
+      )}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
     >
       {options.map((opt) => {
@@ -220,7 +232,10 @@ function ButtonGroup<T extends string | number>({ options, value, onChange }: Bu
             title={opt.label}
             aria-label={opt.label}
             className={cn(
-              'flex min-h-[2.125rem] items-center justify-center rounded-lg px-2.5 py-1.5 text-[13px] tracking-wide transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-current/40 active:scale-[0.98]',
+              'flex items-center justify-center tracking-wide transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-current/40 active:scale-[0.98]',
+              isSm
+                ? 'min-h-[1.75rem] rounded-md px-2 py-1 text-xs'
+                : 'min-h-[2.125rem] rounded-lg px-2.5 py-1.5 text-[13px]',
               isSelected
                 ? 'bg-[var(--bd-read-bg)] font-medium text-current shadow-sm'
                 : 'font-normal text-current/60 hover:text-current hover:bg-stone-500/5',
@@ -300,7 +315,7 @@ function getInitialSection(): Section {
   return 'font'
 }
 
-export function SettingsPanel({ bookId }: { bookId?: string }) {
+export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookId?: string; cleanReadingSupported?: boolean }) {
   const [section, setSection] = useState<Section>(getInitialSection)
   const onSetSection = useCallback((s: Section) => {
     setSection(s)
@@ -353,6 +368,8 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
     setHorizontalPadding,
     textAlignJustify,
     setTextAlignJustify,
+    cleanReading,
+    setCleanReading,
     overrideBookFont,
     setOverrideBookFont,
     overrideBookLayout,
@@ -471,9 +488,9 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
   // (or the global store, depending on the "This book only" switch). Outside the
   // reader (no context) everything falls back to the global store.
   const viewSettings = useViewSettings()
-  const bindSetting = (key: PerBookSettingKey, storeValue: number, storeSetter: (v: number) => void) => ({
+  const bindSetting = <K extends Exclude<PerBookSettingKey, 'cleanReading'>,>(key: K, storeValue: number, storeSetter: (v: number) => void) => ({
     value: viewSettings ? viewSettings.effective[key] : storeValue,
-    onChange: (v: number) => (viewSettings ? viewSettings.updateSetting(key, v) : storeSetter(v)),
+    onChange: (v: number) => (viewSettings ? viewSettings.updateSetting(key, v as PerBookSettingValue<K>) : storeSetter(v)),
   })
   const fontSizeBinding = bindSetting('fontSize', fontSize, setFontSize)
   const lineHeightBinding = bindSetting('lineHeight', lineHeight, setLineHeight)
@@ -482,6 +499,10 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
   const verticalPaddingBinding = bindSetting('verticalPadding', verticalPadding, setVerticalPadding)
   const pageColumnsBinding = bindSetting('pageColumns', pageColumns, setPageColumns)
   const columnGapBinding = bindSetting('columnGap', columnGap, setColumnGap)
+  const cleanReadingBinding = {
+    value: viewSettings?.effective.cleanReading ?? cleanReading,
+    onChange: (value: boolean) => (viewSettings ? viewSettings.updateSetting('cleanReading', value) : setCleanReading(value)),
+  }
 
   const currentTheme = resolveReadingTheme(readingThemeId, customThemes)
   const [showClickAreaHint, setShowClickAreaHint] = useState(false)
@@ -718,118 +739,177 @@ export function SettingsPanel({ bookId }: { bookId?: string }) {
       )}
 
       {section === 'display' && (
-        <div>
-          <div className="mb-2.5">
-            <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.readingMode')}</label>
-            <ButtonGroup
-              options={[
-                { value: 'scroll', label: _('reader.readingModeScroll') },
-                { value: 'page', label: _('reader.readingModePage') },
-              ]}
-              value={readingMode}
-              onChange={setReadingMode}
-            />
-          </div>
+        <div className="space-y-4">
+          <div>
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+              {_('reader.displayReadingMethodGroup')}
+            </div>
 
-          {readingMode === 'page' && (
-            <>
-              <div className="mb-3.5">
-                <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.columnCount')}</label>
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.readingMode')}</label>
                 <ButtonGroup
                   options={[
-                    { value: 1, label: '1' },
-                    { value: 2, label: '2' },
-                    { value: 3, label: '3' },
+                    { value: 'scroll', label: _('reader.readingModeScroll') },
+                    { value: 'page', label: _('reader.readingModePage') },
                   ]}
-                  value={pageColumnsBinding.value}
-                  onChange={pageColumnsBinding.onChange}
+                  value={readingMode}
+                  onChange={setReadingMode}
                 />
               </div>
-              {pageColumnsBinding.value > 1 && (
-                <SliderRow
-                  label={_('reader.columnGap')}
-                  value={columnGapBinding.value}
-                  min={0}
-                  max={15}
-                  step={1}
-                  suffix="%"
-                  onChange={columnGapBinding.onChange}
+
+              {readingMode === 'page' && (
+                <>
+                  <div>
+                    <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.columnCount')}</label>
+                    <ButtonGroup
+                      size="sm"
+                      options={[
+                        { value: 1, label: '1' },
+                        { value: 2, label: '2' },
+                        { value: 3, label: '3' },
+                      ]}
+                      value={pageColumnsBinding.value}
+                      onChange={pageColumnsBinding.onChange}
+                    />
+                  </div>
+                  {pageColumnsBinding.value > 1 && (
+                    <SliderRow
+                      label={_('reader.columnGap')}
+                      value={columnGapBinding.value}
+                      min={0}
+                      max={15}
+                      step={1}
+                      suffix="%"
+                      onChange={columnGapBinding.onChange}
+                    />
+                  )}
+                </>
+              )}
+
+              {readingMode === 'scroll' && (
+                <div>
+                  <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.continuousScroll')}</label>
+                  <ButtonGroup
+                    size="sm"
+                    options={[
+                      { value: 'off', label: _('reader.continuousScrollOff') },
+                      { value: 'snap', label: _('reader.continuousScrollSnap') },
+                      { value: 'seamless', label: _('reader.continuousScrollSeamless') },
+                    ]}
+                    value={continuousScroll}
+                    onChange={setContinuousScroll}
+                  />
+                </div>
+              )}
+
+              <ToggleRow
+                label={_('reader.pageAnimation')}
+                checked={pageAnimation}
+                onChange={setPageAnimation}
+              />
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--bd-read-accent)] pt-3">
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+              {_('reader.displayTextGroup')}
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.chineseConversion')}</label>
+                <ButtonGroup
+                  size="sm"
+                  options={[
+                    { value: 'off', label: _('reader.chineseConversionOff') },
+                    { value: 'simplified', label: _('reader.chineseConversionSimplified') },
+                    { value: 'traditional', label: _('reader.chineseConversionTraditional') },
+                  ]}
+                  value={chineseConversion}
+                  onChange={(v) => setChineseConversion(v === chineseConversion ? 'off' : v)}
+                />
+              </div>
+
+              {cleanReadingSupported && (
+                <ToggleRow
+                  label={_('reader.cleanReading')}
+                  checked={cleanReadingBinding.value}
+                  onChange={cleanReadingBinding.onChange}
                 />
               )}
-            </>
-          )}
-
-          {readingMode === 'scroll' && (
-            <div className="mb-4">
-              <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.continuousScroll')}</label>
-              <ButtonGroup
-                options={[
-                  { value: 'off', label: _('reader.continuousScrollOff') },
-                  { value: 'snap', label: _('reader.continuousScrollSnap') },
-                  { value: 'seamless', label: _('reader.continuousScrollSeamless') },
-                ]}
-                value={continuousScroll}
-                onChange={setContinuousScroll}
-              />
             </div>
-          )}
-
-          <div className="mb-3">
-            <ToggleRow
-              label={_('reader.pageAnimation')}
-              checked={pageAnimation}
-              onChange={setPageAnimation}
-            />
           </div>
 
-          <div className="mb-4">
-            <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.chineseConversion')}</label>
-            <ButtonGroup
-              options={[
-                { value: 'off', label: _('reader.chineseConversionOff') },
-                { value: 'simplified', label: _('reader.chineseConversionSimplified') },
-                { value: 'traditional', label: _('reader.chineseConversionTraditional') },
-              ]}
-              value={chineseConversion}
-              onChange={(v) => setChineseConversion(v === chineseConversion ? 'off' : v)}
-            />
-          </div>
-
-          <div className="mb-3 border-t border-[var(--bd-read-accent)] pt-3">
-            <ToggleRow label={_('reader.header')} checked={showHeader} onChange={setShowHeader} />
-            <div
-              className={cn(
-                'mb-3.5 flex overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-stone-500/5 divide-x divide-[var(--bd-read-accent)] transition-all duration-150',
-                !showHeader && 'pointer-events-none opacity-35 grayscale',
-              )}
-            >
-              <FieldSelect value={headerLeft} onChange={setHeaderLeft} disabled={!showHeader} />
-              <FieldSelect value={headerCenter} onChange={setHeaderCenter} disabled={!showHeader} />
-              <FieldSelect value={headerRight} onChange={setHeaderRight} disabled={!showHeader} />
+          <div className="border-t border-[var(--bd-read-accent)] pt-3">
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+              {_('reader.displayAidsGroup')}
             </div>
 
-            <ToggleRow label={_('reader.footer')} checked={showFooter} onChange={setShowFooter} />
-            <div
-              className={cn(
-                'mb-3 flex overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-stone-500/5 divide-x divide-[var(--bd-read-accent)] transition-all duration-150',
-                !showFooter && 'pointer-events-none opacity-35 grayscale',
-              )}
-            >
-              <FieldSelect value={footerLeft} onChange={setFooterLeft} disabled={!showFooter} />
-              <FieldSelect value={footerCenter} onChange={setFooterCenter} disabled={!showFooter} />
-              <FieldSelect value={footerRight} onChange={setFooterRight} disabled={!showFooter} />
-            </div>
-            <ToggleRow label={_('reader.showFriendIdeas')} checked={showFriendIdeas} onChange={setShowFriendIdeas} />
-            <div className="flex flex-col gap-1.5 pt-1">
-              <span className="text-xs text-[var(--bd-read-sub)]">{_('reader.ideaDisplayMode')}</span>
-              <ButtonGroup
-                options={[
-                  { value: 'sidebar', label: _('reader.ideaDisplaySidebar') },
-                  { value: 'modal', label: _('reader.ideaDisplayModal') },
-                ]}
-                value={ideaDisplayMode}
-                onChange={setIdeaDisplayMode}
-              />
+            <div className="space-y-2">
+              <div>
+                <ToggleRow label={_('reader.header')} checked={showHeader} onChange={setShowHeader} />
+                {showHeader && (
+                  <div className="mt-1 mb-2.5 flex overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-stone-500/5 divide-x divide-[var(--bd-read-accent)]">
+                    <FieldSelect
+                      value={headerLeft}
+                      onChange={setHeaderLeft}
+                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.header'), position: _('reader.marginalPositionLeft') })}
+                    />
+                    <FieldSelect
+                      value={headerCenter}
+                      onChange={setHeaderCenter}
+                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.header'), position: _('reader.marginalPositionCenter') })}
+                    />
+                    <FieldSelect
+                      value={headerRight}
+                      onChange={setHeaderRight}
+                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.header'), position: _('reader.marginalPositionRight') })}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <ToggleRow label={_('reader.footer')} checked={showFooter} onChange={setShowFooter} />
+                {showFooter && (
+                  <div className="mt-1 mb-2.5 flex overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-stone-500/5 divide-x divide-[var(--bd-read-accent)]">
+                    <FieldSelect
+                      value={footerLeft}
+                      onChange={setFooterLeft}
+                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.footer'), position: _('reader.marginalPositionLeft') })}
+                    />
+                    <FieldSelect
+                      value={footerCenter}
+                      onChange={setFooterCenter}
+                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.footer'), position: _('reader.marginalPositionCenter') })}
+                    />
+                    <FieldSelect
+                      value={footerRight}
+                      onChange={setFooterRight}
+                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.footer'), position: _('reader.marginalPositionRight') })}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <ToggleRow label={_('reader.showFriendIdeas')} checked={showFriendIdeas} onChange={setShowFriendIdeas} />
+                {showFriendIdeas && (
+                  <div className="mt-1 mb-1">
+                    <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.ideaDisplayMode')}</label>
+                    <ButtonGroup
+                      size="sm"
+                      options={[
+                        { value: 'sidebar', label: _('reader.ideaDisplaySidebar') },
+                        { value: 'modal', label: _('reader.ideaDisplayModal') },
+                      ]}
+                      value={ideaDisplayMode}
+                      onChange={setIdeaDisplayMode}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

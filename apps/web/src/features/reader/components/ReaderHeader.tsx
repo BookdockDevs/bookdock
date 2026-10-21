@@ -50,10 +50,14 @@ interface ReaderHeaderProps {
   autoReadingOpen?: boolean
   readingMode?: 'scroll' | 'page'
   bookId?: string
+  cleanReadingSupported?: boolean
   onAddBookmark?: () => void
   onToggleSettings?: () => void
   onToggleTts?: () => void
   onToggleAutoReading?: () => void
+  onCloseSettings?: () => void
+  onCloseTts?: () => void
+  onCloseAutoReading?: () => void
   /** Fired when playback is started from a panel: dismisses the popover and unpins the chrome. */
   onTtsStart?: () => void
   onAutoReadingStart?: () => void
@@ -61,7 +65,7 @@ interface ReaderHeaderProps {
   bookmarkActive?: boolean
 }
 
-export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onTtsStart, onAutoReadingStart, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, cleanReadingSupported, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onCloseSettings, onCloseTts, onCloseAutoReading, onTtsStart, onAutoReadingStart, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const _ = useTranslation()
   const onBack = useBackNavigation('/')
   const { state: ttsState } = useTtsSession()
@@ -115,7 +119,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
                 <TtsIcon className="h-4 w-4" viewBox="1.7 2.4 20.6 19.2" strokeWidth={1.29} />
               )}
             </button>
-            <SettingsPopover open={!!ttsOpen} onClose={() => onToggleTts?.()} toggleSelector="[data-tts-toggle]">
+            <SettingsPopover open={!!ttsOpen} onClose={() => onCloseTts?.()} toggleSelector="[data-tts-toggle]">
               <TtsPanel onStart={onTtsStart} />
             </SettingsPopover>
           </div>
@@ -137,7 +141,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
             >
               <AutoReadingIcon status={autoReadingState.status} />
             </button>
-            <SettingsPopover open={!!autoReadingOpen} onClose={() => onToggleAutoReading?.()} toggleSelector="[data-auto-reading-toggle]">
+            <SettingsPopover open={!!autoReadingOpen} onClose={() => onCloseAutoReading?.()} toggleSelector="[data-auto-reading-toggle]">
               <AutoReadingPanel readingMode={readingMode} onStart={onAutoReadingStart} />
             </SettingsPopover>
           </div>
@@ -196,8 +200,8 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
                 </g>
               </svg>
             </button>
-            <SettingsPopover open={!!settingsOpen} onClose={() => onToggleSettings?.()}>
-              <SettingsPanel bookId={bookId ?? ''} />
+            <SettingsPopover open={!!settingsOpen} onClose={() => onCloseSettings?.()}>
+              <SettingsPanel bookId={bookId ?? ''} cleanReadingSupported={cleanReadingSupported} />
             </SettingsPopover>
           </div>
         )}

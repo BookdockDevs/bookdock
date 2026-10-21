@@ -93,6 +93,7 @@ export function useReaderRenderer({
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<BookReader | null>(null)
   const [renderer, setRenderer] = useState<BookReader | null>(null)
+  const remountPositionRef = useRef<{ key: string; cfi: string | null; fraction: number | null } | null>(null)
 
   const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
@@ -101,6 +102,7 @@ export function useReaderRenderer({
   const fontPreferences = useUiStore((s) => s.fontPreferences)
   const fontOrder = useUiStore((s) => s.fontOrder)
   const storeFontSize = useUiStore((s) => s.fontSize)
+  const storeCleanReading = useUiStore((s) => s.cleanReading)
   const fontWeight = useUiStore((s) => s.fontWeight)
   const storeLineHeight = useUiStore((s) => s.lineHeight)
   const paragraphSpacing = useUiStore((s) => s.paragraphSpacing)
@@ -136,6 +138,7 @@ export function useReaderRenderer({
   // Per-book overrides (F1) take precedence over the global store for the
   // first-batch keys; everything else keeps reading the store directly.
   const fontSize = settings?.fontSize ?? storeFontSize
+  const cleanReading = settings?.cleanReading ?? storeCleanReading
   const lineHeight = settings?.lineHeight ?? storeLineHeight
   const pageWidth = settings?.pageWidth ?? storePageWidth
   const verticalPadding = settings?.verticalPadding ?? storeVerticalPadding
@@ -247,7 +250,7 @@ export function useReaderRenderer({
     fontSize: marginalFontSize,
   }
 
-  const createRenderer = useCallback(() => new FoliateReader(url, bookId, bookSize, format), [bookId, bookSize, format, url])
+  const createRenderer = useCallback(() => new FoliateReader(url, bookId, bookSize, format, cleanReading), [bookId, bookSize, cleanReading, format, url])
 
   useEffect(() => {
     if (!containerRef.current || !url || !canMount) return
@@ -257,6 +260,11 @@ export function useReaderRenderer({
     // transitions undefined -> value once per book.
     if (initialCfi === undefined) return
 
+    const rendererKey = `${bookId ?? ''}\u0000${url}`
+    const carriedPosition = remountPositionRef.current?.key === rendererKey
+      ? remountPositionRef.current
+      : null
+    remountPositionRef.current = null
     const newRenderer = createRenderer()
     rendererRef.current = newRenderer
     const theme = themeRef.current
@@ -278,28 +286,32 @@ export function useReaderRenderer({
 
     let cancelled = false
     const isCurrentRenderer = () => !cancelled && rendererRef.current === newRenderer
-    const initialTarget = initialCfi
+    const initialTarget = carriedPosition?.cfi ?? initialCfi
+    const initialPositionFraction = carriedPosition?.fraction ?? initialFraction
     // Fires once the view is live but BEFORE the initial chapter load resolves:
     // exposing the renderer here lets TOC jumps navigate immediately (a user
-    // jump supersedes the in-flight open). lastDisplayedCfiRef is recorded in
-    // the same call so the saved-position effect below never re-navigates over
-    // a jump the user already made.
+    // jump supersedes the in-flight open). Record the consumed startup input,
+    // not the carried live position: the saved-position effect must not replay
+    // an older startup CFI over a same-book rebuild or a user jump.
     const markReady = () => {
       if (!isCurrentRenderer()) return undefined
-      lastDisplayedCfiRef.current = initialTarget
+      handledInitialCfiRef.current = initialCfi
       setRenderer(newRenderer)
       return onReadyRef.current?.()
     }
-    newRenderer.mount(containerRef.current, initialTarget, initialFraction, markReady).then(async () => {
+    newRenderer.mount(containerRef.current, initialTarget, initialPositionFraction, markReady).then(async () => {
       // StrictMode double-invokes this effect: the loser must not become the
       // current renderer — its view already bailed out of mount
       if (!isCurrentRenderer()) return
       // mount already navigated (initialTarget may be '' for "book start")
-      lastDisplayedCfiRef.current = initialTarget
+      handledInitialCfiRef.current = initialCfi
       setRenderer(newRenderer)
     }).catch((err) => {
       console.error('[FoliateReader] mount failed:', err)
-      if (isCurrentRenderer()) onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)))
+      if (isCurrentRenderer()) {
+        onViewRebuildingRef.current?.(false)
+        onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)))
+      }
     })
 
     const unsubRelocated = newRenderer.on('relocated', (e) => { if (isCurrentRenderer()) onRelocatedRef.current?.(e) })
@@ -311,7 +323,11 @@ export function useReaderRenderer({
     const unsubMediaError = newRenderer.on('mediaError', (e) => { if (isCurrentRenderer()) onMediaErrorRef.current?.(e) })
     const unsubMediaPlay = newRenderer.on('mediaPlay', (e) => { if (isCurrentRenderer()) onMediaPlayRef.current?.(e) })
     const unsubInstantAnnotation = newRenderer.on('instantAnnotation', (e) => { if (isCurrentRenderer()) onInstantAnnotationRef.current?.(e) })
-    const unsubRendered = newRenderer.on('rendered', () => { if (isCurrentRenderer()) onRenderedRef.current?.() })
+    const unsubRendered = newRenderer.on('rendered', () => {
+      if (!isCurrentRenderer()) return
+      onViewRebuildingRef.current?.(false)
+      onRenderedRef.current?.()
+    })
     const unsubFontFallback = newRenderer.on('fontFallback', () => { if (isCurrentRenderer()) onFontFallbackRef.current?.() })
     const unsubViewRebuilding = newRenderer.on('viewRebuilding', (e) => { if (isCurrentRenderer()) onViewRebuildingRef.current?.(e.pending) })
     const unsubToc = newRenderer.on('tocReady', (items) => { if (isCurrentRenderer()) onTocReadyRef.current?.(items) })
@@ -327,6 +343,12 @@ export function useReaderRenderer({
 
     return () => {
       cancelled = true
+      if (rendererRef.current === newRenderer) onViewRebuildingRef.current?.(true)
+      const position = newRenderer.getCurrentPosition?.()
+      if (rendererRef.current === newRenderer && position
+        && (position.cfi !== null || position.fraction !== null)) {
+        remountPositionRef.current = { key: rendererKey, ...position }
+      }
       unsubRelocated()
       unsubSelected()
       unsubTextSelectionStart()
@@ -353,17 +375,17 @@ export function useReaderRenderer({
       if (rendererRef.current === newRenderer) rendererRef.current = null
       setRenderer((current) => (current === newRenderer ? null : current))
     }
-  }, [url, createRenderer, initialCfi, initialFraction, canMount])
+  }, [url, bookId, createRenderer, initialCfi, initialFraction, canMount])
 
   // Navigate to the saved position once both renderer and progress are ready.
   // Skipping when initialCfi is undefined avoids a spurious goTo({ index: 0 })
   // that would be immediately overwritten by the real CFI from progress.
-  const lastDisplayedCfiRef = useRef<string | null>(null)
+  const handledInitialCfiRef = useRef<string | null>(null)
   useEffect(() => {
     if (!renderer) return
     if (initialCfi === undefined) return
-    if (initialCfi === lastDisplayedCfiRef.current) return
-    lastDisplayedCfiRef.current = initialCfi
+    if (initialCfi === handledInitialCfiRef.current) return
+    handledInitialCfiRef.current = initialCfi
     void renderer.display(initialCfi, { internal: true })
   }, [renderer, initialCfi])
 

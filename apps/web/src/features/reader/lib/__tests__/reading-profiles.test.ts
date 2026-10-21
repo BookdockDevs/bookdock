@@ -27,8 +27,9 @@ function configWith(preset: ReadingPreset): ReadingConfig {
 }
 
 describe('reading profiles', () => {
-  it('covers every reading-menu setting (47 keys)', () => {
-    expect(READING_PROFILE_KEYS).toHaveLength(47)
+  it('covers every reading-menu setting (48 keys)', () => {
+    expect(READING_PROFILE_KEYS).toHaveLength(48)
+    expect(READING_PROFILE_KEYS).toContain('cleanReading')
     expect(READING_PROFILE_KEYS).toContain('readingThemeMode')
     expect(READING_PROFILE_KEYS).toContain('fontFamily')
     expect(READING_PROFILE_KEYS).toContain('cjkFontFamily')
@@ -56,6 +57,7 @@ describe('reading profiles', () => {
     expect(parsed.global.clickAreaMode).toBe('standard')
     expect(parsed.global.showHeader).toBe(false)
     expect(parsed.global.showFriendIdeas).toBe(true)
+    expect(parsed.global.cleanReading).toBe(false)
   })
 
   it('backfills the mode-mirror fields from the matching backing field', () => {
@@ -113,6 +115,11 @@ describe('reading profiles', () => {
     expect(config.presets[1]).toEqual(preset)
     expect(preset.name).toBe('护眼')
     expect('active' in config).toBe(false)
+  })
+
+  it('captures the effective clean-reading value in a new preset', () => {
+    const { preset } = createReadingPreset(configWith({ id: 'p1', name: 'x', snapshot: snapshot() }), '纯净', snapshot({ cleanReading: true }))
+    expect(preset.snapshot.cleanReading).toBe(true)
   })
 
   it('renames a preset in place', () => {

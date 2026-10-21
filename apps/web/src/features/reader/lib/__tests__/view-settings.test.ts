@@ -4,6 +4,7 @@ import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from '../v
 import type { GlobalViewSettings } from '../view-settings'
 
 const baseGlobal: GlobalViewSettings = {
+  cleanReading: false,
   fontSize: 18,
   lineHeight: 1.8,
   pageWidth: 800,
@@ -23,6 +24,7 @@ const baseGlobal: GlobalViewSettings = {
 describe('mergeViewSettings', () => {
   it('returns global values when there is no per-book diff', () => {
     expect(mergeViewSettings(baseGlobal, undefined)).toEqual({
+      cleanReading: false,
       fontSize: 18,
       lineHeight: 1.8,
       pageWidth: 800,
@@ -41,6 +43,11 @@ describe('mergeViewSettings', () => {
     expect(merged.columnGap).toBe(8)
     // untouched keys stay global
     expect(merged.pageWidth).toBe(800)
+  })
+
+  it('lets an explicit false override a true global value', () => {
+    expect(mergeViewSettings({ ...baseGlobal, cleanReading: true }, { cleanReading: false }).cleanReading).toBe(false)
+    expect(mergeViewSettings({ ...baseGlobal, cleanReading: false }, { cleanReading: true }).cleanReading).toBe(true)
   })
 
   it('merges dual-backing keys per mode, not by the diff flat value', () => {
@@ -76,6 +83,10 @@ describe('mergeViewSettings', () => {
 })
 
 describe('viewSettingsDiffForKey', () => {
+  it('keeps the boolean field typed and independent from numeric settings', () => {
+    expect(viewSettingsDiffForKey('cleanReading', true, 'scroll')).toEqual({ cleanReading: true })
+    expect(viewSettingsDiffForKey('cleanReading', false, 'page')).toEqual({ cleanReading: false })
+  })
   it('carries flat + backing for dual-backing keys in scroll mode', () => {
     expect(viewSettingsDiffForKey('pageWidth', 900, 'scroll')).toEqual({ pageWidth: 900, scrollPageWidth: 900 })
     expect(viewSettingsDiffForKey('horizontalPadding', 8, 'scroll')).toEqual({ horizontalPadding: 8, scrollHorizontalPadding: 8 })
