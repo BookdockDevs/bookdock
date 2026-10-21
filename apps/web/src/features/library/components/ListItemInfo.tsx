@@ -12,7 +12,7 @@ interface ListItemInfoProps {
 export interface ListInfoSource {
   progress: number | null
   lastReadAt?: number | null
-  shelfName?: string | null
+  categoryName?: string | null
   tags?: string[]
   size: number
   createdAt: number
@@ -39,8 +39,8 @@ export default function ListItemInfo({ book }: ListItemInfoProps) {
       })
     } else if (item === 'lastRead' && book.lastReadAt) {
       parts.push({ key: 'lastRead', text: formatRelativeTime(_, book.lastReadAt) })
-    } else if (item === 'shelf' && book.shelfName) {
-      parts.push({ key: 'shelf', text: book.shelfName })
+    } else if (item === 'shelf' && book.categoryName) {
+      parts.push({ key: 'category', text: book.categoryName })
     } else if (item === 'tags' && book.tags && book.tags.length > 0) {
       parts.push({ key: 'tags', text: book.tags.join('、') })
     } else if (item === 'size') {

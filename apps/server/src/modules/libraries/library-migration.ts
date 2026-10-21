@@ -115,11 +115,11 @@ export async function migratePrivateLibraries(): Promise<LibraryMigrationReport>
           if (book.coverKey && coverSize !== null) {
             report.blobs += Number(tx.run(sql`INSERT OR IGNORE INTO "blobs" ("key", "size", "kind", "created_at") VALUES (${book.coverKey}, ${coverSize}, 'cover', ${book.createdAt})`).changes)
           }
-          tx.insert(libraryBooks).values({
-            id: libraryBookId, libraryId, userId: user.id, categoryId: null,
-            title: book.title, author: book.author, description, coverKey: book.coverKey,
-            createdAt: book.createdAt, updatedAt: book.updatedAt, deletedAt: book.deletedAt,
-          }).run()
+          // This bridge runs before 0039 retirement and 0054 shelf DDL. An
+          // ORM insert includes every current column, even when omitted here.
+          tx.run(sql`INSERT INTO library_books
+            (id, library_id, user_id, category_id, title, author, description, cover_key, created_at, updated_at, deleted_at)
+            VALUES (${libraryBookId}, ${libraryId}, ${user.id}, NULL, ${book.title}, ${book.author}, ${description}, ${book.coverKey}, ${book.createdAt}, ${book.updatedAt}, ${book.deletedAt})`)
           tx.insert(libraryBookVersions).values({
             id: libraryBookVersionId, libraryId, libraryBookId, bookVersionId: book.id,
             kind: 'personal', status: 'published', name: '',
@@ -218,7 +218,7 @@ export async function migrateLibraryOrganization(): Promise<OrganizationMigratio
           report.anomalies.push({ bookId: book.id, reason: 'book has no migrated library entry' })
           continue
         }
-        const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+        const work = db.select({ updatedAt: libraryBooks.updatedAt }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
         if (!work || work.updatedAt > book.updatedAt) continue
         if (book.shelfId) {
           const category = db.select({ id: libraryCategories.id }).from(libraryCategories)

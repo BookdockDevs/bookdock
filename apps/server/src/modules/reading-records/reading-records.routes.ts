@@ -19,6 +19,7 @@ import {
   deleteSession,
   getBookRecords,
   getByBook,
+  getByCategory,
   getByTag,
   getDaily,
   getHourly,
@@ -125,6 +126,12 @@ readingRecordsRoutes.get('/by-book', async (c) => {
   }
   const items = await getByBook(user.id, parsed.data, c.req.query('showHidden') === '1')
   return c.json({ data: items })
+})
+
+readingRecordsRoutes.get('/by-category', async (c) => {
+  const parsed = readingRecordRangeSchema.safeParse(c.req.query())
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid range', parsed.error.flatten())
+  return c.json({ data: await getByCategory(c.get('user')!.id, parsed.data, c.req.query('showHidden') === '1') })
 })
 
 readingRecordsRoutes.get('/by-tag', async (c) => {

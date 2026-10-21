@@ -69,6 +69,7 @@ export interface LegadoExploreLibrary {
   type: 'private' | 'shared'
   /** Libraries with no readable work are omitted entirely. */
   categories: LegadoExploreCategory[]
+  shelves: LegadoExploreCategory[]
   tags: LegadoExploreCategory[]
 }
 
@@ -1198,6 +1199,8 @@ export interface TagReorderReq {
 export interface BookMembershipReq {
   /** Single-shelf membership: string = move into shelf, null = remove from shelf, absent = unchanged */
   shelfId?: string | null
+  categoryId?: string | null
+  categoryTemplateKey?: string
   tagIds?: string[]
 }
 
@@ -1218,11 +1221,13 @@ export interface BookListItem {
   createdAt: number
   updatedAt: number
   deletedAt?: number | null
-  /** Single-shelf membership; null = uncategorized. Drives drag-to-shelf no-op checks. */
+  /** Single-shelf membership; null = unshelved. Drives drag-to-shelf no-op checks. */
   shelfId: string | null
+  categoryId?: string | null
+  categoryName?: string | null
   /** Private-library entry kind; A is personal, B is shared, C is local. */
   kind?: LibraryVersionKind
-  /** Resolved shelf name (null when uncategorized); list view info line only */
+  /** Resolved storage name; metadata display uses categoryName instead. */
   shelfName?: string | null
   /** Tag names attached to the book; list view info line only */
   tags?: string[]
@@ -1598,6 +1603,15 @@ export interface ReadingRecordTagItem {
   durationSeconds: number
   /** Distinct book count having this tag in the range */
   bookCount?: number
+}
+
+export interface ReadingRecordCategoryItem {
+  categoryId: string | null
+  name: string | null
+  parentId: string | null
+  parentName: string | null
+  durationSeconds: number
+  bookCount: number
 }
 
 export type ReplacementCreateReq = {

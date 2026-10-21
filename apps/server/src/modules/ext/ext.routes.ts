@@ -104,22 +104,17 @@ extRoutes.post('/books', async (c) => {
     throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
   }
   const libraryId = typeof body['libraryId'] === 'string' && body['libraryId'] ? body['libraryId'] : undefined
-  // A shelf is optional in the same way it is in the Web's own upload dialog:
-  // omitted means uncategorized, which is what the homepage upload does. It is
-  // only meaningful together with a libraryId, because the private library is
-  // where an unnamed-library upload already lands — sending a category without
-  // one would silently drop it.
-  const categoryId = typeof body['categoryId'] === 'string' && body['categoryId'] && libraryId
-    ? body['categoryId']
-    : undefined
+  const categoryId = typeof body['categoryId'] === 'string' && body['categoryId'] ? body['categoryId'] : undefined
+  const shelfId = typeof body['shelfId'] === 'string' && body['shelfId'] ? body['shelfId'] : undefined
+  if (categoryId && !libraryId) throw new AppError('VALIDATION_ERROR', 'Category placement requires a libraryId')
   const normalizeTitle = isTitleNormalizeEnabled(user.id)
   // Two upload paths because the domain has two: uploadBook always writes to the
   // caller's private library, while uploadCatalogBook targets a named one and
   // enforces requireLibraryManager itself. Both report duplication, which is
   // what lets a client re-run the same folder safely.
   const result = libraryId
-    ? await uploadCatalogBook(libraryId, user.id, file, { normalizeTitle, categoryId })
-    : await uploadBook(user.id, file, undefined, { normalizeTitle }).then((r) => ({
+    ? await uploadCatalogBook(libraryId, user.id, file, { normalizeTitle, categoryId, shelfId })
+    : await uploadBook(user.id, file, { shelfId }, { normalizeTitle }).then((r) => ({
       bookVersionId: r.book.id,
       duplicated: r.duplicated,
     }))

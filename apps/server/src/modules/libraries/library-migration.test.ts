@@ -9,6 +9,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import * as schema from '../../db/legacy-test-schema'
+import * as legacyBookSchema from '../../db/legacy-book-schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
@@ -149,7 +150,7 @@ describe('library follow-up migrations', () => {
     ))
 
     db.insert(schema.users).values({ id: 'u-owner', username: 'Fool', role: 'owner', createdAt: 1 }).run()
-    db.insert(schema.shelves).values([
+    db.insert(legacyBookSchema.shelves).values([
       { id: 's1', userId: 'u-owner', name: 'Fiction', sortOrder: 0, createdAt: 1 },
       { id: 's2', userId: 'u-owner', name: 'Tech', sortOrder: 1, createdAt: 1 },
     ]).run()

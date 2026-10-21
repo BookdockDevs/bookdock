@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -21,7 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 function createTestDb() {
   const sqlite = new Database(':memory:')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '../../db/migrations') })
+  migrate(db, { migrationsFolder: path.join(__dirname, '../../db/migrations') }, [])
   return db
 }
 
@@ -145,6 +145,44 @@ describe('external API projection', () => {
     // not a category row. Advertising it here would hand a client an id that the
     // upload path answers with CATEGORY_NOT_FOUND.
     expect(library.categories.map((c) => c.id)).not.toContain('none')
+  })
+
+  it('projects private shelves separately from categories', async () => {
+    const shelfId = createId('shelf')
+    const categoryId = createId('cat')
+    db.insert(schema.shelves).values({
+      id: shelfId, libraryId: privateLibraryId, userId: ownerId, name: 'Reading',
+      sortOrder: 0, createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraryCategories).values({
+      id: categoryId, libraryId: privateLibraryId, userId: ownerId, name: 'Mystery',
+      parentId: null, createdAt: 1, updatedAt: 1,
+    }).run()
+
+    const library = (await listExternalLibraries(ownerId)).find((row) => row.id === privateLibraryId)!
+
+    expect(library.shelves.map((row) => row.id)).toEqual([shelfId])
+    expect(library.categories.map((row) => row.id)).toEqual([categoryId])
+    expect((await listExternalLibraries(ownerId)).find((row) => row.id === sharedLibraryId)!.shelves).toEqual([])
+  })
+
+  it('returns private shelf and category labels as separate book fields', async () => {
+    const shelfId = createId('shelf')
+    const categoryId = createId('cat')
+    db.insert(schema.shelves).values({
+      id: shelfId, libraryId: privateLibraryId, userId: ownerId, name: 'Reading',
+      sortOrder: 0, createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.libraryCategories).values({
+      id: categoryId, libraryId: privateLibraryId, userId: ownerId, name: 'Mystery',
+      parentId: null, createdAt: 1, updatedAt: 1,
+    }).run()
+    const seeded = seedVersion(privateLibraryId, ownerId, { title: 'Filed', revisionAt: 1000 })
+    db.update(schema.libraryBooks).set({ shelfId, categoryId }).where(eq(schema.libraryBooks.id, seeded.workId)).run()
+
+    const book = (await listExternalBooks(ownerId, { page: 1, pageSize: 10 })).items[0]!
+
+    expect(book).toMatchObject({ shelfName: 'Reading', categoryName: 'Mystery' })
   })
 
   it('shows a hidden shelf to its manager and to nobody else', async () => {

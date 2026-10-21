@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { eq, sql } from 'drizzle-orm'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,7 +33,7 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [])
   return db
 }
 

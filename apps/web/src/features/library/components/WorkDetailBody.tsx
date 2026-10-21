@@ -23,6 +23,7 @@ import { useCollectBook, useLibraryCategories, useUpdateCatalogBook, useUpdateCa
 import { categoryPath } from '../taxonomy'
 import { getHiddenCause } from '../hidden-status'
 import BookCover from './BookCover'
+import TaxonomyIcon from './TaxonomyIcon'
 import DetailHeader from './book-detail/DetailHeader'
 import DetailCoverEditor from './book-detail/DetailCoverEditor'
 import MetadataFieldDialog from './book-detail/MetadataFieldDialog'
@@ -152,9 +153,9 @@ export default function WorkDetailBody({
   const readable = Boolean(selected) && (canManage || !selectedHidden)
   const canDownload = canCollect && readable && Boolean(selected)
 
-  function goToFilter(search: { author?: string; tag?: string; series?: string; shelf?: string; categoryScope?: 'direct' | 'subtree' }) {
+  function goToFilter(search: { author?: string; tag?: string; series?: string; category?: string; categoryScope?: 'direct' | 'subtree' }) {
     onClose()
-    void navigate({ to: '/', search: { libraryId: library.id, ...search } })
+    void navigate({ to: '/', search: { libraryId: library.id, ...(search.category !== undefined ? { category: search.category, shelf: undefined, tag: undefined } : {}), ...(search.tag !== undefined ? { tag: search.tag, shelf: undefined, category: undefined, categoryScope: undefined } : {}), ...search } })
   }
 
   function readSelected() {
@@ -355,10 +356,10 @@ export default function WorkDetailBody({
         chips={(
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             {!work.categoryId || categoryName ? (
-              <FilterChip prefix="📁" label={categoryName ?? _('library.uncategorized')} onClick={() => goToFilter({ shelf: work.categoryId ?? 'none', categoryScope: work.categoryId ? 'subtree' : 'direct' })} />
+              <FilterChip icon={<TaxonomyIcon kind="category" size={13} className="text-stone-400" />} label={categoryName ?? _('library.uncategorized')} onClick={() => goToFilter({ category: work.categoryId ?? 'none', categoryScope: work.categoryId ? 'subtree' : 'direct' })} />
             ) : (
               <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-stone-100/90 px-2 py-0.5 text-xs text-stone-400 dark:bg-stone-800/90 dark:text-stone-500">
-                <span aria-hidden="true">📁</span>
+                <TaxonomyIcon kind="category" size={13} className="text-stone-400" />
                 {categories.isPending ? _('library.categories') : _('library.categoryUnavailable')}
               </span>
             )}

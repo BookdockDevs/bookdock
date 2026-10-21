@@ -14,7 +14,7 @@ import type {
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { settings, storageConnections } from '../../db/schema'
+import { libraries, settings, storageConnections } from '../../db/schema'
 import { createId } from '../../lib/id'
 import type { RemoteBrowseClient } from '../../lib/remote-client'
 import { S3Client } from '../../lib/s3'
@@ -305,6 +305,9 @@ export async function importStorageConnectionBooks(
   const instance = getInstanceSettings()
   const normalizeTitle = isTitleNormalizeEnabled(userId)
   const results: WebDavImportItemResult[] = []
+  const privateTarget = req.libraryId
+    ? getDb().select({ type: libraries.type }).from(libraries).where(eq(libraries.id, req.libraryId)).get()?.type === 'private'
+    : true
 
   for (const filePath of req.files) {
     const rawName = filePath.split('/').filter(Boolean).pop() || 'book'
@@ -338,7 +341,7 @@ export async function importStorageConnectionBooks(
 
       if (req.libraryId) {
         const catalogRes = await uploadCatalogBook(req.libraryId, userId, file, {
-          categoryId: req.shelfId,
+          ...(privateTarget ? { shelfId: req.shelfId, categoryId: req.categoryId } : { categoryId: req.categoryId ?? req.shelfId }),
           tagIds: req.tagIds,
           normalizeTitle,
         })
@@ -352,7 +355,7 @@ export async function importStorageConnectionBooks(
         const uploadRes = await uploadBook(
           userId,
           file,
-          { shelfId: req.shelfId, tagIds: req.tagIds },
+          { shelfId: req.shelfId, categoryId: req.categoryId, tagIds: req.tagIds },
           { normalizeTitle, allowCorresponding: true },
         )
         results.push({

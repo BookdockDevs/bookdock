@@ -14,7 +14,7 @@ import { getReadingLedger } from '../modules/reading-records/reading-ledger.serv
 import * as storage from '../storage'
 import { blobKeyReferenced } from './blob-refs'
 import * as client from './client'
-import { migrateBeforeBookRetirement, migrateWithTagFilter, PERSONAL_ARCHIVE_TAG } from './migration-stage'
+import { migrateBeforeBookRetirement, migrateWithTagFilter, migrationTagWhen, PERSONAL_ARCHIVE_TAG } from './migration-stage'
 import * as schema from './schema'
 
 const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
@@ -28,7 +28,8 @@ describe('personal archive upgrade', () => {
     const db = drizzle(sqlite, { schema })
     migrateBeforeBookRetirement(db, { migrationsFolder })
     client.retargetBookIdReferences(db)
-    migrateWithTagFilter(db, { migrationsFolder }, (entry) => entry.tag !== PERSONAL_ARCHIVE_TAG)
+    const archiveWhen = migrationTagWhen(migrationsFolder, PERSONAL_ARCHIVE_TAG)
+    migrateWithTagFilter(db, { migrationsFolder }, (entry) => entry.when < archiveWhen)
     sqlite.exec(`
       INSERT INTO users(id, username, created_at) VALUES ('owner','Owner',1), ('other','Other',1);
       INSERT INTO libraries(id,user_id,type,name,created_at,updated_at) VALUES ('private','owner','private','Private',1,1);

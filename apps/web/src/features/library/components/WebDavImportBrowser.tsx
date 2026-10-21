@@ -19,6 +19,7 @@ interface WebDavImportBrowserProps {
   onConnectionChange?: (id: string) => void
   libraryId?: string
   shelfId?: string
+  categoryId?: string
   tagId?: string
   includeCurrentTag?: boolean
   target?: UploadTarget
@@ -81,6 +82,7 @@ export default function WebDavImportBrowser({
   onConnectionChange,
   libraryId: propLibraryId,
   shelfId,
+  categoryId,
   tagId,
   includeCurrentTag,
   target,
@@ -313,6 +315,7 @@ export default function WebDavImportBrowser({
           body: {
             files: [nextPath],
             shelfId,
+            categoryId,
             tagIds: includeCurrentTag && tagId ? [tagId] : undefined,
             libraryId: targetLibraryId,
           },
@@ -395,7 +398,7 @@ export default function WebDavImportBrowser({
     } else if (freshCancelledCount > 0) {
       notify.info(_('library.webdavImportCancelled') || '导入已取消；服务端可能已完成部分导入')
     }
-  }, [activeConnectionId, importMutation, includeCurrentTag, onImportComplete, patchQueueItem, propLibraryId, shelfId, tagId, target, _])
+  }, [activeConnectionId, importMutation, includeCurrentTag, onImportComplete, patchQueueItem, propLibraryId, shelfId, categoryId, tagId, target, _])
 
   const startImportQueue = useCallback(
     (pathsToImport: string[]) => {

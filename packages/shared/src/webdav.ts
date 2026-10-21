@@ -66,6 +66,7 @@ export const webdavImportReqSchema = z.object({
   files: z.array(z.string().min(1).max(1000)).min(1).max(100),
   libraryId: z.string().optional(),
   shelfId: z.string().optional(),
+  categoryId: z.string().min(1).max(128).optional(),
   tagIds: z.array(z.string()).optional(),
 })
 export type WebDavImportReq = z.infer<typeof webdavImportReqSchema>

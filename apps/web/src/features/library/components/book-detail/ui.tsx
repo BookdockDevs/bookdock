@@ -61,11 +61,13 @@ export function Chip({
 
 export function FilterChip({
   label,
+  icon,
   prefix,
   muted = false,
   onClick,
 }: {
   label: string
+  icon?: ReactNode
   prefix?: string
   muted?: boolean
   onClick: () => void
@@ -81,6 +83,7 @@ export function FilterChip({
           : 'bg-stone-100/90 text-stone-600 hover:bg-stone-200/90 hover:text-stone-900 dark:bg-stone-800/90 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100'
       }`}
     >
+      {icon}
       {prefix && <span aria-hidden="true" className="opacity-60 font-mono text-[11px]">{prefix}</span>}
       <span>{label}</span>
     </button>

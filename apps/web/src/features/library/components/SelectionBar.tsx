@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { BatchSelectionItem, ReadStatus } from '@bookdock/shared'
 import { apiDelete, apiPatch, apiPost } from '@/api/client'
+import { READING_RECORDS_KEY } from '@/api/hooks/reading-records'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
 import { invalidatePermanentlyDeletedBookQueries, useLibraryCategories, useLibraryTags, useShelves, useTags } from '../hooks'
 import { categoryChoices } from '../taxonomy'
+import CategoryAssignmentSelector from './CategoryAssignmentSelector'
 import ClearBookDataOption from './ClearBookDataOption'
+import TaxonomyChoiceRow from './TaxonomyChoiceRow'
 import { READ_STATUS_OPTIONS } from './read-status'
 
 interface SelectionBarProps {
@@ -22,6 +26,7 @@ interface SelectionBarProps {
   trashEnabled?: boolean
   elevated?: boolean
   libraryId?: string
+  taxonomyLibraryId?: string
 }
 
 const BATCH_STATUS_ACTIONS: { value: ReadStatus; labelKey: string }[] = [
@@ -48,7 +53,7 @@ async function settleBatch(ids: string[], action: (id: string) => Promise<unknow
   return results
 }
 
-export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, onRetainSelection, trash = false, trashEnabled = true, elevated = false, libraryId }: SelectionBarProps) {
+export default function SelectionBar({ selectedIds, onClear, onComplete = onClear, onRetainSelection, trash = false, trashEnabled = true, elevated = false, libraryId, taxonomyLibraryId }: SelectionBarProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   // Trash mode offers only restore/permanent-delete, which route per id below
@@ -441,6 +446,7 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
           ids={selectedIds}
           items={selectionItems}
           libraryId={libraryId}
+          taxonomyLibraryId={taxonomyLibraryId}
           onClose={() => setDialog(null)}
           onDone={onComplete}
         />
@@ -471,29 +477,40 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   )
 }
 
-function BatchClassifyDialog({ ids, items, libraryId, onClose, onDone }: { ids: string[]; items: BatchSelectionItem[]; libraryId?: string; onClose: () => void; onDone: () => void }) {
+function BatchClassifyDialog({ ids, items, libraryId, taxonomyLibraryId, onClose, onDone }: { ids: string[]; items: BatchSelectionItem[]; libraryId?: string; taxonomyLibraryId?: string; onClose: () => void; onDone: () => void }) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const { data: shelvesData } = useShelves()
   const { data: tagsData } = useTags()
-  const { data: libraryCategories } = useLibraryCategories(libraryId ?? null)
+  const { data: libraryCategories } = useLibraryCategories(taxonomyLibraryId ?? libraryId ?? null)
   const { data: libraryTags } = useLibraryTags(libraryId ?? null)
-  const [activeTab, setActiveTab] = useState<'shelves' | 'tags'>('shelves')
+  const [activeTab, setActiveTab] = useState<'shelves' | 'categories' | 'tags'>(libraryId ? 'categories' : 'shelves')
   // undefined = untouched (no shelf PUT), null = move out of shelf (uncategorized)
   const [selectedShelf, setSelectedShelf] = useState<string | null | undefined>(undefined)
+  const [selectedCategory, setSelectedCategory] = useState<string | null | undefined>(undefined)
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string | undefined>(undefined)
   const [tagChanges, setTagChanges] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
+  const shelfRadioName = `batch-shelf-${useId()}`
 
-  const shelves = libraryId ? categoryChoices(libraryCategories?.data ?? []) : (shelvesData?.data ?? [])
+  const shelves = shelvesData?.data ?? []
+  const categories = categoryChoices(libraryCategories?.data ?? [])
   const tags = libraryId ? (libraryTags?.data ?? []) : (tagsData?.data ?? [])
-  const initialCategory = items.every((item) => item.categoryId === items[0]?.categoryId) ? items[0]?.categoryId : undefined
+  const initialShelf = items.every((item) => item.shelfId === items[0]?.shelfId) ? items[0]?.shelfId ?? null : undefined
+  const initialCategory = items.every((item) => item.categoryId === items[0]?.categoryId) ? items[0]?.categoryId ?? null : undefined
+
+  function handleClose() {
+    if (!saving) onClose()
+  }
 
   async function handleApply() {
+    if (saving) return
     setSaving(true)
     try {
       await apiPatch(libraryId ? `/libraries/${libraryId}/books/batch/organize` : '/books/batch/organize', {
         ids,
-        ...(selectedShelf !== undefined ? { categoryId: selectedShelf } : {}),
+        ...(selectedShelf !== undefined ? { shelfId: selectedShelf } : {}),
+        ...(selectedTemplateKey ? { categoryTemplateKey: selectedTemplateKey } : selectedCategory !== undefined ? { categoryId: selectedCategory } : {}),
         addTagIds: Object.keys(tagChanges).filter((id) => tagChanges[id]),
         removeTagIds: Object.keys(tagChanges).filter((id) => !tagChanges[id]),
       })
@@ -502,6 +519,8 @@ function BatchClassifyDialog({ ids, items, libraryId, onClose, onDone }: { ids: 
       void queryClient.invalidateQueries({ queryKey: ['tags'] })
       void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       void queryClient.invalidateQueries({ queryKey: ['book'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries', taxonomyLibraryId, 'categories'] })
+      void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
       if (libraryId) {
         void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
         void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
@@ -516,118 +535,83 @@ function BatchClassifyDialog({ ids, items, libraryId, onClose, onDone }: { ids: 
     }
   }
 
-  const showSave = selectedShelf !== undefined || Object.keys(tagChanges).length > 0
+  const showSave = selectedShelf !== undefined || selectedCategory !== undefined || selectedTemplateKey !== undefined || Object.keys(tagChanges).length > 0
+  const currentShelfName = initialShelf === null
+    ? _('library.notOnShelf')
+    : shelves.find((shelf) => shelf.id === initialShelf)?.name
+  const currentCategoryName = initialCategory === null
+    ? _('library.uncategorized')
+    : categories.find((category) => category.id === initialCategory)?.name
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-4">
-      <div className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-t-xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:max-h-none sm:overflow-visible sm:rounded-xl dark:bg-stone-900">
-        <h2 className="mb-4 font-serif text-lg font-medium text-stone-900 dark:text-stone-100">
-          {_('library.batchOrganize')}
-        </h2>
-        <p className="mb-4 text-sm text-stone-500">
-          {_('library.batchOrganizeConfirm', { count: ids.length })}
-        </p>
-
-        <div className="mb-4 flex rounded-lg border border-stone-200 p-0.5 dark:border-stone-800">
-          <button
-            type="button"
-            onClick={() => setActiveTab('shelves')}
-            className={cn(
-              'flex-1 rounded-md py-1.5 text-sm transition-colors',
-              activeTab === 'shelves'
-                ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                : 'text-stone-500 hover:text-stone-900 dark:hover:text-stone-200',
-            )}
-          >
-            {_(libraryId ? 'library.categories' : 'library.shelves')}
+    <Modal
+      title={<span className="flex items-center gap-2"><span>{_('library.batchOrganize')}</span><span className="text-xs font-normal text-stone-500">{_('library.taxonomySelectionCount', { count: ids.length })}</span></span>}
+      closeLabel={_('library.close')}
+      onClose={handleClose}
+      size="sm"
+      panelClassName="h-[min(30rem,calc(100dvh-1rem))] sm:h-[min(30rem,85vh)]"
+      contentClassName="flex flex-col gap-3 overflow-hidden"
+      footer={<div className="ml-auto flex items-center gap-2"><Button variant="secondary" onClick={handleClose} disabled={saving}>{_('library.cancel')}</Button><Button disabled={!showSave || saving} onClick={() => void handleApply()}>{_('library.save')}</Button></div>}
+    >
+      <div className="flex shrink-0 rounded-lg border border-stone-200 p-0.5 dark:border-stone-800">
+        {(libraryId ? ['categories', 'tags'] as const : ['shelves', 'categories', 'tags'] as const).map((tab) => (
+          <button key={tab} type="button" disabled={saving} onClick={() => setActiveTab(tab)} className={cn(
+            'flex-1 rounded-md py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+            activeTab === tab ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100' : 'text-stone-500 hover:text-stone-900 dark:hover:text-stone-200',
+          )}>
+            {_(tab === 'categories' ? 'library.categories' : tab === 'shelves' ? 'library.shelves' : 'library.tags')}
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('tags')}
-            className={cn(
-              'flex-1 rounded-md py-1.5 text-sm transition-colors',
-              activeTab === 'tags'
-                ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                : 'text-stone-500 hover:text-stone-900 dark:hover:text-stone-200',
-            )}
-          >
-            {_('library.tags')}
-          </button>
-        </div>
-
-        {activeTab === 'shelves' ? (
-          <div className="flex max-h-60 flex-col gap-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
-            <ShelfRadio
-              label={_('library.keepCategory')}
-              checked={selectedShelf === undefined}
-              onChange={() => setSelectedShelf(undefined)}
-            />
-            <ShelfRadio
-              label={_('library.uncategorized')}
-              checked={selectedShelf === null || (selectedShelf === undefined && initialCategory === null)}
-              onChange={() => setSelectedShelf(null)}
-            />
-            {shelves.map((shelf) => (
-              <ShelfRadio
-                key={shelf.id}
-                label={shelf.name}
-                count={shelf.bookCount}
-                checked={selectedShelf === shelf.id || (selectedShelf === undefined && initialCategory === shelf.id)}
-                onChange={() => setSelectedShelf(shelf.id)}
-              />
-            ))}
-          </div>
-        ) : tags.length === 0 ? (
-          <div className="py-4 text-center text-sm text-stone-400">{_('library.noTags')}</div>
-        ) : (
-          <div className="flex max-h-60 flex-col gap-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1">
-            {tags.map((tag) => {
-              const count = items.filter((item) => item.tagIds.includes(tag.id)).length
-              const state = tagChanges[tag.id] === undefined ? (count === 0 ? 'none' : count === ids.length ? 'all' : 'mixed') : (tagChanges[tag.id] ? 'all' : 'none')
-              return (
-              <label
-                key={tag.id}
-                className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-2 hover:bg-stone-50 dark:hover:bg-stone-800"
-              >
-                <span className="flex items-center gap-2 text-sm text-stone-700 dark:text-stone-200">
-                  <input
-                    type="checkbox"
-                    checked={state === 'all'}
-                    ref={(node) => { if (node) node.indeterminate = state === 'mixed' }}
-                    onChange={() => setTagChanges((previous) => ({ ...previous, [tag.id]: state !== 'all' }))}
-                    className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-500 dark:border-stone-700"
-                  />
-                  <span className="truncate">{tag.name}</span>
-                </span>
-                <span className="text-xs text-stone-400">{state === 'all' ? ids.length : state === 'none' ? 0 : count}/{ids.length}</span>
-              </label>
-            )})}
-          </div>
-        )}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>{_('library.cancel')}</Button>
-          <Button disabled={!showSave || saving} onClick={() => void handleApply()}>{_('library.save')}</Button>
-        </div>
+        ))}
       </div>
-    </div>
-  )
-}
-
-function ShelfRadio({ label, count, checked, onChange }: { label: string; count?: number; checked: boolean; onChange: () => void }) {
-  return (
-    <label className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-2 hover:bg-stone-50 dark:hover:bg-stone-800">
-      <span className="flex items-center gap-2 text-sm text-stone-700 dark:text-stone-200">
-        <input
-          type="radio"
-          checked={checked}
-          onChange={onChange}
-          className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-500 dark:border-stone-700"
-        />
-        <span className="truncate">{label}</span>
-      </span>
-      {count !== undefined && <span className="text-xs text-stone-400">{count}</span>}
-    </label>
+      <fieldset disabled={saving} className="min-h-0 min-w-0 flex-1">
+        <div className="h-full min-h-0 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable]">
+          {activeTab === 'shelves' ? (
+            <div className="flex flex-col gap-0.5">
+              {currentShelfName !== undefined && <p className="mb-1 px-2 text-xs text-stone-400">{_('library.batchCurrentShelf', { name: currentShelfName })}</p>}
+              <TaxonomyChoiceRow label={_('library.keepShelf')} checked={selectedShelf === undefined} name={shelfRadioName} onChange={() => setSelectedShelf(undefined)} />
+              <TaxonomyChoiceRow label={_('library.notOnShelf')} checked={selectedShelf === null} name={shelfRadioName} onChange={() => setSelectedShelf(null)} />
+              {shelves.map((shelf) => <TaxonomyChoiceRow key={shelf.id} label={shelf.name} count={shelf.bookCount} checked={selectedShelf === shelf.id} name={shelfRadioName} onChange={() => setSelectedShelf(shelf.id)} />)}
+            </div>
+          ) : activeTab === 'categories' ? (
+            <div className="space-y-2">
+              {currentCategoryName !== undefined && <p className="px-2 text-xs text-stone-400">{_('library.batchCurrentCategory', { name: currentCategoryName })}</p>}
+              <CategoryAssignmentSelector
+                categories={libraryCategories?.data ?? []}
+                categoryId={selectedCategory}
+                categoryTemplateKey={selectedTemplateKey}
+                allowTemplates={!libraryId}
+                allowKeep
+                onKeep={() => { setSelectedCategory(undefined); setSelectedTemplateKey(undefined) }}
+                onChange={(value) => {
+                  setSelectedCategory(value.categoryId)
+                  setSelectedTemplateKey(value.categoryTemplateKey)
+                }}
+              />
+            </div>
+          ) : tags.length === 0 ? (
+            <div className="space-y-2 py-4 text-center text-sm text-stone-400"><p>{_('library.noTags')}</p><p>{_('library.batchTagsHint')}</p></div>
+          ) : (
+            <div className="flex flex-col gap-0.5">
+              <p className="mb-1 px-2 text-xs text-stone-400">{_('library.batchTagsHint')}</p>
+              {tags.map((tag) => {
+                const count = items.filter((item) => item.tagIds.includes(tag.id)).length
+                const state = tagChanges[tag.id] === undefined ? (count === 0 ? false : count === ids.length ? true : 'mixed') : tagChanges[tag.id]
+                const targetCount = state === true ? ids.length : state === false ? 0 : count
+                return <TaxonomyChoiceRow
+                  key={tag.id}
+                  label={tag.name}
+                  ariaLabel={tag.name}
+                  type="checkbox"
+                  checked={state}
+                  count={`${targetCount}/${ids.length}`}
+                  onChange={() => setTagChanges((previous) => ({ ...previous, [tag.id]: state !== true }))}
+                />
+              })}
+            </div>
+          )}
+        </div>
+      </fieldset>
+    </Modal>
   )
 }
 

@@ -3,7 +3,7 @@ import { and, eq, isNotNull, isNull, not, or, sql, type SQL } from 'drizzle-orm'
 import { bindLibrarySearch, LibrarySearchError, readLibrarySearchExpression, visitLibrarySearch, type LibrarySearchExpression } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { libraries, libraryBooks, libraryBookVersions, libraryCategories, libraryTags } from '../../db/schema'
+import { libraries, libraryBooks, libraryBookVersions, libraryCategories, libraryTags, shelves } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { assertLibraryBrowsable, isLibraryManager, requireLibraryOwner } from './library-access'
 import { loadLibraryHiddenTaxonomy, workHiddenExclusion } from './library-query'
@@ -25,17 +25,20 @@ export function compileSearchExpression(
     if (parsed.kind === 'text') return leaf(parsed)
     let needsTags = false
     let needsCategories = false
+    let needsShelves = false
     visitLibrarySearch(parsed, (node) => {
       if (node.kind !== 'field') return
       if (node.field === 'tag') needsTags = true
-      if (node.field === 'shelf' || node.field === 'category') needsCategories = true
+      if (node.field === 'shelf') needsShelves = true
+      if (node.field === 'category') needsCategories = true
     })
-    const db = needsTags || needsCategories ? getDb() : undefined
+    const db = needsTags || needsCategories || needsShelves ? getDb() : undefined
     const hidden = db && visibleTaxonomyOnly ? loadLibraryHiddenTaxonomy(db, libraryId) : undefined
     const expression = bindLibrarySearch(parsed, {
       shared,
       tags: needsTags ? db!.select().from(libraryTags).where(eq(libraryTags.libraryId, libraryId)).all().filter((tag) => !hidden?.hiddenTagIds.includes(tag.id)) : [],
       categories: needsCategories ? db!.select().from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all().filter((category) => !hidden?.hiddenCategoryIds.includes(category.id)) : [],
+      shelves: needsShelves && !shared ? db!.select().from(shelves).where(eq(shelves.libraryId, libraryId)).all().filter((shelf) => !hidden?.hiddenShelfIds.includes(shelf.id)) : [],
     })
     const compile = (node: LibrarySearchExpression): SQL => {
       if (node.kind === 'and') return and(compile(node.left), compile(node.right)) as SQL

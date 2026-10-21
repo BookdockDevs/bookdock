@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import {
@@ -15,6 +15,7 @@ import { AppError, isUniqueViolation } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { getLibraryBookVersion, getOwnsSourceVersionIds, resolveSharedVersionRead } from './library-access'
 import { getCatalogBook } from './catalog.service'
+import { resolveOrCreateCategoryPath } from './library-category-path'
 
 /**
  * Add-to-private (7.1): one server action turns a shared library's version into
@@ -99,7 +100,7 @@ export async function addToPrivateLibrary(
   if (opts?.categoryId) {
     const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
       .where(and(eq(libraryCategories.id, opts.categoryId), eq(libraryCategories.libraryId, privateLibrary.id))).get()
-    if (!category) throw new AppError('SHELF_NOT_FOUND')
+    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
   }
   const tagIds = [...new Set(opts?.tagIds ?? [])]
   if (tagIds.length > 0) {
@@ -114,6 +115,27 @@ export async function addToPrivateLibrary(
   const work = await getCatalogBook(userId, libraryId, source.libraryBookId)
   const version = work.versions.find((v) => v.id === versionLinkId)
   if (!version) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+
+  const sourceWork = db.select({ id: libraryBooks.id, categoryId: libraryBooks.categoryId }).from(libraryBooks)
+    .where(and(eq(libraryBooks.id, source.libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
+  const sourcePath: string[] = []
+  if (sourceWork?.categoryId) {
+    const rows = db.select({ id: libraryCategories.id, name: libraryCategories.name, parentId: libraryCategories.parentId })
+      .from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all()
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    let cursor = byId.get(sourceWork.categoryId)
+    const seen = new Set<string>()
+    while (cursor && !seen.has(cursor.id) && sourcePath.length < 2) {
+      seen.add(cursor.id)
+      sourcePath.unshift(cursor.name)
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined
+    }
+  }
+  const sourceTagNames = sourceWork
+    ? db.select({ name: libraryTags.name }).from(libraryBookTags)
+      .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
+      .where(eq(libraryBookTags.libraryBookId, sourceWork.id)).all().map((row) => row.name)
+    : []
 
   // (7.3) Pin the revision published right now — the latest, not the first.
   // B never follows a later revision on its own, and the private read path
@@ -143,8 +165,11 @@ export async function addToPrivateLibrary(
         raced = fresh
         return
       }
+      const categoryId = opts?.categoryId ?? (sourcePath.length > 0
+        ? resolveOrCreateCategoryPath(tx, privateLibrary.id, userId, sourcePath)
+        : null)
       tx.insert(libraryBooks).values({
-        id: libraryBookId, libraryId: privateLibrary.id, userId, categoryId: opts?.categoryId ?? null,
+        id: libraryBookId, libraryId: privateLibrary.id, userId, shelfId: null, categoryId,
         title: version.effective.title, author: version.effective.author, authors: version.effective.authors,
         description: version.effective.description, coverKey: version.effective.coverKey,
         createdAt: now, updatedAt: now,
@@ -158,8 +183,22 @@ export async function addToPrivateLibrary(
         sourceLibraryId: libraryId, sourceLibraryBookVersionId: versionLinkId,
         pinnedRevisionId: revision.id, createdAt: now, updatedAt: now,
       }).run()
-      if (tagIds.length > 0) {
-        tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).run()
+      const inheritedTagIds = sourceTagNames.map((name) => {
+        const existingTag = tx.select({ id: libraryTags.id }).from(libraryTags)
+          .where(and(eq(libraryTags.libraryId, privateLibrary.id), eq(libraryTags.name, name))).get()
+        if (existingTag) return existingTag.id
+        const max = tx.select({ max: sql<number>`max(${libraryTags.sortOrder})` }).from(libraryTags)
+          .where(eq(libraryTags.libraryId, privateLibrary.id)).get()
+        const id = createId('tag')
+        tx.insert(libraryTags).values({
+          id, libraryId: privateLibrary.id, userId, name, sortOrder: (max?.max ?? -1) + 1,
+          pinned: false, hidden: false, createdAt: now, updatedAt: now,
+        }).run()
+        return id
+      })
+      const assignedTagIds = [...new Set([...tagIds, ...inheritedTagIds])]
+      if (assignedTagIds.length > 0) {
+        tx.insert(libraryBookTags).values(assignedTagIds.map((tagId) => ({ libraryBookId, tagId }))).run()
       }
       // Collected, not started: the row exists so the card sorts and filters
       // like any other, and reading takes over from here. Reading the version in

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm'
 
 import type { LibraryRelation } from '@bookdock/shared'
 
@@ -11,6 +11,25 @@ import { AppError, isUniqueViolation } from '../../middleware/error'
 import { getStorage } from '../../storage'
 import { createId } from '../../lib/id'
 import { isWorkEffectivelyHidden } from './library-query'
+
+/** Set-query counterpart of the library and publication gates below. */
+export function sharedVersionAccessConditions(userId: string): SQL {
+  const manager = sharedLibraryManagerCondition(userId)
+  return sql`${libraries.type} = 'shared'
+    AND (${libraries.userId} = ${userId} OR ${libraries.visibility} = 'public' OR EXISTS (
+      SELECT 1 FROM ${libraryMemberships} AS read_member
+      WHERE read_member.library_id = ${libraries.id} AND read_member.user_id = ${userId}
+    ))
+    AND (${manager} OR ${libraryBookVersions.status} = 'published')`
+}
+
+export function sharedLibraryManagerCondition(userId: string): SQL {
+  return sql`(${libraries.userId} = ${userId} OR EXISTS (
+    SELECT 1 FROM ${libraryMemberships} AS read_admin
+    WHERE read_admin.library_id = ${libraries.id} AND read_admin.user_id = ${userId}
+      AND read_admin.role = 'admin'
+  ))`
+}
 
 /**
  * Phase 1 domain permission base (1.8): identity, library membership and
@@ -224,8 +243,10 @@ function resolveSharedVersionReadInternal(
   if ((relation === 'non-member' || relation === 'guest') && library.visibility !== 'public') {
     throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
   }
-  const link = db.select().from(libraryBookVersions)
-    .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.bookVersionId, bookVersionId))).get()
+  const link = db.select({ link: libraryBookVersions }).from(libraryBookVersions)
+    .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
+    .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.bookVersionId, bookVersionId),
+      userId ? sharedVersionAccessConditions(userId) : undefined)).get()?.link
   if (!link) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
   // Trash binds every relation: a trashed work reads as deleted until restored.
   const trashedWork = db.select({ deletedAt: libraryBooks.deletedAt }).from(libraryBooks)

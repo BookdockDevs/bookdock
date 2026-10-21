@@ -19,6 +19,7 @@ import {
   libraryBooks,
   libraryBookVersions,
   libraryCategories,
+  shelves,
   libraryTags,
   instance,
   readingRecords,
@@ -234,6 +235,7 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
       .where(and(eq(libraries.userId, targetId), eq(libraries.type, 'private'))).all()
     for (const library of privateLibraries) {
       tx.delete(libraryBooks).where(eq(libraryBooks.libraryId, library.id)).run()
+      tx.delete(shelves).where(eq(shelves.libraryId, library.id)).run()
       tx.delete(libraryCategories).where(eq(libraryCategories.libraryId, library.id)).run()
       tx.delete(libraryTags).where(eq(libraryTags.libraryId, library.id)).run()
       tx.delete(libraries).where(eq(libraries.id, library.id)).run()

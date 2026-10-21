@@ -56,7 +56,7 @@ describe('libraryUrlCorrection', () => {
  * editing the URL by hand. Clearing the filter is the only honest state.
  */
 describe('vanishedFilterCorrection', () => {
-  const taxonomy = { shelfIds: ['shelf-a', 'shelf-b'], tagIds: ['tag-a'] }
+  const taxonomy = { shelfIds: ['shelf-a', 'shelf-b'], categoryIds: ['category-a'], tagIds: ['tag-a'] }
 
   it('leaves a filter whose row is still reachable alone', () => {
     expect(vanishedFilterCorrection({ shelfId: 'shelf-a', tagId: 'tag-a', ...taxonomy })).toEqual({})
@@ -69,7 +69,7 @@ describe('vanishedFilterCorrection', () => {
   it('clears a shelf that is no longer in the sidebar', () => {
     // Hiding it again, unhiding it, or deleting it all end up here.
     expect(vanishedFilterCorrection({ shelfId: 'shelf-gone', tagId: null, ...taxonomy }))
-      .toEqual({ shelf: undefined, categoryScope: undefined })
+      .toEqual({ shelf: undefined })
   })
 
   it('clears a tag that is no longer in the sidebar', () => {
@@ -81,9 +81,18 @@ describe('vanishedFilterCorrection', () => {
     expect(vanishedFilterCorrection({ shelfId: 'none', tagId: null, ...taxonomy })).toEqual({})
   })
 
+  it('clears a vanished category independently from a shelf', () => {
+    expect(vanishedFilterCorrection({ shelfId: null, categoryId: 'category-gone', tagId: null, ...taxonomy }))
+      .toEqual({ category: undefined, categoryScope: undefined })
+  })
+
+  it('exempts the virtual uncategorized category row', () => {
+    expect(vanishedFilterCorrection({ shelfId: null, categoryId: 'none', tagId: null, ...taxonomy })).toEqual({})
+  })
+
   it('clears both dimensions in one pass', () => {
     expect(vanishedFilterCorrection({ shelfId: 'shelf-gone', tagId: 'tag-gone', ...taxonomy }))
-      .toEqual({ shelf: undefined, categoryScope: undefined, tag: undefined })
+      .toEqual({ shelf: undefined, tag: undefined })
   })
 
   it('is idempotent, so the correction cannot loop', () => {

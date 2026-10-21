@@ -181,6 +181,7 @@ export interface LibraryBook {
   libraryId: string
   /** Null = uncategorized; a real state, not a special category. */
   categoryId: string | null
+  shelfId?: string | null
   title: string
   /** Derived first-author mirror of `authors`; sort/filter/search use this. */
   author: string
@@ -311,9 +312,10 @@ export interface CatalogBookTag {
  * `category`/`tag` come from hidden taxonomy. Priority is direct over
  * category over tag, so one reason always wins for display.
  */
-export type HiddenReason = 'direct' | 'category' | 'tag'
+export type HiddenReason = 'direct' | 'category' | 'tag' | 'shelf'
 
 export interface HiddenVia {
+  shelfName?: string
   /** Nearest hidden ancestor category name, for `category` only. */
   categoryName?: string
   /** Hidden tag names carried by the work, for `tag` only. */
@@ -383,6 +385,7 @@ export interface CatalogListRes {
 export interface BatchSelectionItem {
   id: string
   categoryId: string | null
+  shelfId?: string | null
   tagIds: string[]
   hidden: boolean
   pinnedAt: number | null
@@ -398,8 +401,12 @@ export const batchSelectionSchema = z.object({
 
 export const batchOrganizeSchema = batchSelectionSchema.extend({
   categoryId: z.string().min(1).max(128).nullable().optional(),
+  shelfId: z.string().min(1).max(128).nullable().optional(),
+  categoryTemplateKey: z.string().min(1).max(128).optional(),
   addTagIds: z.array(z.string().min(1).max(128)).default([]),
   removeTagIds: z.array(z.string().min(1).max(128)).default([]),
+}).refine((value) => value.categoryId === undefined || value.categoryTemplateKey === undefined, {
+  message: 'Choose an existing category or a recommendation', path: ['categoryTemplateKey'],
 })
 
 export type BatchOrganizeReq = z.infer<typeof batchOrganizeSchema>
@@ -461,6 +468,8 @@ export const catalogUploadSchema = z.object({
   libraryBookId: z.string().min(1).max(128).optional(),
   /** Library category (the catalog's own taxonomy). */
   categoryId: z.string().min(1).max(128).optional(),
+  /** Private storage only; shared libraries reject shelf placement. */
+  shelfId: z.string().min(1).max(128).optional(),
   tagIds: z.array(z.string().min(1).max(128)).optional(),
   /** Version label inside the library, e.g. the edition name. */
   name: z.string().trim().max(120).optional(),
@@ -478,6 +487,7 @@ export const catalogBookUpdateSchema = z.object({
   authors: authorListSchema.optional(),
   description: z.string().max(4000).optional(),
   categoryId: z.string().min(1).max(128).nullable().optional(),
+  categoryTemplateKey: z.string().min(1).max(128).optional(),
   /** Replaces the work's whole tag set; every id must belong to this library. */
   tagIds: z.array(z.string().min(1).max(128)).optional(),
   /** Work-level hide; manager-only like every other catalog write. */

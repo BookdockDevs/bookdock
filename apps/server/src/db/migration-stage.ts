@@ -10,6 +10,7 @@ export const LEGACY_IDENTITY_RETIREMENT_TAG = '0040_retire_legacy_identity'
 export const IDEA_DISCUSSION_TAG = '0041_idea_discussion'
 export const READING_LEDGER_TAG = '0052_reading_ledger'
 export const PERSONAL_ARCHIVE_TAG = '0053_personal_archive'
+export const CATEGORY_SHELF_SEPARATION_TAG = '0054_category_shelf_separation'
 export const BOOK_STATE_PROGRESS_TAG = '0051_book_state_progress'
 
 interface JournalEntry {
@@ -90,6 +91,26 @@ export function migrateBeforeBookRetirementIncluding(
     db.run(sql`ALTER TABLE reading_archives ADD COLUMN format TEXT`)
     db.run(sql`ALTER TABLE reading_archives ADD COLUMN cover_key TEXT`)
   }
+  repairHybridShelfSchema(db)
+}
+
+/**
+ * Partial service-test databases retain legacy books/shelves while exercising
+ * current library queries. Keep the old shelf rows in place and add the
+ * current nullable ownership/visibility columns plus the library-book FK.
+ */
+function repairHybridShelfSchema(db: Parameters<typeof migrate>[0]) {
+  const shelfColumns = new Set((db.all(sql`PRAGMA table_info("shelves")`) as Array<{ name: string }>).map((column) => column.name))
+  const libraryBookColumns = new Set((db.all(sql`PRAGMA table_info("library_books")`) as Array<{ name: string }>).map((column) => column.name))
+  if (!shelfColumns.size || !libraryBookColumns.size) return
+  if (!shelfColumns.has('library_id')) db.run(sql`ALTER TABLE shelves ADD COLUMN library_id TEXT REFERENCES libraries(id) ON DELETE CASCADE`)
+  if (!shelfColumns.has('pinned')) db.run(sql`ALTER TABLE shelves ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`)
+  if (!shelfColumns.has('hidden')) db.run(sql`ALTER TABLE shelves ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
+  if (!shelfColumns.has('updated_at')) db.run(sql`ALTER TABLE shelves ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`)
+  if (!libraryBookColumns.has('shelf_id')) db.run(sql`ALTER TABLE library_books ADD COLUMN shelf_id TEXT REFERENCES shelves(id) ON DELETE SET NULL`)
+  db.run(sql`CREATE INDEX IF NOT EXISTS shelves_library_sort_idx ON shelves(library_id, sort_order)`)
+  db.run(sql`CREATE UNIQUE INDEX IF NOT EXISTS shelves_library_name_unique ON shelves(library_id, name)`)
+  db.run(sql`CREATE INDEX IF NOT EXISTS library_books_shelf_idx ON library_books(shelf_id)`)
 }
 
 /**

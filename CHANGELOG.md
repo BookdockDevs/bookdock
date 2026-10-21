@@ -6,12 +6,18 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
+- Personal-library categories are now independent of shelves, with two-level paths and optional recommendations created only when you save a selection.
+- The reading-data API provides category breakdowns, including uncategorized reading history.
 - Personal highlights, bookmarks, ideas and private reviews now stay in your archive after the original book file is deleted.
 - Retained books keep their title, author, format and cover in the archive, shown as source unavailable instead of failing to open.
 - Removing a book from your library, or deleting it, now offers to clear your personal data for that book: reading records, notes and more.
 
 ### Changed
 
+- The personal-library sidebar separates shelves, categories and tags. Books without a shelf appear under Not on a shelf, independently of Uncategorized books.
+- Book details display and edit categories and tags; shelf organization remains available from the library and batch organizer.
+- Collecting a shared book copies its category path and merges tags by name into your library, without copying hidden or pinned settings or following later source changes.
+- Batch organization uses consistent shelf, category and tag choices, explicit keep-unchanged options, compact category trees, and fixed dialog actions.
 - Archived notes, reviews and reading statistics leave out a book as soon as you choose personal-data cleanup, and come back when you restore it from the trash.
 - Permanent deletion, emptying the trash and automatic cleanup honor that choice and remove only your own data for the book.
 - Batch deletion applies the personal-data choice to owned books as well as collected ones.
@@ -20,12 +26,16 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Switching between shelf, category and tag navigation clears the previous dimension and pagination while retaining additional filters and existing link meanings.
+- Category and tag reading totals use one authorized library entry per version, respect private-library metadata and visibility, and avoid counting duplicate links. Retained history without a current library entry remains included.
+- Empty shelf, category and tag views use consistent hints; empty shared tags are labeled correctly, and failed category loads show retry instead of appearing empty.
 - Opening a book keeps the reader theme, font size and spacing applied even when external fonts load slowly or time out, preventing a temporary white page with the book's original formatting.
 - The archive no longer labels a note's position as unavailable when the book itself is gone; only the jump back to the original text is disabled.
 
 ### Upgrade notes
 
 - Back up the complete `DATA_DIR` before upgrading. Migration 0053 keeps your notes, reviews, comments and likes, and stops deleting them when a book is removed. Downgrading requires the pre-upgrade data with the matching previous release.
+- Migration 0054 preserves existing personal shelf IDs, settings and book assignments in a separate shelf table, and copies category paths and tags from valid shared sources for previously collected books. Recommended categories are not pre-created.
 
 ## [0.6.1] - 2026-10-20
 
@@ -780,12 +790,18 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
+- 私库分类与书架独立，支持两级分类路径；推荐分类仅在选用并保存后按需创建。
+- 阅读数据 API 新增分类分布，包含未分类的历史阅读数据。
 - 个人划线、书签、想法与私密书评在原书文件被删除后仍保留在归档中心。
 - 保留的书籍在归档中心继续显示书名、作者、格式与封面，并标注原书不可用，而不是直接打开失败。
 - 从个人书库移出或删除书籍时，可以同时选择清理这本书的个人数据，包括阅读记录、笔记等。
 
 #### 变更
 
+- 私库侧栏分为书架、分类与标签；未分配书架的书籍显示在“未入架”，与“未分类”独立。
+- 书籍详情展示和编辑分类与标签；书架整理继续从书库首页和批量整理入口操作。
+- 收藏共享书籍时，按分类路径映射到私库、按名称合并标签，不复制隐藏或置顶状态，也不自动跟随来源更新。
+- 批量整理统一书架、分类与标签的选择样式，明确提供保持不变的选项，分类树更紧凑，弹窗底部操作保持固定。
 - 选择清理个人数据后，归档笔记、书评与阅读统计会先隐藏该书；从回收站恢复后重新出现。
 - 彻底删除、清空回收站与自动清理都会遵循该选择，并且只清除你本人在这本书上的数据。
 - 批量删除同样应用个人数据清理选择，个人书籍与收藏书籍一视同仁。
@@ -794,12 +810,16 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 切换书架、分类与标签导航时清除前一维度条件及分页，保留附加筛选与旧链接语义。
+- 分类与标签阅读统计为每个版本选定唯一合法馆藏，遵循私库元数据和可见性规则，避免重复关联造成重复计时；没有当前馆藏的保留历史仍会计入。
+- 书架、分类与标签空状态统一；共享库空标签文案恢复正确，分类加载失败时提供重试，不再误显示为空。
 - 打开书籍时，即使外部字体加载缓慢或超时，正文仍保持阅读主题、字号与间距，不再短暂显示白底和书籍原始排版。
 - 原书已不存在时，归档笔记不再标注历史位置不可用，仅禁用跳转到原文的入口。
 
 #### 升级说明
 
 - 升级前完整备份 `DATA_DIR`。迁移 0053 会保留你的笔记、书评、评论与点赞，并停止在书籍删除时一并清除；降级需要恢复升级前的数据并使用对应旧版本。
+- 迁移 0054 将已有私库书架平移到独立表，保留书架 ID、属性及成员关系，并从合法共享来源为此前收藏的书籍映射分类路径、合并标签；不会预先创建推荐分类。
 
 ### [0.6.1] - 2026-10-20
 

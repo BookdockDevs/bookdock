@@ -353,18 +353,27 @@ function bdExplore(ctx) {
     // Section headings name the library only when there is more than one, so a
     // single-library reader sees the familiar 书架 / 标签 headings.
     var prefix = multiple ? libraryName + " · " : "";
-    // The reader's own library keeps the 书架 wording the Web sidebar uses; a
-    // shared library's taxonomy is 分类.
-    var categoryLabel = String(library.type) === "private" ? "书架" : "分类";
+    if (String(library.type) === "private") {
+      bdExploreHeader(rows, prefix + "书架");
+      var shelves = library.shelves || [];
+      if (!shelves.length) {
+        bdExploreEmpty(rows, "暂无书架");
+      } else {
+        for (var s = 0; s < shelves.length; s++) {
+          var shelf = shelves[s] || {};
+          bdExploreEntry(rows, String(shelf.name || "未命名书架"), apiRoot + "/explore/libraries/" + libraryId + "/shelves/" + encodeURIComponent(String(shelf.id || "")) + "?" + query);
+        }
+      }
+    }
 
-    bdExploreHeader(rows, prefix + categoryLabel);
+    bdExploreHeader(rows, prefix + "分类");
     var categories = library.categories || [];
     if (!categories.length) {
-      bdExploreEmpty(rows, categoryLabel === "书架" ? "暂无书架" : "暂无分类");
+      bdExploreEmpty(rows, "暂无分类");
     } else {
       for (var c = 0; c < categories.length; c++) {
         var category = categories[c] || {};
-        bdExploreEntry(rows, bdExploreIndent(category.depth) + String(category.name || (categoryLabel === "书架" ? "未命名书架" : "未命名分类")), apiRoot + "/explore/libraries/" + libraryId + "/categories/" + encodeURIComponent(String(category.id || "")) + "?" + query);
+        bdExploreEntry(rows, bdExploreIndent(category.depth) + String(category.name || "未命名分类"), apiRoot + "/explore/libraries/" + libraryId + "/categories/" + encodeURIComponent(String(category.id || "")) + "?" + query);
       }
     }
 
@@ -536,7 +545,7 @@ async function legadoSearchItems(
   c: Context,
   userId: string,
   libraryIds: string[],
-  params: { page: number; sortBy?: string; sortOrder?: string; categoryId?: string; tagId?: string; search?: string },
+  params: { page: number; sortBy?: string; sortOrder?: string; shelfId?: string; categoryId?: string; tagId?: string; search?: string },
 ) {
   const items: LegadoBookSearchItem[] = []
   let page = params.page
@@ -606,6 +615,7 @@ async function exploreBooks(c: Context, scope: LegadoExploreScope, id?: string, 
       page: parsed.data.page,
       sortBy,
       sortOrder,
+      shelfId: filter.shelfId,
       categoryId: filter.categoryId,
       tagId: filter.tagId,
     }),
@@ -623,7 +633,8 @@ legadoRoutes.get('/explore/config', async (c) => {
 // per-library routes are what the discovery buttons point at.
 legadoRoutes.get('/explore/all', (c) => exploreBooks(c, 'all'))
 legadoRoutes.get('/explore/libraries/:id', (c) => exploreBooks(c, 'all', undefined, c.req.param('id')))
-legadoRoutes.get('/explore/libraries/:id/categories/:categoryId', (c) => exploreBooks(c, 'shelf', c.req.param('categoryId'), c.req.param('id')))
+legadoRoutes.get('/explore/libraries/:id/shelves/:shelfId', (c) => exploreBooks(c, 'shelf', c.req.param('shelfId'), c.req.param('id')))
+legadoRoutes.get('/explore/libraries/:id/categories/:categoryId', (c) => exploreBooks(c, 'category', c.req.param('categoryId'), c.req.param('id')))
 legadoRoutes.get('/explore/libraries/:id/tags/:tagId', (c) => exploreBooks(c, 'tag', c.req.param('tagId'), c.req.param('id')))
 
 legadoRoutes.get('/search', async (c) => {

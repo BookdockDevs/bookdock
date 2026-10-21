@@ -19,7 +19,7 @@ import {
 import type { LibraryListQuery } from '../libraries/library-query'
 import { isLibraryManager } from '../libraries/library-access'
 import { listLibraries } from '../libraries/libraries.service'
-import { listLibraryCategories } from '../shelves/shelves.service'
+import { listLibraryCategories, listShelves } from '../shelves/shelves.service'
 import { listLibraryTags } from '../tags/tags.service'
 import { listBrowsableLibraries } from '../books/legado.service'
 import { getActiveBook, getBookCoverContent, trashBook } from '../books/books.service'
@@ -36,9 +36,9 @@ import { isTrashEnabled } from '../settings/settings.service'
  *
  * It reuses the book source's version-per-row projection rather than
  * `listBooks` or `listCatalogBooks`: the first carries per-user reading state a
- * client has no use for (`progress`, `readStatus`, a single-valued `shelfId`
- * that exists for drag-to-shelf checks), and the second is work-grouped, which
- * is the wrong unit for something whose downloadable atom is a file.
+ * client has no use for (`progress` and `readStatus`), and the second is
+ * work-grouped, which is the wrong unit for something whose downloadable atom
+ * is a file.
  */
 
 export interface ExternalListParams {
@@ -79,10 +79,8 @@ export const EXT_READ = { showHidden: true } as const
  * counts batched per library rather than per row. Writing parallel queries here
  * would be a second place for the hide rules to drift.
  *
- * The uncategorized bucket is absent, and that is not an omission: it is not a
- * row in `library_categories` but a display fiction the book source synthesises
- * for its generated UI. A book with no shelf is `categoryId: null`, which is
- * exactly what omitting the field on upload produces.
+ * Shelves and categories have separate IDs and are projected separately. The
+ * uncategorized bucket is absent because it is a display fiction, not a row.
  */
 export async function listExternalLibraries(userId: string): Promise<ExternalLibrary[]> {
   const browsable = listBrowsableLibraries(userId)
@@ -96,32 +94,35 @@ export async function listExternalLibraries(userId: string): Promise<ExternalLib
     // canWrite answers "will an upload or delete be accepted here" without
     // making the client find out by collecting a 403 on its first write.
     const canWrite = await isLibraryManager(userId, library.id)
-    const [categories, tags] = await Promise.all([
+    const [categories, libraryShelves, tags] = await Promise.all([
       listLibraryCategories(userId, library.id),
+      library.private ? listShelves(userId, true) : Promise.resolve([]),
       listLibraryTags(userId, library.id),
     ])
 
-    // `depth` is derived rather than stored: the tree is cycle-free because the
-    // category-parent service refuses cycles, and the walk is bounded anyway so
-    // a hand-edited row cannot hang the request.
-    const byId = new Map(categories.map((row) => [row.id, row]))
-    const shelves: ExternalCategory[] = []
-    for (const row of categories) {
-      let depth = 0
-      let cursor = row.parentId
-      while (cursor && depth < 8) {
-        depth += 1
-        cursor = byId.get(cursor)?.parentId ?? null
-      }
-      shelves.push({
-        id: row.id,
-        name: row.name,
-        parentId: row.parentId,
-        depth,
-        bookCount: row.bookCount,
-        // Coerced because the row types this column boolean while SQLite hands
-        // back 0/1, and the contract promises a real boolean.
-        hidden: Boolean(row.hidden),
+    const projectTaxonomy = (rows: Array<{
+      id: string
+      name: string
+      parentId?: string | null
+      bookCount: number
+      hidden: boolean
+    }>): ExternalCategory[] => {
+      const byId = new Map(rows.map((row) => [row.id, row]))
+      return rows.map((row) => {
+        let depth = 0
+        let cursor = row.parentId
+        while (cursor && depth < 8) {
+          depth += 1
+          cursor = byId.get(cursor)?.parentId ?? null
+        }
+        return {
+          id: row.id,
+          name: row.name,
+          parentId: row.parentId ?? null,
+          depth,
+          bookCount: row.bookCount,
+          hidden: Boolean(row.hidden),
+        }
       })
     }
 
@@ -136,7 +137,8 @@ export async function listExternalLibraries(userId: string): Promise<ExternalLib
       canWrite,
       memberCount: row?.memberCount ?? 1,
       workCount: row?.workCount ?? 0,
-      categories: shelves,
+      categories: projectTaxonomy(categories),
+      shelves: projectTaxonomy(libraryShelves),
       tags: tags.map((tag) => ({
         id: tag.id,
         name: tag.name,
@@ -163,6 +165,7 @@ function toExternalBook(entry: LibraryVersionEntry, libraryId: string, libraryNa
     size: entry.size,
     hasCover: Boolean(entry.coverKey),
     categoryName: entry.categoryName,
+    shelfName: entry.shelfName,
     tags: entry.tags,
     // A manager sees the vault's hidden rows, so the row has to say which ones
     // they are — the Web badges them for the same reason. A member never

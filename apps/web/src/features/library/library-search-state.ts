@@ -24,7 +24,7 @@ export function submittedSearchPatch(source: string, names: LibrarySearchNames):
   }
   patch.expression = JSON.stringify(bindLibrarySearch(parsed, names))
   visitLibrarySearch(parsed, (node) => {
-    if (node.kind === 'field') Object.assign(patch, { [node.field === 'category' || node.field === 'shelf' ? 'shelf' : node.field]: undefined })
+    if (node.kind === 'field') Object.assign(patch, { [node.field === 'category' ? 'category' : node.field]: undefined })
   })
   return patch
 }
@@ -60,7 +60,7 @@ export function adoptArchiveExitRestore(
 }
 
 const controlFields: Partial<Record<keyof LibrarySearch, LibrarySearchField | 'text'>> = {
-  shelf: 'shelf', tag: 'tag', author: 'author', format: 'format', status: 'status', q: 'text',
+  shelf: 'shelf', category: 'category', tag: 'tag', author: 'author', format: 'format', status: 'status', q: 'text',
 }
 
 export function searchProjection(expression?: string): Partial<LibrarySearch> {
@@ -71,7 +71,7 @@ export function searchProjection(expression?: string): Partial<LibrarySearch> {
     const result: Partial<LibrarySearch> = {}
     for (const [key, field] of Object.entries(controlFields)) {
       if (key === 'q') continue
-      const matches = nodes.filter((node) => node.kind === 'field' && (node.field === field || (key === 'shelf' && node.field === 'category')))
+      const matches = nodes.filter((node) => node.kind === 'field' && node.field === field)
       if (matches.length === 1) {
         const node = matches[0] as Extract<LibrarySearchExpression, { kind: 'field' }>
         Object.assign(result, { [key]: node.id ?? node.value })
@@ -90,7 +90,7 @@ export function editSearchControls(search: LibrarySearch, patch: Partial<Library
   if (!fields.length) return patch
   const remove = (node: LibrarySearchExpression): LibrarySearchExpression | undefined => {
     if (node.kind === 'text') return fields.includes('text') ? undefined : node
-    if (node.kind === 'field') return fields.includes(node.field) || (node.field === 'category' && fields.includes('shelf')) ? undefined : node
+    if (node.kind === 'field') return fields.includes(node.field) ? undefined : node
     if (node.kind !== 'and') return node
     const left = remove(node.left)
     const right = remove(node.right)

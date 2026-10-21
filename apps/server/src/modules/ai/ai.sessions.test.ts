@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 
-import { createTestDb } from '../../__tests__/setup'
+import { createTestDbWithShelves } from '../../__tests__/setup'
 import { getDb } from '../../db/client'
 import { aiMessageEvents, aiMessages, aiThreads, books, bookVersions, contentRevisions, libraryBooks, libraryBookVersions, libraries, users } from '../../db/legacy-test-schema'
 
@@ -11,7 +11,7 @@ import { createAiAssistantDraft, createAiThread, deleteAiThread, getAiThread, li
 
 describe('AI session service', () => {
   beforeEach(() => {
-    const db = createTestDb()
+    const db = createTestDbWithShelves()
     vi.mocked(getDb).mockReturnValue(db as never)
     db.insert(users).values([
       { id: 'user-1', username: 'user-1', createdAt: 1 },

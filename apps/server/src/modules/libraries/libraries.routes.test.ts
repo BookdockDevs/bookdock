@@ -163,6 +163,39 @@ describe('libraries routes', () => {
       expect(missingFile.status).toBe(400)
     })
 
+    it('filters private books by independent shelfId and categoryId query parameters', async () => {
+      const privateLibraryId = createId('lib')
+      const shelfId = createId('shelf')
+      const categoryId = createId('cat')
+      const now = Date.now()
+      db.insert(schema.libraries).values({
+        id: privateLibraryId, userId: ownerId, type: 'private', name: 'Private',
+        description: '', visibility: null, createdAt: now, updatedAt: now,
+      }).run()
+      db.insert(schema.shelves).values({
+        id: shelfId, libraryId: privateLibraryId, userId: ownerId, name: 'Reading',
+        sortOrder: 0, pinned: false, hidden: false, createdAt: now, updatedAt: now,
+      }).run()
+      db.insert(schema.libraryCategories).values({
+        id: categoryId, libraryId: privateLibraryId, userId: ownerId, name: 'Mystery',
+        parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: now, updatedAt: now,
+      }).run()
+      await uploadCatalogBook(privateLibraryId, ownerId, new File(['private content'], 'private.txt', { type: 'text/plain' }), {
+        shelfId, categoryId, title: 'Private Book',
+      })
+
+      const app = createApp({ id: ownerId })
+      const byShelf = await app.request(`/api/v1/libraries/${privateLibraryId}/books?shelfId=${shelfId}`)
+      const byCategory = await app.request(`/api/v1/libraries/${privateLibraryId}/books?categoryId=${categoryId}`)
+      const categoryUsedAsShelf = await app.request(`/api/v1/libraries/${privateLibraryId}/books?shelfId=${categoryId}`)
+      const shelfUsedAsCategory = await app.request(`/api/v1/libraries/${privateLibraryId}/books?categoryId=${shelfId}`)
+
+      expect((await byShelf.json()).data.items).toHaveLength(1)
+      expect((await byCategory.json()).data.items).toHaveLength(1)
+      expect((await categoryUsedAsShelf.json()).data.items).toHaveLength(0)
+      expect((await shelfUsedAsCategory.json()).data.items).toHaveLength(0)
+    })
+
     it('publishes a private A through the dedicated snapshot route', async () => {
       const source = await uploadBook(ownerId, new File(['第一章\n私库内容'], 'private.txt', { type: 'text/plain' }))
       const ownerApp = createApp({ id: ownerId })

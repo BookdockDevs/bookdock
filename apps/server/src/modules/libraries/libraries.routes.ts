@@ -261,6 +261,7 @@ librariesRoutes.get('/:id/books', async (c) => {
   const format = c.req.query('format')
   const scope = categoryScopeSchema.safeParse(c.req.query('categoryScope') ?? 'direct')
   if (!scope.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid category scope' } }, 400)
+  const library = await getLibrary({ userId: user.id, isGuest: c.get('guest') === true }, c.req.param('id'))
   // Same query vocabulary as GET /books, so one library list and the other can
   // share a single UI without the two drifting apart. Reading-state dimensions
   // (read status, progress, last-read) are deliberately absent: they belong to
@@ -272,7 +273,8 @@ librariesRoutes.get('/:id/books', async (c) => {
     search: c.req.query('q') ?? undefined,
     sortBy: c.req.query('sortBy') ?? undefined,
     sortOrder: c.req.query('sortOrder') ?? undefined,
-    categoryId: c.req.query('categoryId') ?? c.req.query('shelfId') ?? undefined,
+    categoryId: c.req.query('categoryId') ?? (library.type === 'shared' ? c.req.query('shelfId') : undefined),
+    shelfId: library.type === 'private' ? c.req.query('shelfId') ?? undefined : undefined,
     categoryScope: scope.data,
     tagId: c.req.query('tagId') ?? undefined,
     format: format === 'epub' || format === 'txt' ? format : undefined,
@@ -341,6 +343,7 @@ librariesRoutes.post('/:id/books', async (c) => {
   const parsed = catalogUploadSchema.safeParse({
     libraryBookId: body['libraryBookId'],
     categoryId: body['categoryId'],
+    shelfId: body['shelfId'],
     name: body['name'],
     title: body['title'],
     author: body['author'],

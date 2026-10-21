@@ -4,7 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useDndContext, useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
-import type { LibraryListItem, LibraryRelation } from '@bookdock/shared'
+import type { Category, LibraryListItem, LibraryRelation } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -21,6 +21,7 @@ import { sortCategories } from '../taxonomy'
 import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleShelfHidden, useToggleTagPin, useToggleTagHidden, useTrashEnabled, useLibraryPrefs, useLibraryPrefsState, useHiddenLibraries, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TaxonomyEntry from './TaxonomyEntry'
+import TaxonomyEmptyState from './TaxonomyEmptyState'
 import TaxonomyIcon from './TaxonomyIcon'
 import { MenuHeader } from './RowMenuChrome'
 import LibraryDetailsDialog from './LibraryDetailsDialog'
@@ -29,13 +30,15 @@ import TagDialog from './TagDialog'
 import PrivateLibraryRenameDialog from './PrivateLibraryRenameDialog'
 import { useContextMenu } from './use-context-menu'
 
-const navigationSessions = new Map<string, { panel: 'categories' | 'tags'; expanded: string[]; scroll: Record<string, number> }>()
+const navigationSessions = new Map<string, { panel: 'shelves' | 'categories' | 'tags'; expanded: string[]; scroll: Record<string, number> }>()
+const EMPTY_CATEGORIES: Category[] = []
 
 interface LibrarySidebarProps {
   sessionKey?: string
   navSearch: (patch: Partial<LibrarySearch>) => void
   onPrefetchNavigation?: (patch: Partial<LibrarySearch>, targetLibraryId?: string | null) => void
   shelfId: string | null
+  categoryId: string | null
   tagId: string | null
   trash: boolean
   /** Mobile navigation drawer state; desktop keeps the sidebar in flow. */
@@ -52,7 +55,7 @@ interface LibrarySidebarProps {
   /** Tag row that was just released; its transform reset glides into place. */
   settleTagId?: string | null
   /** Active directory view panel ('categories' | 'tags'), if currently browsing directory */
-  directory?: 'categories' | 'tags'
+  directory?: 'shelves' | 'categories' | 'tags'
   /** Guest sessions may browse but cannot mutate library organization. */
   readOnly?: boolean
   /**
@@ -64,6 +67,7 @@ interface LibrarySidebarProps {
    */
   libraries?: LibraryListItem[]
   activeLibraryId?: string | null
+  privateLibraryId?: string | null
   activeLibraryName?: string
   activeLibraryNameLoading?: boolean
   librariesResolved?: boolean
@@ -83,54 +87,30 @@ interface LibrarySidebarProps {
   librarySearch?: LibrarySearch
 }
 
-interface TaxonomyEmptyStateProps {
-  type: 'categories' | 'tags'
-  inLibrary: boolean
-}
-
-function TaxonomyEmptyState({ type, inLibrary }: TaxonomyEmptyStateProps) {
-  const _ = useTranslation()
-  const label = _(inLibrary ? 'library.noCategories' : type === 'tags' ? 'library.noTags' : 'library.noShelves')
-
-  return (
-    <div className="flex flex-col items-center justify-center py-8 px-2 text-center select-none">
-      <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-stone-500/5 text-stone-400 dark:bg-stone-500/10 dark:text-stone-500">
-        {type === 'tags' ? (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l8.58-8.58a1 1 0 0 0 0-1.42z" />
-            <circle cx="7" cy="7" r="1" />
-          </svg>
-        ) : (
-          <TaxonomyIcon kind={inLibrary ? 'category' : 'shelf'} size={15} />
-        )}
-      </div>
-      <p className="text-xs font-medium text-stone-500 dark:text-stone-400">{label}</p>
-    </div>
-  )
-}
-
-const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, activeLibraryName, activeLibraryNameLoading = false, librariesResolved = true, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries, onOpenNotifications, notificationButtonRef, librarySearch }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, categoryId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, privateLibraryId = null, activeLibraryName, activeLibraryNameLoading = false, librariesResolved = true, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries, onOpenNotifications, notificationButtonRef, librarySearch }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
-  const [session, setSession] = useState(() => (sessionKey ? navigationSessions.get(sessionKey) : undefined) ?? { panel: (directory || 'categories') as 'categories' | 'tags', expanded: [] as string[], scroll: {} as Record<string, number> })
+  const [session, setSession] = useState(() => (sessionKey ? navigationSessions.get(sessionKey) : undefined) ?? { panel: (directory || (activeLibraryId ? 'categories' : 'shelves')) as 'shelves' | 'categories' | 'tags', expanded: [] as string[], scroll: {} as Record<string, number> })
   const panel = session.panel
   const remember = useCallback((patch: Partial<typeof session>) => setSession((previous) => {
     const next = { ...previous, ...patch }; navigationSessions.set(sessionKey, next); return next
   }), [sessionKey])
 
   useEffect(() => {
-    if (directory && (directory === 'categories' || directory === 'tags') && directory !== panel) {
+    if (activeLibraryId && panel === 'shelves') remember({ panel: 'categories' })
+  }, [activeLibraryId, panel, remember])
+  useEffect(() => {
+    if (directory && directory !== panel && (activeLibraryId || directory !== 'shelves')) {
       remember({ panel: directory })
     }
-  }, [directory, panel, remember])
+  }, [directory, panel, activeLibraryId, remember])
   const { data: shelvesData, isLoading: shelvesLoading, isError: shelvesError, refetch: refetchShelves } = useShelves()
   const { data: tagsData, isLoading: tagsLoading, isError: tagsError, refetch: refetchTags } = useTags()
-  // 0.4.0: the library in context decides which taxonomy the rows below the
-  // library switcher are. A private library's shelf is a library category, so
-  // this is one list read from whichever library is selected - not a second set
-  // of sidebar rows for shared libraries.
+  // Shared libraries expose their categories here; private shelves and private
+  // categories stay independent and load from their respective endpoints.
   const inLibrary = activeLibraryId !== null
-  const categoriesQuery = useLibraryCategories(activeLibraryId)
+  const taxonomyLibraryId = activeLibraryId ?? privateLibraryId
+  const categoriesQuery = useLibraryCategories(taxonomyLibraryId)
   const libraryTagsQuery = useLibraryTags(activeLibraryId)
   const relationQuery = useLibraryRelation(activeLibraryId)
   const canCurate = inLibrary
@@ -140,19 +120,18 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   // Auto modes re-sort the full list client-side over the server (manual)
   // order; the same memo exists in Library for the drag materialization. Both
   // taxonomies satisfy SidebarSortableItem, so the preference applies to either.
-  const shelves = useMemo(() => inLibrary
-    ? sortCategories(applyShelfOrder(categoriesQuery.data?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort)
-    : sortSidebarItems(applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort),
-    [inLibrary, categoriesQuery.data, shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort])
-  const categories = categoriesQuery.data?.data ?? []
+  const shelfRows = useMemo(() => sortSidebarItems(applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort), [shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort])
+  const categories = categoriesQuery.data?.data ?? EMPTY_CATEGORIES
+  const categoryRows = useMemo(() => sortCategories(applyShelfOrder(categories, shelfOrderOverride), libraryPrefs?.shelfSort), [categories, shelfOrderOverride, libraryPrefs?.shelfSort])
+  const shelves = panel === 'categories' ? categoryRows : shelfRows
   const autoExpandedSelection = useRef('')
   useEffect(() => {
-    const selected = categoriesQuery.data?.data.find((category) => category.id === shelfId)
+    const selected = categoriesQuery.data?.data.find((category) => category.id === categoryId)
     if (!selected) {
-      if (!shelfId) autoExpandedSelection.current = ''
+      if (!categoryId) autoExpandedSelection.current = ''
       return
     }
-    const key = `${sessionKey}:${shelfId}`
+    const key = `${sessionKey}:${categoryId}`
     if (autoExpandedSelection.current === key) return
     autoExpandedSelection.current = key
     const parent = selected.parentId ?? (categoriesQuery.data?.data.some((category) => category.parentId === selected.id) ? selected.id : undefined)
@@ -163,7 +142,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
       navigationSessions.set(sessionKey, next)
       return next
     })
-  }, [categoriesQuery.data, shelfId, sessionKey])
+  }, [categoriesQuery.data, categoryId, sessionKey])
   const tags = useMemo(
     () => sortSidebarItems(
       applyTagOrder(inLibrary ? (libraryTagsQuery.data?.data ?? []) : (tagsData?.data ?? []), tagOrderOverride),
@@ -171,9 +150,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     ),
     [inLibrary, libraryTagsQuery.data, tagsData, tagOrderOverride, libraryPrefs?.tagSort],
   )
-  const taxonomyLoading = inLibrary
-    ? (categoriesQuery.isLoading || libraryTagsQuery.isLoading)
-    : (shelvesLoading || tagsLoading)
+  const taxonomyLoading = panel === 'categories' ? categoriesQuery.isLoading : panel === 'shelves' ? shelvesLoading : (inLibrary ? libraryTagsQuery.isLoading : tagsLoading)
   const revealHidden = useUiStore((s) => s.revealHidden)
   const trashEnabled = useTrashEnabled({ enabled: !readOnly && !inLibrary })
   const { data: trashData } = useBooks({
@@ -241,6 +218,8 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     { page: 1, pageSize: 1, categoryId: 'none' },
   )
   const uncategorizedCount = inLibrary ? libraryUncategorizedData?.data.total : uncategorizedData?.total
+  const { data: unclassifiedData } = useBooks({ page: 1, pageSize: 1, search: '', sortBy: 'createdAt', sortOrder: 'desc', shelfId: null, categoryId: 'none', tagId: null, format: null, readStatus: null, trash: false, showHidden: revealHidden }, { enabled: !inLibrary })
+  const unclassifiedCount = inLibrary ? uncategorizedCount : unclassifiedData?.total
 
   const [shelfDialog, setShelfDialog] = useState<{ shelfId?: string; initialName?: string; initialParentId?: string } | null>(null)
   const [deleteShelfTarget, setDeleteShelfTarget] = useState<TaxonomyRow | null>(null)
@@ -261,7 +240,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
 
   // Two levels can be lit at once: the library row says which library is in
   // context, the category and tag rows say what is filtered inside it.
-  const isUncategorizedActive = !trash && shelfId === 'none'
+  const isUncategorizedActive = !trash && (inLibrary ? categoryId === 'none' : panel === 'categories' ? categoryId === 'none' : shelfId === 'none')
   // The empty hint only describes a bare section: no shelf row and no
   // uncategorized row. Any visible row already answers "where are my books".
 
@@ -356,18 +335,22 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
         <NavItem
           label={_('library.allBooks')}
           count={allBooksCount}
-          active={!trash && !shelfId && !tagId}
+          active={!trash && !shelfId && !categoryId && !tagId}
           icon={
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M2 3h6a4 4 0 0 1 4 4v14a4 4 0 0 0-3-3H2z" />
               <path d="M22 3h-6a4 4 0 0 0-4 4v14a4 4 0 0 1 3-3h7z" />
             </svg>
           }
-          onClick={() => selectNavigation({ expression: undefined, shelf: undefined, tag: undefined, q: undefined, format: undefined, status: undefined, author: undefined, series: undefined, categoryScope: undefined, trash: undefined })}
+          onClick={() => selectNavigation({ expression: undefined, shelf: undefined, category: undefined, tag: undefined, q: undefined, format: undefined, status: undefined, author: undefined, series: undefined, categoryScope: undefined, trash: undefined })}
         />
-        <UncategorizedDropTarget count={uncategorizedCount} active={isUncategorizedActive}
-          onClick={() => selectNavigation({ shelf: 'none', categoryScope: undefined, trash: undefined })}
-          onPointerEnter={() => onPrefetchNavigation?.({ shelf: 'none', categoryScope: undefined, trash: undefined })} />
+        {panel === 'shelves' && <UncategorizedDropTarget label={_('library.notOnShelf')} count={uncategorizedCount} active={isUncategorizedActive}
+          onClick={() => selectNavigation({ shelf: 'none', category: undefined, tag: undefined, categoryScope: undefined, trash: undefined })}
+          onPointerEnter={() => onPrefetchNavigation?.({ shelf: 'none', category: undefined, tag: undefined, categoryScope: undefined, trash: undefined })} />}
+        {panel === 'categories' && <NavItem label={_('library.uncategorized')} count={inLibrary ? uncategorizedCount : unclassifiedCount} active={isUncategorizedActive}
+          icon={<TaxonomyIcon kind="category" size={15} />}
+          onClick={() => selectNavigation({ category: 'none', shelf: undefined, tag: undefined, categoryScope: 'subtree', trash: undefined })}
+          onPointerEnter={() => onPrefetchNavigation?.({ category: 'none', shelf: undefined, tag: undefined, categoryScope: 'subtree', trash: undefined })} />}
         {((trashEnabled && !readOnly && !inLibrary) || (sharedTrashVisible && libraryTrashEnabled)) && (
           <NavItem
             label={_('library.trash')}
@@ -380,16 +363,16 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
                 <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
               </svg>
             }
-            onClick={() => selectNavigation({ trash: true, shelf: undefined, tag: undefined, status: undefined, categoryScope: undefined })}
+            onClick={() => selectNavigation({ trash: true, shelf: undefined, category: undefined, tag: undefined, status: undefined, categoryScope: undefined })}
           />
         )}
       </div>
 
       <div className="my-2.5 border-t border-stone-200/60 dark:border-stone-800/60" />
 
-      <div className="mb-1 flex items-center justify-between px-0.5">
-        <div className="inline-flex h-7 items-center rounded-lg border border-stone-200/60 bg-stone-200/50 p-0.5 text-xs dark:border-stone-700/50 dark:bg-stone-800/60">
-          {(['categories', 'tags'] as const).map((value) => (
+      <div className="mb-1 flex min-w-0 items-center gap-2 px-0.5">
+        <div className="inline-flex h-7 min-w-0 flex-1 items-center rounded-lg border border-stone-200/60 bg-stone-200/50 p-0.5 dark:border-stone-700/50 dark:bg-stone-800/60">
+          {(inLibrary ? ['categories', 'tags'] as const : ['shelves', 'categories', 'tags'] as const).map((value) => (
             <button
               key={value}
               type="button"
@@ -402,22 +385,22 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
                 }
               }}
               className={cn(
-                'flex h-full min-w-14 items-center justify-center rounded-[6px] px-3.5 text-xs transition-all select-none cursor-pointer',
+                'flex h-full min-w-0 flex-auto items-center justify-center rounded-[6px] px-1 text-xs whitespace-nowrap transition-colors select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 cursor-pointer',
                 panel === value
                   ? 'bg-white font-semibold text-stone-900 shadow-xs ring-1 ring-stone-200/70 dark:bg-stone-700 dark:text-stone-100 dark:ring-white/10'
                   : 'font-medium text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200',
               )}
             >
-              {_(value === 'tags' ? 'library.tags' : inLibrary ? 'library.categories' : 'library.shelves')}
+              {_(value === 'tags' ? 'library.tags' : value === 'categories' ? 'library.categories' : 'library.shelves')}
             </button>
           ))}
         </div>
 
-        <div className="flex items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
-            title={_(panel === 'tags' ? 'library.browseTags' : inLibrary ? 'library.browseCategories' : 'library.browseShelves')}
-            aria-label={_(panel === 'tags' ? 'library.browseTags' : inLibrary ? 'library.browseCategories' : 'library.browseShelves')}
+            title={_(panel === 'tags' ? 'library.browseTags' : panel === 'categories' ? 'library.browseCategories' : 'library.browseShelves')}
+            aria-label={_(panel === 'tags' ? 'library.browseTags' : panel === 'categories' ? 'library.browseCategories' : 'library.browseShelves')}
             onClick={() => {
               if (directory === panel) {
                 navSearch({ directory: undefined })
@@ -441,14 +424,14 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
             </svg>
           </button>
 
-          {(panel === 'categories' ? canEditShelves : canEditTags) && (
+          {(panel === 'tags' ? canEditTags : canEditShelves) && (
             <button
               type="button"
-              title={_(panel === 'categories' ? (inLibrary ? 'library.newCategory' : 'library.newShelf') : 'library.newTag')}
-              aria-label={_(panel === 'categories' ? (inLibrary ? 'library.newCategory' : 'library.newShelf') : 'library.newTag')}
+              title={_(panel === 'tags' ? 'library.newTag' : panel === 'categories' ? 'library.newCategory' : 'library.newShelf')}
+              aria-label={_(panel === 'tags' ? 'library.newTag' : panel === 'categories' ? 'library.newCategory' : 'library.newShelf')}
               onClick={() => {
-                if (panel === 'categories') setShelfDialog({})
-                else setTagDialog({})
+                if (panel === 'tags') setTagDialog({})
+                else setShelfDialog({})
               }}
               className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-all hover:bg-stone-200/60 hover:text-stone-700 active:scale-95 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200 cursor-pointer"
             >
@@ -465,72 +448,70 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
           updateScrollShadows()
           navigationSessions.set(sessionKey, { ...session, scroll: { ...(navigationSessions.get(sessionKey)?.scroll ?? session.scroll), [panel]: localNavRef.current?.scrollTop ?? 0 } })
         }} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-y-contain px-1.5 py-1 sidebar-scrollbar">
-          {taxonomyLoading ? <div aria-busy="true" className="h-8 animate-pulse rounded-lg bg-stone-200/60 dark:bg-stone-800/60" /> : panel === 'categories' ? (
+          {taxonomyLoading ? <div aria-busy="true" className="h-8 animate-pulse rounded-lg bg-stone-200/60 dark:bg-stone-800/60" /> : panel !== 'tags' ? (
             <SortableContext items={shelves.map((shelf) => shelf.id)} strategy={verticalListSortingStrategy}>
               {shelves.filter((shelf) => {
                 const parentId = categories.find((category) => category.id === shelf.id)?.parentId
                 return !parentId || session.expanded.includes(parentId)
               }).map((shelf) => {
-                const category = inLibrary ? categories.find((item) => item.id === shelf.id) : undefined
+                const category = panel === 'categories' ? categories.find((item) => item.id === shelf.id) : undefined
                 const parent = category?.parentId ? categories.find((item) => item.id === category.parentId) : undefined
                 const hasChildren = categories.some((item) => item.parentId === shelf.id)
                 const isExpanded = session.expanded.includes(shelf.id)
                 return (
                   <TaxonomyEntry
                     key={shelf.id}
-                    isCategory={inLibrary}
+                    isCategory={panel === 'categories'}
                     inheritedHidden={Boolean(parent?.hidden)}
                     row={{ ...shelf, bookCount: category && !category.parentId ? category.subtreeBookCount ?? shelf.bookCount : shelf.bookCount }}
-                    active={!trash && shelfId === shelf.id}
+                    active={!trash && (panel === 'categories' ? categoryId : shelfId) === shelf.id}
                     settling={settleShelfId === shelf.id}
                     readOnly={!canEditShelves}
                     isExpanded={hasChildren ? isExpanded : undefined}
                     indent={Boolean(category?.parentId)}
                     onOpen={() => {
                       if (hasChildren && !isExpanded) remember({ expanded: [...session.expanded, shelf.id] })
-                      selectNavigation({ shelf: shelf.id, categoryScope: inLibrary ? 'subtree' : undefined, trash: undefined })
+                      selectNavigation(panel === 'categories'
+                        ? { category: shelf.id, shelf: undefined, tag: undefined, categoryScope: 'subtree', trash: undefined }
+                        : { shelf: shelf.id, category: undefined, tag: undefined, categoryScope: undefined, trash: undefined })
                     }}
                     onClick={() => {
                       if (hasChildren) {
-                        if (!trash && !directory && shelfId === shelf.id) {
+                        if (!trash && !directory && (panel === 'categories' ? categoryId : shelfId) === shelf.id) {
                           remember({ expanded: isExpanded ? session.expanded.filter((id) => id !== shelf.id) : [...session.expanded, shelf.id] })
                           return
                         }
                         if (!isExpanded) remember({ expanded: [...session.expanded, shelf.id] })
                       }
-                      selectNavigation({ shelf: shelf.id, categoryScope: inLibrary ? 'subtree' : undefined, trash: undefined })
+                      selectNavigation(panel === 'categories'
+                        ? { category: shelf.id, shelf: undefined, tag: undefined, categoryScope: 'subtree', trash: undefined }
+                        : { shelf: shelf.id, category: undefined, tag: undefined, categoryScope: undefined, trash: undefined })
                     }}
-                    onPointerEnter={() => onPrefetchNavigation?.({ shelf: shelf.id, categoryScope: inLibrary ? 'subtree' : undefined, trash: undefined })}
+                    onPointerEnter={() => onPrefetchNavigation?.(panel === 'categories' ? { category: shelf.id, shelf: undefined, tag: undefined, categoryScope: 'subtree', trash: undefined } : { shelf: shelf.id, category: undefined, tag: undefined, categoryScope: undefined, trash: undefined })}
                     onNewChild={category && !category.parentId ? () => setShelfDialog({ initialParentId: shelf.id }) : undefined}
                     onEdit={() => setShelfDialog({ shelfId: shelf.id, initialName: shelf.name, initialParentId: category?.parentId ?? undefined })}
                     onDelete={() => setDeleteShelfTarget(shelf)}
-                    onTogglePin={() => activeLibraryId ? updateLibraryCategory.mutate({ libraryId: activeLibraryId, categoryId: shelf.id, patch: { pinned: !shelf.pinned } }) : toggleShelfPin.mutate({ id: shelf.id, pinned: !shelf.pinned })}
-                    onToggleHidden={() => activeLibraryId ? updateLibraryCategory.mutate({ libraryId: activeLibraryId, categoryId: shelf.id, patch: { hidden: !shelf.hidden } }) : toggleShelfHidden.mutate({ id: shelf.id, hidden: !shelf.hidden })}
+                    onTogglePin={() => panel === 'categories' ? updateLibraryCategory.mutate({ libraryId: taxonomyLibraryId!, categoryId: shelf.id, patch: { pinned: !shelf.pinned } }) : toggleShelfPin.mutate({ id: shelf.id, pinned: !shelf.pinned })}
+                    onToggleHidden={() => panel === 'categories' ? updateLibraryCategory.mutate({ libraryId: taxonomyLibraryId!, categoryId: shelf.id, patch: { hidden: !shelf.hidden } }) : toggleShelfHidden.mutate({ id: shelf.id, hidden: !shelf.hidden })}
                   />
                 )
               })}
-              {shelves.length === 0 && !(inLibrary ? categoriesQuery.isError && !categoriesQuery.data : shelvesError && !shelvesData) && (
-                <TaxonomyEmptyState
-                  type="categories"
-                  inLibrary={inLibrary}
-                />
+              {shelves.length === 0 && !(panel === 'categories' ? categoriesQuery.isError && !categoriesQuery.data : shelvesError && !shelvesData) && (
+                <TaxonomyEmptyState type={panel} />
               )}
             </SortableContext>
           ) : <SortableContext items={tags.map((tag) => tag.id)} strategy={verticalListSortingStrategy}>
             {tags.map((tag) => <TaxonomyEntry isTag key={tag.id} row={tag} settling={settleTagId === tag.id} readOnly={!canEditTags} active={!trash && tagId === tag.id}
-              onClick={() => selectNavigation({ tag: tag.id, trash: undefined })} onPointerEnter={() => onPrefetchNavigation?.({ tag: tag.id, trash: undefined })}
+              onClick={() => selectNavigation({ tag: tag.id, shelf: undefined, category: undefined, categoryScope: undefined, trash: undefined })} onPointerEnter={() => onPrefetchNavigation?.({ tag: tag.id, shelf: undefined, category: undefined, categoryScope: undefined, trash: undefined })}
               onEdit={() => setTagDialog({ tagId: tag.id, initialName: tag.name })} onDelete={() => setDeleteTagTarget(tag)}
               onTogglePin={() => activeLibraryId ? updateLibraryTag.mutate({ libraryId: activeLibraryId, tagId: tag.id, patch: { pinned: !tag.pinned } }) : toggleTagPin.mutate({ id: tag.id, pinned: !tag.pinned })}
               onToggleHidden={() => activeLibraryId ? updateLibraryTag.mutate({ libraryId: activeLibraryId, tagId: tag.id, patch: { hidden: !tag.hidden } }) : toggleTagHidden.mutate({ id: tag.id, hidden: !tag.hidden })} />)}
             {tags.length === 0 && !(inLibrary ? libraryTagsQuery.isError && !libraryTagsQuery.data : tagsError && !tagsData) && (
-              <TaxonomyEmptyState
-                type="tags"
-                inLibrary={inLibrary}
-              />
+              <TaxonomyEmptyState type="tags" />
             )}
           </SortableContext>}
-          {(inLibrary ? categoriesQuery.isError || libraryTagsQuery.isError : shelvesError || tagsError) &&
-            <button type="button" onClick={() => inLibrary ? Promise.all([categoriesQuery.refetch(), libraryTagsQuery.refetch()]) : Promise.all([refetchShelves(), refetchTags()])} className="px-3 py-2 text-xs text-stone-500">{_('library.retryNavigation')}</button>}
+          {(panel === 'categories' ? categoriesQuery.isError : panel === 'shelves' ? shelvesError : inLibrary ? libraryTagsQuery.isError : tagsError) &&
+            <button type="button" onClick={() => panel === 'categories' ? void categoriesQuery.refetch() : panel === 'shelves' ? void refetchShelves() : inLibrary ? void libraryTagsQuery.refetch() : void refetchTags()} className="px-3 py-2 text-xs text-stone-500">{_('library.retryNavigation')}</button>}
         </nav>
         <div data-testid="sidebar-scroll-shadow-bottom" aria-hidden="true" className={cn('pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-stone-50 via-stone-50/70 to-transparent transition-opacity duration-200 dark:from-stone-950 dark:via-stone-950/70', canScrollDown ? 'opacity-100' : 'opacity-0')} />
       </div>
@@ -579,7 +560,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
 
       <ShelfDialog
         open={shelfDialog !== null}
-        libraryId={activeLibraryId ?? undefined}
+        libraryId={panel === 'categories' ? taxonomyLibraryId ?? undefined : undefined}
         shelfId={shelfDialog?.shelfId}
         initialName={shelfDialog?.initialName}
         initialParentId={shelfDialog?.initialParentId}
@@ -603,8 +584,8 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
 
       {deleteShelfTarget && (
         <ConfirmDialog
-          title={_(inLibrary ? 'library.deleteCategory' : 'library.deleteShelf')}
-          message={_(inLibrary ? 'library.deleteCategoryTreeConfirm' : 'library.deleteShelfConfirm', { name: deleteShelfTarget.name })}
+          title={_(panel === 'categories' ? 'library.deleteCategory' : 'library.deleteShelf')}
+          message={_(panel === 'categories' ? 'library.deleteCategoryTreeConfirm' : 'library.deleteShelfConfirm', { name: deleteShelfTarget.name })}
           confirmLabel={_('reader.delete')}
           confirmVariant="danger"
           confirmDisabled={deletingPending}
@@ -613,10 +594,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
             if (deletingPending) return
             const target = deleteShelfTarget
             setDeletingPending(true)
-            const operation = activeLibraryId ? deleteLibraryCategory.mutateAsync({ libraryId: activeLibraryId, categoryId: target.id }) : deleteShelf.mutateAsync(target.id)
+            const operation = panel === 'categories' ? deleteLibraryCategory.mutateAsync({ libraryId: taxonomyLibraryId!, categoryId: target.id }) : deleteShelf.mutateAsync(target.id)
             void operation.then(() => {
               setDeleteShelfTarget(null)
-              if (shelfId === target.id) selectNavigation({ shelf: undefined, categoryScope: undefined })
+              if ((panel === 'categories' ? categoryId : shelfId) === target.id) selectNavigation(panel === 'categories' ? { category: undefined, categoryScope: undefined } : { shelf: undefined })
             }).catch(() => undefined).finally(() => setDeletingPending(false))
           }}
         />
@@ -1140,17 +1121,18 @@ function NavItem({
 }
 
 function UncategorizedDropTarget({
+  label,
   count,
   active,
   onClick,
   onPointerEnter,
 }: {
+  label: string
   count?: number
   active: boolean
   onClick: () => void
   onPointerEnter?: () => void
 }) {
-  const _ = useTranslation()
   const { setNodeRef, isOver } = useDroppable({ id: SHELF_NONE_DROPPABLE })
   const { active: dragActive } = useDndContext()
   const isBookDragging = isBookDrag(dragActive?.data.current)
@@ -1160,7 +1142,7 @@ function UncategorizedDropTarget({
   return (
     <div ref={setNodeRef} className="relative">
       <NavItem
-        label={_('library.uncategorized')}
+        label={label}
         count={count}
         active={active || dropHint}
         icon={

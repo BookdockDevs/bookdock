@@ -120,7 +120,6 @@ describe('users module', () => {
     db.run(sql.raw('DROP TABLE annotations'))
     db.run(sql.raw('DROP TABLE book_tags'))
     db.run(sql.raw('DROP TABLE books'))
-    db.run(sql.raw('DROP TABLE shelves'))
     db.run(sql.raw('DROP TABLE tags'))
   })
 

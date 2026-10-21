@@ -202,6 +202,7 @@ export type {
   ReadingSessionUpdateReq,
   ReadingRecordConflictDetails,
   ReadingRecordTagItem,
+  ReadingRecordCategoryItem,
   AnnotationCreateReq,
   AnnotationUpdateReq,
   AnnotationRes,
@@ -474,6 +475,7 @@ export {
   type TransferIssue,
 } from './rule-transfer'
 export * from './library-search'
+export * from './category-templates'
 export * from './idea-discussion'
 export * from './review'
 export * from './reader-profile'

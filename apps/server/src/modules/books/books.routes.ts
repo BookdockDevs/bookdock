@@ -22,7 +22,7 @@ import {
   getBookChapters,
   getBookContent,
   getBookCoverContent,
-  setBookShelf,
+  setBookMembership,
   setBookTags,
   getBookShelf,
   getBookTags,
@@ -122,6 +122,7 @@ booksRoutes.get('/', async (c) => {
   const sortBy = query['sortBy']
   const sortOrder = query['sortOrder']
   const shelfId = query['shelfId']
+  const categoryId = query['categoryId']
   const tagId = query['tagId']
   const author = query['author']
   const series = query['series']
@@ -136,7 +137,7 @@ booksRoutes.get('/', async (c) => {
     await purgeExpiredTrash(user.id, trashSettings.autoCleanDays)
     await purgeTrashToCapacity(user.id, trashSettings.maxTrashBytes ?? 0)
   }
-  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series, requestShowHidden(c), query['expression'])
+  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series, requestShowHidden(c), query['expression'], categoryId)
   return c.json(result)
 })
 
@@ -163,7 +164,7 @@ booksRoutes.post('/', async (c) => {
       throw new AppError('VALIDATION_ERROR', 'Invalid tagIds')
     }
   }
-  const membership = bookMembershipSchema.safeParse({ shelfId: body['shelfId'], tagIds })
+  const membership = bookMembershipSchema.safeParse({ shelfId: body['shelfId'], categoryId: body['categoryId'], categoryTemplateKey: body['categoryTemplateKey'], tagIds })
   if (!membership.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid membership', membership.error.flatten())
   }
@@ -478,7 +479,7 @@ booksRoutes.put('/:id/shelves', async (c) => {
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
-  await setBookShelf(user.id, bookId, parsed.data.shelfId ?? null)
+  await setBookMembership(user.id, bookId, parsed.data)
   return c.json({ data: null })
 })
 

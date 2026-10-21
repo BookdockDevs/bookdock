@@ -115,5 +115,8 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
 
   await client.runDatabaseMigrations(db)
   expect(sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at').all()).toEqual(upgradedLedger)
-  expect(retainedTables.map((table) => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all())).toEqual(before)
+  const after = retainedTables.map((table) => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
+  const libraryBooksIndex = retainedTables.indexOf('library_books')
+  after[libraryBooksIndex] = (after[libraryBooksIndex] as Array<Record<string, unknown>>).map(({ shelf_id: _shelfId, ...row }) => row)
+  expect(after).toEqual(before)
 }, 30_000)

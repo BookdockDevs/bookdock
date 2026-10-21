@@ -482,7 +482,7 @@ describe('Legado book-source adapter', () => {
 
     // The taxonomy id is validated against the library it was asked for, so a
     // category from another library cannot answer for this one.
-    expect(getLegadoExploreFilter).toHaveBeenCalledWith('user-1', 'lib-city', 'shelf', 'cat-9')
+    expect(getLegadoExploreFilter).toHaveBeenCalledWith('user-1', 'lib-city', 'category', 'cat-9')
     expect(listLibraryVersionEntries).toHaveBeenCalledWith('user-1', 'lib-city', expect.objectContaining({
       page: 2,
       sortBy: 'title',

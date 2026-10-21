@@ -18,12 +18,12 @@ interface UploadSheetProps {
   onClose: () => void
   libraryId?: string
   shelfId?: string
+  categoryId?: string
   /**
-   * Explicit name of the shelf or category in context. If omitted, looked up
-   * from shelfId in the private library's shelves.
+   * Explicit taxonomy name in context. If omitted, looked up from shelfId.
    */
   shelfName?: string
-  /** Whether the destination is a category (shared library) or a shelf (private). */
+  /** Whether the destination is a category or a shelf. */
   isCategory?: boolean
   tagId?: string
   /**
@@ -90,6 +90,7 @@ export default function UploadSheet({
   onClose,
   libraryId,
   shelfId,
+  categoryId,
   shelfName: propShelfName,
   isCategory = false,
   tagId,
@@ -150,7 +151,8 @@ export default function UploadSheet({
     : _('library.uploadShelfContext', { name: shelfName ?? '' })
   const tagName = tagId ? tagsData?.data.find((tag) => tag.id === tagId)?.name : undefined
   const assignment: UploadAssignment = {
-    shelfId: shelfId,
+    shelfId,
+    categoryId,
     tagIds: includeCurrentTag && tagId ? [tagId] : [],
   }
 
@@ -346,6 +348,7 @@ export default function UploadSheet({
           onConnectionChange={handleSelectSource}
           libraryId={libraryId}
           shelfId={shelfId}
+          categoryId={categoryId}
           tagId={tagId}
           includeCurrentTag={includeCurrentTag}
           target={target}

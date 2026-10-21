@@ -36,7 +36,7 @@ function setup(canManage = true) {
   client.setQueryData(['shelves'], { data: [] })
   client.setQueryData(['tags'], { data: [] })
   const navigate = vi.fn()
-  const props = { libraryId: 'lib', sessionKey: `test-${Math.random()}`, panel: 'categories' as const, canManage, navSearch: navigate, onOpenNavigation: vi.fn() }
+  const props = { libraryId: 'lib', privateLibraryId: 'private-lib', sessionKey: `test-${Math.random()}`, panel: 'categories' as const, canManage, navSearch: navigate, onOpenNavigation: vi.fn() }
   const result = render(<QueryClientProvider client={client}><TaxonomyDirectory {...props} /></QueryClientProvider>)
   return { ...result, navigate, client, props }
 }
@@ -51,11 +51,33 @@ beforeEach(() => {
 })
 
 describe('taxonomy directory', () => {
+  it.each([
+    ['shelves', 'library.noShelves'],
+    ['categories', 'library.noCategories'],
+    ['tags', 'library.noTags'],
+  ] as const)('shows the matching empty state for an empty %s collection', async (panel, emptyLabel) => {
+    const { rerender, props, client } = setup()
+    if (panel === 'categories') act(() => client.setQueryData(['libraries', 'lib', 'categories'], { data: [] }))
+    if (panel === 'tags') act(() => client.setQueryData(['libraries', 'lib', 'tags'], { data: [] }))
+    rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} panel={panel} /></QueryClientProvider>)
+
+    expect(await screen.findByText(emptyLabel)).toBeInTheDocument()
+    if (panel === 'tags') expect(screen.queryByText('library.noCategories')).toBeNull()
+  })
+
+  it('keeps the empty-collection state out of search results with no matches', () => {
+    setup()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'missing' } })
+
+    expect(screen.queryByText('library.noCategories')).toBeNull()
+    expect(screen.queryByText('Root')).toBeNull()
+  })
+
   it('opens a category directly from its menu header and closes the menu', () => {
     const { navigate } = setup()
     fireEvent.contextMenu(screen.getByText('Root'))
     fireEvent.click(screen.getByRole('button', { name: /Root library.bookCount/ }))
-    expect(navigate).toHaveBeenCalledWith({ shelf: 'Root', categoryScope: 'subtree', directory: undefined })
+    expect(navigate).toHaveBeenCalledWith({ category: 'Root', shelf: undefined, categoryScope: 'subtree', directory: undefined })
     expect(screen.queryByRole('button', { name: 'library.edit' })).toBeNull()
   })
 
@@ -85,7 +107,7 @@ describe('taxonomy directory', () => {
     expect(screen.queryByText('Other')).toBeNull()
     expect(navigate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByText('Child'))
-    expect(navigate).toHaveBeenCalledWith({ shelf: 'Child', categoryScope: 'subtree', directory: undefined })
+    expect(navigate).toHaveBeenCalledWith({ category: 'Child', shelf: undefined, categoryScope: 'subtree', directory: undefined })
   })
 
   it('exposes browse-only entries to ordinary readers', () => {
@@ -93,7 +115,7 @@ describe('taxonomy directory', () => {
     expect(screen.queryByText('library.manageDirectory')).toBeNull()
     expect(screen.queryByText('library.newCategory')).toBeNull()
     fireEvent.click(screen.getByText('Child'))
-    expect(navigate).toHaveBeenCalledWith({ shelf: 'Child', categoryScope: 'subtree', directory: undefined })
+    expect(navigate).toHaveBeenCalledWith({ category: 'Child', shelf: undefined, categoryScope: 'subtree', directory: undefined })
   })
 
   it('creates a child only under a root and submits the selected parent', async () => {
@@ -254,7 +276,7 @@ describe('directory batch selection', () => {
     const { client, props, rerender } = setup()
     client.setQueryData(['shelves'], { data: [category('Shelf', null)] })
     client.setQueryData(['tags'], { data: [category('Tag', null)] })
-    rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} libraryId={null} /></QueryClientProvider>)
+    rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} libraryId={null} panel="shelves" /></QueryClientProvider>)
     start(); select('Shelf')
     fireEvent.click(toolbar().getByRole('button', { name: 'library.hide' }))
     await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/shelves/Shelf', { hidden: true }))
@@ -265,5 +287,18 @@ describe('directory batch selection', () => {
     start(); select('Tag')
     fireEvent.click(toolbar().getByRole('button', { name: 'library.pin' }))
     await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/tags/Tag', { pinned: true }))
+  })
+
+  it('manages private categories through the private library category endpoint, separately from shelves', async () => {
+    const { client, props, rerender } = setup()
+    client.setQueryData(['libraries', 'private-lib', 'categories'], { data: [category('Private root', null)] })
+    rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} libraryId={null} panel="categories" /></QueryClientProvider>)
+
+    fireEvent.contextMenu(await screen.findByText('Private root'))
+    fireEvent.click(screen.getByText('library.edit'))
+    fireEvent.change(screen.getByPlaceholderText('library.categoryName'), { target: { value: 'Renamed private root' } })
+    fireEvent.click(screen.getByText('library.save'))
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/libraries/private-lib/categories/Private root', { name: 'Renamed private root', parentId: null }))
+    expect(apiPut).not.toHaveBeenCalledWith('/shelves/Private root', expect.anything())
   })
 })

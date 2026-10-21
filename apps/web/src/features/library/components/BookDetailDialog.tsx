@@ -8,6 +8,7 @@ import type { BookListItem, CatalogBook, Library, Review } from '@bookdock/share
 
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
+import { READING_RECORDS_KEY } from '@/api/hooks/reading-records'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
@@ -16,10 +17,11 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import type { ToastMessage } from '@/stores/toast.store'
 
-import { useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useShelves, useTags, useVersionTocState } from '../hooks'
+import { useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useTags, useVersionTocState, useLibraryCategories, useLibraries } from '../hooks'
 
 import AppendContentModal from './AppendContentModal'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
+import { categoryPath } from '../taxonomy'
 import BookCoverEditor from './book-detail/BookCoverEditor'
 import BookDetailView from './book-detail/BookDetailView'
 import BookMetaForm from './book-detail/BookMetaForm'
@@ -66,8 +68,10 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const displayBook: BookListItem = detail ?? book!
   const bookmeta = detail?.meta?.bookmeta
 
-  const { shelves: memShelves, tags: memTags } = useBookMembership(book?.id ?? null)
-  const { data: shelvesData } = useShelves()
+  const { tags: memTags } = useBookMembership(book?.id ?? null)
+  const { data: librariesData } = useLibraries()
+  const privateLibraryId = librariesData?.data.find((library) => library.type === 'private')?.id ?? null
+  const categoriesData = useLibraryCategories(privateLibraryId)
   const { data: tagsData } = useTags()
 
   const [editing, setEditing] = useState(false)
@@ -80,7 +84,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null)
   const [coverRemovalPending, setCoverRemovalPending] = useState(false)
   const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null)
-  const [shelfSel, setShelfSel] = useState<string | null>(null)
+  const [categorySel, setCategorySel] = useState<{ categoryId?: string | null; categoryTemplateKey?: string }>({ categoryId: null })
   const [tagSel, setTagSel] = useState<Set<string>>(new Set())
 
   const [tocRuleOpen, setTocRuleOpen] = useState(false)
@@ -275,7 +279,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     })
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
-    setShelfSel(memShelves.data?.data !== undefined ? memShelves.data.data : (book.shelfId ?? null))
+    setCategorySel({ categoryId: displayBook.categoryId ?? null })
     setTagSel(
       new Set(
         memTags.data?.data ??
@@ -320,7 +324,9 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
       }
       const requests: Promise<unknown>[] = [
         apiPatch(`/books/${book.id}`, patch),
-        apiPut(`/books/${book.id}/shelves`, { shelfId: shelfSel }),
+        apiPut(`/books/${book.id}/shelves`, categorySel.categoryTemplateKey
+          ? { categoryTemplateKey: categorySel.categoryTemplateKey }
+          : { categoryId: categorySel.categoryId }),
         apiPut(`/books/${book.id}/tags`, { tagIds: [...tagSel] }),
       ]
       if (coverRemovalPending) {
@@ -333,6 +339,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
       queryClient.invalidateQueries({ queryKey: ['book', book.id] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
+      queryClient.invalidateQueries({ queryKey: ['libraries', privateLibraryId, 'categories'] })
+      queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
       const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       if (failed.length > 0) {
         const reason = getUserErrorNotification(failed[0]!.reason, 'toast.updateBookFailed')
@@ -513,8 +521,6 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
 
   if (!book) return null
 
-  const currentShelfId =
-    memShelves.data?.data !== undefined ? memShelves.data.data : (displayBook.shelfId ?? null)
   const tagIds = memTags.data?.data ? new Set(memTags.data.data) : null
   // 7.x: a collected B keeps its own metadata editable, but its content belongs
   // to the library — appending, re-chaptering and resetting derived metadata
@@ -522,9 +528,13 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   // is the right test for that: it is set for a B and for a library read, and
   // absent for A/C.
   const isLibraryOwned = Boolean(displayBook.source)
-  const shelfName = currentShelfId
-    ? (shelvesData?.data ?? []).find((s) => s.id === currentShelfId)?.name ?? book.shelfName ?? undefined
-    : undefined
+  const currentCategoryName = displayBook.categoryId === null
+    ? categoriesData.data ? _('library.uncategorized') : undefined
+    : displayBook.categoryId
+      ? categoriesData.data?.data.some((category) => category.id === displayBook.categoryId)
+        ? categoryPath(categoriesData.data.data, displayBook.categoryId).map((category) => category.name).join(' / ')
+        : displayBook.categoryName ?? undefined
+      : displayBook.categoryName ?? undefined
   const memberTags = tagIds
     ? (tagsData?.data ?? []).filter((t) => tagIds.has(t.id))
     : (book.tags ?? []).map((name) => {
@@ -679,9 +689,11 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
                 }
               />
               <BookClassificationEditor
-                shelfId={shelfSel}
+                libraryId={privateLibraryId ?? ''}
+                categoryId={categorySel.categoryId ?? null}
+                categoryTemplateKey={categorySel.categoryTemplateKey}
                 tagIds={tagSel}
-                onShelfChange={setShelfSel}
+                onCategoryChange={(value) => setCategorySel(value)}
                 onTagChange={setTagSel}
               />
             </div>
@@ -692,10 +704,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
               // private card; their personal-library actions must stay hidden.
               readOnly={readOnly || displayBook.collected === false}
               detail={detail}
-              shelfName={shelfName}
-              currentShelfId={currentShelfId}
-              shelfMembershipReady={memShelves.data !== undefined && !memShelves.isError}
-              shelfMembershipError={memShelves.isError}
+              categoryName={currentCategoryName}
               memberTags={memberTags}
               isLoading={detailLoading || !detail}
               moreActions={privateMenuItems}

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -32,7 +32,7 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [])
   return db
 }
 
@@ -90,8 +90,8 @@ describe('shelves service', () => {
     const lbv = db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
       .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, id)).get()
     if (!lbv) return undefined
-    return db.select({ categoryId: schema.libraryBooks.categoryId })
-      .from(schema.libraryBooks).where(eq(schema.libraryBooks.id, lbv.libraryBookId)).get()?.categoryId
+    return db.select({ shelfId: schema.libraryBooks.shelfId })
+      .from(schema.libraryBooks).where(eq(schema.libraryBooks.id, lbv.libraryBookId)).get()?.shelfId
   }
 
   it('should create and list shelves', async () => {
@@ -117,14 +117,18 @@ describe('shelves service', () => {
     expect(updated.name).toBe('New Name')
   })
 
-  it('should toggle a shelf pin without touching membership timestamps', async () => {
+  it('should toggle a shelf pin without touching book membership timestamps', async () => {
     const shelf = await createShelf(userId, 'Shelf A')
+    const membershipTimestamp = db.select({ updatedAt: schema.libraryBooks.updatedAt })
+      .from(schema.libraryBooks).where(eq(schema.libraryBooks.userId, userId)).get()?.updatedAt
     const pinned = await updateShelf(userId, shelf.id, { pinned: true })
     expect(pinned.pinned).toBe(true)
 
     const listed = (await listShelves(userId)).find((s) => s.id === shelf.id)
     expect(listed?.pinned).toBe(true)
     expect(listed?.updatedAt).toBe(shelf.updatedAt)
+    expect(db.select({ updatedAt: schema.libraryBooks.updatedAt })
+      .from(schema.libraryBooks).where(eq(schema.libraryBooks.userId, userId)).get()?.updatedAt).toBe(membershipTimestamp)
 
     const unpinned = await updateShelf(userId, shelf.id, { pinned: false })
     expect(unpinned.pinned).toBe(false)
@@ -186,7 +190,7 @@ describe('shelves service', () => {
     expect(getBookShelfId(bookId)).toBe(shelfA.id)
   })
 
-  it('should delete a shelf and set its books to uncategorized', async () => {
+  it('should delete a shelf and leave its books without shelf membership', async () => {
     const shelf = await createShelf(userId, 'To Delete')
     await moveBooksToShelf(userId, shelf.id, [bookId])
 
@@ -329,15 +333,18 @@ describe('shared library categories', () => {
     expect((await listLibraryCategories(ownerId, libraryId)).find((row) => row.id === root.id)?.parentId).toBe(other.id)
   })
 
-  it('rejects parenting through generic private-library management', async () => {
+  it('keeps private categories separate from shelves and allows two-level categories', async () => {
     const privateId = createId('lib')
     db.insert(schema.libraries).values({ id: privateId, userId: ownerId, type: 'private', name: '', createdAt: 1, updatedAt: 1 }).run()
     const root = await createLibraryCategory(ownerId, privateId, { name: 'Shelf' })
     const other = await createLibraryCategory(ownerId, privateId, { name: 'Other shelf' })
-    await expect(createLibraryCategory(ownerId, privateId, { name: 'Nested', parentId: root.id }))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-    await expect(updateLibraryCategory(ownerId, privateId, other.id, { name: 'Renamed', parentId: root.id }))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-    expect((await listLibraryCategories(ownerId, privateId)).find((row) => row.id === other.id)?.name).toBe('Other shelf')
+    const child = await createLibraryCategory(ownerId, privateId, { name: 'Nested', parentId: root.id })
+    expect(child.parentId).toBe(root.id)
+    await updateLibraryCategory(ownerId, privateId, other.id, { name: 'Renamed', parentId: root.id })
+    expect((await listLibraryCategories(ownerId, privateId)).find((row) => row.id === other.id))
+      .toMatchObject({ name: 'Renamed', parentId: root.id })
+    const shelf = await createShelf(ownerId, 'Shelf')
+    expect((await listLibraryCategories(ownerId, privateId)).map((row) => row.id)).not.toContain(shelf.id)
+    expect((await listShelves(ownerId)).map((row) => row.id)).toContain(shelf.id)
   })
 })

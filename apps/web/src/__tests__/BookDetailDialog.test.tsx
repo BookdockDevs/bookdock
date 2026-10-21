@@ -99,7 +99,7 @@ vi.mock('../features/library/hooks', () => ({
   useVersionTocState: () => ({ data: undefined }),
   useUpdateCatalogVersion: () => ({ mutate: updateCatalogVersionMutate, mutateAsync: updateCatalogVersionMutate, isPending: quickEditPending }),
   useUpdateCatalogBook: () => ({ mutate: updateCatalogBookMutate, mutateAsync: updateCatalogBookMutate, isPending: false }),
-  useLibraries: () => ({ data: undefined }),
+  useLibraries: () => ({ data: { data: [{ id: 'private', type: 'private' }] } }),
   useLibraryCategories: () => ({ data: categoriesPending ? undefined : { data: sharedCategories }, isPending: categoriesPending, isError: categoriesError }),
   useLibraryTags: () => ({ data: { data: [] } }),
   useCreateLibraryCategory: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -126,6 +126,7 @@ const book: BookListItem = {
   coverKey: null,
   size: 100,
   readStatus: 'reading',
+  categoryId: null,
   progress: 0,
   createdAt: 1,
   updatedAt: 1,
@@ -174,7 +175,7 @@ beforeEach(async () => {
   await i18n.changeLanguage('zh-CN')
 })
 
-describe('BookDetailDialog shelf chips', () => {
+describe('BookDetailDialog classification editor', () => {
   it('waits for every save request and retains a partial result in the form for retry', async () => {
     let finishShelf!: () => void
     apiPut.mockImplementationOnce(() => new Promise((resolve) => { finishShelf = () => resolve({}) }))
@@ -206,52 +207,53 @@ describe('BookDetailDialog shelf chips', () => {
     expect(useToastStore.getState().toasts).toHaveLength(0)
   })
 
-  it('keeps personal status, source, shelf and tags together without update or collection notices', () => {
-    membershipShelf = 'shelf-1'
+  it('keeps personal status, source, category and tags together without update or collection notices', () => {
     membershipTags = ['tag-1']
-    bookDetail = { data: { ...book, kind: 'shared', ownsSource: true, hasUnreadUpdate: true, source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' } } }
+    bookDetail = { data: { ...book, categoryId: 'category-1', categoryName: 'Fiction', kind: 'shared', ownsSource: true, hasUnreadUpdate: true, source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' } } }
     renderDialog()
     const row = screen.getByRole('button', { name: '在读' }).parentElement!.parentElement!
-    expect(row.textContent).toBe('在读City📁Favorites#小说')
+    expect(row.textContent).toContain('在读CityFiction#小说')
     expect(row).not.toContainElement(screen.getByText('有更新'))
     // The private detail never offers a collection action any more.
     expect(screen.queryByRole('button', { name: '已在书库中' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'shelf-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Fiction' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { category: 'category-1' } })
   })
 
-  it('saves a single shelf via chip selection', async () => {
+  it('saves an existing category from the classification selector', async () => {
+    sharedCategories = [{ id: 'category-1', libraryId: 'private', userId: 'test-user', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 }]
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Fiction' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { shelfId: 'shelf-1' })
+      expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { categoryId: 'category-1' })
     })
   })
 
-  it('keeps the clicked chip selected instead of toggling off', () => {
+  it('keeps the uncategorized choice selected instead of toggling off', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    const uncategorized = screen.getByRole('button', { name: '未分类' })
-    expect(uncategorized).toHaveAttribute('aria-pressed', 'true')
+    const uncategorized = screen.getByRole('radio', { name: '未分类' })
+    expect(uncategorized).toBeChecked()
     fireEvent.click(uncategorized)
-    expect(uncategorized).toHaveAttribute('aria-pressed', 'true')
+    expect(uncategorized).toBeChecked()
   })
 
-  it('saves uncategorized as shelfId null', async () => {
+  it('saves uncategorized as categoryId null', async () => {
+    sharedCategories = [{ id: 'category-1', libraryId: 'private', userId: 'test-user', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 }]
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
-    fireEvent.click(screen.getByRole('button', { name: '未分类' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Fiction' }))
+    fireEvent.click(screen.getByRole('radio', { name: '未分类' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { shelfId: null })
+      expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { categoryId: null })
     })
   })
 })
@@ -322,53 +324,29 @@ describe('BookDetailDialog tag chips', () => {
   })
 })
 
-describe('BookDetailDialog shelf chips', () => {
-  it('keeps personal status, source, shelf and tags together without update or collection notices', () => {
-    membershipShelf = 'shelf-1'
-    membershipTags = ['tag-1']
-    bookDetail = { data: { ...book, kind: 'shared', ownsSource: true, hasUnreadUpdate: true, source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' } } }
+describe('BookDetailDialog recommended categories', () => {
+  it('saves a selected recommendation atomically and does not create it before save', async () => {
     renderDialog()
-    const row = screen.getByRole('button', { name: '在读' }).parentElement!.parentElement!
-    expect(row.textContent).toBe('在读City📁Favorites#小说')
-    expect(row).not.toContainElement(screen.getByText('有更新'))
-    // The private detail never offers a collection action any more.
-    expect(screen.queryByRole('button', { name: '已在书库中' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'shelf-1' } })
-  })
-
-  it('creates a shelf from the inline chip and auto-selects it', async () => {
-    renderDialog()
-
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建书架' }))
-    const input = screen.getByPlaceholderText('新书架名称')
-    fireEvent.change(input, { target: { value: '科幻' } })
-    fireEvent.keyDown(input, { key: 'Enter' })
-
-    await waitFor(() => expect(createShelfMutate).toHaveBeenCalledWith('科幻'))
-    await waitFor(() => expect(screen.getByRole('button', { name: '+ 新建书架' })).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { shelfId: 'shelf-new' })
-    })
-  })
-
-  it('cancels the inline shelf input when clicking away', () => {
-    renderDialog()
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建书架' }))
-    const input = screen.getByPlaceholderText('新书架名称')
-    fireEvent.change(input, { target: { value: '科幻' } })
-    fireEvent.mouseDown(document.body)
-
+    fireEvent.click(screen.getByText('推荐分类'))
+    const search = screen.getByRole('textbox', { name: '按名称或完整路径搜索' })
+    fireEvent.change(search, { target: { value: '文学 / 散文随笔' } })
+    fireEvent.click(screen.getByRole('radio', { name: '文学 / 散文随笔' }))
+    expect(apiPut).not.toHaveBeenCalled()
     expect(createShelfMutate).not.toHaveBeenCalled()
-    expect(screen.queryByPlaceholderText('新书架名称')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { categoryTemplateKey: 'literature.essays' }))
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建书架' }))
-    expect(screen.getByPlaceholderText('新书架名称')).toHaveValue('')
+  it('cancels a selected recommendation without creating or saving a category', () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByText('推荐分类'))
+    fireEvent.change(screen.getByRole('textbox', { name: '按名称或完整路径搜索' }), { target: { value: '文学 / 散文随笔' } })
+    fireEvent.click(screen.getByRole('radio', { name: '文学 / 散文随笔' }))
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(apiPut).not.toHaveBeenCalled()
+    expect(createShelfMutate).not.toHaveBeenCalled()
   })
 })
 
@@ -525,22 +503,22 @@ describe('BookDetailDialog identity chips', () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { series: 'Trilogy' } })
   })
 
-  it('renders format in specs and navigates to the shelf filter on shelf chip click', () => {
-    membershipShelf = 'shelf-1'
+  it('renders format in specs and navigates to the category filter from the category chip', () => {
+    bookDetail = { data: { ...book, categoryId: 'category-1', categoryName: 'Fiction' } }
     const onClose = vi.fn()
     render(<BookDetailDialog book={book} onClose={onClose} onDelete={vi.fn()} />, { wrapper })
 
     expect(screen.getByText('EPUB')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Favorites' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Fiction' }))
 
     expect(onClose).toHaveBeenCalled()
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'shelf-1' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { category: 'category-1' } })
   })
 
-  it('filters unassigned books from the unassigned shelf chip', () => {
+  it('filters uncategorized books from the uncategorized category chip', () => {
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '未分类' }))
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { shelf: 'none' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { category: 'none' } })
   })
 
   it('navigates to the tag filter on tag chip click', () => {
@@ -601,7 +579,7 @@ describe('BookDetailDialog read-status chip', () => {
     quickEditPending = true
     renderDialog()
     expect(screen.queryByRole('button', { name: '修改阅读状态' })).toBeNull()
-    fireEvent.contextMenu(screen.getByRole('button', { name: membershipUnavailable ? '书架信息暂不可用' : '未分类' }))
+    fireEvent.contextMenu(screen.getByRole('button', { name: '未分类' }))
     expect(screen.queryByRole('menu')).toBeNull()
     fireEvent.contextMenu(screen.getByRole('button', { name: '在读' }))
     expect(screen.queryByRole('menu')).toBeNull()
@@ -638,25 +616,22 @@ describe('BookDetailDialog read-status chip', () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: '/books/$id', params: { id: book.id } })
   })
 
-  it('edits only the private shelf and supports clearing its assignment', () => {
-    membershipShelf = 'shelf-1'
-    membershipTags = ['tag-1']
+  it('keeps category chips as filters and exposes no shelf quick-edit menu', () => {
+    bookDetail = { data: { ...book, categoryId: 'category-1', categoryName: 'Fiction' } }
     renderDialog()
-    fireEvent.contextMenu(screen.getByRole('button', { name: 'Favorites' }))
-    expect(screen.getByRole('menuitemradio', { name: 'Favorites' })).toHaveAttribute('aria-checked', 'true')
-    fireEvent.click(screen.getByRole('menuitemradio', { name: '未分类' }))
-    expect(updateMembershipMutate).toHaveBeenCalledWith({ bookId: 'book-1', shelfId: null })
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Fiction' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.getByRole('radio', { name: '未分类' })).toBeInTheDocument()
     expect(navigateMock).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: '小说' })).toBeInTheDocument()
   })
 
-  it('disables shelf editing when membership is unavailable rather than claiming unassigned', () => {
+  it('does not expose shelf membership data as category state', () => {
     membershipUnavailable = true
     renderDialog()
-    fireEvent.contextMenu(screen.getByRole('button', { name: membershipUnavailable ? '书架信息暂不可用' : '未分类' }))
-    expect(screen.queryByRole('menu')).toBeNull()
-    expect(screen.queryByRole('button', { name: '未分类' })).toBeNull()
-    expect(screen.getByRole('button', { name: '书架信息暂不可用' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '未分类' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Favorites' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '书架信息暂不可用' })).toBeNull()
   })
 
   it('renders the current status as the first identity chip', () => {
@@ -1466,7 +1441,7 @@ describe('BookDetailDialog shared work mode', () => {
     expect(screen.queryByText('City', { exact: true })).toBeNull()
     fireEvent.click(category)
     expect(onClose).toHaveBeenCalled()
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: 'c1', categoryScope: 'subtree' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: undefined, tag: undefined, category: 'c1', categoryScope: 'subtree' } })
     fireEvent.click(tag)
     expect(navigateMock).toHaveBeenLastCalledWith({ to: '/', search: { libraryId: 'lib_city', tag: 't1' } })
     expect(updateCatalogBookMutate).not.toHaveBeenCalled()
@@ -1475,7 +1450,7 @@ describe('BookDetailDialog shared work mode', () => {
   it('shows uncategorized even without tags and filters the shared library', () => {
     renderWorkDialog(catalogWork({ tags: [] }))
     fireEvent.click(screen.getByRole('button', { name: '未分类' }))
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: 'none', categoryScope: 'direct' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: undefined, tag: undefined, category: 'none', categoryScope: 'direct' } })
   })
 
   it.each(['loading', 'error', 'missing'])('never labels an unresolved category as uncategorized (%s)', (state) => {

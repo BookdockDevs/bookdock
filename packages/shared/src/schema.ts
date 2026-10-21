@@ -746,7 +746,11 @@ export const categoryUpdateSchema = z.object({
 export const categoryReorderSchema = z.object({ categoryIds: z.array(z.string().min(1)) })
 export const bookMembershipSchema = z.object({
   shelfId: z.string().min(1).nullable().optional(),
+  categoryId: z.string().min(1).nullable().optional(),
+  categoryTemplateKey: z.string().min(1).max(128).optional(),
   tagIds: z.array(z.string().min(1)).optional(),
+}).refine((value) => value.categoryId === undefined || value.categoryTemplateKey === undefined, {
+  message: 'Choose an existing category or a recommendation', path: ['categoryTemplateKey'],
 })
 
 export const bookUploadOptionsSchema = z.object({

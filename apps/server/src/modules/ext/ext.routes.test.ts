@@ -64,7 +64,7 @@ describe('external API routes', () => {
     vi.mocked(listExternalBooks).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 50, hasMore: false })
     vi.mocked(getExternalBook).mockResolvedValue({
       bookVersionId: 'v1', libraryId: 'lib1', libraryName: '', title: 'T', author: 'A', authors: [],
-      versionName: '', sourceFormat: 'epub', size: 1, hasCover: false, categoryName: null, tags: [],
+      versionName: '', sourceFormat: 'epub', size: 1, hasCover: false, categoryName: null, shelfName: null, tags: [],
       hidden: false, wordCount: null, createdAt: 1, updatedAt: 2, description: '', bookmeta: {}, fileName: 'T.epub', cover: null,
     })
     vi.mocked(deleteExternalBook).mockResolvedValue({ bookVersionId: 'v1' })
@@ -138,24 +138,26 @@ describe('external API routes', () => {
     expect(empty.status).toBe(400)
   })
 
-  it('files an upload into a named shelf, and only when a library is named too', async () => {
+  it('keeps category and shelf placement separate for external uploads', async () => {
     const form = (fields: Record<string, string>) => {
       const parts = ['--x', 'Content-Disposition: form-data; name="file"; filename="a.epub"', 'Content-Type: application/epub+zip', '', 'PK', ...Object.entries(fields).flatMap(([k, v]) => [`--x`, `Content-Disposition: form-data; name="${k}"`, '', v]), '--x--', '']
       return { method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=x' }, body: parts.join('\r\n') }
     }
 
-    // A shelf id is meaningless without a library: an upload with no libraryId
-    // lands in the caller's private library, and the private library's
-    // uncategorized state is what omitting categoryId already means.
-    const filed = await createApp().request('/api/v1/ext/books', form({ libraryId: 'lib1', categoryId: 'cat1' }))
+    const filed = await createApp().request('/api/v1/ext/books', form({ libraryId: 'lib1', categoryId: 'cat1', shelfId: 'shelf1' }))
     expect(filed.status).toBe(201)
-    expect(uploadCatalogBook).toHaveBeenCalledWith('lib1', USER.id, expect.any(File), expect.objectContaining({ categoryId: 'cat1' }))
+    expect(uploadCatalogBook).toHaveBeenCalledWith('lib1', USER.id, expect.any(File), expect.objectContaining({ categoryId: 'cat1', shelfId: 'shelf1' }))
+
+    vi.clearAllMocks()
+    const privateShelf = await createApp().request('/api/v1/ext/books', form({ shelfId: 'shelf2' }))
+    expect(privateShelf.status).toBe(201)
+    expect(uploadBook).toHaveBeenCalledWith(USER.id, expect.any(File), { shelfId: 'shelf2' }, expect.anything())
 
     vi.clearAllMocks()
     const uncategorized = await createApp().request('/api/v1/ext/books', form({ categoryId: 'cat1' }))
-    expect(uncategorized.status).toBe(201)
+    expect(uncategorized.status).toBe(400)
     expect(uploadCatalogBook).not.toHaveBeenCalled()
-    expect(uploadBook).toHaveBeenCalledWith(USER.id, expect.any(File), undefined, expect.anything())
+    expect(uploadBook).not.toHaveBeenCalled()
   })
 
   it('trashes a version and checks the named library before acting on it', async () => {

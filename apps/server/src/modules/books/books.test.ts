@@ -1,7 +1,7 @@
 import { parseLibrarySearch } from '@bookdock/shared'
 import { listSearchAuthors } from '../libraries/search-expression'
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
@@ -37,6 +37,7 @@ import {
   purgeAllExpiredTrash,
   listBooks,
   setBookShelf,
+  setBookMembership,
   getBookShelf,
   getBookTags,
   getPrivateBatchSelection,
@@ -128,15 +129,12 @@ function ensureLibrary(db: ReturnType<typeof createTestDb>, userId: string): str
   return id
 }
 
-// Test doubles mirror the 2.5 migration: every old shelf/tag/relation gets
-// its new-model twin so rewired reads resolve.
+// Test doubles mirror the current membership split so rewired reads resolve.
 function mirrorShelf(db: ReturnType<typeof createTestDb>, userId: string, shelfId: string) {
   const libraryId = ensureLibrary(db, userId)
-  const shelf = db.select().from(schema.shelves).where(eq(schema.shelves.id, shelfId)).get()!
-  db.insert(schema.libraryCategories).values({
-    id: shelf.id, libraryId, userId, name: shelf.name,
-    parentId: null, sortOrder: shelf.sortOrder, pinned: shelf.pinned, createdAt: shelf.createdAt, updatedAt: shelf.updatedAt,
-  }).onConflictDoNothing().run()
+  expect(db.select({ id: schema.shelves.id, userId: schema.shelves.userId }).from(schema.shelves)
+    .where(eq(schema.shelves.id, shelfId)).get()?.userId).toBe(userId)
+  db.update(schema.shelves).set({ libraryId }).where(eq(schema.shelves.id, shelfId)).run()
 }
 
 function mirrorTag(db: ReturnType<typeof createTestDb>, userId: string, tagId: string) {
@@ -189,17 +187,6 @@ function seedBook(
   const meta = (book.meta ?? {}) as Record<string, unknown>
   const chapters = Array.isArray(meta.chapters) ? meta.chapters : []
   const bookmeta = (meta.bookmeta ?? {}) as Record<string, unknown>
-  // Shelves double as categories (2.5 id reuse): mirror the referenced shelf
-  // so classification survives the model switch without a mapping table.
-  if (book.shelfId) {
-    const shelf = db.select().from(schema.shelves).where(eq(schema.shelves.id, book.shelfId)).get()
-    if (shelf) {
-      db.insert(schema.libraryCategories).values({
-        id: shelf.id, libraryId, userId, name: shelf.name,
-        parentId: null, sortOrder: shelf.sortOrder, pinned: shelf.pinned, createdAt: shelf.createdAt, updatedAt: shelf.updatedAt,
-      }).onConflictDoNothing().run()
-    }
-  }
   const libraryBookId = createId('lb')
   db.insert(schema.bookVersions).values({
     id: book.id, format: book.format, size: book.size, createdAt: book.createdAt, updatedAt: book.updatedAt,
@@ -210,7 +197,7 @@ function seedBook(
     chapterCount: chapters.length, meta, createdAt: book.createdAt,
   }).run()
   db.insert(schema.libraryBooks).values({
-    id: libraryBookId, libraryId, userId, categoryId: book.shelfId ?? null,
+    id: libraryBookId, libraryId, userId, shelfId: book.shelfId ?? null,
     title: book.title, author: book.author,
     description: typeof bookmeta.description === 'string' ? bookmeta.description : '',
     coverKey: book.coverKey, createdAt: book.createdAt, updatedAt: book.updatedAt,
@@ -456,7 +443,7 @@ describe('uploadBook membership', () => {
   it('persists the requested shelf and tags with a new book', async () => {
     const shelfId = createId('shelf')
     const tagId = createId('tag')
-    db.insert(schema.shelves).values({ id: shelfId, userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.shelves).values({ id: shelfId, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
     db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
     mirrorShelf(db, ownerId, shelfId)
     mirrorTag(db, ownerId, tagId)
@@ -473,7 +460,7 @@ describe('uploadBook membership', () => {
   it('rejects membership owned by another user', async () => {
     const otherId = seedUser(db, 'other')
     const shelfId = createId('shelf')
-    db.insert(schema.shelves).values({ id: shelfId, userId: otherId, name: 'Other', sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.shelves).values({ id: shelfId, libraryId: ensureLibrary(db, otherId), userId: otherId, name: 'Other', sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
     mirrorShelf(db, otherId, shelfId)
 
     await expect(
@@ -486,8 +473,8 @@ describe('uploadBook membership', () => {
     const shelfA = createId('shelf')
     const shelfB = createId('shelf')
     db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
-    db.insert(schema.shelves).values({ id: shelfA, userId: ownerId, name: 'A', sortOrder: 0, createdAt: Date.now() }).run()
-    db.insert(schema.shelves).values({ id: shelfB, userId: ownerId, name: 'B', sortOrder: 1, createdAt: Date.now() }).run()
+    db.insert(schema.shelves).values({ id: shelfA, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: 'A', sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
+    db.insert(schema.shelves).values({ id: shelfB, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: 'B', sortOrder: 1, createdAt: Date.now(), updatedAt: Date.now() }).run()
     mirrorTag(db, ownerId, tagId)
     mirrorShelf(db, ownerId, shelfA)
     mirrorShelf(db, ownerId, shelfB)
@@ -627,7 +614,7 @@ describe('POST /api/v1/books upload membership', () => {
     ownerId = seedUser(db, 'owner')
     shelfId = createId('shelf')
     tagId = createId('tag')
-    db.insert(schema.shelves).values({ id: shelfId, userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.shelves).values({ id: shelfId, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
     db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
     mirrorShelf(db, ownerId, shelfId)
     mirrorTag(db, ownerId, tagId)
@@ -722,7 +709,7 @@ describe('listBooks search escaping', () => {
   it('matches catalog metadata, shelf names, and tag names', async () => {
     const shelfId = createId('shelf')
     const tagId = createId('tag')
-    db.insert(schema.shelves).values({ id: shelfId, userId: ownerId, name: '历史小说', sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.shelves).values({ id: shelfId, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: '历史小说', sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
     db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '宫斗', sortOrder: 0 }).run()
     mirrorShelf(db, ownerId, shelfId)
     mirrorTag(db, ownerId, tagId)
@@ -841,7 +828,7 @@ describe('private vault (hidden works)', () => {
     const shelf = await createShelf(ownerId, 'Vault')
     const shelved = seedBook(db, ownerId, { title: 'Shelved' })
     const work = libraryBookOf(db, shelved.id)!
-    db.update(schema.libraryBooks).set({ categoryId: shelf.id })
+    db.update(schema.libraryBooks).set({ shelfId: shelf.id })
       .where(eq(schema.libraryBooks.id, work.id)).run()
     await updateShelf(ownerId, shelf.id, { hidden: true })
 
@@ -852,12 +839,12 @@ describe('private vault (hidden works)', () => {
     const row = revealed.data.find((b) => b.id === shelved.id)
     expect(row?.hidden).toBe(false)
     expect(row?.effectiveHidden).toBe(true)
-    expect(row?.hiddenReason).toBe('category')
-    expect(row?.hiddenVia).toEqual({ categoryName: 'Vault' })
+    expect(row?.hiddenReason).toBe('shelf')
+    expect(row?.hiddenVia).toEqual({ shelfName: 'Vault' })
     // Detail agrees with the list.
     const detail = await getActiveBook(ownerId, shelved.id, { showHidden: true })
     expect(detail.effectiveHidden).toBe(true)
-    expect(detail.hiddenReason).toBe('category')
+    expect(detail.hiddenReason).toBe('shelf')
   })
 
   it('names the hiding tag and prefers direct over category over tag', async () => {
@@ -1760,7 +1747,7 @@ describe('book shelf membership (single shelf)', () => {
 
   function seedShelf(name: string, userId = ownerId) {
     const id = createId('shelf')
-    db.insert(schema.shelves).values({ id, userId, name, sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.shelves).values({ id, libraryId: ensureLibrary(db, userId), userId, name, sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
     mirrorShelf(db, userId, id)
     return id
   }
@@ -1796,6 +1783,98 @@ describe('book shelf membership (single shelf)', () => {
     const byNone = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, 'none')
     expect(byNone.total).toBe(1)
     expect(byNone.data[0].id).toBe(uncategorized.id)
+  })
+})
+
+describe('book membership dimensions', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'membership-owner')
+  })
+
+  it('assigns a shelf and a recommended category independently', async () => {
+    const book = seedBook(db, ownerId)
+    const shelfId = createId('shelf')
+    db.insert(schema.shelves).values({
+      id: shelfId, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: 'Inbox',
+      sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now(),
+    }).run()
+
+    await setBookMembership(ownerId, book.id, { shelfId, categoryTemplateKey: 'web-fiction.mystery' })
+
+    const work = libraryBookOf(db, book.id)!
+    const category = db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, work.categoryId!)).get()!
+    const parent = db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, category.parentId!)).get()!
+    expect(work.shelfId).toBe(shelfId)
+    expect([parent.name, category.name]).toEqual(['网络小说', '悬疑'])
+  })
+
+  it('reuses the matching two-level path without changing hidden flags under another same-name parent', async () => {
+    const libraryId = ensureLibrary(db, ownerId)
+    const otherRootId = createId('cat')
+    const otherChildId = createId('cat')
+    const rootId = createId('cat')
+    const childId = createId('cat')
+    db.insert(schema.libraryCategories).values([
+      { id: otherRootId, libraryId, userId: ownerId, name: 'Other', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1 },
+      { id: otherChildId, libraryId, userId: ownerId, name: '悬疑', parentId: otherRootId, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1 },
+      { id: rootId, libraryId, userId: ownerId, name: '网络小说', parentId: null, sortOrder: 1, pinned: true, hidden: true, createdAt: 1, updatedAt: 1 },
+      { id: childId, libraryId, userId: ownerId, name: '悬疑', parentId: rootId, sortOrder: 0, pinned: true, hidden: true, createdAt: 1, updatedAt: 1 },
+    ]).run()
+    const first = seedBook(db, ownerId)
+    const second = seedBook(db, ownerId)
+
+    await setBookMembership(ownerId, first.id, { categoryTemplateKey: 'web-fiction.mystery' })
+    await setBookMembership(ownerId, second.id, { categoryTemplateKey: 'web-fiction.mystery' })
+
+    expect(libraryBookOf(db, first.id)?.categoryId).toBe(childId)
+    expect(libraryBookOf(db, second.id)?.categoryId).toBe(childId)
+    expect(db.select().from(schema.libraryCategories).all()).toHaveLength(4)
+    expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, rootId)).get())
+      .toMatchObject({ pinned: true, hidden: true })
+    expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, childId)).get())
+      .toMatchObject({ pinned: true, hidden: true })
+  })
+
+  it('serializes concurrent assignments to the same recommended path', async () => {
+    const first = seedBook(db, ownerId)
+    const second = seedBook(db, ownerId)
+
+    await Promise.all([
+      setBookMembership(ownerId, first.id, { categoryTemplateKey: 'science.computing' }),
+      setBookMembership(ownerId, second.id, { categoryTemplateKey: 'science.computing' }),
+    ])
+
+    const categories = db.select().from(schema.libraryCategories).all()
+    expect(categories).toHaveLength(2)
+    expect(new Set([libraryBookOf(db, first.id)?.categoryId, libraryBookOf(db, second.id)?.categoryId]).size).toBe(1)
+  })
+
+  it('rejects a category from another private library', async () => {
+    const book = seedBook(db, ownerId)
+    const otherId = seedUser(db, 'other-category-owner')
+    const foreignCategoryId = createId('cat')
+    db.insert(schema.libraryCategories).values({
+      id: foreignCategoryId, libraryId: ensureLibrary(db, otherId), userId: otherId,
+      name: 'Private', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1,
+    }).run()
+
+    await expect(setBookMembership(ownerId, book.id, { categoryId: foreignCategoryId }))
+      .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
+  })
+
+  it('rolls back recommendation categories when the membership write fails', async () => {
+    const book = seedBook(db, ownerId)
+    db.run(sql`CREATE TRIGGER reject_membership_update BEFORE UPDATE ON library_books
+      BEGIN SELECT RAISE(ABORT, 'membership write rejected'); END`)
+
+    await expect(setBookMembership(ownerId, book.id, { categoryTemplateKey: 'web-fiction.mystery' }))
+      .rejects.toThrow('membership write rejected')
+    expect(db.select().from(schema.libraryCategories).all()).toEqual([])
   })
 })
 
@@ -1845,7 +1924,7 @@ describe('listBooks shelfName and tags', () => {
 
   function seedShelf(name: string) {
     const id = createId('shelf')
-    db.insert(schema.shelves).values({ id, userId: ownerId, name, sortOrder: 0, createdAt: Date.now() }).run()
+    db.insert(schema.shelves).values({ id, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name, sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
     mirrorShelf(db, ownerId, id)
     return id
   }

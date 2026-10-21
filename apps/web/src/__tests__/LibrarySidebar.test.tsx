@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 
 import type { LibraryListItem } from '@bookdock/shared'
+import type { LibrarySearch } from '@/routes/index'
 
 import i18n from '../i18n/i18n'
 import LibrarySidebar from '../features/library/components/LibrarySidebar'
@@ -163,6 +164,42 @@ function showTagsPanel() {
 }
 
 describe('LibrarySidebar', () => {
+  it('shows the matching empty hint when switching between private taxonomy panels', () => {
+    mockHooks()
+    render(<LibrarySidebar sessionKey="private-empty-panels" privateLibraryId="private-1" navSearch={navSearch} shelfId={null} categoryId={null} tagId={null} trash={false} />)
+
+    expect(screen.getByText('暂无书架')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '分类', exact: true }))
+    expect(screen.getByText('暂无分类')).toBeInTheDocument()
+    expect(screen.queryByText('暂无书架')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '标签', exact: true }))
+    expect(screen.getByText('暂无标签')).toBeInTheDocument()
+    expect(screen.queryByText('暂无分类')).toBeNull()
+  })
+
+  it('labels empty shared tags correctly without exposing management to readers', () => {
+    mockHooks()
+    mockLibraryHooks({ relation: 'member' })
+    render(<LibrarySidebar sessionKey="shared-empty-tags" activeLibraryId="shared-1" navSearch={navSearch} shelfId={null} categoryId={null} tagId={null} trash={false} readOnly />)
+
+    fireEvent.click(screen.getByRole('button', { name: '标签', exact: true }))
+    expect(screen.getByText('暂无标签')).toBeInTheDocument()
+    expect(screen.queryByText('暂无分类')).toBeNull()
+    expect(screen.queryByRole('button', { name: '新建标签' })).toBeNull()
+  })
+
+  it('does not present a failed private category request as an empty collection', () => {
+    mockHooks()
+    const refetch = vi.fn()
+    vi.mocked(libraryHooks.useLibraryCategories).mockReturnValue({ isLoading: false, isError: true, refetch } as unknown as ReturnType<typeof libraryHooks.useLibraryCategories>)
+    render(<LibrarySidebar sessionKey="private-category-error" privateLibraryId="private-1" navSearch={navSearch} shelfId={null} categoryId={null} tagId={null} trash={false} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '分类', exact: true }))
+    expect(screen.queryByText('暂无分类')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '重新加载目录' }))
+    expect(refetch).toHaveBeenCalledOnce()
+  })
+
   it('shows the cached private display name without opening stale switcher rows', () => {
     mockHooks()
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} libraries={[]} activeLibraryName="Personal shelf" librariesResolved={false} />)
@@ -241,6 +278,33 @@ describe('LibrarySidebar', () => {
     expect(navSearch).toHaveBeenCalledWith({ shelf: 'shelf-1', tag: undefined, status: undefined, trash: undefined })
   })
 
+  it('switches among private shelves, categories, and tags while resetting the page and retaining independent search filters', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }], tags: [{ id: 'tag-1', name: 'Topic', bookCount: 1 }] })
+    mockLibraryHooks({ categories: [{ id: 'category-1', name: 'Fiction', bookCount: 3 }] })
+    let search: Record<string, unknown> = {
+      page: 4, shelf: 'old-shelf', category: undefined, tag: undefined,
+      q: 'author search', author: 'An Author', format: 'epub', status: 'finished',
+    }
+    const navSearch = vi.fn((patch: Partial<LibrarySearch>) => {
+      const filterKeys = ['expression', 'shelf', 'category', 'tag', 'q', 'format', 'status', 'trash', 'author', 'series', 'categoryScope'] as const
+      const changed = filterKeys.some((key) => key in patch && patch[key] !== search[key])
+      search = { ...search, ...(changed ? { page: undefined } : {}), ...patch }
+    })
+    render(<LibrarySidebar sessionKey="private-three-taxonomies" navSearch={navSearch} shelfId="old-shelf" categoryId={null} tagId={null} trash={false} privateLibraryId="private-lib" />)
+
+    fireEvent.click(screen.getByText('分类'))
+    fireEvent.click(screen.getByText('Fiction'))
+    expect(search).toMatchObject({ page: undefined, category: 'category-1', shelf: undefined, q: 'author search', author: 'An Author', format: 'epub', status: 'finished' })
+
+    fireEvent.click(screen.getByText('标签'))
+    fireEvent.click(screen.getByText('Topic'))
+    expect(search).toMatchObject({ page: undefined, category: undefined, shelf: undefined, tag: 'tag-1', q: 'author search', author: 'An Author', format: 'epub', status: 'finished' })
+
+    fireEvent.click(screen.getByText('书架'))
+    fireEvent.click(screen.getByText('Favorites'))
+    expect(search).toMatchObject({ page: undefined, category: undefined, shelf: 'shelf-1', tag: undefined, q: 'author search', author: 'An Author', format: 'epub', status: 'finished' })
+  })
+
   it('closes the mobile drawer after selecting a shelf', () => {
     const onMobileClose = vi.fn()
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] })
@@ -263,7 +327,7 @@ describe('LibrarySidebar', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
-    fireEvent.click(screen.getByText('未分类'))
+    fireEvent.click(screen.getByText('未入架'))
     expect(navSearch).toHaveBeenCalledWith({ shelf: 'none', tag: undefined, status: undefined, trash: undefined })
     expect(screen.queryByText('暂无书架')).toBeNull()
   })
@@ -275,7 +339,7 @@ describe('LibrarySidebar', () => {
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
 
     expect(screen.getByText('暂无书架')).toBeInTheDocument()
-    expect(screen.getByText('未分类')).toBeInTheDocument()
+    expect(screen.getByText('未入架')).toBeInTheDocument()
   })
 
   it('shows the empty-category hint for a shared library without categories', () => {
@@ -347,7 +411,7 @@ describe('LibrarySidebar', () => {
       />,
     )
 
-    expect(screen.getByText('未分类').closest('aside')).toHaveClass('w-[min(19rem,75vw)]')
+    expect(screen.getByText('未入架').closest('aside')).toHaveClass('w-[min(19rem,75vw)]')
   })
 
   it('places uncategorized in the top navigation before the shelves list', () => {
@@ -355,7 +419,7 @@ describe('LibrarySidebar', () => {
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
     const allBooks = screen.getByText('全部书籍')
-    const uncategorized = screen.getByText('未分类')
+    const uncategorized = screen.getByText('未入架')
     const firstShelf = screen.getByText('Favorites')
     expect(allBooks.compareDocumentPosition(uncategorized) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(uncategorized.compareDocumentPosition(firstShelf) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -366,15 +430,15 @@ describe('LibrarySidebar', () => {
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
 
-    expect(screen.getByText('未分类')).toBeInTheDocument()
+    expect(screen.getByText('未入架')).toBeInTheDocument()
   })
 
   it('keeps an empty uncategorized entry visible when it is selected', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }], uncategorizedTotal: 0 })
 
-    render(<LibrarySidebar navSearch={navSearch} shelfId="none" tagId={null} trash={false} />)
+    render(<LibrarySidebar navSearch={navSearch} shelfId="none" categoryId={null} tagId={null} trash={false} />)
 
-    expect(screen.getByText('未分类')).toBeInTheDocument()
+    expect(screen.getByText('未入架')).toBeInTheDocument()
   })
 
   it('shows a skeleton while taxonomy loads', () => {
@@ -574,14 +638,14 @@ describe('LibrarySidebar', () => {
       render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
       fireEvent.click(screen.getByText('Sci-Fi'))
 
-      expect(navSearch).toHaveBeenCalledWith({ shelf: 'cat-1', categoryScope: 'subtree', trash: undefined, directory: undefined })
+      expect(navSearch).toHaveBeenCalledWith({ category: 'cat-1', shelf: undefined, categoryScope: 'subtree', trash: undefined, directory: undefined })
     })
 
     it('offers the uncategorized entry for works filed under no category', () => {
       mockHooks({ uncategorizedTotal: 0 })
       mockLibraryHooks({ uncategorizedTotal: 7 })
 
-      render(<LibrarySidebar navSearch={navSearch} shelfId="none" tagId={null} trash={false} activeLibraryId="lib-1" />)
+      render(<LibrarySidebar navSearch={navSearch} shelfId={null} categoryId="none" tagId={null} trash={false} activeLibraryId="lib-1" />)
 
       expect(screen.getByText('未分类')).toBeInTheDocument()
       expect(screen.getAllByText('7')).toHaveLength(2)
@@ -656,7 +720,7 @@ describe('LibrarySidebar', () => {
       const mutateAsync = vi.fn().mockResolvedValue({})
       ;(libraryHooks.useDeleteLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
 
-      render(<LibrarySidebar navSearch={navSearch} shelfId="cat-1" tagId={null} trash={false} activeLibraryId="lib-1" />)
+      render(<LibrarySidebar navSearch={navSearch} shelfId={null} categoryId="cat-1" tagId={null} trash={false} activeLibraryId="lib-1" />)
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
       fireEvent.click(screen.getByText('删除'))
 
@@ -664,7 +728,7 @@ describe('LibrarySidebar', () => {
       fireEvent.click(screen.getAllByRole('button', { name: '删除' }).at(-1)!)
       expect(mutateAsync).toHaveBeenCalledWith({ libraryId: 'lib-1', categoryId: 'cat-1' })
       // Deleting the category being viewed is a dead end, so leave the filter.
-      await waitFor(() => expect(navSearch).toHaveBeenCalledWith({ shelf: undefined, categoryScope: undefined, directory: undefined }))
+      await waitFor(() => expect(navSearch).toHaveBeenCalledWith({ category: undefined, categoryScope: undefined, directory: undefined }))
     })
 
     it('shows the trash to a shared-library owner but hides it from members', () => {
@@ -1015,11 +1079,11 @@ describe('arrowless category navigation', () => {
     mockHooks()
     mockLibraryHooks({ categories: rows })
     const close = vi.fn()
-    render(<LibrarySidebar sessionKey={`header-${Math.random()}`} navSearch={navSearch} shelfId="parent" tagId={null} trash={false} activeLibraryId="lib-1" onMobileClose={close} />)
+    render(<LibrarySidebar sessionKey={`header-${Math.random()}`} navSearch={navSearch} shelfId={null} categoryId="parent" tagId={null} trash={false} activeLibraryId="lib-1" onMobileClose={close} />)
     expect(screen.getByText('Child')).toBeInTheDocument()
     fireEvent.contextMenu(screen.getByText('Parent'))
     fireEvent.click(screen.getByRole('button', { name: /Parent 共 2 本/ }))
-    expect(navSearch).toHaveBeenCalledWith({ shelf: 'parent', categoryScope: 'subtree', trash: undefined, directory: undefined })
+    expect(navSearch).toHaveBeenCalledWith({ category: 'parent', shelf: undefined, categoryScope: 'subtree', trash: undefined, directory: undefined })
     expect(screen.getByText('Child')).toBeInTheDocument()
     expect(close).toHaveBeenCalledOnce()
   })
@@ -1028,21 +1092,21 @@ describe('arrowless category navigation', () => {
     mockHooks()
     mockLibraryHooks({ categories: rows })
     const close = vi.fn()
-    const props = { sessionKey: `arrowless-${Math.random()}`, navSearch, shelfId: null as string | null, tagId: null, trash: false, activeLibraryId: 'lib-1', onMobileClose: close }
+    const props = { sessionKey: `arrowless-${Math.random()}`, navSearch, shelfId: null as string | null, categoryId: null as string | null, tagId: null, trash: false, activeLibraryId: 'lib-1', onMobileClose: close }
     const { rerender } = render(<LibrarySidebar {...props} />)
     expect(screen.queryByText('Child')).toBeNull()
     expect(screen.queryByText('↳')).toBeNull()
     fireEvent.click(screen.getByText('Parent'))
     expect(screen.getByText('Child')).toBeInTheDocument()
-    expect(navSearch).toHaveBeenCalledWith({ shelf: 'parent', categoryScope: 'subtree', trash: undefined, directory: undefined })
+    expect(navSearch).toHaveBeenCalledWith({ category: 'parent', shelf: undefined, categoryScope: 'subtree', trash: undefined, directory: undefined })
     expect(close).toHaveBeenCalledOnce()
-    rerender(<LibrarySidebar {...props} shelfId="parent" />)
+    rerender(<LibrarySidebar {...props} categoryId="parent" />)
     fireEvent.click(screen.getByText('Parent'))
     expect(screen.queryByText('Child')).toBeNull()
     expect(navSearch).toHaveBeenCalledOnce()
     expect(close).toHaveBeenCalledOnce()
     mockLibraryHooks({ categories: rows.map((row) => ({ ...row, bookCount: row.bookCount + 1 })) })
-    rerender(<LibrarySidebar {...props} shelfId="parent" />)
+    rerender(<LibrarySidebar {...props} categoryId="parent" />)
     expect(screen.queryByText('Child')).toBeNull()
     fireEvent.click(screen.getByText('Parent'))
     expect(screen.getByText('Child')).toBeInTheDocument()
@@ -1053,7 +1117,7 @@ describe('arrowless category navigation', () => {
     mockHooks()
     mockLibraryHooks({ categories: rows, relation: 'member' })
     const close = vi.fn()
-    render(<LibrarySidebar sessionKey={`arrowless-${Math.random()}`} navSearch={navSearch} shelfId="child" tagId={null} trash={false} activeLibraryId="lib-1" onMobileClose={close} />)
+    render(<LibrarySidebar sessionKey={`arrowless-${Math.random()}`} navSearch={navSearch} shelfId={null} categoryId="child" tagId={null} trash={false} activeLibraryId="lib-1" onMobileClose={close} />)
     expect(screen.getByText('Child')).toBeInTheDocument()
     fireEvent.contextMenu(screen.getByText('Parent'))
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()

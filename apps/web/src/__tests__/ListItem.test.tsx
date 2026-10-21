@@ -28,7 +28,7 @@ const book: BookListItem = {
   createdAt: new Date(2026, 0, 2).getTime(),
   updatedAt: new Date(2026, 0, 3).getTime(),
   lastReadAt: Date.now() - 2 * 3600_000,
-  shelfName: 'Favorites',
+  categoryName: 'Favorites',
   tags: ['小说', '科幻'],
 }
 
@@ -80,7 +80,7 @@ describe('Library list row', () => {
     expect(screen.queryByText('1 KB')).toBeNull()
   })
 
-  it('renders the enabled optional items and skips the disabled ones', () => {
+  it('renders enabled optional items, including category under the saved shelf preference key', () => {
     useUiStore.setState({ listInfoItems: ['size', 'shelf', 'tags', 'createdAt'] })
     renderRow()
 

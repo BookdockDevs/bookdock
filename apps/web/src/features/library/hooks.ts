@@ -55,6 +55,7 @@ export interface UseBooksParams {
   sortBy: string
   sortOrder: string
   shelfId: string | null
+  categoryId?: string | null
   tagId: string | null
   author?: string | null
   series?: string | null
@@ -65,7 +66,7 @@ export interface UseBooksParams {
   showHidden?: boolean
 }
 
-export function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash, showHidden, expression }: UseBooksParams): string {
+export function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, categoryId, tagId, author, series, format, readStatus, trash, showHidden, expression }: UseBooksParams): string {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
@@ -75,6 +76,7 @@ export function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shel
   if (expression) params.set('expression', expression)
   if (search) params.set('search', search)
   if (shelfId) params.set('shelfId', shelfId)
+  if (categoryId) params.set('categoryId', categoryId)
   if (tagId) params.set('tagId', tagId)
   if (author) params.set('author', author)
   if (series) params.set('series', series)
@@ -190,6 +192,7 @@ export interface UploadItem {
   /** Upload progress 0-100; stays 100 while the server parses the book */
   progress: number
   shelfId?: string
+  categoryId?: string
   tagIds?: string[]
   /** Edition label for a catalog upload into an existing work (P3). */
   versionName?: string
@@ -203,6 +206,7 @@ export interface UploadItem {
 
 export interface UploadAssignment {
   shelfId?: string
+  categoryId?: string
   tagIds?: string[]
 }
 
@@ -261,9 +265,10 @@ const PRIVATE_UPLOAD_TARGET: UploadTarget = {
   fields: (item) => ({
     ...(item.allowCorresponding ? { allowCorresponding: 'true' } : {}),
     ...(item.shelfId ? { shelfId: item.shelfId } : {}),
+    ...(item.categoryId ? { categoryId: item.categoryId } : {}),
     ...(item.tagIds?.length ? { tagIds: JSON.stringify(item.tagIds) } : {}),
   }),
-  invalidateKeys: [...BOOK_MEMBERSHIP_KEYS],
+  invalidateKeys: [...BOOK_MEMBERSHIP_KEYS, ['libraries']],
   reportsAppliedShelf: true,
   pickBookId: (body) => (body as { data?: { id?: string } } | null)?.data?.id,
 }
@@ -486,6 +491,7 @@ function useTaxonomyMutation<TVars extends { libraryId: string }, TData = unknow
       void queryClient.invalidateQueries({ queryKey: ['books'] })
       void queryClient.invalidateQueries({ queryKey: ['book'] })
       void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
+      void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
     },
     onError: (error) => notify.error(getUserErrorNotification(error)),
   })
@@ -923,6 +929,10 @@ export function useCollectBook() {
       // must stop offering the same version again.
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      void queryClient.invalidateQueries({ queryKey: ['shelves'] })
+      void queryClient.invalidateQueries({ queryKey: ['tags'] })
+      void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
     },
   })
 }
@@ -1495,6 +1505,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
           status,
           progress: 0,
           shelfId: opts?.shelfId,
+          categoryId: opts?.categoryId,
           tagIds: opts?.tagIds,
           ...(opts?.versionNameMode ? { versionName: extractVersionNameFromFileName(file.name) } : {}),
         })),
@@ -1516,6 +1527,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
         ...it,
         status: 'queued' as const,
         shelfId: assignment.shelfId,
+        categoryId: assignment.categoryId,
         tagIds: assignment.tagIds,
       }
     }))
@@ -1751,6 +1763,7 @@ export function useToggleShelfHidden() {
       void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
     },
     onError: (error) => notify.error(getUserErrorNotification(error, 'library.taxonomyVisibilityFailed')),
   })
@@ -1766,6 +1779,7 @@ export function useDeleteShelf() {
       void queryClient.invalidateQueries({ queryKey: ['book'] })
       void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
+      void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
       notify.success({ key: 'toast.shelfDeleted' })
     },
     onError: (error) => {
@@ -2074,9 +2088,15 @@ export function useUpdateBookMembership() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ bookId, shelfId, tagIds }: { bookId: string; shelfId?: string | null; tagIds?: string[] }) => {
+    mutationFn: async ({ bookId, shelfId, categoryId, categoryTemplateKey, tagIds }: { bookId: string; shelfId?: string | null; categoryId?: string | null; categoryTemplateKey?: string; tagIds?: string[] }) => {
       await Promise.all([
-        shelfId !== undefined ? apiPut<{ data: null }>(`/books/${bookId}/shelves`, { shelfId }) : Promise.resolve(),
+        shelfId !== undefined || categoryId !== undefined || categoryTemplateKey !== undefined
+          ? apiPut<{ data: null }>(`/books/${bookId}/shelves`, {
+              ...(shelfId !== undefined ? { shelfId } : {}),
+              ...(categoryId !== undefined ? { categoryId } : {}),
+              ...(categoryTemplateKey !== undefined ? { categoryTemplateKey } : {}),
+            })
+          : Promise.resolve(),
         tagIds !== undefined ? apiPut<{ data: null }>(`/books/${bookId}/tags`, { tagIds }) : Promise.resolve(),
       ])
     },
@@ -2087,6 +2107,8 @@ export function useUpdateBookMembership() {
         queryClient.invalidateQueries({ queryKey: ['shelves'] }),
         queryClient.invalidateQueries({ queryKey: ['tags'] }),
         queryClient.invalidateQueries({ queryKey: ['batch-selection'] }),
+        queryClient.invalidateQueries({ queryKey: ['libraries'] }),
+        queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY }),
       ])
       notify.success({ key: 'toast.membershipUpdated' })
     },

@@ -25,20 +25,22 @@ import { categoryPath, sortCategories } from '../taxonomy'
 import ShelfDialog from './ShelfDialog'
 import TagDialog from './TagDialog'
 import TaxonomyEntry from './TaxonomyEntry'
+import TaxonomyEmptyState from './TaxonomyEmptyState'
 import TaxonomySelectionBar, { type TaxonomySelectionAction } from './TaxonomySelectionBar'
 
 interface TaxonomyDirectoryProps {
   libraryId: string | null
+  privateLibraryId: string | null
   sessionKey: string
-  panel: 'categories' | 'tags'
+  panel: 'shelves' | 'categories' | 'tags'
   canManage: boolean
   navSearch: (patch: Partial<LibrarySearch>) => void
   onOpenNavigation: () => void
 }
 
-const directoryLookups = new Map<string, Partial<Record<'categories' | 'tags', string>>>()
+const directoryLookups = new Map<string, Partial<Record<'shelves' | 'categories' | 'tags', string>>>()
 
-export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canManage, navSearch, onOpenNavigation }: TaxonomyDirectoryProps) {
+export default function TaxonomyDirectory({ libraryId, privateLibraryId, sessionKey, panel, canManage, navSearch, onOpenNavigation }: TaxonomyDirectoryProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const [batchPending, setBatchPending] = useState(false)
@@ -46,7 +48,8 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
   const [batchDeleting, setBatchDeleting] = useState(false)
   const shelvesQuery = useShelves()
   const tagsQuery = useTags()
-  const categoriesQuery = useLibraryCategories(libraryId)
+  const categoryLibraryId = libraryId ?? privateLibraryId
+  const categoriesQuery = useLibraryCategories(categoryLibraryId)
   const libraryTagsQuery = useLibraryTags(libraryId)
   const prefs = useLibraryPrefs()
   const updatePrefs = useUpdateLibraryPrefs()
@@ -78,15 +81,16 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
   const reorderLibraryTags = useReorderLibraryTags()
   const reorderShelves = useReorderShelves()
   const reorderTags = useReorderTags()
-  const categories = useMemo(() => sortCategories(categoriesQuery.data?.data ?? [], prefs?.shelfSort), [categoriesQuery.data, prefs?.shelfSort])
+  const categories = useMemo(() => sortCategories(panel === 'categories' ? categoriesQuery.data?.data ?? [] : [], prefs?.shelfSort), [categoriesQuery.data, prefs?.shelfSort, panel])
   const shelves = useMemo(() => sortSidebarItems(shelvesQuery.data?.data ?? [], prefs?.shelfSort), [shelvesQuery.data, prefs?.shelfSort])
   const tags = useMemo(() => sortSidebarItems(libraryId ? libraryTagsQuery.data?.data ?? [] : tagsQuery.data?.data ?? [], prefs?.tagSort), [libraryId, libraryTagsQuery.data, tagsQuery.data, prefs?.tagSort])
   const term = (lookup[panel] ?? '').trim().toLocaleLowerCase()
   const matches = (name: string) => name.toLocaleLowerCase().includes(term)
-  const query = panel === 'tags' ? (libraryId ? libraryTagsQuery : tagsQuery) : (libraryId ? categoriesQuery : shelvesQuery)
-  const noun = panel === 'tags' ? 'Tags' : libraryId ? 'Categories' : 'Shelves'
+  const query = panel === 'tags' ? (libraryId ? libraryTagsQuery : tagsQuery) : panel === 'categories' ? categoriesQuery : shelvesQuery
+  const noun = panel === 'tags' ? 'Tags' : panel === 'categories' ? 'Categories' : 'Shelves'
 
-  const entries = panel === 'tags' ? tags : libraryId ? categories : shelves
+  const entries = panel === 'tags' ? tags : panel === 'categories' ? categories : shelves
+  const showEmptyState = query.isSuccess && entries.length === 0 && term.length === 0
   const selectedRows = entries.filter((row) => selection.has(row.id))
   const matchingRows = entries.filter((row) => matches(row.name))
 
@@ -97,15 +101,15 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
     const failed = new Set<string>()
     const snapshot = [...selectedRows]
     // Children go first so deleting a selected parent cannot promote them mid-batch.
-    if (action === 'delete' && libraryId && panel === 'categories') snapshot.sort((a, b) => Number('parentId' in b && Boolean(b.parentId)) - Number('parentId' in a && Boolean(a.parentId)))
+    if (action === 'delete' && panel === 'categories') snapshot.sort((a, b) => Number('parentId' in b && Boolean(b.parentId)) - Number('parentId' in a && Boolean(a.parentId)))
     try {
       for (const row of snapshot) {
         try {
-          const url = libraryId ? `/libraries/${libraryId}/${panel === 'tags' ? 'tags' : 'categories'}/${row.id}` : `/${panel === 'tags' ? 'tags' : 'shelves'}/${row.id}`
+          const url = panel === 'categories' ? `/libraries/${categoryLibraryId}/${panel}/${row.id}` : libraryId ? `/libraries/${libraryId}/${panel}/${row.id}` : `/${panel}/${row.id}`
           if (action === 'delete') await apiDelete(url)
           else {
             const patch = action === 'pin' || action === 'unpin' ? { pinned: action === 'pin' } : { hidden: action === 'hide' }
-            if (libraryId) await apiPatch(url, patch)
+            if (panel === 'categories' || (panel === 'tags' && libraryId)) await apiPatch(url, patch)
             else await apiPut(url, patch)
           }
         } catch {
@@ -120,7 +124,7 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
         showResult({ key: 'library.taxonomyBatchPartial', params: { succeeded, failed: failed.size } })
       }
       else notify.success({ key: 'library.taxonomyBatchSucceeded', params: { count: succeeded } })
-      const keys = [['shelves'], ['tags'], ['books'], ['book'], ['batch-selection'], ...(libraryId ? [['libraries', libraryId, 'categories'], ['libraries', libraryId, 'tags'], ['libraries', libraryId, 'catalog']] : [])]
+      const keys = [['shelves'], ['tags'], ['books'], ['book'], ['batch-selection'], ...(categoryLibraryId ? [['libraries', categoryLibraryId, 'categories']] : []), ...(libraryId ? [['libraries', libraryId, 'tags'], ['libraries', libraryId, 'catalog']] : [])]
       await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })))
     } finally {
       batchLock.current = false
@@ -135,13 +139,13 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
     if (!event.over || event.active.id === event.over.id) return
     const id = event.active.data.current?.entryId as string | undefined
     const targetId = event.over.data.current?.entryId as string | undefined
-    const entries = panel === 'tags' ? tags : libraryId ? categories : shelves
+    const entries = panel === 'tags' ? tags : panel === 'categories' ? categories : shelves
     const row = entries.find((entry) => entry.id === id)
     const target = entries.find((entry) => entry.id === targetId)
     if (!row || !target) return
     const parentId = 'parentId' in row ? row.parentId : null
     if ('parentId' in target && target.parentId !== parentId) return
-    const siblings = panel === 'categories' && libraryId ? categories.filter((category) => category.parentId === parentId) : entries
+    const siblings = panel === 'categories' ? categories.filter((category) => category.parentId === parentId) : entries
     const ids = siblings.map((entry) => entry.id)
     const moved = arrayMove(ids, ids.indexOf(row.id), ids.indexOf(target.id))
     let position = 0
@@ -153,7 +157,7 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
         else await reorderTags.mutateAsync(complete)
         updatePrefs.mutate({ tagSort: { mode: 'manual' } })
       } else {
-        if (libraryId) await reorderCategories.mutateAsync({ libraryId, categoryIds: complete })
+        if (panel === 'categories') await reorderCategories.mutateAsync({ libraryId: categoryLibraryId!, categoryIds: complete })
         else await reorderShelves.mutateAsync(complete)
         updatePrefs.mutate({ shelfSort: { mode: 'manual' } })
       }
@@ -165,32 +169,34 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
   }
 
   function entry(row: ShelfListItem | Category | TagListItem, isTag = false) {
-    const category = libraryId && !isTag ? categories.find((item) => item.id === row.id) : undefined
+    const category = panel === 'categories' && !isTag ? categories.find((item) => item.id === row.id) : undefined
     const parent = category?.parentId ? categories.find((item) => item.id === category.parentId) : undefined
     const count = category && !category.parentId ? category.subtreeBookCount : row.bookCount
-    return <TaxonomyEntry key={row.id} row={{ ...row, bookCount: count }} isTag={isTag} isCategory={Boolean(libraryId && !isTag)} directory directoryHeading={Boolean(category && !category.parentId)} sortableId={`directory:${row.id}`}
+    return <TaxonomyEntry key={row.id} row={{ ...row, bookCount: count }} isTag={isTag} isCategory={panel === 'categories'} directory directoryHeading={Boolean(category && !category.parentId)} sortableId={`directory:${row.id}`}
       inheritedHidden={Boolean(parent?.hidden)} readOnly={!canManage} selecting={selecting} selected={selection.has(row.id)} orderingPending={orderingPending || batchPending}
       title={category ? categoryPath(categories, row.id).map((item) => item.name).join(' / ') : row.name}
       onClick={() => {
         if (dragJustEnded.current || batchLock.current) return
         if (selecting) {
           setSelection((current) => { const next = new Set(current); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next })
-        } else navSearch(isTag ? { tag: row.id, directory: undefined } : { shelf: row.id, categoryScope: libraryId ? 'subtree' : undefined, directory: undefined })
+        } else navSearch(isTag ? { tag: row.id, shelf: undefined, category: undefined, categoryScope: undefined, directory: undefined } : category ? { category: row.id, shelf: undefined, tag: undefined, categoryScope: 'subtree', directory: undefined } : { shelf: row.id, category: undefined, tag: undefined, categoryScope: undefined, directory: undefined })
       }}
       onEdit={() => isTag ? setTagDialog({ id: row.id, name: row.name }) : setShelfDialog({ id: row.id, name: row.name, parentId: category?.parentId ?? undefined })}
       onNewChild={category && !category.parentId ? () => setShelfDialog({ parentId: row.id }) : undefined}
       onDelete={() => setDeleting({ id: row.id, name: row.name, tag: isTag })}
       onToggleHidden={() => {
-        if (libraryId) {
+        if (panel === 'categories') {
+          updateCategory.mutate({ libraryId: categoryLibraryId!, categoryId: row.id, patch: { hidden: !row.hidden } })
+        } else if (libraryId) {
           if (isTag) updateTag.mutate({ libraryId, tagId: row.id, patch: { hidden: !row.hidden } })
-          else updateCategory.mutate({ libraryId, categoryId: row.id, patch: { hidden: !row.hidden } })
         } else if (isTag) tagHidden.mutate({ id: row.id, hidden: !row.hidden })
         else shelfHidden.mutate({ id: row.id, hidden: !row.hidden })
       }}
       onTogglePin={() => {
-        if (libraryId) {
+        if (panel === 'categories') {
+          updateCategory.mutate({ libraryId: categoryLibraryId!, categoryId: row.id, patch: { pinned: !row.pinned } })
+        } else if (libraryId) {
           if (isTag) updateTag.mutate({ libraryId, tagId: row.id, patch: { pinned: !row.pinned } })
-          else updateCategory.mutate({ libraryId, categoryId: row.id, patch: { pinned: !row.pinned } })
         } else if (isTag) tagPin.mutate({ id: row.id, pinned: !row.pinned })
         else shelfPin.mutate({ id: row.id, pinned: !row.pinned })
       }} />
@@ -199,17 +205,17 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
   const isTag = panel === 'tags'
   const title = isTag
     ? _('library.allTags')
-    : libraryId
+    : panel === 'categories'
       ? _('library.allCategories')
       : _('library.allShelves')
   const count = isTag
     ? tags.length
-    : libraryId
+    : panel === 'categories'
       ? categories.length
       : shelves.length
   const countSubtitle = isTag
     ? _('library.tagCount', { count })
-    : libraryId
+    : panel === 'categories'
       ? _('library.categoryCount', { count })
       : _('library.shelfCount', { count })
 
@@ -288,7 +294,7 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 5v14M5 12h14" />
                 </svg>
-                <span>{_(panel === 'tags' ? 'library.newTag' : libraryId ? 'library.newCategory' : 'library.newShelf')}</span>
+                <span>{_(panel === 'tags' ? 'library.newTag' : panel === 'categories' ? 'library.newCategory' : 'library.newShelf')}</span>
               </button>
             </>
           )}
@@ -297,9 +303,9 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
     </header>
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(event) => void reorder(event)}>
       {query.isLoading ? <div aria-busy="true" className="h-16 animate-pulse rounded-lg bg-stone-200/60 dark:bg-stone-800" /> : query.isError ? <QueryErrorState isRetrying={query.isFetching} onRetry={() => void query.refetch()} />
-      : panel === 'tags' ? <SortableContext items={tags.map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}><div className="grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{tags.filter((tag) => matches(tag.name)).map((tag) => entry(tag, true))}</div></SortableContext>
-        : libraryId ? (
-          <SortableContext items={categories.filter((row) => !row.parentId).map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}>
+      : panel === 'tags' ? showEmptyState ? <TaxonomyEmptyState type="tags" /> : <SortableContext items={tags.map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}><div className="grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{tags.filter((tag) => matches(tag.name)).map((tag) => entry(tag, true))}</div></SortableContext>
+        : panel === 'categories' ? (
+          showEmptyState ? <TaxonomyEmptyState type="categories" /> : <SortableContext items={categories.filter((row) => !row.parentId).map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}>
             <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
               {categories.filter((category) => !category.parentId).map((root) => {
                 const children = categories.filter((category) => category.parentId === root.id && (matches(category.name) || matches(root.name)))
@@ -322,7 +328,7 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
               })}
             </div>
           </SortableContext>
-        ) : <SortableContext items={shelves.map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}><div className="grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{shelves.filter((shelf) => matches(shelf.name)).map((shelf) => entry(shelf))}</div></SortableContext>}
+        ) : showEmptyState ? <TaxonomyEmptyState type="shelves" /> : <SortableContext items={shelves.map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}><div className="grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{shelves.filter((shelf) => matches(shelf.name)).map((shelf) => entry(shelf))}</div></SortableContext>}
     </DndContext>
     {selecting && <TaxonomySelectionBar rows={selectedRows} pending={batchPending} canManage={canManage && !query.isError && !query.isLoading}
       canSelectAll={matchingRows.some((row) => !selection.has(row.id))}
@@ -330,17 +336,17 @@ export default function TaxonomyDirectory({ libraryId, sessionKey, panel, canMan
       onClear={() => { if (!batchLock.current) { setSelection(new Set()); setSelecting(false) } }}
       onAction={(action) => { if (action === 'delete') setBatchDeleting(true); else void applyBatch(action) }} />}
     {batchDeleting && <ConfirmDialog title={_('library.delete')}
-      message={_(panel === 'tags' ? 'library.taxonomyBatchDeleteTags' : libraryId ? 'library.taxonomyBatchDeleteCategories' : 'library.taxonomyBatchDeleteShelves', { count: selectedRows.length })}
+      message={_(panel === 'tags' ? 'library.taxonomyBatchDeleteTags' : panel === 'categories' ? 'library.taxonomyBatchDeleteCategories' : 'library.taxonomyBatchDeleteShelves', { count: selectedRows.length })}
       confirmLabel={_('library.delete')} confirmDisabled={batchPending}
       onClose={() => { if (!batchLock.current) setBatchDeleting(false) }} onConfirm={() => applyBatch('delete')} />}
-    <ShelfDialog open={shelfDialog !== null} libraryId={libraryId ?? undefined} shelfId={shelfDialog?.id} initialName={shelfDialog?.name} initialParentId={shelfDialog?.parentId} onClose={() => setShelfDialog(null)} />
+    <ShelfDialog open={shelfDialog !== null} libraryId={panel === 'categories' ? categoryLibraryId ?? undefined : undefined} shelfId={shelfDialog?.id} initialName={shelfDialog?.name} initialParentId={shelfDialog?.parentId} onClose={() => setShelfDialog(null)} />
     <TagDialog open={tagDialog !== null} libraryId={libraryId ?? undefined} tagId={tagDialog?.id} initialName={tagDialog?.name} onClose={() => setTagDialog(null)} />
-    {deleting && <ConfirmDialog title={_(deleting.tag ? 'library.deleteTag' : libraryId ? 'library.deleteCategory' : 'library.deleteShelf')}
-      message={_(deleting.tag ? 'library.deleteTagConfirm' : libraryId ? 'library.deleteCategoryTreeConfirm' : 'library.deleteShelfConfirm', { name: deleting.name })}
+    {deleting && <ConfirmDialog title={_(deleting.tag ? 'library.deleteTag' : panel === 'categories' ? 'library.deleteCategory' : 'library.deleteShelf')}
+      message={_(deleting.tag ? 'library.deleteTagConfirm' : panel === 'categories' ? 'library.deleteCategoryTreeConfirm' : 'library.deleteShelfConfirm', { name: deleting.name })}
       confirmLabel={_('reader.delete')} confirmDisabled={deletingPending} onClose={() => { if (!deletingPending) setDeleting(null) }} onConfirm={() => {
         if (deletingPending) return
         setDeletingPending(true)
-        const operation = libraryId ? (deleting.tag ? deleteLibraryTag.mutateAsync({ libraryId, tagId: deleting.id }) : deleteCategory.mutateAsync({ libraryId, categoryId: deleting.id }))
+        const operation = panel === 'categories' ? deleteCategory.mutateAsync({ libraryId: categoryLibraryId!, categoryId: deleting.id }) : libraryId ? deleteLibraryTag.mutateAsync({ libraryId, tagId: deleting.id })
           : deleting.tag ? deleteTag.mutateAsync(deleting.id) : deleteShelf.mutateAsync(deleting.id)
         void operation.then(() => setDeleting(null)).catch(() => undefined).finally(() => setDeletingPending(false))
       }} />}

@@ -75,13 +75,18 @@ export function libraryUrlCorrection(params: {
  */
 export function vanishedFilterCorrection(params: {
   shelfId: string | null
+  categoryId?: string | null
   tagId: string | null
   shelfIds: string[]
+  categoryIds?: string[]
   tagIds: string[]
 }): Partial<LibrarySearch> {
   const patch: Partial<LibrarySearch> = {}
   if (params.shelfId && params.shelfId !== 'none' && !params.shelfIds.includes(params.shelfId)) {
     patch.shelf = undefined
+  }
+  if (params.categoryId && params.categoryId !== 'none' && !params.categoryIds?.includes(params.categoryId)) {
+    patch.category = undefined
     patch.categoryScope = undefined
   }
   if (params.tagId && !params.tagIds.includes(params.tagId)) {

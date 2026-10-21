@@ -161,7 +161,7 @@ export function parseLibrarySearch(source: string): LibrarySearchExpression | un
 }
 
 export interface SearchName { id: string; name: string; parentId?: string | null }
-export interface LibrarySearchNames { shared: boolean; tags: SearchName[]; categories: SearchName[]; authors?: string[] }
+export interface LibrarySearchNames { shared: boolean; tags: SearchName[]; categories: SearchName[]; shelves?: SearchName[]; authors?: string[] }
 
 export function librarySearchCategoryName(categories: SearchName[], id: string): string {
   const path: string[] = []
@@ -180,11 +180,11 @@ export function bindLibrarySearch(expression: LibrarySearchExpression, names: Li
   if (node.kind === 'and' || node.kind === 'or') return { ...node, left: bindLibrarySearch(node.left, names), right: bindLibrarySearch(node.right, names) }
   if (node.kind === 'not') return { ...node, child: bindLibrarySearch(node.child, names) }
   if (node.kind !== 'field') return node
-  if ((node.field === 'shelf' && names.shared) || (node.field === 'category' && !names.shared) || (node.field === 'status' && names.shared)) {
-    throw new LibrarySearchError(`${node.field} ${node.field === 'category' ? '仅用于共享库' : '仅用于私库'}`, node.start, node.end)
+  if ((node.field === 'shelf' && names.shared) || (node.field === 'status' && names.shared)) {
+    throw new LibrarySearchError(`${node.field} 仅用于私库`, node.start, node.end)
   }
   if (!['tag', 'shelf', 'category'].includes(node.field)) return node
-  const entries = node.field === 'tag' ? names.tags : names.categories
+  const entries = node.field === 'tag' ? names.tags : node.field === 'shelf' ? names.shelves ?? [] : names.categories
   const matches = node.id
     ? entries.filter((entry) => entry.id === node.id)
     : entries.filter((entry) => entry.name === node.value || (node.field === 'category' && librarySearchCategoryName(names.categories, entry.id) === node.value))

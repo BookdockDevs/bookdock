@@ -87,6 +87,10 @@ function makeLegacyIdentity() {
     ALTER TABLE ideas DROP COLUMN edited_at;
     ALTER TABLE book_states DROP COLUMN progress_data;
     ALTER TABLE book_states DROP COLUMN read_fraction;
+    DROP TABLE shelves;
+    DROP INDEX library_books_shelf_idx;
+    ALTER TABLE library_books DROP COLUMN shelf_id;
+    DELETE FROM library_migration_log WHERE batch = 'category-shelf-separation-v1';
     DELETE FROM __drizzle_migrations WHERE created_at >= ${cutoff};`)
   db.$client.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'")
   db.$client.prepare("UPDATE users SET role = 'owner' WHERE id = ?").run(ownerId)

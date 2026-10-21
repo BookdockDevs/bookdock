@@ -4,6 +4,7 @@ import type {
   ReadingRange,
   ReadingRecordBookDetailRes,
   ReadingRecordBookItem,
+  ReadingRecordCategoryItem,
   ReadingRecordCreateReq,
   ReadingRecordDailyItem,
   ReadingRecordHourlyItem,
@@ -15,11 +16,13 @@ import type {
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookStates, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryTags, readingArchives, readingRecords, readingRounds, readingSessions } from '../../db/schema'
+import { bookStates, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, readingArchives, readingRecords, readingRounds, readingSessions } from '../../db/schema'
 import { readProgressFile } from '../../lib/progress-file'
 import { getBook } from '../books/books.service'
 import { unionLength } from '../../lib/intervals'
 import { excludedReadingBookVersionIds } from './reading-visibility'
+import { readingHoldings } from './reading-holdings'
+import { pendingBookDataDeletionVersionIds } from '../libraries/library-query'
 import { isProgressMigrationCompleted } from '../progress/progress-migration'
 import { AppError } from '../../middleware/error'
 import { addLedgerReading, deleteLedgerSession, ensureReadingArchive, updateLedgerSession } from './reading-ledger.service'
@@ -442,20 +445,79 @@ export async function updateSession(userId: string, sessionId: string, body: Rea
 export async function deleteSession(userId: string, sessionId: string): Promise<void> {
   deleteLedgerSession(userId, sessionId)
 }
-/** Reading time grouped by tag; untagged books are excluded (no 'uncategorized' bucket) */
-export async function getByTag(userId: string, range: { from?: string; to?: string }, showHidden = false): Promise<ReadingRecordTagItem[]> {
+function readingTaxonomyFacts(userId: string, range: ReadingRange, showHidden: boolean) {
   const db = getDb()
-  return db.select({
+  const holdings = readingHoldings(db, userId, showHidden)
+  const excluded = [...new Set([
+    ...pendingBookDataDeletionVersionIds(db, userId),
+    ...holdings.filter((row) => row.excluded).map((row) => row.bookVersionId),
+  ])]
+  const facts = db.select({
+    bookVersionId: readingRecords.bookId,
+    durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
+  }).from(readingRecords).where(rangeConditions(userId, range, excluded))
+    .groupBy(readingRecords.bookId).all()
+  return { db, facts, holdings: new Map(holdings.filter((row) => !row.excluded).map((row) => [row.bookVersionId, row])) }
+}
+
+/** Every distinct version/tag receives the full duration, without multiplying facts. */
+export async function getByTag(userId: string, range: ReadingRange, showHidden = false): Promise<ReadingRecordTagItem[]> {
+  const { db, facts, holdings } = readingTaxonomyFacts(userId, range, showHidden)
+  const workIds = [...new Set(facts.flatMap((fact) => {
+    const holding = holdings.get(fact.bookVersionId)
+    return holding ? [holding.libraryBookId] : []
+  }))]
+  if (!workIds.length) return []
+  const links = db.selectDistinct({
+    libraryBookId: libraryBookTags.libraryBookId,
     tagId: libraryBookTags.tagId,
     name: libraryTags.name,
-    durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
-    bookCount: sql<number>`count(distinct ${readingRecords.bookId})`,
-  }).from(readingRecords)
-    .innerJoin(libraryBookVersions, eq(readingRecords.bookId, libraryBookVersions.bookVersionId))
-    .innerJoin(libraryBookTags, eq(libraryBookTags.libraryBookId, libraryBookVersions.libraryBookId))
-    .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
-    .where(rangeConditions(userId, range, excludedReadingBookVersionIds(db, userId, showHidden)))
-    .groupBy(libraryBookTags.tagId, libraryTags.name)
-    .orderBy(desc(sql`count(distinct ${readingRecords.bookId})`), desc(sql`sum(${readingRecords.durationSeconds})`))
-    .all()
+  }).from(libraryBookTags)
+    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookTags.libraryBookId))
+    .innerJoin(libraryTags, and(eq(libraryTags.id, libraryBookTags.tagId), eq(libraryTags.libraryId, libraryBooks.libraryId)))
+    .where(inArray(libraryBookTags.libraryBookId, workIds)).all()
+  const tagsByWork = new Map<string, typeof links>()
+  for (const link of links) {
+    const tags = tagsByWork.get(link.libraryBookId) ?? []
+    tags.push(link)
+    tagsByWork.set(link.libraryBookId, tags)
+  }
+  const groups = new Map<string, ReadingRecordTagItem>()
+  for (const fact of facts) {
+    const holding = holdings.get(fact.bookVersionId)
+    if (!holding) continue
+    const seen = new Set<string>()
+    for (const tag of tagsByWork.get(holding.libraryBookId) ?? []) {
+      if (seen.has(tag.tagId)) continue
+      seen.add(tag.tagId)
+      const group = groups.get(tag.tagId) ?? { tagId: tag.tagId, name: tag.name, durationSeconds: 0, bookCount: 0 }
+      group.durationSeconds += fact.durationSeconds
+      group.bookCount = (group.bookCount ?? 0) + 1
+      groups.set(tag.tagId, group)
+    }
+  }
+  return [...groups.values()].sort((a, b) => (b.bookCount ?? 0) - (a.bookCount ?? 0) || b.durationSeconds - a.durationSeconds || a.tagId.localeCompare(b.tagId))
+}
+
+export async function getByCategory(userId: string, range: ReadingRange, showHidden = false): Promise<ReadingRecordCategoryItem[]> {
+  const { db, facts, holdings } = readingTaxonomyFacts(userId, range, showHidden)
+  const categories = db.select().from(libraryCategories).all()
+  const categoryMap = new Map(categories.map((category) => [category.id, category]))
+  const groups = new Map<string | null, ReadingRecordCategoryItem>()
+  for (const fact of facts) {
+    const holding = holdings.get(fact.bookVersionId)
+    const assigned = holding?.categoryId ? categoryMap.get(holding.categoryId) : undefined
+    const category = assigned?.libraryId === holding?.libraryId ? assigned : undefined
+    const parent = category?.parentId ? categoryMap.get(category.parentId) : undefined
+    const categoryId = category?.id ?? null
+    const group = groups.get(categoryId) ?? {
+      categoryId, name: category?.name ?? null, parentId: parent?.libraryId === category?.libraryId ? parent?.id ?? null : null,
+      parentName: parent?.libraryId === category?.libraryId ? parent?.name ?? null : null,
+      durationSeconds: 0, bookCount: 0,
+    }
+    group.durationSeconds += fact.durationSeconds
+    group.bookCount += 1
+    groups.set(categoryId, group)
+  }
+  return [...groups.values()].sort((a, b) => b.durationSeconds - a.durationSeconds || (a.categoryId ?? '').localeCompare(b.categoryId ?? ''))
 }

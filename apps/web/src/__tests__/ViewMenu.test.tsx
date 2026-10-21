@@ -140,9 +140,9 @@ describe('ViewMenu list info toggles', () => {
   it('shows the six toggles only in list view, progress on by default', () => {
     renderMenu({ defaultTab: 'viewLayout', view: 'list' })
     expect(screen.getByText('列表信息')).toBeInTheDocument()
-    // 书架/标签 only exist in the list-info group; the other four labels
-    // collide with the always-visible sort chips
-    expect(screen.getByRole('button', { name: '书架' })).toHaveAttribute('aria-pressed', 'false')
+    // Category/tag labels only exist in the list-info group; the other four labels
+    // collide with the always-visible sort chips.
+    expect(screen.getByRole('button', { name: '分类' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: '标签' })).toHaveAttribute('aria-pressed', 'false')
     expect(useUiStore.getState().listInfoItems).toEqual(['progress'])
   })
@@ -150,18 +150,18 @@ describe('ViewMenu list info toggles', () => {
   it('hides the toggle group in grid view', () => {
     renderMenu({ defaultTab: 'viewLayout', view: 'grid' })
     expect(screen.queryByText('列表信息')).toBeNull()
-    expect(screen.queryByRole('button', { name: '书架' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '分类' })).toBeNull()
   })
 
   it('toggles an item in the store and persists it', () => {
     renderMenu({ defaultTab: 'viewLayout', view: 'list' })
 
-    fireEvent.click(screen.getByRole('button', { name: '书架' }))
+    fireEvent.click(screen.getByRole('button', { name: '分类' }))
     expect(useUiStore.getState().listInfoItems).toEqual(['progress', 'shelf'])
     expect(localStorage.getItem('bd-list-info-items')).toBe('["progress","shelf"]')
-    expect(screen.getByRole('button', { name: '书架' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '分类' })).toHaveAttribute('aria-pressed', 'true')
 
-    fireEvent.click(screen.getByRole('button', { name: '书架' }))
+    fireEvent.click(screen.getByRole('button', { name: '分类' }))
     expect(useUiStore.getState().listInfoItems).toEqual(['progress'])
   })
 

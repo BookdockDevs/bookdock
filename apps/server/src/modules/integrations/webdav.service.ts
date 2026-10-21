@@ -12,7 +12,7 @@ import type {
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { settings } from '../../db/schema'
+import { libraries, settings } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { encryptPassword, decryptPassword } from '../../lib/secrets'
 import { WebDavClient } from '../../lib/webdav'
@@ -140,6 +140,9 @@ export async function importWebDavBooks(userId: string, req: WebDavImportReq): P
   const instance = getInstanceSettings()
   const normalizeTitle = isTitleNormalizeEnabled(userId)
   const results: WebDavImportItemResult[] = []
+  const privateTarget = req.libraryId
+    ? getDb().select({ type: libraries.type }).from(libraries).where(eq(libraries.id, req.libraryId)).get()?.type === 'private'
+    : true
 
   for (const filePath of req.files) {
     const rawName = filePath.split('/').filter(Boolean).pop() || 'book'
@@ -173,7 +176,7 @@ export async function importWebDavBooks(userId: string, req: WebDavImportReq): P
 
       if (req.libraryId) {
         const catalogRes = await uploadCatalogBook(req.libraryId, userId, file, {
-          categoryId: req.shelfId,
+          ...(privateTarget ? { shelfId: req.shelfId, categoryId: req.categoryId } : { categoryId: req.categoryId ?? req.shelfId }),
           tagIds: req.tagIds,
           normalizeTitle,
         })
@@ -187,7 +190,7 @@ export async function importWebDavBooks(userId: string, req: WebDavImportReq): P
         const uploadRes = await uploadBook(
           userId,
           file,
-          { shelfId: req.shelfId, tagIds: req.tagIds },
+          { shelfId: req.shelfId, categoryId: req.categoryId, tagIds: req.tagIds },
           { normalizeTitle, allowCorresponding: true },
         )
         results.push({

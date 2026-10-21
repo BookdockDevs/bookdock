@@ -91,7 +91,8 @@ const LIST_INFO_LABEL_KEYS: Record<ListInfoItem, string> = {
   progress: 'library.sortBy.progress',
   size: 'library.sortBy.size',
   lastRead: 'library.sortBy.lastRead',
-  shelf: 'library.shelves',
+  // The saved `shelf` preference remains compatible while this slot now shows category metadata.
+  shelf: 'library.categories',
   tags: 'library.tags',
   createdAt: 'library.sortBy.createdAt',
 }

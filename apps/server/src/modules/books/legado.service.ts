@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, or, sql } from 'drizzle-orm'
 import { applyTitleReplacements, type LegadoExploreConfigRes, type LegadoExploreLibrary, type TextRun } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { contentRevisions, libraryCategories, libraryMemberships, libraryTags, libraries } from '../../db/schema'
+import { contentRevisions, libraryCategories, libraryMemberships, libraryTags, libraries, shelves } from '../../db/schema'
 import { isEpubMediaPath, loadEpubChapterMarkup, loadEpubResource, resolveEpubResourcePath, type EpubChapterMedia } from '../../formats/epub'
 import { AppError } from '../../middleware/error'
 import { getUserTimezone } from '../auth/auth.service'
@@ -28,7 +28,7 @@ const READING_INLINE_TAGS = new Set(['b', 'em', 'i', 's', 'small', 'span', 'stro
 /** Sentinel category id meaning "uncategorized"; it exists once per library. */
 export const LEGADO_NONE_CATEGORY = 'none'
 
-export type LegadoExploreScope = 'all' | 'shelf' | 'tag'
+export type LegadoExploreScope = 'all' | 'shelf' | 'category' | 'tag'
 
 /**
  * A shelf/tag filter is always scoped to one library: taxonomy ids are
@@ -38,6 +38,7 @@ export type LegadoExploreScope = 'all' | 'shelf' | 'tag'
 export interface LegadoExploreFilter {
   libraryId: string
   categoryId?: string
+  shelfId?: string
   tagId?: string
 }
 
@@ -108,13 +109,14 @@ export async function getLegadoExploreConfig(userId: string): Promise<LegadoExpl
   const rows: LegadoExploreLibrary[] = []
   for (const library of listBrowsableLibraries(userId)) {
     const showHidden = await isLibraryManager(userId, library.id)
-    const [categories, tags, works] = await Promise.all([
+    const [categories, privateShelves, tags, works] = await Promise.all([
       listLegadoCategories(library.id, showHidden),
+      library.private ? listLegadoShelves(library.id, showHidden) : Promise.resolve([]),
       listLegadoTags(library.id, showHidden),
       listLibraryVersionEntries(userId, library.id, { page: 1, pageSize: 1 }),
     ])
     if (works.total === 0) continue
-    rows.push({ id: library.id, name: library.name, type: library.type, categories, tags })
+    rows.push({ id: library.id, name: library.name, type: library.type, categories, shelves: privateShelves, tags })
   }
   return { libraries: rows }
 }
@@ -136,6 +138,17 @@ function listLegadoCategories(libraryId: string, includeHidden: boolean) {
   }))]
 }
 
+function listLegadoShelves(libraryId: string, includeHidden: boolean) {
+  const db = getDb()
+  const rows = db.select({ id: shelves.id, name: shelves.name, sortOrder: shelves.sortOrder, createdAt: shelves.createdAt })
+    .from(shelves)
+    .where(includeHidden
+      ? eq(shelves.libraryId, libraryId)
+      : and(eq(shelves.libraryId, libraryId), eq(shelves.hidden, false)))
+    .orderBy(asc(shelves.sortOrder), asc(shelves.createdAt)).all()
+  return [{ id: LEGADO_NONE_CATEGORY, name: '未入架', depth: 0 }, ...rows.map((row) => ({ id: row.id, name: row.name, depth: 0 }))]
+}
+
 function listLegadoTags(libraryId: string, includeHidden: boolean) {
   return getDb().select({ id: libraryTags.id, name: libraryTags.name })
     .from(libraryTags)
@@ -150,12 +163,19 @@ function listLegadoTags(libraryId: string, includeHidden: boolean) {
 /** Reject a taxonomy id that does not belong to the library it was asked for. */
 export function getLegadoExploreFilter(userId: string, libraryId: string, scope: LegadoExploreScope, id?: string): LegadoExploreFilter {
   if (scope === 'all') return { libraryId }
-  if (!id) throw new AppError(scope === 'shelf' ? 'SHELF_NOT_FOUND' : 'TAG_NOT_FOUND')
+  if (!id) throw new AppError(scope === 'shelf' ? 'SHELF_NOT_FOUND' : scope === 'category' ? 'CATEGORY_NOT_FOUND' : 'TAG_NOT_FOUND')
   if (scope === 'shelf') {
+    if (id === LEGADO_NONE_CATEGORY) return { libraryId, shelfId: LEGADO_NONE_CATEGORY }
+    const shelf = getDb().select({ id: shelves.id }).from(shelves)
+      .where(and(eq(shelves.id, id), eq(shelves.libraryId, libraryId))).get()
+    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
+    return { libraryId, shelfId: id }
+  }
+  if (scope === 'category') {
     if (id === LEGADO_NONE_CATEGORY) return { libraryId, categoryId: LEGADO_NONE_CATEGORY }
     const category = getDb().select({ id: libraryCategories.id }).from(libraryCategories)
       .where(and(eq(libraryCategories.id, id), eq(libraryCategories.libraryId, libraryId))).get()
-    if (!category) throw new AppError('SHELF_NOT_FOUND')
+    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
     return { libraryId, categoryId: id }
   }
   const tag = getDb().select({ id: libraryTags.id }).from(libraryTags)

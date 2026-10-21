@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm'
 
-import { bookVersions, contentRevisions, libraryBookTags, libraryBooks, libraryBookVersions, libraryCategories, libraryTags } from '../../db/schema'
-import type { getDb } from '../../db/client'
+import { bookVersions, contentRevisions, libraryBookTags, libraryBooks, libraryBookVersions, libraryCategories, libraryTags, shelves, libraries } from '../../db/schema'
+import { getDb } from '../../db/client'
 import type { CategoryScope, HiddenReason, HiddenVia } from '@bookdock/shared'
 
 export function pendingBookDataDeletionVersionIds(db: ReturnType<typeof getDb>, userId: string): string[] {
@@ -20,10 +20,8 @@ export function pendingBookDataDeletionVersionIds(db: ReturnType<typeof getDb>, 
  * A private library's own list and a shared library's catalog are the same kind
  * of thing - works in a library, filed under that library's categories and tags -
  * so they share one implementation of the parts that mean the same thing to both.
- * `shelfId` and `categoryId` are two names for the same column: a private
- * library's shelf is a LibraryBook.categoryId, and a library's category is the
- * identical table scoped by libraryId. Keeping both names is only about the
- * vocabulary the UI uses; the query is one.
+ * Private shelves and library categories are independent dimensions. Shared
+ * libraries have categories only.
  *
  * What genuinely differs is per-user reading state: progress, read status and
  * last-read only exist for books someone owns, so a shared catalog cannot offer
@@ -39,6 +37,8 @@ export interface LibraryListQuery {
   sortOrder?: string
   /** Category, or the 'none' sentinel for uncategorized. */
   categoryId?: string
+  /** Private shelf, or the 'none' sentinel for works outside every shelf. */
+  shelfId?: string
   categoryScope?: CategoryScope
   tagId?: string
   format?: 'epub' | 'txt'
@@ -121,6 +121,8 @@ export function tagFilter(tagId: string, libraryId: string): SQL | undefined {
  * carries it. Libraries are small; the walk runs in memory per request.
  */
 export interface LibraryHiddenTaxonomy {
+  hiddenShelfIds: string[]
+  hiddenShelfNames: Map<string, string>
   hiddenCategoryIds: string[]
   /** Only rows flagged hidden themselves, without inherited descendants. */
   directHiddenCategoryIds: string[]
@@ -137,6 +139,8 @@ export function loadLibraryHiddenTaxonomy(
   db: ReturnType<typeof getDb>,
   libraryId: string,
 ): LibraryHiddenTaxonomy {
+  const hiddenShelves = db.select({ id: shelves.id, name: shelves.name }).from(shelves)
+    .where(and(eq(shelves.libraryId, libraryId), eq(shelves.hidden, true))).all()
   const categories = db.select({
     id: libraryCategories.id,
     parentId: libraryCategories.parentId,
@@ -168,6 +172,8 @@ export function loadLibraryHiddenTaxonomy(
   const tags = db.select({ id: libraryTags.id, name: libraryTags.name }).from(libraryTags)
     .where(and(eq(libraryTags.libraryId, libraryId), eq(libraryTags.hidden, true))).all()
   return {
+    hiddenShelfIds: hiddenShelves.map((shelf) => shelf.id),
+    hiddenShelfNames: new Map(hiddenShelves.map((shelf) => [shelf.id, shelf.name])),
     hiddenCategoryIds: [...closure],
     directHiddenCategoryIds: categories.filter((category) => category.hidden).map((category) => category.id),
     hiddenTagIds: tags.map((tag) => tag.id),
@@ -190,11 +196,14 @@ export interface WorkHiddenDetail {
  * name is the nearest hidden ancestor, which is where the owner must unhide.
  */
 export function classifyWorkHidden(
-  work: { hidden: boolean; categoryId: string | null },
+  work: { hidden: boolean; shelfId?: string | null; categoryId: string | null },
   taxonomy: LibraryHiddenTaxonomy,
   workTagIds: string[] = [],
 ): WorkHiddenDetail {
   if (work.hidden) return { reason: 'direct' }
+  if (work.shelfId && taxonomy.hiddenShelfNames.has(work.shelfId)) {
+    return { reason: 'shelf', via: { shelfName: taxonomy.hiddenShelfNames.get(work.shelfId) } }
+  }
   // Walk the ancestry for the nearest directly-hidden category: descendants
   // inherit the hide but only the flagged ancestor names the cause.
   const seen = new Set<string>()
@@ -222,7 +231,7 @@ export function classifyWorkHidden(
 export function getWorkHiddenDetail(
   db: ReturnType<typeof getDb>,
   libraryId: string,
-  work: { id: string; categoryId: string | null; hidden: boolean },
+  work: { id: string; shelfId?: string | null; categoryId: string | null; hidden: boolean },
 ): WorkHiddenDetail {
   if (work.hidden) return { reason: 'direct' }
   const taxonomy = loadLibraryHiddenTaxonomy(db, libraryId)
@@ -257,6 +266,11 @@ export function hiddenCategoryExclusion(hiddenCategoryIds: string[]): SQL | unde
   ) as SQL
 }
 
+export function hiddenShelfExclusion(hiddenShelfIds: string[]): SQL | undefined {
+  if (hiddenShelfIds.length === 0) return undefined
+  return or(isNull(libraryBooks.shelfId), notInArray(libraryBooks.shelfId, hiddenShelfIds)) as SQL
+}
+
 export function hiddenTagExclusion(hiddenTagIds: string[]): SQL | undefined {
   if (hiddenTagIds.length === 0) return undefined
   return sql`NOT EXISTS (
@@ -271,6 +285,8 @@ export function workHiddenExclusion(taxonomy: LibraryHiddenTaxonomy): SQL {
   const conditions: SQL[] = [workDirectHiddenExclusion()]
   const category = hiddenCategoryExclusion(taxonomy.hiddenCategoryIds)
   if (category) conditions.push(category)
+  const shelf = hiddenShelfExclusion(taxonomy.hiddenShelfIds)
+  if (shelf) conditions.push(shelf)
   const tag = hiddenTagExclusion(taxonomy.hiddenTagIds)
   if (tag) conditions.push(tag)
   return and(...conditions) as SQL
@@ -284,7 +300,7 @@ export function workHiddenExclusion(taxonomy: LibraryHiddenTaxonomy): SQL {
 export function isWorkEffectivelyHidden(
   db: ReturnType<typeof getDb>,
   libraryId: string,
-  work: { id: string; categoryId: string | null; hidden: boolean },
+  work: { id: string; shelfId?: string | null; categoryId: string | null; hidden: boolean },
 ): boolean {
   return getWorkHiddenDetail(db, libraryId, work).reason !== null
 }
@@ -319,9 +335,16 @@ export function authorFilter(author: string, libraryId: string, opts?: { publish
 }
 
 /**
- * Category and tag *names* are searchable alongside the work's own fields, so
+ * Shelf, category, and tag *names* are searchable alongside the work's own fields, so
  * typing a shelf or tag name finds the works filed under it.
- */export function taxonomyNameMatch(pattern: string, libraryId: string): SQL {
+ */
+export function taxonomyNameMatch(pattern: string, libraryId: string): SQL {
+  const shelfMatch = sql`EXISTS (
+    SELECT 1 FROM ${shelves} AS q_shelf
+    WHERE q_shelf.id = ${libraryBooks.shelfId}
+      AND q_shelf.library_id = ${libraryId}
+      AND q_shelf.name LIKE ${pattern} ESCAPE '!'
+  )`
   const categoryMatch = sql`EXISTS (
     SELECT 1 FROM ${libraryCategories} AS q_category
     WHERE q_category.id = ${libraryBooks.categoryId}
@@ -335,7 +358,7 @@ export function authorFilter(author: string, libraryId: string, opts?: { publish
       AND q_tag.library_id = ${libraryId}
       AND q_tag.name LIKE ${pattern} ESCAPE '!'
   )`
-  return sql`(${categoryMatch} OR ${tagMatch})`
+  return sql`(${shelfMatch} OR ${categoryMatch} OR ${tagMatch})`
 }
 
 /**
@@ -410,8 +433,16 @@ export function seriesFilter(series: string, libraryId: string, opts?: { publish
 /** All list filters that mean the same thing in every library, in one place. */
 export function sharedListConditions(query: LibraryListQuery, libraryId: string, opts?: { publishedOnly?: boolean }): SQL[] {
   const conditions: SQL[] = []
-  const category = categoryFilter(query.categoryId, query.categoryScope, libraryId)
+  const libraryType = getDb().select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()?.type
+  const categoryScope = libraryType === 'private' ? 'subtree' : query.categoryScope ?? 'direct'
+  const category = categoryFilter(query.categoryId, categoryScope, libraryId)
   if (category) conditions.push(category)
+  if (query.shelfId !== undefined) {
+    conditions.push(sql`EXISTS (SELECT 1 FROM ${libraries} WHERE ${libraries.id} = ${libraryId} AND ${libraries.type} = 'private')`)
+    conditions.push(query.shelfId === 'none'
+      ? isNull(libraryBooks.shelfId)
+      : eq(libraryBooks.shelfId, query.shelfId))
+  }
   const tag = query.tagId ? tagFilter(query.tagId, libraryId) : undefined
   if (tag) conditions.push(tag)
   const author = authorFilter(query.author ?? '', libraryId, opts)

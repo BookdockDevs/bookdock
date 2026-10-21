@@ -4,7 +4,7 @@ import { bindLibrarySearch, LibrarySearchError, normalizeLibrarySearch, parseLib
 
 import { editSearchControls, removeSearchCondition, searchProjection } from './library-search-state'
 
-const names = { shared: false, tags: [{ id: 'sf', name: '科幻' }, { id: 'fantasy', name: '奇幻' }, { id: 'keep', name: '收藏' }], categories: [{ id: 's', name: '书 架' }] }
+const names = { shared: false, tags: [{ id: 'sf', name: '科幻' }, { id: 'fantasy', name: '奇幻' }, { id: 'keep', name: '收藏' }], shelves: [{ id: 's', name: '书 架' }], categories: [{ id: 'c', name: '小说' }] }
 
 describe('library search grammar and URL state', () => {
   it('keeps consecutive plain text as one legacy search item', () => {
@@ -31,7 +31,8 @@ describe('library search grammar and URL state', () => {
   })
   it('rejects unavailable names and resolves ambiguous categories through full paths', () => {
     expect(() => bindLibrarySearch(parseLibrarySearch('tag:不存在')!, names)).toThrow('名称不存在')
-    expect(() => bindLibrarySearch(parseLibrarySearch('category:科幻')!, names)).toThrow('仅用于共享库')
+    expect(bindLibrarySearch(parseLibrarySearch('category:小说')!, names)).toMatchObject({ id: 'c' })
+    expect(() => bindLibrarySearch(parseLibrarySearch('category:小说')!, { ...names, shared: true })).not.toThrow()
     expect(() => bindLibrarySearch(parseLibrarySearch('shelf:x')!, { ...names, shared: true })).toThrow('仅用于私库')
     expect(() => bindLibrarySearch(parseLibrarySearch('status:reading')!, { ...names, shared: true })).toThrow('仅用于私库')
     const shared = { ...names, shared: true, categories: [{ id: 'r1', name: 'Root1' }, { id: 'r2', name: 'Root2' }, { id: 'c1', name: 'Child', parentId: 'r1' }, { id: 'c2', name: 'Child', parentId: 'r2' }] }

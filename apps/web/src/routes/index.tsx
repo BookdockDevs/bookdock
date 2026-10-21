@@ -11,6 +11,7 @@ export interface LibrarySearch {
   sortBy?: string
   sortOrder?: 'asc' | 'desc'
   shelf?: string
+  category?: string
   tag?: string
   author?: string
   series?: string
@@ -19,7 +20,7 @@ export interface LibrarySearch {
   trash?: boolean
   /** Active shared library; absent = the user's own private library. */
   libraryId?: string
-  directory?: 'categories' | 'tags'
+  directory?: 'shelves' | 'categories' | 'tags'
   categoryScope?: CategoryScope
 }
 
@@ -41,6 +42,7 @@ export const indexRoute = createRoute({
       sortBy: typeof input.sortBy === 'string' && input.sortBy.length > 0 ? input.sortBy : undefined,
       sortOrder: VALID_ORDERS.has(input.sortOrder as string) ? (input.sortOrder as 'asc' | 'desc') : undefined,
       shelf: typeof input.shelf === 'string' && input.shelf.length > 0 ? input.shelf : undefined,
+      category: typeof input.category === 'string' && input.category.length > 0 ? input.category : undefined,
       tag: typeof input.tag === 'string' && input.tag.length > 0 ? input.tag : undefined,
       author: typeof input.author === 'string' && input.author.length > 0 ? input.author : undefined,
       series: typeof input.series === 'string' && input.series.length > 0 ? input.series : undefined,
@@ -48,7 +50,7 @@ export const indexRoute = createRoute({
       status: VALID_STATUSES.has(input.status as string) ? (input.status as LibrarySearch['status']) : undefined,
       trash: input.trash === true ? true : undefined,
       libraryId: typeof input.libraryId === 'string' && input.libraryId.length > 0 ? input.libraryId : undefined,
-      directory: input.directory === 'categories' || input.directory === 'tags' ? input.directory : undefined,
+      directory: input.directory === 'shelves' || input.directory === 'categories' || input.directory === 'tags' ? input.directory : undefined,
       categoryScope: categoryScopeSchema.safeParse(input.categoryScope).success ? input.categoryScope as CategoryScope : undefined,
     }
   },

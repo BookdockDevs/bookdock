@@ -13,6 +13,7 @@ import {
   libraryCategories,
   libraryMemberships,
   libraryTags,
+  shelves,
   libraries,
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
@@ -40,6 +41,7 @@ import {
 } from './library-query'
 import {
   LibrarySearchError,
+  categoryTemplatePath,
   normalizeAuthors,
   type BatchOrganizeReq,
   type BatchSelectionItem,
@@ -52,6 +54,7 @@ import {
   type HiddenReason,
   type LibraryVersionKind,
 } from '@bookdock/shared'
+import { resolveOrCreateCategoryPath } from './library-category-path'
 
 /**
  * Catalog reads and metadata management (5.1/5.3). Every entry point resolves
@@ -511,6 +514,7 @@ export interface LibraryVersionEntry {
   wordCount: number | null
   categoryId: string | null
   categoryName: string | null
+  shelfName: string | null
   tags: string[]
   /** Version over work over parsed-file publication metadata. */
   bookmeta: Record<string, unknown>
@@ -596,6 +600,7 @@ export async function listLibraryVersionEntries(
     coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
     categoryId: libraryBooks.categoryId,
     categoryName: libraryCategories.name,
+    shelfName: shelves.name,
     // A real column, not json_extract on the meta blob that also stores a copy.
     wordCount: contentRevisions.wordCount,
     // Selected whole and read in JS. `json_extract` unquotes scalars but returns
@@ -618,6 +623,7 @@ export async function listLibraryVersionEntries(
       eq(contentRevisions.revisionNo, sql`(SELECT max(${contentRevisions.revisionNo}) FROM ${contentRevisions} WHERE ${contentRevisions.bookVersionId} = ${bookVersions.id})`),
     ))
     .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
+    .leftJoin(shelves, eq(libraryBooks.shelfId, shelves.id))
     .where(where)
 
   // Pin-first is universal; a manager's pin on a private card and a shared
@@ -678,6 +684,7 @@ export async function listLibraryVersionEntries(
         wordCount: row.wordCount,
         categoryId: row.categoryId,
         categoryName: row.categoryName ?? null,
+        shelfName: row.shelfName ?? null,
         tags: tagNames.get(row.libraryBookId) ?? [],
         // Merged in JS, the same way toCatalogVersion does it: SQLite's
         // json_patch applies one patch at a time, and the three layers live in
@@ -820,6 +827,14 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
   const db = getDb()
   await requireLibraryManager(actorId, libraryId)
   const work = getWork(libraryId, libraryBookId)
+  if (patch.categoryId !== undefined && patch.categoryTemplateKey !== undefined) {
+    throw new AppError('VALIDATION_ERROR', 'Choose an existing category or a recommendation')
+  }
+  const templatePath = patch.categoryTemplateKey ? categoryTemplatePath(patch.categoryTemplateKey) : undefined
+  if (patch.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
+  if (templatePath && db.select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()?.type !== 'private') {
+    throw new AppError('VALIDATION_ERROR', 'Category recommendations are only available in private libraries')
+  }
   const updates: Partial<typeof libraryBooks.$inferInsert> = { updatedAt: Date.now() }
   if (patch.title !== undefined) updates.title = patch.title
   if (patch.author !== undefined) updates.author = patch.author
@@ -847,7 +862,14 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
   // Taxonomy moves with the metadata, so a rename and a retag are one action and
   // one transaction rather than two calls that can half-apply.
   db.transaction((tx) => {
+    if (templatePath) updates.categoryId = resolveOrCreateCategoryPath(tx, libraryId, actorId, templatePath)
     tx.update(libraryBooks).set(updates).where(eq(libraryBooks.id, work.id)).run()
+    if (patch.categoryId !== undefined || templatePath) {
+      const nextCategoryId = updates.categoryId ?? null
+      for (const categoryId of new Set([work.categoryId, nextCategoryId])) {
+        if (categoryId) tx.update(libraryCategories).set({ updatedAt: updates.updatedAt }).where(eq(libraryCategories.id, categoryId)).run()
+      }
+    }
     if (patch.tagIds !== undefined) setWorkTags(tx, libraryId, work.id, patch.tagIds)
   })
   return getCatalogBook(actorId, libraryId, work.id)
@@ -875,6 +897,7 @@ export async function getCatalogBatchSelection(actorId: string, libraryId: strin
   const byId = new Map(works.map((work) => [work.id, {
     id: work.id,
     categoryId: work.categoryId,
+    shelfId: work.shelfId,
     tagIds: tagIdsByWork.get(work.id) ?? [],
     hidden: work.hidden,
     pinnedAt: work.pinnedAt,
@@ -890,6 +913,16 @@ export async function organizeCatalogBatch(actorId: string, libraryId: string, i
   const works = db.select({ id: libraryBooks.id }).from(libraryBooks)
     .where(and(eq(libraryBooks.libraryId, libraryId), inArray(libraryBooks.id, ids))).all()
   if (works.length !== ids.length) throw new AppError('LIBRARY_BOOK_NOT_FOUND')
+  const libraryType = db.select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()?.type
+  if (input.categoryId !== undefined && input.categoryTemplateKey !== undefined) {
+    throw new AppError('VALIDATION_ERROR', 'Choose an existing category or a recommendation')
+  }
+  const templatePath = input.categoryTemplateKey ? categoryTemplatePath(input.categoryTemplateKey) : undefined
+  if (input.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
+  if (templatePath && libraryType !== 'private') throw new AppError('VALIDATION_ERROR', 'Category recommendations are only available in private libraries')
+  if (input.shelfId !== undefined && libraryType !== 'private') throw new AppError('VALIDATION_ERROR', 'Shelves are only available in private libraries')
+  if (input.shelfId && !db.select({ id: shelves.id }).from(shelves)
+    .where(and(eq(shelves.id, input.shelfId), eq(shelves.libraryId, libraryId))).get()) throw new AppError('SHELF_NOT_FOUND')
   if (input.categoryId !== undefined && input.categoryId !== null && !db.select({ id: libraryCategories.id }).from(libraryCategories)
     .where(and(eq(libraryCategories.id, input.categoryId), eq(libraryCategories.libraryId, libraryId))).get()) throw new AppError('CATEGORY_NOT_FOUND')
   const addTagIds = [...new Set(input.addTagIds)]
@@ -903,12 +936,32 @@ export async function organizeCatalogBatch(actorId: string, libraryId: string, i
   }
   const now = Date.now()
   db.transaction((tx) => {
-    if (input.categoryId !== undefined) tx.update(libraryBooks)
-      .set({ categoryId: input.categoryId, updatedAt: now }).where(inArray(libraryBooks.id, ids)).run()
+    const touchedShelfIds = new Set<string>()
+    const touchedCategoryIds = new Set<string>()
+    const existing = tx.select({ id: libraryBooks.id, shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId })
+      .from(libraryBooks).where(inArray(libraryBooks.id, ids)).all()
+    if (input.shelfId !== undefined || input.categoryId !== undefined || templatePath) {
+      const updates: Partial<typeof libraryBooks.$inferInsert> = { updatedAt: now }
+      if (input.shelfId !== undefined) {
+        updates.shelfId = input.shelfId
+        for (const row of existing) if (row.shelfId) touchedShelfIds.add(row.shelfId)
+        if (input.shelfId) touchedShelfIds.add(input.shelfId)
+      }
+      if (input.categoryId !== undefined || templatePath) {
+        updates.categoryId = templatePath
+          ? resolveOrCreateCategoryPath(tx, libraryId, actorId, templatePath)
+          : input.categoryId
+        for (const row of existing) if (row.categoryId) touchedCategoryIds.add(row.categoryId)
+        if (updates.categoryId) touchedCategoryIds.add(updates.categoryId)
+      }
+      tx.update(libraryBooks).set(updates).where(inArray(libraryBooks.id, ids)).run()
+    }
     for (const tagId of removeTagIds) tx.delete(libraryBookTags)
       .where(and(inArray(libraryBookTags.libraryBookId, ids), eq(libraryBookTags.tagId, tagId))).run()
     for (const tagId of addTagIds) tx.insert(libraryBookTags)
       .values(ids.map((libraryBookId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
+    for (const shelfId of touchedShelfIds) tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, shelfId)).run()
+    for (const categoryId of touchedCategoryIds) tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, categoryId)).run()
   })
   return { count: ids.length }
 }

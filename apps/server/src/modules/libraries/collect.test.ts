@@ -120,6 +120,65 @@ describe('add-to-private (7.x)', () => {
     return created
   }
 
+  it('copies source categories and tag names into separate private dimensions when collected', async () => {
+    const city = await seedCityBook()
+    const rootId = createId('cat')
+    const childId = createId('cat')
+    const sourceTagId = createId('tag')
+    db.insert(schema.libraryCategories).values([
+      { id: rootId, libraryId, userId: ownerId, name: 'Fantasy', parentId: null, createdAt: 1, updatedAt: 1 },
+      { id: childId, libraryId, userId: ownerId, name: 'Mystery', parentId: rootId, createdAt: 2, updatedAt: 2 },
+    ]).run()
+    db.insert(schema.libraryTags).values({
+      id: sourceTagId, libraryId, userId: ownerId, name: 'Finished', sortOrder: 0,
+      pinned: false, hidden: false, createdAt: 1, updatedAt: 1,
+    }).run()
+    db.update(schema.libraryBooks).set({ categoryId: childId }).where(eq(schema.libraryBooks.id, city.libraryBookId)).run()
+    db.insert(schema.libraryBookTags).values({ libraryBookId: city.libraryBookId, tagId: sourceTagId }).run()
+
+    const collected = await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
+    const privateLibraryId = memberPrivateId()
+    const privateWork = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, collected.libraryBookId)).get()!
+    const copiedCategory = db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, privateWork.categoryId!)).get()!
+    const copiedParent = db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, copiedCategory.parentId!)).get()!
+    const copiedTag = db.select().from(schema.libraryTags)
+      .where(and(eq(schema.libraryTags.libraryId, privateLibraryId), eq(schema.libraryTags.name, 'Finished'))).get()!
+
+    expect(privateWork.shelfId).toBeNull()
+    expect([copiedParent.name, copiedCategory.name]).toEqual(['Fantasy', 'Mystery'])
+    expect(db.select().from(schema.libraryBookTags)
+      .where(and(eq(schema.libraryBookTags.libraryBookId, collected.libraryBookId), eq(schema.libraryBookTags.tagId, copiedTag.id))).get()).toBeDefined()
+  })
+
+  it('reuses exact source category names and preserves private category flags', async () => {
+    const city = await seedCityBook()
+    const sourceRootId = createId('cat')
+    const sourceChildId = createId('cat')
+    db.insert(schema.libraryCategories).values([
+      { id: sourceRootId, libraryId, userId: ownerId, name: ' Fiction ', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1 },
+      { id: sourceChildId, libraryId, userId: ownerId, name: ' Mystery ', parentId: sourceRootId, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1 },
+    ]).run()
+    db.update(schema.libraryBooks).set({ categoryId: sourceChildId }).where(eq(schema.libraryBooks.id, city.libraryBookId)).run()
+
+    const privateLibraryId = memberPrivateId()
+    const privateRootId = createId('cat')
+    const privateChildId = createId('cat')
+    db.insert(schema.libraryCategories).values([
+      { id: privateRootId, libraryId: privateLibraryId, userId: memberId, name: ' Fiction ', parentId: null, sortOrder: 0, pinned: true, hidden: true, createdAt: 1, updatedAt: 1 },
+      { id: privateChildId, libraryId: privateLibraryId, userId: memberId, name: ' Mystery ', parentId: privateRootId, sortOrder: 0, pinned: true, hidden: true, createdAt: 1, updatedAt: 1 },
+    ]).run()
+
+    const collected = await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
+    const privateWork = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, collected.libraryBookId)).get()!
+
+    expect(privateWork.categoryId).toBe(privateChildId)
+    expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.libraryId, privateLibraryId)).all()).toHaveLength(2)
+    expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, privateRootId)).get())
+      .toMatchObject({ name: ' Fiction ', pinned: true, hidden: true })
+    expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, privateChildId)).get())
+      .toMatchObject({ name: ' Mystery ', pinned: true, hidden: true })
+  })
+
   it('reports appended content through real detail and acknowledgment routes without a progress write', async () => {
     const city = await seedCityBook()
     await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)

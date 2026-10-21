@@ -124,7 +124,7 @@ export default function CatalogListRow({
           book={{
             progress: null,
             lastReadAt: null,
-            shelfName: categoryName ?? null,
+            categoryName: categoryName ?? null,
             tags: work.tags.map((t) => t.name),
             size: first?.size ?? 0,
             createdAt: work.createdAt,

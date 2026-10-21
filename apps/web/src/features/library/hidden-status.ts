@@ -4,7 +4,7 @@ import type { HiddenReason, HiddenVia } from '@bookdock/shared'
 export type HiddenVocab = 'shelf' | 'category'
 
 export interface HiddenCause {
-  kind: 'category' | 'tag' | 'taxonomy'
+  kind: 'shelf' | 'category' | 'tag' | 'taxonomy'
   /** Short label for menus and icon buttons, e.g. 分类已隐藏. */
   shortKey: string
   /** Tooltip explaining where the hide lives. */
@@ -29,6 +29,14 @@ export function getHiddenCause(
   vocab: HiddenVocab = 'category',
 ): HiddenCause | null {
   if (item.hidden || item.effectiveHidden !== true) return null
+  if (item.hiddenReason === 'shelf' && item.hiddenVia?.shelfName) {
+    return {
+      kind: 'shelf',
+      shortKey: 'library.shelfHiddenAction',
+      hintKey: 'library.shelfHiddenHint',
+      hintParams: { name: item.hiddenVia.shelfName },
+    }
+  }
   if (item.hiddenReason === 'category' && item.hiddenVia?.categoryName) {
     return {
       kind: 'category',

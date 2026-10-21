@@ -388,11 +388,27 @@ export const libraryMemberships = sqliteTable('library_memberships', {
   userIdx: index('library_memberships_user_idx').on(table.userId),
 }))
 
+export const shelves = sqliteTable('shelves', {
+  id: text('id').primaryKey(),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  librarySortIdx: index('shelves_library_sort_idx').on(table.libraryId, table.sortOrder),
+  libraryNameUnique: uniqueIndex('shelves_library_name_unique').on(table.libraryId, table.name),
+}))
+
 export const libraryBooks = sqliteTable('library_books', {
   id: text('id').primaryKey(),
   libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
   userId: text('user_id').notNull().references(() => users.id),
   categoryId: text('category_id').references(() => libraryCategories.id, { onDelete: 'set null' }),
+  shelfId: text('shelf_id').references(() => shelves.id, { onDelete: 'set null' }),
   title: text('title').notNull(),
   author: text('author').notNull().default(''),
   // Full author list (max 10); `author` above mirrors authors[0] ?? '' as a
@@ -423,6 +439,7 @@ export const libraryBooks = sqliteTable('library_books', {
 }, (table) => ({
   libraryIdx: index('library_books_library_idx').on(table.libraryId, table.updatedAt),
   categoryIdx: index('library_books_category_idx').on(table.categoryId),
+  shelfIdx: index('library_books_shelf_idx').on(table.shelfId),
 }))
 
 export const bookVersions = sqliteTable('book_versions', {

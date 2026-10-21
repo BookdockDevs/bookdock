@@ -52,7 +52,7 @@ export default function TaxonomyEntry({ row, isTag = false, isCategory = false, 
   const menu = useContextMenu()
   const dragged = useRef(false)
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
-    id: sortableId, data: { type: isTag ? 'tag' : 'shelf', entryId: row.id },
+    id: sortableId, data: { type: isTag ? 'tag' : isCategory ? 'category' : 'shelf', entryId: row.id },
     disabled: readOnly || selecting || orderingPending, animateLayoutChanges: () => false,
   })
   const { active: dragActive, over } = useDndContext()

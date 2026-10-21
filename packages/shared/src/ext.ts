@@ -23,22 +23,18 @@ import type { BookMetadata } from './contract'
  * `application/epub+zip`, and `sourceFormat` records what was uploaded.
  *
  * Taxonomy is present only as far as placing an upload needs it: each library row
- * carries its whole shelf tree and tag list, and an upload may name a category.
+ * carries categories, private shelves and tags; an upload may name a category.
  * Creating, renaming and deleting either stays in the Web.
  */
 
 /**
- * One shelf in a library, with the work count the caller would see.
- *
- * Called `category` because that is the column, the table and the id the upload
- * takes. The Web labels the private library's shelves 书架 and a shared library's
- * 分类, but they are one taxonomy in one id space — the migration that created
- * the library model reused the old shelf ids as category ids.
+ * A library category, or a flat private shelf when returned in `shelves`.
+ * The arrays use independent IDs and assignment columns.
  */
 export interface ExternalCategory {
   id: string
   name: string
-  /** `null` for a top-level shelf. */
+  /** `null` for a root category or any shelf. */
   parentId: string | null
   /**
    * Nesting level from the tree root, so a client can indent without walking
@@ -91,6 +87,7 @@ export interface ExternalLibrary {
    * and the hide rules are the ones the caller's own browser would show.
    */
   categories: ExternalCategory[]
+  shelves: ExternalCategory[]
   tags: ExternalTag[]
 }
 
@@ -137,6 +134,7 @@ export interface ExternalBook {
    */
   hasCover: boolean
   categoryName: string | null
+  shelfName?: string | null
   tags: string[]
   /**
    * The work is hidden in its library. Only ever true for a manager: the

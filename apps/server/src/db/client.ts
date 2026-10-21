@@ -305,6 +305,8 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
   migrate(db, { migrationsFolder })
   repairReadingLedgerSchema(db)
+  const { migrateCategoryShelfSeparation } = await import('../modules/libraries/category-shelf-migration')
+  migrateCategoryShelfSeparation(db)
   const { importProgressFiles } = await import('../modules/progress/progress-migration')
   await importProgressFiles(db)
 }

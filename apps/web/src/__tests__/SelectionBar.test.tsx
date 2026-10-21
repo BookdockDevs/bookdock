@@ -69,6 +69,8 @@ describe('SelectionBar', () => {
     render(<SelectionBar selectedIds={['w1', 'w2']} libraryId="lib1" onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
 
     await clickReady('library.batchOrganize')
+    expect(screen.getByRole('dialog')).toHaveAccessibleName(/library.batchOrganize/)
+    expect(screen.getByRole('button', { name: 'library.close' })).toBeInTheDocument()
     fireEvent.click(screen.getByText('科幻'))
     fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
 
@@ -96,7 +98,7 @@ describe('SelectionBar', () => {
   })
 
   it('adds a partially present tag to all selected entries without changing other tags', async () => {
-    selectionItems = [item('a', { tagIds: ['t1', 'other'] }), item('b', { tagIds: [] })]
+    selectionItems = [item('a', { shelfId: 's1', categoryId: 'c1', tagIds: ['t1', 'other'] }), item('b', { shelfId: 's2', categoryId: 'c2', tagIds: [] })]
     tags = [{ id: 't1', name: '科幻', bookCount: 1 }]
     render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
 
@@ -110,6 +112,102 @@ describe('SelectionBar', () => {
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
       ids: ['a', 'b'], addTagIds: ['t1'], removeTagIds: [],
     }))
+  })
+
+  it('keeps shelf and category selected by default and only unshelves when explicitly chosen', async () => {
+    selectionItems = [item('a', { shelfId: 's1', categoryId: 'c1' })]
+    categories = [{ id: 's1', name: 'Reading', bookCount: 1 }]
+    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+
+    await clickReady('library.batchOrganize')
+    expect(screen.getByRole('radio', { name: 'library.keepShelf' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'library.notOnShelf' })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'library.save' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('radio', { name: 'library.notOnShelf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
+      ids: ['a'], shelfId: null, addTagIds: [], removeTagIds: [],
+    }))
+  })
+
+  it('clears a category only after explicitly choosing uncategorized', async () => {
+    selectionItems = [item('a', { categoryId: 'c1' })]
+    categories = [{ id: 'c1', name: 'Mystery', bookCount: 1 }]
+    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+
+    await clickReady('library.batchOrganize')
+    fireEvent.click(screen.getByText('library.categories'))
+    expect(screen.getByRole('radio', { name: 'library.keepCategory' })).toBeChecked()
+    fireEvent.click(screen.getByRole('radio', { name: 'library.uncategorized' }))
+    fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
+      ids: ['a'], categoryId: null, addTagIds: [], removeTagIds: [],
+    }))
+  })
+
+  it('allows private recommendations and resets a recommendation to keep before an unrelated tag edit', async () => {
+    selectionItems = [item('a', { categoryId: 'existing' })]
+    tags = [{ id: 't1', name: 'Topic', bookCount: 0 }]
+    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+
+    await clickReady('library.batchOrganize')
+    fireEvent.click(screen.getByText('library.categories'))
+    fireEvent.click(screen.getByText('library.recommendedCategories'))
+    fireEvent.click(screen.getByRole('button', { name: /library\.expand.*web-fiction/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /library\.categoryTemplate\.web-fiction\.name \/ library\.categoryTemplate\.web-fiction\.mystery/ }))
+    fireEvent.click(screen.getByRole('radio', { name: 'library.keepCategory' }))
+    fireEvent.click(screen.getByText('library.tags'))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
+
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
+      ids: ['a'], addTagIds: ['t1'], removeTagIds: [],
+    }))
+  })
+
+  it('does not offer private recommended categories in a shared library', async () => {
+    selectionItems = [item('a', { kind: undefined })]
+    render(<SelectionBar selectedIds={['a']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
+
+    await clickReady('library.batchOrganize')
+    expect(screen.getByText('library.categories')).toBeInTheDocument()
+    expect(screen.queryByText('library.recommendedCategories')).toBeNull()
+  })
+
+  it('closes the organize dialog on Escape', async () => {
+    selectionItems = [item('a')]
+    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+
+    await clickReady('library.batchOrganize')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('prevents edits, duplicate saves, and dismissal while a save is pending', async () => {
+    selectionItems = [item('a')]
+    let resolvePatch: (() => void) | undefined
+    apiPatch.mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePatch = () => resolve({ data: null })
+    }))
+    const onComplete = vi.fn()
+    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
+
+    await clickReady('library.batchOrganize')
+    fireEvent.click(screen.getByRole('radio', { name: 'library.notOnShelf' }))
+    fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
+    expect(screen.getByRole('button', { name: 'library.save' })).toBeDisabled()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'library.close' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(apiPatch).toHaveBeenCalledTimes(1)
+
+    resolvePatch?.()
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(onComplete).toHaveBeenCalledOnce()
   })
 
   it('removes a tag only when every selected entry has it', async () => {

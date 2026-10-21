@@ -90,6 +90,26 @@ function migrateUpTo(db: ReturnType<typeof drizzle<typeof schema>>, before: stri
   }
 }
 
+function migrateAllUpTo(db: ReturnType<typeof drizzle<typeof schema>>, before: string) {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-migrations-all-'))
+  try {
+    fs.mkdirSync(path.join(scratch, 'meta'), { recursive: true })
+    for (const name of fs.readdirSync(migrationsDir).filter((n) => n.endsWith('.sql'))) {
+      fs.copyFileSync(path.join(migrationsDir, name), path.join(scratch, name))
+    }
+    fs.copyFileSync(path.join(migrationsDir, 'meta', '_journal.json'), path.join(scratch, 'meta', '_journal.json'))
+    const journalPath = path.join(scratch, 'meta', '_journal.json')
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { entries: Array<{ tag: string }> }
+    const cutoff = journal.entries.findIndex((entry) => entry.tag === before)
+    if (cutoff < 0) throw new Error(`migration not found: ${before}`)
+    journal.entries = journal.entries.slice(0, cutoff)
+    fs.writeFileSync(journalPath, JSON.stringify(journal, null, 2))
+    migrateAll(db, { migrationsFolder: scratch })
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true })
+  }
+}
+
 function applyLegadoAccessKeyMigration(sqlite: Database.Database) {
   const sql = fs.readFileSync(legadoAccessKeyMigrationFile, 'utf8')
   for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
@@ -959,6 +979,37 @@ describe('version source base migration', () => {
     // that lookup is indexed rather than scanning the whole versions table.
     const indexes = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'library_book_versions'").all() as Array<{ name: string }>
     expect(indexes.map((i) => i.name)).toContain('library_book_versions_source_base_idx')
+    sqlite.close()
+  })
+})
+
+describe('category and shelf separation migration', () => {
+  it('adds shelves without rebuilding the category tree or losing its parent index', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrate(db, { migrationsFolder: migrationsDir })
+    retargetBookIdReferences(db)
+    migrateAllUpTo(db, '0054_category_shelf_separation')
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+      INSERT INTO libraries (id, user_id, type, name, description, created_at, updated_at)
+        VALUES ('lib1', 'u1', 'private', '', '', 1, 1);
+      INSERT INTO library_categories (id, library_id, user_id, name, parent_id, sort_order, created_at, updated_at)
+        VALUES ('root', 'lib1', 'u1', 'Root', NULL, 1, 1, 1), ('child', 'lib1', 'u1', 'Child', 'root', 2, 1, 1);
+    `)
+    migrateAll(db, { migrationsFolder: migrationsDir })
+
+    expect(sqlite.prepare('SELECT id, name, parent_id FROM library_categories ORDER BY id').all())
+      .toEqual([{ id: 'child', name: 'Child', parent_id: 'root' }, { id: 'root', name: 'Root', parent_id: null }])
+    expect(sqlite.prepare('PRAGMA foreign_key_list(library_categories)').all())
+      .toEqual(expect.arrayContaining([expect.objectContaining({ table: 'library_categories', from: 'parent_id', to: 'id', on_delete: 'SET NULL' })]))
+    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'library_categories_parent_idx'").get())
+      .toEqual({ name: 'library_categories_parent_idx' })
+    expect((sqlite.prepare('PRAGMA table_info(library_books)').all() as Array<{ name: string }>).map((column) => column.name))
+      .toContain('shelf_id')
+    expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'library_books_shelf_idx'").get())
+      .toEqual({ name: 'library_books_shelf_idx' })
     sqlite.close()
   })
 })

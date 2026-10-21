@@ -7,7 +7,7 @@ import { blobKeyReferenced, deleteBlobRowIfUnreferenced } from '../../db/blob-re
 import {
   blobs, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
-  libraryMemberships, users as usersTable, tocRules,
+  libraryMemberships, users as usersTable, tocRules, shelves,
   highlights, ideas, bookmarks, aiThreads, textReplacements,
   readingArchives, readingRecords, readingRounds, readingSessions, readingWriteReceipts, bookReviews,
 } from '../../db/schema'
@@ -28,7 +28,7 @@ import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { assertCanContribute, assertLibraryBrowsable, assertMutableContent, ensurePrivateLibrary, getOwnsSourceVersionIds, isLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
 import { assertUserUploadAllowed } from '../auth/auth.service'
-import { libraryOrderBy, classifyWorkHidden, getWorkHiddenDetail, isWorkEffectivelyHidden, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
+import { categoryFilter, libraryOrderBy, classifyWorkHidden, getWorkHiddenDetail, isWorkEffectivelyHidden, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
 import { resolveSharedVersionRead } from '../libraries/library-access'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
@@ -39,12 +39,13 @@ import { capturePrivateArchiveSnapshots } from '../../lib/personal-book-archive'
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey, detectImageExtension, blobKey, generateCoverThumbnail } from '../../lib/cover'
 import { log } from '../../lib/logger'
-import { LibrarySearchError, normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
+import { categoryTemplatePath, LibrarySearchError, normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type BookMembershipReq, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
 
 import { compileSearchExpression } from '../libraries/search-expression'
 
 import { getReaderBookSettings } from './reader-settings.service'
 import { readTxtEpubCandidate, sameEpubArchive } from './txt-epub-correspondence'
+import { resolveOrCreateCategoryPath } from '../libraries/library-category-path'
 
 /**
  * The effective TOC preset for a book: the pinned rule id in books.meta
@@ -133,7 +134,7 @@ export function scoreTocRules(userId: string, sample: string): typeof tocRules.$
   return pickedId ? rules.find((r) => r.id === pickedId) ?? null : null
 }
 
-export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string, showHidden?: boolean, expression?: string) {
+export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string, showHidden?: boolean, expression?: string, categoryId?: string) {
   const db = getDb()
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
@@ -168,6 +169,12 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
         AND search_category.library_id = ${library.id}
         AND search_category.name LIKE ${pattern} ESCAPE '!'
     )`
+    const shelfMatch = sql`EXISTS (
+      SELECT 1 FROM ${shelves} AS search_shelf
+      WHERE search_shelf.id = ${libraryBooks.shelfId}
+        AND search_shelf.library_id = ${library.id}
+        AND search_shelf.name LIKE ${pattern} ESCAPE '!'
+    )`
     const tagMatch = sql`EXISTS (
       SELECT 1
       FROM ${libraryBookTags} AS search_book_tag
@@ -192,6 +199,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
       OR ${revMeta('$.bookmeta.identifier')} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.source')} LIKE ${pattern} ESCAPE '!'
       OR ${categoryMatch}
+      OR ${shelfMatch}
       OR ${tagMatch}
     )`
   }
@@ -203,11 +211,15 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   if (readStatus) {
     conditions.push(eq(effReadStatus, readStatus))
   }
-  // 'none' sentinel filters uncategorized books (categoryId IS NULL)
+  // The two 'none' sentinels are independent: shelf placement is not category metadata.
   if (shelfId === 'none') {
-    conditions.push(isNull(libraryBooks.categoryId))
+    conditions.push(isNull(libraryBooks.shelfId))
   } else if (shelfId) {
-    conditions.push(eq(libraryBooks.categoryId, shelfId))
+    conditions.push(eq(libraryBooks.shelfId, shelfId))
+  }
+  const categoryCondition = categoryFilter(categoryId, 'subtree', library.id)
+  if (categoryCondition) {
+    conditions.push(categoryCondition)
   }
   if (tagId) {
     const sub = db.select({ libraryBookId: libraryBookTags.libraryBookId }).from(libraryBookTags).where(eq(libraryBookTags.tagId, tagId))
@@ -231,7 +243,8 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     conditions.push(compileSearchExpression(expression, library.id, false, (node) => {
       if (node.kind === 'text') return textMatch(node.value)
       if (node.field === 'tag') return sql`EXISTS (SELECT 1 FROM ${libraryBookTags} WHERE ${libraryBookTags.libraryBookId} = ${libraryBooks.id} AND ${libraryBookTags.tagId} = ${node.id})`
-      if (node.field === 'shelf') return eq(libraryBooks.categoryId, node.id!)
+      if (node.field === 'shelf') return node.id === 'none' ? isNull(libraryBooks.shelfId) : eq(libraryBooks.shelfId, node.id!)
+      if (node.field === 'category') return node.id === 'none' ? isNull(libraryBooks.categoryId) : eq(libraryBooks.categoryId, node.id!)
       if (node.field === 'format') return eq(bookVersions.format, node.value as BookFormat)
       if (node.field === 'status') return eq(effReadStatus, node.value)
       const predicate = sql`(${effAuthor} = ${node.value} OR EXISTS (SELECT 1 FROM json_each(coalesce(${libraryBookVersions.authors}, ${libraryBooks.authors}, '[]')) WHERE value = ${node.value}))`
@@ -279,8 +292,10 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     createdAt: libraryBooks.createdAt,
     updatedAt: libraryBooks.updatedAt,
     deletedAt: libraryBooks.deletedAt,
-    shelfId: libraryBooks.categoryId,
-    shelfName: libraryCategories.name,
+    shelfId: libraryBooks.shelfId,
+    shelfName: shelves.name,
+    categoryId: libraryBooks.categoryId,
+    categoryName: libraryCategories.name,
     // Work-level hide; surfaced so the vault reveal mode can badge rows.
     hidden: libraryBooks.hidden,
     // 7.7: a B carries its single source; A/C rows resolve to null.
@@ -295,6 +310,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
     .leftJoin(bookStates, and(eq(bookStates.bookVersionId, bookVersions.id), eq(bookStates.userId, userId)))
     .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
+    .leftJoin(shelves, eq(libraryBooks.shelfId, shelves.id))
     .where(where)
   // Pin-first is meaningless in the trash; there the chosen sort rules alone.
   const rows = baseQuery()
@@ -306,6 +322,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
     .leftJoin(bookStates, and(eq(bookStates.bookVersionId, bookVersions.id), eq(bookStates.userId, userId)))
     .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
+    .leftJoin(shelves, eq(libraryBooks.shelfId, shelves.id))
     .where(where).get()
   // Tag names are fetched per page in a second query: joining tags into
   // the paginated query would multiply rows per book and break LIMIT/OFFSET.
@@ -361,7 +378,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     // Effective hide for badging: without reveal every row here is visible
     // by construction, so a reason only ever fires in reveal mode.
     const detail = taxonomy
-      ? classifyWorkHidden({ hidden: b.hidden, categoryId: b.shelfId }, taxonomy, tagIdsByBook.get(_libraryBookId) ?? [])
+      ? classifyWorkHidden({ hidden: b.hidden, shelfId: b.shelfId, categoryId: b.categoryId }, taxonomy, tagIdsByBook.get(_libraryBookId) ?? [])
       : { reason: null as HiddenReason | null }
     return {
       ...b,
@@ -612,17 +629,29 @@ export async function cleanupStagedCover(coverKey: string): Promise<void> {
 export async function uploadBook(
   userId: string,
   file: File,
-  membership?: { shelfId?: string | null; tagIds?: string[] },
+  membership?: { shelfId?: string | null; categoryId?: string | null; categoryTemplateKey?: string; tagIds?: string[] },
   opts?: { normalizeTitle?: boolean; allowCorresponding?: boolean },
 ) {
   assertUserUploadAllowed(userId)
+  if (membership?.categoryId !== undefined && membership.categoryTemplateKey !== undefined) {
+    throw new AppError('VALIDATION_ERROR', 'Choose a category or a recommendation')
+  }
   const db = getDb()
   const library = { id: ensurePrivateLibrary(db, userId) }
   const tagIds = [...new Set(membership?.tagIds ?? [])]
   if (membership?.shelfId) {
+    const shelf = db.select({ id: shelves.id }).from(shelves)
+      .where(and(eq(shelves.id, membership.shelfId), eq(shelves.libraryId, library.id))).get()
+    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
+  }
+  if (membership?.categoryId) {
     const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, membership.shelfId), eq(libraryCategories.libraryId, library.id))).get()
-    if (!category) throw new AppError('SHELF_NOT_FOUND')
+      .where(and(eq(libraryCategories.id, membership.categoryId), eq(libraryCategories.libraryId, library.id))).get()
+    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
+  }
+  const templatePath = membership?.categoryTemplateKey ? categoryTemplatePath(membership.categoryTemplateKey) : undefined
+  if (membership?.categoryTemplateKey && !templatePath) {
+    throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
   }
   if (tagIds.length > 0) {
     const existingTags = db.select({ count: sql<number>`count(*)` }).from(libraryTags)
@@ -694,7 +723,8 @@ export async function uploadBook(
         tx.insert(blobs).values({ key: upload.coverKey, size: upload.coverSize, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
       }
       tx.insert(libraryBooks).values({
-        id: libraryBookId, libraryId: library.id, userId, categoryId: membership?.shelfId ?? null,
+        id: libraryBookId, libraryId: library.id, userId, shelfId: membership?.shelfId ?? null,
+        categoryId: membership?.categoryId ?? (templatePath ? resolveOrCreateCategoryPath(tx, library.id, userId, templatePath) : null),
         title: upload.title, author: upload.author, authors: upload.authors, description: upload.description,
         coverKey: upload.coverKey, createdAt: now, updatedAt: now,
       }).run()
@@ -710,7 +740,10 @@ export async function uploadBook(
         tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).run()
       }
       if (membership?.shelfId) {
-        tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, membership.shelfId)).run()
+        tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, membership.shelfId)).run()
+      }
+      if (membership?.categoryId) {
+        tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, membership.categoryId)).run()
       }
     })
   } catch (err) {
@@ -735,6 +768,7 @@ export async function uploadCatalogBook(
   opts?: {
     libraryBookId?: string
     categoryId?: string
+    shelfId?: string
     tagIds?: string[]
     name?: string
     title?: string
@@ -746,7 +780,14 @@ export async function uploadCatalogBook(
   const db = getDb()
   // Owner/admin only by default; members when the library opened uploads.
   await assertCanContribute(userId, libraryId)
+  const libraryType = db.select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()?.type
   const tagIds = [...new Set(opts?.tagIds ?? [])]
+  if (opts?.shelfId) {
+    if (libraryType !== 'private') throw new AppError('VALIDATION_ERROR', 'Shelves are only available in private libraries')
+    const shelf = db.select({ id: shelves.id }).from(shelves)
+      .where(and(eq(shelves.id, opts.shelfId), eq(shelves.libraryId, libraryId))).get()
+    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
+  }
   if (opts?.categoryId) {
     const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
       .where(and(eq(libraryCategories.id, opts.categoryId), eq(libraryCategories.libraryId, libraryId))).get()
@@ -810,7 +851,7 @@ export async function uploadCatalogBook(
           ? normalizeAuthors({ author: opts?.author, authors: opts?.authors })
           : { author: upload.author, authors: upload.authors }
         tx.insert(libraryBooks).values({
-          id: libraryBookId, libraryId, userId, categoryId: opts?.categoryId ?? null,
+          id: libraryBookId, libraryId, userId, shelfId: opts?.shelfId ?? null, categoryId: opts?.categoryId ?? null,
           title: opts?.title ?? upload.title, author: workAuthors.author, authors: workAuthors.authors,
           description: upload.description, coverKey: upload.coverKey, createdAt: now, updatedAt: now,
         }).run()
@@ -830,6 +871,9 @@ export async function uploadCatalogBook(
       }
       if (opts?.categoryId) {
         tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, opts.categoryId)).run()
+      }
+      if (opts?.shelfId) {
+        tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, opts.shelfId)).run()
       }
     })
   } catch (err) {
@@ -1314,7 +1358,11 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     pinnedAt: lbv.pinnedAt ?? null,
     lastReadAt: state?.lastReadAt ?? null,
     deletedAt: lb.deletedAt ?? null,
-    shelfId: lb.categoryId,
+    shelfId: lb.shelfId,
+    categoryId: lb.categoryId,
+    categoryName: lb.categoryId
+      ? db.select({ name: libraryCategories.name }).from(libraryCategories).where(eq(libraryCategories.id, lb.categoryId)).get()?.name ?? null
+      : null,
     // Work-level hide; surfaced so the vault reveal mode can badge the row.
     hidden: lb.hidden,
     effectiveHidden: hiddenDetail.reason !== null,
@@ -1344,9 +1392,9 @@ export function getBookMembership(userId: string, bookId: string, shelfId: strin
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
   const shelfName = shelfId && library
-    ? db.select({ name: libraryCategories.name })
-      .from(libraryCategories)
-      .where(and(eq(libraryCategories.id, shelfId), eq(libraryCategories.libraryId, library.id)))
+    ? db.select({ name: shelves.name })
+      .from(shelves)
+      .where(and(eq(shelves.id, shelfId), eq(shelves.libraryId, library.id)))
       .get()?.name ?? null
     : null
   const tagRows = library
@@ -3798,27 +3846,56 @@ export function resolveLibraryBook(userId: string, bookId: string): { libraryId:
   return { libraryId: library.id, libraryBookId: lbv.libraryBookId, libraryBookVersionId: lbv.id, kind: lbv.kind }
 }
 
-export async function setBookShelf(userId: string, bookId: string, shelfId: string | null) {
+export async function setBookMembership(userId: string, bookId: string, membership: BookMembershipReq) {
+  if (membership.categoryId !== undefined && membership.categoryTemplateKey !== undefined) {
+    throw new AppError('VALIDATION_ERROR', 'Choose a category or a recommendation')
+  }
   const db = getDb()
   const { libraryId, libraryBookId } = resolveLibraryBook(userId, bookId)
   const now = Date.now()
-  if (shelfId !== null) {
+  if (membership.shelfId) {
+    const shelf = db.select({ id: shelves.id }).from(shelves)
+      .where(and(eq(shelves.id, membership.shelfId), eq(shelves.libraryId, libraryId))).get()
+    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
+  }
+  if (membership.categoryId) {
     const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, shelfId), eq(libraryCategories.libraryId, libraryId))).get()
-    if (!category) throw new AppError('SHELF_NOT_FOUND')
+      .where(and(eq(libraryCategories.id, membership.categoryId), eq(libraryCategories.libraryId, libraryId))).get()
+    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
   }
-  const previous = db.select({ categoryId: libraryBooks.categoryId }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
-  db.update(libraryBooks).set({ categoryId: shelfId, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
-  // Membership-change time, mirroring the legacy trigger semantics.
-  for (const touched of new Set([previous?.categoryId, shelfId])) {
-    if (touched) db.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, touched)).run()
-  }
+  const templatePath = membership.categoryTemplateKey ? categoryTemplatePath(membership.categoryTemplateKey) : undefined
+  if (membership.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
+  db.transaction((tx) => {
+    const existing = tx.select({ shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId })
+      .from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+    if (!existing) throw new AppError('BOOK_NOT_FOUND')
+    const set: Partial<typeof libraryBooks.$inferInsert> = { updatedAt: now }
+    if (membership.shelfId !== undefined) set.shelfId = membership.shelfId
+    let categoryId = membership.categoryId
+    if (templatePath) categoryId = resolveOrCreateCategoryPath(tx, libraryId, userId, templatePath)
+    if (categoryId !== undefined) set.categoryId = categoryId
+    tx.update(libraryBooks).set(set).where(eq(libraryBooks.id, libraryBookId)).run()
+    if (membership.shelfId !== undefined) {
+      for (const touched of new Set([existing.shelfId, membership.shelfId])) {
+        if (touched) tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, touched)).run()
+      }
+    }
+    if (categoryId !== undefined) {
+      for (const touched of new Set([existing.categoryId, categoryId])) {
+        if (touched) tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, touched)).run()
+      }
+    }
+  })
+}
+
+export async function setBookShelf(userId: string, bookId: string, shelfId: string | null) {
+  return setBookMembership(userId, bookId, { shelfId })
 }
 
 export async function getBookShelf(userId: string, bookId: string) {
   const db = getDb()
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
-  return db.select({ categoryId: libraryBooks.categoryId }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()?.categoryId ?? null
+  return db.select({ shelfId: libraryBooks.shelfId }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()?.shelfId ?? null
 }
 
 export async function setBookTags(userId: string, bookId: string, tagIds: string[]) {
@@ -3866,6 +3943,7 @@ export function getPrivateBatchSelection(userId: string, ids: string[]): BatchSe
     id: libraryBookVersions.bookVersionId,
     libraryBookId: libraryBooks.id,
     categoryId: libraryBooks.categoryId,
+    shelfId: libraryBooks.shelfId,
     hidden: libraryBooks.hidden,
     pinnedAt: libraryBookVersions.pinnedAt,
     kind: libraryBookVersions.kind,
@@ -3884,6 +3962,7 @@ export function getPrivateBatchSelection(userId: string, ids: string[]): BatchSe
   const byId = new Map(rows.map((row) => [row.id, {
     id: row.id,
     categoryId: row.categoryId,
+    shelfId: row.shelfId,
     tagIds: tagIdsByWork.get(row.libraryBookId) ?? [],
     hidden: row.hidden,
     pinnedAt: row.pinnedAt,
@@ -3894,6 +3973,9 @@ export function getPrivateBatchSelection(userId: string, ids: string[]): BatchSe
 }
 
 export function organizePrivateBatch(userId: string, input: BatchOrganizeReq) {
+  if (input.categoryId !== undefined && input.categoryTemplateKey !== undefined) {
+    throw new AppError('VALIDATION_ERROR', 'Choose a category or a recommendation')
+  }
   const db = getDb()
   const libraryId = ensurePrivateLibrary(db, userId)
   const ids = [...new Set(input.ids)]
@@ -3901,8 +3983,12 @@ export function organizePrivateBatch(userId: string, input: BatchOrganizeReq) {
     .from(libraryBookVersions).innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
     .where(and(eq(libraryBooks.libraryId, libraryId), inArray(libraryBookVersions.bookVersionId, ids))).all()
   if (rows.length !== ids.length) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  if (input.shelfId !== undefined && input.shelfId !== null && !db.select({ id: shelves.id }).from(shelves)
+    .where(and(eq(shelves.id, input.shelfId), eq(shelves.libraryId, libraryId))).get()) throw new AppError('SHELF_NOT_FOUND')
   if (input.categoryId !== undefined && input.categoryId !== null && !db.select({ id: libraryCategories.id }).from(libraryCategories)
-    .where(and(eq(libraryCategories.id, input.categoryId), eq(libraryCategories.libraryId, libraryId))).get()) throw new AppError('SHELF_NOT_FOUND')
+    .where(and(eq(libraryCategories.id, input.categoryId), eq(libraryCategories.libraryId, libraryId))).get()) throw new AppError('CATEGORY_NOT_FOUND')
+  const templatePath = input.categoryTemplateKey ? categoryTemplatePath(input.categoryTemplateKey) : undefined
+  if (input.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
   const addTagIds = [...new Set(input.addTagIds)]
   const removeTagIds = [...new Set(input.removeTagIds)]
   if (addTagIds.some((id) => removeTagIds.includes(id))) throw new AppError('VALIDATION_ERROR', 'Conflicting tag changes')
@@ -3915,14 +4001,30 @@ export function organizePrivateBatch(userId: string, input: BatchOrganizeReq) {
   const workIds = rows.map((row) => row.libraryBookId)
   const now = Date.now()
   db.transaction((tx) => {
-    if (input.categoryId !== undefined) tx.update(libraryBooks)
-      .set({ categoryId: input.categoryId, updatedAt: now })
-      .where(inArray(libraryBooks.id, workIds)).run()
+    const touchedShelfIds = new Set<string>()
+    const touchedCategoryIds = new Set<string>()
+    if (input.shelfId !== undefined) {
+      for (const row of tx.select({ shelfId: libraryBooks.shelfId }).from(libraryBooks).where(inArray(libraryBooks.id, workIds)).all()) {
+        if (row.shelfId) touchedShelfIds.add(row.shelfId)
+      }
+      if (input.shelfId) touchedShelfIds.add(input.shelfId)
+      tx.update(libraryBooks).set({ shelfId: input.shelfId, updatedAt: now }).where(inArray(libraryBooks.id, workIds)).run()
+    }
+    if (input.categoryId !== undefined || templatePath) {
+      for (const row of tx.select({ categoryId: libraryBooks.categoryId }).from(libraryBooks).where(inArray(libraryBooks.id, workIds)).all()) {
+        if (row.categoryId) touchedCategoryIds.add(row.categoryId)
+      }
+      const categoryId = templatePath ? resolveOrCreateCategoryPath(tx, libraryId, userId, templatePath) : input.categoryId
+      tx.update(libraryBooks).set({ categoryId, updatedAt: now }).where(inArray(libraryBooks.id, workIds)).run()
+      if (categoryId) touchedCategoryIds.add(categoryId)
+    }
     for (const tagId of removeTagIds) tx.delete(libraryBookTags)
       .where(and(inArray(libraryBookTags.libraryBookId, workIds), eq(libraryBookTags.tagId, tagId))).run()
     for (const tagId of addTagIds) tx.insert(libraryBookTags)
       .values(workIds.map((libraryBookId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
     for (const tagId of touchedTagIds) tx.update(libraryTags).set({ updatedAt: now }).where(eq(libraryTags.id, tagId)).run()
+    for (const shelfId of touchedShelfIds) tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, shelfId)).run()
+    for (const categoryId of touchedCategoryIds) tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, categoryId)).run()
   })
   return { count: ids.length }
 }

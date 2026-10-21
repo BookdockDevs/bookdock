@@ -26,9 +26,9 @@ import MetadataFieldDialog from './MetadataFieldDialog'
 import type { EditableMetadataField } from './metadata-field'
 import MoreActionsMenu, { type MoreActionsMenuItem } from './MoreActionsMenu'
 import ReadStatusChip from './ReadStatusChip'
-import ShelfChip from './ShelfChip'
 import { isMachineIdentifier, formatLanguage, formatWordCount } from './types'
 import { ActionIcon, FilterChip, GroupLabel } from './ui'
+import TaxonomyIcon from '../TaxonomyIcon'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import ReviewPreviewSection from '@/features/reviews/components/ReviewPreviewSection'
 import { useReviewBookContext } from '@/features/reviews/hooks/useReviews'
@@ -38,10 +38,7 @@ interface BookDetailViewProps {
   book: BookListItem
   readOnly?: boolean
   detail?: BookDetailRes
-  shelfName?: string
-  currentShelfId: string | null
-  shelfMembershipReady: boolean
-  shelfMembershipError?: boolean
+  categoryName?: string
   memberTags: Array<{ id: string; name: string }>
   isLoading?: boolean
   moreActions?: MoreActionsMenuItem[]
@@ -59,10 +56,7 @@ export default function BookDetailView({
   book,
   readOnly = false,
   detail,
-  shelfName,
-  currentShelfId,
-  shelfMembershipReady,
-  shelfMembershipError = false,
+  categoryName,
   memberTags,
   isLoading,
   moreActions,
@@ -180,9 +174,12 @@ export default function BookDetailView({
     }
   }
 
-  function goToFilter(search: { shelf?: string; tag?: string; author?: string; series?: string; status?: ReadStatus }) {
+  function goToFilter(search: { shelf?: string; category?: string; tag?: string; author?: string; series?: string; status?: ReadStatus }) {
     onClose()
-    void navigate({ to: '/', search })
+    const taxonomy = search.category !== undefined || search.tag !== undefined
+      ? { shelf: undefined, category: search.category, tag: search.tag }
+      : {}
+    void navigate({ to: '/', search: { ...taxonomy, ...search } })
   }
 
   const hasProgress = displayBook.progress != null && displayBook.progress > 0
@@ -285,11 +282,8 @@ export default function BookDetailView({
                 </span>
               </span>
             )}
-            {!readOnly && (
-              <ShelfChip bookId={book.id} shelfId={currentShelfId} shelfName={shelfName} membershipReady={shelfMembershipReady} membershipError={shelfMembershipError} onFilter={() => goToFilter({ shelf: currentShelfId ?? 'none' })} />
-            )}
-            {readOnly && shelfName && currentShelfId && (
-              <FilterChip prefix="📁" label={shelfName} onClick={() => goToFilter({ shelf: currentShelfId })} />
+            {categoryName && displayBook.categoryId !== undefined && (
+              <FilterChip icon={<TaxonomyIcon kind="category" size={13} className="text-stone-400" />} label={categoryName} onClick={() => goToFilter({ category: displayBook.categoryId ?? 'none' })} />
             )}
             {memberTags.map((tag) => (
               <FilterChip key={tag.id} prefix="#" label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />

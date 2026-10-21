@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../db/migration-stage'
+import { migrateBeforeBookRetirement as migrate, migrateBeforeBookRetirementIncluding } from '../db/migration-stage'
 import * as schema from '../db/schema'
 
 export function createTestDb() {
@@ -9,5 +9,14 @@ export function createTestDb() {
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
   migrate(db, { migrationsFolder: './src/db/migrations' })
+  return db
+}
+
+export function createTestDbWithShelves() {
+  const sqlite = new Database(':memory:')
+  sqlite.pragma('journal_mode = WAL')
+  sqlite.pragma('foreign_keys = ON')
+  const db = drizzle(sqlite, { schema })
+  migrateBeforeBookRetirementIncluding(db, { migrationsFolder: './src/db/migrations' }, [])
   return db
 }
