@@ -100,7 +100,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     if (activeLibraryId && panel === 'shelves') remember({ panel: 'categories' })
   }, [activeLibraryId, panel, remember])
   useEffect(() => {
-    if (directory && directory !== panel && (activeLibraryId || directory !== 'shelves')) {
+    if (directory && directory !== panel && (!activeLibraryId || directory !== 'shelves')) {
       remember({ panel: directory })
     }
   }, [directory, panel, activeLibraryId, remember])

@@ -126,6 +126,8 @@ export default function Reader() {
   const footerHotRef = useRef(false)
   const headerLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const footerLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [readerModalOpen, setReaderModalOpen] = useState(false)
+  const readerModalOpenRef = useRef(false)
 
   const onHeaderEnter = useCallback(() => {
     if (headerLeaveTimerRef.current) {
@@ -157,6 +159,22 @@ export default function Reader() {
     }, 180)
   }, [])
 
+  const clearChromeSummon = useCallback(() => {
+    headerHotRef.current = false
+    footerHotRef.current = false
+    setHeaderSummon(false)
+    setFooterSummon(false)
+    setCornerDwell(false)
+    if (headerLeaveTimerRef.current) {
+      clearTimeout(headerLeaveTimerRef.current)
+      headerLeaveTimerRef.current = null
+    }
+    if (footerLeaveTimerRef.current) {
+      clearTimeout(footerLeaveTimerRef.current)
+      footerLeaveTimerRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     return () => {
       if (headerLeaveTimerRef.current) clearTimeout(headerLeaveTimerRef.current)
@@ -169,8 +187,26 @@ export default function Reader() {
   const isTouch = useIsTouch()
   const [isSelectingText, setIsSelectingText] = useState(false)
   useEffect(() => {
+    const syncReaderModal = () => {
+      const open = document.querySelector('[data-reader-modal], [aria-modal="true"]') !== null
+      if (readerModalOpenRef.current === open) return
+      readerModalOpenRef.current = open
+      setReaderModalOpen(open)
+      if (open) clearChromeSummon()
+    }
+    syncReaderModal()
+    if (typeof MutationObserver === 'undefined') return
+    const observer = new MutationObserver(syncReaderModal)
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [clearChromeSummon])
+  useEffect(() => {
     if (isTouch) return
     const updateHotZones = (clientX: number, clientY: number, buttons: number, hasSelection = false, target?: EventTarget | null) => {
+      if (readerModalOpen || document.querySelector('[data-reader-modal], [aria-modal="true"]')) {
+        clearChromeSummon()
+        return
+      }
       if (buttons || hasSelection || window.getSelection()?.type === 'Range') return
       const canvas = document.querySelector('[data-reader-canvas]')
       const rect = canvas?.getBoundingClientRect()
@@ -211,7 +247,7 @@ export default function Reader() {
       headerHotRef.current = false
       footerHotRef.current = false
     }
-  }, [isTouch, onHeaderEnter, onHeaderLeave, onFooterEnter, onFooterLeave])
+  }, [clearChromeSummon, isTouch, onHeaderEnter, onHeaderLeave, onFooterEnter, onFooterLeave, readerModalOpen])
   useEffect(() => {
     function onPointerUp() {
       setIsSelectingText(false)
@@ -230,8 +266,8 @@ export default function Reader() {
     return () => window.removeEventListener('pointerdown', onPointerDown)
   }, [])
   const footerVisibleRef = useRef(false)
-  const footerVisible = chromePinned || footerSummon || (footerVisibleRef.current && cornerDwell)
-  const headerVisible = chromePinned || headerSummon || settingsOpen || ttsOpen || autoReadingOpen
+  const footerVisible = !readerModalOpen && (chromePinned || footerSummon || (footerVisibleRef.current && cornerDwell))
+  const headerVisible = !readerModalOpen && (chromePinned || headerSummon || settingsOpen || ttsOpen || autoReadingOpen)
   useEffect(() => {
     footerVisibleRef.current = footerVisible
   }, [footerVisible])
@@ -1912,7 +1948,11 @@ export default function Reader() {
         )}
         <ShareCardDialog bookId={id} />
         {replaceTarget && (
-          <Modal title={_('annotation.replaceSelection')} onClose={() => setReplaceTarget(null)}>
+          <Modal
+            title={_('annotation.replaceSelection')}
+            onClose={() => setReplaceTarget(null)}
+            containerProps={{ 'data-reader-modal': '' }}
+          >
             <ReplacementForm
               bookId={id}
               selection={replaceTarget}

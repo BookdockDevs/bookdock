@@ -62,6 +62,7 @@ describe('BookReplacementsDialog', () => {
     // to body, so it isn't under the render container.
     const root = document.body.querySelector('[data-settings-toggle]')
     expect(root).not.toBeNull()
+    expect(root).toHaveAttribute('data-reader-modal', '')
     expect(root).toHaveClass('fixed', 'inset-0')
   })
 

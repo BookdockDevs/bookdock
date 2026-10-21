@@ -28,6 +28,9 @@ interface ModalProps {
   children: ReactNode
 }
 
+let activeModalCount = 0
+let savedBodyOverflow = ''
+
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
@@ -72,6 +75,11 @@ export default function Modal({
     : 'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
 
   useEffect(() => {
+    if (activeModalCount === 0) {
+      savedBodyOverflow = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+    }
+    activeModalCount += 1
     const dialog = dialogRef.current
     if (dialog && !dialog.contains(document.activeElement)) {
       const focusable = dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
@@ -137,6 +145,10 @@ export default function Modal({
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
+      activeModalCount = Math.max(0, activeModalCount - 1)
+      if (activeModalCount === 0) {
+        document.body.style.overflow = savedBodyOverflow
+      }
       if (previousActiveElement && document.contains(previousActiveElement)) {
         previousActiveElement.focus()
       }
@@ -148,10 +160,10 @@ export default function Modal({
   return createPortal(
     <div
       {...containerProps}
-      className={`fixed inset-0 z-50 flex justify-center overscroll-none bg-black/50 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm ${placement} ${dialogLayout.className} animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
+      data-reader-modal={reader ? '' : containerProps?.['data-reader-modal']}
+      className={`fixed inset-0 z-50 flex justify-center overscroll-none bg-black/50 pb-[env(safe-area-inset-bottom)] ${placement} ${dialogLayout.className} animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
       style={{ ...dialogLayout.style, ...containerProps?.style }}
       onClick={onClose}
-      onWheel={(event) => { if (event.target === event.currentTarget) event.preventDefault() }}
     >
       <div
         ref={dialogRef}
@@ -161,7 +173,6 @@ export default function Modal({
         tabIndex={-1}
         className={`flex w-full ${width} ${panelShape} flex-col overflow-hidden shadow-xl outline-none ${reader ? 'bg-[var(--bd-read-bg)] text-[var(--bd-read-text)]' : 'bg-white dark:bg-stone-900'} animate-modal-panel ${panelClassName}`}
         onClick={(e) => e.stopPropagation()}
-        onWheel={(event) => event.stopPropagation()}
       >
         {hideHeader ? (
           <h2 id={titleId} className="sr-only">{title}</h2>

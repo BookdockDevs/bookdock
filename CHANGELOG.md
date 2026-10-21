@@ -16,6 +16,8 @@ All notable changes to Bookdock are documented here.
 
 - The personal-library sidebar separates shelves, categories and tags. Books without a shelf appear under Not on a shelf, independently of Uncategorized books.
 - Book details display and edit categories and tags; shelf organization remains available from the library and batch organizer.
+- Redesigned book detail category and tag pickers into compact popover attributes: category picker supports two-level hierarchy with viewport-aware auto-flip, inline category creation, and collapsible template suggestions; tag picker uses removable selected pills paired with a searchable multi-select popover and inline creation.
+- Modal dialogs remove non-passive wheel blockers and full-screen backdrop blurs to restore native compositor-thread smooth scrolling; broad scrollbar hover pseudo-selectors are confined to dedicated scroll containers to reduce style recalculation churn.
 - Collecting a shared book copies its category path and merges tags by name into your library, without copying hidden or pinned settings or following later source changes.
 - Batch organization uses consistent shelf, category and tag choices, explicit keep-unchanged options, compact category trees, and fixed dialog actions.
 - Archived notes, reviews and reading statistics leave out a book as soon as you choose personal-data cleanup, and come back when you restore it from the trash.
@@ -26,6 +28,8 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Reader immediately clears and suppresses header and footer summon states while any fullscreen modal or overlay is active, preventing accidental toolbar reveal when moving the mouse near top or bottom edges.
+- Opening replacement rules from reader settings no longer leaves the reader header stuck open.
 - Switching between shelf, category and tag navigation clears the previous dimension and pagination while retaining additional filters and existing link meanings.
 - Category and tag reading totals use one authorized library entry per version, respect private-library metadata and visibility, and avoid counting duplicate links. Retained history without a current library entry remains included.
 - Empty shelf, category and tag views use consistent hints; empty shared tags are labeled correctly, and failed category loads show retry instead of appearing empty.
@@ -800,6 +804,8 @@ All notable changes to Bookdock are documented here.
 
 - 私库侧栏分为书架、分类与标签；未分配书架的书籍显示在“未入架”，与“未分类”独立。
 - 书籍详情展示和编辑分类与标签；书架整理继续从书库首页和批量整理入口操作。
+- 书籍详情中的分类与标签编辑交互重构为紧凑属性弹层：分类选择器支持两级层级树与视口自适应翻转、行内新建分类以及折叠式推荐分类；标签选择器支持已选标签直接快捷移除，结合支持即时过滤和行内新建的多选弹层。
+- 优化模态弹窗滚动与渲染性能：移除阻塞主线程平滑滚动的非被动 onWheel 拦截与全屏背景模糊，收敛全局通配符高频伪类以消除滚动时的样式重算掉帧。
 - 收藏共享书籍时，按分类路径映射到私库、按名称合并标签，不复制隐藏或置顶状态，也不自动跟随来源更新。
 - 批量整理统一书架、分类与标签的选择样式，明确提供保持不变的选项，分类树更紧凑，弹窗底部操作保持固定。
 - 选择清理个人数据后，归档笔记、书评与阅读统计会先隐藏该书；从回收站恢复后重新出现。
@@ -810,6 +816,8 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 阅读器在打开任意全屏弹窗或遮罩时，立即清除并静默顶栏/底栏召唤状态，避免鼠标滑动到页面边缘时误触发栏位显隐。
+- 从阅读设置打开替换规则弹窗时，顶栏不再因设置态残留而保持常显。
 - 切换书架、分类与标签导航时清除前一维度条件及分页，保留附加筛选与旧链接语义。
 - 分类与标签阅读统计为每个版本选定唯一合法馆藏，遵循私库元数据和可见性规则，避免重复关联造成重复计时；没有当前馆藏的保留历史仍会计入。
 - 书架、分类与标签空状态统一；共享库空标签文案恢复正确，分类加载失败时提供重试，不再误显示为空。

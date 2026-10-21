@@ -157,6 +157,7 @@ describe('ShareCardDialog', () => {
     const overlay = saveButton.closest('[class*="fixed"]')
 
     expect(overlay).not.toBeNull()
+    expect(overlay).toHaveAttribute('data-reader-modal', '')
     expect(container.contains(overlay)).toBe(false)
     expect(document.body.contains(overlay)).toBe(true)
   })

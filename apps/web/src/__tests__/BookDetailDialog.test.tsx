@@ -225,6 +225,7 @@ describe('BookDetailDialog classification editor', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '分类' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Fiction' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
@@ -237,10 +238,11 @@ describe('BookDetailDialog classification editor', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '分类' }))
     const uncategorized = screen.getByRole('radio', { name: '未分类' })
-    expect(uncategorized).toBeChecked()
+    expect(uncategorized).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(uncategorized)
-    expect(uncategorized).toBeChecked()
+    expect(screen.getByRole('button', { name: '分类' })).toBeInTheDocument()
   })
 
   it('saves uncategorized as categoryId null', async () => {
@@ -248,7 +250,9 @@ describe('BookDetailDialog classification editor', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '分类' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Fiction' }))
+    fireEvent.click(screen.getByRole('button', { name: '分类' }))
     fireEvent.click(screen.getByRole('radio', { name: '未分类' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
@@ -263,10 +267,11 @@ describe('BookDetailDialog tag chips', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    const tag = screen.getByRole('button', { name: '小说' })
-    expect(tag).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    const tag = screen.getByRole('checkbox', { name: '小说' })
+    expect(tag).toHaveAttribute('aria-checked', 'false')
     fireEvent.click(tag)
-    expect(tag).toHaveAttribute('aria-pressed', 'true')
+    expect(tag).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
@@ -278,15 +283,12 @@ describe('BookDetailDialog tag chips', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建标签' }))
-    const input = screen.getByPlaceholderText('新标签名称')
+    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    const input = screen.getByPlaceholderText('搜索标签…')
     fireEvent.change(input, { target: { value: '科幻' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
     await waitFor(() => expect(createTagMutate).toHaveBeenCalledWith('科幻'))
-    // the input collapses back to the new-tag chip after a successful create
-    await waitFor(() => expect(screen.getByRole('button', { name: '+ 新建标签' })).toBeInTheDocument())
-
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => {
       expect(apiPut).toHaveBeenCalledWith('/books/book-1/tags', { tagIds: ['tag-new'] })
@@ -297,30 +299,27 @@ describe('BookDetailDialog tag chips', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建标签' }))
-    const input = screen.getByPlaceholderText('新标签名称')
+    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    const input = screen.getByPlaceholderText('搜索标签…')
     fireEvent.change(input, { target: { value: '科幻' } })
     fireEvent.keyDown(input, { key: 'Escape' })
 
     expect(createTagMutate).not.toHaveBeenCalled()
-    expect(screen.queryByPlaceholderText('新标签名称')).toBeNull()
-    expect(screen.getByRole('button', { name: '+ 新建标签' })).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('搜索标签…')).toBeNull()
+    expect(screen.getByRole('button', { name: '新建标签' })).toBeInTheDocument()
   })
 
   it('cancels the inline tag input when clicking away', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建标签' }))
-    const input = screen.getByPlaceholderText('新标签名称')
+    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    const input = screen.getByPlaceholderText('搜索标签…')
     fireEvent.change(input, { target: { value: '科幻' } })
     fireEvent.mouseDown(document.body)
 
     expect(createTagMutate).not.toHaveBeenCalled()
-    expect(screen.queryByPlaceholderText('新标签名称')).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: '+ 新建标签' }))
-    expect(screen.getByPlaceholderText('新标签名称')).toHaveValue('')
+    expect(screen.queryByPlaceholderText('搜索标签…')).toBeNull()
   })
 })
 
@@ -328,9 +327,8 @@ describe('BookDetailDialog recommended categories', () => {
   it('saves a selected recommendation atomically and does not create it before save', async () => {
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '分类' }))
     fireEvent.click(screen.getByText('推荐分类'))
-    const search = screen.getByRole('textbox', { name: '按名称或完整路径搜索' })
-    fireEvent.change(search, { target: { value: '文学 / 散文随笔' } })
     fireEvent.click(screen.getByRole('radio', { name: '文学 / 散文随笔' }))
     expect(apiPut).not.toHaveBeenCalled()
     expect(createShelfMutate).not.toHaveBeenCalled()
@@ -341,8 +339,8 @@ describe('BookDetailDialog recommended categories', () => {
   it('cancels a selected recommendation without creating or saving a category', () => {
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '分类' }))
     fireEvent.click(screen.getByText('推荐分类'))
-    fireEvent.change(screen.getByRole('textbox', { name: '按名称或完整路径搜索' }), { target: { value: '文学 / 散文随笔' } })
     fireEvent.click(screen.getByRole('radio', { name: '文学 / 散文随笔' }))
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(apiPut).not.toHaveBeenCalled()
@@ -622,7 +620,7 @@ describe('BookDetailDialog read-status chip', () => {
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Fiction' }))
     expect(screen.queryByRole('menu')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    expect(screen.getByRole('radio', { name: '未分类' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '分类' })).toBeInTheDocument()
     expect(navigateMock).not.toHaveBeenCalled()
   })
 
