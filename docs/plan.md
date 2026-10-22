@@ -36,6 +36,8 @@ The following are intentionally excluded from this Web milestone: brightness con
 
 ## Medium term
 
+- Reader profiles: editable bios, private/public profiles for signed-in readers, and separate reading-overview, currently-reading, and activity sharing controls implemented for v0.6.3
+- Activity timelines: personal ideas/reviews and permission-filtered shared-library events, with type filters and expandable batches, implemented for v0.6.3; deletion/restoration records remain restricted to library owners and administrators
 - Further EPUB/TXT quality improvements after the current TTS/AI queue: vertical-writing feasibility, annotation UX, and demand-driven settings coverage
 - Library organization: two-level shared categories and hierarchical subtree counts delivered in v0.4.3; batch metadata editing remains demand-driven
 - Rule JSON import/export: delivered for replacement rules and TOC presets in v0.4.3

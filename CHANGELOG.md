@@ -4,22 +4,39 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-23
+
 ### Highlights
 
-- Personal profile pages now support private/public access, editable bios, reading overviews, and filtered currently-reading books for other signed-in users.
+- Personal profiles bring your bio, reading overview, currently-reading books, ideas, and reviews together, with separate sharing controls.
+- Shared-library activity brings new books, versions, content updates, and reader contributions into one filterable timeline.
 
 ### Added
 
-- Profile links are available from reader ideas, reviews, comments, replies, likes, notifications, and user-management lists, including instance users and library members, with the existing outer interaction preserved.
-- Public profile settings independently control access to the reading overview and currently-reading section, with server-side privacy enforcement.
-- Personal profiles now include an activity timeline for ideas and reviews, with an independent sharing setting; private content is always visible only to its author.
-- Shared libraries now have an activity page for new books, versions, content updates, ideas, and reviews, with filters and expandable batch records. Deletion and restoration records are visible only to library owners and administrators.
+- Editable profile bios and public/private profile settings. Shared profiles are available to other signed-in users; reading overviews, currently-reading books, and activity can each be shared independently, subject to current access permissions.
+- Personal activity timelines for ideas and reviews. Your own timeline includes private entries; other readers see only shared content they can currently access.
+- Shared-library activity for new books, versions, content updates, ideas, and reviews, with filters and expandable batch records. Deletion and restoration records are visible only to library owners and administrators.
+- Profile links from ideas, reviews, comments, replies, likes, notifications, and instance-user and library-member lists.
+
+### Changed
+
+- Not on a shelf and Uncategorized move to the top of their respective sidebar lists and hide when empty, keeping the navigation tabs in place when switching views. Removing the last book leaves the current empty view open.
+- The notification popover uses a more compact layout, and its bell stays highlighted while it is open.
+- Inline idea editing groups visibility and image tools together, with theme-aware Save buttons and actions that wrap together in narrow panels.
 
 ### Fixed
 
-- Docker images now use Node.js 22.23.4 to address the October 21, 2026 security advisories, including the Brotli remote code execution vulnerability (CVE-2026-111497). Existing installations must pull the patched Bookdock image and recreate the container, or rebuild from updated source; in-app updates do not upgrade Node.js.
 - Settings retain the selected section, user-management tab, and library when returning from a user profile or refreshing the page, without adding a history entry for each tab switch.
-- Reader startup no longer treats book-owned fonts as failed Bookdock fonts when book typography remains authoritative, avoiding false timeout fallbacks while still waiting for visible glyphs when Bookdock font overrides are enabled.
+- Reader startup no longer reports a Bookdock font timeout for fonts controlled by the book. Bookdock font overrides still wait for the fonts needed by visible text.
+
+### Security
+
+- Docker images and CI now use Node.js 22.23.4 with upstream runtime security fixes.
+
+### Upgrade notes
+
+- Back up the complete `DATA_DIR` before upgrading. Migration 0055 adds activity history and imports existing shared ideas and reviews using their original publication times; it does not reconstruct earlier book additions, updates, or deletions. Downgrading requires the pre-upgrade data with the matching previous release.
+- Pull the updated Bookdock image and recreate the container, or rebuild from updated source, to receive the Node.js runtime update. In-app updates replace application files only and do not upgrade Node.js.
 
 ## [0.6.2] - 2026-10-22
 
@@ -826,22 +843,39 @@ All notable changes to Bookdock are documented here.
 
 ### [Unreleased]
 
+### [0.6.3] - 2026-10-23
+
 #### 亮点
 
-- 个人主页现支持公开/私密访问、可编辑简介、阅读概览，以及面向其他登录用户并按权限过滤的正在阅读书目。
+- 个人主页集中展示简介、阅读概览、正在阅读的书籍、想法与书评，各展示模块可独立控制分享。
+- 共享书库动态集中展示新书、新版本、正文更新与书友发布的内容，支持按类型筛选。
 
 #### 新增
 
-- 阅读器想法、书评、评论、回复、点赞、通知及用户管理列表中的用户身份均可进入对应个人主页，涵盖实例用户与书库成员，并保留原有外层交互。
-- 公开个人主页可分别控制阅读概览和正在阅读模块，隐私权限由服务端执行。
-- 个人主页新增动态时间线，集中查看想法与书评，可独立控制是否向他人展示；私人内容始终仅本人可见。
+- 可编辑个人简介，将主页设为公开或私密；公开主页面向其他登录用户，阅读概览、正在阅读和动态可分别控制分享，展示内容遵循当前访问权限。
+- 个人动态时间线集中展示想法与书评；本人可查看自己的私人条目，其他读者仅能看到当前有权访问的公开内容。
 - 共享书库新增动态页，汇集新书、新版本、正文更新及书友想法、书评，支持筛选与展开批量记录；删除、恢复等管理记录仅书库所有者和管理员可见。
+- 想法、书评、评论、回复、点赞、通知，以及实例用户和书库成员列表均可进入对应个人主页。
+
+#### 优化
+
+- “未入架”和“未分类”移至各自侧栏列表首位，内部为空时隐藏，切换标签不再带动顶部导航上下移动；移走或删除最后一本书后，仍保留当前空页面。
+- 通知浮层采用更紧凑的布局，打开期间铃铛保持高亮。
+- 就地编辑想法时，公开设置与图片工具集中排列，保存按钮跟随主题配色；窄面板内操作按钮整体换行。
 
 #### 修复
 
-- Docker 镜像升级至 Node.js 22.23.4，修复 2026 年 10 月 21 日公布的安全漏洞，包括 Brotli 远程代码执行漏洞（CVE-2026-111497）。现有部署须拉取包含修复的新 Bookdock 镜像并重建容器，或使用更新后的源码重新构建；面板内更新不会升级 Node.js。
 - 从用户主页返回设置页或刷新页面后，会保留原先的设置分区、用户管理标签和选中书库；切换标签不会逐次增加返回记录。
-- 修复书籍字体仍由书籍控制时被误判为 Bookdock 字体加载失败并触发超时回退的问题；启用 Bookdock 字体覆盖时仍会等待可见正文所需的字形。
+- 书籍自行控制的字体不再被误报为 Bookdock 字体加载超时；启用 Bookdock 字体覆盖时，仍等待可见正文所需的字体。
+
+#### 安全更新
+
+- Docker 镜像和 CI 升级至包含上游安全修复的 Node.js 22.23.4。
+
+#### 升级说明
+
+- 升级前请备份完整 `DATA_DIR`。迁移 0055 新增动态历史，并按原始发布时间导入已有公开想法和书评；不会补造更早的新书入库、正文更新或删除记录。降级须使用升级前的数据和对应旧版本。
+- 请拉取新版 Bookdock 镜像并重建容器，或使用更新后的源码重新构建，以更新 Node.js 运行环境；面板内更新仅替换应用文件，不会升级 Node.js。
 
 ### [0.6.2] - 2026-10-22
 
