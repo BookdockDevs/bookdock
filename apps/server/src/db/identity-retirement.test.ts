@@ -69,6 +69,7 @@ function makeLegacyIdentity() {
     DROP TABLE interaction_notifications;
     DROP TABLE interaction_receipts;
     DROP TABLE IF EXISTS storage_transfer_tasks;
+    DROP TABLE IF EXISTS activity_events;
     ALTER TABLE blobs DROP COLUMN storage_tier;
     ALTER TABLE blobs DROP COLUMN last_accessed_at;
     ALTER TABLE instance DROP COLUMN storage_backend_enabled;

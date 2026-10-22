@@ -3,7 +3,7 @@ import type { LibrarySearchNames } from '@bookdock/shared'
 import LibrarySearchInput from './LibrarySearchInput'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { formatBytes } from '@/lib/utils'
+import { cn, formatBytes } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 
 import type { LibrarySearch } from '@/routes/index'
@@ -40,13 +40,14 @@ interface LibraryHeaderProps {
   catalogMode?: boolean
   canSwitchCategoryScope?: boolean
   categoryScope?: LibrarySearch['categoryScope']
+  hideBookControls?: boolean
 }
 
-export default function LibraryHeader({ navSearch, view, query, searchNames, searchContext, searchError, onSearchSubmit, onSearchClear, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, titleLoading = false, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, searchNames, searchContext, searchError, onSearchSubmit, onSearchClear, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, titleLoading = false, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope, hideBookControls = false }: LibraryHeaderProps) {
   const _ = useTranslation()
 
   return (
-    <header className="mb-6 md:mb-8">
+    <header className={cn('mb-6 md:mb-8', hideBookControls && 'mb-4 md:mb-6')}>
       <div className="flex flex-wrap items-center justify-between gap-3 md:items-end md:gap-x-6 md:gap-y-4">
         <div className="flex w-full min-w-0 items-center gap-2 md:w-auto md:flex-none">
           {onOpenNavigation && (
@@ -92,7 +93,7 @@ export default function LibraryHeader({ navSearch, view, query, searchNames, sea
           </div>
         </div>
 
-        <div className="flex w-full min-w-0 flex-1 flex-wrap items-center justify-end gap-2 md:w-auto">
+        {!hideBookControls && <div className="flex w-full min-w-0 flex-1 flex-wrap items-center justify-end gap-2 md:w-auto">
           {!trash && (
             <LibrarySearchInput query={query} names={searchNames} context={searchContext} appliedError={searchError} onClear={onSearchClear} placeholder={_('library.searchPlaceholder')} onSubmit={onSearchSubmit ?? (async (source) => { navSearch({ q: source || undefined }) })} />
           )}
@@ -151,7 +152,7 @@ export default function LibraryHeader({ navSearch, view, query, searchNames, sea
           ) : onUploadClick ? (
             <Button onClick={onUploadClick}>{_('library.upload')}</Button>
           ) : null}
-        </div>
+        </div>}
       </div>
     </header>
   )

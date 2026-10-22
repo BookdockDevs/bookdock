@@ -32,7 +32,7 @@ import { draftFrom, draftToBookmetaPreserving, parseAuthorList, type MetaDraft }
 import TocRulePicker from './TocRulePicker'
 import WorkDetailBody from './WorkDetailBody'
 import AllReviewsView from '@/features/reviews/components/AllReviewsView'
-import ReviewDetailHeaderActions from '@/features/reviews/components/ReviewDetailHeaderActions'
+import ReviewDetailHeaderActions, { ReviewDetailModalTitle } from '@/features/reviews/components/ReviewDetailHeaderActions'
 import { getReviewTotalCount } from '@/features/reviews/lib/review-count'
 import ReviewDetailView from '@/features/reviews/components/ReviewDetailView'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
@@ -201,21 +201,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
       )
     }
     if (subView === 'review-detail') {
-      return (
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setReviewSubView(reviewDetailReturn)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-            aria-label={_('common.back')}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-          </button>
-          <span>{_('review.detailTitle')}</span>
-        </div>
-      )
+      return <ReviewDetailModalTitle onBack={() => setReviewSubView(reviewDetailReturn)} />
     }
     return defaultTitle
   }

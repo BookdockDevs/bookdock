@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useSearch } from '@tanstack/react-router'
+import { Link, useLocation, useNavigate, useSearch } from '@tanstack/react-router'
 
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useBackNavigation } from '@/hooks/useBackNavigation'
@@ -10,13 +10,16 @@ import { useAuthStore } from '@/stores/auth.store'
 
 import ProfileAccountSection from './components/ProfileAccountSection'
 import ProfileReadingShowcase from './components/ProfileReadingShowcase'
+import ProfilePending from './components/ProfilePending'
 import ProfileSettingsDialog from './components/ProfileSettingsDialog'
 import ProfileStatsSection from './components/ProfileStatsSection'
+import ActivityFeed from '@/features/activity/ActivityFeed'
 
 export default function Profile() {
   const _ = useTranslation()
   usePageTitle(_('profile.title'))
   const navigate = useNavigate()
+  const location = useLocation()
   const user = useAuthStore((s) => s.user)
   const search = useSearch({ from: '/profile' })
   const publicView = Boolean(search.userId && search.userId !== user?.id)
@@ -25,6 +28,11 @@ export default function Profile() {
   const isGuest = !user
   const [settingsOpen, setSettingsOpen] = useState(false)
   const onBack = useBackNavigation('/')
+  const activityFilter = search.activity ?? 'all'
+  const readerReturn = { to: '/profile' as const, search: { userId: publicView ? search.userId : undefined, activity: search.activity }, sourceHistoryIndex: location.state.__TSR_index }
+  const setActivityFilter = (activity: 'all' | 'idea' | 'review') => {
+    void navigate({ to: '/profile', replace: true, resetScroll: false, search: (previous) => ({ ...previous, activity: activity === 'all' ? undefined : activity }), state: (previous) => ({ ...previous }) })
+  }
 
   useEffect(() => {
     if (isGuest) void navigate({ to: '/' })
@@ -33,7 +41,7 @@ export default function Profile() {
   if (!user) return null
 
   if (reader.isPending) {
-    return <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6"><div className="h-44 animate-pulse rounded-2xl bg-stone-500/10 motion-reduce:animate-none" /></div>
+    return <ProfilePending />
   }
 
   if (reader.isError || !reader.data) {
@@ -45,7 +53,7 @@ export default function Profile() {
 
   if (publicView) {
     return (
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6">
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6 pb-24 sm:pb-32">
         <header className="flex items-center justify-between gap-3 border-b border-stone-200/70 pb-3 dark:border-stone-800/70">
           <Link to="/" onClick={onBack} aria-label={_('profile.back')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200" title={_('profile.back')}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>
@@ -60,7 +68,18 @@ export default function Profile() {
         ) : (
           <>
             {data.showStats && <ProfileStatsSection summary={data.summary} />}
-            {data.showShowcase && <ProfileReadingShowcase books={data.currentlyReading} readerReturn={{ to: '/profile', search: { userId: search.userId } }} showBrowseLink={false} />}
+            {data.showShowcase && <ProfileReadingShowcase books={data.currentlyReading} readerReturn={{ to: '/profile', search: { userId: search.userId, activity: search.activity } }} showBrowseLink={false} />}
+            {data.showPublicActivity && (
+              <ActivityFeed
+                scope="personal"
+                targetId={targetUserId}
+                type={activityFilter}
+                historyIndex={location.state.__TSR_index}
+                readerReturn={readerReturn}
+                title={<h2 className="text-lg font-semibold text-stone-800 dark:text-stone-100">{_('profile.timeline')}</h2>}
+                onFilterChange={(value) => { if (value === 'all' || value === 'idea' || value === 'review') setActivityFilter(value) }}
+              />
+            )}
           </>
         )}
       </div>
@@ -68,7 +87,7 @@ export default function Profile() {
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6 pb-24 sm:pb-32">
       <header className="flex items-center justify-between gap-3 border-b border-stone-200/70 pb-3 dark:border-stone-800/70">
         <Link to="/" onClick={onBack} aria-label={_('profile.back')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-200/60 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200" title={_('profile.back')}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg>
@@ -83,8 +102,17 @@ export default function Profile() {
 
       {data.showStats !== false && <ProfileStatsSection summary={data.summary} showArchiveLink />}
       {data.showShowcase !== false && <ProfileReadingShowcase books={data.currentlyReading} readerReturn={{ to: '/profile' }} />}
+      <ActivityFeed
+        scope="personal"
+        targetId={targetUserId}
+        type={activityFilter}
+        historyIndex={location.state.__TSR_index}
+        readerReturn={readerReturn}
+        title={<h2 className="text-lg font-semibold text-stone-800 dark:text-stone-100">{_('profile.timeline')}</h2>}
+        onFilterChange={(value) => { if (value === 'all' || value === 'idea' || value === 'review') setActivityFilter(value) }}
+      />
 
-      {isOwner && <ProfileSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
+      {isOwner && settingsOpen && <ProfileSettingsDialog bio={data.author.bio ?? ''} onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }

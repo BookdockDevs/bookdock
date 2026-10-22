@@ -6,6 +6,7 @@ import { ANNOTATION_MAX_TEXT_LENGTH, ErrorCode } from '@bookdock/shared'
 import type { AnnotationRes, AnnotationCreateReq, AnnotationUpdateReq } from '@bookdock/shared'
 
 import { ApiError, apiGet, apiPost, apiPut, apiDelete } from '@/api/client'
+import { invalidateActivityQueries } from '@/features/activity/hooks'
 import { withReveal } from '@/lib/reveal-hidden'
 
 import { cfiRangesOverlap, loadCfiModule } from '../lib/cfi-overlap'
@@ -97,12 +98,13 @@ export function useCreateAnnotation(bookId: string) {
     },
     // Not awaited on purpose: mutateAsync resolves as soon as the POST does,
     // the refetch resyncs the cache (including overlap deletes) in the background
-    onSettled: (_data, _error, body) => {
+    onSettled: (result, error, body) => {
       if (body) replacementIdsByBody.delete(body)
       void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['idea-composer', bookId] })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
+      if (!error && body.type === 'note') void invalidateActivityQueries(queryClient)
     },
   })
 }
@@ -129,12 +131,15 @@ export function useUpdateAnnotation(bookId: string) {
       if (context?.previous) queryClient.setQueryData(key, context.previous)
     },
     // Not awaited on purpose: the refetch resyncs the cache in the background
-    onSettled: () => {
+    onSettled: (result, error, input) => {
       void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
       void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+      const cachedNote = queryClient.getQueryData<AnnotationsCache>(key)?.data.some((annotation) => annotation.id === input.id && annotation.type === 'note')
+      const responseIsNote = result?.data?.type === 'note'
+      if (!error && (responseIsNote || cachedNote)) void invalidateActivityQueries(queryClient)
     },
   })
 }
@@ -161,6 +166,7 @@ export function useDeleteAnnotation(bookId: string) {
       void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
       // Deleting a whole annotation can retire the notifications pointing at it.
       void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+      void invalidateActivityQueries(queryClient)
     },
   })
 }
@@ -194,6 +200,7 @@ export function useBatchDeleteAnnotations(bookId: string) {
           data: [...(old?.data ?? []).filter((item) => !failed.has(item.id)), ...restored],
         }))
       }
+      if (result.succeeded > 0) void invalidateActivityQueries(queryClient)
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ['note-archive'] })

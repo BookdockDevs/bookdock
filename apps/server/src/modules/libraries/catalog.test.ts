@@ -54,7 +54,7 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, ['0041_idea_discussion', '0042_storage_connections', '0043_storage_backend', '0044_storage_s3', '0046_book_reviews', '0048_content_files'])
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, ['0041_idea_discussion', '0042_storage_connections', '0043_storage_backend', '0044_storage_s3', '0046_book_reviews', '0048_content_files', '0055_activity_events'])
   return db
 }
 
@@ -1062,6 +1062,9 @@ describe('shared library catalog', () => {
     const rows = db.select().from(schema.contentRevisions)
       .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
     expect(rows).toHaveLength(1)
+    expect(db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.workId, created.libraryBookId)).all()
+      .filter((event) => event.eventType === 'revision.published')).toHaveLength(0)
   })
 
   it('pushes the linked private draft to its city version', async () => {
@@ -1085,6 +1088,11 @@ describe('shared library catalog', () => {
     // The base advances with the push, so the next identical push is a no-op.
     const again = await pushPrivateToVersion(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId)
     expect(again).toMatchObject({ revisionNo: 2, alreadyUpToDate: true, diverged: false })
+    const events = db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.workId, pub.libraryBookId)).all()
+      .filter((event) => event.eventType === 'revision.published')
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ actorUserId: ownerId, versionId: pub.bookVersionId, audience: 'library' })
   })
 
   it('refuses a push once the library moved on, leaving both sides intact', async () => {
@@ -1200,6 +1208,11 @@ describe('shared library catalog', () => {
     expect(rows).toHaveLength(2)
     expect(rows[1]!.blobKey).not.toBe(rows[0]!.blobKey)
     expect(rows[1]!.meta.readingCompatibleRevisions).toEqual(expect.arrayContaining([rows[0]!.id]))
+    const events = db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.workId, created.libraryBookId)).all()
+      .filter((event) => event.eventType === 'revision.published')
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ actorUserId: ownerId, versionId: created.bookVersionId })
     // Actor progress rescales; the other holder keeps percent, loses the stale CFI.
       expect(db.select().from(schema.bookStates).where(and(eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, created.bookVersionId))).get()!.progressData).toMatchObject({ chapter: null })
       const memberProgress = db.select().from(schema.bookStates).where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, created.bookVersionId))).get()!.progressData!

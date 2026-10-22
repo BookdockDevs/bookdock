@@ -17,6 +17,7 @@ import {
   libraries,
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
+import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
 import { readingCompatibleRevisions } from '../../lib/reading-coverage'
 import { getStorage } from '../../storage'
@@ -1299,11 +1300,25 @@ export async function deleteCatalogBook(actorId: string, libraryId: string, libr
   if (isLibraryTrashEnabled(library)) {
     if (work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
     const now = Date.now()
-    db.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+    db.transaction((tx) => {
+      recordActivityEvent(tx, {
+        idempotencyKey: `work.trashed:${libraryBookId}:${now}`,
+        eventType: 'work.trashed', audience: 'manager', libraryId, actorUserId: actorId,
+        targetKind: 'work', targetId: libraryBookId, workId: libraryBookId,
+        occurredAt: now, snapshotWorkTitle: work.title,
+      })
+      tx.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+    })
     return { id: libraryBookId, versionCount: links.length, trashed: true as const }
   }
   const orphanedVersionIds: string[] = []
   db.transaction((tx) => {
+    recordActivityEvent(tx, {
+      idempotencyKey: `work.deleted:${libraryBookId}`,
+      eventType: 'work.deleted', audience: 'manager', libraryId, actorUserId: actorId,
+      targetKind: 'work', targetId: libraryBookId, workId: libraryBookId,
+      occurredAt: Date.now(), snapshotWorkTitle: work.title,
+    })
     tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
@@ -1325,11 +1340,25 @@ export async function restoreCatalogBook(actorId: string, libraryId: string, lib
   const db = getDb()
   const work = getWork(libraryId, libraryBookId)
   if (!work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
-  db.update(libraryBooks).set({ deletedAt: null, updatedAt: Date.now() }).where(eq(libraryBooks.id, libraryBookId)).run()
+  const now = Date.now()
+  db.transaction((tx) => {
+    recordActivityEvent(tx, {
+      idempotencyKey: `work.restored:${libraryBookId}:${work.deletedAt}`,
+      eventType: 'work.restored', audience: 'manager', libraryId, actorUserId: actorId,
+      targetKind: 'work', targetId: libraryBookId, workId: libraryBookId,
+      occurredAt: now, snapshotWorkTitle: work.title,
+    })
+    tx.update(libraryBooks).set({ deletedAt: null, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+  })
   return { id: libraryBookId }
 }
 
-async function hardDeleteCatalogWork(libraryId: string, libraryBookId: string): Promise<boolean> {
+async function hardDeleteCatalogWork(
+  libraryId: string,
+  libraryBookId: string,
+  actorUserId: string | null,
+  operationId?: string,
+): Promise<boolean> {
   const db = getDb()
   const work = db.select().from(libraryBooks)
     .where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
@@ -1337,7 +1366,14 @@ async function hardDeleteCatalogWork(libraryId: string, libraryBookId: string): 
   const links = db.select().from(libraryBookVersions)
     .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.libraryBookId, libraryBookId))).all()
   const orphanedVersionIds: string[] = []
+  const now = Date.now()
   db.transaction((tx) => {
+    recordActivityEvent(tx, {
+      idempotencyKey: `work.deleted:${libraryBookId}`,
+      eventType: 'work.deleted', audience: 'manager', libraryId, actorUserId, operationId,
+      targetKind: 'work', targetId: libraryBookId, workId: libraryBookId,
+      occurredAt: now, snapshotWorkTitle: work.title,
+    })
     tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
@@ -1358,7 +1394,7 @@ export async function permanentDeleteCatalogBook(actorId: string, libraryId: str
   await requireLibraryOwner(actorId, libraryId)
   const work = getWork(libraryId, libraryBookId)
   if (!work.deletedAt) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
-  await hardDeleteCatalogWork(libraryId, libraryBookId)
+  await hardDeleteCatalogWork(libraryId, libraryBookId, actorId)
   return { id: libraryBookId }
 }
 
@@ -1368,7 +1404,8 @@ export async function emptyLibraryTrash(actorId: string, libraryId: string) {
   const db = getDb()
   const trashed = db.select({ id: libraryBooks.id }).from(libraryBooks)
     .where(and(eq(libraryBooks.libraryId, libraryId), isNotNull(libraryBooks.deletedAt))).all()
-  for (const row of trashed) await hardDeleteCatalogWork(libraryId, row.id)
+  const operationId = createId('activity-operation')
+  for (const row of trashed) await hardDeleteCatalogWork(libraryId, row.id, actorId, operationId)
   return { count: trashed.length }
 }
 
@@ -1379,13 +1416,14 @@ export async function purgeLibraryTrashIfNeeded(libraryId: string): Promise<numb
   if (!library || library.type !== 'shared') return 0
   const settings = getLibraryTrashSettings(library)
   if (!settings.enabled) return 0
+  const operationId = createId('activity-operation')
   let purged = 0
   if (settings.autoCleanDays > 0) {
     const cutoff = Date.now() - settings.autoCleanDays * 24 * 60 * 60 * 1000
     const expired = db.select({ id: libraryBooks.id }).from(libraryBooks)
       .where(and(eq(libraryBooks.libraryId, libraryId), isNotNull(libraryBooks.deletedAt), lt(libraryBooks.deletedAt, cutoff))).all()
     for (const row of expired) {
-      if (await hardDeleteCatalogWork(libraryId, row.id)) purged++
+      if (await hardDeleteCatalogWork(libraryId, row.id, null, operationId)) purged++
     }
   }
   if (settings.maxTrashBytes > 0) {
@@ -1402,7 +1440,7 @@ export async function purgeLibraryTrashIfNeeded(libraryId: string): Promise<numb
     let total = rows.reduce((sum, row) => sum + row.size, 0)
     for (const row of rows) {
       if (total <= settings.maxTrashBytes) break
-      if (await hardDeleteCatalogWork(libraryId, row.id)) {
+      if (await hardDeleteCatalogWork(libraryId, row.id, null, operationId)) {
         total -= row.size
         purged++
       }
@@ -1441,12 +1479,28 @@ export async function deleteCatalogVersion(
   const remaining = db.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
     .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all()
   if (isLibraryTrashEnabled(library) && remaining.length <= 1) {
-    db.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+    db.transaction((tx) => {
+      recordActivityEvent(tx, {
+        idempotencyKey: `work.trashed:${libraryBookId}:${now}`,
+        eventType: 'work.trashed', audience: 'manager', libraryId, actorUserId: actorId,
+        targetKind: 'work', targetId: libraryBookId, workId: libraryBookId,
+        occurredAt: now, snapshotWorkTitle: work.title,
+      })
+      tx.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+    })
     return { id: link.id, libraryBookId, workDeleted: false, trashed: true as const }
   }
   const orphanedVersionIds: string[] = []
   let workDeleted = false
   db.transaction((tx) => {
+    recordActivityEvent(tx, {
+      idempotencyKey: `version.deleted:${link.id}`,
+      eventType: 'version.deleted', audience: 'manager', libraryId, actorUserId: actorId,
+      targetKind: 'version', targetId: link.id, workId: libraryBookId, versionId: link.bookVersionId,
+      occurredAt: now,
+      snapshotWorkTitle: work.title,
+      snapshotObjectLabel: link.name || link.title || null,
+    })
     tx.delete(libraryBookVersions).where(eq(libraryBookVersions.id, link.id)).run()
     const remaining = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
       .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all()

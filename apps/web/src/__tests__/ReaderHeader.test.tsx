@@ -11,7 +11,7 @@ import type { TtsController } from '../features/reader/lib/tts-controller'
 const { mockReaderGo, mockReaderNavigate, mockReaderLocation } = vi.hoisted(() => ({
   mockReaderGo: vi.fn(),
   mockReaderNavigate: vi.fn(),
-  mockReaderLocation: { state: {} as { __TSR_index?: number; readerReturn?: { to: '/profile'; sourceHistoryIndex?: number; search?: { userId?: string } } } },
+  mockReaderLocation: { state: {} as { __TSR_index?: number; readerReturn?: { to: '/profile'; sourceHistoryIndex?: number; search?: { userId?: string; activity?: 'all' | 'idea' | 'review' } } } },
 }))
 
 vi.mock('@/hooks/useTranslation', () => ({
@@ -39,7 +39,7 @@ describe('ReaderHeader', () => {
   })
 
   it('returns to the profile source recorded on reader entry', () => {
-    mockReaderLocation.state = { __TSR_index: 2, readerReturn: { to: '/profile', sourceHistoryIndex: 1, search: { userId: 'reader' } } }
+    mockReaderLocation.state = { __TSR_index: 2, readerReturn: { to: '/profile', sourceHistoryIndex: 1, search: { userId: 'reader', activity: 'idea' } } }
     render(<ReaderHeader title="测试书籍" visible />)
 
     fireEvent.click(screen.getByRole('link', { name: 'reader.backToPrevious' }))

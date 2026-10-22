@@ -22,6 +22,8 @@ export interface LibrarySearch {
   libraryId?: string
   directory?: 'shelves' | 'categories' | 'tags'
   categoryScope?: CategoryScope
+  section?: 'books' | 'activity'
+  activityType?: 'all' | 'idea' | 'review' | 'catalog' | 'management'
 }
 
 const VALID_VIEWS = new Set(['grid', 'list'])
@@ -52,6 +54,8 @@ export const indexRoute = createRoute({
       libraryId: typeof input.libraryId === 'string' && input.libraryId.length > 0 ? input.libraryId : undefined,
       directory: input.directory === 'shelves' || input.directory === 'categories' || input.directory === 'tags' ? input.directory : undefined,
       categoryScope: categoryScopeSchema.safeParse(input.categoryScope).success ? input.categoryScope as CategoryScope : undefined,
+      section: input.section === 'activity' ? 'activity' : undefined,
+      activityType: input.activityType === 'idea' || input.activityType === 'review' || input.activityType === 'catalog' || input.activityType === 'management' ? input.activityType : undefined,
     }
   },
   component: Library,

@@ -50,6 +50,7 @@ export interface ReaderProfile {
   visibility?: 'public' | 'private'
   showStats?: boolean
   showShowcase?: boolean
+  showPublicActivity?: boolean
   summary?: ProfileReadingSummary
   currentlyReading?: ProfileReadingBook[]
   reviews: ArchivePage<MyReviewEntry>

@@ -91,6 +91,9 @@
     "retrying": "重试中..."
   },
   "library": {
+    "mainSection": "书库内容",
+    "books": "书籍",
+    "activity": "动态",
     "catalogNoChanges": "内容没有变化，无需保存",
     "taxonomyVisibilityFailed": "未能更改显示状态，请重试",
     "catalogPinFailed": "未能更改置顶状态，请重试",
@@ -414,14 +417,81 @@
     "recommendedCategories": "推荐分类",
     "searchCategoryTemplates": "按名称或完整路径搜索",
     "categoryTemplate": {
-      "literature": { "name": "文学", "essays": "散文随笔", "poetry": "诗歌", "drama": "戏剧", "nonfiction": "纪实文学", "criticism": "文学理论与鉴赏" },
-      "fiction": { "name": "小说", "realism": "社会现实", "romance": "情感小说", "science-fiction": "科幻小说", "mystery": "悬疑推理", "horror": "惊悚恐怖", "historical": "历史小说", "martial-arts": "武侠小说" },
-      "web-fiction": { "name": "网络小说", "xuanhuan": "玄幻", "fantasy": "奇幻", "martial-arts": "武侠", "xianxia": "仙侠", "urban": "都市", "realism": "现实", "history": "历史", "military": "军事", "science-fiction": "科幻", "mystery": "悬疑", "games": "游戏", "sports": "体育", "romance": "言情", "light-novel": "轻小说" },
-      "history": { "name": "历史传记", "ancient-china": "中国古代史", "modern-china": "中国近现代史", "world": "世界历史", "biography": "人物传记" },
-      "humanities": { "name": "人文社科", "philosophy": "哲学", "religion": "宗教", "sociology": "社会学", "psychology": "心理学", "culture": "文化研究", "politics": "政治", "law": "法律" },
-      "business": { "name": "经济管理", "economics": "经济学", "finance": "金融投资", "management": "商业管理", "marketing": "市场营销" },
-      "science": { "name": "科学技术", "popular": "科普", "natural": "自然科学", "computing": "计算机", "engineering": "工程技术", "medicine": "医学" },
-      "life": { "name": "生活成长", "growth": "个人成长", "health": "健康养生", "fitness": "运动健身", "leisure": "生活休闲", "education": "教育学习" }
+      "literature": {
+        "name": "文学",
+        "essays": "散文随笔",
+        "poetry": "诗歌",
+        "drama": "戏剧",
+        "nonfiction": "纪实文学",
+        "criticism": "文学理论与鉴赏"
+      },
+      "fiction": {
+        "name": "小说",
+        "realism": "社会现实",
+        "romance": "情感小说",
+        "science-fiction": "科幻小说",
+        "mystery": "悬疑推理",
+        "horror": "惊悚恐怖",
+        "historical": "历史小说",
+        "martial-arts": "武侠小说"
+      },
+      "web-fiction": {
+        "name": "网络小说",
+        "xuanhuan": "玄幻",
+        "fantasy": "奇幻",
+        "martial-arts": "武侠",
+        "xianxia": "仙侠",
+        "urban": "都市",
+        "realism": "现实",
+        "history": "历史",
+        "military": "军事",
+        "science-fiction": "科幻",
+        "mystery": "悬疑",
+        "games": "游戏",
+        "sports": "体育",
+        "romance": "言情",
+        "light-novel": "轻小说"
+      },
+      "history": {
+        "name": "历史传记",
+        "ancient-china": "中国古代史",
+        "modern-china": "中国近现代史",
+        "world": "世界历史",
+        "biography": "人物传记"
+      },
+      "humanities": {
+        "name": "人文社科",
+        "philosophy": "哲学",
+        "religion": "宗教",
+        "sociology": "社会学",
+        "psychology": "心理学",
+        "culture": "文化研究",
+        "politics": "政治",
+        "law": "法律"
+      },
+      "business": {
+        "name": "经济管理",
+        "economics": "经济学",
+        "finance": "金融投资",
+        "management": "商业管理",
+        "marketing": "市场营销"
+      },
+      "science": {
+        "name": "科学技术",
+        "popular": "科普",
+        "natural": "自然科学",
+        "computing": "计算机",
+        "engineering": "工程技术",
+        "medicine": "医学"
+      },
+      "life": {
+        "name": "生活成长",
+        "growth": "个人成长",
+        "health": "健康养生",
+        "fitness": "运动健身",
+        "leisure": "生活休闲",
+        "education": "教育学习"
+      }
     },
     "categoryName": "分类名称",
     "newCategory": "新建分类",
@@ -1326,6 +1396,8 @@
     "saveProfile": "保存资料",
     "settingShowStats": "展示阅读概览",
     "settingShowShowcase": "展示正在阅读",
+    "settingShowActivity": "展示个人动态",
+    "settingShowActivityHint": "公开动态仅展示共享内容；私人内容始终仅自己可见。",
     "sectionPrivacy": "主页可见性",
     "settingPublicProfile": "允许他人访问主页",
     "settingPublicProfileHint": "关闭后，其他用户无法查看你的个人主页",
@@ -1337,6 +1409,32 @@
     "timelineEmpty": "个人动态将在这里展示",
     "readingData": "阅读数据",
     "readingDataEmpty": "个人阅读数据概览将在这里展示"
+  },
+  "activity": {
+    "all": "全部",
+    "ideas": "想法",
+    "reviews": "书评",
+    "catalog": "更新",
+    "management": "管理",
+    "idea": "发布了想法",
+    "review": "发布了书评",
+    "workAdded": "上传了新作品",
+    "versionAdded": "上传了新版本",
+    "revisionPublished": "更新了作品内容",
+    "workTrashed": "移入了回收站",
+    "workRestored": "恢复了作品",
+    "workDeleted": "永久删除了作品",
+    "versionDeleted": "删除了版本",
+    "ideaDeleted": "删除了想法",
+    "reviewDeleted": "删除了书评",
+    "commentDeleted": "删除了评论",
+    "replyDeleted": "删除了回复",
+    "showItems": "展开本次操作（{{count}} 项）",
+    "collapse": "收起",
+    "loadMore": "加载更多",
+    "loading": "正在加载…",
+    "filterEmpty": "暂无相关动态",
+    "libraryEmpty": "书库动态将在这里展示"
   },
   "settings": {
     "fontUploadSummary": "新增 {{succeeded}} 个字体，{{duplicated}} 个已存在，无需重复上传",

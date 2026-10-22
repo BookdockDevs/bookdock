@@ -86,6 +86,34 @@ describe('idea source authorization and discussion', () => {
     expect(await ideaComposerContext('author', 'version')).toMatchObject({ defaultVisibility: 'shared' })
   })
 
+  it('records a shared idea publication once and captures only minimal deletion facts', async () => {
+    const idea = await createAnnotation('author', 'version', { ...request, visibility: 'private', note: 'private note' })
+    expect(db.select().from(schema.activityEvents).all()).toEqual([])
+
+    await updateAnnotation('author', idea.id, { visibility: 'shared' })
+    const published = db.select().from(schema.activityEvents).all()
+    expect(published).toHaveLength(1)
+    expect(published[0]).toMatchObject({
+      idempotencyKey: `idea.published:${idea.id}`,
+      eventType: 'idea.published', audience: 'library', libraryId: 'source', actorUserId: 'author',
+      targetKind: 'idea', targetId: idea.id, workId: 'listing-work', versionId: 'version',
+    })
+
+    await updateAnnotation('author', idea.id, { visibility: 'private' })
+    await updateAnnotation('author', idea.id, { visibility: 'shared' })
+    expect(db.select().from(schema.activityEvents).all()).toHaveLength(1)
+    await deleteAnnotation('author', idea.id)
+
+    const events = db.select().from(schema.activityEvents).all()
+    expect(events).toHaveLength(2)
+    expect(events.find((event) => event.eventType === 'idea.deleted')).toMatchObject({
+      audience: 'manager', actorUserId: 'author', targetKind: 'idea', targetId: idea.id,
+      workId: 'listing-work', versionId: 'version', snapshotWorkTitle: 'Book', snapshotAuthorId: 'author',
+    })
+    expect(JSON.stringify(events)).not.toContain('private note')
+    expect(JSON.stringify(events)).not.toContain(request.text)
+  })
+
   it('keeps direct-reading ideas private and public ideas out of others personal/AI queries', async () => {
     const direct = await createAnnotation('member', 'version', { ...request, revisionId: undefined })
     expect(direct.visibility).toBe('private')
@@ -117,6 +145,27 @@ describe('idea source authorization and discussion', () => {
     expect((await getIdeaDiscussion('author', idea.id)).idea.likeCount).toBe(0)
   })
 
+  it('records deletions of shared comments and replies but never private discussion', async () => {
+    const privateIdea = await createAnnotation('author', 'version', { ...request, visibility: 'private' })
+    const privateComment = await createIdeaComment('author', privateIdea.id, { body: 'private comment body' })
+    await deleteIdeaComment('author', privateIdea.id, privateComment)
+    expect(db.select().from(schema.activityEvents).all()).toEqual([])
+
+    const sharedIdea = await createAnnotation('author', 'version', { ...request, visibility: 'shared' })
+    const comment = await createIdeaComment('member', sharedIdea.id, { body: 'comment body' })
+    const reply = await createIdeaComment('outsider', sharedIdea.id, { body: 'reply body', replyToId: comment })
+    await deleteIdeaComment('outsider', sharedIdea.id, reply)
+    await deleteIdeaComment('member', sharedIdea.id, comment)
+
+    const events = db.select().from(schema.activityEvents).all().filter((event) => event.targetId === comment || event.targetId === reply)
+    expect(events.map((event) => [event.eventType, event.actorUserId, event.targetKind, event.targetId, event.snapshotAuthorId]).sort()).toEqual([
+      ['comment.deleted', 'member', 'comment', comment, 'member'],
+      ['reply.deleted', 'outsider', 'reply', reply, 'outsider'],
+    ])
+    expect(JSON.stringify(events)).not.toContain('comment body')
+    expect(JSON.stringify(events)).not.toContain('reply body')
+  })
+
   it('allows members and readable non-members to interact; private transitions preserve discussion', async () => {
     const idea = await createAnnotation('author', 'version', request)
     const comment = await createIdeaComment('outsider', idea.id, { body: 'discussion' })
@@ -138,6 +187,8 @@ describe('idea source authorization and discussion', () => {
     await createIdeaComment('member', idea.id, { body: 'reply', replyToId: comment })
     await setIdeaLike('member', idea.id, true, comment)
     await deleteIdeaComment('manager', idea.id, comment)
+    const deletionEvent = db.select().from(schema.activityEvents).all().find((event) => event.targetId === comment)
+    expect(deletionEvent).toMatchObject({ eventType: 'comment.deleted', audience: 'manager', actorUserId: 'manager', snapshotAuthorId: 'outsider' })
     const discussion = await getIdeaDiscussion('member', idea.id)
     expect(discussion.comments).toHaveLength(1)
     expect(discussion.comments[0]).toMatchObject({ body: 'reply', parentId: null })

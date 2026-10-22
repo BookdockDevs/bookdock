@@ -2,6 +2,21 @@ import { bindLibrarySearch, normalizeLibrarySearch, parseLibrarySearch, printLib
 
 import type { LibrarySearch } from '@/routes/index'
 
+/** Taxonomy, trash, and directory navigation returns the shared library to its book list. */
+export function clearActivityForLibraryNavigation(patch: Partial<LibrarySearch>): Partial<LibrarySearch> {
+  if (patch.section === 'activity') return patch
+  const clearKeys = ['shelf', 'category', 'tag', 'directory', 'trash'] as const
+  if (clearKeys.some((key) => key in patch && patch[key] !== undefined)) {
+    return { ...patch, section: undefined, activityType: undefined }
+  }
+  return patch
+}
+
+/** Leaving or switching a library clears view state scoped to its activity feed. */
+export function clearActivityForLibrarySwitch(patch: Partial<LibrarySearch>): Partial<LibrarySearch> {
+  return { ...patch, section: undefined, activityType: undefined }
+}
+
 export interface LibrarySearchReturn {
   search: LibrarySearch
   scrollTop: number

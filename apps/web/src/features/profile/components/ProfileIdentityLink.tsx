@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 
 import { avatarUrl } from '@/lib/avatar'
+import { cn } from '@/lib/utils'
 
 interface ProfileIdentityLinkProps {
   userId: string
@@ -11,16 +12,40 @@ interface ProfileIdentityLinkProps {
   stopPropagation?: boolean
 }
 
-export default function ProfileIdentityLink({ userId, name, avatarKey, className, avatarClassName = 'h-8 w-8', stopPropagation = false }: ProfileIdentityLinkProps) {
+export default function ProfileIdentityLink({
+  userId,
+  name,
+  avatarKey,
+  className,
+  avatarClassName = 'h-6 w-6',
+  stopPropagation = false,
+}: ProfileIdentityLinkProps) {
   const avatar = avatarUrl(avatarKey)
   return (
     <Link
       to="/profile"
       search={{ userId }}
       onClick={stopPropagation ? (event) => event.stopPropagation() : undefined}
-      className={className}
+      className={cn('inline-flex items-center gap-2 min-w-0 max-w-full', className)}
     >
-      {avatar ? <img src={avatar} alt="" className={`shrink-0 rounded-full object-cover ${avatarClassName}`} /> : <span className={`flex shrink-0 items-center justify-center rounded-full bg-stone-100 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300 ${avatarClassName}`}>{name.slice(0, 1)}</span>}
+      {avatarClassName !== 'hidden' && (
+        avatar ? (
+          <img
+            src={avatar}
+            alt=""
+            className={cn('shrink-0 rounded-full object-cover', avatarClassName)}
+          />
+        ) : (
+          <span
+            className={cn(
+              'flex shrink-0 items-center justify-center rounded-full bg-stone-200/80 text-[11px] font-semibold uppercase text-stone-700 dark:bg-stone-700 dark:text-stone-200',
+              avatarClassName,
+            )}
+          >
+            {name.slice(0, 1)}
+          </span>
+        )
+      )}
       <span className="truncate">{name}</span>
     </Link>
   )

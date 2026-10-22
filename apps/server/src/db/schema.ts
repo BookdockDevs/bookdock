@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
-import type { ReadingTimeFragment, ReadingCoverageInterval, AccessTokenPermission, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
+import type { ReadingTimeFragment, ReadingCoverageInterval, AccessTokenPermission, ActivityAudience, ActivityEventType, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
 import type { ProgressFileData } from '../lib/progress-file'
 
 export const users = sqliteTable('users', {
@@ -797,6 +797,30 @@ export const bookReviews = sqliteTable('book_reviews', {
   privateUnique: uniqueIndex('book_reviews_private_unique')
     .on(table.privateLibraryBookId)
     .where(sql`${table.privateLibraryBookId} IS NOT NULL`),
+}))
+
+export const activityEvents = sqliteTable('activity_events', {
+  id: text('id').primaryKey(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  eventType: text('event_type').$type<ActivityEventType>().notNull(),
+  audience: text('audience').$type<ActivityAudience>().notNull(),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+  // Identity and target references intentionally do not constrain account or content deletion.
+  actorUserId: text('actor_user_id'),
+  targetKind: text('target_kind').notNull(),
+  targetId: text('target_id').notNull(),
+  workId: text('work_id'),
+  versionId: text('version_id'),
+  operationId: text('operation_id'),
+  occurredAt: integer('occurred_at').notNull(),
+  snapshotWorkTitle: text('snapshot_work_title'),
+  snapshotObjectLabel: text('snapshot_object_label'),
+  snapshotAuthorId: text('snapshot_author_id'),
+}, (table) => ({
+  idempotencyUnique: uniqueIndex('activity_events_idempotency_unique').on(table.idempotencyKey),
+  libraryPageIdx: index('activity_events_library_page_idx').on(table.libraryId, table.audience, table.occurredAt, table.id),
+  actorPageIdx: index('activity_events_actor_page_idx').on(table.actorUserId, table.eventType, table.occurredAt, table.id),
+  operationIdx: index('activity_events_operation_idx').on(table.libraryId, table.actorUserId, table.operationId, table.eventType, table.audience),
 }))
 
 export const bookReviewComments = sqliteTable('book_review_comments', {

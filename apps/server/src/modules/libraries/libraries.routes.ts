@@ -348,6 +348,7 @@ librariesRoutes.post('/:id/books', async (c) => {
     title: body['title'],
     author: body['author'],
     tagIds: rawTagIds,
+    operationId: body['operationId'],
   })
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)

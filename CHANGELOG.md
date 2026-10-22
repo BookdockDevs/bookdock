@@ -12,6 +12,8 @@ All notable changes to Bookdock are documented here.
 
 - Profile links are available from reader ideas, reviews, comments, replies, likes, notifications, and user-management lists, including instance users and library members, with the existing outer interaction preserved.
 - Public profile settings independently control access to the reading overview and currently-reading section, with server-side privacy enforcement.
+- Personal profiles now include an activity timeline for ideas and reviews, with an independent sharing setting; private content is always visible only to its author.
+- Shared libraries now have an activity page for new books, versions, content updates, ideas, and reviews, with filters and expandable batch records. Deletion and restoration records are visible only to library owners and administrators.
 
 ### Fixed
 
@@ -832,6 +834,8 @@ All notable changes to Bookdock are documented here.
 
 - 阅读器想法、书评、评论、回复、点赞、通知及用户管理列表中的用户身份均可进入对应个人主页，涵盖实例用户与书库成员，并保留原有外层交互。
 - 公开个人主页可分别控制阅读概览和正在阅读模块，隐私权限由服务端执行。
+- 个人主页新增动态时间线，集中查看想法与书评，可独立控制是否向他人展示；私人内容始终仅本人可见。
+- 共享书库新增动态页，汇集新书、新版本、正文更新及书友想法、书评，支持筛选与展开批量记录；删除、恢复等管理记录仅书库所有者和管理员可见。
 
 #### 修复
 

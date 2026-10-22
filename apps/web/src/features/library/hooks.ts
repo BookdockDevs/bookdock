@@ -38,8 +38,10 @@ import {
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
 import { READING_RECORDS_KEY } from '@/api/hooks/reading-records'
 import { tocBasePath, invalidateCityVersionQueries, type TocTarget } from '@/api/hooks/useTocRules'
+import { invalidateActivityQueries } from '@/features/activity/hooks'
 import { useAuthStore } from '@/stores/auth.store'
 import { getAuthSessionRevision } from '@/stores/auth.store'
+import { interactionRequestId } from '@/lib/interaction-request'
 import { withReveal } from '@/lib/reveal-hidden'
 import i18n from '@/i18n/i18n'
 import { getErrorKeyByCode, getUserErrorNotification } from '@/lib/error-message'
@@ -186,6 +188,7 @@ export type UploadItemStatus = 'pending' | 'queued' | 'uploading' | 'processing'
 
 export interface UploadItem {
   id: string
+  operationId?: string
   name: string
   file: File
   status: UploadItemStatus
@@ -228,6 +231,8 @@ export interface UploadTarget {
    * duplicate that lands elsewhere is worth telling the reader about.
    */
   reportsAppliedShelf?: boolean
+  /** Shared-library activity scope affected by successful uploads. */
+  activityLibraryId?: string
   /**
    * Where this endpoint keeps the uploaded book in its response. A private
    * upload answers a flat book, a catalog upload answers a work whose first
@@ -388,6 +393,7 @@ export function useJoinLibrary() {
     onSuccess: (_res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['libraries'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'relation'] })
+      void invalidateActivityQueries(queryClient, vars.libraryId)
     },
   })
 }
@@ -415,6 +421,7 @@ function useLibraryMutation<TVars extends { libraryId?: string } | Record<string
         void queryClient.invalidateQueries({ queryKey: ['notifications'] })
         void queryClient.invalidateQueries({ queryKey: ['reviews'] })
         void queryClient.invalidateQueries({ queryKey: ['archive'] })
+        void invalidateActivityQueries(queryClient, vars.libraryId)
       }
     },
   })
@@ -661,12 +668,12 @@ export function catalogQueryParts(libraryId: string, params: CatalogListParams) 
   return { key, queryKey: ['libraries', libraryId, 'catalog', key] as const, path: `/libraries/${libraryId}/books?${search.toString()}` }
 }
 
-export function useLibraryCatalog(libraryId: string | null, params: CatalogListParams = {}) {
+export function useLibraryCatalog(libraryId: string | null, params: CatalogListParams = {}, options?: { enabled?: boolean }) {
   const { queryKey, path } = catalogQueryParts(libraryId ?? '', params)
   return useQuery({
     queryKey,
-    queryFn: () => apiGet<{ data: CatalogListRes }>(path),
-    enabled: !!libraryId,
+    queryFn: ({ signal }) => apiGet<{ data: CatalogListRes }>(path, signal),
+    enabled: !!libraryId && (options?.enabled ?? true),
     // Keep the previous page while the same library reloads, but never show
     // another library's cards under the new library's actions: the key carries
     // the library id, yet the data belongs to the query that fetched it.
@@ -787,6 +794,7 @@ function useCatalogVersionMutation<TVars extends { libraryId: string; libraryBoo
       if (build(vars).method === 'delete' && (_res as { data?: { trashed?: boolean } }).data?.trashed !== true) {
         void invalidatePermanentlyDeletedBookQueries(queryClient)
       }
+      if (build(vars).method === 'delete') void invalidateActivityQueries(queryClient, vars.libraryId)
     },
   })
 }
@@ -804,6 +812,7 @@ export function useUpdateCatalogVersion() {
         queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] }),
         queryClient.invalidateQueries({ queryKey: ['books'] }),
         queryClient.invalidateQueries({ queryKey: ['book'] }),
+        invalidateActivityQueries(queryClient, vars.libraryId),
       ])
     },
   })
@@ -832,6 +841,7 @@ export function useRestoreLibraryBook() {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      void invalidateActivityQueries(queryClient, vars.libraryId)
       notify.success({ key: 'library.bookRestored', params: { title: vars.title } })
     },
     onError: (error) => {
@@ -852,6 +862,7 @@ export function usePermanentDeleteLibraryBook() {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries'] })
       void invalidatePermanentlyDeletedBookQueries(queryClient)
+      void invalidateActivityQueries(queryClient, vars.libraryId)
       notify.success({ key: 'library.bookPermanentlyDeleted', params: { title: vars.title } })
     },
     onError: (error) => {
@@ -872,6 +883,7 @@ export function useEmptyLibraryTrash() {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries'] })
       if (result.data.count > 0) void invalidatePermanentlyDeletedBookQueries(queryClient)
+      if (result.data.count > 0) void invalidateActivityQueries(queryClient, vars.libraryId)
       if (result.data.count === 0) notify.info({ key: 'library.trashAlreadyEmpty' })
       else notify.success({ key: 'library.trashEmptied', params: { count: result.data.count } })
     },
@@ -996,6 +1008,7 @@ export function usePushVersion() {
     onSuccess: (res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['books'] })
+      if (!res.data.alreadyUpToDate) void invalidateActivityQueries(queryClient, vars.libraryId)
       invalidateCityVersionQueries(queryClient, res.data.book, vars.versionLinkId)
     },
   })
@@ -1019,6 +1032,7 @@ export function usePublishPrivateBook() {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+      void invalidateActivityQueries(queryClient, vars.libraryId)
     },
   })
 }
@@ -1176,13 +1190,14 @@ export function useUpdateProfileSettings() {
       }
       notify.error(getUserErrorNotification(error, 'settings.profilePrefsUpdateFailed'))
     },
-    onSettled: () => {
+    onSettled: (_data, _error, patch) => {
       activeWritesCountRef.current = Math.max(0, activeWritesCountRef.current - 1)
       if (activeWritesCountRef.current === 0) {
         // Force refetchQueries to guarantee sync even when no active query observer exists
         void queryClient.refetchQueries({ queryKey: ['settings'] })
         if (userId) void queryClient.invalidateQueries({ queryKey: ['reviews', 'author', userId] })
       }
+      if ('showPublicActivity' in patch || 'isPublic' in patch) void invalidateActivityQueries(queryClient)
     },
   })
 }
@@ -1450,6 +1465,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
     for (const key of target.invalidateKeys) {
       void queryClient.invalidateQueries({ queryKey: key })
     }
+    if (succeeded > 0 && target.activityLibraryId) void invalidateActivityQueries(queryClient, target.activityLibraryId)
     // Rows already say "cancelled", and files that finished before the cancel
     // still landed, so the lists above are refreshed either way. What must not
     // happen is a red "N failed" toast for a batch the reader stopped on purpose.
@@ -1473,6 +1489,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
 
   const addFiles = useCallback(
     (files: FileList | File[], opts?: { autoStart?: boolean; maxBytes?: number; versionNameMode?: boolean } & UploadAssignment) => {
+      const operationId = `upload-${Date.now()}-${interactionRequestId()}`
       const list = Array.from(files)
       const accepted = list.filter(isAcceptedUploadFile)
       const oversized = opts?.maxBytes ? accepted.filter((f) => f.size > opts.maxBytes!) : []
@@ -1496,6 +1513,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
         ...prev.map((it) => (autoStart && it.status === 'pending' ? { ...it, status } : it)),
         ...inRange.map((file) => ({
           id: `up-${Date.now()}-${nextIdRef.current++}`,
+          operationId,
           name: file.name,
           file,
           status,
@@ -1926,6 +1944,7 @@ export function useAppendBookContent() {
       } else {
         void queryClient.invalidateQueries({ queryKey: ['libraries', input.target.libraryId, 'catalog'] })
         void queryClient.invalidateQueries({ queryKey: ['books'] })
+        void invalidateActivityQueries(queryClient, input.target.libraryId)
         invalidateCityVersionQueries(queryClient, result.data.book, input.target.versionLinkId)
       }
     },
@@ -2167,7 +2186,7 @@ export function useLibrarySearchAuthors(libraryId: string | null, trash: boolean
   return useQuery({
     enabled: Boolean(user) && (options?.enabled ?? true),
     queryKey: ['library-search-authors', libraryId, trash, showHidden],
-    queryFn: () => apiGet<{ data: string[] }>(`${libraryId ? `/libraries/${libraryId}/search-authors` : '/books/search-authors'}?trash=${trash ? '1' : '0'}&showHidden=${showHidden ? '1' : '0'}`),
+    queryFn: ({ signal }) => apiGet<{ data: string[] }>(`${libraryId ? `/libraries/${libraryId}/search-authors` : '/books/search-authors'}?trash=${trash ? '1' : '0'}&showHidden=${showHidden ? '1' : '0'}`, signal),
     staleTime: 0,
   })
 }

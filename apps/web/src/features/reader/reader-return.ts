@@ -3,6 +3,7 @@ export interface ReaderReturn {
   sourceHistoryIndex?: number
   search?: {
     userId?: string
+    activity?: 'all' | 'idea' | 'review'
   }
 }
 
@@ -19,6 +20,7 @@ export function isReaderReturn(value: unknown): value is ReaderReturn {
   if (candidate.sourceHistoryIndex !== undefined && typeof candidate.sourceHistoryIndex !== 'number') return false
   if (candidate.search === undefined) return true
   if (!candidate.search || typeof candidate.search !== 'object') return false
-  const userId = (candidate.search as { userId?: unknown }).userId
-  return userId === undefined || typeof userId === 'string'
+  const search = candidate.search as { userId?: unknown; activity?: unknown }
+  return (search.userId === undefined || typeof search.userId === 'string')
+    && (search.activity === undefined || search.activity === 'all' || search.activity === 'idea' || search.activity === 'review')
 }

@@ -12,6 +12,25 @@ import { useAuthStore } from '@/stores/auth.store'
 
 import { useDeleteReview, useReviewAction } from '../hooks/useReviews'
 
+export function ReviewDetailModalTitle({ onBack }: { onBack: () => void }) {
+  const _ = useTranslation()
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={onBack}
+        className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+        aria-label={_('common.back')}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+      </button>
+      <span>{_('review.detailTitle')}</span>
+    </div>
+  )
+}
+
 export interface ReviewDetailHeaderActionsProps {
   review: Review
   onEdit?: (review: Review) => void

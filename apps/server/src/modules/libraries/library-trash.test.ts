@@ -17,9 +17,11 @@ import { updateLibrary } from './libraries.service'
 import { resolveSharedVersionRead } from './library-access'
 import {
   deleteCatalogBook,
+  deleteCatalogVersion,
   emptyLibraryTrash,
   listCatalogBooks,
   permanentDeleteCatalogBook,
+  purgeLibraryTrashIfNeeded,
   restoreCatalogBook,
 } from './catalog.service'
 
@@ -39,7 +41,7 @@ describe('shared library trash', () => {
     raw = new Database(':memory:')
     db = drizzle(raw, { schema })
     const migrationsFolder = fileURLToPath(new URL('../../db/migrations', import.meta.url))
-    migrate(db, { migrationsFolder }, ['0041_idea_discussion', '0042_storage_connections', '0043_storage_backend', '0044_storage_s3', '0046_book_reviews', '0048_content_files'])
+    migrate(db, { migrationsFolder }, ['0041_idea_discussion', '0042_storage_connections', '0043_storage_backend', '0044_storage_s3', '0046_book_reviews', '0048_content_files', '0055_activity_events'])
     vi.spyOn(client, 'getDb').mockReturnValue(db as never)
     const files = new Map<string, Buffer>()
     const driver: StorageDriver = {
@@ -80,6 +82,14 @@ describe('shared library trash', () => {
     await expect(restoreCatalogBook(adminId, libraryId, created.libraryBookId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
     await restoreCatalogBook(ownerId, libraryId, created.libraryBookId)
     expect((await listCatalogBooks(memberId, libraryId, {})).items).toHaveLength(1)
+    const events = db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.workId, created.libraryBookId)).all()
+      .sort((a, b) => a.eventType.localeCompare(b.eventType))
+    expect(events.map((event) => [event.eventType, event.actorUserId, event.audience])).toEqual([
+      ['work.added', ownerId, 'library'],
+      ['work.trashed', adminId, 'manager'],
+      ['work.restored', ownerId, 'manager'],
+    ].sort((a, b) => a[0].localeCompare(b[0])))
   })
 
   it('owner empties and permanently deletes; admin cannot', async () => {
@@ -89,12 +99,52 @@ describe('shared library trash', () => {
     await expect(emptyLibraryTrash(adminId, libraryId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
     expect(await emptyLibraryTrash(ownerId, libraryId)).toMatchObject({ count: 1 })
     expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, created.libraryBookId)).get()).toBeUndefined()
+    const deletion = db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.targetId, created.libraryBookId)).all()
+      .find((event) => event.eventType === 'work.deleted')
+    expect(deletion).toMatchObject({ actorUserId: ownerId, audience: 'manager', targetKind: 'work' })
+    expect(deletion?.operationId).toBeTruthy()
   })
 
   it('hard-deletes directly while the switch is off', async () => {
     await updateLibrary(ownerId, libraryId, { trashEnabled: false })
     const created = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '甲'), { title: 'A' })
     expect(await deleteCatalogBook(adminId, libraryId, created.libraryBookId)).toMatchObject({ trashed: false })
+    expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, created.libraryBookId)).get()).toBeUndefined()
+    expect(db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.targetId, created.libraryBookId)).all())
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        eventType: 'work.deleted', audience: 'manager', actorUserId: adminId,
+      })]))
+  })
+
+  it('records direct version deletion with its work and acting manager', async () => {
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('first.txt', '第一章甲'), { title: 'Two versions' })
+    await uploadCatalogBook(libraryId, ownerId, txtFile('second.txt', '第一章乙'), { libraryBookId: first.libraryBookId })
+    await deleteCatalogVersion(ownerId, libraryId, first.libraryBookId, first.versionLinkId!)
+
+    const event = db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.targetId, first.versionLinkId!)).get()
+    expect(event).toMatchObject({
+      eventType: 'version.deleted', audience: 'manager', actorUserId: ownerId,
+      targetKind: 'version', workId: first.libraryBookId, versionId: first.bookVersionId,
+    })
+  })
+
+  it('records automatic trash purge as a system manager event', async () => {
+    db.update(schema.libraries).set({ trashAutoCleanDays: 1 }).where(eq(schema.libraries.id, libraryId)).run()
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('old.txt', '第一章甲'), { title: 'Expired work' })
+    await deleteCatalogBook(ownerId, libraryId, created.libraryBookId)
+    db.update(schema.libraryBooks)
+      .set({ deletedAt: Date.now() - 2 * 24 * 60 * 60 * 1000 })
+      .where(eq(schema.libraryBooks.id, created.libraryBookId)).run()
+
+    expect(await purgeLibraryTrashIfNeeded(libraryId)).toBe(1)
+    const event = db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.targetId, created.libraryBookId)).all()
+      .find((row) => row.eventType === 'work.deleted')
+    expect(event).toMatchObject({ actorUserId: null, audience: 'manager', targetKind: 'work' })
+    expect(event?.operationId).toBeTruthy()
     expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, created.libraryBookId)).get()).toBeUndefined()
   })
 })

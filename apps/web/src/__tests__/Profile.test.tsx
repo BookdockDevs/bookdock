@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth.store'
 import i18n from '@/i18n/i18n'
 
 const mockNavigate = vi.fn()
-let profileSearch: { userId?: string; notesPage: number; reviewsPage: number } = { notesPage: 1, reviewsPage: 1 }
+let profileSearch: { userId?: string; activity?: 'all' | 'idea' | 'review'; notesPage: number; reviewsPage: number } = { notesPage: 1, reviewsPage: 1 }
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, to, className, onClick, ['aria-label']: ariaLabel, title }: { children: React.ReactNode; to: string; className?: string; onClick?: React.MouseEventHandler<HTMLAnchorElement>; 'aria-label'?: string; title?: string }) => (
@@ -52,6 +52,9 @@ vi.mock('@/api/hooks/reading-records', () => ({
 
 const mockProfileMutate = vi.fn()
 let profileSettings: { showStats?: boolean; showShowcase?: boolean; showPublicStats?: boolean; showPublicShowcase?: boolean; isPublic?: boolean } = {}
+let publicActivityEnabled = false
+let publicProfilePrivate = false
+let readerProfilePending = false
 
 // The settings dialog reads and writes the public profile preferences.
 vi.mock('@/features/library/hooks', () => ({
@@ -87,7 +90,8 @@ vi.mock('@/features/reviews/hooks/useReviews', () => ({
           createdAt: Date.now() - 15 * 24 * 3600 * 1000,
         },
         isOwner: userId !== 'reader',
-        visibility: 'public',
+        visibility: publicProfilePrivate ? 'private' : 'public',
+        showPublicActivity: publicActivityEnabled,
         showStats: true,
         showShowcase: true,
         summary: {
@@ -103,7 +107,7 @@ vi.mock('@/features/reviews/hooks/useReviews', () => ({
         reviews: { entries: [], page: 1, hasMore: false },
       },
     },
-    isPending: false,
+    isPending: readerProfilePending,
     isError: false,
     isFetching: false,
     refetch: vi.fn(),
@@ -112,6 +116,15 @@ vi.mock('@/features/reviews/hooks/useReviews', () => ({
 
 vi.mock('@/features/profile/hooks', () => ({
   useNoteArchive: () => ({ data: { data: { entries: [], hasMore: false } }, isPending: false }),
+}))
+
+vi.mock('@/features/activity/ActivityFeed', () => ({
+  default: ({ type, onFilterChange, title }: { type: string; onFilterChange: (type: 'review') => void; title?: React.ReactNode }) => (
+    <div data-testid="activity-feed" data-type={type}>
+      {title}
+      <button type="button" onClick={() => onFilterChange('review')}>filter reviews</button>
+    </div>
+  ),
 }))
 
 function renderWithQuery(ui: React.ReactElement) {
@@ -137,6 +150,9 @@ describe('Profile Page', () => {
       },
     })
     profileSettings = { showStats: true, showShowcase: true, isPublic: true }
+    publicActivityEnabled = false
+    publicProfilePrivate = false
+    readerProfilePending = false
     mockProfileMutate.mockClear()
     profileSearch = { notesPage: 1, reviewsPage: 1 }
     mockMyReviews.mockReset()
@@ -153,6 +169,15 @@ describe('Profile Page', () => {
     expect(screen.getByRole('button', { name: '个人设置' })).toBeInTheDocument()
     expect(screen.queryByText('修改密码')).not.toBeInTheDocument()
     expect(screen.queryByText('修改')).not.toBeInTheDocument()
+  })
+
+  it('uses the full profile skeleton while profile data is pending', () => {
+    readerProfilePending = true
+    renderWithQuery(<Profile />)
+
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('link', { name: '返回书库' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '个人设置' })).not.toBeInTheDocument()
   })
 
   it('renders a visitor profile with the shared homepage sections and no account controls', () => {
@@ -265,6 +290,11 @@ describe('Profile Page', () => {
     fireEvent.click(showShowcaseSwitch)
     expect(mockProfileMutate).toHaveBeenCalledWith({ showPublicShowcase: false })
 
+    const showActivitySwitch = screen.getByRole('switch', { name: '展示个人动态' })
+    expect(showActivitySwitch).not.toBeChecked()
+    fireEvent.click(showActivitySwitch)
+    expect(mockProfileMutate).toHaveBeenCalledWith({ showPublicActivity: true })
+
     const publicSwitch = screen.getByRole('switch', { name: '允许他人访问主页' })
     expect(publicSwitch).toBeInTheDocument()
     fireEvent.click(publicSwitch)
@@ -290,7 +320,25 @@ describe('Profile Page', () => {
 
     expect(screen.getByRole('switch', { name: '展示阅读概览' })).toBeDisabled()
     expect(screen.getByRole('switch', { name: '展示正在阅读' })).toBeDisabled()
+    expect(screen.getByRole('switch', { name: '展示个人动态' })).toBeDisabled()
     expect(screen.getByText('展示阅读概览')).toHaveClass('text-stone-400')
     expect(screen.getByText('展示正在阅读')).toHaveClass('text-stone-400')
+  })
+
+  it('shows public activity only when the visitor setting allows it and the profile is public', () => {
+    profileSearch = { userId: 'reader', notesPage: 1, reviewsPage: 1 }
+    publicActivityEnabled = true
+    const view = renderWithQuery(<Profile />)
+    expect(screen.getByTestId('activity-feed')).toHaveAttribute('data-type', 'all')
+    fireEvent.click(screen.getByText('filter reviews'))
+    expect(mockNavigate).toHaveBeenCalledWith(expect.objectContaining({
+      search: expect.any(Function),
+      state: expect.any(Function),
+    }))
+
+    view.unmount()
+    publicProfilePrivate = true
+    renderWithQuery(<Profile />)
+    expect(screen.queryByTestId('activity-feed')).not.toBeInTheDocument()
   })
 })

@@ -27,12 +27,13 @@ import { useAuthStore } from '@/stores/auth.store'
 import { normalizeLibrarySearch, readLibrarySearchExpression } from '@bookdock/shared'
 
 import ClearBookDataOption from './components/ClearBookDataOption'
-import { adoptArchiveExitRestore, editSearchControls, expressionDisplay, keepsSearchSession, searchExitTarget, searchProjection, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
+import { adoptArchiveExitRestore, clearActivityForLibraryNavigation, clearActivityForLibrarySwitch, editSearchControls, expressionDisplay, keepsSearchSession, searchExitTarget, searchProjection, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
 
 import { ApiError } from '@/api/client'
 import { notify } from '@/lib/notifications'
 import { getUserErrorNotification, isAccessRevocationError } from '@/lib/error-message'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import Modal from '@/components/ui/Modal'
 import { readLibraryNames, readTaxonomyNames } from '@/lib/library-name-cache'
 
 import { indexRoute, type LibrarySearch } from '@/routes/index'
@@ -63,6 +64,7 @@ import ListItemWrapper from './components/ListItemWrapper'
 import { SelectionCheck } from './components/RowChrome'
 import ReadingStatsCard from './components/ReadingStatsCard'
 import RecentlyRead from './components/RecentlyRead'
+import ActivityFeed from '@/features/activity/ActivityFeed'
 import SelectionBar from './components/SelectionBar'
 import TrashInfo from './components/TrashInfo'
 import UploadSheet from './components/UploadSheet'
@@ -71,7 +73,7 @@ import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-r
 import { libraryUrlCorrection, pageRangeCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
 import { categoryPath, sortCategories } from './taxonomy'
-import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, catalogQueryParts, useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useUpdateBookMembership, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefsState, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
+import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, catalogQueryParts, useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useUpdateBookMembership, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefsState, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useCatalogBookDetail, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
 
 function estimateDynColumns(): number {  if (typeof window === 'undefined') return 4
@@ -154,6 +156,8 @@ export default function Library() {
   // per-library relation query resolves later.
   const activeLibraryIsOwner = activeLibrary?.relation === 'owner'
   const trash = !isGuest && (search.trash ?? false) && (!activeLibrary || activeLibraryIsOwner)
+  const isLibraryActivity = Boolean(activeLibrary && search.section === 'activity' && !trash)
+  const activityType = search.activityType ?? 'all'
   const privateTrashEnabled = useTrashEnabled({ enabled: !isGuest && !requestedLibraryId })
   const privateTrashCapBytes = useTrashCapBytes({ enabled: !isGuest && !requestedLibraryId })
   // Per-library switch (owner sees the value, others get null); private rows
@@ -261,6 +265,24 @@ export default function Library() {
   const [publishTarget, setPublishTarget] = useState<BookListItem | null>(null)
   const [forkTarget, setForkTarget] = useState<BookListItem | null>(null)
   const [workDetail, setWorkDetail] = useState<CatalogBook | null>(null)
+  const [activityWorkTargetId, setActivityWorkTargetId] = useState<string | null>(null)
+  const activityWorkQuery = useCatalogBookDetail(activeLibrary?.id ?? null, activityWorkTargetId)
+  const previousActivityLibraryIdRef = useRef(activeLibrary?.id)
+  useEffect(() => {
+    if (previousActivityLibraryIdRef.current !== activeLibrary?.id) {
+      previousActivityLibraryIdRef.current = activeLibrary?.id
+      setActivityWorkTargetId(null)
+      setWorkDetail(null)
+      setSelection(new Set())
+    }
+  }, [activeLibrary?.id])
+  useEffect(() => {
+    if (isLibraryActivity) {
+      setSelection(new Set())
+      setWorkDetail(null)
+      setActivityWorkTargetId(null)
+    }
+  }, [isLibraryActivity])
   const [selection, setSelection] = useState<Set<string>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const lastSelectIndexRef = useRef<number | null>(null)
@@ -576,7 +598,7 @@ export default function Library() {
     author: search.author,
     series: series ?? undefined,
     trash: activeLibrary ? trash : undefined,
-  })
+  }, { enabled: !isLibraryActivity })
   const libraryRelationQuery = useLibraryRelation(activeLibrary?.id ?? null)
 
   const allBooks = useMemo(() => data?.data ?? [], [data])
@@ -658,7 +680,7 @@ export default function Library() {
     if (canUpload) setUploadOpen(open)
   }, [canUpload])
 
-  const searchAuthors = useLibrarySearchAuthors(activeLibrary?.id ?? null, trash, revealHidden, { enabled: !libraryContextUnresolved })
+  const searchAuthors = useLibrarySearchAuthors(activeLibrary?.id ?? null, trash, revealHidden, { enabled: !libraryContextUnresolved && !isLibraryActivity })
   const shelvesQuery = useShelves({ enabled: !requestedLibraryId })
   const tagsQuery = useTags({ enabled: !requestedLibraryId })
   const taxonomyLibraryId = activeLibrary?.id ?? privateLibraryId
@@ -733,7 +755,9 @@ export default function Library() {
     || (categoryId && categoryId !== 'none' && !activeCategoryName && libraryCategoriesQuery.isLoading)
     || (tagId && !activeTagName && (requestedLibraryId ? libraryTagsQuery.isLoading : tagsQuery.isLoading)),
   )
-  const viewTitle = trash
+  const viewTitle = isLibraryActivity
+    ? _('library.activity')
+    : trash
     ? _('library.trash')
     : shelfId === 'none'
       ? _('library.notOnShelf')
@@ -744,7 +768,9 @@ export default function Library() {
           : metadataFilter?.kind === 'series'
             ? _('library.seriesFilterTitle', { name: metadataFilter.value })
             : (activeCategoryName ?? activeShelfName ?? activeTagName ?? (filterNameUnknown || privateLibraryNameFailed ? '' : activeLibrary?.name ?? (requestedLibraryId ? requestedLibraryName : privateLibraryName)))
-  const viewTitleLoading = filterNamePending
+  const viewTitleLoading = isLibraryActivity
+    ? false
+    : filterNamePending
     || (!requestedLibraryId && !shelfId && !categoryId && !tagId && !trash && privateLibraryNameLoading)
     || (libraryContextUnresolved && !viewTitle)
 
@@ -819,15 +845,18 @@ export default function Library() {
   useGlobalDragToggle(setUploadOpenIfAllowed)
 
   const navSearch = useCallback(
-    (patch: Partial<LibrarySearch>) => {
+    (patch: Partial<LibrarySearch>, options?: { replace?: boolean }) => {
       patch = editSearchControls(search, patch)
+      patch = clearActivityForLibraryNavigation(patch)
       // The trash has its own default sort; URL sort params are meaningful only
       // within the list/trash domain they were set in, so drop them on crossing
       const nextTrash = 'trash' in patch ? (patch.trash ?? false) : trash
       const sortPatch = nextTrash !== trash ? { sortBy: undefined, sortOrder: undefined } : null
-      const filterChanged = (['expression', 'shelf', 'category', 'tag', 'q', 'format', 'status', 'trash', 'author', 'series', 'categoryScope'] as const)
+      const filterChanged = (['expression', 'shelf', 'category', 'tag', 'q', 'format', 'status', 'trash', 'author', 'series', 'categoryScope', 'section', 'activityType'] as const)
         .some((key) => key in patch && patch[key] !== search[key])
-      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, state: (previous) => ({ ...previous, librarySearchReturn: keepsSearchSession(patch) ? previous.librarySearchReturn : undefined, archiveExitScroll: undefined }), replace: !filterChanged && !('directory' in patch) })
+      const activityFilterOnly = ('activityType' in patch) && !('section' in patch) && !('shelf' in patch) && !('category' in patch) && !('q' in patch) && !('expression' in patch);
+      const shouldReplace = options?.replace ?? (activityFilterOnly || (!filterChanged && !('directory' in patch)));
+      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, state: (previous) => ({ ...previous, librarySearchReturn: keepsSearchSession(patch) ? previous.librarySearchReturn : undefined, archiveExitScroll: undefined }), replace: shouldReplace })
     },
     [navigate, search, trash],
   )
@@ -894,7 +923,10 @@ export default function Library() {
   // in a single navigation: those params are scoped to a library and must never
   // leak across, and two navigations would race on stale URL state.
   const handleSwitchLibrary = useCallback((id: string | null) => {
-    void navSearch({
+    setSelection(new Set())
+    setWorkDetail(null)
+    setActivityWorkTargetId(null)
+    void navSearch(clearActivityForLibrarySwitch({
       expression: undefined,
       libraryId: id ?? undefined,
       directory: undefined,
@@ -909,7 +941,8 @@ export default function Library() {
       format: undefined,
       author: undefined,
       series: undefined,
-    })
+      section: undefined,
+    }))
   }, [navSearch])
 
   const clearActiveFilters = useCallback(() => {
@@ -1146,9 +1179,44 @@ export default function Library() {
         />
 
       <main className="flex min-w-0 flex-1 flex-col px-3 py-5 sm:px-4 sm:py-8 md:px-8">
-        {search.directory && !libraryStale && !catalogGone ? <TaxonomyDirectory key={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}:${search.directory}`}
-          libraryId={activeLibrary?.id ?? null} privateLibraryId={privateLibraryId ?? null} sessionKey={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}`} panel={search.directory}
-          canManage={!isGuest && (!activeLibrary || isLibraryManager)} navSearch={navSearch} onOpenNavigation={() => setMobileNavOpen(true)} /> : <>
+        {search.directory && !libraryStale && !catalogGone ? (
+          <TaxonomyDirectory
+            key={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}:${search.directory}`}
+            libraryId={activeLibrary?.id ?? null}
+            privateLibraryId={privateLibraryId ?? null}
+            sessionKey={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}`}
+            panel={search.directory}
+            canManage={!isGuest && (!activeLibrary || isLibraryManager)}
+            navSearch={navSearch}
+            onOpenNavigation={() => setMobileNavOpen(true)}
+          />
+        ) : isLibraryActivity && activeLibrary ? (
+          <>
+            <ActivityFeed
+              scope="library"
+              targetId={activeLibrary.id}
+              type={activityType}
+              libraryName={activeLibrary.name}
+              historyIndex={location.state.__TSR_index}
+              title={<h1 className="font-serif text-2xl font-semibold text-stone-900 dark:text-stone-50">{_('library.activity')}</h1>}
+              onOpenNavigation={() => setMobileNavOpen(true)}
+              onFilterChange={(nextType) => navSearch({ activityType: nextType === 'all' ? undefined : nextType, page: undefined }, { replace: true })}
+              onOpenCatalogWork={(workId) => {
+                setActivityWorkTargetId(workId)
+                setWorkDetail(null)
+              }}
+            />
+            {activityWorkTargetId && !activityWorkQuery.data && (
+              <Modal title={_('library.bookDetails')} onClose={() => setActivityWorkTargetId(null)} size="default">
+                {activityWorkQuery.isError ? (
+                  <div className="p-4"><QueryErrorState isRetrying={activityWorkQuery.isFetching} onRetry={() => void activityWorkQuery.refetch()} /></div>
+                ) : (
+                  <div role="status" className="m-4 h-40 animate-pulse rounded-xl bg-stone-500/10" />
+                )}
+              </Modal>
+            )}
+          </>
+        ) : (<>
         <LibraryHeader key={activeLibrary?.id ?? 'private'}
           navSearch={navSearch}
           view={view}
@@ -1178,12 +1246,15 @@ export default function Library() {
           onOpenNavigation={() => setMobileNavOpen(true)}
           title={viewTitleLoading ? undefined : viewTitle}
           titleLoading={viewTitleLoading}
-          bookCount={hasLoadedTotal ? total : undefined}
+          bookCount={!isLibraryActivity && hasLoadedTotal ? total : undefined}
           onResetMetadataFilter={metadataFilter ? () => navSearch({ author: undefined, series: undefined }) : undefined}
+          hideBookControls={isLibraryActivity}
         />
+
 
         {!isGuest && <NotificationDrawer anchorRef={notificationButtonRef} open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />}
 
+        <div hidden={isLibraryActivity}>
         {!trash && <LibraryContextBar search={search} navSearch={navSearch} onClear={clearActiveFilters} />}
 
         {(privateLibrariesFailed || visibleTaxonomyError || (prefsError && !prefsReady)) && !catalogGone && (
@@ -1432,13 +1503,14 @@ export default function Library() {
             selectionActive={selectionActive}
           />
         )}
-      </>}
+        </div>
+        </>)}
       </main>
 
       {/* Shared selections contain work ids; private selections contain version ids.
           The shared trash is owner-only (see the trash guard above), so its
           batch bar only offers restore/permanent-delete. */}
-      {!isGuest && (!activeLibrary || isLibraryManager) && selection.size > 0 && (
+      {!isGuest && !isLibraryActivity && (!activeLibrary || isLibraryManager) && selection.size > 0 && (
         <SelectionBar
           selectedIds={Array.from(selection)}
           onClear={clearSelection}
@@ -1507,11 +1579,11 @@ export default function Library() {
 
       <BookDetailDialog
         book={detailTarget && (revealHidden || !detailTarget.effectiveHidden) ? detailTarget : null}
-        work={activeLibrary && workDetail ? {
+        work={activeLibrary && (workDetail || activityWorkQuery.data?.data) ? {
           // Live row from the catalog query, not the click-time snapshot: menu
           // toggles and version uploads invalidate the catalog, and the open
           // dialog must follow without closing and reopening.
-          work: catalogWorks.find((w) => w.id === workDetail.id) ?? workDetail,
+          work: catalogWorks.find((w) => w.id === workDetail?.id) ?? workDetail ?? activityWorkQuery.data!.data,
           library: activeLibrary,
           canManage: isLibraryManager,
           canCollect: libraryRelation !== 'guest',
@@ -1521,6 +1593,7 @@ export default function Library() {
         onClose={() => {
           setDetailTarget(null)
           setWorkDetail(null)
+          setActivityWorkTargetId(null)
         }}
         onPublish={canPublishDetail ? (book) => {
           setDetailTarget(null)

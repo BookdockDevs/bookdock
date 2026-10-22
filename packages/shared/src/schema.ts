@@ -192,6 +192,7 @@ export const settingsUpdateSchema = z.object({
     showShowcase: z.boolean().optional(),
     showPublicStats: z.boolean().optional(),
     showPublicShowcase: z.boolean().optional(),
+    showPublicActivity: z.boolean().optional(),
     isPublic: z.boolean().optional(),
   }).optional(),
   integrations: z.object({

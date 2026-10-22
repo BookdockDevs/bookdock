@@ -25,6 +25,7 @@ import {
 } from '../../formats/txt'
 import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
 import { AppError } from '../../middleware/error'
+import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
 import { assertCanContribute, assertLibraryBrowsable, assertMutableContent, ensurePrivateLibrary, getOwnsSourceVersionIds, isLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
 import { assertUserUploadAllowed } from '../auth/auth.service'
@@ -775,6 +776,7 @@ export async function uploadCatalogBook(
     author?: string
     authors?: string[]
     normalizeTitle?: boolean
+    operationId?: string
   },
 ) {
   const db = getDb()
@@ -866,6 +868,21 @@ export async function uploadCatalogBook(
         coverKey: targetLibraryBookId ? upload.coverKey : null,
         createdAt: now, updatedAt: now,
       }).run()
+      if (libraryType === 'shared') {
+        recordActivityEvent(tx, targetLibraryBookId
+          ? {
+              idempotencyKey: `version.added:${linkId}`,
+              eventType: 'version.added', audience: 'library', libraryId, actorUserId: userId,
+              targetKind: 'version', targetId: linkId, workId: libraryBookId, versionId,
+              operationId: opts?.operationId, occurredAt: now,
+            }
+          : {
+              idempotencyKey: `work.added:${libraryBookId}`,
+              eventType: 'work.added', audience: 'library', libraryId, actorUserId: userId,
+              targetKind: 'work', targetId: libraryBookId, workId: libraryBookId, versionId,
+              operationId: opts?.operationId, occurredAt: now,
+            })
+      }
       if (tagIds.length > 0) {
         tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
       }
@@ -3355,6 +3372,12 @@ export async function pushPrivateToVersion(
       wordCount: sourceLatest.wordCount, chapterCount: sourceLatest.chapterCount,
       meta, createdAt: updatedAt,
     }).run()
+    recordActivityEvent(tx, {
+      idempotencyKey: `revision.published:${newRevisionId}`,
+      eventType: 'revision.published', audience: 'library', libraryId, actorUserId: actorId,
+      targetKind: 'revision', targetId: newRevisionId, workId: libraryBookId,
+      versionId: link.bookVersionId, occurredAt: updatedAt,
+    })
     tx.insert(blobs).values({ key: sourceLatest.blobKey, size: sourceLatest.size, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
     tx.update(bookVersions).set({ size: sourceLatest.size, updatedAt }).where(eq(bookVersions.id, link.bookVersionId)).run()
     tx.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, libraryBookId)).run()
@@ -3571,6 +3594,12 @@ export async function appendCityVersionContent(
         blobKey: fileKey, size: epubBuffer.length, wordCount: newWordCount,
         chapterCount: metaChapters.length, meta, createdAt: updatedAt,
       }).run()
+      recordActivityEvent(tx, {
+        idempotencyKey: `revision.published:${newRevisionId}`,
+        eventType: 'revision.published', audience: 'library', libraryId: link.libraryId, actorUserId: actorId,
+        targetKind: 'revision', targetId: newRevisionId, workId: libraryBookId,
+        versionId: link.bookVersionId, occurredAt: updatedAt,
+      })
       tx.insert(blobs).values({ key: fileKey, size: epubBuffer.length, kind: 'book', createdAt: updatedAt }).onConflictDoNothing().run()
       tx.update(bookVersions).set({ size: epubBuffer.length, updatedAt }).where(eq(bookVersions.id, link.bookVersionId)).run()
       tx.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, libraryBookId)).run()

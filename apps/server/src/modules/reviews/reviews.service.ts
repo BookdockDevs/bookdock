@@ -19,6 +19,7 @@ import { getDb } from '../../db/client'
 import { syncContentFiles } from '../../db/content-files'
 import { bookReviewComments, bookReviewLikes, bookReviews, bookStates, bookVersions, libraries, libraryBooks, libraryBookVersions, users } from '../../db/schema'
 import { createId } from '../../lib/id'
+import { recordActivityEvent } from '../../lib/activity-events'
 import { capturePrivateArchiveSnapshots, savePersonalBookSnapshot } from '../../lib/personal-book-archive'
 import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { AppError, isUniqueViolation } from '../../middleware/error'
@@ -351,6 +352,26 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
       if (snapshot) savePersonalBookSnapshot(tx as unknown as ReturnType<typeof getDb>, userId, input.bookVersionId, snapshot)
       else capturePrivateArchiveSnapshots(tx as unknown as ReturnType<typeof getDb>, [input.bookVersionId])
       syncContentFiles(tx, { userId, domain: 'review', targetId: row.id, bookVersionId: input.bookVersionId, draftId: input.draftId, ...files })
+      if (visibility === 'shared' && row.sourceLibraryId && row.sourceLibraryBookId) {
+        const workRow = tx.select().from(libraryBooks).where(and(
+          eq(libraryBooks.id, row.sourceLibraryBookId),
+          eq(libraryBooks.libraryId, row.sourceLibraryId),
+        )).get()
+        if (workRow && !workRow.deletedAt) {
+          recordActivityEvent(tx, {
+            idempotencyKey: `review.published:${row.id}`,
+            eventType: 'review.published',
+            audience: 'library',
+            libraryId: row.sourceLibraryId,
+            actorUserId: userId,
+            targetKind: 'review',
+            targetId: row.id,
+            workId: row.sourceLibraryBookId,
+            versionId: row.readBookVersionId,
+            occurredAt: row.createdAt,
+          })
+        }
+      }
     })
   } catch (error) {
     if (isUniqueViolation(error)) throw new AppError('REVIEW_ALREADY_EXISTS')
@@ -412,6 +433,26 @@ export async function updateReview(userId: string, id: string, patch: ReviewUpda
       .where(eq(bookReviews.id, id))
       .run()
     syncContentFiles(tx, { userId, domain: 'review', targetId: id, draftId: patch.draftId, ...files })
+    if (row.visibility !== 'shared' && visibility === 'shared' && row.sourceLibraryId && row.sourceLibraryBookId) {
+      const workRow = tx.select().from(libraryBooks).where(and(
+        eq(libraryBooks.id, row.sourceLibraryBookId),
+        eq(libraryBooks.libraryId, row.sourceLibraryId),
+      )).get()
+      if (workRow && !workRow.deletedAt) {
+        recordActivityEvent(tx, {
+          idempotencyKey: `review.published:${row.id}`,
+          eventType: 'review.published',
+          audience: 'library',
+          libraryId: row.sourceLibraryId,
+          actorUserId: userId,
+          targetKind: 'review',
+          targetId: row.id,
+          workId: row.sourceLibraryBookId,
+          versionId: row.readBookVersionId,
+          occurredAt: now,
+        })
+      }
+    }
   })
   await cleanContentBlobs()
   const updated = db.select().from(bookReviews).where(eq(bookReviews.id, id)).get()!
@@ -434,12 +475,63 @@ export async function deleteReview(userId: string, id: string) {
     } catch {
       throw new AppError('REVIEW_NOT_FOUND')
     }
+    db.transaction((tx) => {
+      const workRow = tx.select().from(libraryBooks).where(and(
+        eq(libraryBooks.id, access.row.sourceLibraryBookId!),
+        eq(libraryBooks.libraryId, access.row.sourceLibraryId!),
+      )).get()
+      if (access.row.visibility === 'shared' && workRow) {
+        recordActivityEvent(tx, {
+          idempotencyKey: `review.deleted:${access.row.id}`,
+          eventType: 'review.deleted',
+          audience: 'manager',
+          libraryId: access.row.sourceLibraryId!,
+          actorUserId: userId,
+          targetKind: 'review',
+          targetId: access.row.id,
+          workId: access.row.sourceLibraryBookId,
+          versionId: access.row.readBookVersionId,
+          occurredAt: Date.now(),
+          snapshotWorkTitle: workRow.title,
+          snapshotObjectLabel: access.row.title,
+          snapshotAuthorId: access.row.userId,
+        })
+      }
+      tx.delete(bookReviews).where(eq(bookReviews.id, id)).run()
+    })
+    await cleanContentBlobs()
+    return { id }
   }
   // Author deletes are always allowed, even when the source is gone: the
   // retained copy stays under the author's control. Manager deletes derive
   // from the source and require it to still read.
   // Dependent discussion and likes follow through FK cascades.
-  db.delete(bookReviews).where(eq(bookReviews.id, id)).run()
+  db.transaction((tx) => {
+    if (owned.visibility === 'shared' && owned.sourceLibraryId && owned.sourceLibraryBookId) {
+      const workRow = tx.select().from(libraryBooks).where(and(
+        eq(libraryBooks.id, owned.sourceLibraryBookId),
+        eq(libraryBooks.libraryId, owned.sourceLibraryId),
+      )).get()
+      if (workRow) {
+        recordActivityEvent(tx, {
+          idempotencyKey: `review.deleted:${owned.id}`,
+          eventType: 'review.deleted',
+          audience: 'manager',
+          libraryId: owned.sourceLibraryId,
+          actorUserId: userId,
+          targetKind: 'review',
+          targetId: owned.id,
+          workId: owned.sourceLibraryBookId,
+          versionId: owned.readBookVersionId,
+          occurredAt: Date.now(),
+          snapshotWorkTitle: workRow.title,
+          snapshotObjectLabel: owned.title,
+          snapshotAuthorId: owned.userId,
+        })
+      }
+    }
+    tx.delete(bookReviews).where(eq(bookReviews.id, id)).run()
+  })
   await cleanContentBlobs()
   return { id }
 }
@@ -606,6 +698,7 @@ export async function readerProfile(viewerId: string | null, authorId: string, q
     const settings = getProfileSettings(authorId)
     const isPublic = isOwner || settings.isPublic !== false
     if (!isPublic) return { author, isOwner: false, visibility: 'private' as const, reviews: { entries: [], page: 1, hasMore: false } }
+    const showActivity = settings.showPublicActivity === true
     const showStats = settings.showPublicStats ?? settings.showStats !== false
     const showShowcase = settings.showPublicShowcase ?? settings.showShowcase !== false
     if (isOwner) {
@@ -613,6 +706,7 @@ export async function readerProfile(viewerId: string | null, authorId: string, q
         author: { ...author, bio: authorRow.bio, createdAt: authorRow.createdAt },
         isOwner: true,
         visibility: 'public' as const,
+        showPublicActivity: showActivity,
         showStats: true,
         summary: await profileSummary(authorId, options.today),
         showShowcase: true,
@@ -625,6 +719,7 @@ export async function readerProfile(viewerId: string | null, authorId: string, q
       isOwner,
       visibility: 'public' as const,
       ...(showStats ? { showStats: true, summary: await profileSummary(authorId, options.today) } : { showStats: false }),
+      showPublicActivity: showActivity,
       ...(showShowcase ? { showShowcase: true, currentlyReading: await profileCurrentlyReading(viewerId, authorId) } : { showShowcase: false }),
       reviews: { entries: [], page: 1, hasMore: false },
     }

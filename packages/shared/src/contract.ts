@@ -394,9 +394,11 @@ export interface ProfileSettings {
   /** Legacy owner-view preferences retained for stored settings compatibility. */
   showStats?: boolean
   showShowcase?: boolean
-  /** Public homepage module controls. Omitted means enabled. */
+  /** Public reading modules; omitted means enabled for existing profiles. */
   showPublicStats?: boolean
   showPublicShowcase?: boolean
+  /** Public homepage activity timeline; omitted means hidden and sharing defaults off. */
+  showPublicActivity?: boolean
   /** Server-enforced public homepage ACL. Omitted means public. */
   isPublic?: boolean
 }

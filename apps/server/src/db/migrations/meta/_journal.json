@@ -379,6 +379,13 @@
       "when": 1793200000000,
       "tag": "0054_category_shelf_separation",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793300000000,
+      "tag": "0055_activity_events",
+      "breakpoints": true
     }
   ]
 }

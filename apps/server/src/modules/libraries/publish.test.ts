@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateTestBaseWithStorage as migrate } from '../../db/migration-stage'
+import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,7 +26,10 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [
+    '0041_idea_discussion', '0042_storage_connections', '0043_storage_backend', '0044_storage_s3',
+    '0046_book_reviews', '0048_content_files', '0055_activity_events',
+  ])
   return db
 }
 
@@ -113,12 +116,54 @@ describe('publish private book snapshot', () => {
     const targetRevision = db.select().from(schema.contentRevisions)
       .where(eq(schema.contentRevisions.bookVersionId, ownerResult.bookVersionId)).get()!
     expect(targetRevision).toMatchObject({ blobKey: sourceRevision.blobKey, revisionNo: 1 })
+    const publicationEvents = db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.libraryId, sharedLibraryId)).all()
+      .filter((event) => event.eventType === 'work.added')
+      .sort((a, b) => a.actorUserId!.localeCompare(b.actorUserId!))
+    expect(publicationEvents.map((event) => [event.actorUserId, event.workId, event.versionId])).toEqual([
+      [adminId, adminResult.libraryBookId, adminResult.bookVersionId],
+      [ownerId, ownerResult.libraryBookId, ownerResult.bookVersionId],
+    ].sort((a, b) => a[0].localeCompare(b[0])))
     expect(targetRevision.meta).toMatchObject({ coverPaletteKey: ownerBook.book.id })
     expect(db.select().from(schema.libraryBookVersions)
       .where(eq(schema.libraryBookVersions.id, ownerResult.versionLinkId)).get())
       .toMatchObject({ kind: 'personal', sourceLibraryId: null, sourceLibraryBookVersionId: null })
     expect(db.select().from(schema.bookStates)
       .where(eq(schema.bookStates.bookVersionId, ownerResult.bookVersionId)).all()).toHaveLength(0)
+  })
+
+  it('records first catalog publication and only genuinely new versions for the publisher', async () => {
+    const first = await uploadCatalogBook(sharedLibraryId, ownerId, txtFile('第一章\n甲'), {
+      title: 'Catalog work', operationId: 'upload-batch-1',
+    })
+    const second = await uploadCatalogBook(sharedLibraryId, adminId, txtFile('第一章\n乙'), {
+      libraryBookId: first.libraryBookId, operationId: 'upload-batch-1',
+    })
+    const duplicate = await uploadCatalogBook(sharedLibraryId, ownerId, txtFile('第一章\n甲'), {
+      title: 'Catalog work', operationId: 'upload-batch-1',
+    })
+
+    expect(duplicate.duplicated).toBe(true)
+    const events = db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.libraryId, sharedLibraryId)).all()
+      .filter((event) => event.operationId === 'upload-batch-1')
+      .sort((a, b) => a.eventType.localeCompare(b.eventType))
+    expect(events.map((event) => [event.eventType, event.actorUserId, event.targetId, event.versionId])).toEqual([
+      ['work.added', ownerId, first.libraryBookId, first.bookVersionId],
+      ['version.added', adminId, second.versionLinkId, second.bookVersionId],
+    ].sort((a, b) => a[0].localeCompare(b[0])))
+  })
+
+  it('rolls back catalog publication when the activity event cannot be written', async () => {
+    db.run(sql.raw(`CREATE TRIGGER reject_catalog_activity BEFORE INSERT ON activity_events
+      BEGIN SELECT RAISE(ABORT, 'activity write rejected'); END`))
+
+    await expect(uploadCatalogBook(sharedLibraryId, ownerId, txtFile('第一章\n回滚'), { title: 'Rejected' }))
+      .rejects.toThrow()
+    expect(db.select().from(schema.libraryBooks).all()).toHaveLength(0)
+    expect(db.select().from(schema.bookVersions).all()).toHaveLength(0)
+    expect(db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.libraryId, sharedLibraryId)).all()).toHaveLength(0)
   })
 
   it('records the publish-time source base on the city link', async () => {

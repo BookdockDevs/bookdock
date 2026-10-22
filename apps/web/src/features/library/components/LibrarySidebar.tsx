@@ -12,7 +12,7 @@ import { useUiStore } from '@/stores/ui.store'
 
 import type { LibrarySearch } from '@/routes/index'
 import SmartMenu from '@/components/ui/SmartMenu'
-import { archiveEntryState } from '@/features/archive/archive-return'
+import { archiveEntryState, captureArchiveExitScroll } from '@/features/archive/archive-return'
 import AccountMenu from '@/features/auth/AccountMenu'
 import NotificationBell from '@/features/notifications/components/NotificationBell'
 import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
@@ -110,6 +110,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   // Shared libraries expose their categories here; private shelves and private
   // categories stay independent and load from their respective endpoints.
   const inLibrary = activeLibraryId !== null
+  const isLibraryActivity = Boolean(inLibrary && librarySearch?.section === 'activity' && !trash)
   const taxonomyLibraryId = activeLibraryId ?? privateLibraryId
   const categoriesQuery = useLibraryCategories(taxonomyLibraryId)
   const libraryTagsQuery = useLibraryTags(activeLibraryId)
@@ -289,7 +290,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   }, [updateScrollShadows])
 
   function selectNavigation(patch: Partial<LibrarySearch>) {
-    navSearch({ ...patch, directory: undefined })
+    navSearch({ ...patch, directory: undefined, section: undefined })
     onMobileClose?.()
   }
 
@@ -398,6 +399,31 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5">
+          {inLibrary && (
+            <button
+              type="button"
+              title={_('library.activity')}
+              aria-label={_('library.activity')}
+              onClick={() => {
+                if (isLibraryActivity) {
+                  navSearch({ section: undefined, activityType: undefined, page: undefined })
+                } else {
+                  navSearch({ section: 'activity', activityType: undefined, directory: undefined, page: undefined })
+                }
+                onMobileClose?.()
+              }}
+              className={cn(
+                'flex h-7 w-7 items-center justify-center rounded-lg transition-all active:scale-95 cursor-pointer',
+                isLibraryActivity
+                  ? 'bg-white font-medium text-stone-900 shadow-xs ring-1 ring-stone-200/80 dark:bg-stone-800 dark:text-stone-50 dark:ring-stone-700/70'
+                  : 'text-stone-400 hover:bg-stone-200/60 hover:text-stone-700 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+              )}
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 12V2a5 5 0 0 1 0 10Zm0 0h10a5 5 0 0 1-10 0Zm0 0v10a5 5 0 0 1 0-10Zm0 0H2a5 5 0 0 1 10 0Z" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
             title={_(panel === 'tags' ? 'library.browseTags' : panel === 'categories' ? 'library.browseCategories' : 'library.browseShelves')}
@@ -406,7 +432,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
               if (directory === panel) {
                 navSearch({ directory: undefined })
               } else {
-                navSearch({ directory: panel })
+                navSearch({ directory: panel, section: undefined })
               }
               onMobileClose?.()
             }}
@@ -531,6 +557,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
             // Record the entry source once: the archive top bar exits back to
             // it no matter how far the reader navigates inside the archive.
             if (librarySearch) {
+              if (!router?.state?.location.state.archiveReturn) captureArchiveExitScroll(window.scrollY)
               void navigate({ to: '/archive', state: (previous) => ({ ...previous, ...archiveEntryState(librarySearch, window.scrollY, previous.archiveReturn) }) })
             } else {
               void navigate({ to: '/archive' })

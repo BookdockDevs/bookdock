@@ -92,6 +92,7 @@ export function migrateBeforeBookRetirementIncluding(
     db.run(sql`ALTER TABLE reading_archives ADD COLUMN cover_key TEXT`)
   }
   repairHybridShelfSchema(db)
+  ensureTestActivityEvents(db)
 }
 
 /**
@@ -132,4 +133,34 @@ export function migrateTestBaseWithStorage(
     '0043_storage_backend',
     '0044_storage_s3',
   ])
+}
+
+/**
+ * Hybrid service fixtures stop before newer feature migrations, then apply
+ * selected legacy tables by hand. Keep the activity writer table available
+ * without advancing Drizzle's migration watermark or running historical
+ * backfills against this intentionally mixed schema.
+ */
+function ensureTestActivityEvents(db: Parameters<typeof migrate>[0]) {
+  db.run(sql.raw(`CREATE TABLE IF NOT EXISTS activity_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    audience TEXT NOT NULL,
+    library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    actor_user_id TEXT,
+    target_kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    work_id TEXT,
+    version_id TEXT,
+    operation_id TEXT,
+    occurred_at INTEGER NOT NULL,
+    snapshot_work_title TEXT,
+    snapshot_object_label TEXT,
+    snapshot_author_id TEXT
+  )`))
+  db.run(sql.raw('CREATE UNIQUE INDEX IF NOT EXISTS activity_events_idempotency_unique ON activity_events(idempotency_key)'))
+  db.run(sql.raw('CREATE INDEX IF NOT EXISTS activity_events_library_page_idx ON activity_events(library_id, audience, occurred_at, id)'))
+  db.run(sql.raw('CREATE INDEX IF NOT EXISTS activity_events_actor_page_idx ON activity_events(actor_user_id, event_type, occurred_at, id)'))
+  db.run(sql.raw('CREATE INDEX IF NOT EXISTS activity_events_operation_idx ON activity_events(library_id, actor_user_id, operation_id, event_type, audience)'))
 }

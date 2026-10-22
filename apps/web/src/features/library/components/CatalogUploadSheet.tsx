@@ -57,6 +57,7 @@ export default function CatalogUploadSheet({
   const target = useMemo<UploadTarget>(() => ({
     url: `/libraries/${libraryId}/books`,
     fields: (item) => ({
+      ...(item.operationId ? { operationId: item.operationId } : {}),
       ...(libraryBookId
         ? { libraryBookId }
         : (categoryId ? { categoryId } : {})),
@@ -76,6 +77,7 @@ export default function CatalogUploadSheet({
       ['book'],
       ['batch-selection'],
     ],
+    activityLibraryId: libraryId,
   }), [libraryId, categoryId, libraryBookId])
 
   if (!open) return null

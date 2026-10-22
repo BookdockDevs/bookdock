@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   search: { libraryId: 'requested-library', shelf: 'none', tag: undefined, trash: true, page: 4 },
   libraries: vi.fn(),
   books: vi.fn(),
+  catalog: vi.fn(),
+  searchAuthors: vi.fn(),
   navigate: vi.fn(),
 }))
 
@@ -28,11 +30,11 @@ vi.mock('@/features/library/hooks', async (importOriginal) => {
     ...actual,
     useLibraries: mocks.libraries,
     useBooks: (...args: unknown[]) => { mocks.books(...args); return query({ data: [], total: 0 }) },
-    useLibraryCatalog: () => query(),
+    useLibraryCatalog: (...args: unknown[]) => { mocks.catalog(...args); return query() },
     useLibraryRelation: () => query(),
     useLibraryCategories: () => query({ data: [] }),
     useLibraryTags: () => query({ data: [] }),
-    useLibrarySearchAuthors: () => query({ data: [] }),
+    useLibrarySearchAuthors: (...args: unknown[]) => { mocks.searchAuthors(...args); return query({ data: [] }) },
     useShelves: () => query({ data: [] }),
     useTags: () => query({ data: [] }),
     useTrashEnabled: () => true,
@@ -84,6 +86,8 @@ describe('Library requested context resolution', () => {
     mocks.search = { libraryId: 'requested-library', shelf: 'none', tag: undefined, trash: true, page: 4 }
     mocks.libraries.mockReturnValue({ data: undefined, isPending: true, isError: false, isFetching: true, refetch: vi.fn() })
     mocks.books.mockClear()
+    mocks.catalog.mockClear()
+    mocks.searchAuthors.mockClear()
     mocks.navigate.mockClear()
     useAuthStore.setState({ user: { id: 'user-1', username: 'reader', role: 'member' } })
   })
@@ -156,5 +160,26 @@ describe('Library requested context resolution', () => {
 
     expect(view.container.querySelector('[data-library-context="resolved"]')).toBeInTheDocument()
     expect(mocks.navigate.mock.calls.every(([options]) => (options as { search?: { shelf?: string } }).search?.shelf === 'none')).toBe(true)
+  })
+
+  it('disables catalog and author-search requests in library activity and restores them in the books view', () => {
+    mocks.search = { libraryId: 'requested-library', shelf: undefined, tag: undefined, trash: false, page: 1, section: 'activity' }
+    mocks.libraries.mockReturnValue({
+      data: { data: [{ id: 'requested-library', type: 'shared', name: 'Shared', relation: 'owner' }] },
+      isPending: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    })
+    const view = renderLibrary()
+
+    expect(mocks.catalog.mock.calls.some(([id, , options]) => id === 'requested-library' && (options as { enabled?: boolean } | undefined)?.enabled === false)).toBe(true)
+    expect(mocks.searchAuthors.mock.calls.some(([id, , , options]) => id === 'requested-library' && (options as { enabled?: boolean } | undefined)?.enabled === false)).toBe(true)
+
+    mocks.search = { ...mocks.search, section: undefined }
+    act(() => view.rerender(<QueryClientProvider client={view.client}><Library /></QueryClientProvider>))
+
+    expect(mocks.catalog.mock.calls.some(([id, , options]) => id === 'requested-library' && (options as { enabled?: boolean } | undefined)?.enabled === true)).toBe(true)
+    expect(mocks.searchAuthors.mock.calls.some(([id, , , options]) => id === 'requested-library' && (options as { enabled?: boolean } | undefined)?.enabled === true)).toBe(true)
   })
 })

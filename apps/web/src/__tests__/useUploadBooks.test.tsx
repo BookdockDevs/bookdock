@@ -73,6 +73,7 @@ describe('useUploadBooks', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('holds a correspondence for explicit continuation without reporting a successful upload', () => {
@@ -103,6 +104,38 @@ describe('useUploadBooks', () => {
     expect(result.current.items[0]?.status).toBe('pending')
     expect(useToastStore.getState().toasts).toHaveLength(0)
     expect(queryClient.getQueryState(['books'])?.isInvalidated).not.toBe(true)
+  })
+
+  it('reuses one activity operation id for files picked together and keeps it on retry', () => {
+    const target = {
+      url: '/libraries/lib-1/books',
+      fields: (item: { operationId?: string }) => item.operationId ? { operationId: item.operationId } : {},
+      invalidateKeys: [],
+    }
+    const { result } = renderHook(() => useUploadBooks(target), { wrapper: wrapper(queryClient) })
+
+    act(() => result.current.addFiles([new File(['a'], 'a.epub'), new File(['b'], 'b.epub')], { autoStart: true }))
+    const operationId = result.current.items[0]?.operationId
+    expect(operationId).toBeTruthy()
+    expect(result.current.items.map((item) => item.operationId)).toEqual([operationId, operationId])
+    expect(FakeXHR.instances.slice(0, 2).map((xhr) => xhr.fields.operationId)).toEqual([operationId, operationId])
+
+    act(() => FakeXHR.instances[0]!.respond(500, {}))
+    act(() => result.current.retry(result.current.items[0]!.id))
+    expect(FakeXHR.instances[2]?.fields.operationId).toBe(operationId)
+  })
+
+  it('gives independent upload batches distinct operation ids when created at the same time', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000)
+    const first = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
+    const second = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
+
+    act(() => first.result.current.addFiles([new File(['a'], 'a.epub')], { autoStart: true }))
+    act(() => second.result.current.addFiles([new File(['b'], 'b.epub')], { autoStart: true }))
+
+    expect(first.result.current.items[0]?.operationId).toBeTruthy()
+    expect(second.result.current.items[0]?.operationId).toBeTruthy()
+    expect(second.result.current.items[0]?.operationId).not.toBe(first.result.current.items[0]?.operationId)
   })
 
   it('rejects oversized files before queueing them', () => {

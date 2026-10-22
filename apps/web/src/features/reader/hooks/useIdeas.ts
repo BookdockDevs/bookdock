@@ -7,6 +7,7 @@ import type { AnnotationRes, BookDetailRes, IdeaComposerContext, IdeaDiscussion,
 
 import { apiDelete, apiGet, apiPost, apiPut } from '@/api/client'
 import { withReveal } from '@/lib/reveal-hidden'
+import { invalidateActivityQueries } from '@/features/activity/hooks'
 import { useAuthStore } from '@/stores/auth.store'
 
 export function useIdeaComposer(bookId: string, enabled = true) {
@@ -178,7 +179,7 @@ export function useIdeaAction(ideaId: string, bookId: string) {
         }
       }
     },
-    onSettled: async () => {
+    onSettled: async (_result, _error, action) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['note-archive'] }),
         queryClient.invalidateQueries({ queryKey: ['idea-discussion', ideaId] }),
@@ -186,6 +187,7 @@ export function useIdeaAction(ideaId: string, bookId: string) {
         queryClient.invalidateQueries({ queryKey: ['annotations', bookId] }),
         // Comment/like writes can retire the notifications pointing at them.
         queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+        ...(action.type === 'delete' ? [invalidateActivityQueries(queryClient)] : []),
       ])
     },
   })

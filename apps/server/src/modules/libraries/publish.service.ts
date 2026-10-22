@@ -14,6 +14,7 @@ import {
   libraryTags,
   libraries,
 } from '../../db/schema'
+import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
 import { AppError } from '../../middleware/error'
 import { getStorage } from '../../storage'
@@ -178,6 +179,12 @@ export async function publishPrivateBook(
       createdAt: now,
       updatedAt: now,
     }).run()
+    recordActivityEvent(tx, {
+      idempotencyKey: `work.added:${newLibraryBookId}`,
+      eventType: 'work.added', audience: 'library', libraryId: targetLibraryId, actorUserId: actorId,
+      targetKind: 'work', targetId: newLibraryBookId, workId: newLibraryBookId,
+      versionId: newBookVersionId, occurredAt: now,
+    })
     if (tagIds.length > 0) {
       tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId: newLibraryBookId, tagId }))).run()
     }

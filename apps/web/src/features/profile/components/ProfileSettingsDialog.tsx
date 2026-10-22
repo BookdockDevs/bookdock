@@ -9,17 +9,16 @@ import ChangePasswordDialog from '@/features/auth/ChangePasswordDialog'
 import { authErrorKey } from '@/features/auth/errors'
 import { useUpdateBio, useUpdateUsername } from '@/features/auth/hooks'
 import { useProfileSettings, useUpdateProfileSettings } from '@/features/library/hooks'
-import { useReaderProfile } from '@/features/reviews/hooks/useReviews'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
 
 interface ProfileSettingsDialogProps {
-  open: boolean
+  bio: string
   onClose: () => void
 }
 
-export default function ProfileSettingsDialog({ open, onClose }: ProfileSettingsDialogProps) {
+export default function ProfileSettingsDialog({ bio, onClose }: ProfileSettingsDialogProps) {
   const _ = useTranslation()
   const user = useAuthStore((s) => s.user)
   const updateUsername = useUpdateUsername()
@@ -27,26 +26,24 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const [nameDraft, setNameDraft] = useState(user?.username ?? '')
   const [nameError, setNameError] = useState<string | null>(null)
-  const [bioDraft, setBioDraft] = useState('')
+  const [bioDraft, setBioDraft] = useState(bio)
   const profile = useProfileSettings()
-  const reader = useReaderProfile(user?.id)
   const updateProfile = useUpdateProfileSettings()
   const showStats = profile.showPublicStats ?? profile.showStats !== false
   const showShowcase = profile.showPublicShowcase ?? profile.showShowcase !== false
+  const showActivity = profile.showPublicActivity === true
   const isPublic = profile.isPublic !== false
-  const savedBio = reader.data?.data.author.bio ?? ''
+  const savedBio = bio
   const normalizedName = nameDraft.trim()
   const normalizedBio = bioDraft.trim()
   const hasProfileChanges = normalizedName !== (user?.username ?? '') || normalizedBio !== savedBio
   const isSavingProfile = updateUsername.isPending || updateBio.isPending
 
   useEffect(() => {
-    if (open) {
-      setNameDraft(user?.username ?? '')
-      setNameError(null)
-      setBioDraft(savedBio)
-    }
-  }, [open, user?.username, savedBio])
+    setNameDraft(user?.username ?? '')
+    setNameError(null)
+    setBioDraft(savedBio)
+  }, [user?.username, savedBio])
 
   async function onSaveProfile() {
     setNameError(null)
@@ -77,8 +74,6 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
       notify.error({ key: 'settings.profileUpdateFailed' })
     }
   }
-
-  if (!open) return null
 
   return (
     <>
@@ -118,8 +113,8 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
                     value={bioDraft}
                     onChange={(event) => setBioDraft(event.target.value)}
                     maxLength={500}
-                    rows={4}
-                    className="min-h-24 w-full resize-y rounded-lg border border-stone-200 bg-white px-3 py-2 pr-16 pb-7 text-sm outline-none focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900"
+                    rows={2}
+                    className="min-h-16 w-full resize-y rounded-lg border border-stone-200 bg-white px-3 py-2 pr-16 pb-7 text-sm outline-none focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900"
                     placeholder={_('profile.bioPlaceholder')}
                   />
                   <span className="pointer-events-none absolute bottom-2 right-3 text-xs tabular-nums text-stone-400 dark:text-stone-500">
@@ -156,9 +151,13 @@ export default function ProfileSettingsDialog({ open, onClose }: ProfileSettings
                   <span className={isPublic ? 'text-sm text-stone-700 dark:text-stone-200' : 'text-sm text-stone-400 dark:text-stone-500'}>{_('profile.settingShowStats')}</span>
                   <Toggle checked={showStats} disabled={!isPublic || updateProfile.isPending} onChange={(v) => updateProfile.mutate({ showPublicStats: v })} ariaLabel={_('profile.settingShowStats')} />
                 </div>
-                <div className="flex items-center justify-between gap-4 pt-3">
+                <div className="flex items-center justify-between gap-4 py-3">
                   <span className={isPublic ? 'text-sm text-stone-700 dark:text-stone-200' : 'text-sm text-stone-400 dark:text-stone-500'}>{_('profile.settingShowShowcase')}</span>
                   <Toggle checked={showShowcase} disabled={!isPublic || updateProfile.isPending} onChange={(v) => updateProfile.mutate({ showPublicShowcase: v })} ariaLabel={_('profile.settingShowShowcase')} />
+                </div>
+                <div className="flex items-center justify-between gap-4 pt-3">
+                  <span className={isPublic ? 'text-sm text-stone-700 dark:text-stone-200' : 'text-sm text-stone-400 dark:text-stone-500'}>{_('profile.settingShowActivity')}</span>
+                  <Toggle checked={showActivity} disabled={!isPublic || updateProfile.isPending} onChange={(v) => updateProfile.mutate({ showPublicActivity: v })} ariaLabel={_('profile.settingShowActivity')} />
                 </div>
               </div>
             </div>

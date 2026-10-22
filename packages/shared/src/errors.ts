@@ -1,4 +1,5 @@
 export const ErrorCode = {
+  ACTIVITY_NOT_FOUND: 'ACTIVITY_NOT_FOUND',
   BOOK_NOT_FOUND: 'BOOK_NOT_FOUND',
   LIBRARY_NOT_FOUND: 'LIBRARY_NOT_FOUND',
   LIBRARY_VERSION_NOT_FOUND: 'LIBRARY_VERSION_NOT_FOUND',
@@ -77,6 +78,7 @@ export const ErrorCode = {
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 
 export const ErrorHttpStatus: Record<ErrorCode, number> = {
+  ACTIVITY_NOT_FOUND: 404,
   BOOK_NOT_FOUND: 404,
   LIBRARY_NOT_FOUND: 404,
   LIBRARY_VERSION_NOT_FOUND: 404,

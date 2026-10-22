@@ -91,6 +91,9 @@
     "retrying": "Retrying..."
   },
   "library": {
+    "mainSection": "Library content",
+    "books": "Books",
+    "activity": "Activity",
     "catalogNoChanges": "Nothing changed; no save was needed",
     "taxonomyVisibilityFailed": "Could not change visibility. Try again.",
     "catalogPinFailed": "Could not change pinned state. Try again.",
@@ -416,14 +419,81 @@
     "recommendedCategories": "Recommended categories",
     "searchCategoryTemplates": "Search by name or path",
     "categoryTemplate": {
-      "literature": { "name": "Literature", "essays": "Essays", "poetry": "Poetry", "drama": "Drama", "nonfiction": "Literary nonfiction", "criticism": "Literary criticism" },
-      "fiction": { "name": "Fiction", "realism": "Social realism", "romance": "Romance", "science-fiction": "Science fiction", "mystery": "Mystery", "horror": "Horror", "historical": "Historical fiction", "martial-arts": "Martial arts fiction" },
-      "web-fiction": { "name": "Web fiction", "xuanhuan": "Xuanhuan", "fantasy": "Fantasy", "martial-arts": "Martial arts", "xianxia": "Xianxia", "urban": "Urban", "realism": "Realism", "history": "History", "military": "Military", "science-fiction": "Science fiction", "mystery": "Mystery", "games": "Gaming", "sports": "Sports", "romance": "Romance", "light-novel": "Light novels" },
-      "history": { "name": "History and biography", "ancient-china": "Ancient China", "modern-china": "Modern China", "world": "World history", "biography": "Biography" },
-      "humanities": { "name": "Humanities and social sciences", "philosophy": "Philosophy", "religion": "Religion", "sociology": "Sociology", "psychology": "Psychology", "culture": "Cultural studies", "politics": "Politics", "law": "Law" },
-      "business": { "name": "Business and economics", "economics": "Economics", "finance": "Finance and investment", "management": "Business management", "marketing": "Marketing" },
-      "science": { "name": "Science and technology", "popular": "Popular science", "natural": "Natural sciences", "computing": "Computing", "engineering": "Engineering", "medicine": "Medicine" },
-      "life": { "name": "Life and growth", "growth": "Personal growth", "health": "Health and wellness", "fitness": "Fitness", "leisure": "Lifestyle and leisure", "education": "Education and learning" }
+      "literature": {
+        "name": "Literature",
+        "essays": "Essays",
+        "poetry": "Poetry",
+        "drama": "Drama",
+        "nonfiction": "Literary nonfiction",
+        "criticism": "Literary criticism"
+      },
+      "fiction": {
+        "name": "Fiction",
+        "realism": "Social realism",
+        "romance": "Romance",
+        "science-fiction": "Science fiction",
+        "mystery": "Mystery",
+        "horror": "Horror",
+        "historical": "Historical fiction",
+        "martial-arts": "Martial arts fiction"
+      },
+      "web-fiction": {
+        "name": "Web fiction",
+        "xuanhuan": "Xuanhuan",
+        "fantasy": "Fantasy",
+        "martial-arts": "Martial arts",
+        "xianxia": "Xianxia",
+        "urban": "Urban",
+        "realism": "Realism",
+        "history": "History",
+        "military": "Military",
+        "science-fiction": "Science fiction",
+        "mystery": "Mystery",
+        "games": "Gaming",
+        "sports": "Sports",
+        "romance": "Romance",
+        "light-novel": "Light novels"
+      },
+      "history": {
+        "name": "History and biography",
+        "ancient-china": "Ancient China",
+        "modern-china": "Modern China",
+        "world": "World history",
+        "biography": "Biography"
+      },
+      "humanities": {
+        "name": "Humanities and social sciences",
+        "philosophy": "Philosophy",
+        "religion": "Religion",
+        "sociology": "Sociology",
+        "psychology": "Psychology",
+        "culture": "Cultural studies",
+        "politics": "Politics",
+        "law": "Law"
+      },
+      "business": {
+        "name": "Business and economics",
+        "economics": "Economics",
+        "finance": "Finance and investment",
+        "management": "Business management",
+        "marketing": "Marketing"
+      },
+      "science": {
+        "name": "Science and technology",
+        "popular": "Popular science",
+        "natural": "Natural sciences",
+        "computing": "Computing",
+        "engineering": "Engineering",
+        "medicine": "Medicine"
+      },
+      "life": {
+        "name": "Life and growth",
+        "growth": "Personal growth",
+        "health": "Health and wellness",
+        "fitness": "Fitness",
+        "leisure": "Lifestyle and leisure",
+        "education": "Education and learning"
+      }
     },
     "categoryName": "Category name",
     "newCategory": "New category",
@@ -1337,6 +1407,8 @@
     "saveProfile": "Save Profile",
     "settingShowStats": "Show Reading Overview",
     "settingShowShowcase": "Show Currently Reading",
+    "settingShowActivity": "Show Personal Activity",
+    "settingShowActivityHint": "Public activity shows shared content only; private content remains visible only to you.",
     "sectionPrivacy": "Profile Visibility",
     "settingPublicProfile": "Allow Others to Access Your Profile",
     "settingPublicProfileHint": "When disabled, other users cannot view your profile",
@@ -1348,6 +1420,32 @@
     "timelineEmpty": "Your activity will appear here",
     "readingData": "Reading data",
     "readingDataEmpty": "Your reading data overview will appear here"
+  },
+  "activity": {
+    "all": "All",
+    "ideas": "Ideas",
+    "reviews": "Reviews",
+    "catalog": "Updates",
+    "management": "Admin",
+    "idea": "published an idea",
+    "review": "published a review",
+    "workAdded": "uploaded a new work",
+    "versionAdded": "uploaded a new version",
+    "revisionPublished": "updated work content",
+    "workTrashed": "moved work to trash",
+    "workRestored": "restored work",
+    "workDeleted": "permanently deleted work",
+    "versionDeleted": "deleted version",
+    "ideaDeleted": "deleted idea",
+    "reviewDeleted": "deleted review",
+    "commentDeleted": "deleted comment",
+    "replyDeleted": "deleted reply",
+    "showItems": "Show this operation ({{count}} items)",
+    "collapse": "Collapse",
+    "loadMore": "Load more",
+    "loading": "Loading…",
+    "filterEmpty": "No matching activity",
+    "libraryEmpty": "Library activity will appear here"
   },
   "settings": {
     "fontUploadSummary": "Added {{succeeded}} fonts; {{duplicated}} already existed and needed no upload.",

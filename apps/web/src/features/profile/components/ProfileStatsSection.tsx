@@ -1,8 +1,8 @@
-import { Link } from '@tanstack/react-router'
+import { Link, useLocation } from '@tanstack/react-router'
 
 import type { ProfileReadingSummary } from '@bookdock/shared'
 
-import { archiveEntryState } from '@/features/archive/archive-return'
+import { archiveEntryState, captureArchiveExitScroll } from '@/features/archive/archive-return'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 
@@ -53,6 +53,7 @@ const icons = [
 
 export default function ProfileStatsSection({ summary, showArchiveLink = false }: ProfileStatsSectionProps) {
   const _ = useTranslation()
+  const location = useLocation()
   const cards = [
     { label: _('profile.totalReadingTime'), value: summary ? formatCompactDuration(summary.totalSeconds, _) : '—', color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400' },
     { label: _('profile.totalReadingWords'), value: summary ? formatWords(summary.totalWordsRead, _) : '—', color: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400' },
@@ -67,7 +68,11 @@ export default function ProfileStatsSection({ summary, showArchiveLink = false }
       <div className="flex items-center justify-between px-1">
         <h2 className="text-sm font-semibold tracking-tight text-stone-900 sm:text-base dark:text-stone-100">{_('profile.overview')}</h2>
         {showArchiveLink && (
-          <Link to="/archive" search={{ view: 'overview' }} state={(previous) => ({ ...previous, ...archiveEntryState({ to: '/profile' }, 0, previous.archiveReturn) })} className="group inline-flex items-center gap-1 text-xs font-medium text-stone-500 transition-colors hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200">
+          <Link to="/archive" search={{ view: 'overview' }} state={(previous) => ({ ...previous, ...archiveEntryState({ to: '/profile' }, 0, previous.archiveReturn) })} onClick={(event) => {
+            if (!location.state.archiveReturn && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented) {
+              captureArchiveExitScroll(0)
+            }
+          }} className="group inline-flex items-center gap-1 text-xs font-medium text-stone-500 transition-colors hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200">
             <span>{_('profile.readingArchive')}</span>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:translate-x-0.5"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
           </Link>

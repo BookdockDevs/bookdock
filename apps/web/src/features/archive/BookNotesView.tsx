@@ -31,7 +31,7 @@ import { compareAnnotations, groupAnnotationsByChapter } from '@/features/reader
 import { buildChapterOrderLookup, type ChapterOrderItem } from '@/features/reader/lib/chapter-order'
 import { useReaderState } from '@/features/reader/state/reader-state'
 import { reviewExcerpt } from '@/features/reviews/lib/markdown'
-import ReviewDetailHeaderActions from '@/features/reviews/components/ReviewDetailHeaderActions'
+import ReviewDetailHeaderActions, { ReviewDetailModalTitle } from '@/features/reviews/components/ReviewDetailHeaderActions'
 import ReviewDetailView from '@/features/reviews/components/ReviewDetailView'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import { useReviewBookContext } from '@/features/reviews/hooks/useReviews'
@@ -1045,12 +1045,20 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
       )}
       {openReview && (
         <Modal
-          title={displayedBook?.title ?? _('review.sourceGoneTitle')}
+          title={
+            <ReviewDetailModalTitle
+              onBack={() => {
+                setOpenReviewId(null)
+                void detail.refetch()
+              }}
+            />
+          }
           onClose={() => {
             setOpenReviewId(null)
             void detail.refetch()
           }}
           closeLabel={_('library.close')}
+          hideClose={true}
           size="xl"
           actions={
             <ReviewDetailHeaderActions

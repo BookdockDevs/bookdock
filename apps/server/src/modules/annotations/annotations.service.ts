@@ -2,8 +2,9 @@ import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import { getDb } from '../../db/client'
 import { publishedContentFiles, syncContentFiles } from '../../db/content-files'
-import { bookmarks, contentFiles, highlights, ideas, ideaComments, ideaLikes, settings } from '../../db/schema'
+import { bookmarks, contentFiles, highlights, ideas, ideaComments, ideaLikes, libraryBooks, libraryBookVersions, settings } from '../../db/schema'
 import { AppError } from '../../middleware/error'
+import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
 import { savePersonalBookSnapshot } from '../../lib/personal-book-archive'
 import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
@@ -302,6 +303,30 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     savePersonalBookSnapshot(tx as unknown as ReturnType<typeof getDb>, userId, bookId, snapshot)
     tx.insert(ideas).values(row).run()
     syncContentFiles(tx, { userId, domain: 'idea', targetId: row.id, bookVersionId: bookId, draftId: data.draftId, ids: data.imageIds ?? [], imageIds: data.imageIds ?? [] })
+    if (visibility === 'shared' && row.sharedLibraryId && row.sourceLibraryBookVersionId) {
+      const listing = tx.select().from(libraryBookVersions).where(and(
+        eq(libraryBookVersions.id, row.sourceLibraryBookVersionId),
+        eq(libraryBookVersions.libraryId, row.sharedLibraryId),
+      )).get()
+      const work = listing ? tx.select().from(libraryBooks).where(and(
+        eq(libraryBooks.id, listing.libraryBookId),
+        eq(libraryBooks.libraryId, row.sharedLibraryId!),
+      )).get() : null
+      if (listing && work && !work.deletedAt) {
+        recordActivityEvent(tx, {
+          idempotencyKey: `idea.published:${row.id}`,
+          eventType: 'idea.published',
+          audience: 'library',
+          libraryId: row.sharedLibraryId,
+          actorUserId: userId,
+          targetKind: 'idea',
+          targetId: row.id,
+          workId: listing.libraryBookId,
+          versionId: row.bookVersionId,
+          occurredAt: row.createdAt,
+        })
+      }
+    }
     if (context.eligible) {
       tx.insert(settings).values({ id: createId('setting'), userId, key: IDEA_VISIBILITY_KEY, value: visibility })
         .onConflictDoUpdate({ target: [settings.userId, settings.key], set: { value: visibility } }).run()
@@ -375,6 +400,30 @@ export async function updateAnnotation(userId: string, annotationId: string, dat
   db.transaction((tx) => {
     tx.update(ideas).set(patch).where(eq(ideas.id, owned.row.id)).run()
     if (data.imageIds !== undefined) syncContentFiles(tx, { userId, domain: 'idea', targetId: owned.row.id, draftId: data.draftId, ids: data.imageIds, imageIds: data.imageIds })
+    if (owned.row.visibility !== 'shared' && visibility === 'shared' && source.sharedLibraryId && source.sourceLibraryBookVersionId) {
+      const listing = tx.select().from(libraryBookVersions).where(and(
+        eq(libraryBookVersions.id, source.sourceLibraryBookVersionId),
+        eq(libraryBookVersions.libraryId, source.sharedLibraryId),
+      )).get()
+      const work = listing ? tx.select().from(libraryBooks).where(and(
+        eq(libraryBooks.id, listing.libraryBookId),
+        eq(libraryBooks.libraryId, source.sharedLibraryId!),
+      )).get() : null
+      if (listing && work && !work.deletedAt) {
+        recordActivityEvent(tx, {
+          idempotencyKey: `idea.published:${owned.row.id}`,
+          eventType: 'idea.published',
+          audience: 'library',
+          libraryId: source.sharedLibraryId,
+          actorUserId: userId,
+          targetKind: 'idea',
+          targetId: owned.row.id,
+          workId: listing.libraryBookId,
+          versionId: owned.row.bookVersionId,
+          occurredAt: now,
+        })
+      }
+    }
   })
   await cleanContentBlobs()
   return toRes('idea', { ...owned.row, ...patch })
@@ -402,6 +451,32 @@ export async function deleteAnnotation(userId: string, annotationId: string) {
   }
   if (owned.row.visibility === 'shared') await assertIdeaSource(userId, owned.row)
   db.transaction((tx) => {
+    if (owned.kind === 'idea' && owned.row.visibility === 'shared' && owned.row.sharedLibraryId && owned.row.sourceLibraryBookVersionId) {
+      const listing = tx.select().from(libraryBookVersions).where(and(
+        eq(libraryBookVersions.id, owned.row.sourceLibraryBookVersionId),
+        eq(libraryBookVersions.libraryId, owned.row.sharedLibraryId),
+      )).get()
+      const work = listing ? tx.select().from(libraryBooks).where(and(
+        eq(libraryBooks.id, listing.libraryBookId),
+        eq(libraryBooks.libraryId, owned.row.sharedLibraryId!),
+      )).get() : null
+      if (listing && work) {
+        recordActivityEvent(tx, {
+          idempotencyKey: `idea.deleted:${owned.row.id}`,
+          eventType: 'idea.deleted',
+          audience: 'manager',
+          libraryId: owned.row.sharedLibraryId,
+          actorUserId: userId,
+          targetKind: 'idea',
+          targetId: owned.row.id,
+          workId: listing.libraryBookId,
+          versionId: owned.row.bookVersionId,
+          occurredAt: now,
+          snapshotWorkTitle: work.title,
+          snapshotAuthorId: owned.row.userId,
+        })
+      }
+    }
     tx.delete(ideaComments).where(eq(ideaComments.ideaId, owned.row.id)).run()
     tx.delete(ideaLikes).where(eq(ideaLikes.ideaId, owned.row.id)).run()
     tx.delete(contentFiles).where(eq(contentFiles.ideaId, owned.row.id)).run()

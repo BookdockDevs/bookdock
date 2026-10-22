@@ -6,6 +6,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ArchivePage, MyReviewEntry, ReaderProfile, ReviewBookContext, ReviewDiscussion } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '@/api/client'
+import { invalidateActivityQueries } from '@/features/activity/hooks'
+import { useAuthStore } from '@/stores/auth.store'
 
 export function useReviewBookContext(bookVersionId: string | null, enabled = true) {
   return useQuery({
@@ -47,10 +49,11 @@ export function useMyReviews(enabled = true, page = 1) {
 }
 
 export function useReaderProfile(userId: string | undefined, page = 1) {
+  const viewerId = useAuthStore((state) => state.user?.id ?? null)
   const today = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
   return useQuery({
-    queryKey: ['reviews', 'author', userId, page, 'profile', today],
-    queryFn: () => apiGet<{ data: ReaderProfile }>(`/reviews/author/${encodeURIComponent(userId!)}?page=${page}&profile=1&today=${today}`),
+    queryKey: ['reviews', 'author', userId, viewerId, page, 'profile', today],
+    queryFn: ({ signal }) => apiGet<{ data: ReaderProfile }>(`/reviews/author/${encodeURIComponent(userId!)}?page=${page}&profile=1&today=${today}`, signal),
     enabled: Boolean(userId),
     staleTime: 30_000,
     refetchOnWindowFocus: true,
@@ -81,6 +84,7 @@ export function useSaveReview() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['reviews'] }),
         queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+        invalidateActivityQueries(queryClient),
       ])
     },
   })
@@ -95,6 +99,7 @@ export function useDeleteReview() {
         queryClient.invalidateQueries({ queryKey: ['reviews'] }),
         // A deleted review retires the notifications pointing at it.
         queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+        invalidateActivityQueries(queryClient),
       ])
     },
   })
@@ -160,11 +165,12 @@ export function useReviewAction(reviewId: string) {
         for (const [key, data] of context.prev) queryClient.setQueryData(key, data)
       }
     },
-    onSettled: async () => {
+    onSettled: async (_result, _error, action) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['reviews'] }),
         // Comment/like writes can retire the notifications pointing at them.
         queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+        ...(action.type === 'delete' ? [invalidateActivityQueries(queryClient)] : []),
       ])
     },
   })

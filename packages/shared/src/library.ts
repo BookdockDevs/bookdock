@@ -464,6 +464,8 @@ export function extractVersionNameFromFileName(filename: string): string | undef
 }
 
 export const catalogUploadSchema = z.object({
+  /** Client-stable identifier joining files from one user-confirmed batch upload. */
+  operationId: z.string().trim().min(1).max(128).optional(),
   /** Existing work to attach this version to (5.2); omit to create one. */
   libraryBookId: z.string().min(1).max(128).optional(),
   /** Library category (the catalog's own taxonomy). */

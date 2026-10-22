@@ -3,8 +3,9 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { ReviewAuthor, ReviewComment, ReviewDiscussion } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookReviewCommentLikes, bookReviewComments, bookReviewLikes, users } from '../../db/schema'
+import { bookReviewCommentLikes, bookReviewComments, bookReviewLikes, libraryBooks, users } from '../../db/schema'
 import { createId } from '../../lib/id'
+import { recordActivityEvent } from '../../lib/activity-events'
 import { findCommentReceipt, recordInteractionNotification, saveCommentReceipt } from '../../lib/interaction-notifications'
 import { AppError } from '../../middleware/error'
 import { projectReview, readableReview } from './review-access'
@@ -179,7 +180,7 @@ export async function updateReviewComment(userId: string, reviewId: string, comm
 }
 
 export async function deleteReviewComment(userId: string, reviewId: string, commentId: string) {
-  const { manager } = await readableReview(userId, reviewId)
+  const { row, manager } = await readableReview(userId, reviewId)
   const db = getDb()
   const comment = db
     .select()
@@ -188,6 +189,31 @@ export async function deleteReviewComment(userId: string, reviewId: string, comm
     .get()
   if (!comment || (comment.userId !== userId && !manager)) throw new AppError('REVIEW_NOT_FOUND')
   db.transaction((tx) => {
+    if (row.visibility === 'shared' && row.sourceLibraryId && row.sourceLibraryBookId) {
+      const work = tx.select().from(libraryBooks).where(and(
+        eq(libraryBooks.id, row.sourceLibraryBookId),
+        eq(libraryBooks.libraryId, row.sourceLibraryId),
+      )).get()
+      if (work) {
+        const isReply = comment.replyToId !== null
+        const eventType = isReply ? 'reply.deleted' : 'comment.deleted'
+        recordActivityEvent(tx, {
+          idempotencyKey: `review.${eventType}:${comment.id}`,
+          eventType,
+          audience: 'manager',
+          libraryId: row.sourceLibraryId,
+          actorUserId: userId,
+          targetKind: isReply ? 'reply' : 'comment',
+          targetId: comment.id,
+          workId: row.sourceLibraryBookId,
+          versionId: row.readBookVersionId,
+          occurredAt: Date.now(),
+          snapshotWorkTitle: work.title,
+          snapshotObjectLabel: row.title,
+          snapshotAuthorId: comment.userId,
+        })
+      }
+    }
     tx.delete(bookReviewCommentLikes).where(eq(bookReviewCommentLikes.commentId, commentId)).run()
     // No tombstones: surviving replies are promoted to top level so the thread
     // stays readable with no "deleted" scar. replyTo references null out via

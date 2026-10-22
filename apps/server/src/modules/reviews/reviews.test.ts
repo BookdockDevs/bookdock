@@ -177,16 +177,17 @@ describe('book reviews', () => {
     })
 
     const ownerPrivate = await readerProfile('author', 'author', { page: 1, pageSize: 20 }, { homepage: true, today: '2026-10-22' })
-    expect(ownerPrivate).toMatchObject({ isOwner: true, visibility: 'public', showStats: true, showShowcase: true })
+    expect(ownerPrivate).toMatchObject({ isOwner: true, visibility: 'public', showPublicActivity: false, showStats: true, showShowcase: true })
     expect(ownerPrivate.author).toMatchObject({ bio: 'A short public bio', createdAt: now })
     expect(ownerPrivate.currentlyReading?.map((book) => book.id)).toEqual(['v1', 'v2', 'va'])
 
-    db.update(schema.settings).set({ value: { isPublic: true, showPublicStats: false, showPublicShowcase: true } }).where(eq(schema.settings.id, 'author-profile')).run()
+    db.update(schema.settings).set({ value: { isPublic: true, showPublicActivity: true, showPublicStats: false, showPublicShowcase: true } }).where(eq(schema.settings.id, 'author-profile')).run()
     const publicResponse = await app.request('/api/v1/reviews/author/author?profile=1', { headers: { 'x-test-user': 'member' } })
     const publicPayload = (await publicResponse.json() as { data: Awaited<ReturnType<typeof readerProfile>> }).data
     expect(publicPayload).toMatchObject({
       visibility: 'public',
       isOwner: false,
+      showPublicActivity: true,
       showStats: false,
       showShowcase: true,
       author: { bio: 'A short public bio', createdAt: now },
@@ -205,6 +206,42 @@ describe('book reviews', () => {
     expect(ownerAfterPublicOff).toMatchObject({ showStats: true, showShowcase: true })
     expect(ownerAfterPublicOff.summary).toBeDefined()
     expect(ownerAfterPublicOff.currentlyReading?.map((book) => book.id)).toEqual(['v1', 'v2', 'va'])
+  })
+
+  it('records review publication once and keeps manager deletion records minimal', async () => {
+    const privateReview = await createReview('author', { bookVersionId: 'v1', rating: 4, title: 'Private title', body: 'Private body', visibility: 'private' })
+    expect(db.select().from(schema.activityEvents).all()).toEqual([])
+
+    await updateReview('author', privateReview.id, { visibility: 'shared' })
+    const publication = db.select().from(schema.activityEvents).all()
+    expect(publication).toHaveLength(1)
+    expect(publication[0]).toMatchObject({
+      idempotencyKey: `review.published:${privateReview.id}`,
+      eventType: 'review.published', audience: 'library', libraryId: 'source', actorUserId: 'author',
+      targetKind: 'review', targetId: privateReview.id, workId: 'w1', versionId: 'v1',
+    })
+    const publishedAt = publication[0].occurredAt
+
+    await updateReview('author', privateReview.id, { rating: 4.5 })
+    await updateReview('author', privateReview.id, { visibility: 'private' })
+    await updateReview('author', privateReview.id, { visibility: 'shared' })
+    expect(db.select().from(schema.activityEvents).all()).toHaveLength(1)
+    expect(db.select().from(schema.activityEvents).all()[0].occurredAt).toBe(publishedAt)
+
+    await deleteReview('author', privateReview.id)
+    const events = db.select().from(schema.activityEvents).all()
+    expect(events).toHaveLength(2)
+    expect(events.find((event) => event.eventType === 'review.deleted')).toMatchObject({
+      audience: 'manager', actorUserId: 'author', targetKind: 'review', targetId: privateReview.id,
+      workId: 'w1', versionId: 'v1', snapshotWorkTitle: 'Work One', snapshotObjectLabel: 'Private title', snapshotAuthorId: 'author',
+    })
+    expect(JSON.stringify(events)).not.toContain('Private body')
+
+    const privateOnly = await createReview('author', { bookVersionId: 'va', body: 'private only' })
+    const privateComment = await createReviewComment('author', privateOnly.id, { body: 'private comment body' })
+    await deleteReviewComment('author', privateOnly.id, privateComment)
+    await deleteReview('author', privateOnly.id)
+    expect(db.select().from(schema.activityEvents).all()).toHaveLength(2)
   })
 
   it('projects other profiles only through current shared work permissions', async () => {
@@ -465,6 +502,22 @@ describe('book reviews', () => {
       code: 'REVIEW_NOT_FOUND',
     })
     expect((await getReviewDiscussion('member', other.id)).comments).toHaveLength(1)
+  })
+
+  it('records shared review comment and reply deletions without discussion text', async () => {
+    const review = await createReview('author', { bookVersionId: 'v2', title: 'Review label', rating: 4, visibility: 'shared' })
+    const comment = await createReviewComment('member', review.id, { body: 'comment text' })
+    const reply = await createReviewComment('outsider', review.id, { body: 'reply text', replyToId: comment })
+    await deleteReviewComment('outsider', review.id, reply)
+    await deleteReviewComment('member', review.id, comment)
+
+    const events = db.select().from(schema.activityEvents).all().filter((event) => event.targetId === comment || event.targetId === reply)
+    expect(events.map((event) => [event.eventType, event.actorUserId, event.targetKind, event.targetId, event.snapshotAuthorId, event.snapshotObjectLabel]).sort()).toEqual([
+      ['comment.deleted', 'member', 'comment', comment, 'member', 'Review label'],
+      ['reply.deleted', 'outsider', 'reply', reply, 'outsider', 'Review label'],
+    ])
+    expect(JSON.stringify(events)).not.toContain('comment text')
+    expect(JSON.stringify(events)).not.toContain('reply text')
   })
 
   it('refuses re-sharing from trashed holdings while keeping shared reads', async () => {
@@ -961,7 +1014,7 @@ describe('book reviews', () => {
   it('adds file persistence to populated review/notification structures without rewriting legacy bodies', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: '  **literal**\n', bodyFormat: 'plain', visibility: 'shared' })
     await createReviewComment('member', review.id, { body: 'before files', requestId: 'before_files_123456789' })
-    sqlite.exec('DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
+    sqlite.exec('DROP TABLE activity_events; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
     await client.runDatabaseMigrations(db)
     expect((await getReviewDiscussion('author', review.id)).review).toMatchObject({ body: '  **literal**\n', bodyFormat: 'plain', files: [] })
     expect((await unreadNotificationCount('author')).count).toBe(1)
@@ -999,7 +1052,7 @@ describe('book reviews', () => {
 
   it('upgrades populated stage-one review structures into notification persistence', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: 'baseline', visibility: 'shared' })
-    sqlite.exec("DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
+    sqlite.exec("DROP TABLE activity_events; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
     await client.runDatabaseMigrations(db)
     expect(db.select().from(schema.bookReviews).get()?.id).toBe(review.id)
     await createReviewComment('member', review.id, { body: 'upgrade event', requestId: 'upgrade_12345678901' })

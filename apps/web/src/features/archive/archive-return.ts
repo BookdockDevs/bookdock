@@ -30,12 +30,9 @@ declare module '@tanstack/react-router' {
 }
 
 /**
- * Entry capture: keep an existing record (re-entering the archive from
- * inside it must not overwrite the exit source), otherwise snapshot the
- * source and its current history index. The source entry also receives the
- * scroll request before the archive push, so history traversal can restore it
- * without replacing the source with a duplicate route. Absent stays absent
- * for in-archive moves, so direct opens keep falling back to the library home.
+ * Build the archive entry state without side effects. TanStack Link can call
+ * state updaters while rendering, so callers capture source scroll separately
+ * at the actual navigation boundary.
  */
 export function archiveEntryState(
   source: ArchiveSource,
@@ -44,7 +41,6 @@ export function archiveEntryState(
   sourceHistoryIndex = readCurrentHistoryIndex(),
 ): { archiveReturn: ArchiveReturn } {
   if (previous) return { archiveReturn: previous }
-  if (sourceHistoryIndex !== undefined) rememberArchiveExitScroll(scrollTop)
   const returnState: ArchiveReturn = 'to' in source
     ? { to: source.to, scrollTop }
     : { search: source, scrollTop }
@@ -58,7 +54,7 @@ function readCurrentHistoryIndex(): number | undefined {
   return typeof index === 'number' ? index : undefined
 }
 
-function rememberArchiveExitScroll(scrollTop: number): void {
+export function captureArchiveExitScroll(scrollTop: number): void {
   if (typeof window === 'undefined') return
   const state = window.history.state
   if (!state || typeof state !== 'object') return

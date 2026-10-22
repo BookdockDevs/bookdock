@@ -3,9 +3,10 @@ import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { IdeaAuthor, IdeaComment, IdeaDiscussion, ReaderIdea } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { ideaCommentLikes, ideaComments, ideaLikes, ideas, users } from '../../db/schema'
+import { ideaCommentLikes, ideaComments, ideaLikes, ideas, libraryBooks, libraryBookVersions, users } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { findCommentReceipt, recordInteractionNotification, saveCommentReceipt } from '../../lib/interaction-notifications'
+import { recordActivityEvent } from '../../lib/activity-events'
 import { AppError } from '../../middleware/error'
 import { pendingBookDataDeletionVersionIds } from '../libraries/library-query'
 import { assertReadableBook } from '../books/books.service'
@@ -193,11 +194,39 @@ export async function updateIdeaComment(userId: string, ideaId: string, commentI
 }
 
 export async function deleteIdeaComment(userId: string, ideaId: string, commentId: string) {
-  const { manager } = await readableIdea(userId, ideaId)
+  const { row, manager } = await readableIdea(userId, ideaId)
   const db = getDb()
   const comment = db.select().from(ideaComments).where(and(eq(ideaComments.id, commentId), eq(ideaComments.ideaId, ideaId), isNull(ideaComments.deletedAt))).get()
   if (!comment || (comment.userId !== userId && !manager)) throw new AppError('ANNOTATION_NOT_FOUND')
   db.transaction((tx) => {
+    if (row.visibility === 'shared' && row.sharedLibraryId && row.sourceLibraryBookVersionId) {
+      const listing = tx.select().from(libraryBookVersions).where(and(
+        eq(libraryBookVersions.id, row.sourceLibraryBookVersionId),
+        eq(libraryBookVersions.libraryId, row.sharedLibraryId),
+      )).get()
+      const work = listing ? tx.select().from(libraryBooks).where(and(
+        eq(libraryBooks.id, listing.libraryBookId),
+        eq(libraryBooks.libraryId, row.sharedLibraryId!),
+      )).get() : null
+      if (listing && work) {
+        const isReply = comment.replyToId !== null
+        const eventType = isReply ? 'reply.deleted' : 'comment.deleted'
+        recordActivityEvent(tx, {
+          idempotencyKey: `idea.${eventType}:${comment.id}`,
+          eventType,
+          audience: 'manager',
+          libraryId: row.sharedLibraryId,
+          actorUserId: userId,
+          targetKind: isReply ? 'reply' : 'comment',
+          targetId: comment.id,
+          workId: listing.libraryBookId,
+          versionId: row.bookVersionId,
+          occurredAt: Date.now(),
+          snapshotWorkTitle: work.title,
+          snapshotAuthorId: comment.userId,
+        })
+      }
+    }
     tx.delete(ideaCommentLikes).where(eq(ideaCommentLikes.commentId, commentId)).run()
     // No tombstones: surviving replies are promoted to top level so the thread
     // stays readable with no "deleted" scar. replyTo references null out via

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,7 +7,7 @@ import { normalizeLibrarySearch, parseLibrarySearch } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
 
-import { booksQueryParts, catalogQueryParts, loadSearchPage, useBooks, useLibraryCatalog, type UseBooksParams } from './hooks'
+import { booksQueryParts, catalogQueryParts, loadSearchPage, useBooks, useLibraryCatalog, useLibrarySearchAuthors, type UseBooksParams } from './hooks'
 
 vi.mock('@/api/client', async (original) => ({ ...await original<typeof import('@/api/client')>(), apiGet: vi.fn() }))
 vi.mock('@/stores/auth.store', () => ({ useAuthStore: (selector: (state: unknown) => unknown) => selector({ user: { id: 'reader' } }) }))
@@ -55,6 +55,41 @@ describe('submitted library search requests', () => {
     expect(client.getQueryData(catalogQueryParts('other-library', target).queryKey)).toBeUndefined()
     expect(client.getQueryData(catalogQueryParts('library', { ...target, trash: false }).queryKey)).toBeUndefined()
     expect(client.getQueryData(catalogQueryParts('library', { ...target, categoryScope: 'direct' }).queryKey)).toBeUndefined()
+    unmount(); client.clear()
+  })
+  it('keeps the catalog cache while its query is disabled in activity and resumes the same key in books', () => {
+    const { client, wrapper } = setup()
+    const target = { page: 1, pageSize: 24, sortBy: 'title' as const, sortOrder: 'asc' as const }
+    const request = catalogQueryParts('library', target)
+    const response = { data: { items: [], total: 0, page: 1, pageSize: 24 } }
+    const { result, rerender, unmount } = renderHook(
+      ({ enabled }) => useLibraryCatalog('library', target, { enabled }),
+      { initialProps: { enabled: false }, wrapper },
+    )
+
+    expect(apiGet).not.toHaveBeenCalled()
+    expect(result.current.data).toBeUndefined()
+    client.setQueryData(request.queryKey, response)
+    rerender({ enabled: true })
+    expect(result.current.data).toEqual(response)
+    expect(apiGet).not.toHaveBeenCalled()
+
+    unmount(); client.clear()
+  })
+  it('keeps author search disabled with catalog requests until the books view is active', async () => {
+    const { client, wrapper } = setup()
+    const { result, rerender, unmount } = renderHook(
+      ({ enabled }) => useLibrarySearchAuthors('library', false, false, { enabled }),
+      { initialProps: { enabled: false }, wrapper },
+    )
+    expect(apiGet).not.toHaveBeenCalled()
+
+    vi.mocked(apiGet).mockResolvedValue({ data: ['Author'] })
+    rerender({ enabled: true })
+    await waitFor(() => expect(result.current.data).toEqual({ data: ['Author'] }))
+    expect(apiGet).toHaveBeenCalledOnce()
+    expect(apiGet).toHaveBeenCalledWith('/libraries/library/search-authors?trash=0&showHidden=0', expect.any(AbortSignal))
+
     unmount(); client.clear()
   })
   it('leaves the previous result intact when validation fails', async () => {

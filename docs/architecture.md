@@ -38,6 +38,63 @@ The existing `/archive` single-book shell owns the complete Reading data and Not
 
 This section defines the new implementation boundary; older descriptions below continue to describe legacy storage until the corresponding migration/writer is replaced. Detailed agreed scope and acceptance cases: `docs/local/plan/reading-data-maturity.md`.
 
+### Personal and library activity v1 (implemented locally, acceptance in progress; 2026-10-22)
+
+Personal activity includes the author's shared and private ideas and work reviews
+when viewed by that author. Visitor projections contain only currently readable
+shared content; private rows are always author-only, regardless of profile sharing.
+Library activity projects the exact source library's public content, first work
+publication, newly readable versions and formally published content revisions.
+The same content retains one identity, discussion and authorization model.
+Profile activity sharing is independently opt-in and defaults off. Historical
+public ideas/reviews retain their known original times; unknown catalog or
+deletion history is never fabricated. Reading behavior and standalone posts are
+outside this scope, as are new guest entry points and activity unread alerts.
+
+Activity uses transactional, idempotent event references with current domain ACLs
+applied before projecting ordinary content or pagination. Edits do not bump
+events, and visibility toggles do not create duplicate publications. Book events
+identify the actual uploader or operation actor rather than attributing every
+change to the original uploader. Batch operations may share a display group.
+
+Management activity adds work trash/restore/permanent-deletion, version deletion,
+and deletion of library-visible ideas/reviews and their comments/replies. It is
+visible only to the source library's current owner/admin, including after the
+target is gone; private content never enters this stream. These records retain
+only bounded identifying facts (actor/author references, source/target identifiers,
+time, book title and necessary short target label), never deleted bodies, quotes,
+images or files. Deleted-object references must survive target deletion; account
+deletion must remain possible. Source-library deletion ends this library-scoped
+management history. Ordinary content projections hide unavailable targets rather
+than exposing these management snapshots. Cascading cleanup does not emit one
+management item per dependent object. This is not a general audit log.
+
+Migration 0055 introduces `activity_events`; domain writes use the transactional
+`lib/activity-events.ts` helper. Authenticated `GET /api/v1/activity` serves
+personal/library views and authorized grouped child pages with viewer-bound
+cursors. Catalog group summaries use existing access/hidden-taxonomy predicates
+in joined queries, and management summaries use a count plus bounded preview.
+The profile and library UI reuse these projections and existing content details.
+Activity projection batches may share loaded source rows, owner-safe titles and
+existing source-access verdicts within one bounded request batch; permission
+results never persist across requests. Profile overview and activity pagination
+remain independently cached queries. Profile filter changes replace the current
+history entry so the page back action returns to the original entry source.
+Private personal items derive from current author-owned content and reliable
+original timestamps; they are excluded from all visitor/library/group projections.
+Personal cards omit repeated actor identity and mark private items as author-only.
+Private sources do not manufacture shared-library links or grant file access.
+Library cards retain actor identity but omit the redundant current-library link.
+Library activity disables unused catalog and search-author queries while retaining
+their existing cache keys for the return to books. Profile settings mount on
+demand and reuse the overview bio; profile requests forward cancellation signals.
+Archive entry state construction stays pure during Link rendering; exit scroll
+capture runs only on actual navigation clicks to avoid recursive router updates.
+Detailed scope, implementation tasks and actual acceptance evidence are tracked
+in `docs/local/plan/personal-library-activity.md`. Earlier no-feed statements
+describe their original stages; this extension is implemented locally, while
+browser acceptance remains incomplete and must not be inferred from unit tests.
+
 ### B-entry ideas and reader discussion
 
 Only a collected B entry may publish an idea as public (`shared` in storage).

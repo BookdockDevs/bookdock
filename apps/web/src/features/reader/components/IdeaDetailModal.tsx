@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 
 import type { IdeaEntry } from './IdeaOverlay'
 
@@ -8,6 +9,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { buildAnnotationCopyText } from '@/features/reader/lib/annotation-text'
+import type { ReaderReturn } from '@/features/reader/reader-return'
 
 import { useIdeaAction, useIdeaDiscussion } from '../hooks/useIdeas'
 import IdeaDetailCard from './IdeaDetailCard'
@@ -19,7 +21,7 @@ import IdeaDiscussionPanel from './IdeaDiscussionPanel'
  * scoped to this subtree so the shared card renders identically without any
  * reader-file changes.
  */
-export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose, onShare, onEdit, onDelete, initialTab, focusCommentId, theme = 'reader', sourceAvailable = true }: {
+export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose, onShare, onEdit, onDelete, initialTab, focusCommentId, theme = 'reader', sourceAvailable = true, readerReturn, onBeforeReaderNavigate }: {
   ideaId: string
   bookVersionId: string
   title: string
@@ -31,8 +33,11 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
   focusCommentId?: string
   sourceAvailable?: boolean
   theme?: 'reader' | 'app'
+  readerReturn?: ReaderReturn
+  onBeforeReaderNavigate?: () => void
 }) {
   const _ = useTranslation()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const discussion = useIdeaDiscussion(ideaId, bookVersionId)
   const likeAction = useIdeaAction(ideaId, bookVersionId)
@@ -76,7 +81,14 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
           theme={theme}
           surface
           onBack={onClose}
-          onJump={jumpHref ? () => window.location.assign(jumpHref) : undefined}
+          onJump={jumpHref ? () => {
+            onBeforeReaderNavigate?.()
+            if (readerReturn) {
+              void navigate({ to: '/books/$id', params: { id: bookVersionId }, search: { annotation: idea.annotation.id }, state: (previous) => ({ ...previous, readerReturn }) })
+            } else {
+              window.location.assign(jumpHref)
+            }
+          } : undefined}
           onToggleLike={() => likeAction.mutate({ type: 'like', liked: !idea.liked }, {
             onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['archive'] }),
             onError: (error) => notify.error(getUserErrorNotification(error, 'comment.actionFailed')),

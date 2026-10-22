@@ -18,6 +18,7 @@ import type {
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
+import { invalidateActivityQueries } from '@/features/activity/hooks'
 
 export const INSTANCE_QUERY_KEY = ['auth', 'instance'] as const
 export const ME_QUERY_KEY = ['auth', 'me'] as const
@@ -86,6 +87,7 @@ export function useUpdateUsername() {
       updateUser({ username: res.data.username })
       void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
       void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
+      void invalidateActivityQueries(queryClient)
     },
   })
 }
@@ -96,6 +98,7 @@ export function useUpdateBio() {
     mutationFn: (body: UpdateBioReq) => apiPost<{ data: { bio: string } }>('/auth/bio', body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
+      void invalidateActivityQueries(queryClient)
       void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
     },
   })
@@ -112,6 +115,7 @@ export function useUploadAvatar() {
       void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
       void queryClient.invalidateQueries({ queryKey: ADMIN_USERS_QUERY_KEY })
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey[0] === 'libraries' && queryKey[2] === 'members' })
+      void invalidateActivityQueries(queryClient)
     },
   })
 }
@@ -127,6 +131,7 @@ export function useDeleteAvatar() {
       void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
       void queryClient.invalidateQueries({ queryKey: ADMIN_USERS_QUERY_KEY })
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey[0] === 'libraries' && queryKey[2] === 'members' })
+      void invalidateActivityQueries(queryClient)
     },
   })
 }

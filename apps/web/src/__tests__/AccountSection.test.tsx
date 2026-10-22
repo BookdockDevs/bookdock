@@ -15,13 +15,6 @@ vi.mock('@/features/auth/hooks', () => ({
   useChangePassword: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }))
 
-vi.mock('@/features/reviews/hooks/useReviews', () => ({
-  useReaderProfile: vi.fn(() => ({
-    data: { data: { author: { bio: '' } } },
-    isPending: false,
-  })),
-}))
-
 // The settings dialog reads and writes profile preferences through these hooks.
 vi.mock('@/features/library/hooks', () => ({
   useProfileSettings: () => ({ showStats: true, showShowcase: true, isPublic: true }),
@@ -73,7 +66,7 @@ describe('AccountSection', () => {
   it('edits and saves the username in ProfileSettingsDialog', () => {
     const updateUsername = { mutateAsync: vi.fn().mockResolvedValue({}), isPending: false }
     vi.mocked(useUpdateUsername).mockReturnValue(updateUsername as unknown as ReturnType<typeof useUpdateUsername>)
-    render(<ProfileSettingsDialog open={true} onClose={vi.fn()} />)
+    render(<ProfileSettingsDialog bio="" onClose={vi.fn()} />)
 
     const input = screen.getByDisplayValue('tester')
     fireEvent.change(input, { target: { value: '  newname  ' } })
@@ -82,7 +75,7 @@ describe('AccountSection', () => {
   })
 
   it('opens the change-password dialog from ProfileSettingsDialog', () => {
-    render(<ProfileSettingsDialog open={true} onClose={vi.fn()} />)
+    render(<ProfileSettingsDialog bio="" onClose={vi.fn()} />)
 
     expect(screen.queryByText('旧密码')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '修改密码' }))
