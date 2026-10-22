@@ -15,6 +15,7 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Docker images now use Node.js 22.23.4 to address the October 21, 2026 security advisories, including the Brotli remote code execution vulnerability (CVE-2026-111497). Existing installations must pull the patched Bookdock image and recreate the container, or rebuild from updated source; in-app updates do not upgrade Node.js.
 - Settings retain the selected section, user-management tab, and library when returning from a user profile or refreshing the page, without adding a history entry for each tab switch.
 - Reader startup no longer treats book-owned fonts as failed Bookdock fonts when book typography remains authoritative, avoiding false timeout fallbacks while still waiting for visible glyphs when Bookdock font overrides are enabled.
 
@@ -834,6 +835,7 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- Docker 镜像升级至 Node.js 22.23.4，修复 2026 年 10 月 21 日公布的安全漏洞，包括 Brotli 远程代码执行漏洞（CVE-2026-111497）。现有部署须拉取包含修复的新 Bookdock 镜像并重建容器，或使用更新后的源码重新构建；面板内更新不会升级 Node.js。
 - 从用户主页返回设置页或刷新页面后，会保留原先的设置分区、用户管理标签和选中书库；切换标签不会逐次增加返回记录。
 - 修复书籍字体仍由书籍控制时被误判为 Bookdock 字体加载失败并触发超时回退的问题；启用 Bookdock 字体覆盖时仍会等待可见正文所需的字形。
 

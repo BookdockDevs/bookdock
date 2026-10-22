@@ -10,6 +10,8 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release history and version-specific up
 
 ### Development
 
+Use Node.js 22.23.4 or later in the 22.x line. The minimum patched versions for the 24.x and 26.x lines are 24.22.1 and 26.12.1, respectively. CI and Docker use Node.js 22.23.4.
+
 ```bash
 # Install
 pnpm install
@@ -40,6 +42,8 @@ Then open `http://localhost:3000` (the server also serves the built web UI) and 
 - `docker compose ps` shows the health status (the image ships its own `HEALTHCHECK`). The health endpoint is `http://localhost:3000/api/v1/health`.
 
 By default, `docker-compose.yml` uses `loofffff/bookdock:latest`, which tracks the latest stable release. Set `BOOKDOCK_IMAGE` to pin a specific version. To use the published registry image, run `docker compose pull` followed by `docker compose up -d --no-build`. Docker Hub is only needed for this pull-based workflow; building from the repository does not require Docker Hub.
+
+Node.js security updates require a new container image. After a patched Bookdock image is published, pull it and recreate the container using the commands above, or rebuild from the updated source. In-app updates replace application files only and do not upgrade Node.js. Verify the running version with `docker compose exec bookdock node --version`.
 
 The repository publishes Docker Hub images when a `v*` tag is pushed. To enable that workflow, add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as GitHub Actions secrets, create a public Docker Hub repository named `bookdock`, and push a release tag. A stable `vX.Y.Z` tag publishes `<dockerhub-username>/bookdock:X.Y.Z`, `<dockerhub-username>/bookdock:X.Y`, and updates `latest`; prerelease tags do not update `latest`. Until an image is published, use the source-build command above.
 

@@ -1,4 +1,4 @@
-FROM node:22-alpine AS base
+FROM node:22.23.4-alpine AS base
 RUN corepack enable && corepack prepare pnpm@11.13.1 --activate
 # Toolchain for native modules (better-sqlite3) when no musl prebuild is available
 RUN apk add --no-cache python3 make g++
@@ -22,7 +22,7 @@ COPY --from=build /out/server /apps/server
 COPY --from=build /app/apps/web/dist /apps/web/dist
 COPY --from=build /out/release.json /release.json
 
-FROM node:22-alpine AS runtime
+FROM node:22.23.4-alpine AS runtime
 WORKDIR /app
 # /app is the factory app root the launcher falls back to; the same tree the
 # updater stages onto the volume, plus the launcher itself.
