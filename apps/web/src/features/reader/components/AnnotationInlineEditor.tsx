@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { AnnotationUpdateReq, ContentFile } from '@bookdock/shared'
+import { IDEA_IMAGE_MAX_COUNT } from '@bookdock/shared'
 
-import IdeaImageEditor from '@/features/content-files/components/IdeaImageEditor'
+import { ImageIcon } from '@/features/content-files/components/ContentUpload'
+import IdeaImageEditor, { type IdeaImageEditorHandle } from '@/features/content-files/components/IdeaImageEditor'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 
@@ -54,6 +56,8 @@ export default function AnnotationInlineEditor({
   const [visibility, setVisibility] = useState(initialVisibility)
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const imageEditorRef = useRef<IdeaImageEditorHandle>(null)
+  const [imageCount, setImageCount] = useState(initialImages?.length ?? 0)
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -114,27 +118,56 @@ export default function AnnotationInlineEditor({
             : 'text-stone-800 placeholder:text-stone-400 dark:text-stone-200',
         )}
       />
-      {bookVersionId && <IdeaImageEditor bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
+      {bookVersionId && <IdeaImageEditor ref={imageEditorRef} bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} showToolbar={false} onCountChange={setImageCount} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
       {error && <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
-      {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable ?? false} disabled={saving} />}
-      <div className="mt-2 flex items-center justify-end gap-2">
-        <button
-          disabled={saving}
-          onClick={onCancel}
-          className={cn(
-            'rounded-md px-2 py-1 text-xs transition-colors hover:bg-stone-500/10 hover:text-current',
-            theme === 'reader' ? 'text-[var(--bd-read-sub)]' : 'text-stone-500 dark:text-stone-400',
-          )}
-        >
-          {_('annotation.cancel')}
-        </button>
-        <button
-          onClick={submit}
-          disabled={saving || uploading || !canSave}
-          className="rounded-md bg-blue-500 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-60"
-        >
-          {_('annotation.save')}
-        </button>
+      <div className={cn(
+        'mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-2.5',
+        theme === 'reader' ? 'border-[var(--bd-read-accent)]/25' : 'border-stone-200 dark:border-stone-800',
+      )}>
+        {(visibilityEligible || bookVersionId) && <div className="flex min-w-0 items-center gap-3">
+          {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable ?? false} disabled={saving} />}
+          {bookVersionId && <div className={cn('flex shrink-0 items-center gap-1 text-xs', theme === 'reader' ? 'text-[var(--bd-read-sub)]' : 'text-stone-500 dark:text-stone-400')}>
+            <button
+              type="button"
+              disabled={saving || uploading || imageCount >= IDEA_IMAGE_MAX_COUNT}
+              onClick={() => imageEditorRef.current?.openFilePicker()}
+              title={_('contentFiles.addImage')}
+              aria-label={_('contentFiles.addImage')}
+              className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ImageIcon />
+            </button>
+            <span className="whitespace-nowrap tabular-nums">{imageCount} / {IDEA_IMAGE_MAX_COUNT}</span>
+          </div>}
+        </div>}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={onCancel}
+            className={cn(
+              'rounded-full px-3 py-1.5 text-sm transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-40',
+              theme === 'reader' ? 'text-[var(--bd-read-sub)]' : 'text-stone-500 dark:text-stone-400',
+            )}
+          >
+            {_('annotation.cancel')}
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={saving || uploading || !canSave}
+            className={cn(
+              'rounded-full px-5 py-1.5 text-sm font-medium shadow-xs transition-all enabled:cursor-pointer enabled:hover:opacity-90 enabled:active:scale-95 disabled:cursor-not-allowed',
+              saving || uploading || !canSave
+                ? 'bg-stone-200 text-stone-400 opacity-60 dark:bg-stone-800 dark:text-stone-500'
+                : theme === 'reader'
+                  ? 'bg-[var(--bd-read-primary)] text-white'
+                  : 'bg-stone-900 text-white dark:bg-white dark:text-stone-900',
+            )}
+          >
+            {_('annotation.save')}
+          </button>
+        </div>
       </div>
     </div>
   )

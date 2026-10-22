@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { InteractionNotification } from '@bookdock/shared'
-import type { RefObject } from 'react'
+import { useRef, useState, type RefObject } from 'react'
 
 import * as api from '@/api/client'
 import NotificationCenter from '@/features/notifications/NotificationCenter'
@@ -43,6 +43,37 @@ beforeEach(async () => {
 })
 
 describe('notification center', () => {
+  it('keeps the bell highlighted only while its popover is open across dismissal paths', async () => {
+    vi.mocked(api.apiGet).mockImplementation(async (path) => path.endsWith('/unread')
+      ? { data: { count: 0 } }
+      : { data: { entries: [], page: 1, hasMore: false } })
+    function Notifications() {
+      const [open, setOpen] = useState(false)
+      const anchorRef = useRef<HTMLButtonElement>(null)
+      return <>
+        <NotificationBell buttonRef={anchorRef} open={open} onOpen={() => setOpen((value) => !value)} />
+        <NotificationDrawer anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} />
+      </>
+    }
+    render(<Notifications />, { wrapper: wrapper() })
+    const bell = screen.getByRole('button', { name: '通知中心' })
+    expect(bell).toHaveAttribute('aria-expanded', 'false')
+
+    for (const dismissal of ['toggle', 'escape', 'close', 'outside']) {
+      fireEvent.click(bell)
+      expect(await screen.findByRole('dialog', { name: '通知' })).toBeInTheDocument()
+      expect(bell).toHaveAttribute('aria-expanded', 'true')
+      expect(bell).toHaveClass('bg-stone-200/60', 'text-stone-900')
+      if (dismissal === 'toggle') fireEvent.click(bell)
+      else if (dismissal === 'escape') fireEvent.keyDown(window, { key: 'Escape' })
+      else if (dismissal === 'close') fireEvent.click(screen.getByRole('button', { name: '关闭通知' }))
+      else fireEvent.pointerDown(document.body)
+      expect(screen.queryByRole('dialog', { name: '通知' })).not.toBeInTheDocument()
+      expect(bell).toHaveAttribute('aria-expanded', 'false')
+      expect(bell).not.toHaveClass('bg-stone-200/60')
+    }
+  })
+
   it('shares unread state with the global entry and refreshes it after a read write', async () => {
     let read = false
     vi.mocked(api.apiGet).mockImplementation(async (path) => path === '/notifications/unread'

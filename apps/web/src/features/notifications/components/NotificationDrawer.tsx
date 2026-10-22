@@ -19,7 +19,7 @@ interface NotificationDrawerProps {
   onClose: () => void
 }
 
-const POPOVER_WIDTH = 380
+const POPOVER_WIDTH = 360
 const POPOVER_MAX_HEIGHT = 520
 const POPOVER_MARGIN = 12
 
@@ -167,9 +167,9 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
                   {entries.map((entry) => (
                     <li
                       key={entry.id}
-                      className={`group relative px-4 py-3.5 transition-colors ${entry.readAt === null ? 'bg-stone-50/80 dark:bg-stone-800/35' : ''}`}
+                      className={`group relative px-4 py-3 transition-colors ${entry.readAt === null ? 'bg-stone-50/80 dark:bg-stone-800/35' : ''}`}
                     >
-                      <div role="button" tabIndex={0} onClick={() => openNotification(entry.id, entry.readAt)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openNotification(entry.id, entry.readAt) } }} className="block w-full pr-10 text-left focus:outline-hidden focus-visible:ring-2 focus-visible:ring-stone-400">
+                      <div role="button" tabIndex={0} onClick={() => openNotification(entry.id, entry.readAt)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openNotification(entry.id, entry.readAt) } }} className="block w-full pr-8 text-left focus:outline-hidden focus-visible:ring-2 focus-visible:ring-stone-400">
                         <div className="flex items-start gap-2.5">
                           <Link to="/profile" search={{ userId: entry.actor.id }} onClick={(event) => event.stopPropagation()} className="shrink-0" aria-label={entry.actor.name}>
                             {entry.actor.avatarKey ? <img src={`/api/v1/avatars/${entry.actor.avatarKey}`} alt="" className="h-8 w-8 rounded-full object-cover" /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-100 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300">{entry.actor.name.slice(0, 1).toUpperCase()}</span>}
@@ -181,7 +181,7 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
                           </div>
                         </div>
                       </div>
-                      {entry.readAt === null && <span data-testid="notification-unread-dot" aria-label={_('notificationCenter.unread')} className="pointer-events-none absolute right-11 top-5 h-2 w-2 rounded-full bg-blue-500" />}
+                      {entry.readAt === null && <span data-testid="notification-unread-dot" aria-label={_('notificationCenter.unread')} className="pointer-events-none absolute right-9 top-4.5 h-1.5 w-1.5 rounded-full bg-blue-500" />}
                       <button
                         type="button"
                         disabled={remove.isPending}
@@ -191,7 +191,7 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
                           event.stopPropagation()
                           deleteEntry(entry.id)
                         }}
-                        className="absolute right-3 top-3.5 flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-400 cursor-pointer max-md:opacity-100"
+                        className="absolute right-1 top-2.5 flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-400 cursor-pointer max-md:opacity-100"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2 2V6h14z" />

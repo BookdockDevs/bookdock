@@ -165,7 +165,7 @@ function showTagsPanel() {
 
 describe('LibrarySidebar', () => {
   it('shows the matching empty hint when switching between private taxonomy panels', () => {
-    mockHooks()
+    mockHooks({ uncategorizedTotal: 0 })
     render(<LibrarySidebar sessionKey="private-empty-panels" privateLibraryId="private-1" navSearch={navSearch} shelfId={null} categoryId={null} tagId={null} trash={false} />)
 
     expect(screen.getByText('暂无书架')).toBeInTheDocument()
@@ -332,14 +332,14 @@ describe('LibrarySidebar', () => {
     expect(screen.queryByText('暂无书架')).toBeNull()
   })
 
-  it('shows the empty-shelf hint alongside the uncategorized entry when bare', () => {
+  it('shows the empty-shelf hint without an empty uncategorized entry', () => {
 
     mockHooks({ uncategorizedTotal: 0 })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
 
     expect(screen.getByText('暂无书架')).toBeInTheDocument()
-    expect(screen.getByText('未入架')).toBeInTheDocument()
+    expect(screen.queryByText('未入架')).toBeNull()
   })
 
   it('shows the empty-category hint for a shared library without categories', () => {
@@ -350,7 +350,7 @@ describe('LibrarySidebar', () => {
 
     expect(screen.getByText('分类')).toBeInTheDocument()
     expect(screen.getByText('暂无分类')).toBeInTheDocument()
-    expect(screen.getByText('未分类')).toBeInTheDocument()
+    expect(screen.queryByText('未分类')).toBeNull()
   })
 
   it('keeps the uncategorized row for read-only readers when categories are empty', () => {
@@ -361,7 +361,7 @@ describe('LibrarySidebar', () => {
 
     expect(screen.getByText('分类')).toBeInTheDocument()
     expect(screen.getByText('未分类')).toBeInTheDocument()
-    expect(screen.getByText('暂无分类')).toBeInTheDocument()
+    expect(screen.queryByText('暂无分类')).toBeNull()
   })
 
   it('offers no create entry: creating moved to the settings library list', () => {
@@ -414,31 +414,66 @@ describe('LibrarySidebar', () => {
     expect(screen.getByText('未入架').closest('aside')).toHaveClass('w-[min(19rem,75vw)]')
   })
 
-  it('places uncategorized in the top navigation before the shelves list', () => {
-    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] })
+  it('places uncategorized first inside the shelves list ahead of pinned shelves', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2, pinned: true }] })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
     const allBooks = screen.getByText('全部书籍')
     const uncategorized = screen.getByText('未入架')
     const firstShelf = screen.getByText('Favorites')
+    const list = uncategorized.closest('nav')!
+    expect(list).toContainElement(firstShelf)
+    expect(list).not.toContainElement(allBooks)
+    expect(list.firstElementChild).toContainElement(uncategorized)
     expect(allBooks.compareDocumentPosition(uncategorized) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(uncategorized.compareDocumentPosition(firstShelf) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('keeps the uncategorized entry visible even when empty', () => {
+  it('hides the uncategorized entry when empty', () => {
     mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }], uncategorizedTotal: 0 })
 
     render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
 
-    expect(screen.getByText('未入架')).toBeInTheDocument()
+    expect(screen.queryByText('未入架')).toBeNull()
   })
 
-  it('keeps an empty uncategorized entry visible when it is selected', () => {
-    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }], uncategorizedTotal: 0 })
+  it.each(['shelves', 'private categories', 'shared categories'])('hides a selected %s entry when its count reaches zero without navigating', (context) => {
+    mockHooks()
+    const shared = context === 'shared categories'
+    const categories = context !== 'shelves'
+    if (shared) mockLibraryHooks({ uncategorizedTotal: 1 })
+    const props = {
+      sessionKey: `empty-selected-${context}`, navSearch, shelfId: categories ? null : 'none',
+      categoryId: categories ? 'none' : null, tagId: null, trash: false,
+      activeLibraryId: shared ? 'lib-1' : undefined, privateLibraryId: 'private-1',
+    }
+    const { rerender } = render(<LibrarySidebar {...props} />)
+    if (categories && !shared) fireEvent.click(screen.getByRole('button', { name: '分类', exact: true }))
+    const label = categories ? '未分类' : '未入架'
+    expect(screen.getByText(label)).toBeInTheDocument()
 
-    render(<LibrarySidebar navSearch={navSearch} shelfId="none" categoryId={null} tagId={null} trash={false} />)
+    mockHooks({ uncategorizedTotal: 0 })
+    // Mocked hooks do not emit query updates, so change a prop to refresh the memoized sidebar.
+    rerender(<LibrarySidebar {...props} navSearch={(patch) => navSearch(patch)} />)
 
-    expect(screen.getByText('未入架')).toBeInTheDocument()
+    expect(screen.queryByText(label)).toBeNull()
+    expect(screen.getByText(categories ? '暂无分类' : '暂无书架')).toBeInTheDocument()
+    expect(navSearch).not.toHaveBeenCalled()
+  })
+
+  it('keeps special entries below the panel tabs and out of the tags panel', () => {
+    mockHooks()
+    render(<LibrarySidebar sessionKey="special-panel-entries" privateLibraryId="private-1" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+    const tabs = screen.getByRole('button', { name: '标签', exact: true }).parentElement!
+    expect(tabs.compareDocumentPosition(screen.getByText('未入架')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '分类', exact: true }))
+    const uncategorized = screen.getByText('未分类')
+    expect(uncategorized.closest('nav')!.firstElementChild).toContainElement(uncategorized)
+    expect(tabs.compareDocumentPosition(uncategorized) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    showTagsPanel()
+    expect(screen.queryByText('未入架')).toBeNull()
+    expect(screen.queryByText('未分类')).toBeNull()
+    expect(screen.getByRole('button', { name: '标签', exact: true }).parentElement).toBe(tabs)
   })
 
   it('shows a skeleton while taxonomy loads', () => {

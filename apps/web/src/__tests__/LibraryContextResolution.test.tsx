@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   catalog: vi.fn(),
   searchAuthors: vi.fn(),
   navigate: vi.fn(),
+  listTotal: null as number | null,
 }))
 
 vi.mock('@tanstack/react-router', async (importOriginal) => {
@@ -29,8 +30,8 @@ vi.mock('@/features/library/hooks', async (importOriginal) => {
   return {
     ...actual,
     useLibraries: mocks.libraries,
-    useBooks: (...args: unknown[]) => { mocks.books(...args); return query({ data: [], total: 0 }) },
-    useLibraryCatalog: (...args: unknown[]) => { mocks.catalog(...args); return query() },
+    useBooks: (...args: unknown[]) => { mocks.books(...args); return query({ data: [], total: mocks.listTotal ?? 0 }) },
+    useLibraryCatalog: (...args: unknown[]) => { mocks.catalog(...args); return query(mocks.listTotal === null ? undefined : { data: { items: [], total: mocks.listTotal } }) },
     useLibraryRelation: () => query(),
     useLibraryCategories: () => query({ data: [] }),
     useLibraryTags: () => query({ data: [] }),
@@ -89,6 +90,7 @@ describe('Library requested context resolution', () => {
     mocks.catalog.mockClear()
     mocks.searchAuthors.mockClear()
     mocks.navigate.mockClear()
+    mocks.listTotal = null
     useAuthStore.setState({ user: { id: 'user-1', username: 'reader', role: 'member' } })
   })
 
@@ -160,6 +162,31 @@ describe('Library requested context resolution', () => {
 
     expect(view.container.querySelector('[data-library-context="resolved"]')).toBeInTheDocument()
     expect(mocks.navigate.mock.calls.every(([options]) => (options as { search?: { shelf?: string } }).search?.shelf === 'none')).toBe(true)
+  })
+
+  it.each(['shelves', 'private categories', 'shared categories'])('keeps the selected %s view when its last book leaves', (context) => {
+    const shared = context === 'shared categories'
+    mocks.search = {
+      libraryId: shared ? 'requested-library' : undefined,
+      shelf: context === 'shelves' ? 'none' : undefined,
+      category: context !== 'shelves' ? 'none' : undefined,
+      tag: undefined, trash: false, page: 1,
+    }
+    mocks.libraries.mockReturnValue({
+      data: { data: [{ id: shared ? 'requested-library' : 'private-1', type: shared ? 'shared' : 'private', name: 'Library', relation: 'owner' }] },
+      isPending: false, isError: false, isFetching: false, refetch: vi.fn(),
+    })
+    mocks.listTotal = 1
+    const view = renderLibrary()
+    mocks.navigate.mockClear()
+
+    mocks.listTotal = 0
+    act(() => view.rerender(<QueryClientProvider client={view.client}><Library /></QueryClientProvider>))
+
+    expect(view.container.querySelector('[data-library-context="resolved"]')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: context === 'shelves' ? 'Not on a shelf' : 'Uncategorized' })).toBeInTheDocument()
+    expect(screen.getByText(/^(No books yet|Library is empty)$/)).toBeInTheDocument()
+    expect(mocks.navigate).not.toHaveBeenCalled()
   })
 
   it('disables catalog and author-search requests in library activity and restores them in the books view', () => {

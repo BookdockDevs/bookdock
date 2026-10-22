@@ -78,6 +78,7 @@ interface LibrarySidebarProps {
   /** Opens the discovery dialog showing all public and password libraries. */
   onExploreLibraries?: () => void
   onOpenNotifications?: () => void
+  notificationsOpen?: boolean
   notificationButtonRef?: React.RefObject<HTMLButtonElement | null>
   /**
    * Current library search, used once when entering the archive: the archive
@@ -87,7 +88,7 @@ interface LibrarySidebarProps {
   librarySearch?: LibrarySearch
 }
 
-const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, categoryId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, privateLibraryId = null, activeLibraryName, activeLibraryNameLoading = false, librariesResolved = true, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries, onOpenNotifications, notificationButtonRef, librarySearch }: LibrarySidebarProps) {
+const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch, onPrefetchNavigation, shelfId, categoryId, tagId, trash, directory, readOnly = false, mobileOpen = false, onMobileClose, navRef, shelfOrderOverride, settleShelfId, tagOrderOverride, settleTagId, libraries, activeLibraryId = null, privateLibraryId = null, activeLibraryName, activeLibraryNameLoading = false, librariesResolved = true, onSelectLibrary, onManageLibrary, onJoinLibrary, onExploreLibraries, onOpenNotifications, notificationsOpen, notificationButtonRef, librarySearch }: LibrarySidebarProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const router = useRouter({ warn: false })
@@ -243,6 +244,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   // Two levels can be lit at once: the library row says which library is in
   // context, the category and tag rows say what is filtered inside it.
   const isUncategorizedActive = !trash && (inLibrary ? categoryId === 'none' : panel === 'categories' ? categoryId === 'none' : shelfId === 'none')
+  const showUncategorized = panel === 'shelves' ? (uncategorizedCount ?? 0) > 0 : panel === 'categories' && (unclassifiedCount ?? 0) > 0
   // The empty hint only describes a bare section: no shelf row and no
   // uncategorized row. Any visible row already answers "where are my books".
 
@@ -279,7 +281,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
 
   useEffect(() => {
     updateScrollShadows()
-  }, [shelves, tags, shelvesLoading, mobileOpen, updateScrollShadows])
+  }, [shelves, tags, shelvesLoading, mobileOpen, showUncategorized, updateScrollShadows])
 
   useEffect(() => {
     const el = localNavRef.current
@@ -318,6 +320,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
         <NotificationBell
           buttonRef={notificationButtonRef}
           onOpen={onOpenNotifications}
+          open={notificationsOpen}
           className="h-8 w-8"
         />
       </div>
@@ -346,13 +349,6 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
           }
           onClick={() => selectNavigation({ expression: undefined, shelf: undefined, category: undefined, tag: undefined, q: undefined, format: undefined, status: undefined, author: undefined, series: undefined, categoryScope: undefined, trash: undefined })}
         />
-        {panel === 'shelves' && <UncategorizedDropTarget label={_('library.notOnShelf')} count={uncategorizedCount} active={isUncategorizedActive}
-          onClick={() => selectNavigation({ shelf: 'none', category: undefined, tag: undefined, categoryScope: undefined, trash: undefined })}
-          onPointerEnter={() => onPrefetchNavigation?.({ shelf: 'none', category: undefined, tag: undefined, categoryScope: undefined, trash: undefined })} />}
-        {panel === 'categories' && <NavItem label={_('library.uncategorized')} count={inLibrary ? uncategorizedCount : unclassifiedCount} active={isUncategorizedActive}
-          icon={<TaxonomyIcon kind="category" size={15} />}
-          onClick={() => selectNavigation({ category: 'none', shelf: undefined, tag: undefined, categoryScope: 'subtree', trash: undefined })}
-          onPointerEnter={() => onPrefetchNavigation?.({ category: 'none', shelf: undefined, tag: undefined, categoryScope: 'subtree', trash: undefined })} />}
         {((trashEnabled && !readOnly && !inLibrary) || (sharedTrashVisible && libraryTrashEnabled)) && (
           <NavItem
             label={_('library.trash')}
@@ -475,6 +471,12 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
           updateScrollShadows()
           navigationSessions.set(sessionKey, { ...session, scroll: { ...(navigationSessions.get(sessionKey)?.scroll ?? session.scroll), [panel]: localNavRef.current?.scrollTop ?? 0 } })
         }} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-y-contain px-1.5 py-1 sidebar-scrollbar">
+          {showUncategorized && (panel === 'shelves' ? <UncategorizedDropTarget label={_('library.notOnShelf')} count={uncategorizedCount} active={isUncategorizedActive}
+            onClick={() => selectNavigation({ shelf: 'none', category: undefined, tag: undefined, categoryScope: undefined, trash: undefined })}
+            onPointerEnter={() => onPrefetchNavigation?.({ shelf: 'none', category: undefined, tag: undefined, categoryScope: undefined, trash: undefined })} /> : <NavItem label={_('library.uncategorized')} count={unclassifiedCount} active={isUncategorizedActive}
+            icon={<TaxonomyIcon kind="category" size={15} />}
+            onClick={() => selectNavigation({ category: 'none', shelf: undefined, tag: undefined, categoryScope: 'subtree', trash: undefined })}
+            onPointerEnter={() => onPrefetchNavigation?.({ category: 'none', shelf: undefined, tag: undefined, categoryScope: 'subtree', trash: undefined })} />)}
           {taxonomyLoading ? <div aria-busy="true" className="h-8 animate-pulse rounded-lg bg-stone-200/60 dark:bg-stone-800/60" /> : panel !== 'tags' ? (
             <SortableContext items={shelves.map((shelf) => shelf.id)} strategy={verticalListSortingStrategy}>
               {shelves.filter((shelf) => {
@@ -523,7 +525,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
                   />
                 )
               })}
-              {shelves.length === 0 && !(panel === 'categories' ? categoriesQuery.isError && !categoriesQuery.data : shelvesError && !shelvesData) && (
+              {shelves.length === 0 && !showUncategorized && !(panel === 'categories' ? categoriesQuery.isError && !categoriesQuery.data : shelvesError && !shelvesData) && (
                 <TaxonomyEmptyState type={panel} />
               )}
             </SortableContext>
@@ -1173,12 +1175,7 @@ function UncategorizedDropTarget({
         label={label}
         count={count}
         active={active || dropHint}
-        icon={
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M22 12h-6l-2 3h-4l-2-3H2" />
-            <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-          </svg>
-        }
+        icon={<TaxonomyIcon kind="shelf" size={15} />}
         onClick={onClick}
         onPointerEnter={onPointerEnter}
       />

@@ -1021,42 +1021,6 @@ export default function Library() {
     if (Object.keys(patch).length > 0) navSearch(patch)
   }, [libraryContextUnresolved, taxonomyLoading, taxonomyFailed, search.shelf, search.category, search.tag, activeLibrary, privateShelves, categories, tags, navSearch])
 
-  // Uncategorized is a virtual view: staying on it after the last book is
-  // moved/deleted away is a dead end, so leave back to all books. A view
-  // entered already empty keeps its empty state — bookmarked ?shelf=none
-  // URLs must not be bounced.
-  const uncategorizedEmptyOnEntryRef = useRef<boolean | null>(null)
-  useEffect(() => {
-    if (libraryContextUnresolved) return
-    if (shelfId !== 'none') {
-      uncategorizedEmptyOnEntryRef.current = null
-      return
-    }
-    // The placeholder total belongs to the previous view, not this one
-    if (listLoading || !hasLoadedTotal) return
-    if (uncategorizedEmptyOnEntryRef.current === null) {
-      uncategorizedEmptyOnEntryRef.current = total === 0
-    } else if (!uncategorizedEmptyOnEntryRef.current && total === 0) {
-      uncategorizedEmptyOnEntryRef.current = null
-      navSearch({ shelf: undefined })
-    }
-  }, [libraryContextUnresolved, shelfId, listLoading, hasLoadedTotal, total, navSearch])
-
-  const uncategorizedCategoryEmptyOnEntryRef = useRef<boolean | null>(null)
-  useEffect(() => {
-    if (libraryContextUnresolved) return
-    if (categoryId !== 'none') {
-      uncategorizedCategoryEmptyOnEntryRef.current = null
-      return
-    }
-    if (listLoading || !hasLoadedTotal) return
-    if (uncategorizedCategoryEmptyOnEntryRef.current === null) uncategorizedCategoryEmptyOnEntryRef.current = total === 0
-    else if (!uncategorizedCategoryEmptyOnEntryRef.current && total === 0) {
-      uncategorizedCategoryEmptyOnEntryRef.current = null
-      navSearch({ category: undefined })
-    }
-  }, [libraryContextUnresolved, categoryId, listLoading, hasLoadedTotal, total, navSearch])
-
   const gridColumns = useUiStore((s) => s.gridColumns)
   const recentlyReadStyle = prefsReady ? (libraryPrefs?.recentlyReadStyle ?? 'off') : 'off'
   const readingStatsEnabled = prefsReady ? (libraryPrefs?.readingStatsEnabled !== false) : false
@@ -1173,6 +1137,7 @@ export default function Library() {
           onJoinLibrary={setJoinTarget}
           onExploreLibraries={() => setDiscoveryOpen(true)}
           onOpenNotifications={() => setNotificationsOpen((value) => !value)}
+          notificationsOpen={notificationsOpen}
           notificationButtonRef={notificationButtonRef}
           directory={search.directory}
           librarySearch={search}
