@@ -57,12 +57,6 @@ export const PRESET_READING_THEMES: CustomReadingTheme[] = [
   { id: 'night', name: '夜间', colors: { bg: '#111111', fg: '#d6d6d6', primary: '#8a8a8a' } },
 ]
 
-const PRESET_IDS = new Set(PRESET_READING_THEMES.map((t) => t.id))
-
-export function isPresetThemeId(id: string): boolean {
-  return PRESET_IDS.has(id)
-}
-
 export function resolveReadingTheme(id: string, customThemes: CustomReadingTheme[] = []): ReadingTheme {
   const preset = PRESET_READING_THEMES.find((t) => t.id === id)
   if (preset) return deriveReadingTheme(preset.colors)

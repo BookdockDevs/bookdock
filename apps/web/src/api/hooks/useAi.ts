@@ -1,13 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { AiConfigRes, AiConfigTestReq, AiConnectionTestRes, AiIndexReq, AiIndexRes, AiMessageRevisionRes, AiModelDiscoveryReq, AiModelRes, AiConfigUpdateReq, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiProviderRes, AiThreadCreateReq, AiThreadDetailRes, AiThreadRes, AiThreadUpdateReq } from '@bookdock/shared'
+import type { AiConfigRes, AiConfigTestReq, AiConnectionTestRes, AiMessageRevisionRes, AiModelDiscoveryReq, AiModelRes, AiConfigUpdateReq, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiProviderRes, AiThreadDetailRes, AiThreadRes, AiThreadUpdateReq } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost } from '../client'
 
 export const AI_CONFIG_KEY = ['ai', 'config'] as const
 export const AI_PROVIDERS_KEY = ['ai', 'providers'] as const
 export const AI_THREADS_KEY = ['ai', 'threads'] as const
-export const AI_RETRIEVAL_KEY = ['ai', 'retrieval'] as const
 
 export function useAiProviders(options?: { enabled?: boolean }) {
   return useQuery({
@@ -60,68 +59,6 @@ export function useSelectAiMessageRevision() {
       void queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, 'detail', variables.threadId] })
       void queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, 'revisions', variables.threadId] })
       void queryClient.invalidateQueries({ queryKey: AI_THREADS_KEY })
-    },
-  })
-}
-
-export function useAiIndexStatus(bookId: string, options?: { enabled?: boolean }) {
-  return useQuery({
-    queryKey: [...AI_RETRIEVAL_KEY, 'status', bookId],
-    queryFn: () => apiGet<{ data: AiIndexRes }>(`/ai/retrieval/status?bookId=${encodeURIComponent(bookId)}`),
-    enabled: (options?.enabled ?? true) && Boolean(bookId),
-    staleTime: 30 * 1000,
-    refetchInterval: (query) => query.state.data?.data.status === 'indexing' ? 750 : false,
-  })
-}
-
-export function useIndexAiBook() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (input: AiIndexReq & { signal?: AbortSignal }) => {
-      const { signal, ...body } = input
-      return signal
-        ? apiPost<{ data: AiIndexRes }>('/ai/retrieval/index', body, signal)
-        : apiPost<{ data: AiIndexRes }>('/ai/retrieval/index', body)
-    },
-    onMutate: ({ bookId }) => {
-      const key = [...AI_RETRIEVAL_KEY, 'status', bookId]
-      const current = queryClient.getQueryData<{ data: AiIndexRes }>(key)
-      queryClient.setQueryData(key, {
-        data: {
-          bookId,
-          status: 'indexing',
-          embeddingStatus: 'not_indexed',
-          progress: 0,
-          chunkCount: current?.data.chunkCount ?? 0,
-          updatedAt: current?.data.updatedAt ?? null,
-        } satisfies AiIndexRes,
-      })
-    },
-    onSuccess: (response) => {
-      queryClient.setQueryData([...AI_RETRIEVAL_KEY, 'status', response.data.bookId], response)
-    },
-    onSettled: (_response, _error, input) => {
-      void queryClient.invalidateQueries({ queryKey: [...AI_RETRIEVAL_KEY, 'status', input.bookId] })
-    },
-  })
-}
-
-export function useCancelAiBookIndex() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: AiIndexReq) => apiPost<{ data: AiIndexRes }>('/ai/retrieval/index/cancel', body),
-    onSuccess: (response) => {
-      queryClient.setQueryData([...AI_RETRIEVAL_KEY, 'status', response.data.bookId], response)
-    },
-  })
-}
-
-export function useClearAiBookIndex() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (bookId: string) => apiDelete<{ data: null }>(`/ai/retrieval/index?bookId=${encodeURIComponent(bookId)}`),
-    onSuccess: (_response, bookId) => {
-      queryClient.setQueryData<{ data: AiIndexRes }>([...AI_RETRIEVAL_KEY, 'status', bookId], { data: { bookId, status: 'not_indexed', embeddingStatus: 'not_indexed', progress: 0, chunkCount: 0, updatedAt: null } })
     },
   })
 }
@@ -206,14 +143,6 @@ export function useFetchAiModels() {
 export function useTestAiConfigDraft() {
   return useMutation({
     mutationFn: (body: AiConfigTestReq) => apiPost<{ data: AiConnectionTestRes }>('/ai/test', body),
-  })
-}
-
-export function useCreateAiThread() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: AiThreadCreateReq) => apiPost<{ data: AiThreadRes }>('/ai/threads', body),
-    onSuccess: (response) => { void queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, response.data.bookId] }) },
   })
 }
 

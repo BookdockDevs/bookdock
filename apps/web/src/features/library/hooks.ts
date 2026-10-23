@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useInfiniteQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryObserverResult } from '@tanstack/react-query'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 import {
@@ -126,61 +126,6 @@ export function prefetchBooks(queryClient: QueryClient, params: UseBooksParams) 
   return queryClient.prefetchQuery({
     queryKey,
     queryFn: () => apiGet<BookListRes>(path),
-  })
-}
-
-export interface UseInfiniteBooksParams {
-  pageSize: number
-  search: string
-  sortBy: string
-  sortOrder: string
-  shelfId: string | null
-  tagId: string | null
-  author?: string | null
-  series?: string | null
-  format: BookFormat | null
-  readStatus: ReadStatus | null
-  trash: boolean
-  /** Private-vault reveal; omitted = hidden rows excluded. */
-  showHidden?: boolean
-}
-
-function infiniteBooksFn(page: number, pageSize: number, search: string, sortBy: string, sortOrder: string, shelfId: string | null, tagId: string | null, author: string | null | undefined, series: string | null | undefined, format: BookFormat | null, readStatus: ReadStatus | null, trash: boolean, showHidden?: boolean) {
-  return apiGet<BookListRes>(buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, tagId, author, series, format, readStatus, trash, showHidden }))
-}
-
-export function useInfiniteBooks(params: UseInfiniteBooksParams, options?: { enabled?: boolean }) {
-  return useInfiniteQuery({
-    queryKey: ['books', 'infinite', params],
-    enabled: options?.enabled ?? true,
-    queryFn: ({ pageParam }) =>
-      infiniteBooksFn(pageParam, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash, params.showHidden),
-    initialPageParam: 1,
-    placeholderData: (previousData, previousQuery) => {
-      const prevParams = previousQuery?.queryKey[2] as UseInfiniteBooksParams | undefined
-      // Never retain regular books when switching into Trash, or vice versa
-      if (prevParams && prevParams.trash !== params.trash) {
-        return undefined
-      }
-      return previousData
-    },
-    getNextPageParam: (last) => {
-      const totalPages = Math.ceil(last.total / last.pageSize)
-      return last.page < totalPages ? last.page + 1 : undefined
-    },
-  })
-}
-
-export function prefetchInfiniteBooks(queryClient: QueryClient, params: UseInfiniteBooksParams) {
-  return queryClient.prefetchInfiniteQuery({
-    queryKey: ['books', 'infinite', params],
-    queryFn: ({ pageParam }) =>
-      infiniteBooksFn(pageParam as number, params.pageSize, params.search, params.sortBy, params.sortOrder, params.shelfId, params.tagId, params.author, params.series, params.format, params.readStatus, params.trash, params.showHidden),
-    initialPageParam: 1,
-    getNextPageParam: (last: BookListRes) => {
-      const totalPages = Math.ceil(last.total / last.pageSize)
-      return last.page < totalPages ? last.page + 1 : undefined
-    },
   })
 }
 
@@ -686,17 +631,6 @@ export function prefetchLibraryCatalog(queryClient: QueryClient, libraryId: stri
   return queryClient.prefetchQuery({
     queryKey,
     queryFn: () => apiGet<{ data: CatalogListRes }>(path),
-  })
-}
-
-/** Grouping candidates for an upload (5.2): a hint, never an automatic grouping. */
-export function useCatalogSimilar(libraryId: string | null, params: { title: string; enabled: boolean }) {
-  return useQuery({
-    queryKey: ['libraries', libraryId, 'catalog', 'similar', { title: params.title }],
-    queryFn: () => apiGet<{ data: CatalogBook[] }>(
-      `/libraries/${libraryId}/books/similar?title=${encodeURIComponent(params.title)}`,
-    ),
-    enabled: !!libraryId && params.enabled && params.title.trim().length > 0,
   })
 }
 

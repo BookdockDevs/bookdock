@@ -19,9 +19,6 @@ export default defineConfig({
             if (id.includes('@dnd-kit')) {
               return 'vendor-dnd'
             }
-            if (id.includes('react-virtuoso')) {
-              return 'vendor-virtuoso'
-            }
           }
         },
       },

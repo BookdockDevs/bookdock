@@ -7,7 +7,7 @@ import i18n from '@/i18n/i18n'
 
 import ArchiveOverviewDashboard from './components/ArchiveOverviewDashboard'
 import SortMenu from './components/SortMenu'
-import { archiveCountParts, hasReadableText } from './components/archive-helpers'
+import { hasReadableText } from './components/archive-helpers'
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, search, onClick, role }: { children: React.ReactNode; search?: unknown; onClick?: () => void; role?: string }) => (
@@ -79,15 +79,6 @@ describe('archive display helpers', () => {
     expect(hasReadableText('OK')).toBe(true)
   })
 
-  it('lists nonzero counts in card order without measure words', () => {
-    const t = (key: string) => ({ 'archive.highlights': '划线', 'archive.bookmarks': '书签', 'archive.ideas': '想法', 'archive.reviews': '书评' })[key]!
-    expect(archiveCountParts({ highlights: 5, bookmarks: 0, ideas: 4, reviews: 1 }, t)).toEqual([
-      { key: 'highlights', label: '划线', value: 5 },
-      { key: 'ideas', label: '想法', value: 4 },
-      { key: 'reviews', label: '书评', value: 1 },
-    ])
-    expect(archiveCountParts({ highlights: 0, bookmarks: 0, ideas: 0, reviews: 0 }, t)).toEqual([])
-  })
 })
 
 describe('SortMenu', () => {

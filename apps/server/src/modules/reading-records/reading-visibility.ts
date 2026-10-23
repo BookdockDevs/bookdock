@@ -8,7 +8,3 @@ export function excludedReadingBookVersionIds(db: ReturnType<typeof getDb>, user
     ...readingHoldings(db, userId, showHidden).filter((row) => row.excluded).map((row) => row.bookVersionId),
   ])]
 }
-
-export function hiddenBookVersionIds(db: ReturnType<typeof getDb>, userId: string): string[] {
-  return readingHoldings(db, userId).filter((row) => row.excluded).map((row) => row.bookVersionId)
-}

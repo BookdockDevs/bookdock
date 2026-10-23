@@ -72,8 +72,3 @@ export function compareCfiPosition(a: string, b: string, toEnd = false): number 
   }
   return 0
 }
-
-export async function annotationsOverlap(a: string, b: string): Promise<boolean> {
-  const cfi = await loadCfiModule()
-  return cfiRangesOverlap(cfi, a, b)
-}
