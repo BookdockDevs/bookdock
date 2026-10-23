@@ -86,6 +86,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
   workspace.dispose()
 })
 
@@ -187,6 +189,35 @@ describe('planLaunch', () => {
 })
 
 describe('launcher update gate', () => {
+  it.each([
+    [undefined, 18423],
+    ['3000', 3000],
+    ['19000', 19000],
+  ])('probes the configured server port with PORT=%s', async (value, expectedPort) => {
+    vi.stubEnv('PORT', value)
+    const { target } = workspace.stageUpdate()
+    const fetchMock = vi.fn(async (url) => ({
+      ok: true,
+      json: async () => url.endsWith('/health') ? { data: { ok: true } } : { data: { version: target } },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const child = createChild([target])
+    const { launcher } = launcherFor(() => child, { probe: undefined })
+    const running = launcher.run()
+    try {
+      await vi.waitFor(() => expect(workspace.readPointer('current')).toEqual({ name: target }))
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        `http://127.0.0.1:${expectedPort}/api/v1/health`,
+        `http://127.0.0.1:${expectedPort}/api/v1/internal/version`,
+      ])
+      expect(fetchMock.mock.calls[1][1].headers).toEqual({ 'x-bookdock-launcher-nonce': 'test-nonce' })
+    } finally {
+      child.idle()
+      launcher.stop()
+      await running
+    }
+  })
+
   it('commits a pending release that reports its own version', async () => {
     const { dir, target } = workspace.stageUpdate({ previous: '0.3.5' })
     workspace.writeRelease('0.3.5')

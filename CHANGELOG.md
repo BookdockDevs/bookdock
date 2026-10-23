@@ -4,6 +4,14 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- The default service port is now **18423** instead of **3000** for Docker and source deployments. The frontend development port remains **5173**; explicit `PORT` settings remain supported.
+
+### Upgrade notes
+
+- Update Docker port mappings and reverse-proxy upstreams for the new default, or keep the public port with a mapping such as `3000:18423`. Pull/rebuild the image and recreate the container; in-app updates do not replace the old launcher or health check. If retaining an old image for in-app updates, first recreate it with `PORT=3000` explicitly set.
+
 ## [0.6.3] - 2026-10-23
 
 ### Highlights
@@ -842,6 +850,14 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### [Unreleased]
+
+#### 变更
+
+- Docker 和源码部署的默认服务端口由 **3000** 调整为 **18423**。前端开发端口仍为 **5173**，继续支持通过 `PORT` 自定义服务端口。
+
+#### 升级说明
+
+- 请同步调整 Docker 端口映射和反向代理上游地址；如需保留原访问端口，可使用 `3000:18423` 映射。请拉取或重新构建镜像并重建容器，面板更新不会替换旧启动器和健康检查。若保留旧镜像使用面板更新，需先显式设置 `PORT=3000` 并重建容器。
 
 ### [0.6.3] - 2026-10-23
 

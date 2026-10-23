@@ -31,6 +31,7 @@ COPY apps/server/launcher/launcher.mjs ./launcher.mjs
 RUN mkdir -p /data
 ENV NODE_ENV=production
 ENV DATA_DIR=/data
-EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node -e "fetch('http://127.0.0.1:3000/api/v1/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+ENV PORT=18423
+EXPOSE 18423
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node -e "fetch('http://127.0.0.1:' + process.env.PORT + '/api/v1/health', { signal: AbortSignal.timeout(4000) }).then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 CMD ["node", "/app/launcher.mjs"]

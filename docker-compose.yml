@@ -5,11 +5,11 @@ services:
     build:
       context: .
     ports:
-      - "3000:3000"
+      - "18423:18423"
     restart: unless-stopped
     volumes:
       - ./data:/data
-    # No environment block: NODE_ENV and DATA_DIR are set by the image, and all
+    # No environment block: NODE_ENV, DATA_DIR, and PORT are set by the image, and all
     # other variables have working defaults (see docs/architecture.md, Config & Env).
     # Add overrides here when needed, e.g.:
     # environment:

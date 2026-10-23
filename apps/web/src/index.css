@@ -224,6 +224,22 @@ body.reader-resizing iframe {
   --scrollbar-thumb-active: color-mix(in srgb, var(--bd-read-sub, var(--color-stone-500)) 64%, var(--bd-read-bg, var(--color-white)));
 }
 
+/* The body scroller is exposed through Foliate's nested shadow roots. */
+foliate-view::part(container) {
+  --scrollbar-thumb: color-mix(in srgb, var(--bd-read-text) 40%, var(--bd-read-bg));
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--bd-read-text) 55%, var(--bd-read-bg));
+  --scrollbar-thumb-active: color-mix(in srgb, var(--bd-read-text) 70%, var(--bd-read-bg));
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+foliate-view::part(container):hover {
+  scrollbar-color: var(--scrollbar-thumb-hover) transparent;
+}
+
+foliate-view::part(container):active {
+  scrollbar-color: var(--scrollbar-thumb-active) transparent;
+}
+
 @keyframes smart-menu-in {
   from { opacity: 0; transform: translateY(var(--slide-y, -4px)); }
   to   { opacity: 1; transform: translateY(0); }

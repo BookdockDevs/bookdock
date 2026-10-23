@@ -15,7 +15,7 @@ const projectRoot = path.resolve(__dirname, '..', '..', '..')
 loadDotenv({ path: path.join(projectRoot, 'apps', 'server', '.env') })
 
 const envSchema = z.object({
-  PORT: z.coerce.number().int().min(1).default(3000),
+  PORT: z.coerce.number().int().min(1).max(65535).default(18423),
   DATA_DIR: z.string().default(path.join(projectRoot, 'data')),
   DB_PATH: z.string().optional(),
   JWT_SECRET: z.string().optional(),

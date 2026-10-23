@@ -1,69 +1,53 @@
-# Bookdock
+<div align="center">
+  <h1>Bookdock · 书坞</h1>
+  <p>自托管的在线电子书库。</p>
+  <p>中文 · <a href="./README.en.md">English</a></p>
+  <p>
+    <a href="https://github.com/BookdockDevs/bookdock/releases"><img src="https://img.shields.io/github/v/release/BookdockDevs/bookdock?style=flat-square&amp;label=release" alt="最新版本"></a>
+    <a href="https://hub.docker.com/r/loofffff/bookdock"><img src="https://img.shields.io/badge/Docker-loofffff%2Fbookdock-2496ED?style=flat-square&amp;logo=docker&amp;logoColor=white" alt="Docker 镜像"></a>
+  </p>
+</div>
 
-Self-hosted web e-book library.
+整理 EPUB 和 TXT 电子书，在浏览器中阅读，保存划线、想法和阅读进度。你可以维护自己的个人书库，也可以创建共享书库，与其他读者分享书籍、交流阅读感受。
 
-## Releases
+## 主要功能
 
-See [`CHANGELOG.md`](./CHANGELOG.md) for release history and version-specific upgrade notes.
+| 功能 | 说明 |
+| :--- | :--- |
+| **整理藏书** | 上传电子书，通过书架、分类和标签整理，搜索查找书籍。 |
+| **在线阅读** | 支持 EPUB 和 TXT，可调整字体、主题和阅读布局，使用目录与书签定位内容。 |
+| **记录阅读** | 保存划线和想法，记录阅读进度与时长，查看阅读统计。 |
+| **分享交流** | 创建共享书库，管理成员与访问权限，发表书评，参与评论和讨论。 |
+| **辅助阅读** | 支持语音朗读和 AI 阅读助手，可在设置中配置相应服务。 |
 
-## Quick Start
+## 快速部署
 
-### Development
+**1. 保存配置**
 
-Use Node.js 22.23.4 or later in the 22.x line. The minimum patched versions for the 24.x and 26.x lines are 24.22.1 and 26.12.1, respectively. CI and Docker use Node.js 22.23.4.
+安装 Docker 后，将以下内容保存为 `docker-compose.yml`：
 
-```bash
-# Install
-pnpm install
-
-# Terminal 1: Server (http://localhost:3000)
-pnpm --filter @bookdock/server dev
-
-# Terminal 2: Web (http://localhost:5173)
-pnpm --filter @bookdock/web dev
+```yaml
+services:
+  bookdock:
+    image: loofffff/bookdock:latest
+    ports:
+      - "18423:18423"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
 ```
 
-On first run, open the web UI and complete setup to create the owner account. The owner can later enable guest access (no-sign-in mode) or open registration in Settings.
+**2. 启动服务**
 
-### Production (Docker)
-
-```bash
-docker compose up -d --build
-```
-
-Then open `http://localhost:3000` (the server also serves the built web UI) and complete `/setup` to create the owner account — no account is created automatically on first boot.
-
-- The shipped `docker-compose.yml` sets no environment variables on purpose: `NODE_ENV=production` and `DATA_DIR=/data` are baked into the image, and every other variable has a working default. The full table lives in [`docs/architecture.md`](docs/architecture.md) (§ Config & Env).
-- To override a variable, add an `environment:` block to the service, e.g. `LOG_LEVEL: debug`.
-- `JWT_SECRET` is optional: when omitted, a random secret is generated and persisted to `/data/.jwt-secret`.
-- `LOG_LEVEL` defaults to `info`; set it to `debug`, `warn`, or `error` when diagnosing a deployment. Logs are JSON lines on Docker stdout/stderr.
-- When guest access is enabled, visitors can read allowed books without signing in. Guests do not have a database account; their reading progress and preferences remain in their local browser.
-- The complete `data/` directory is the persistent state. Stop the container before copying it for a cold backup, and restore the complete directory (including the hidden `.jwt-secret` file) before starting the container again.
-- `docker compose ps` shows the health status (the image ships its own `HEALTHCHECK`). The health endpoint is `http://localhost:3000/api/v1/health`.
-
-By default, `docker-compose.yml` uses `loofffff/bookdock:latest`, which tracks the latest stable release. Set `BOOKDOCK_IMAGE` to pin a specific version. To use the published registry image, run `docker compose pull` followed by `docker compose up -d --no-build`. Docker Hub is only needed for this pull-based workflow; building from the repository does not require Docker Hub.
-
-Node.js security updates require a new container image. After a patched Bookdock image is published, pull it and recreate the container using the commands above, or rebuild from the updated source. In-app updates replace application files only and do not upgrade Node.js. Verify the running version with `docker compose exec bookdock node --version`.
-
-The repository publishes Docker Hub images when a `v*` tag is pushed. To enable that workflow, add `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as GitHub Actions secrets, create a public Docker Hub repository named `bookdock`, and push a release tag. A stable `vX.Y.Z` tag publishes `<dockerhub-username>/bookdock:X.Y.Z`, `<dockerhub-username>/bookdock:X.Y`, and updates `latest`; prerelease tags do not update `latest`. Until an image is published, use the source-build command above.
-
-## Commands
+在该文件所在目录运行：
 
 ```bash
-pnpm lint          # Lint all packages
-pnpm typecheck     # Type check all packages
-pnpm test          # Run all tests
-pnpm dev           # Run all dev servers
+docker compose up -d
 ```
 
-## Data
+**3. 开始使用**
 
-All data (database + uploaded files) is stored in `data/` directory. Backup by copying this directory.
+打开 [http://localhost:18423](http://localhost:18423)，按页面提示创建书库所有者账户。远程部署时，将 `localhost` 替换为服务器地址。所有者可以在设置中开启注册或游客访问。
 
-## Tech Stack
-
-- Frontend: React 19 + Vite + Tailwind CSS 4 + TanStack Router + TanStack Query + Zustand
-- Backend: Hono + TypeScript
-- Database: SQLite + Drizzle ORM
-- Reading Engine: foliate-js (vendored)
-- Formats: EPUB, TXT
+> [!NOTE]
+> 默认情况下，数据保存在 Compose 文件同级的 `data/` 目录。备份时先停止容器，再完整复制该目录，包括隐藏文件；如果配置了远端存储，还需单独备份远端书籍文件。

@@ -36,9 +36,9 @@ Four account preferences are supported: `auto`, `manual`, `both`, `off`. `both` 
 
 The existing `/archive` single-book shell owns the complete Reading data and Notes views, with a retroactive-entry action, combined history, calendar/trend/distribution, correction and transfer tools. Book details link directly into data, and archive retains the source-detail entry subject to ACL. Reader data remains a concise summary plus shared quick actions. Overall period metrics share week/month/year/all scope; reading days require 60 seconds, while shorter valid records still contribute time. Estimates use the book's available combined history, without a three-day gate or fixed speed fallback. Tag time is non-exclusive and uses bars. CSV is analytical export; versioned JSON is a full user-owned recovery contract with preview, validation and deduplication, never a source-permission grant or position overwrite.
 
-This section defines the new implementation boundary; older descriptions below continue to describe legacy storage until the corresponding migration/writer is replaced. Detailed agreed scope and acceptance cases: `docs/local/plan/reading-data-maturity.md`.
+This section defines the current implementation boundary; older descriptions below continue to describe legacy storage until the corresponding migration/writer is replaced. The code, shared contracts, and migrations are the implementation reference; historical development records are not part of this public architecture document.
 
-### Personal and library activity v1 (implemented locally, acceptance in progress; 2026-10-22)
+### Personal and library activity v1 (delivered in v0.6.3; 2026-10-22)
 
 Personal activity includes the author's shared and private ideas and work reviews
 when viewed by that author. Visitor projections contain only currently readable
@@ -90,10 +90,10 @@ their existing cache keys for the return to books. Profile settings mount on
 demand and reuse the overview bio; profile requests forward cancellation signals.
 Archive entry state construction stays pure during Link rendering; exit scroll
 capture runs only on actual navigation clicks to avoid recursive router updates.
-Detailed scope, implementation tasks and actual acceptance evidence are tracked
-in `docs/local/plan/personal-library-activity.md`. Earlier no-feed statements
-describe their original stages; this extension is implemented locally, while
-browser acceptance remains incomplete and must not be inferred from unit tests.
+Detailed historical scope and acceptance evidence belong to the project history.
+Earlier no-feed statements describe their original stages; this extension is
+delivered in v0.6.3, while any remaining browser evidence gaps are non-blocking
+follow-up evidence rather than an unimplemented product slice.
 
 ### B-entry ideas and reader discussion
 
@@ -559,7 +559,9 @@ Selection toolbar geometry is captured in main-viewport coordinates after select
 
 ### Sidebar, home and taxonomy v1 (implemented functionality, 2026-10-04)
 
-The authoritative product slice is `docs/local/plan/sidebar-home-taxonomy-v1.md`.
+The delivered product slice is summarized by the rules in this section; current
+implementation follows the shared taxonomy and permission boundaries described
+above.
 Taxonomy directories and sidebar entries share their context menu, count-to-menu capsule and touch/keyboard entry points. Directory management is available per item without a management mode. Grid drag sorting uses the same preferences and permissions, retains the complete identifier set when searching and only reorders categories within one parent. Selection mode follows the book-home control, changes entry clicks into selection and disables dragging; batch actions remain deferred.
 Taxonomy item menus expose one Edit action. Category editing combines name and parent changes in the existing atomic write; private shelves and tags edit their names. Dialog titles describe editing rather than renaming, and parent selection retains the two-level restrictions. There is no separate Move action.
 Sidebar category rows have no dedicated expansion-arrow column or empty placeholder. Entering a root category expands its children; clicking the current root again toggles expansion without navigating or closing the mobile drawer. Expansion is handled only by row clicks, including for read-only readers; context menus contain item management actions only. Child rows use indentation alone; trailing hidden/count/menu positions remain unchanged. External category navigation expands the selected root or its parent, while taxonomy refreshes preserve manual collapse.
@@ -623,7 +625,7 @@ from an owner-only complete read before submitting, with optimistic rollback.
 
 ### UI/UX Design Language & Core Goals
 
-Bookdock's visual and interaction design embodies a **"Restrained, Tactile Minimalism (人文主义数字书房)"**—balancing literary warmth with modern geometric clarity (detailed in `docs/local/dev/design-system.md`).
+Bookdock's visual and interaction design embodies a **"Restrained, Tactile Minimalism (人文主义数字书房)"**—balancing literary warmth with modern geometric clarity.
 
 - **Dual Aesthetic Metaphor**:
   - *Library (Curated Gallery)*: Orderly, book-first presentation. Covers take center stage with Morandi tone palettes and spine binding details; typography pairs literary serif headings (`Songti` / `Source Han Serif`) with modern geometric sans-serif metadata (`Inter` / `PingFang SC`).
@@ -1429,7 +1431,7 @@ The toast host uses a neutral application surface with severity-colored icons. A
 Visible bottom action surfaces mark their bounds with `data-toast-obstacle`; `contents` measures direct children when the wrapper includes a transparent hover corridor. The toast host measures only horizontally intersecting surfaces and raises its bottom clearance above them, constraining stack height to the remaining viewport. Changes to marked surfaces and viewport size trigger recalibration; notification producers do not choose pixel offsets. This applies to library batch actions, upload result rows and actions, modal footers, and visible reader bottom controls.
 
 ### 6.2 Reader
-- Rendering engine is vendored **foliate-js** (`public/foliate-js/`, not npm epubjs). `FoliateReader.ts` adapts the vendored engine: dynamic `import()` of `reader-entry.js`, manages reader lifecycle (render, pagination, annotations, progress). See `docs/local/reader/` for vendoring notes.
+- Rendering engine is vendored **foliate-js** (`public/foliate-js/`, not npm epubjs). `FoliateReader.ts` adapts the vendored engine: dynamic `import()` of `reader-entry.js`, manages reader lifecycle (render, pagination, annotations, progress). The vendored source and current adapter code are the implementation reference.
 - Reader media interaction stays split at the iframe boundary: vendored `view.js` recognizes standalone raster `img` and SVG `image` clicks, suppresses the generic page-turn event, and emits structured media metadata; it also routes standalone image context-menu/long-press gestures to the host, with a pointer long-press fallback for touch/pen and deduplication against browser `contextmenu`. `FoliateReader` forwards the section/CFI/source/alt payload to the host. Images inside links, buttons, footnote references, or other interactive controls retain the control's existing semantics. The host-side viewer provides fullscreen fit-to-viewport viewing, bounded zoom, wheel/double-click zoom, mouse drag, touch pinch/pan, Escape/backdrop close, download of the current Blob-backed resource, clipboard copy (normalized to PNG when required), and a compact context menu for view/save/copy. Image navigation, system sharing, and broader resource-management UI remain later capabilities.
 - Inline EPUB audio/video stays native and non-blocking: the vendored core prioritizes instant text rendering over heavy media decompression. During chapter XHTML preparation, heavy video and audio sources are deferred into `data-bd-deferred-src`, allowing chapter text to render without waiting for multi-megabyte binary decompression from the EPUB archive. Once rendered, `FoliateReader` resolves the Blob URLs asynchronously via `section.loadHref()` and uses adaptive `.bd-video-wrapper` sizing: media with a poster or source preserves its natural ratio, while empty placeholders fall back to a minimum 16:9 card. Loading feedback waits for media readiness, native and custom controls do not overlap during loading, and failed media exposes a retryable error state without interrupting text rendering. The vendored core preserves controls, source, track, and poster semantics and suppresses reader page-turn handling when a media element is clicked. The Loader owns static and dynamic media Blob URLs and releases them with the section/frame lifecycle; React does not create a second media cache or custom player for this baseline.
 - The vendored EPUB core is based on the reproducible upstream foliate-js baseline (revision snapshot `4512f39859280b8c1f1e6fefa4f104f9e09c55e5`, submodule `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`). Bookdock-specific behavior belongs in the adapter or an explicitly recorded `bookdock:` patch in `PATCHES.md`. The scoped compatibility refresh is closed for markup/resource recovery, dynamic resource lifecycles, scripted layout, fixed-layout bitmap sizing, image interaction, native inline media boundaries, and Media Overlay host wiring; each is recorded against the authoritative vendored snapshot. Future upstream updates must replace the core as a whole and replay this patch ledger before changing the runtime baseline.
@@ -1469,18 +1471,13 @@ Personal reader marks use deterministic SVG ink: marker backgrounds have a singl
 - Reader sidebar has TOC, notes and stats tabs. Stats uses combined book history for total time, coverage, reading days and recorded word volume, with quick retroactive entry and record maintenance. The full calendar/trend/distribution view belongs to the archive; the reader panel has no separate archive-jump control. Opening stats flushes the in-progress timer. Reader prefetch warms only the live per-book total (used by the navigation badge) and ledger; the retired mixed-detail feed and chart helper have no remaining consumers. Per-book reading days in archive microcards and book-time lists use the same sixty-second threshold as the ledger; shorter sessions still count toward duration.
 - Jump history (后退/前进): browser-style session history, in-memory only and cleared on book switch. `FoliateReader.display`/`scrollToPercent` is the chokepoint — every user jump (TOC, note/bookmark, search result, progress drag) emits `willJump` with the position being left, which `Reader.tsx` pushes into `features/reader/jump-history.ts` (back/forward stacks, cap 50; a new jump clears the forward stack). Internal navigation opts out via `display(target, { internal: true })`: the initial open, saved-progress re-display, and the history back/forward buttons themselves. Page turns and scrolling never enter the history.
 
-### 6.3 Planned browser extension
+### 6.3 Companion browser extension
 
-The companion extension is a separate client application under `apps/extension/`. It is developed in this monorepo so API contracts, upload/auth behavior, and any deliberately extracted reader-core code can evolve with the server and Web client. Its build output is independent: the extension does not bundle `@bookdock/server` or the full `@bookdock/web` application.
-
-The extension has two explicit modes:
-
-- **Local mode**: an extension-local flat `LocalLibrary` stores EPUB/TXT files, editable title/author metadata, a single reading position, and the minimum reader preferences. It supports reading, TOC navigation, progress recovery, and basic reading settings; it does not implement the Web client's custom fonts, custom themes, custom TXT TOC rules, annotations, AI, or TTS.
-- **Connected mode**: an `InstanceConnection` identifies a configured Bookdock instance and authentication state. Dropped files are uploaded to `POST /api/v1/books`; the returned `bookId` is opened through the extension reader using the instance's remote file endpoint. A configured but unreachable instance must not silently report a successful local upload.
-
-The extension must not import the whole `@bookdock/web` entry point. Shared code is limited to `@bookdock/shared` and, only after a stable second consumer exists, a small reader-core boundary for source adapters, TOC/progress primitives, or vendored foliate assets. Browser-only persistence and instance profiles remain extension-owned concerns.
-
-The first extension milestone intentionally excludes `file://` takeover, annotations/bookmarks/notes, full-text indexing, multi-shelf organization, cloud synchronization, PDF/MOBI/CBZ support, and offline upload queues. See `docs/local/extension/` for the scoped product and implementation documents, and `docs/local/research/browser-extensions/` for competitor research.
+The companion browser extension is currently shelved and is not an active
+architecture target. The old prototype and its previous milestones are not
+part of the current Web architecture. If development resumes, its scope,
+storage model, and client boundaries must be re-evaluated before implementation;
+the Web application does not depend on the extension.
 
 ---
 
@@ -1490,7 +1487,7 @@ Single `config.ts`, zod-validated then `Object.freeze`:
 
 | Env | Default | Notes |
 |---|---|---|
-| `PORT` | 3000 | listen port |
+| `PORT` | 18423 | listen port (1–65535); shared by the server, container launcher, and image health check |
 | `DATA_DIR` | `./data` (`/data` in image) | storage root for library & covers |
 | `DB_PATH` | `${DATA_DIR}/bookdock.db` | SQLite path |
 | `JWT_SECRET` | — | if unset: generate random hex, persist to `${DATA_DIR}/.jwt-secret` and reuse; env overrides |
@@ -1508,7 +1505,7 @@ Single `config.ts`, zod-validated then `Object.freeze`:
 | `AI_RPM` | `6` | per-user sliding-window chat request limit; active-request concurrency remains 1 |
 | `AI_TIMEOUT_MS` | `300000` | maximum wall-clock time for one provider chat/embedding operation |
 
-The shipped `docker-compose.yml` sets no environment variables: `NODE_ENV` and `DATA_DIR` are image `ENV`s and everything else runs on defaults; overrides are added as an `environment:` block. Backup = tarball `DATA_DIR`.
+The shipped `docker-compose.yml` sets no environment variables: `NODE_ENV`, `DATA_DIR`, and `PORT` are image `ENV`s and everything else runs on defaults; overrides are added as an `environment:` block. Backup = tarball `DATA_DIR`.
 
 ---
 
@@ -1549,37 +1546,40 @@ The shipped `docker-compose.yml` sets no environment variables: `NODE_ENV` and `
 
 ## 10. Architecture Decision Records (ADR)
 
-Each ADR is a short standalone file. They live in `docs/local/adr/` (private working notes, archived with the design docs).
+The following stable identifiers summarize the architecture decisions that
+remain relevant to the implementation. Their detailed deliberation records are
+not part of this public document.
 
-| # | Decision | File |
-|---|---|---|
-| ADR-01 | TanStack Router over react-router-dom | `docs/local/adr/0001-tanstack-router.md` |
-| ADR-02 | Don't extract @bookdock/db / storage packages yet | `docs/local/adr/0002-no-db-storage-extraction.md` |
-| ADR-03 | Multi-user schema pre-wired | `docs/local/adr/0003-multi-user-schema.md` |
-| ADR-04 | StorageDriver / FormatRegistry interfaces first | `docs/local/adr/0004-storage-format-interfaces.md` |
-| ADR-05 | Unified `/api/v1` version prefix | `docs/local/adr/0005-api-v1-prefix.md` |
-| ADR-06 | nanoid string primary keys | `docs/local/adr/0006-nanoid-primary-keys.md` |
-| ADR-07 | shadcn/ui code ownership, on-demand generation | `docs/local/adr/0007-shadcn-codeset.md` |
-| ADR-08 | JSON columns for unstable fields, columns for stable ones | `docs/local/adr/0008-json-column-for-volatile-fields.md` |
-| ADR-09 | foliate-js replaces epubjs as reader engine | `docs/local/adr/0009-foliate-js-vendored.md` |
-| ADR-10 | annotations table + full CRUD in P0 | `docs/local/adr/0010-annotations-table-write.md` |
-| ADR-11 | HttpOnly cookie JWT + guard fresh DB user | `docs/local/adr/0011-http-only-cookie-jwt.md` |
-| ADR-12 | Historical instance settings (superseded by 0040) | `docs/local/adr/0012-instance-settings-no-userid.md` |
-| ADR-13 | fonts table two-scope ownership (user/instance) | `docs/local/adr/0013-fonts-two-scope.md` |
-| ADR-14 | TTS visible-DOM segments and user-owned online configuration | `docs/local/adr/0014-tts-visible-dom-user-config.md` |
-| ADR-15 | unified reader TTS engines and multiple user AI services | `docs/local/adr/0015-tts-unified-engines-multi-services.md` |
-| ADR-16 | AI chat gateway and explicit reader context | `docs/local/adr/0016-ai-chat-gateway-and-reader-context.md` |
-| ADR-17 | AI lexical index and bounded book retrieval | `docs/local/adr/0017-ai-lexical-index.md` |
-| ADR-18 | optional AI embeddings and portable hybrid retrieval | `docs/local/adr/0018-ai-optional-embedding-vectors.md` |
-| ADR-19 | persisted AI citations and source navigation | `docs/local/adr/0019-ai-citations-source-navigation.md` |
-| ADR-20 | bounded AI search over user-owned book annotations | `docs/local/adr/0020-ai-annotation-search.md` |
-| ADR-21 | bounded recipe for historical AI retry | `docs/local/adr/0021-ai-historical-retry-recipe.md` |
-| ADR-22 | companion browser extension as an isolated app in the monorepo | `docs/local/adr/0022-companion-extension-monorepo.md` |
-| ADR-23 | Readest foliate-js as the EPUB compatibility baseline | `docs/local/adr/0023-readest-foliate-upstream.md` |
-| ADR-24 | operation-scoped access tokens for external clients | `docs/local/adr/0024-scoped-access-tokens.md` |
-| ADR-25 | in-container self-update via launcher and volume-held releases | `docs/local/adr/0025-launcher-volume-releases-self-update.md` |
+| # | Decision |
+|---|---|
+| ADR-01 | TanStack Router over react-router-dom |
+| ADR-02 | Don't extract @bookdock/db / storage packages yet |
+| ADR-03 | Multi-user schema pre-wired |
+| ADR-04 | StorageDriver / FormatRegistry interfaces first |
+| ADR-05 | Unified `/api/v1` version prefix |
+| ADR-06 | nanoid string primary keys |
+| ADR-07 | shadcn/ui code ownership, on-demand generation |
+| ADR-08 | JSON columns for unstable fields, columns for stable ones |
+| ADR-09 | foliate-js replaces epubjs as reader engine |
+| ADR-10 | annotations table + full CRUD in P0 |
+| ADR-11 | HttpOnly cookie JWT + guard fresh DB user |
+| ADR-12 | Historical instance settings ownership model; superseded by migration 0040 |
+| ADR-13 | fonts table two-scope ownership (user/instance) |
+| ADR-14 | TTS visible-DOM segments and user-owned online configuration |
+| ADR-15 | unified reader TTS engines and multiple user AI services |
+| ADR-16 | AI chat gateway and explicit reader context |
+| ADR-17 | AI lexical index and bounded book retrieval |
+| ADR-18 | optional AI embeddings and portable hybrid retrieval |
+| ADR-19 | persisted AI citations and source navigation |
+| ADR-20 | bounded AI search over user-owned book annotations |
+| ADR-21 | bounded recipe for historical AI retry |
+| ADR-22 | companion browser extension as an isolated app in the monorepo; currently shelved |
+| ADR-23 | Readest foliate-js as the EPUB compatibility baseline |
+| ADR-24 | operation-scoped access tokens for external clients |
+| ADR-25 | in-container self-update via launcher and volume-held releases |
 
-The ADR number always equals the file-number prefix, so `0017-*.md` is ADR-17.
+ADR identifiers remain stable even when a decision is superseded or its
+implementation details change.
 - **Legado media projection boundary**: EPUB chapter responses may contain a `<usehtml>` projection with same-origin `<img>` URLs. Those URLs point to an authenticated, ownership-checked media-resource route that reads only image/audio/video entries from the stored EPUB archive. The standard Legado text renderer handles images but strips or externally opens ordinary audio/video markup, so non-image media is represented by a clickable image payload that invokes Legado's built-in `java.openVideoPlayer(url, title, true)` floating player. This keeps playback available regardless of the app's image-click preference without pretending that a text source can provide inline mixed-content controls or EPUB Media Overlay synchronization.
 - **Legado EPUB title de-duplication**: The adapter keeps the chapter `title` because Legado's text reader renders it independently in the chapter header, then removes only the first meaningful EPUB heading whose normalized text exactly matches that title. Leading decorative blocks without text, such as logo images, are ignored while looking for that heading; headings after real prose remain content, so in-chapter section headings are not lost.
 - **Legado basic inline style projection**: EPUB text may use `<usehtml>` when the serializer finds safe inline styles or semantic emphasis. Only color, bold, italic, underline, and strikethrough are converted to Android `HtmlCompat`-compatible tags (`font`, `b`, `i`, `u`, `s`); external stylesheets, classes, layout, font declarations, backgrounds, and other full EPUB CSS are intentionally not projected through a Legado text source.

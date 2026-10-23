@@ -37,13 +37,13 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/bookdock-data"
           docker run --detach --name bookdock-ci \
-            --publish 3000:3000 \
+            --publish 18423:18423 \
             --volume "$RUNNER_TEMP/bookdock-data:/data" \
             bookdock:ci
       - name: Wait for health endpoint
         run: |
           for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:3000/api/v1/health; then
+            if curl --fail --silent http://127.0.0.1:18423/api/v1/health; then
               exit 0
             fi
             sleep 1

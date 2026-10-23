@@ -88,7 +88,7 @@ export function createLauncher({
   dataDir = process.env.DATA_DIR ?? '/data',
   dbPath = process.env.DB_PATH ?? path.join(dataDir, 'bookdock.db'),
   factoryRoot = process.env.BOOKDOCK_FACTORY_ROOT ?? '/app',
-  port = Number(process.env.PORT ?? 3000),
+  port = Number(process.env.PORT ?? 18423),
   nonce = randomUUID(),
   log = (message, extra) => console.log(JSON.stringify({ msg: message, ...extra })),
   error = (message, extra) => console.error(JSON.stringify({ msg: message, ...extra })),

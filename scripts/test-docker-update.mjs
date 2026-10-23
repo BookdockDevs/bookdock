@@ -52,7 +52,7 @@ function requestJson(appName, route, options = {}, timeoutMs = 2_000) {
 let input = ''
 for await (const chunk of process.stdin) input += chunk
 const { route, options, timeoutMs } = JSON.parse(input)
-const response = await fetch('http://127.0.0.1:3000' + route, { ...options, signal: AbortSignal.timeout(timeoutMs) })
+const response = await fetch('http://127.0.0.1:' + (process.env.PORT ?? 18423) + route, { ...options, signal: AbortSignal.timeout(timeoutMs) })
 const body = await response.json().catch(() => null)
 console.log(JSON.stringify({ status: response.status, ok: response.ok, body, cookie: response.headers.get('set-cookie') }))
 `

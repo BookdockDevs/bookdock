@@ -36,13 +36,13 @@ pnpm install
 ```bash
 pnpm --filter @bookdock/server dev
 ```
-`tsx watch src/index.ts`, defaults to http://localhost:3000.
+`tsx watch src/index.ts`, defaults to http://localhost:18423.
 
 ### Web dev
 ```bash
 pnpm --filter @bookdock/web dev
 ```
-Vite dev, defaults to http://localhost:5173, `/api` proxy to :3000.
+Vite dev, defaults to http://localhost:5173, `/api` proxy to :18423.
 
 ### Both
 ```bash

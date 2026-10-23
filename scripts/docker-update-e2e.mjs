@@ -40,7 +40,7 @@ createServer((request, response) => {
     return
   }
   response.writeHead(404).end()
-}).listen(3000, '0.0.0.0')
+}).listen(Number(process.env.PORT ?? 18423), '0.0.0.0')
 `
 }
 
