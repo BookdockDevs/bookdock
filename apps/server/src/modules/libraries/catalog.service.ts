@@ -64,6 +64,13 @@ import { resolveOrCreateCategoryPath } from './library-category-path'
  * lives in books.service so uploads and reads share one materialization path.
  */
 export const CATALOG_PAGE_SIZE = 24
+const SQLITE_ID_BATCH_SIZE = 400
+
+function idBatches(ids: string[]) {
+  const batches: string[][] = []
+  for (let index = 0; index < ids.length; index += SQLITE_ID_BATCH_SIZE) batches.push(ids.slice(index, index + SQLITE_ID_BATCH_SIZE))
+  return batches
+}
 
 function effectiveBookmeta(...layers: object[]): Record<string, unknown> {
   // Null masks an inherited field without exposing invalid null values to readers.
@@ -214,12 +221,15 @@ function getCollectedVersionIds(actorId: string, versionIds: string[]) {
   const privateLibrary = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, actorId), eq(libraries.type, 'private'))).get()
   if (!privateLibrary) return new Set<string>()
-  return new Set(db.select({ bookVersionId: libraryBookVersions.bookVersionId })
-    .from(libraryBookVersions)
-    .where(and(
-      eq(libraryBookVersions.libraryId, privateLibrary.id),
-      inArray(libraryBookVersions.bookVersionId, versionIds),
-    )).all().map((row) => row.bookVersionId))
+  const collected = new Set<string>()
+  for (const batch of idBatches(versionIds)) {
+    for (const row of db.select({ bookVersionId: libraryBookVersions.bookVersionId })
+      .from(libraryBookVersions)
+      .where(and(eq(libraryBookVersions.libraryId, privateLibrary.id), inArray(libraryBookVersions.bookVersionId, batch))).all()) {
+      collected.add(row.bookVersionId)
+    }
+  }
+  return collected
 }
 
 /**
@@ -251,21 +261,24 @@ function getMaintainableVersionLinkIds(
 }
 
 /**
- * One page's version facts in two queries, not two per link. Revisions arrive
- * newest-first so the first row kept per version is its latest.
+ * One page's version facts in bounded queries, not two per link. The revision
+ * predicate is database-owned so historical rows never cross the application
+ * boundary when only the current facts are needed.
  */
 function loadVersionFacts(bookVersionIds: string[]) {
   const db = getDb()
   const versions = new Map<string, typeof bookVersions.$inferSelect>()
   const revisions = new Map<string, typeof contentRevisions.$inferSelect>()
   if (bookVersionIds.length === 0) return { versions, revisions }
-  for (const row of db.select().from(bookVersions).where(inArray(bookVersions.id, bookVersionIds)).all()) {
-    versions.set(row.id, row)
-  }
-  for (const row of db.select().from(contentRevisions)
-    .where(inArray(contentRevisions.bookVersionId, bookVersionIds))
-    .orderBy(desc(contentRevisions.revisionNo)).all()) {
-    if (!revisions.has(row.bookVersionId)) revisions.set(row.bookVersionId, row)
+  for (const batch of idBatches(bookVersionIds)) {
+    for (const row of db.select().from(bookVersions).where(inArray(bookVersions.id, batch)).all()) versions.set(row.id, row)
+    for (const row of db.select().from(contentRevisions)
+      .where(and(
+        inArray(contentRevisions.bookVersionId, batch),
+        eq(contentRevisions.revisionNo, sql`(SELECT max(latest.revision_no) FROM content_revisions AS latest WHERE latest.book_version_id = ${contentRevisions.bookVersionId})`),
+      )).all()) {
+      revisions.set(row.bookVersionId, row)
+    }
   }
   return { versions, revisions }
 }
@@ -370,25 +383,36 @@ export async function listCatalogBooks(
     const trashWorks = db.select().from(libraryBooks).where(where)
       .orderBy(desc(libraryBooks.deletedAt), asc(libraryBooks.id))
       .limit(pageSize).offset((page - 1) * pageSize).all()
-    const items: CatalogBook[] = []
-    for (const work of trashWorks) {
-      const links = db.select().from(libraryBookVersions)
-        .where(eq(libraryBookVersions.libraryBookId, work.id))
-        .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
-      const facts = loadVersionFacts(links.map((link) => link.bookVersionId))
-      const collectedVersionIds = getCollectedVersionIds(actorId, links.map((link) => link.bookVersionId))
-      items.push(toCatalogBook(
+    const workIds = trashWorks.map((work) => work.id)
+    const links = workIds.length ? db.select().from(libraryBookVersions)
+      .where(inArray(libraryBookVersions.libraryBookId, workIds))
+      .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all() : []
+    const linksByWork = new Map<string, typeof links>()
+    for (const link of links) {
+      const list = linksByWork.get(link.libraryBookId) ?? []
+      list.push(link)
+      linksByWork.set(link.libraryBookId, list)
+    }
+    const versionIds = [...new Set(links.map((link) => link.bookVersionId))]
+    const facts = loadVersionFacts(versionIds)
+    const collectedVersionIds = getCollectedVersionIds(actorId, versionIds)
+    const tagMap = tagNamesByWork(db, workIds)
+    const pageTaxonomy = workIds.length > 0 ? loadLibraryHiddenTaxonomy(db, libraryId) : undefined
+    const items = trashWorks.map((work) => {
+      const workLinks = linksByWork.get(work.id) ?? []
+      return toCatalogBook(
         work,
-        links,
-        tagNamesByWork(db, [work.id]).get(work.id) ?? [],
+        workLinks,
+        tagMap.get(work.id) ?? [],
         facts,
         collectedVersionIds,
         undefined,
         // The trash list is owner-only, so every link there is maintainable.
-        new Set(links.map((link) => link.id)),
+        new Set(workLinks.map((link) => link.id)),
         true,
-      ))
-    }
+        pageTaxonomy,
+      )
+    })
     return { items, total, page, pageSize }
   }
   await assertLibraryBrowsable(actorId, libraryId)

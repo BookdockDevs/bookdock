@@ -1,12 +1,14 @@
-import { and, asc, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql } from 'drizzle-orm'
 
 import type {
   ArchiveQuery,
+  ContentFile,
   MyReviewEntry,
   ProfileReadingBook,
   ProfileReadingSummary,
   Review,
   ReviewAuthor,
+  ReviewProvenance,
   ReviewBookContext,
   ReviewComposerContext,
   ReviewCreateReq,
@@ -16,8 +18,8 @@ import type {
 import { reviewFileReferences, reviewHalvesToRating, reviewRatingToHalves } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { syncContentFiles } from '../../db/content-files'
-import { bookReviewComments, bookReviewLikes, bookReviews, bookStates, bookVersions, libraries, libraryBooks, libraryBookVersions, users } from '../../db/schema'
+import { contentFileProjection, syncContentFiles } from '../../db/content-files'
+import { bookReviewComments, bookReviewLikes, bookReviews, bookStates, bookVersions, contentFiles, contentRevisions, libraries, libraryBooks, libraryBookVersions, users } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { recordActivityEvent } from '../../lib/activity-events'
 import { capturePrivateArchiveSnapshots, savePersonalBookSnapshot } from '../../lib/personal-book-archive'
@@ -47,26 +49,32 @@ export async function summarizeSourceReviews(
   sourceLibraryBookId: string,
 ): Promise<ReviewSummary> {
   const rows = getDb()
-    .select({ ratingHalves: bookReviews.ratingHalves })
+    .select({
+      ratingHalves: bookReviews.ratingHalves,
+      count: sql<number>`count(*)`,
+      sum: sql<number>`sum(${bookReviews.ratingHalves})`,
+    })
     .from(bookReviews)
     .where(
       and(
         eq(bookReviews.sourceLibraryId, sourceLibraryId),
         eq(bookReviews.sourceLibraryBookId, sourceLibraryBookId),
         eq(bookReviews.visibility, 'shared'),
+        isNotNull(bookReviews.ratingHalves),
       ),
     )
+    .groupBy(bookReviews.ratingHalves)
     .all()
   const distribution = emptyDistribution()
   let rated = 0
   let halvesSum = 0
   for (const row of rows) {
     if (row.ratingHalves == null) continue
-    rated += 1
-    halvesSum += row.ratingHalves
+    rated += row.count
+    halvesSum += row.sum
     const rating = reviewHalvesToRating(row.ratingHalves)
     const bucket = distribution.find((entry) => entry.rating === rating)
-    if (bucket) bucket.count += 1
+    if (bucket) bucket.count += row.count
   }
   return {
     average: rated === 0 ? null : Math.round((halvesSum / (2 * rated)) * 100) / 100,
@@ -96,42 +104,102 @@ async function listSourceReviews(
     .orderBy(asc(bookReviews.createdAt), asc(bookReviews.id))
     .all()
   if (rows.length === 0) return []
-  // Set-based fan-out: one select each for likes, comment counts and authors
-  // instead of per-row queries. Provenance stays per row — each review may
-  // point at a different read version.
-  const ids = rows.map((row) => row.id)
+  const facts = await loadReviewProjectionFacts(rows, userId)
+  const reviews: Review[] = []
+  for (const row of rows) {
+    reviews.push(await projectReview(userId, row, manager, {
+      libraryName,
+      likes: facts.likesByReview.get(row.id) ?? [],
+      commentCount: facts.commentsByReview.get(row.id) ?? 0,
+      author: facts.authorsById.get(row.userId),
+      files: facts.filesByReview.get(row.id) ?? [],
+      provenance: facts.provenanceByReview.get(row.id),
+    }))
+  }
+  return reviews
+}
+
+interface ReviewProjectionFacts {
+  likesByReview: Map<string, Array<typeof bookReviewLikes.$inferSelect>>
+  commentsByReview: Map<string, number>
+  authorsById: Map<string, ReviewAuthor>
+  filesByReview: Map<string, ContentFile[]>
+  provenanceByReview: Map<string, ReviewProvenance>
+}
+
+async function loadReviewProjectionFacts(rows: Array<typeof bookReviews.$inferSelect>, viewerId: string | null): Promise<ReviewProjectionFacts> {
+  const db = getDb()
+  const ids = [...new Set(rows.map((row) => row.id))]
   const likesByReview = new Map<string, Array<typeof bookReviewLikes.$inferSelect>>()
-  for (const like of db.select().from(bookReviewLikes).where(inArray(bookReviewLikes.reviewId, ids)).all()) {
+  for (const like of ids.length ? db.select().from(bookReviewLikes).where(inArray(bookReviewLikes.reviewId, ids)).all() : []) {
     const list = likesByReview.get(like.reviewId) ?? []
     list.push(like)
     likesByReview.set(like.reviewId, list)
   }
   const commentsByReview = new Map<string, number>()
-  for (const comment of db
-    .select({ reviewId: bookReviewComments.reviewId })
-    .from(bookReviewComments)
+  for (const comment of ids.length ? db.select({ reviewId: bookReviewComments.reviewId, count: sql<number>`count(*)` }).from(bookReviewComments)
     .where(and(inArray(bookReviewComments.reviewId, ids), isNull(bookReviewComments.deletedAt)))
-    .all()) {
-    commentsByReview.set(comment.reviewId, (commentsByReview.get(comment.reviewId) ?? 0) + 1)
+    .groupBy(bookReviewComments.reviewId).all() : []) {
+    commentsByReview.set(comment.reviewId, comment.count)
   }
   const authorsById = new Map<string, ReviewAuthor>()
-  for (const author of db
-    .select({ id: users.id, username: users.username, avatarKey: users.avatarKey })
-    .from(users)
-    .where(inArray(users.id, [...new Set(rows.map((row) => row.userId))]))
-    .all()) {
+  const authorIds = [...new Set(rows.map((row) => row.userId))]
+  for (const author of authorIds.length ? db.select({ id: users.id, username: users.username, avatarKey: users.avatarKey })
+    .from(users).where(inArray(users.id, authorIds)).all() : []) {
     authorsById.set(author.id, { id: author.id, name: author.username, avatarKey: author.avatarKey })
   }
-  return Promise.all(
-    rows.map((row) =>
-      projectReview(userId, row, manager, {
-        libraryName,
-        likes: likesByReview.get(row.id) ?? [],
-        commentCount: commentsByReview.get(row.id) ?? 0,
-        author: authorsById.get(row.userId),
-      }),
-    ),
-  )
+  for (const authorId of authorIds) {
+    if (!authorsById.has(authorId)) authorsById.set(authorId, { id: authorId, name: 'Deleted user', avatarKey: null })
+  }
+  const filesByReview = new Map<string, ContentFile[]>()
+  for (const file of ids.length ? db.select().from(contentFiles)
+    .where(and(inArray(contentFiles.reviewId, ids), eq(contentFiles.ready, true)))
+    .orderBy(contentFiles.sortOrder, contentFiles.createdAt, contentFiles.id).all() : []) {
+    const list = filesByReview.get(file.reviewId!) ?? []
+    list.push(contentFileProjection(file))
+    filesByReview.set(file.reviewId!, list)
+  }
+
+  const provenanceByReview = new Map<string, ReviewProvenance>()
+  const ownRows = viewerId ? rows.filter((row) => row.userId === viewerId && row.sourceLibraryId && row.readListingId && row.readBookVersionId) : []
+  const listingIds = [...new Set(ownRows.map((row) => row.readListingId!))]
+  const listingsById = new Map(listingIds.length ? db.select().from(libraryBookVersions).where(inArray(libraryBookVersions.id, listingIds)).all().map((row) => [row.id, row]) : [])
+  const revisionIds = [...new Set(ownRows.flatMap((row) => row.readRevisionId ? [row.readRevisionId] : []))]
+  const revisionsById = new Map(revisionIds.length ? db.select().from(contentRevisions).where(inArray(contentRevisions.id, revisionIds)).all().map((row) => [row.id, row]) : [])
+  const readableBySource = new Map<string, Promise<boolean>>()
+  for (const row of ownRows) {
+    const base: ReviewProvenance = {
+      listingId: row.readListingId,
+      bookVersionId: row.readBookVersionId,
+      revisionId: row.readRevisionId,
+      versionName: null,
+      available: false,
+    }
+    const listing = listingsById.get(row.readListingId!)
+    if (!listing || listing.libraryId !== row.sourceLibraryId || listing.bookVersionId !== row.readBookVersionId) {
+      provenanceByReview.set(row.id, base)
+      continue
+    }
+    const key = [row.sourceLibraryId, row.readBookVersionId].join(':')
+    let readable = readableBySource.get(key)
+    if (!readable) {
+      readable = (async () => {
+        try {
+          await resolveSharedVersionRead(row.sourceLibraryId!, row.readBookVersionId!, viewerId)
+          return true
+        } catch (error) {
+          if (error instanceof AppError) return false
+          throw error
+        }
+      })()
+      readableBySource.set(key, readable)
+    }
+    const revision = row.readRevisionId ? revisionsById.get(row.readRevisionId) : null
+    provenanceByReview.set(row.id, await readable && revision && revision.bookVersionId === row.readBookVersionId
+      ? { ...base, versionName: listing.name || null, available: true }
+      : base)
+  }
+  return { likesByReview, commentsByReview, authorsById, filesByReview, provenanceByReview }
 }
 
 const GUEST_COMPOSER: ReviewComposerContext = {
@@ -551,47 +619,77 @@ export async function myReviews(userId: string, query: ArchiveQuery = { page: 1,
     .limit(query.pageSize + 1)
     .offset((query.page - 1) * query.pageSize)
     .all()
-  const entries: MyReviewEntry[] = await Promise.all(
-    rows.slice(0, query.pageSize).map(async (row) => {
-      if (!row.sourceLibraryId || !row.sourceLibraryBookId) {
-        const work = row.privateLibraryBookId
-          ? db.select().from(libraryBooks).where(eq(libraryBooks.id, row.privateLibraryBookId)).get()
-          : null
-        return {
-          review: await projectReview(userId, row, false),
-          sourceStatus: 'private' as const,
-          workTitle: work?.title ?? null,
-        }
-      }
-      const library = db.select().from(libraries).where(eq(libraries.id, row.sourceLibraryId)).get()
-      if (!library) {
-        return { review: await projectReview(userId, row, false), sourceStatus: 'library-deleted' as const, workTitle: null }
-      }
-      const work = db
-        .select()
-        .from(libraryBooks)
-        .where(and(eq(libraryBooks.id, row.sourceLibraryBookId), eq(libraryBooks.libraryId, row.sourceLibraryId)))
-        .get()
-      if (!work) {
-        return { review: await projectReview(userId, row, false), sourceStatus: 'deleted' as const, workTitle: null }
-      }
-      // The live title needs the same current read permission as any other
-      // shared metadata; the retained rating, body and discussion above do
-      // not. Without it the entry keeps its status with a null title.
-      let workTitle: string | null = null
+  const pageRows = rows.slice(0, query.pageSize)
+  const facts = await loadReviewProjectionFacts(pageRows, userId)
+  const libraryIds = [...new Set(pageRows.flatMap((row) => row.sourceLibraryId ? [row.sourceLibraryId] : []))]
+  const librariesById = new Map(libraryIds.length ? db.select().from(libraries).where(inArray(libraries.id, libraryIds)).all().map((row) => [row.id, row]) : [])
+  const sourceWorkKeys = [...new Set(pageRows.flatMap((row) => row.sourceLibraryId && row.sourceLibraryBookId ? [[row.sourceLibraryId, row.sourceLibraryBookId].join(':')] : []))]
+  const sourceBookPairs = new Map(sourceWorkKeys.map((key) => {
+    const [libraryId, bookId] = key.split(':')
+    return [key, { libraryId, bookId }]
+  }))
+  const worksByKey = new Map<string, typeof libraryBooks.$inferSelect>()
+  const sourceBookIds = [...new Set([...sourceBookPairs.values()].map((pair) => pair.bookId))]
+  for (const work of sourceBookIds.length && libraryIds.length
+    ? db.select().from(libraryBooks).where(and(inArray(libraryBooks.id, sourceBookIds), inArray(libraryBooks.libraryId, libraryIds))).all()
+    : []) {
+    worksByKey.set([work.libraryId, work.id].join(':'), work)
+  }
+  const privateWorkIds = [...new Set(pageRows.flatMap((row) => row.privateLibraryBookId ? [row.privateLibraryBookId] : []))]
+  const privateWorks = new Map(privateWorkIds.length ? db.select().from(libraryBooks).where(inArray(libraryBooks.id, privateWorkIds)).all().map((row) => [row.id, row]) : [])
+  const readableByWork = new Map<string, Promise<boolean>>()
+  const isSourceReadable = (libraryId: string, bookId: string) => {
+    const key = [libraryId, bookId].join(':')
+    const existing = readableByWork.get(key)
+    if (existing) return existing
+    const check = (async () => {
       try {
-        await assertSourceWorkReadable(userId, row.sourceLibraryId, row.sourceLibraryBookId)
-        workTitle = work.title
+        await assertSourceWorkReadable(userId, libraryId, bookId)
+        return true
       } catch (error) {
-        if (!(error instanceof AppError)) throw error
+        if (error instanceof AppError) return false
+        throw error
       }
-      return {
-        review: await projectReview(userId, row, false),
-        sourceStatus: work.deletedAt ? ('trashed' as const) : workTitle === null ? ('unavailable' as const) : ('ok' as const),
-        workTitle,
-      }
-    }),
-  )
+    })()
+    readableByWork.set(key, check)
+    return check
+  }
+  const entries: MyReviewEntry[] = []
+  for (const row of pageRows) {
+    const preset = {
+      likes: facts.likesByReview.get(row.id) ?? [],
+      commentCount: facts.commentsByReview.get(row.id) ?? 0,
+      author: facts.authorsById.get(row.userId),
+      files: facts.filesByReview.get(row.id) ?? [],
+      provenance: facts.provenanceByReview.get(row.id),
+    }
+    if (!row.sourceLibraryId || !row.sourceLibraryBookId) {
+      entries.push({
+        review: await projectReview(userId, row, false, preset),
+        sourceStatus: 'private',
+        workTitle: row.privateLibraryBookId ? privateWorks.get(row.privateLibraryBookId)?.title ?? null : null,
+      })
+      continue
+    }
+    const library = librariesById.get(row.sourceLibraryId)
+    if (!library) {
+      entries.push({ review: await projectReview(userId, row, false, preset), sourceStatus: 'library-deleted', workTitle: null })
+      continue
+    }
+    const work = worksByKey.get([row.sourceLibraryId, row.sourceLibraryBookId].join(':'))
+    if (!work) {
+      entries.push({ review: await projectReview(userId, row, false, preset), sourceStatus: 'deleted', workTitle: null })
+      continue
+    }
+    // Retained review data is independent from the live source title and ACL.
+    const readable = await isSourceReadable(row.sourceLibraryId, row.sourceLibraryBookId)
+    const workTitle = readable ? work.title : null
+    entries.push({
+      review: await projectReview(userId, row, false, { ...preset, libraryName: readable ? library.name : null }),
+      sourceStatus: work.deletedAt ? 'trashed' : workTitle === null ? 'unavailable' : 'ok',
+      workTitle,
+    })
+  }
   return { entries, page: query.page, hasMore: rows.length > query.pageSize }
 }
 
@@ -729,24 +827,52 @@ export async function readerProfile(viewerId: string | null, authorId: string, q
   const skip = (query.page - 1) * query.pageSize
   let visible = 0
   let offset = 0
+  const visibleRows: Array<{ row: typeof bookReviews.$inferSelect; read: Awaited<ReturnType<typeof assertSourceWorkReadable>> }> = []
+  const readableByWork = new Map<string, Promise<Awaited<ReturnType<typeof assertSourceWorkReadable>> | null>>()
+  const readSourceWork = (libraryId: string, bookId: string) => {
+    const key = [viewerId, libraryId, bookId].join(':')
+    const existing = readableByWork.get(key)
+    if (existing) return existing
+    const check = (async () => {
+      try {
+        return await assertSourceWorkReadable(viewerId, libraryId, bookId)
+      } catch (error) {
+        if (error instanceof AppError) return null
+        throw error
+      }
+    })()
+    readableByWork.set(key, check)
+    return check
+  }
   // ACL filtering precedes pagination; bounded batches avoid loading the archive.
-  while (entries.length <= query.pageSize) {
+  while (visibleRows.length <= query.pageSize) {
     const rows = db.select().from(bookReviews)
       .where(and(eq(bookReviews.userId, authorId), eq(bookReviews.visibility, 'shared')))
       .orderBy(desc(bookReviews.createdAt), desc(bookReviews.id)).limit(50).offset(offset).all()
     for (const row of rows) {
       if (!row.sourceLibraryId || !row.sourceLibraryBookId) continue
-      try {
-        const read = await assertSourceWorkReadable(viewerId, row.sourceLibraryId, row.sourceLibraryBookId)
-        if (visible++ < skip) continue
-        entries.push({ review: await projectReview(viewerId, row, read.relation === 'owner' || read.relation === 'admin', { libraryName: read.library.name }), sourceStatus: 'ok', workTitle: read.work.title })
-        if (entries.length > query.pageSize) break
-      } catch (error) {
-        if (!(error instanceof AppError)) throw error
-      }
+      const read = await readSourceWork(row.sourceLibraryId, row.sourceLibraryBookId)
+      if (!read) continue
+      if (visible++ < skip) continue
+      visibleRows.push({ row, read })
+      if (visibleRows.length > query.pageSize) break
     }
     if (rows.length < 50) break
     offset += rows.length
+  }
+  const facts = await loadReviewProjectionFacts(visibleRows.map((entry) => entry.row), viewerId)
+  for (const { row, read } of visibleRows) {
+    entries.push({
+      review: await projectReview(viewerId, row, read.relation === 'owner' || read.relation === 'admin', {
+        libraryName: read.library.name,
+        likes: facts.likesByReview.get(row.id) ?? [],
+        commentCount: facts.commentsByReview.get(row.id) ?? 0,
+        author: facts.authorsById.get(row.userId),
+        files: facts.filesByReview.get(row.id) ?? [],
+      }),
+      sourceStatus: 'ok',
+      workTitle: read.work.title,
+    })
   }
   return { author, reviews: { entries: entries.slice(0, query.pageSize), page: query.page, hasMore: entries.length > query.pageSize } }
 }

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 
 import type {
+  ContentFile,
   LibraryRelation,
   Review,
   ReviewAuthor,
@@ -289,6 +290,8 @@ export async function projectReview(
     likes?: Array<typeof bookReviewLikes.$inferSelect>
     commentCount?: number
     author?: ReviewAuthor
+    files?: ContentFile[]
+    provenance?: ReviewProvenance | null
   },
 ): Promise<Review> {
   const db = getDb()
@@ -318,14 +321,14 @@ export async function projectReview(
     }
     source = { libraryId: row.sourceLibraryId, libraryBookId: row.sourceLibraryBookId, libraryName }
   }
-  const provenance = await resolveProvenance(row, userId)
+  const provenance = preset?.provenance !== undefined ? preset.provenance : await resolveProvenance(row, userId)
   return {
     id: row.id,
     rating: row.ratingHalves == null ? null : reviewHalvesToRating(row.ratingHalves),
     title: row.title ?? null,
     body: row.body,
     bodyFormat: row.bodyFormat,
-    files: publishedContentFiles(getDb(), 'review', row.id),
+    files: preset?.files ?? publishedContentFiles(getDb(), 'review', row.id),
     visibility: row.visibility,
     source,
     privateLibraryBookId: row.privateLibraryBookId,

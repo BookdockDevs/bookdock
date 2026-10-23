@@ -209,6 +209,46 @@ describe('shared library catalog', () => {
     expect((await listLibraryTags(memberId, libraryId)).find((t) => t.id === tag)?.bookCount).toBe(1)
   })
 
+  it('batches trash-page facts and reads only each version latest revision', async () => {
+    const trashed: Array<{ libraryBookId: string; bookVersionId: string }> = []
+    for (let index = 0; index < 6; index++) {
+      const created = await uploadCatalogBook(libraryId, ownerId, txtFile(`trash-${index}.txt`, `Trash ${index}`), { title: `Trash ${index}` })
+      trashed.push({ libraryBookId: created.libraryBookId, bookVersionId: created.bookVersionId })
+      db.insert(schema.contentRevisions).values({
+        id: createId('rev'), bookVersionId: created.bookVersionId, revisionNo: 2,
+        blobKey: `trash-${index}-latest`, size: 12, chapterCount: 2, wordCount: 100 + index, createdAt: 3,
+      }).run()
+      db.update(schema.libraryBooks).set({ deletedAt: Date.now() + index }).where(eq(schema.libraryBooks.id, created.libraryBookId)).run()
+    }
+    const select = vi.spyOn(db, 'select')
+    const revisionRowCounts: number[] = []
+    const originalPrepare = db.$client.prepare.bind(db.$client)
+    vi.spyOn(db.$client, 'prepare').mockImplementation(((source: string) => {
+      const statement = originalPrepare(source)
+      if (source.includes('content_revisions') && source.includes('max(latest.revision_no)')) {
+        const originalAll = statement.all.bind(statement)
+        Object.defineProperty(statement, 'all', {
+          configurable: true,
+          value: (...params: unknown[]) => {
+            const rows = originalAll(...params as never[])
+            revisionRowCounts.push(rows.length)
+            return rows
+          },
+        })
+      }
+      return statement
+    }) as typeof db.$client.prepare)
+    const firstPage = await listCatalogBooks(ownerId, libraryId, { trash: true, page: 1, pageSize: 1 })
+    const oneWorkQueries = select.mock.calls.length
+    select.mockClear()
+    const page = await listCatalogBooks(ownerId, libraryId, { trash: true, page: 1, pageSize: 5 })
+    expect(page.items).toHaveLength(5)
+    expect(revisionRowCounts).toEqual([1, 5])
+    expect(page.items.every((item) => typeof item.versions[0]?.wordCount === 'number' && item.versions[0].wordCount >= 100)).toBe(true)
+    expect(select.mock.calls.length).toBeLessThan(oneWorkQueries + 10)
+    expect(firstPage.items[0]?.versions[0]?.wordCount).toBeGreaterThanOrEqual(100)
+  })
+
   it('carries the work taxonomy: tags on upload, replacement on update, names on read', async () => {
     const tagA = seedTag(libraryId, 'Sci-Fi')
     const tagB = seedTag(libraryId, 'Classic')

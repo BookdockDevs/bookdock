@@ -4,47 +4,126 @@ import type { InteractionNotification, NotificationPage, NotificationQuery, Noti
 import { reviewExcerpt } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookReviewCommentLikes, bookReviewComments, bookReviewLikes, ideaCommentLikes, ideaComments, ideaLikes, interactionNotifications, users } from '../../db/schema'
+import { bookReviewCommentLikes, bookReviewComments, bookReviewLikes, bookReviews, ideaCommentLikes, ideaComments, ideaLikes, ideas, interactionNotifications, users } from '../../db/schema'
 import { AppError } from '../../middleware/error'
-import { readableIdea } from '../annotations/idea-access'
-import { assertSourceWorkReadable, readableReview } from '../reviews/review-access'
+import { assertIdeaSource } from '../annotations/idea-access'
+import { assertSourceWorkReadable } from '../reviews/review-access'
 
 type NotificationRow = typeof interactionNotifications.$inferSelect
+type IdeaRow = typeof ideas.$inferSelect
+type ReviewRow = typeof bookReviews.$inferSelect
+type CommentRow = typeof ideaComments.$inferSelect | typeof bookReviewComments.$inferSelect
 
-async function project(userId: string, row: NotificationRow): Promise<InteractionNotification | null> {
-  const db = getDb()
-  let preview: string
-  try {
-    if (row.domain === 'idea') {
-      const { row: idea } = await readableIdea(userId, row.targetId)
-      if (idea.visibility !== 'shared') return null
-      preview = idea.note ?? idea.text
-    } else {
-      const { row: review } = await readableReview(userId, row.targetId)
-      if (review.visibility !== 'shared' || !review.sourceLibraryId || !review.sourceLibraryBookId) return null
-      await assertSourceWorkReadable(userId, review.sourceLibraryId, review.sourceLibraryBookId)
-      preview = reviewExcerpt(review.body ?? '', review.bodyFormat, 180)
+interface NotificationAvailability {
+  row: NotificationRow
+  target: IdeaRow | ReviewRow
+  comment: CommentRow | null
+}
+
+interface NotificationBatchContext {
+  ideaSources: Map<string, Promise<boolean>>
+  reviewSources: Map<string, Promise<boolean>>
+}
+
+function isExpectedUnavailable(error: unknown) {
+  return error instanceof AppError
+}
+
+function cachedPermission(
+  cache: Map<string, Promise<boolean>>,
+  key: string,
+  check: () => Promise<void>,
+) {
+  const existing = cache.get(key)
+  if (existing) return existing
+  const result = (async () => {
+    try {
+      await check()
+      return true
+    } catch (error) {
+      if (isExpectedUnavailable(error)) return false
+      throw error
     }
+  })()
+  cache.set(key, result)
+  return result
+}
+
+async function loadNotificationAvailability(
+  userId: string,
+  rows: NotificationRow[],
+  context: NotificationBatchContext,
+): Promise<NotificationAvailability[]> {
+  if (rows.length === 0) return []
+  const db = getDb()
+  const ideaIds = [...new Set(rows.filter((row) => row.domain === 'idea').map((row) => row.targetId))]
+  const reviewIds = [...new Set(rows.filter((row) => row.domain === 'review').map((row) => row.targetId))]
+  const ideaById = new Map(db.select().from(ideas).where(inArray(ideas.id, ideaIds)).all().map((row) => [row.id, row]))
+  const reviewById = new Map(db.select().from(bookReviews).where(inArray(bookReviews.id, reviewIds)).all().map((row) => [row.id, row]))
+
+  const ideaCommentIds = [...new Set(rows.filter((row) => row.domain === 'idea' && row.commentId).map((row) => row.commentId!))]
+  const reviewCommentIds = [...new Set(rows.filter((row) => row.domain === 'review' && row.commentId).map((row) => row.commentId!))]
+  const ideaCommentsById = new Map(db.select().from(ideaComments)
+    .where(and(inArray(ideaComments.id, ideaCommentIds), isNull(ideaComments.deletedAt))).all().map((row) => [row.id, row]))
+  const reviewCommentsById = new Map(db.select().from(bookReviewComments)
+    .where(and(inArray(bookReviewComments.id, reviewCommentIds), isNull(bookReviewComments.deletedAt))).all().map((row) => [row.id, row]))
+
+  const actorIds = [...new Set(rows.map((row) => row.actorId))]
+  const actorIdsById = new Set(db.select({ id: users.id }).from(users).where(inArray(users.id, actorIds)).all().map((row) => row.id))
+  const ideaLikeKeys = new Set(db.select({ ideaId: ideaLikes.ideaId, userId: ideaLikes.userId }).from(ideaLikes)
+    .where(and(inArray(ideaLikes.ideaId, ideaIds), inArray(ideaLikes.userId, actorIds))).all().map((row) => `${row.ideaId}:${row.userId}`))
+  const reviewLikeKeys = new Set(db.select({ reviewId: bookReviewLikes.reviewId, userId: bookReviewLikes.userId }).from(bookReviewLikes)
+    .where(and(inArray(bookReviewLikes.reviewId, reviewIds), inArray(bookReviewLikes.userId, actorIds))).all().map((row) => `${row.reviewId}:${row.userId}`))
+  const ideaCommentLikeKeys = new Set(db.select({ commentId: ideaCommentLikes.commentId, userId: ideaCommentLikes.userId }).from(ideaCommentLikes)
+    .where(and(inArray(ideaCommentLikes.commentId, ideaCommentIds), inArray(ideaCommentLikes.userId, actorIds))).all().map((row) => `${row.commentId}:${row.userId}`))
+  const reviewCommentLikeKeys = new Set(db.select({ commentId: bookReviewCommentLikes.commentId, userId: bookReviewCommentLikes.userId }).from(bookReviewCommentLikes)
+    .where(and(inArray(bookReviewCommentLikes.commentId, reviewCommentIds), inArray(bookReviewCommentLikes.userId, actorIds))).all().map((row) => `${row.commentId}:${row.userId}`))
+
+  const available: NotificationAvailability[] = []
+  for (const row of rows) {
+    if (!actorIdsById.has(row.actorId)) continue
+    let target: IdeaRow | ReviewRow | undefined
+    let comment: CommentRow | null = null
+    let permissionKey: string | null = null
+    let permitted: Promise<boolean>
+    if (row.domain === 'idea') {
+      const idea = ideaById.get(row.targetId)
+      if (!idea || idea.deletedAt || idea.visibility !== 'shared' || !idea.sharedLibraryId || !idea.sourceLibraryBookVersionId || !idea.bookVersionId) continue
+      target = idea
+      permissionKey = `${idea.sharedLibraryId}:${idea.sourceLibraryBookVersionId}:${idea.bookVersionId}`
+      permitted = cachedPermission(context.ideaSources, permissionKey, () => assertIdeaSource(userId, idea).then(() => undefined))
+      comment = row.commentId ? ideaCommentsById.get(row.commentId) ?? null : null
+    } else {
+      const review = reviewById.get(row.targetId)
+      if (!review || review.visibility !== 'shared' || !review.sourceLibraryId || !review.sourceLibraryBookId) continue
+      target = review
+      permissionKey = `${review.sourceLibraryId}:${review.sourceLibraryBookId}`
+      permitted = cachedPermission(context.reviewSources, permissionKey, () => assertSourceWorkReadable(userId, review.sourceLibraryId!, review.sourceLibraryBookId!).then(() => undefined))
+      comment = row.commentId ? reviewCommentsById.get(row.commentId) ?? null : null
+    }
+    if (!await permitted) continue
     if (row.commentId) {
-      const table = row.domain === 'idea' ? ideaComments : bookReviewComments
-      const comment = db.select().from(table).where(and(eq(table.id, row.commentId), isNull(table.deletedAt))).get()
-      if (!comment || ('ideaId' in comment ? comment.ideaId : comment.reviewId) !== row.targetId) return null
-      preview = comment.body
+      if (!comment) continue
+      const commentTargetId = 'ideaId' in comment ? comment.ideaId : comment.reviewId
+      if (commentTargetId !== row.targetId) continue
     }
     if (row.event === 'like') {
-      if (row.commentId) {
-        const table = row.domain === 'idea' ? ideaCommentLikes : bookReviewCommentLikes
-        if (!db.select().from(table).where(and(eq(table.commentId, row.commentId), eq(table.userId, row.actorId))).get()) return null
-      } else if (row.domain === 'idea') {
-        if (!db.select().from(ideaLikes).where(and(eq(ideaLikes.ideaId, row.targetId), eq(ideaLikes.userId, row.actorId))).get()) return null
-      } else if (!db.select().from(bookReviewLikes).where(and(eq(bookReviewLikes.reviewId, row.targetId), eq(bookReviewLikes.userId, row.actorId))).get()) return null
+      const key = `${row.commentId ?? row.targetId}:${row.actorId}`
+      const active = row.commentId
+        ? row.domain === 'idea' ? ideaCommentLikeKeys.has(key) : reviewCommentLikeKeys.has(key)
+        : row.domain === 'idea' ? ideaLikeKeys.has(key) : reviewLikeKeys.has(key)
+      if (!active) continue
     }
-  } catch (error) {
-    if (error instanceof AppError) return null
-    throw error
+    available.push({ row, target, comment })
   }
-  const actor = db.select().from(users).where(eq(users.id, row.actorId)).get()
-  if (!actor) return null
+  return available
+}
+
+function project(available: NotificationAvailability, actor: { id: string; username: string; avatarKey: string | null }): InteractionNotification {
+  const { row, target, comment } = available
+  const preview = comment?.body ?? (row.domain === 'idea'
+    ? (target as IdeaRow).note ?? (target as IdeaRow).text
+    : reviewExcerpt((target as ReviewRow).body ?? '', (target as ReviewRow).bodyFormat, 180))
   return {
     id: row.id, domain: row.domain, event: row.event, targetId: row.targetId, commentId: row.commentId,
     actor: { id: actor.id, name: actor.username, avatarKey: actor.avatarKey },
@@ -54,26 +133,31 @@ async function project(userId: string, row: NotificationRow): Promise<Interactio
 
 async function* availableNotifications(userId: string, unreadOnly = false) {
   const db = getDb()
+  const context: NotificationBatchContext = { ideaSources: new Map(), reviewSources: new Map() }
   for (let offset = 0; ; offset += 50) {
     const rows = db.select().from(interactionNotifications).where(and(
       eq(interactionNotifications.userId, userId), unreadOnly ? isNull(interactionNotifications.readAt) : undefined,
     )).orderBy(desc(interactionNotifications.createdAt), desc(interactionNotifications.id)).limit(50).offset(offset).all()
-    for (const row of rows) {
-      const notification = await project(userId, row)
-      if (notification) yield notification
-    }
+    for (const entry of await loadNotificationAvailability(userId, rows, context)) yield entry
     if (rows.length < 50) break
   }
 }
 
 export async function listNotifications(userId: string, query: NotificationQuery): Promise<NotificationPage> {
-  const entries: InteractionNotification[] = []
+  const available: NotificationAvailability[] = []
   let skipped = 0
   for await (const entry of availableNotifications(userId, query.unread)) {
     if (skipped++ < (query.page - 1) * query.pageSize) continue
-    entries.push(entry)
-    if (entries.length > query.pageSize) break
+    available.push(entry)
+    if (available.length > query.pageSize) break
   }
+  const actorIds = [...new Set(available.map((entry) => entry.row.actorId))]
+  const actors = new Map(getDb().select({ id: users.id, username: users.username, avatarKey: users.avatarKey })
+    .from(users).where(inArray(users.id, actorIds)).all().map((actor) => [actor.id, actor]))
+  const entries = available.flatMap((entry) => {
+    const actor = actors.get(entry.row.actorId)
+    return actor ? [project(entry, actor)] : []
+  })
   return { entries: entries.slice(0, query.pageSize), page: query.page, hasMore: entries.length > query.pageSize }
 }
 
@@ -120,8 +204,11 @@ export async function unreadNotificationCount(userId: string) {
 
 export async function notificationTarget(userId: string, id: string): Promise<NotificationTarget> {
   const row = getDb().select().from(interactionNotifications).where(and(eq(interactionNotifications.id, id), eq(interactionNotifications.userId, userId))).get()
-  const notification = row ? await project(userId, row) : null
-  return notification ? { available: true, notification } : { available: false }
+  if (!row) return { available: false }
+  const [entry] = await loadNotificationAvailability(userId, [row], { ideaSources: new Map(), reviewSources: new Map() })
+  if (!entry) return { available: false }
+  const actor = getDb().select({ id: users.id, username: users.username, avatarKey: users.avatarKey }).from(users).where(eq(users.id, row.actorId)).get()
+  return actor ? { available: true, notification: project(entry, actor) } : { available: false }
 }
 
 export function markNotificationRead(userId: string, id: string, read: boolean) {
@@ -136,8 +223,8 @@ export async function markAllNotificationsRead(userId: string) {
   let ids: string[] = []
   // Scan all rows: read-state writes must not move the unread offset underneath us.
   for await (const entry of availableNotifications(userId)) {
-    if (entry.readAt !== null) continue
-    ids.push(entry.id)
+    if (entry.row.readAt !== null) continue
+    ids.push(entry.row.id)
     if (ids.length === 50) {
       db.update(interactionNotifications).set({ readAt: Date.now() }).where(and(eq(interactionNotifications.userId, userId), inArray(interactionNotifications.id, ids))).run()
       ids = []

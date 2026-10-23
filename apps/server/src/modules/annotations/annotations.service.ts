@@ -9,7 +9,7 @@ import { createId } from '../../lib/id'
 import { savePersonalBookSnapshot } from '../../lib/personal-book-archive'
 import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { assertReadableBook, getBook } from '../books/books.service'
-import type { AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
+import type { AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq, ContentFile } from '@bookdock/shared'
 import { assertIdeaSource, IDEA_VISIBILITY_KEY, ideaComposerContext, ideaRevision, privateIdeaLink, readableIdea } from './idea-access'
 
 export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
@@ -33,7 +33,7 @@ export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   visibility?: 'private' | 'shared'
   revisionId?: string | null
   editedAt?: number | null
-}): AnnotationRes {
+}, options?: { images?: ContentFile[] }): AnnotationRes {
   if (kind === 'highlight') {
     return {
       id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? '', cfiAnchor: row.cfiAnchor ?? null,
@@ -53,7 +53,7 @@ export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   return {
     id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? '', cfiAnchor: row.cfiAnchor ?? null,
     type: 'note', color: row.color ?? 'yellow', style: (row.style ?? 'underline') as AnnotationRes['style'],
-    images: publishedContentFiles(getDb(), 'idea', row.id),
+    images: options?.images ?? publishedContentFiles(getDb(), 'idea', row.id),
     visibility: row.visibility ?? 'private', revisionId: row.revisionId ?? null, editedAt: row.editedAt ?? null,
     text: row.text ?? '', note: row.note ?? null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
     createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,

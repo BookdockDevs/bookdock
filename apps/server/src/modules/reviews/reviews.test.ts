@@ -826,6 +826,18 @@ describe('book reviews', () => {
     expect((await unreadNotificationCount('author')).count).toBe(0)
   })
 
+  it('keeps notification availability work bounded by candidate batches and sources', async () => {
+    const review = await createReview('author', { bookVersionId: 'v1', body: 'visible', visibility: 'shared' })
+    for (let i = 0; i < 57; i++) await createReviewComment('member', review.id, { body: String(i) })
+    const select = vi.spyOn(db, 'select')
+    expect((await unreadNotificationCount('author')).count).toBe(57)
+    const countQueries = select.mock.calls.length
+    expect(countQueries).toBeLessThan(35)
+    select.mockClear()
+    expect((await listNotifications('author', { page: 1, pageSize: 20 })).entries).toHaveLength(20)
+    expect(select.mock.calls.length).toBeLessThan(25)
+  })
+
   it('covers idea comments, replies and likes with exact-source checks and deletion receipts', async () => {
     db.insert(schema.ideas).values({
       id: 'notification-idea', userId: 'author', bookVersionId: 'v1', revisionId: 'r-v1', visibility: 'shared',
@@ -849,6 +861,10 @@ describe('book reviews', () => {
     await deleteIdeaComment('member', 'notification-idea', root)
     expect(await createIdeaComment('member', 'notification-idea', input)).toBe(root)
     expect(db.select().from(schema.ideaComments).all()).toHaveLength(1)
+    db.update(schema.ideas).set({ deletedAt: now }).where(eq(schema.ideas.id, 'notification-idea')).run()
+    expect((await unreadNotificationCount('author')).count).toBe(0)
+    expect((await listNotifications('author', { page: 1, pageSize: 20 })).entries).toEqual([])
+    expect(await notificationTarget('author', ownerEvent.id)).toEqual({ available: false })
     db.update(schema.ideas).set({ visibility: 'private' }).where(eq(schema.ideas.id, 'notification-idea')).run()
     expect((await unreadNotificationCount('author')).count).toBe(0)
     db.insert(schema.instance).values({ id: 'instance', ownerUserId: 'owner', createdAt: now, updatedAt: now }).run()
