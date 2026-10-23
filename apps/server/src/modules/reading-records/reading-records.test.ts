@@ -382,10 +382,10 @@ describe('reading-records service', () => {
     await expect(getBookRecords(otherId, bookId)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
   })
 
-  it('aggregates session duration by client-local hour of day', async () => {
-    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 100, startedAt: Date.UTC(2026, 6, 30, 15, 10, 0) })
-    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 50, startedAt: Date.UTC(2026, 6, 30, 15, 40, 0) })
-    await addReadingTime(ownerId, { bookId, date: '2026-07-31', durationSeconds: 70, startedAt: Date.UTC(2026, 6, 31, 2, 0, 0) })
+  it('aggregates timed session duration by the recorded timezone hour of day', async () => {
+    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 100, startedAt: Date.UTC(2026, 6, 30, 15, 10, 0), continuous: true, timezone: 'UTC' })
+    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 50, startedAt: Date.UTC(2026, 6, 30, 15, 40, 0), continuous: true, timezone: 'UTC' })
+    await addReadingTime(ownerId, { bookId, date: '2026-07-31', durationSeconds: 70, startedAt: Date.UTC(2026, 6, 31, 2, 0, 0), continuous: true, timezone: 'UTC' })
 
     const utc = await getHourly(ownerId, {}, 0)
     expect(utc).toEqual([
@@ -393,11 +393,11 @@ describe('reading-records service', () => {
       { hour: 15, durationSeconds: 150, days: 1 },
     ])
 
-    // UTC+8 (getTimezoneOffset() = -480): 15:00 UTC -> 23:00 local
+    // The persisted hour belongs to the record timezone; the viewer offset does not rewrite it.
     const utc8 = await getHourly(ownerId, {}, -480)
     expect(utc8).toEqual([
-      { hour: 10, durationSeconds: 70, days: 1 },
-      { hour: 23, durationSeconds: 150, days: 1 },
+      { hour: 2, durationSeconds: 70, days: 1 },
+      { hour: 15, durationSeconds: 150, days: 1 },
     ])
 
     const ranged = await getHourly(ownerId, { from: '2026-07-30', to: '2026-07-30' }, 0)
@@ -405,9 +405,9 @@ describe('reading-records service', () => {
   })
 
   it('filters hourly distribution by bookId', async () => {
-    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 100, startedAt: Date.UTC(2026, 6, 30, 15, 0, 0) })
-    await addReadingTime(ownerId, { bookId: book2Id, date: '2026-07-30', durationSeconds: 200, startedAt: Date.UTC(2026, 6, 30, 21, 0, 0) })
-    await addReadingTime(ownerId, { bookId: book2Id, date: '2026-07-30', durationSeconds: 50, startedAt: Date.UTC(2026, 6, 30, 21, 30, 0) })
+    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 100, startedAt: Date.UTC(2026, 6, 30, 15, 0, 0), continuous: true, timezone: 'UTC' })
+    await addReadingTime(ownerId, { bookId: book2Id, date: '2026-07-30', durationSeconds: 200, startedAt: Date.UTC(2026, 6, 30, 21, 0, 0), continuous: true, timezone: 'UTC' })
+    await addReadingTime(ownerId, { bookId: book2Id, date: '2026-07-30', durationSeconds: 50, startedAt: Date.UTC(2026, 6, 30, 21, 30, 0), continuous: true, timezone: 'UTC' })
 
     const all = await getHourly(ownerId, {}, 0)
     expect(all).toEqual([

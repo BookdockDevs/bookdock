@@ -16,6 +16,35 @@ async function migrate(db: ReturnType<typeof drizzle<typeof schema>>) {
   await runDatabaseMigrations(db, { beforeRetarget: () => undefined })
 }
 
+function removeReadingProjectionSchema(sqlite: Database.Database) {
+  sqlite.exec(`
+    DROP TRIGGER IF EXISTS reading_projection_revision_delete;
+    DROP TRIGGER IF EXISTS reading_projection_revision_update;
+    DROP TRIGGER IF EXISTS reading_projection_revision_insert;
+    DROP INDEX IF EXISTS reading_book_stats_user_book_idx;
+    DROP TABLE IF EXISTS reading_book_stats;
+    DROP INDEX IF EXISTS reading_round_stats_book_idx;
+    DROP TABLE IF EXISTS reading_round_stats;
+    DROP INDEX IF EXISTS reading_hourly_stats_book_hour_idx;
+    DROP TABLE IF EXISTS reading_hourly_stats;
+    DROP INDEX IF EXISTS reading_contributions_book_date_idx;
+    DROP INDEX IF EXISTS reading_contributions_session_date_idx;
+    DROP INDEX IF EXISTS reading_contributions_user_key_idx;
+    DROP TABLE IF EXISTS reading_contributions;
+    DROP INDEX IF EXISTS reading_projection_states_user_version_idx;
+    DROP TABLE IF EXISTS reading_projection_states;
+    DROP INDEX IF EXISTS reading_sessions_user_book_sort_idx;
+    DROP INDEX IF EXISTS reading_sessions_user_book_id_idx;
+    ALTER TABLE reading_sessions DROP COLUMN sort_started_at;
+    ALTER TABLE reading_sessions DROP COLUMN sort_date;
+    ALTER TABLE reading_records DROP COLUMN progress_delta;
+    ALTER TABLE reading_records DROP COLUMN coverage;
+    ALTER TABLE reading_records DROP COLUMN word_state;
+    ALTER TABLE reading_records DROP COLUMN word_units;
+    ALTER TABLE reading_records DROP COLUMN fact_version;
+  `)
+}
+
 describe('activity migration', () => {
   it('creates indexed event storage on an empty database', async () => {
     sqlite = new Database(':memory:')
@@ -33,9 +62,10 @@ describe('activity migration', () => {
     sqlite.pragma('foreign_keys = ON')
     const db = drizzle(sqlite, { schema })
     await migrate(db)
+    removeReadingProjectionSchema(sqlite)
     sqlite.exec(`
       DROP TABLE activity_events;
-      DELETE FROM __drizzle_migrations WHERE created_at = 1793300000000;
+      DELETE FROM __drizzle_migrations WHERE created_at >= 1793300000000;
     `)
     sqlite.exec(`
       INSERT INTO users(id,username,created_at) VALUES ('author','Author',1),('other','Other',1);

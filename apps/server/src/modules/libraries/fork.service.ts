@@ -13,8 +13,7 @@ import {
   libraries,
   libraryBooks,
   libraryBookVersions,
-  readingRecords,
-  readingSessions,
+  readingArchives, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions,
   settings,
   textReplacementOverrides,
   textReplacements,
@@ -150,6 +149,20 @@ export async function forkLocalBook(userId: string, bookVersionId: string): Prom
       .where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookVersionId, bookVersionId))).run()
     tx.update(readingSessions).set({ bookId: newBookVersionId, bookVersionId: newBookVersionId })
       .where(and(eq(readingSessions.userId, userId), eq(readingSessions.bookVersionId, bookVersionId))).run()
+    tx.update(readingRounds).set({ bookVersionId: newBookVersionId })
+      .where(and(eq(readingRounds.userId, userId), eq(readingRounds.bookVersionId, bookVersionId))).run()
+    tx.update(readingArchives).set({ bookVersionId: newBookVersionId })
+      .where(and(eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, bookVersionId))).run()
+    tx.update(readingContributions).set({ bookVersionId: newBookVersionId })
+      .where(and(eq(readingContributions.userId, userId), eq(readingContributions.bookVersionId, bookVersionId))).run()
+    tx.update(readingHourlyStats).set({ bookVersionId: newBookVersionId })
+      .where(and(eq(readingHourlyStats.userId, userId), eq(readingHourlyStats.bookVersionId, bookVersionId))).run()
+    tx.update(readingRoundStats).set({ bookVersionId: newBookVersionId })
+      .where(and(eq(readingRoundStats.userId, userId), eq(readingRoundStats.bookVersionId, bookVersionId))).run()
+    tx.update(readingBookStats).set({ bookVersionId: newBookVersionId })
+      .where(and(eq(readingBookStats.userId, userId), eq(readingBookStats.bookVersionId, bookVersionId))).run()
+    tx.update(readingProjectionStates).set({ bookVersionId: newBookVersionId })
+      .where(and(eq(readingProjectionStates.userId, userId), eq(readingProjectionStates.bookVersionId, bookVersionId))).run()
     // Book-local patches only (bookId set); user-global pattern rules have
     // bookId null and stay shared.
     tx.update(textReplacements)

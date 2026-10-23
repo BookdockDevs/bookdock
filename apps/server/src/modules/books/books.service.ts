@@ -9,7 +9,7 @@ import {
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
   libraryMemberships, users as usersTable, tocRules, shelves,
   highlights, ideas, bookmarks, aiThreads, textReplacements,
-  readingArchives, readingRecords, readingRounds, readingSessions, readingWriteReceipts, bookReviews,
+  readingArchives, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingWriteReceipts, bookReviews,
 } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
@@ -3822,6 +3822,11 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
         tx.update(readingWriteReceipts).set({ status: 'deleted' }).where(and(eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.bookVersionId, versionId))).run()
         tx.delete(readingSessions).where(and(eq(readingSessions.userId, userId), eq(readingSessions.bookId, versionId))).run()
         tx.delete(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, versionId))).run()
+        tx.delete(readingContributions).where(and(eq(readingContributions.userId, userId), eq(readingContributions.bookVersionId, versionId))).run()
+        tx.delete(readingHourlyStats).where(and(eq(readingHourlyStats.userId, userId), eq(readingHourlyStats.bookVersionId, versionId))).run()
+        tx.delete(readingRoundStats).where(and(eq(readingRoundStats.userId, userId), eq(readingRoundStats.bookVersionId, versionId))).run()
+        tx.delete(readingBookStats).where(and(eq(readingBookStats.userId, userId), eq(readingBookStats.bookVersionId, versionId))).run()
+        tx.delete(readingProjectionStates).where(and(eq(readingProjectionStates.userId, userId), eq(readingProjectionStates.bookVersionId, versionId))).run()
         tx.delete(readingRounds).where(and(eq(readingRounds.userId, userId), eq(readingRounds.bookVersionId, versionId))).run()
         tx.delete(readingArchives).where(and(eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, versionId))).run()
         tx.delete(highlights).where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, versionId))).run()

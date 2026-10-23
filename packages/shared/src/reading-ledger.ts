@@ -9,6 +9,7 @@ export { readingTimezoneSchema } from './reading-range'
 export type ReadingCoverageInterval = [number, number]
 export interface ReadingTimeFragment { startedAt: number; endedAt: number }
 export type ReadingSource = 'auto' | 'manual' | 'retroactive' | 'legacy'
+export type ReadingWordState = 'known' | 'partial' | 'unknown'
 
 export interface ReadingLedgerRound {
   id: string
@@ -53,6 +54,7 @@ export interface ReadingLedgerSession {
   unalignedCoverage?: boolean
   fragments: ReadingTimeFragment[]
   timezone: string
+  contributionDates?: string[]
 }
 
 export interface ReadingLedgerRes {
@@ -75,6 +77,68 @@ export interface ReadingLedgerRes {
   projectedLegacyIntervals?: ReadingCoverageInterval[]
   unalignedCoverage?: boolean
   coverageEstimated?: boolean
+}
+
+export interface ReadingLedgerOverview {
+  format?: BookFormat | null
+  coverKey?: string | null
+  bookId: string
+  title: string
+  author: string
+  sourceAvailable: boolean
+  currentRoundId: string | null
+  legacyCoverage: boolean
+  rounds: ReadingLedgerRound[]
+  coverage: number
+  coverageIntervals: ReadingCoverageInterval[]
+  totalSeconds: number
+  totalWordsRead: number | null
+  wordState: ReadingWordState
+  readingDays: number
+  earliestDate: string | null
+  legacyIntervals: ReadingCoverageInterval[]
+  legacyWordCount: number | null
+  legacyRevisionId?: string | null
+  projectedLegacyIntervals?: ReadingCoverageInterval[]
+  unalignedCoverage?: boolean
+  coverageEstimated?: boolean
+  dataVersion: number
+}
+
+export interface ReadingLedgerStatsDay {
+  date: string
+  durationSeconds: number
+  totalWordsRead: number | null
+  wordState: ReadingWordState
+  cumulativeCoverage: number | null
+  progressDelta: number
+}
+
+export interface ReadingLedgerStatsHour {
+  hour: number
+  durationSeconds: number
+  days: number
+}
+
+export interface ReadingLedgerStatsRes {
+  dataVersion: number
+  from?: string
+  to?: string
+  totalSeconds: number
+  totalWordsRead: number | null
+  wordState: ReadingWordState
+  readingDays: number
+  daily: ReadingLedgerStatsDay[]
+  hourly: ReadingLedgerStatsHour[]
+  legacyDaily: Array<{ date: string; durationSeconds: number }>
+  remainingSeconds?: number | null
+}
+
+export interface ReadingLedgerSessionPage {
+  dataVersion: number
+  items: ReadingLedgerSession[]
+  nextCursor: string | null
+  hasMore: boolean
 }
 
 export interface ReadingTransfer {
@@ -116,6 +180,13 @@ export const readingTimerClaimSchema = z.object({
   explicit: z.boolean().default(false),
 })
 export const readingTimerReleaseSchema = z.object({ deviceId: z.string().min(1).max(100), activityAt: z.number().int().positive().optional() })
+export const readingLedgerStatsQuerySchema = z.object({
+  from: readingDateSchema.optional(), to: readingDateSchema.optional(),
+}).refine((value) => !value.from || !value.to || value.from <= value.to, { message: 'Range ends before it starts', path: ['to'] })
+export const readingLedgerSessionsQuerySchema = z.object({
+  from: readingDateSchema.optional(), to: readingDateSchema.optional(),
+  cursor: z.string().max(500).optional(), limit: z.coerce.number().int().min(1).max(100).default(50),
+}).refine((value) => !value.from || !value.to || value.from <= value.to, { message: 'Range ends before it starts', path: ['to'] })
 
 const roundSchema = z.object({
   id: z.string().min(1).max(100), ordinal: z.number().int().positive(),

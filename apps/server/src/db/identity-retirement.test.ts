@@ -49,6 +49,35 @@ function legacyIdentityCutoff() {
   )
 }
 
+function removeReadingProjectionSchema() {
+  db.$client.exec(`
+    DROP TRIGGER IF EXISTS reading_projection_revision_delete;
+    DROP TRIGGER IF EXISTS reading_projection_revision_update;
+    DROP TRIGGER IF EXISTS reading_projection_revision_insert;
+    DROP INDEX IF EXISTS reading_book_stats_user_book_idx;
+    DROP TABLE IF EXISTS reading_book_stats;
+    DROP INDEX IF EXISTS reading_round_stats_book_idx;
+    DROP TABLE IF EXISTS reading_round_stats;
+    DROP INDEX IF EXISTS reading_hourly_stats_book_hour_idx;
+    DROP TABLE IF EXISTS reading_hourly_stats;
+    DROP INDEX IF EXISTS reading_contributions_book_date_idx;
+    DROP INDEX IF EXISTS reading_contributions_session_date_idx;
+    DROP INDEX IF EXISTS reading_contributions_user_key_idx;
+    DROP TABLE IF EXISTS reading_contributions;
+    DROP INDEX IF EXISTS reading_projection_states_user_version_idx;
+    DROP TABLE IF EXISTS reading_projection_states;
+    DROP INDEX IF EXISTS reading_sessions_user_book_sort_idx;
+    DROP INDEX IF EXISTS reading_sessions_user_book_id_idx;
+    ALTER TABLE reading_sessions DROP COLUMN sort_started_at;
+    ALTER TABLE reading_sessions DROP COLUMN sort_date;
+    ALTER TABLE reading_records DROP COLUMN progress_delta;
+    ALTER TABLE reading_records DROP COLUMN coverage;
+    ALTER TABLE reading_records DROP COLUMN word_state;
+    ALTER TABLE reading_records DROP COLUMN word_units;
+    ALTER TABLE reading_records DROP COLUMN fact_version;
+  `)
+}
+
 function makeLegacyIdentity() {
   // Strip the legacy-identity retirement and everything after it (idea
   // discussion tables included); the cutoff is derived from the journal so
@@ -62,6 +91,7 @@ function makeLegacyIdentity() {
       db.$client.exec(statement.replaceAll('REFERENCES `books`', 'REFERENCES `book_versions`'))
     }
   }
+  removeReadingProjectionSchema()
   db.$client.exec(`DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims;
     DROP TABLE IF EXISTS storage_connections;
     DROP TABLE content_files;

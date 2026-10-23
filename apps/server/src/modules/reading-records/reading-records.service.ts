@@ -16,17 +16,15 @@ import type {
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookStates, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, readingArchives, readingRecords, readingRounds, readingSessions } from '../../db/schema'
+import { bookStates, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, readingArchives, readingBookStats, readingContributions, readingHourlyStats, readingRecords, readingRounds, readingSessions } from '../../db/schema'
 import { readProgressFile } from '../../lib/progress-file'
 import { getBook } from '../books/books.service'
-import { unionLength } from '../../lib/intervals'
 import { excludedReadingBookVersionIds } from './reading-visibility'
 import { readingHoldings } from './reading-holdings'
 import { pendingBookDataDeletionVersionIds } from '../libraries/library-query'
 import { isProgressMigrationCompleted } from '../progress/progress-migration'
 import { AppError } from '../../middleware/error'
-import { addLedgerReading, deleteLedgerSession, ensureReadingArchive, updateLedgerSession } from './reading-ledger.service'
-import { splitReadingTime } from './time-fragments'
+import { addLedgerReading, deleteLedgerSession, ensureReadingArchive, ensureReadingProjections, READING_WORD_UNITS_SCALE, updateLedgerSession } from './reading-ledger.service'
 import { readingTimestampBounds } from '../../lib/reading-range'
 
 export async function addReadingTime(userId: string, body: ReadingRecordCreateReq, showHidden = false) {
@@ -69,18 +67,11 @@ async function computeTotalWordsRead(userId: string, showHidden = false): Promis
   const db = getDb()
   const archives = db.select().from(readingArchives).where(eq(readingArchives.userId, userId)).all()
   if (archives.length) {
+    await ensureReadingProjections(userId, showHidden)
     const hidden = new Set(excludedReadingBookVersionIds(db, userId, showHidden))
-    const sessions = db.select().from(readingSessions).where(eq(readingSessions.userId, userId)).all()
-    let words = 0
-    for (const archive of archives) {
-      if (hidden.has(archive.bookVersionId)) continue
-      words += unionLength(archive.legacyIntervals) * (archive.legacyWordCount ?? 0)
-    }
-    for (const session of sessions) {
-      if (hidden.has(session.bookId)) continue
-      words += session.coverage.reduce((sum, [start, end]) => sum + Math.abs(end - start), 0) * (session.wordCount ?? 0)
-    }
-    return Math.round(words)
+    const rows = db.select({ totalWordUnits: readingBookStats.totalWordUnits }).from(readingBookStats)
+      .where(and(eq(readingBookStats.userId, userId), hidden.size ? notInArray(readingBookStats.bookVersionId, [...hidden]) : undefined)).all()
+    return Math.round(rows.reduce((sum, row) => sum + (row.totalWordUnits ?? 0), 0) / READING_WORD_UNITS_SCALE)
   }
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
@@ -259,21 +250,14 @@ export async function getSummary(userId: string, today: string, showHidden = fal
     finishBounds.until !== undefined ? lt(readingRounds.endedAt, finishBounds.until) : undefined,
     hiddenIds.length ? notInArray(readingRounds.bookVersionId, hiddenIds) : undefined,
   )).all()
-  const scopedSessions = db.select().from(readingSessions).where(and(
-    eq(readingSessions.userId, userId),
-    hiddenIds.length ? notInArray(readingSessions.bookId, hiddenIds) : undefined,
-  )).all()
-  let scopedWords = 0
-  for (const session of scopedSessions) {
-    const words = session.coverage.reduce((sum, [a, b]) => sum + Math.abs(b - a), 0) * (session.wordCount ?? 0)
-    if (session.fragments.length && session.timezone) {
-      const slices = splitReadingTime(session.fragments, session.timezone)
-      const total = slices.reduce((sum, slice) => sum + slice.durationSeconds, 0)
-      const selected = slices.filter((slice) => (!range.from || slice.date >= range.from) && (!range.to || slice.date <= range.to))
-        .reduce((sum, slice) => sum + slice.durationSeconds, 0)
-      if (total > 0) scopedWords += words * selected / total
-    } else if ((!range.from || session.date >= range.from) && (!range.to || session.date <= range.to)) scopedWords += words
-  }
+  const scopedContributions = range.from || range.to ? db.select({ wordUnits: readingContributions.wordUnits })
+    .from(readingContributions).where(and(
+      eq(readingContributions.userId, userId),
+      range.from ? gte(readingContributions.date, range.from) : undefined,
+      range.to ? lte(readingContributions.date, range.to) : undefined,
+      hiddenIds.length ? notInArray(readingContributions.bookVersionId, hiddenIds) : undefined,
+    )).all() : []
+  const scopedWordUnits = scopedContributions.reduce((sum, row) => sum + (row.wordUnits ?? 0), 0)
   return {
     ...totals,
     firstRecordedDate: dates[0],
@@ -285,8 +269,8 @@ export async function getSummary(userId: string, today: string, showHidden = fal
       totalDays: scopedDays.filter((day) => day.durationSeconds >= 60).length,
       finishedBooks: new Set(finished.map((round) => round.bookVersionId)).size,
       finishedRounds: finished.length,
-      totalWordsRead: !range.from && !range.to ? totalWordsRead : Math.round(scopedWords),
-      wordsPartial: Boolean(range.from || range.to) && scopedSessions.some((session) => session.source === 'legacy' && !session.coverage.length),
+      totalWordsRead: !range.from && !range.to ? totalWordsRead : Math.round(scopedWordUnits / READING_WORD_UNITS_SCALE),
+      wordsPartial: Boolean(range.from || range.to) && scopedContributions.some((row) => row.wordUnits === null),
     },
     todaySeconds: todayRow.todaySeconds,
     currentStreak: streak.current,
@@ -321,36 +305,25 @@ export async function getDaily(userId: string, range: { from?: string; to?: stri
     .all()
 }
 
-/** Hour-of-day distribution from session detail rows; tzOffset is minutes behind UTC (Date#getTimezoneOffset). */
-export async function getHourly(userId: string, range: { from?: string; to?: string; bookId?: string }, tzOffset: number, showHidden = false): Promise<ReadingRecordHourlyItem[]> {
+/** Hour-of-day distribution from persisted contributions in each record's timezone. */
+export async function getHourly(userId: string, range: { from?: string; to?: string; bookId?: string }, _tzOffset: number, showHidden = false): Promise<ReadingRecordHourlyItem[]> {
   const db = getDb()
+  await ensureReadingProjections(userId, showHidden)
   const hiddenIds = excludedReadingBookVersionIds(db, userId, showHidden)
-  const sessionFrom = range.from ? shiftDays(range.from, -1) : undefined
-  const sessionTo = range.to ? shiftDays(range.to, 1) : undefined
-  const rows = db.select().from(readingSessions).where(and(
-    eq(readingSessions.userId, userId),
-    sessionFrom ? gte(readingSessions.date, sessionFrom) : undefined,
-    sessionTo ? lte(readingSessions.date, sessionTo) : undefined,
-    range.bookId ? eq(readingSessions.bookId, range.bookId) : undefined,
-    hiddenIds.length ? notInArray(readingSessions.bookId, hiddenIds) : undefined,
-  )).all()
+  const rows = db.select({ hour: readingHourlyStats.hour, date: readingHourlyStats.date, durationSeconds: readingHourlyStats.durationSeconds })
+    .from(readingHourlyStats).where(and(
+      eq(readingHourlyStats.userId, userId),
+      range.from ? gte(readingHourlyStats.date, range.from) : undefined,
+      range.to ? lte(readingHourlyStats.date, range.to) : undefined,
+      range.bookId ? eq(readingHourlyStats.bookVersionId, range.bookId) : undefined,
+      hiddenIds.length ? notInArray(readingHourlyStats.bookVersionId, hiddenIds) : undefined,
+    )).all()
   const hours = new Map<number, { durationSeconds: number; days: Set<string> }>()
   for (const row of rows) {
-    if (row.fragments.length && row.timezone) {
-      for (const slice of splitReadingTime(row.fragments, row.timezone)) {
-        if ((range.from && slice.date < range.from) || (range.to && slice.date > range.to)) continue
-        const cur = hours.get(slice.hour) ?? { durationSeconds: 0, days: new Set<string>() }
-        cur.durationSeconds += slice.durationSeconds
-        cur.days.add(slice.date)
-        hours.set(slice.hour, cur)
-      }
-    } else if (row.source === 'legacy' && row.startedAt != null && (!range.from || row.date >= range.from) && (!range.to || row.date <= range.to)) {
-      const hour = new Date(row.startedAt - tzOffset * 60_000).getUTCHours()
-      const cur = hours.get(hour) ?? { durationSeconds: 0, days: new Set<string>() }
-      cur.durationSeconds += row.durationSeconds
-      cur.days.add(row.date)
-      hours.set(hour, cur)
-    }
+    const cur = hours.get(row.hour) ?? { durationSeconds: 0, days: new Set<string>() }
+    cur.durationSeconds += row.durationSeconds
+    cur.days.add(row.date)
+    hours.set(row.hour, cur)
   }
   return [...hours].sort(([a], [b]) => a - b).map(([hour, { durationSeconds, days }]) => ({ hour, durationSeconds, days: days.size }))
 }

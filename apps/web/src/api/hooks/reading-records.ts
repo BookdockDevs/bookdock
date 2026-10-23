@@ -1,9 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { infiniteQueryOptions, queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type {
-  ReadingLedgerRes,
+  ReadingLedgerOverview,
+  ReadingLedgerSessionPage,
+  ReadingLedgerStatsRes,
   ReadingRange,
   ReadingRecordBookDetailRes,
   ReadingRecordBookItem,
@@ -104,6 +106,97 @@ export function useBookReadingRecords(bookId: string | undefined, options: { ena
   })
 }
 
+function readingLedgerStatsOptions(bookId: string, range?: ReadingRange, dataVersion?: number) {
+  const params = new URLSearchParams()
+  if (range?.from) params.set('from', range.from)
+  if (range?.to) params.set('to', range.to)
+  const query = params.toString()
+  return queryOptions({
+    queryKey: [...READING_RECORDS_KEY, 'ledger-stats', bookId, range?.from, range?.to, dataVersion],
+    queryFn: () => apiGet<{ data: ReadingLedgerStatsRes }>(withReveal(`/reading-records/book/${bookId}/stats${query ? `?${query}` : ''}`)),
+    enabled: !!bookId,
+  })
+}
+
+export function useBookReadingLedgerStats(bookId: string, range?: ReadingRange, dataVersion?: number) {
+  return useQuery(readingLedgerStatsOptions(bookId, range, dataVersion))
+}
+
+function readingSessionsOptions(bookId: string, range?: ReadingRange, dataVersion?: number) {
+  return infiniteQueryOptions({
+    queryKey: [...READING_RECORDS_KEY, 'ledger-sessions', bookId, range?.from, range?.to, dataVersion],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams()
+      if (range?.from) params.set('from', range.from)
+      if (range?.to) params.set('to', range.to)
+      if (pageParam) params.set('cursor', pageParam)
+      params.set('limit', '50')
+      return apiGet<{ data: ReadingLedgerSessionPage }>(withReveal(`/reading-records/book/${bookId}/sessions?${params}`))
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.data.nextCursor ?? undefined,
+    enabled: !!bookId,
+  })
+}
+
+export function useBookReadingSessions(bookId: string, range?: ReadingRange, dataVersion?: number) {
+  return useInfiniteQuery(readingSessionsOptions(bookId, range, dataVersion))
+}
+
+export function useReadingLedgerRecovery(bookId: string, mismatch: boolean, range?: ReadingRange) {
+  const queryClient = useQueryClient()
+  const from = range?.from
+  const to = range?.to
+  const timezone = range?.timezone
+  const scope = JSON.stringify([bookId, from, to, timezone])
+  const active = useRef<{ cancelled: boolean } | null>(null)
+  const [result, setResult] = useState<{ scope: string; failed: boolean } | null>(null)
+  const [retry, setRetry] = useState(0)
+  const failed = result?.scope === scope && result.failed
+
+  useEffect(() => () => {
+    if (active.current) active.current.cancelled = true
+    active.current = null
+  }, [scope])
+
+  useEffect(() => {
+    if (!mismatch || failed || active.current) return
+    const run = { cancelled: false }
+    active.current = run
+    void (async () => {
+      const recoveryRange = { from, to, timezone }
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const ledger = await queryClient.fetchQuery({ ...readingLedgerOptions(bookId), staleTime: 0, retry: false })
+          if (run.cancelled) return
+          const version = ledger.data.dataVersion
+          const sessionsOptions = readingSessionsOptions(bookId, recoveryRange, version)
+          // A one-page refetch replaces the previous infinite result atomically.
+          await queryClient.cancelQueries({ queryKey: sessionsOptions.queryKey, exact: true })
+          if (run.cancelled) return
+          const [stats, sessions] = await Promise.all([
+            queryClient.fetchQuery({ ...readingLedgerStatsOptions(bookId, recoveryRange, version), staleTime: 0, retry: false }),
+            queryClient.fetchInfiniteQuery({ ...sessionsOptions, pages: 1, staleTime: 0, retry: false }),
+          ])
+          if (run.cancelled) return
+          if (stats.data.dataVersion === version && sessions.pages.length === 1
+            && sessions.pages[0].data.dataVersion === version) {
+            setResult({ scope, failed: false })
+            return
+          }
+        } catch {
+          if (run.cancelled) return
+        }
+      }
+      if (!run.cancelled) setResult({ scope, failed: true })
+    })().finally(() => {
+      if (active.current === run) active.current = null
+    })
+  }, [bookId, failed, from, mismatch, queryClient, retry, scope, timezone, to])
+
+  return { failed, retry: () => { setResult(null); setRetry((value) => value + 1) } }
+}
+
 /** Refresh coverage-derived views after a retroactive entry without moving the reader position. */
 export function useAddReadingRecord(bookId: string) {
   const queryClient = useQueryClient()
@@ -132,7 +225,7 @@ export function usePrefetchBookReadingStats(bookId: string | undefined) {
     })
     void queryClient.prefetchQuery({
       queryKey: [...READING_RECORDS_KEY, 'ledger', bookId],
-      queryFn: () => apiGet<{ data: ReadingLedgerRes }>(withReveal(`/reading-records/book/${bookId}/ledger`)),
+      queryFn: () => apiGet<{ data: ReadingLedgerOverview }>(withReveal(`/reading-records/book/${bookId}/ledger`)),
     })
   }, [bookId, queryClient])
 }
@@ -162,12 +255,16 @@ export function useDeleteSession() {
   })
 }
 
-export function useReadingLedger(bookId: string) {
-  return useQuery({
+function readingLedgerOptions(bookId: string) {
+  return queryOptions({
     queryKey: [...READING_RECORDS_KEY, 'ledger', bookId],
-    queryFn: () => apiGet<{ data: ReadingLedgerRes }>(withReveal(`/reading-records/book/${bookId}/ledger`)),
+    queryFn: () => apiGet<{ data: ReadingLedgerOverview }>(withReveal(`/reading-records/book/${bookId}/ledger`)),
     enabled: !!bookId,
   })
+}
+
+export function useReadingLedger(bookId: string) {
+  return useQuery(readingLedgerOptions(bookId))
 }
 
 export function useReadingRound(bookId: string) {

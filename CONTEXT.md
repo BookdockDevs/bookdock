@@ -34,6 +34,31 @@ _Avoid_: reporting a lost source as an error, or hiding the retained content wit
 The owner's decision to erase their own reading records, notes and reviews for one removed book. It applies to that owner only, and it is remembered while the book sits in the trash.
 _Avoid_: deleting the book, or clearing another reader's data.
 
+**Reading fact**:
+
+A user-owned session, recorded time fragment, recorded local-date attribution,
+round membership, historical word/revision basis, or retained date-only legacy
+entry. Facts are never replaced by a statistic; edits remove the old fact's
+derived contribution before applying the new fact.
+
+**Reading projection**:
+
+A rebuildable, versioned summary derived from the reading facts for one user
+and book version. A projection may be stale or unavailable; that state is not
+the same as a numeric zero.
+
+**Reading contribution**:
+
+The smallest derived time/word contribution attributable to one fact and one
+recorded local date/hour. A date-only historical fact has a date contribution
+but no fabricated hour contribution.
+
+**Content basis**:
+
+The fixed revision identity and word-count basis used to interpret a coverage
+projection. The latest revision is only a candidate basis; it does not replace
+the revision recorded with a historical fact.
+
 ## User Feedback
 
 **Notification**:

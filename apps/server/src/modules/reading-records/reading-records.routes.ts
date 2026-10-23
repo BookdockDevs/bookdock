@@ -4,6 +4,8 @@ import {
   readingRecordCreateSchema,
   readingRecordHourlySchema,
   readingRecordRangeSchema,
+  readingLedgerSessionsQuerySchema,
+  readingLedgerStatsQuerySchema,
   readingSessionUpdateSchema,
   readingRoundActionSchema,
   readingTimerClaimSchema,
@@ -12,7 +14,7 @@ import {
 } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
-import { changeReadingRound, claimReadingTimer, deleteReadingArchive, exportReadingTransfer, getReadingLedger, importReadingTransfer, releaseReadingTimer } from './reading-ledger.service'
+import { changeReadingRound, claimReadingTimer, deleteReadingArchive, exportReadingTransfer, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, importReadingTransfer, releaseReadingTimer } from './reading-ledger.service'
 
 import {
   addReadingTime,
@@ -41,7 +43,19 @@ function serverToday(): string {
 }
 
 readingRecordsRoutes.get('/book/:bookId/ledger', async (c) => {
-  return c.json({ data: await getReadingLedger(c.get('user')!.id, c.req.param('bookId'), c.req.query('showHidden') === '1') })
+  return c.json({ data: await getReadingLedgerOverview(c.get('user')!.id, c.req.param('bookId'), c.req.query('showHidden') === '1') })
+})
+
+readingRecordsRoutes.get('/book/:bookId/stats', async (c) => {
+  const parsed = readingLedgerStatsQuerySchema.safeParse(c.req.query())
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid reading statistics range', parsed.error.flatten())
+  return c.json({ data: await getReadingLedgerStats(c.get('user')!.id, c.req.param('bookId'), parsed.data, c.req.query('showHidden') === '1') })
+})
+
+readingRecordsRoutes.get('/book/:bookId/sessions', async (c) => {
+  const parsed = readingLedgerSessionsQuerySchema.safeParse(c.req.query())
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid reading session page', parsed.error.flatten())
+  return c.json({ data: await getReadingLedgerSessions(c.get('user')!.id, c.req.param('bookId'), parsed.data, c.req.query('showHidden') === '1') })
 })
 
 readingRecordsRoutes.delete('/book/:bookId/ledger', (c) => {

@@ -22,8 +22,8 @@ describe('reading ledger schema repair', () => {
       const sessions = sqlite.prepare('SELECT * FROM reading_sessions').all()
       await runDatabaseMigrations(db)
       expect(db.select().from(schema.readingRecords).all()).toEqual([
-        { id: 'broken', userId: 'u', bookId: 'v', bookVersionId: 'v', date: '2026-10-01', durationSeconds: 180 },
-        { id: 'good', userId: 'u', bookId: 'v', bookVersionId: 'v', date: '2026-10-02', durationSeconds: 30 },
+        { id: 'broken', userId: 'u', bookId: 'v', bookVersionId: 'v', date: '2026-10-01', durationSeconds: 180, factVersion: 0, wordUnits: null, wordState: 'unknown', progressDelta: 0, coverage: [] },
+        { id: 'good', userId: 'u', bookId: 'v', bookVersionId: 'v', date: '2026-10-02', durationSeconds: 30, factVersion: 0, wordUnits: null, wordState: 'unknown', progressDelta: 0, coverage: [] },
       ])
       expect(db.select().from(schema.readingArchives).all()[0].legacyDaily).toEqual([{ date: '2026-10-01', durationSeconds: 60 }])
       const repaired = sqlite.prepare('SELECT * FROM reading_records').all()

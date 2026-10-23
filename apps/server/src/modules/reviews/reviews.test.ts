@@ -54,6 +54,35 @@ describe('book reviews', () => {
   let db: ReturnType<typeof drizzle<typeof schema>>
   const now = 1000
 
+  function removeReadingProjectionSchema() {
+    sqlite.exec(`
+      DROP TRIGGER IF EXISTS reading_projection_revision_delete;
+      DROP TRIGGER IF EXISTS reading_projection_revision_update;
+      DROP TRIGGER IF EXISTS reading_projection_revision_insert;
+      DROP INDEX IF EXISTS reading_book_stats_user_book_idx;
+      DROP TABLE IF EXISTS reading_book_stats;
+      DROP INDEX IF EXISTS reading_round_stats_book_idx;
+      DROP TABLE IF EXISTS reading_round_stats;
+      DROP INDEX IF EXISTS reading_hourly_stats_book_hour_idx;
+      DROP TABLE IF EXISTS reading_hourly_stats;
+      DROP INDEX IF EXISTS reading_contributions_book_date_idx;
+      DROP INDEX IF EXISTS reading_contributions_session_date_idx;
+      DROP INDEX IF EXISTS reading_contributions_user_key_idx;
+      DROP TABLE IF EXISTS reading_contributions;
+      DROP INDEX IF EXISTS reading_projection_states_user_version_idx;
+      DROP TABLE IF EXISTS reading_projection_states;
+      DROP INDEX IF EXISTS reading_sessions_user_book_sort_idx;
+      DROP INDEX IF EXISTS reading_sessions_user_book_id_idx;
+      ALTER TABLE reading_sessions DROP COLUMN sort_started_at;
+      ALTER TABLE reading_sessions DROP COLUMN sort_date;
+      ALTER TABLE reading_records DROP COLUMN progress_delta;
+    ALTER TABLE reading_records DROP COLUMN coverage;
+      ALTER TABLE reading_records DROP COLUMN word_state;
+      ALTER TABLE reading_records DROP COLUMN word_units;
+      ALTER TABLE reading_records DROP COLUMN fact_version;
+    `)
+  }
+
   function seed() {
     for (const id of ['owner', 'admin', 'member', 'outsider', 'author', 'critic']) {
       db.insert(schema.users).values({ id, username: id, createdAt: now }).run()
@@ -1030,6 +1059,7 @@ describe('book reviews', () => {
   it('adds file persistence to populated review/notification structures without rewriting legacy bodies', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: '  **literal**\n', bodyFormat: 'plain', visibility: 'shared' })
     await createReviewComment('member', review.id, { body: 'before files', requestId: 'before_files_123456789' })
+    removeReadingProjectionSchema()
     sqlite.exec('DROP TABLE activity_events; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
     await client.runDatabaseMigrations(db)
     expect((await getReviewDiscussion('author', review.id)).review).toMatchObject({ body: '  **literal**\n', bodyFormat: 'plain', files: [] })
@@ -1068,6 +1098,7 @@ describe('book reviews', () => {
 
   it('upgrades populated stage-one review structures into notification persistence', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: 'baseline', visibility: 'shared' })
+    removeReadingProjectionSchema()
     sqlite.exec("DROP TABLE activity_events; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
     await client.runDatabaseMigrations(db)
     expect(db.select().from(schema.bookReviews).get()?.id).toBe(review.id)

@@ -11,6 +11,7 @@ export const IDEA_DISCUSSION_TAG = '0041_idea_discussion'
 export const READING_LEDGER_TAG = '0052_reading_ledger'
 export const PERSONAL_ARCHIVE_TAG = '0053_personal_archive'
 export const CATEGORY_SHELF_SEPARATION_TAG = '0054_category_shelf_separation'
+export const READING_PROJECTION_TAG = '0056_reading_projections'
 export const BOOK_STATE_PROGRESS_TAG = '0051_book_state_progress'
 
 interface JournalEntry {
@@ -79,7 +80,7 @@ export function migrateBeforeBookRetirementIncluding(
   options: Parameters<typeof migrate>[1],
   includeTags: string[],
 ) {
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG])
   migrateWithTagFilter(
     db,
     options,

@@ -719,7 +719,55 @@ Conventions:
 - `coverPaletteId` — user-pinned placeholder-cover palette, validated against shared `COVER_PALETTE_IDS` (Morandi tones). In the versioned library model, an unset palette falls back to a deterministic hash of a stable cover-palette key, initially the immutable `bookVersion.id`; snapshot publishes carry that key forward so a new published `BookVersion` does not repaint the same coverless book. The key is not a library work/card id. Shared-library cards and collected private references therefore keep the same color. The pin is decorative and ignored while a real `coverKey` image exists. Legacy `books.meta` and current revision metadata are both exposed through `BookListItem.coverPaletteId` so grid cards do not need full metadata. Picking happens in the edit dialog's cover overlay (palette popover) and saves through `bookUpdateSchema` with the rest of the draft; there is no in-UI revert-to-auto.
 - Book covers retain their original blob. `GET /books/:id/cover` serves a cached, at-most-480px WebP thumbnail by default; `?size=original` serves the source image, and `?download=1` adds an attachment filename. Missing thumbnails are generated on demand for older books, while SVG covers remain in their original format. A thumbnail is deleted only when its original cover blob has no remaining book references.
 - TXT append is a two-step preview/commit flow. The preview parses the candidate text with the book's effective TOC rule, predicts a continuation point from the last 1–3 existing chapter nodes (including volume/chapter hierarchy), and returns every candidate boundary so the user can override the prediction. Commit accepts the selected normalized-text offset, discards only the candidate prefix before that boundary, then rebuilds the derived EPUB; the existing prefix remains byte-for-byte structurally stable so its CFI, bookmarks, and annotations stay valid. On success, the web mutation updates and invalidates both the library detail cache and the reader's `['book', bookId]` cache so a subsequent reader entry uses the new `updatedAt`-versioned file URL immediately.
-- `ReadingRecord(id, userId, bookId, date, durationSeconds)` — user-owned daily projection of the reading ledger. Version provenance survives content deletion. Known effective fragments split at recorded local day boundaries; untimed entries retain their declared date.
+- `ReadingRecord(id, userId, bookId, date, durationSeconds, wordUnits?, wordState, coverage, factVersion)` — user-owned versioned daily projection of the reading ledger. Version provenance survives content deletion. Known effective fragments split at recorded local day boundaries; untimed entries retain their declared date.
+
+### Reading ledger facts and projections
+
+The single-book trend chart retains its daily progress-increment meaning. The daily projection stores `progressDelta` separately from cumulative distinct coverage, using recorded session dates and the existing revision scale/fallback. Re-reading can increase this daily increment without increasing cumulative coverage. Editing, deleting, replacing sessions, and rebuilding projections maintain the same metric.
+
+`ReadingSession` and the date-only baseline retained in `ReadingArchive` are
+the authoritative personal reading facts. `ReadingRecord` remains the daily
+additive projection used by cross-book statistics; it is not a second source
+of truth. The versioned reading projection adds traceable session/date/hour
+contributions and compact daily, hourly, round and book summaries. Every projection
+row is scoped by `userId`; session and round references are foreign keys, while
+the book-version identity remains durable text provenance so personal facts can
+survive source deletion.
+
+Projection facts have three independent versions: the monotonically increasing
+fact version changes when the user's ledger facts change; the algorithm version
+identifies the rebuild/rounding rules; and the content-basis revision identifies
+the revision used for current coverage/word interpretation. Reads require a
+complete matching projection. A missing, stale or failed projection is an
+error state, never an empty statistic. Rebuilds calculate from sessions and
+archive baselines and atomically publishes the result inside one SQLite
+transaction. Ordinary session writes update only the changed session's
+contributions and the affected dates, hours, rounds and book summary; the full
+rebuild is retained as the repair/reference path. Content-revision triggers
+mark affected user projections stale, so the next read or write rebuilds them
+before serving or extending the new content basis.
+
+Time contributions are split using the session's recorded IANA timezone and
+actual fragments, including DST and non-integral offsets. Date-only legacy
+facts contribute duration to a date but never to an invented hour. Hour
+summaries expose cumulative duration and distinct contributing dates separately.
+Word totals retain a fixed integer micro-word precision and a known/partial/
+unknown state; averages use stored numerators and denominators rather than
+adding averages. Coverage is an interval union, separately maintained for
+each round and for the current content basis, so rereads add volume without
+duplicating coverage.
+
+The single-book API separates `overview` (lifetime round and coverage context),
+`stats` (range-scoped daily/hourly distributions and additive totals), and
+`sessions` (stable cursor pagination of unique session entities). The session
+page is ordered by persisted `sort_date`, `sort_started_at` and `id`, with an
+index matching that order; date-range membership still comes from contribution
+dates. Date groups
+are presentation only: a cross-midnight session can contribute to several
+dates but is returned and edited once. Export reads the complete fact ledger
+independently of the paged UI query. All three responses carry one opaque data
+version for comparison; clients invalidate and refetch after a fact or content
+basis change.
 
 ### Shared-library publishing boundary
 
@@ -1219,8 +1267,13 @@ SQLite + Drizzle. User-private rows enforce user ownership; shared content and l
 | `access_tokens` | id, userId FK (cascade), name, permissions (json), tokenHash (unique), tokenLast4, createdAt, expiresAt?, disabledAt? | operation-scoped tokens for external clients (ADR-24); one row per issued token, plaintext never stored, `expiresAt` NULL = permanent, `disabledAt` NULL = enabled; deleting the row is the only terminal state (no `revokedAt`) |
 | `text_replacements` | id, userId FK, bookId?, matchType, pattern/replacement?, isRegex, applyTo, enabled, metadata fields | pattern rules are user-global; point patches require a book and always target content; `applyTo` is `content`, `title`, or `both`; per-book pattern enablement is stored separately |
 | `text_replacement_overrides` | id, userId FK, bookId FK, replacementId FK, enabled, createdAt, updatedAt | unique (bookId, replacementId); existence means a book-specific override |
-| `reading_records` | id, userId FK, bookId (provenance), date, durationSeconds | unique (userId, bookId, date); daily ledger projection |
-| `reading_sessions` | id, userId FK, bookId (provenance), roundId FK, source, requestId, timezone, fragments, coverage, revisionId, wordCount | canonical effective time and coverage contributions; no content-deletion cascade |
+| `reading_records` | id, userId FK, bookId (provenance), date, durationSeconds, wordUnits?, wordState, coverage, factVersion | unique (userId, bookId, date); versioned daily ledger projection |
+| `reading_sessions` | id, userId FK, bookId (provenance), roundId FK, source, requestId, timezone, fragments, coverage, revisionId, wordCount, sortDate, sortStartedAt | canonical effective time and coverage facts plus indexed detail ordering; no content-deletion cascade |
+| `reading_contributions` | id, userId FK, bookVersionId provenance, sessionId FK?, roundId FK?, contributionKey, date, hour?, durationSeconds, wordUnits?, coverage | traceable per-session/date contribution; unique user/contribution key; date-only facts have null hour |
+| `reading_hourly_stats` | userId FK, bookVersionId, date, hour, factVersion, durationSeconds, sessionCount | versioned additive hour projection; distinct dates are counted by grouping rows, not by summing a date counter |
+| `reading_round_stats` | userId FK, roundId FK, bookVersionId, factVersion, totalSeconds, sessionCount, coverage, wordCount?, wordState | versioned per-round summary |
+| `reading_book_stats` | userId FK, bookVersionId, factVersion, algorithmVersion, contentRevisionId?, contentWordCount?, totals, word numerators/denominators, coverage | compact versioned overview and estimate inputs; average/estimate inputs store numerators and denominators |
+| `reading_projection_states` | userId FK, bookVersionId, factVersion, algorithmVersion, contentRevisionId?, contentWordCount?, status, error | per-user projection generation/state; stale or failed is not zero |
 | `reading_archives` | userId FK, bookVersionId (provenance), title, author, format?, coverKey?, legacyIntervals, legacyDaily, legacyWordCount, legacyRevisionId | private retained metadata, the source-unavailable snapshot (title/author/format/cover) and an explicitly limited legacy baseline |
 | `reading_rounds` | id, userId FK, bookVersionId (provenance), ordinal, status, startedAt, endedAt | unique ordinal and at most one ongoing round per user/version |
 | `reading_write_receipts` | userId FK, requestId, bookVersionId, bodyHash, sessionId FK (set null), status | durable request identity, including deletion and overlap-only acknowledgement |
@@ -1358,7 +1411,7 @@ A private work may carry `meta.pendingUserDataDeletion`, set when the owner move
 | `/api/v1/settings` | settings | `GET /` `PUT /` |
 | `/api/v1/tts` | tts | `GET /providers` `GET/POST /services` `POST /services/test` `GET/PUT/DELETE /services/:id` `GET /services/:id/voices` `POST /services/:id/test` `POST /speech` (server-side provider gateways) |
 | `/api/v1/ai` | ai | `GET /providers` `GET /status` `GET/PATCH /config`(active Chat/Embedding profiles, prompt templates, and assistant modes) `POST/PATCH/DELETE /profiles` `POST /models` `POST /test` `GET/POST /threads` `GET/PATCH/DELETE /threads/:id` `GET /runs/:id` `POST /runs/:id/cancel` `GET /retrieval/status` `POST /retrieval/index` `POST /retrieval/index/cancel` `DELETE /retrieval/index` `POST /retrieval/search` `POST /chat` (server-side multi-provider Chat LLM gateway; provider metadata includes key requirements; status exposes only the active profile's non-sensitive model options, enabled quick prompts, and assistant modes for the reader picker; model discovery/test are non-persistent draft operations; existing-profile drafts identify their profile so saved secrets are never borrowed by new profiles; retrieval status exposes user-visible lexical/embedding progress and the embedding provider/model fingerprint, and its derived index can be cancelled, rolled back, cleared, and rebuilt on demand; chat may use an allowlisted, bounded read-only tool set for the owned book, accepts bounded Reader-visible chapter references and the selected assistant-mode prompt, persists user-visible messages and bounded retry recipes by thread, and exposes only bounded generation-run/checkpoint projections) |
-| `/api/v1/reading-records` | reading | `POST /` `GET /summary` `GET /daily` `GET /by-book` `GET /by-category` (direct category groups, including null Uncategorized; current holding metadata) `GET /by-tag` (deduplicated version/tag associations) `GET /hourly`(?from&to&tzOffset&bookId?) `GET /book/:bookId` |
+| `/api/v1/reading-records` | reading | `POST /` `GET /summary` `GET /daily` `GET /by-book` `GET /by-category` (direct category groups, including null Uncategorized; current holding metadata) `GET /by-tag` (deduplicated version/tag associations) `GET /hourly`(?from&to&tzOffset&bookId?) `GET /book/:bookId` (range aggregate) `GET /book/:bookId/ledger` (overview) `GET /book/:bookId/stats` (range projection) `GET /book/:bookId/sessions` (stable cursor page) |
 
 AI retrieval indexes are derived per user and per book. A reader-triggered index request may carry bounded chapter text produced by the reader's visible transformation pipeline, together with its transformation fingerprint; the server keeps ownership and chapter metadata authoritative while using the supplied text for chunk offsets. Reader chat carries the same opaque transformation fingerprint through its context, so `search_book` and `get_chapter_content` must use an exact matching visible index and must not silently fall back to source text; an unbuilt visible index returns an explicit unavailable result for the model to explain. Semantic query embedding has a short bounded timeout and falls back to lexical retrieval, while an explicit user/request abort still cancels the whole operation. Server-only callers may use the source-book fallback, which is intentionally not represented as transformed visible text. For chat, the server derives an effective chapter interval from the requested reading scope and persisted progress before any provider request: `to_here` includes chapters through the current progress chapter, `current_chapter` includes only that chapter, and `full_book` includes the complete TOC. The client chapter index can identify direct context but cannot widen this interval; every TOC, chapter, book-search, and note-search tool execution rechecks the interval. Explicit chapter references remain bounded user-authorized direct context and are recorded separately in the receipt.
 

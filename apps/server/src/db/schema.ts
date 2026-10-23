@@ -252,6 +252,11 @@ export const readingRecords = sqliteTable('reading_records', {
   // Calendar day attributed by the reading ledger ('YYYY-MM-DD'), one row per user+book+day
   date: text('date').notNull(),
   durationSeconds: integer('duration_seconds').notNull().default(0),
+  factVersion: integer('fact_version').notNull().default(0),
+  wordUnits: integer('word_units'),
+  wordState: text('word_state', { enum: ['known', 'partial', 'unknown'] }).notNull().default('unknown'),
+  progressDelta: real('progress_delta').notNull().default(0),
+  coverage: text('coverage', { mode: 'json' }).$type<ReadingCoverageInterval[]>().notNull().default([]),
 }, (table) => ({
   userBookDateIdx: uniqueIndex('reading_records_user_book_date_idx').on(table.userId, table.bookId, table.date),
   userDateIdx: index('reading_records_user_date_idx').on(table.userId, table.date),
@@ -303,6 +308,8 @@ export const readingSessions = sqliteTable('reading_sessions', {
   bookVersionId: text('book_version_id'),
   // Calendar day attributed by the reading ledger ('YYYY-MM-DD')
   date: text('date').notNull(),
+  sortDate: text('sort_date').notNull().default(''),
+  sortStartedAt: integer('sort_started_at').notNull().default(0),
   // Nullable for retroactive manual entries recorded without a start time
   startedAt: integer('started_at'),
   durationSeconds: integer('duration_seconds').notNull().default(0),
@@ -326,6 +333,8 @@ export const readingSessions = sqliteTable('reading_sessions', {
   userRequestIdx: uniqueIndex('reading_sessions_user_request_idx').on(table.userId, table.requestId),
   roundIdx: index('reading_sessions_round_idx').on(table.roundId),
   userDateIdx: index('reading_sessions_user_date_idx').on(table.userId, table.date),
+  userBookIdIdx: index('reading_sessions_user_book_id_idx').on(table.userId, table.bookId, table.id),
+  userBookSortIdx: index('reading_sessions_user_book_sort_idx').on(table.userId, table.bookId, table.sortDate, table.sortStartedAt, table.id),
   versionIdx: index('reading_sessions_book_version_idx').on(table.bookVersionId),
 }))
 
@@ -339,6 +348,91 @@ export const readingWriteReceipts = sqliteTable('reading_write_receipts', {
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.requestId] }),
   versionIdx: index('reading_write_receipts_user_version_idx').on(table.userId, table.bookVersionId),
+}))
+
+export const readingProjectionStates = sqliteTable('reading_projection_states', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull(),
+  factVersion: integer('fact_version').notNull().default(0),
+  algorithmVersion: integer('algorithm_version').notNull().default(1),
+  contentRevisionId: text('content_revision_id'),
+  contentWordCount: integer('content_word_count'),
+  status: text('status', { enum: ['ready', 'failed'] }).notNull().default('ready'),
+  error: text('error'),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.bookVersionId] }),
+  userVersionIdx: index('reading_projection_states_user_version_idx').on(table.userId, table.bookVersionId, table.factVersion),
+}))
+
+export const readingContributions = sqliteTable('reading_contributions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull(),
+  sessionId: text('session_id').references(() => readingSessions.id, { onDelete: 'cascade' }),
+  roundId: text('round_id').references(() => readingRounds.id, { onDelete: 'cascade' }),
+  contributionKey: text('contribution_key').notNull(),
+  date: text('date').notNull(),
+  hour: integer('hour'),
+  durationSeconds: integer('duration_seconds').notNull(),
+  wordUnits: integer('word_units'),
+  coverage: text('coverage', { mode: 'json' }).$type<ReadingCoverageInterval[]>().notNull().default([]),
+}, (table) => ({
+  uniqueKey: uniqueIndex('reading_contributions_user_key_idx').on(table.userId, table.contributionKey),
+  sessionDateIdx: index('reading_contributions_session_date_idx').on(table.userId, table.bookVersionId, table.sessionId, table.date, table.hour),
+  bookDateIdx: index('reading_contributions_book_date_idx').on(table.userId, table.bookVersionId, table.date, table.hour),
+}))
+
+export const readingHourlyStats = sqliteTable('reading_hourly_stats', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull(),
+  date: text('date').notNull(),
+  hour: integer('hour').notNull(),
+  factVersion: integer('fact_version').notNull(),
+  durationSeconds: integer('duration_seconds').notNull(),
+  sessionCount: integer('session_count').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.bookVersionId, table.date, table.hour] }),
+  bookHourIdx: index('reading_hourly_stats_book_hour_idx').on(table.userId, table.bookVersionId, table.hour, table.date),
+}))
+
+export const readingRoundStats = sqliteTable('reading_round_stats', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  roundId: text('round_id').notNull().references(() => readingRounds.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull(),
+  factVersion: integer('fact_version').notNull(),
+  totalSeconds: integer('total_seconds').notNull(),
+  sessionCount: integer('session_count').notNull(),
+  coverage: text('coverage', { mode: 'json' }).$type<ReadingCoverageInterval[]>().notNull().default([]),
+  wordCount: integer('word_count'),
+  wordState: text('word_state', { enum: ['known', 'partial', 'unknown'] }).notNull(),
+}, (table) => ({
+  uniqueRound: uniqueIndex('reading_round_stats_user_round_idx').on(table.userId, table.roundId),
+  bookRoundIdx: index('reading_round_stats_book_idx').on(table.userId, table.bookVersionId, table.roundId),
+}))
+
+export const readingBookStats = sqliteTable('reading_book_stats', {
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  bookVersionId: text('book_version_id').notNull(),
+  factVersion: integer('fact_version').notNull(),
+  algorithmVersion: integer('algorithm_version').notNull(),
+  contentRevisionId: text('content_revision_id'),
+  contentWordCount: integer('content_word_count'),
+  totalSeconds: integer('total_seconds').notNull(),
+  sessionCount: integer('session_count').notNull(),
+  readingDays: integer('reading_days').notNull(),
+  totalWordUnits: integer('total_word_units'),
+  knownWordUnits: integer('known_word_units').notNull().default(0),
+  knownDurationSeconds: integer('known_duration_seconds').notNull().default(0),
+  knownContributionCount: integer('known_contribution_count').notNull().default(0),
+  unknownContributionCount: integer('unknown_contribution_count').notNull().default(0),
+  wordState: text('word_state', { enum: ['known', 'partial', 'unknown'] }).notNull(),
+  coverage: text('coverage', { mode: 'json' }).$type<ReadingCoverageInterval[]>().notNull().default([]),
+  earliestDate: text('earliest_date'),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.bookVersionId] }),
+  userBookIdx: index('reading_book_stats_user_book_idx').on(table.userId, table.bookVersionId, table.factVersion),
 }))
 
 // Library foundation (Phase 1): structure only, no data migration yet.

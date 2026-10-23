@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ReadingLedgerRes } from '@bookdock/shared'
@@ -6,10 +7,20 @@ import type { ReadingLedgerRes } from '@bookdock/shared'
 import StatsPanel from '@/features/reader/components/StatsPanel'
 
 const state = vi.hoisted(() => ({ ledger: null as ReadingLedgerRes | null, error: false, retry: vi.fn() }))
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+function renderPanel() {
+  return render(<QueryClientProvider client={queryClient}><StatsPanel bookId="b1" /></QueryClientProvider>)
+}
 vi.mock('@/api/hooks/reading-records', async (original) => ({
   ...await original<typeof import('@/api/hooks/reading-records')>(),
   useReadingLedger: () => ({ data: { data: state.ledger }, isPending: false, isError: state.error, isFetching: false, refetch: state.retry }),
   useDeleteSession: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useBookReadingLedgerStats: () => ({
+    data: { data: { dataVersion: 1, totalSeconds: state.ledger?.totalSeconds ?? 0, totalWordsRead: 0, wordState: 'known', readingDays: state.ledger?.totalSeconds ? 2 : 0, daily: [], hourly: [], legacyDaily: [] } },
+    refetch: state.retry, isFetching: false,
+  }),
+  useBookReadingSessions: () => ({ data: { pages: [{ data: { dataVersion: 1, items: state.ledger?.sessions ?? [], nextCursor: null, hasMore: false } }] }, hasNextPage: false, fetchNextPage: vi.fn(), isFetchingNextPage: false, refetch: state.retry, isFetching: false }),
 }))
 vi.mock('@tanstack/react-router', () => ({ Link: ({ children, search, to, ...props }: { children: React.ReactNode; to: string; search: unknown }) => <a href={to} data-search={JSON.stringify(search)} {...props}>{children}</a> }))
 vi.mock('@/features/library/hooks', () => ({
@@ -19,6 +30,7 @@ vi.mock('@/features/reader/components/AddRecordDialog', () => ({ default: () => 
 
 beforeEach(() => {
   vi.clearAllMocks()
+  queryClient.clear()
   state.error = false
   state.ledger = {
     bookId: 'b1', title: 'A book', author: 'An author', sourceAvailable: true, currentRoundId: 'r2', coverage: 0.25, totalSeconds: 9000,
@@ -33,7 +45,7 @@ beforeEach(() => {
 
 describe('reader statistics overview', () => {
   it('shows combined history without exposing reading rounds', () => {
-    render(<StatsPanel bookId="b1" />)
+    renderPanel()
     expect(within(screen.getByText('reader.statsProgress').parentElement!).getByText('25%')).toBeInTheDocument()
     expect(within(screen.getByText('reader.statsReadingDays').parentElement!).getByText('2')).toBeInTheDocument()
     expect(screen.getByText(/readingData.roundOrdinal/)).toBeInTheDocument()
@@ -43,7 +55,7 @@ describe('reader statistics overview', () => {
   })
 
   it('offers the shared quick entry', () => {
-    render(<StatsPanel bookId="b1" />)
+    renderPanel()
     fireEvent.click(screen.getByText('reader.detailAdd'))
     expect(screen.getByTestId('quick-add')).toBeInTheDocument()
   })
@@ -54,16 +66,18 @@ describe('reader statistics overview', () => {
     state.ledger!.legacyIntervals = []
     state.ledger!.rounds = []
     state.ledger!.sessions = []
-    render(<StatsPanel bookId="b1" />)
+    renderPanel()
     expect(screen.getByText('reader.statsEmptyTitle')).toBeInTheDocument()
     expect(screen.getByText('reader.statsEmptyDesc')).toBeInTheDocument()
   })
 
   it('uses an explicit retry state when the ledger cannot be loaded', () => {
+    const resetQueries = vi.spyOn(queryClient, 'resetQueries')
     state.error = true
-    render(<StatsPanel bookId="b1" />)
+    renderPanel()
     expect(screen.queryByText('reader.statsProgress')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button'))
-    expect(state.retry).toHaveBeenCalledOnce()
+    expect(state.retry).toHaveBeenCalledTimes(2)
+    expect(resetQueries).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,18 +1,39 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ReadingLedgerRes, ReadingRange } from '@bookdock/shared'
 
 import BookReadingData from './BookReadingData'
+import { ledgerScopedWords, ledgerTimeDistribution } from './reading-ledger-stats'
 
-const state = vi.hoisted(() => ({ ledger: null as ReadingLedgerRes | null, mutate: vi.fn() }))
+const state = vi.hoisted(() => ({ ledger: null as ReadingLedgerRes | null, mutate: vi.fn(), pageSize: 50 }))
 vi.mock('@/api/hooks/reading-records', async (original) => ({
   ...await original<typeof import('@/api/hooks/reading-records')>(),
   useReadingLedger: () => ({ data: { data: state.ledger }, isPending: false, isError: false }),
   useReadingRound: () => ({ mutate: state.mutate, isPending: false }),
   useDeleteSession: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateSession: () => ({ mutate: vi.fn(), isPending: false }),
+  useBookReadingLedgerStats: (_bookId: string, range?: ReadingRange) => {
+    const ledger = state.ledger
+    const sessions = ledger?.sessions ?? []
+    const coverage = Math.max(ledger?.coverage ?? 0, ...sessions.flatMap((session) => session.coverage.map(([, end]) => end)))
+    const distribution = ledgerTimeDistribution(sessions, range)
+    for (const day of ledger?.legacyDaily ?? []) if ((!range?.from || day.date >= range.from) && (!range?.to || day.date <= range.to)) distribution.days.set(day.date, (distribution.days.get(day.date) ?? 0) + day.durationSeconds)
+    const scopedWords = ledgerScopedWords(sessions, range).words + (!range?.from && !range?.to ? (ledger?.legacyIntervals ?? []).reduce((sum, [start, end]) => sum + end - start, 0) * (ledger?.legacyWordCount ?? 0) : 0)
+    return { data: { data: { dataVersion: 1, totalSeconds: [...distribution.days.values()].reduce((sum, value) => sum + value, 0), totalWordsRead: Math.round(scopedWords), wordState: 'known', readingDays: [...distribution.days.values()].filter((value) => value >= 60).length, daily: [...distribution.days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, durationSeconds]) => ({ date, durationSeconds, totalWordsRead: null, wordState: 'known', progressDelta: 0, cumulativeCoverage: coverage })), hourly: [], legacyDaily: (ledger?.legacyDaily ?? []).filter((day) => (!range?.from || day.date >= range.from) && (!range?.to || day.date <= range.to)), remainingSeconds: null } } }
+  },
+  useBookReadingSessions: (_bookId: string, range?: ReadingRange) => {
+    const [pageSize, setPageSize] = useState(50)
+    useEffect(() => setPageSize(50), [range?.from, range?.to])
+    const allItems = (state.ledger?.sessions ?? []).filter((session) => {
+      const dates = session.contributionDates ?? [session.date]
+      return (!range?.from || dates.some((date) => date >= range.from!)) && (!range?.to || dates.some((date) => date <= range.to!))
+    })
+    const items = allItems.slice(0, pageSize)
+    return { data: { pages: [{ data: { dataVersion: 1, items, nextCursor: pageSize < allItems.length ? 'next' : null, hasMore: pageSize < allItems.length } }] }, hasNextPage: pageSize < allItems.length, fetchNextPage: () => setPageSize(allItems.length), isFetchingNextPage: false, isError: false }
+  },
 }))
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string, params?: Record<string, string | number>) => params ? `${key} ${JSON.stringify(params)}` : key }))
 
@@ -22,6 +43,7 @@ function renderData(range?: ReadingRange, onSelectDate?: (date: string | null) =
 
 beforeEach(() => {
   vi.clearAllMocks()
+  state.pageSize = 50
   state.ledger = {
     bookId: 'b1', title: 'A book', author: 'An author', sourceAvailable: false, currentRoundId: 'r1', legacyCoverage: true,
     coverage: 0.2, totalSeconds: 3661, legacyDaily: [{ date: '2026-10-17', durationSeconds: 3600 }], legacyIntervals: [[0, 0.1]], legacyWordCount: 10000,
@@ -41,7 +63,7 @@ describe('single-book reading data', () => {
 
   it('shows only a cross-midnight contribution while retaining the complete record for maintenance', () => {
     state.ledger!.legacyDaily = []
-    state.ledger!.sessions[0] = { ...state.ledger!.sessions[0], durationSeconds: 120, fragments: [{ startedAt: Date.parse('2026-10-17T15:59:30Z'), endedAt: Date.parse('2026-10-17T16:01:30Z') }] }
+    state.ledger!.sessions[0] = { ...state.ledger!.sessions[0], durationSeconds: 120, fragments: [{ startedAt: Date.parse('2026-10-17T15:59:30Z'), endedAt: Date.parse('2026-10-17T16:01:30Z') }], contributionDates: ['2026-10-17', '2026-10-18'] }
     const original = structuredClone(state.ledger!.sessions[0])
     renderData({ from: '2026-10-18', to: '2026-10-18' })
     expect(within(screen.getAllByText('readingData.words')[0].parentElement!).getByText('750')).toBeInTheDocument()

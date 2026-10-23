@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
 
+import { useQueryClient } from '@tanstack/react-query'
+
 import type { ReadingLedgerSession } from '@bookdock/shared'
 
-import { useDeleteSession, useReadingLedger } from '@/api/hooks/reading-records'
+import { READING_RECORDS_KEY, useBookReadingLedgerStats, useBookReadingSessions, useDeleteSession, useReadingLedger, useReadingLedgerRecovery } from '@/api/hooks/reading-records'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useBook } from '@/features/library/hooks'
 import ReadingSessionCard from '@/features/archive/components/ReadingSessionCard'
-import { ledgerCoverageByDate, ledgerEstimates, ledgerProgressBounds, ledgerTimeDistribution } from '@/features/archive/components/reading-ledger-stats'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
 
@@ -18,69 +19,50 @@ interface StatsPanelProps { bookId: string }
 export default function StatsPanel({ bookId }: StatsPanelProps) {
   const _ = useTranslation()
   const ledgerQuery = useReadingLedger(bookId)
+  const dataVersion = ledgerQuery.data?.data?.dataVersion
+  const statsQuery = useBookReadingLedgerStats(bookId, undefined, dataVersion)
+  const sessionsQuery = useBookReadingSessions(bookId, undefined, dataVersion)
   const bookQuery = useBook(bookId)
   const deleteMutation = useDeleteSession()
+  const queryClient = useQueryClient()
+
   const [addOpen, setAddOpen] = useState(false)
   const [editingSession, setEditingSession] = useState<ReadingLedgerSession | null>(null)
   const [deletingSession, setDeletingSession] = useState<ReadingLedgerSession | null>(null)
   const [deletingBusy, setDeletingBusy] = useState(false)
-  const [recordLimit, setRecordLimit] = useState(20)
 
   const ledger = ledgerQuery.data?.data
+  const statsVersionMismatch = Boolean(ledger?.dataVersion !== undefined && statsQuery.data?.data && statsQuery.data.data.dataVersion !== ledger.dataVersion)
   const book = bookQuery.data?.data
   const round = ledger?.rounds.find((item) => item.id === ledger.currentRoundId) ?? ledger?.rounds[0]
-  const sessions = useMemo(() => ledger?.sessions ?? [], [ledger])
-  const sortedSessions = useMemo(
-    () => [...sessions].sort((a, b) => b.date.localeCompare(a.date) || (b.startedAt ?? 0) - (a.startedAt ?? 0)),
-    [sessions],
-  )
-  const visibleSessions = useMemo(() => sortedSessions.slice(0, recordLimit), [sortedSessions, recordLimit])
+  const sessionsVersionStable = useMemo(() => {
+    const pages = sessionsQuery.data?.pages ?? []
+    const pageVersion = pages[0]?.data.dataVersion
+    return pageVersion !== undefined && pages.length > 0 && pages.every((page) => page.data.dataVersion === pageVersion)
+      && (dataVersion === undefined || pageVersion === dataVersion)
+  }, [dataVersion, sessionsQuery.data])
+  const sessionsVersionMismatch = Boolean(dataVersion !== undefined && (sessionsQuery.data?.pages ?? []).length > 0 && !sessionsVersionStable)
+  const hasVersionMismatch = statsVersionMismatch || sessionsVersionMismatch
 
-  const days = useMemo(() => {
-    const daily = ledgerTimeDistribution(sessions).days
-    for (const day of ledger?.legacyDaily ?? []) daily.set(day.date, (daily.get(day.date) ?? 0) + day.durationSeconds)
-    return [...daily.values()].filter((seconds) => seconds >= 60).length
-  }, [sessions, ledger?.legacyDaily])
-  const coverage = useMemo(() => [...ledgerCoverageByDate(sessions, ledger?.projectedLegacyIntervals ?? ledger?.legacyIntervals ?? []).values()].at(-1) ?? (ledger?.projectedLegacyIntervals ?? ledger?.legacyIntervals ?? []).reduce((sum, [start, end]) => sum + end - start, 0), [sessions, ledger?.projectedLegacyIntervals, ledger?.legacyIntervals])
-  const estimates = useMemo(() => ledgerEstimates(sessions, coverage, round?.wordCount), [sessions, coverage, round?.wordCount])
-  const legacyWords = (ledger?.legacyIntervals ?? []).reduce((sum, [start, end]) => sum + end - start, 0) * (ledger?.legacyWordCount ?? 0)
-  const initialFraction = sortedSessions.map((session) => ledgerProgressBounds(session).end).filter((value) => value !== null).at(-1) ?? undefined
+  const recovery = useReadingLedgerRecovery(bookId, hasVersionMismatch)
 
-  const ringIntervals = useMemo(() => {
-    const raw: Array<[number, number]> = []
-    raw.push(...(ledger?.projectedLegacyIntervals ?? ledger?.legacyIntervals ?? []))
-    for (const session of sessions) {
-      const cov = session.projectedCoverage ?? session.coverage
-      if (cov && Array.isArray(cov)) {
-        raw.push(...cov)
-      }
-    }
-    const sorted = raw
-      .map(([a, b]): [number, number] => [Math.max(0, Math.min(1, Math.min(a, b))), Math.max(0, Math.min(1, Math.max(a, b)))])
-      .filter(([a, b]) => b > a)
-      .sort(([a], [b]) => a - b)
-    const merged: Array<[number, number]> = []
-    for (const [start, end] of sorted) {
-      const last = merged.at(-1)
-      if (last && start <= last[1]) {
-        last[1] = Math.max(last[1], end)
-      } else {
-        merged.push([start, end])
-      }
-    }
-    return merged
-  }, [sessions, ledger?.legacyIntervals, ledger?.projectedLegacyIntervals])
-
-  const earliestDate = useMemo(() => {
-    let minDate: string | null = null
-    for (const session of sessions) {
-      if (!minDate || session.date < minDate) minDate = session.date
-    }
-    for (const legacy of ledger?.legacyDaily ?? []) {
-      if (!minDate || legacy.date < minDate) minDate = legacy.date
-    }
-    return minDate
-  }, [sessions, ledger?.legacyDaily])
+  const handleRetry = () => {
+    if (hasVersionMismatch || recovery.failed) { recovery.retry(); return }
+    void ledgerQuery.refetch()
+    void statsQuery.refetch()
+    void queryClient.resetQueries({ queryKey: [...READING_RECORDS_KEY, 'ledger-sessions', bookId] })
+  }
+  const stats = statsVersionMismatch ? undefined : statsQuery.data?.data
+  const sessions = useMemo(() => {
+    const pages = sessionsQuery.data?.pages ?? []
+    return sessionsVersionStable ? pages.flatMap((page) => page.data.items) : pages[0]?.data.items ?? []
+  }, [sessionsQuery.data, sessionsVersionStable])
+  const sortedSessions = sessions
+  const visibleSessions = sortedSessions
+  const days = stats?.readingDays ?? 0
+  const coverage = ledger?.coverage ?? 0
+  const ringIntervals = ledger?.coverageIntervals ?? []
+  const earliestDate = ledger?.earliestDate ?? null
 
   function formatPercent(value: number): string {
     const rounded = Number(value.toFixed(2))
@@ -91,27 +73,26 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
     if (book?.progress != null) {
       return Math.min(100, Math.max(0, book.progress))
     }
-    const lastSessionEnd = sortedSessions
-      .map((s) => ledgerProgressBounds(s).end)
-      .filter((v): v is number => v !== null)
-      .at(0)
-    if (lastSessionEnd != null) {
-      return lastSessionEnd * 100
-    }
     return coverage * 100
-  }, [book?.progress, sortedSessions, coverage])
+  }, [book?.progress, coverage])
 
-  if (ledgerQuery.isError) return <QueryErrorState className="text-[var(--bd-read-sub)]" isRetrying={ledgerQuery.isFetching} onRetry={() => void ledgerQuery.refetch()} />
-  if (ledgerQuery.isPending) return <div role="status" className="h-40 animate-pulse rounded-xl bg-stone-500/10" />
+  if (ledgerQuery.isError || statsQuery.isError || sessionsQuery.isError) {
+    return <QueryErrorState className="text-[var(--bd-read-sub)]" isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />
+  }
+  if (hasVersionMismatch && recovery.failed) {
+    return <QueryErrorState className="text-[var(--bd-read-sub)]" isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />
+  }
+  if (hasVersionMismatch || ledgerQuery.isPending || statsQuery.isPending || sessionsQuery.isPending) return <div role="status" className="h-40 animate-pulse rounded-xl bg-stone-500/10" />
 
   const totalSeconds = ledger?.totalSeconds ?? 0
-  const totalWords = Math.round(estimates.words + legacyWords)
-  const totalWordsDisplay = totalWords > 0
+  const totalWords = stats?.totalWordsRead
+  const totalWordsDisplay = totalWords !== null && totalWords !== undefined && totalWords > 0
     ? totalWords >= 10000
       ? `${(totalWords / 10000).toFixed(2)} 万`
       : totalWords.toLocaleString()
     : '—'
   const avgDailySeconds = days > 0 ? Math.round(totalSeconds / days) : null
+  const initialFraction = coverage
 
   return (
     <div className="space-y-4 px-1 pt-3 pb-6">
@@ -229,10 +210,11 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
               />
             ))}
           </div>
-          {recordLimit < sortedSessions.length && (
+          {sessionsVersionStable && sessionsQuery.hasNextPage && (
             <button
               type="button"
-              onClick={() => setRecordLimit((limit) => limit + 20)}
+              onClick={() => void sessionsQuery.fetchNextPage()}
+              disabled={sessionsQuery.isFetchingNextPage}
               className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--bd-read-accent)]/80 py-2 text-xs font-medium text-[var(--bd-read-sub)] hover:bg-stone-500/10 cursor-pointer transition-colors"
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

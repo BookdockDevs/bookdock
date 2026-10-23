@@ -386,6 +386,13 @@
       "when": 1793300000000,
       "tag": "0055_activity_events",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1793400000000,
+      "tag": "0056_reading_projections",
+      "breakpoints": true
     }
   ]
 }

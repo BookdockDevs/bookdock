@@ -2,7 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import Database from 'better-sqlite3'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,7 +18,7 @@ import * as storage from '../../storage'
 import { getOverview, listBooks } from '../archive/archive.service'
 import { getDaily, getSummary } from './reading-records.service'
 import { noteArchive } from '../annotations/note-archive.service'
-import { addLedgerReading, changeReadingRound, claimReadingTimer, deleteLedgerSession, deleteReadingArchive, exportReadingTransfer, getReadingLedger, importReadingTransfer, releaseReadingTimer, updateLedgerSession } from './reading-ledger.service'
+import { addLedgerReading, changeReadingRound, claimReadingTimer, deleteLedgerSession, deleteReadingArchive, exportReadingTransfer, getReadingLedger, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, importReadingTransfer, rebuildAllReadingProjections, releaseReadingTimer, updateLedgerSession } from './reading-ledger.service'
 
 const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../db/migrations')
 
@@ -361,6 +361,8 @@ describe('reading ledger service', () => {
     const saved = await addLedgerReading('u1', { ...replacement, replaceSessionIds: [first.id, second.id] })
     expect(saved.durationSeconds).toBe(60)
     expect((await getReadingLedger('u1', 'v1')).totalSeconds).toBe(100)
+    expect((await getReadingLedgerOverview('u1', 'v1')).totalSeconds).toBe(100)
+    expect((await getReadingLedgerStats('u1', 'v1')).daily.find((day) => day.date === '2026-10-17')?.progressDelta).toBeCloseTo(0.15)
     expect((await getReadingLedger('u2', 'v1')).totalSeconds).toBe(60)
     await expect(addLedgerReading('u1', firstBody)).resolves.toMatchObject({ deleted: true, durationSeconds: 0 })
     await expect(addLedgerReading('u1', secondBody)).resolves.toMatchObject({ deleted: true, durationSeconds: 0 })
@@ -434,4 +436,164 @@ describe('reading ledger service', () => {
     expect((await getReadingLedger('u1', 'v1')).coverage).toBeCloseTo(0.5)
   })
 
+  it('keeps independent projection queries consistent across cross-day facts, rebuilds and deletion', async () => {
+    const start = Date.parse('2026-10-17T15:59:00Z')
+    const timed = {
+      bookId: 'v1', date: '2026-10-17', durationSeconds: 120, source: 'manual' as const,
+      timezone: 'Asia/Shanghai', wordCount: 1000, startFraction: 0.2, endFraction: 0.4,
+      fragments: [{ startedAt: start, endedAt: start + 120_000 }],
+    }
+    const first = await addLedgerReading('u1', timed)
+    await addLedgerReading('u1', { ...timed, date: '2026-10-19', fragments: [{ startedAt: start + 2 * 86400_000, endedAt: start + 2 * 86400_000 + 120_000 }] })
+
+    const overview = await getReadingLedgerOverview('u1', 'v1')
+    expect(overview.totalSeconds).toBe(280)
+    expect(overview.totalWordsRead).toBe(600)
+    expect(overview.coverage).toBeCloseTo(0.4)
+    expect(overview.dataVersion).toBeGreaterThan(0)
+
+    const scoped = await getReadingLedgerStats('u1', 'v1', { from: '2026-10-17', to: '2026-10-18' })
+    expect(scoped.totalSeconds).toBe(120)
+    expect(scoped.totalWordsRead).toBe(200)
+    expect(scoped.daily.map((day) => [day.date, day.durationSeconds])).toEqual([
+      ['2026-10-17', 60], ['2026-10-18', 60],
+    ])
+    expect(scoped.daily.at(-1)?.cumulativeCoverage).toBeCloseTo(0.4)
+    expect(scoped.hourly).toEqual([
+      { hour: 0, durationSeconds: 60, days: 1 },
+      { hour: 23, durationSeconds: 60, days: 1 },
+    ])
+
+    const firstPage = await getReadingLedgerSessions('u1', 'v1', { limit: 1 })
+    expect(firstPage.items).toHaveLength(1)
+    expect(firstPage.items[0].contributionDates).toEqual(['2026-10-19', '2026-10-20'])
+    const secondPage = await getReadingLedgerSessions('u1', 'v1', { limit: 1, cursor: firstPage.nextCursor ?? undefined })
+    expect(secondPage.items.map((item) => item.id)).toEqual([first.id])
+    expect((await getReadingLedgerSessions('u1', 'v1', { from: '2026-10-18', to: '2026-10-18' })).items.map((item) => item.id)).toEqual([first.id])
+
+    const beforeRebuild = await getReadingLedgerStats('u1', 'v1')
+    rebuildAllReadingProjections('u1')
+    const afterRebuild = await getReadingLedgerStats('u1', 'v1')
+    expect(afterRebuild).toMatchObject({
+      totalSeconds: beforeRebuild.totalSeconds, totalWordsRead: beforeRebuild.totalWordsRead,
+      daily: beforeRebuild.daily, hourly: beforeRebuild.hourly,
+    })
+
+    deleteLedgerSession('u1', first.id)
+    const afterDelete = await getReadingLedgerStats('u1', 'v1', { from: '2026-10-17', to: '2026-10-18' })
+    expect(afterDelete.totalSeconds).toBe(0)
+    expect(afterDelete.totalWordsRead).toBe(0)
+    expect((await getReadingLedgerOverview('u1', 'v1')).totalSeconds).toBe(160)
+  })
+
+  it('keeps date-only facts out of hourly projections and marks their words unknown', async () => {
+    db.update(schema.readingArchives).set({ legacyIntervals: [], legacyWordCount: null }).run()
+    await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-20', durationSeconds: 60, source: 'retroactive' })
+    const stats = await getReadingLedgerStats('u1', 'v1', { from: '2026-10-20', to: '2026-10-20' })
+    expect(stats.hourly).toEqual([])
+    expect(stats.totalWordsRead).toBeNull()
+    expect(stats.wordState).toBe('unknown')
+  })
+
+  it('rebuilds projections whose algorithm version is no longer current', async () => {
+    await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-21', durationSeconds: 60, source: 'manual' })
+    db.update(schema.readingProjectionStates).set({ algorithmVersion: 0 }).where(eq(schema.readingProjectionStates.bookVersionId, 'v1')).run()
+    db.update(schema.readingBookStats).set({ algorithmVersion: 0 }).where(eq(schema.readingBookStats.bookVersionId, 'v1')).run()
+    expect((await getReadingLedgerOverview('u1', 'v1')).totalSeconds).toBe(100)
+    expect(db.select().from(schema.readingProjectionStates).get()?.algorithmVersion).toBe(1)
+    expect(db.select().from(schema.readingBookStats).get()?.algorithmVersion).toBe(1)
+  })
+
+  it('keeps incremental projections equal to an independent raw-fact reference', async () => {
+    db.update(schema.readingArchives).set({ legacyIntervals: [], legacyDaily: [], legacyWordCount: 1000 }).run()
+    const reference = () => {
+      const rows = db.select().from(schema.readingSessions).where(eq(schema.readingSessions.bookId, 'v1')).all()
+      const daily = new Map<string, { seconds: number; words: number | null; known: number; unknown: number }>()
+      let intervals: Array<[number, number]> = []
+      for (const row of rows) {
+        const day = daily.get(row.date) ?? { seconds: 0, words: 0, known: 0, unknown: 0 }
+        day.seconds += row.durationSeconds
+        if (row.wordCount === null) {
+          day.unknown++
+        } else {
+          day.words = (day.words ?? 0) + Math.round(row.coverage.reduce((sum, [start, end]) => sum + end - start, 0) * row.wordCount * 1_000_000)
+          day.known++
+          intervals = [...intervals, ...row.coverage]
+        }
+        daily.set(row.date, day)
+        if (row.wordCount === null) intervals = [...intervals, ...row.coverage]
+      }
+      const merged = intervals.slice().sort((a, b) => a[0] - b[0]).reduce<Array<[number, number]>>((all, [start, end]) => {
+        const last = all.at(-1)
+        if (!last || start > last[1]) all.push([start, end])
+        else last[1] = Math.max(last[1], end)
+        return all
+      }, [])
+      return { rows, daily, totalSeconds: rows.reduce((sum, row) => sum + row.durationSeconds, 0), totalWords: rows.some((row) => row.wordCount !== null) ? rows.reduce((sum, row) => sum + (row.wordCount === null ? 0 : Math.round(row.coverage.reduce((length, [start, end]) => length + end - start, 0) * row.wordCount * 1_000_000)), 0) : null, wordState: rows.length === 0 ? 'known' : rows.every((row) => row.wordCount !== null) ? 'known' : rows.every((row) => row.wordCount === null) ? 'unknown' : 'partial', coverage: merged.reduce((sum, [start, end]) => sum + end - start, 0) }
+    }
+    const assertReference = async () => {
+      const expected = reference()
+      const stats = await getReadingLedgerStats('u1', 'v1')
+      const overview = await getReadingLedgerOverview('u1', 'v1')
+      expect(stats.totalSeconds).toBe(expected.totalSeconds)
+      expect(stats.totalWordsRead).toBe(expected.totalWords === null ? null : Math.round(expected.totalWords / 1_000_000))
+      expect(stats.wordState).toBe(expected.wordState)
+      expect(overview.coverage).toBeCloseTo(expected.coverage)
+      expect(overview.totalWordsRead).toBe(expected.totalWords === null ? null : Math.round(expected.totalWords / 1_000_000))
+      expect(stats.daily.map((row) => [row.date, row.durationSeconds])).toEqual([...expected.daily].sort(([a], [b]) => a.localeCompare(b)).map(([date, day]) => [date, day.seconds]))
+    }
+
+    const first = await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-10', source: 'manual', durationSeconds: 60, startFraction: 0.1, endFraction: 0.3, wordCount: 1000 })
+    await assertReference()
+    const second = await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-11', source: 'manual', durationSeconds: 120, startFraction: 0.2, endFraction: 0.4, wordCount: 1000 })
+    await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-11', source: 'retroactive', durationSeconds: 90, revisionId: 'unavailable-revision' })
+    await assertReference()
+    const queryPlan = sqlite.prepare(`EXPLAIN QUERY PLAN
+      SELECT s.id FROM reading_sessions s
+      WHERE s.user_id = 'u1' AND s.book_id = 'v1'
+        AND s.id IN (SELECT c.session_id FROM reading_contributions c WHERE c.user_id = 'u1' AND c.book_version_id = 'v1' AND c.date >= '2026-10-10')
+      ORDER BY s.sort_date DESC, s.sort_started_at DESC, s.id DESC
+      LIMIT 51`).all() as Array<{ detail: string }>
+    expect(queryPlan.some((row) => row.detail.includes('reading_sessions_user_book_sort_idx'))).toBe(true)
+    expect(queryPlan.some((row) => row.detail.includes('USE TEMP B-TREE FOR ORDER BY'))).toBe(false)
+    updateLedgerSession('u1', second.id, { durationSeconds: 60, startFraction: 0.3, endFraction: 0.5 })
+    await assertReference()
+    deleteLedgerSession('u1', first.id)
+    await assertReference()
+    const unknown = db.select().from(schema.readingSessions).where(and(eq(schema.readingSessions.bookId, 'v1'), eq(schema.readingSessions.source, 'retroactive'))).get()!
+    deleteLedgerSession('u1', unknown.id)
+    await assertReference()
+  })
+
+  it('keeps daily progress increments separate from cumulative coverage through edits and rebuilds', async () => {
+    db.update(schema.readingArchives).set({ legacyIntervals: [], legacyDaily: [], legacyWordCount: 1000 }).run()
+    await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-10', source: 'manual', durationSeconds: 60, startFraction: 0, endFraction: 0.2, wordCount: 1000 })
+    const second = await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-11', source: 'manual', durationSeconds: 60, startFraction: 0.2, endFraction: 0.3, wordCount: 1000 })
+    let stats = await getReadingLedgerStats('u1', 'v1')
+    expect(stats.daily[1].progressDelta).toBeCloseTo(0.1)
+    expect(stats.daily[1].cumulativeCoverage).toBeCloseTo(0.3)
+    updateLedgerSession('u1', second.id, { endFraction: 0.4 })
+    stats = await getReadingLedgerStats('u1', 'v1')
+    expect(stats.daily[1].progressDelta).toBeCloseTo(0.2)
+    rebuildAllReadingProjections('u1')
+    expect((await getReadingLedgerStats('u1', 'v1')).daily).toEqual(stats.daily)
+  })
+
+  it('restores totalWordsRead to null when the last known-word session is deleted with unknown sessions remaining', async () => {
+    db.update(schema.readingArchives).set({ legacyIntervals: [], legacyDaily: [], legacyWordCount: null }).run()
+    await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-12', source: 'retroactive', durationSeconds: 60, revisionId: 'unavailable-revision' })
+    const initialStats = await getReadingLedgerStats('u1', 'v1')
+    expect(initialStats.wordState).toBe('unknown')
+    expect(initialStats.totalWordsRead).toBeNull()
+    const known = await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-12', source: 'manual', durationSeconds: 60, startFraction: 0.1, endFraction: 0.2, wordCount: 1000 })
+    const midStats = await getReadingLedgerStats('u1', 'v1')
+    expect(midStats.wordState).toBe('partial')
+    expect(midStats.totalWordsRead).toBe(100)
+    deleteLedgerSession('u1', known.id)
+    const stats = await getReadingLedgerStats('u1', 'v1')
+    const overview = await getReadingLedgerOverview('u1', 'v1')
+    expect(stats.wordState).toBe('unknown')
+    expect(stats.totalWordsRead).toBeNull()
+    expect(overview.totalWordsRead).toBeNull()
+  })
 })

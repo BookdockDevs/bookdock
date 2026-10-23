@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 
+import { useQueryClient } from '@tanstack/react-query'
+
 import type { ReadingLedgerSession, ReadingRange } from '@bookdock/shared'
 
-import { localDateString, useDeleteSession, useReadingLedger } from '@/api/hooks/reading-records'
+import { localDateString, READING_RECORDS_KEY, useBookReadingLedgerStats, useBookReadingSessions, useDeleteSession, useReadingLedger, useReadingLedgerRecovery } from '@/api/hooks/reading-records'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import AddRecordDialog from '@/features/reader/components/AddRecordDialog'
@@ -13,19 +15,21 @@ import { formatDuration } from '@/lib/format-duration'
 import BookReadingTrendChart from './BookReadingTrendChart'
 import ReadingSessionCard from './ReadingSessionCard'
 import { useBook } from '@/features/library/hooks'
-import { ledgerCoverageByDate, ledgerDateInRange, ledgerEstimates, ledgerProgressBounds, ledgerScopedWords, ledgerTimeDistribution } from './reading-ledger-stats'
 
 interface BookReadingDataProps { bookId: string; onDeleted?: () => void; range?: ReadingRange; onSelectDate?: (date: string | null) => void }
 
 export default function BookReadingData({ bookId, range, onSelectDate }: BookReadingDataProps) {
   const _ = useTranslation()
   const ledgerQuery = useReadingLedger(bookId)
+  const dataVersion = ledgerQuery.data?.data?.dataVersion
+  const statsQuery = useBookReadingLedgerStats(bookId, range, dataVersion)
+  const sessionsQuery = useBookReadingSessions(bookId, range, dataVersion)
   const deleteMutation = useDeleteSession()
+  const queryClient = useQueryClient()
   const [localSelectedDate, setSelectedDate] = useState<string | null>(null)
   const selectedDate = onSelectDate ? range?.from === range?.to ? range?.from ?? null : null : localSelectedDate
   const effectiveRange = useMemo(() => (selectedDate ? { ...range, from: selectedDate, to: selectedDate } : range), [range, selectedDate])
   const bounded = Boolean(effectiveRange?.from || effectiveRange?.to)
-  const [recordLimit, setRecordLimit] = useState(50)
   const [editingSession, setEditingSession] = useState<ReadingLedgerSession | null>(null)
   const [deletingSession, setDeletingSession] = useState<ReadingLedgerSession | null>(null)
   const [addRecordOpen, setAddRecordOpen] = useState(false)
@@ -35,14 +39,34 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
   if (previousScope !== scopeKey) {
     setPreviousScope(scopeKey)
     setSelectedDate(null)
-    setRecordLimit(50)
     setEditingSession(null)
     setDeletingSession(null)
   }
   const ledger = ledgerQuery.data?.data
   const currentRound = ledger?.rounds.find((r) => r.id === ledger.currentRoundId) ?? ledger?.rounds.at(-1)
-  const sessions = useMemo(() => ledger?.sessions ?? [], [ledger])
-  const sessionDistributions = useMemo(() => new Map(sessions.map((session) => [session.id, ledgerTimeDistribution([session], effectiveRange)])), [sessions, effectiveRange])
+  const statsVersionMismatch = Boolean(ledger?.dataVersion !== undefined && statsQuery.data?.data && statsQuery.data.data.dataVersion !== ledger.dataVersion)
+  const sessionsVersionStable = useMemo(() => {
+    const pages = sessionsQuery.data?.pages ?? []
+    const pageVersion = pages[0]?.data.dataVersion
+    return pageVersion !== undefined && pages.length > 0 && pages.every((page) => page.data.dataVersion === pageVersion)
+      && (dataVersion === undefined || pageVersion === dataVersion)
+  }, [dataVersion, sessionsQuery.data])
+  const sessionsVersionMismatch = Boolean(dataVersion !== undefined && (sessionsQuery.data?.pages ?? []).length > 0 && !sessionsVersionStable)
+  const hasVersionMismatch = statsVersionMismatch || sessionsVersionMismatch
+
+  const recovery = useReadingLedgerRecovery(bookId, hasVersionMismatch, range)
+
+  const handleRetry = () => {
+    if (hasVersionMismatch || recovery.failed) { recovery.retry(); return }
+    void ledgerQuery.refetch()
+    void statsQuery.refetch()
+    void queryClient.resetQueries({ queryKey: [...READING_RECORDS_KEY, 'ledger-sessions', bookId] })
+  }
+  const stats = statsVersionMismatch ? undefined : statsQuery.data?.data
+  const sessions = useMemo(() => {
+    const pages = sessionsQuery.data?.pages ?? []
+    return sessionsVersionStable ? pages.flatMap((page) => page.data.items) : pages[0]?.data.items ?? []
+  }, [sessionsQuery.data, sessionsVersionStable])
   const includeLegacy = true
   const distribution = useMemo(() => {
     const result = {
@@ -50,20 +74,13 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
       hours: Array.from({ length: 24 }, () => 0),
       hourDays: Array.from({ length: 24 }, () => new Set<string>()),
     }
-    for (const dist of sessionDistributions.values()) {
-      for (const [date, seconds] of dist.days) result.days.set(date, (result.days.get(date) ?? 0) + seconds)
-      dist.hours.forEach((seconds, hour) => { result.hours[hour] += seconds })
-      if (dist.hourDays) {
-        dist.hourDays.forEach((dates, hour) => {
-          dates.forEach((d) => result.hourDays[hour].add(d))
-        })
-      }
-    }
-    if (includeLegacy) for (const day of ledger?.legacyDaily ?? []) {
-      if (ledgerDateInRange(day.date, effectiveRange)) result.days.set(day.date, (result.days.get(day.date) ?? 0) + day.durationSeconds)
+    for (const day of stats?.daily ?? []) result.days.set(day.date, day.durationSeconds)
+    for (const item of stats?.hourly ?? []) {
+      result.hours[item.hour] = item.durationSeconds
+      result.hourDays[item.hour] = new Set(Array.from({ length: item.days }, (_, index) => String(index)))
     }
     return result
-  }, [sessionDistributions, includeLegacy, ledger?.legacyDaily, effectiveRange])
+  }, [stats?.daily, stats?.hourly])
   const hourBars = useMemo(() => {
     return Array.from({ length: 24 }, (_, hour) => ({
       hour,
@@ -72,97 +89,49 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
     }))
   }, [distribution.hours, distribution.hourDays])
   const dailyTrendPoints = useMemo(() => {
-    const dates = [...distribution.days.entries()]
-      .filter(([, seconds]) => seconds >= 60)
-      .map(([date]) => date)
-      .sort()
-
-    return dates.map((date) => {
-      const seconds = distribution.days.get(date) ?? 0
-      const sessionsOnDate = sessions.filter((s) => s.date === date)
-      const progressDelta = sessionsOnDate.reduce((sum, s) => {
-        const scale = s.progressScale ?? 1
-        const covDelta = s.coverage.reduce((covSum, [start, end]) => covSum + Math.abs(end - start), 0)
-        return sum + covDelta * scale
-      }, 0) * 100
-
-      return {
-        date,
-        seconds,
-        progressPercent: Number(progressDelta.toFixed(1)),
-      }
-    })
-  }, [distribution.days, sessions])
-  const totalSeconds = [...distribution.days.values()].reduce((sum, seconds) => sum + seconds, 0)
-  const scopedWords = useMemo(() => ledgerScopedWords(sessions, effectiveRange), [sessions, effectiveRange])
-  const coverageByDate = useMemo(() => ledgerCoverageByDate(sessions, includeLegacy ? ledger?.projectedLegacyIntervals ?? ledger?.legacyIntervals : []), [sessions, includeLegacy, ledger?.legacyIntervals, ledger?.projectedLegacyIntervals])
-  const coverage = [...coverageByDate.values()].at(-1) ?? (ledger?.projectedLegacyIntervals ?? ledger?.legacyIntervals ?? []).reduce((sum, [start, end]) => sum + end - start, 0)
+    return (stats?.daily ?? []).filter((day) => day.durationSeconds >= 60).map((day) => ({
+      date: day.date, seconds: day.durationSeconds, progressPercent: Number((day.progressDelta * 100).toFixed(1)),
+    }))
+  }, [stats?.daily])
+  const totalSeconds = stats?.totalSeconds ?? 0
+  const coverage = stats?.daily.at(-1)?.cumulativeCoverage ?? ledger?.coverage ?? 0
   const bookQuery = useBook(bookId)
   const book = bookQuery.data?.data
   const latestProgress = useMemo(() => {
     if (book?.progress != null) {
       return Number(book.progress.toFixed(2))
     }
-    const lastSessionEnd = sessions
-      .map((s) => ledgerProgressBounds(s).end)
-      .filter((v): v is number => v !== null)
-      .at(-1)
-    if (lastSessionEnd != null) {
-      return Number((lastSessionEnd * 100).toFixed(2))
-    }
     return Number((coverage * 100).toFixed(2))
-  }, [book?.progress, sessions, coverage])
-  const estimates = useMemo(() => ledgerEstimates(sessions, coverage, currentRound?.wordCount), [sessions, coverage, currentRound?.wordCount])
+  }, [book?.progress, coverage])
+  const estimates = useMemo(() => ({ remainingSeconds: stats?.remainingSeconds ?? null }), [stats?.remainingSeconds])
   const readingDays = [...distribution.days.values()].filter((seconds) => seconds >= 60).length
   const averageSeconds = readingDays > 0 ? totalSeconds / readingDays : null
   const groups = useMemo(() => {
     const result = new Map<string, ReadingLedgerSession[]>()
-    for (const session of [...sessions].sort((a, b) => b.date.localeCompare(a.date) || (b.startedAt ?? 0) - (a.startedAt ?? 0))) {
-      for (const [date] of sessionDistributions.get(session.id)!.days) {
-        if (selectedDate && date !== selectedDate) continue
-        result.set(date, [...(result.get(date) ?? []), session])
-      }
+    for (const session of sessions) {
+      const contributionDates = session.contributionDates ?? [session.date]
+      if (selectedDate && !contributionDates.includes(selectedDate)) continue
+      const displayDate = selectedDate ?? contributionDates.at(-1) ?? session.date
+      result.set(displayDate, [...(result.get(displayDate) ?? []), session])
     }
-    if (includeLegacy) for (const day of ledger?.legacyDaily ?? []) {
-      if (ledgerDateInRange(day.date, effectiveRange) && !result.has(day.date)) result.set(day.date, [])
-    }
+    for (const day of stats?.daily ?? []) if (!selectedDate || day.date === selectedDate) result.set(day.date, result.get(day.date) ?? [])
     return [...result].sort(([a], [b]) => b.localeCompare(a))
-  }, [sessions, sessionDistributions, selectedDate, includeLegacy, ledger?.legacyDaily, effectiveRange])
-  const totalRows = groups.reduce((sum, [, records]) => sum + Math.max(1, records.length), 0)
-  let remainingRows = recordLimit
-  const visibleGroups = groups.flatMap(([date, records]): Array<[string, ReadingLedgerSession[]]> => {
-    if (remainingRows <= 0) return []
-    const visible = records.slice(0, remainingRows)
-    remainingRows -= Math.max(1, visible.length)
-    return [[date, visible]]
-  })
+  }, [sessions, selectedDate, stats?.daily])
+  const visibleGroups = groups
   function changeDate(date: string | null) {
     if (onSelectDate) onSelectDate(date)
     else setSelectedDate(date)
-    setRecordLimit(50)
     setEditingSession(null)
     setDeletingSession(null)
   }
   const card = 'rounded-3xl border border-stone-200/80 bg-white p-5 shadow-xs dark:border-stone-800 dark:bg-stone-900'
 
-  const totalWords = Math.round(
-    scopedWords.words +
-      (!bounded && includeLegacy
-        ? (ledger?.legacyIntervals ?? []).reduce((sum, [start, end]) => sum + end - start, 0) * (ledger?.legacyWordCount ?? 0)
-        : 0),
-  )
-  const totalWordsDisplay = totalWords.toLocaleString()
+  const totalWords = stats?.totalWordsRead ?? null
+  const totalWordsDisplay = totalWords === null ? '—' : totalWords.toLocaleString()
 
   const earliestDate = useMemo(() => {
-    let minDate: string | null = null
-    for (const session of sessions) {
-      if (!minDate || session.date < minDate) minDate = session.date
-    }
-    for (const legacy of ledger?.legacyDaily ?? []) {
-      if (!minDate || legacy.date < minDate) minDate = legacy.date
-    }
-    return minDate
-  }, [sessions, ledger?.legacyDaily])
+    return ledger?.earliestDate ?? null
+  }, [ledger?.earliestDate])
 
   const dailyCoveragePercent = useMemo(() => {
     if (!readingDays || coverage <= 0) return null
@@ -175,7 +144,7 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
   }, [totalSeconds, coverage])
 
   const secondsPerThousandWords = useMemo(() => {
-    if (totalSeconds <= 0 || totalWords <= 0) return null
+    if (totalSeconds <= 0 || totalWords === null || totalWords <= 0) return null
     return (totalSeconds / totalWords) * 1000
   }, [totalSeconds, totalWords])
 
@@ -200,54 +169,18 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
   }
 
   const ringIntervals = useMemo(() => {
-    const raw: Array<[number, number]> = []
-    if (includeLegacy) {
-      raw.push(...(ledger?.projectedLegacyIntervals ?? ledger?.legacyIntervals ?? []))
-    }
-    for (const session of sessions) {
-      const cov = session.projectedCoverage ?? session.coverage
-      if (cov && Array.isArray(cov)) {
-        raw.push(...cov)
-      }
-    }
-    const sorted = raw
-      .map(([a, b]): [number, number] => [Math.max(0, Math.min(1, Math.min(a, b))), Math.max(0, Math.min(1, Math.max(a, b)))])
-      .filter(([a, b]) => b > a)
-      .sort(([a], [b]) => a - b)
-    const merged: Array<[number, number]> = []
-    for (const [start, end] of sorted) {
-      const last = merged.at(-1)
-      if (last && start <= last[1]) {
-        last[1] = Math.max(last[1], end)
-      } else {
-        merged.push([start, end])
-      }
-    }
-    return merged
-  }, [sessions, includeLegacy, ledger?.legacyIntervals, ledger?.projectedLegacyIntervals])
+    return ledger?.coverageIntervals ?? []
+  }, [ledger?.coverageIntervals])
 
   const endDate = useMemo(() => {
     if (currentRound?.status !== 'finished') return null
     if (currentRound.endedAt) return localDateString(new Date(currentRound.endedAt))
-    let maxDate: string | null = null
-    for (const session of sessions) {
-      if (!maxDate || session.date > maxDate) maxDate = session.date
-    }
-    return maxDate
-  }, [currentRound, sessions])
+    return stats?.daily.at(-1)?.date ?? null
+  }, [currentRound, stats?.daily])
 
   const crossDayDates = useMemo(() => {
     const dates = new Set<string>()
-    for (const s of sessions) {
-      if (s.startedAt && s.endedAt) {
-        const startDay = localDateString(new Date(s.startedAt))
-        const endDay = localDateString(new Date(s.endedAt))
-        if (startDay !== endDay) {
-          dates.add(startDay)
-          dates.add(endDay)
-        }
-      }
-    }
+    for (const s of sessions) for (const date of s.contributionDates ?? []) dates.add(date)
     return dates
   }, [sessions])
 
@@ -340,8 +273,13 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
     return items
   }, [distribution.days, _])
 
-  if (ledgerQuery.isPending) return <div role="status" className="h-48 animate-pulse rounded-3xl bg-stone-500/10" />
-  if (ledgerQuery.isError || !ledger) return <QueryErrorState isRetrying={ledgerQuery.isFetching} onRetry={() => void ledgerQuery.refetch()} />
+  if (hasVersionMismatch && recovery.failed) {
+    return <QueryErrorState isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />
+  }
+  if (hasVersionMismatch || ledgerQuery.isPending || statsQuery.isPending || sessionsQuery.isPending) return <div role="status" className="h-48 animate-pulse rounded-3xl bg-stone-500/10" />
+  if (ledgerQuery.isError || statsQuery.isError || sessionsQuery.isError || !ledger) {
+    return <QueryErrorState isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -695,7 +633,7 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
 
       <div className="flex flex-col gap-3">
         {visibleGroups.map(([date, records]) => {
-          const legacySec = includeLegacy ? (ledger?.legacyDaily ?? []).find((day) => day.date === date)?.durationSeconds : undefined
+          const legacySec = includeLegacy ? (stats?.legacyDaily ?? []).find((day) => day.date === date)?.durationSeconds : undefined
           return (
             <div key={date} className="flex flex-col gap-2.5">
               {legacySec !== undefined && legacySec > 0 && (
@@ -718,11 +656,12 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
         })}
       </div>
 
-      {recordLimit < totalRows && (
+          {sessionsVersionStable && sessionsQuery.hasNextPage && (
         <div className="mt-4 flex justify-center">
           <button
             type="button"
-            onClick={() => setRecordLimit((count) => count + 50)}
+            onClick={() => void sessionsQuery.fetchNextPage()}
+            disabled={sessionsQuery.isFetchingNextPage}
             className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200/90 bg-white px-4 py-2 text-xs font-medium text-stone-600 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 dark:border-stone-700/80 dark:bg-stone-900/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-100 cursor-pointer"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
