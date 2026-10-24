@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 
@@ -28,6 +28,7 @@ describe('ConfirmDialog', () => {
     expect(screen.getByText('此操作无法撤销')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'library.cancel' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'library.close' })).toBeInTheDocument()
   })
 
   it('calls onConfirm when confirm button is clicked', async () => {
@@ -68,6 +69,9 @@ describe('ConfirmDialog', () => {
 
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.close' }))
+    expect(onClose).toHaveBeenCalledTimes(3)
   })
 
   it('supports custom ReactNode message', () => {
@@ -91,6 +95,7 @@ describe('ConfirmDialog', () => {
     render(<ConfirmDialog title="Delete" message="Warning" confirmLabel="Delete" confirmationText="City Library" confirmationLabel="Library name" onConfirm={onConfirm} onClose={onClose} />)
     const input = screen.getByRole('textbox', { name: 'Library name' })
     const button = screen.getByRole('button', { name: 'Delete' })
+    const closeBtn = screen.getByRole('button', { name: 'library.close' })
     expect(input).toHaveFocus()
     expect(button).toBeDisabled()
     for (const value of ['city Library', 'City Library ', ' City Library', '']) {
@@ -103,14 +108,32 @@ describe('ConfirmDialog', () => {
     fireEvent.click(button)
     fireEvent.keyDown(window, { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: 'library.cancel' }))
+    fireEvent.click(closeBtn)
     fireEvent.click(screen.getByRole('alertdialog').parentElement!)
     expect(onConfirm).toHaveBeenCalledTimes(1)
     expect(onClose).not.toHaveBeenCalled()
     expect(input).toBeDisabled()
+    expect(closeBtn).toBeDisabled()
     finish()
     await waitFor(() => expect(input).not.toBeDisabled())
+    expect(closeBtn).not.toBeDisabled()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('submits on Enter key in confirmation input when text matches', async () => {
+    const onConfirm = vi.fn()
+    render(<ConfirmDialog title="Transfer" message="Warning" confirmLabel="Transfer" confirmationText="carol" confirmationLabel="Username" onConfirm={onConfirm} onClose={vi.fn()} />)
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: 'wrong' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onConfirm).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: 'carol' } })
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+    expect(onConfirm).toHaveBeenCalledTimes(1)
   })
 
   it('keeps input on failure, permits retry, and resets on remount', async () => {
@@ -169,4 +192,3 @@ describe('ConfirmDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
-

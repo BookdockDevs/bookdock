@@ -10,6 +10,10 @@ All notable changes to Bookdock are documented here.
 - Reader keyboard shortcuts can be customized, synchronized with the user's account, and opened directly with Shift + /. The reader supports configurable navigation history, playback, chapter-boundary, sidebar, search, settings, and font-size commands.
 - Undo recent private-library actions—shelf and category changes, tag adjustments, pinning, hiding, and moving books to trash—from the original notification or the configurable Ctrl/Command+Z shortcut.
 
+### Changed
+
+- Redesigned confirmation dialogs to unify standard, destructive, and text-verified confirmation flows with consistent modal chrome, header close action, balanced button proportions, Enter-key submission for text matching, and background scroll-lock guards.
+
 ### Fixed
 
 - Archive navigation replaces history entries during in-page book selection and view filtering to avoid history stack pollution and prevent stepping back through browsed books.
@@ -888,6 +892,10 @@ All notable changes to Bookdock are documented here.
 - 书籍批量下载：可从批量操作栏下载所选书籍。单本沿用现有下载弹窗，多本打包为 ZIP，并支持保持原格式、统一 EPUB/TXT、逐本应用可用的文本替换规则，以及失败项重试；每本书仍使用现有下载权限校验。
 - 阅读器现支持自定义键盘快捷键并同步到当前账号，也可按 Shift + / 直接打开快捷键菜单。可配置命令涵盖阅读位置历史、朗读、章节首尾、侧页、搜索、设置和字号调整。
 - 私有书库支持撤销书架/归类、标签调整、置顶、隐藏和移入回收站等操作；可点击原操作通知中的撤销图标，也可使用可配置的 Ctrl/Command+Z 快捷键。
+
+#### 优化
+
+- 确认弹窗重构与交互统一：重构确认弹窗视觉与结构，统一普通确认、危险操作与文本验证输入；对齐标准窗口系统的 Header/Footer 与关闭按钮，优化按键比例，支持文本确认回车提交与页面背景防穿透。
 
 #### 修复
 
