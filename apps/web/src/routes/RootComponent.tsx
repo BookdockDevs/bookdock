@@ -128,7 +128,7 @@ export function RootComponent() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-50 p-4 dark:bg-stone-950">
         <div className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-6 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900">
-          <p role="alert" className="mb-4 text-sm text-red-600">{_('auth.instanceLoadFailed')}</p>
+          <p role="alert" className="mb-4 text-sm text-red-600 dark:text-red-400">{_('auth.instanceLoadFailed')}</p>
           <Button type="button" onClick={() => void instanceQuery.refetch()}>{_('auth.retry')}</Button>
         </div>
       </div>
@@ -159,9 +159,24 @@ export function RootComponent() {
         role="status"
         aria-busy="true"
         aria-label={_('common.loading') || '加载中…'}
-        className="flex min-h-screen items-center justify-center bg-stone-50 text-stone-400 dark:bg-stone-950 dark:text-stone-600"
+        className="flex min-h-screen items-center justify-center bg-stone-50 dark:bg-stone-950"
       >
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-stone-300 border-t-stone-600 dark:border-stone-700 dark:border-t-stone-400 motion-reduce:animate-none" />
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-xs dark:bg-stone-900" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-6 w-6 animate-pulse text-stone-700 dark:text-stone-200"
+            >
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
+              <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
+            </svg>
+          </div>
+        </div>
       </div>
     )
   }

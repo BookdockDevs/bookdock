@@ -43,6 +43,7 @@ import { getGuestProgress, saveGuestProgress } from './lib/guest-progress'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
 import { ReaderSidebar } from './components/ReaderSidebar'
+import { ReaderLoadingBadge } from './components/ReaderPending'
 import { Ribbon } from './components/Ribbon'
 import { SelectionToolbar } from './components/SelectionToolbar'
 import { clearReaderSelection } from './lib/reader-selection'
@@ -1887,12 +1888,7 @@ export default function Reader() {
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="flex flex-col items-center gap-2 text-sm text-[var(--bd-read-sub)]">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="animate-spin">
-              <path d="M21 12a9 9 0 11-6.219-8.56" />
-            </svg>
-            {_('reader.loading')}
-          </div>
+          <ReaderLoadingBadge />
         </div>
       </div>
     )
@@ -1902,14 +1898,16 @@ export default function Reader() {
     return (
       <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
-        <div className="flex max-w-sm flex-col items-center gap-4 rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] p-6 text-center shadow-lg">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-500">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
+        <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-500 dark:bg-red-500/20" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </div>
           <span className="text-sm font-medium text-red-500">{getUserErrorMessage(bookQuery.error, _, 'errors.loadFailed')}</span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 pt-1">
             <Button
               type="button"
               variant="secondary"
@@ -1919,11 +1917,10 @@ export default function Reader() {
             >
               {bookQuery.isFetching ? _('errors.retrying') : _('errors.retry')}
             </Button>
-            <Link
-              to="/"
-              className="inline-flex h-8 items-center justify-center rounded-xl bg-stone-900 px-3 text-xs font-medium text-white transition-colors hover:bg-stone-800 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300"
-            >
-              {_('errors.backToLibrary')}
+            <Link to="/">
+              <Button type="button" variant="primary" size="sm">
+                {_('errors.backToLibrary')}
+              </Button>
             </Link>
           </div>
         </div>
@@ -1935,17 +1932,18 @@ export default function Reader() {
     return (
       <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
-        <div className="flex max-w-sm flex-col items-center gap-4 rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] p-6 text-center shadow-lg">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--bd-read-sub)]">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="8" y1="12" x2="16" y2="12" />
-          </svg>
+        <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-stone-500/10 text-[var(--bd-read-sub)]" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="8" y1="12" x2="16" y2="12" />
+            </svg>
+          </div>
           <span className="text-sm text-[var(--bd-read-sub)]">{_('reader.notFound')}</span>
-          <Link
-            to="/"
-            className="inline-flex h-8 items-center justify-center rounded-xl bg-stone-900 px-3 text-xs font-medium text-white transition-colors hover:bg-stone-800 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300"
-          >
-            {_('errors.backToLibrary')}
+          <Link to="/" className="pt-1">
+            <Button type="button" variant="primary" size="sm">
+              {_('errors.backToLibrary')}
+            </Button>
           </Link>
         </div>
       </div>
@@ -2029,23 +2027,22 @@ export default function Reader() {
             <AutoReadingProgressBar readingMode={readingMode} />
             {navPending && (
               <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-                <div className="rounded-full bg-black/10 p-3 shadow-sm backdrop-blur-sm dark:bg-white/10">
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="animate-spin text-[var(--bd-read-sub)]">
-                    <path d="M21 12a9 9 0 11-6.219-8.56" />
-                  </svg>
-                </div>
+                <ReaderLoadingBadge />
               </div>
             )}
             {readerReady && navError && (
               <div className="pointer-events-none absolute inset-x-0 top-1/2 z-30 flex -translate-y-1/2 justify-center px-4">
-                <div className="pointer-events-auto flex max-w-sm flex-col items-center gap-2 rounded-xl border border-red-200 bg-[var(--bd-read-page-bg)]/95 px-4 py-3 text-center text-sm shadow-lg backdrop-blur-sm dark:border-red-900">
+                <div className="pointer-events-auto flex max-w-sm flex-col items-center gap-2.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)]/95 px-5 py-4 text-center text-sm shadow-xl backdrop-blur-md">
                   <span className="font-medium text-red-500">
                     {navError.chapter ? `${navError.chapter}：` : ''}{_('reader.navigationLoadFailed')}
                   </span>
                   <span className="text-xs text-[var(--bd-read-sub)]">{_('reader.navigationLoadHint')}</span>
                   {navError.target && (
-                    <button
-                      className="mt-1 rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      className="mt-1"
                       onClick={() => {
                         const target = navError.target
                         setNavError(null)
@@ -2053,7 +2050,7 @@ export default function Reader() {
                       }}
                     >
                       {_('reader.retry')}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -2072,23 +2069,27 @@ export default function Reader() {
                     }}>{_('reader.retry')}</Button>
                   </div>
                 ) : progressQuery.isError && initialCfiRef.current === undefined && !progressStartOver ? (
-                  <>
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="12" y1="8" x2="12" y2="12" />
-                      <line x1="12" y1="16" x2="12.01" y2="16" />
-                    </svg>
+                  <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-500 dark:bg-red-500/20" aria-hidden="true">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                      </svg>
+                    </div>
                     <span className="font-medium text-red-500">{_('reader.progressLoadFailed')}</span>
                     <p className="max-w-xs text-center text-xs text-[var(--bd-read-sub)]">{_('reader.progressLoadHint')}</p>
-                    <div className="pointer-events-auto mt-2 flex gap-3">
+                    <div className="pointer-events-auto mt-2 flex flex-wrap items-center justify-center gap-2">
                       <Link to="/">
-                        <button className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700">
+                        <Button type="button" variant="secondary" size="sm">
                           {_('reader.back')}
-                        </button>
+                        </Button>
                       </Link>
                       {/* Explicit user choice: starting over may overwrite the saved position */}
-                      <button
-                        className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => {
                           initialCfiRef.current = ''
                           initialFractionRef.current = undefined
@@ -2097,48 +2098,53 @@ export default function Reader() {
                         }}
                       >
                         {_('reader.progressStartOver')}
-                      </button>
-                      <button
-                        className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700"
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
                         onClick={() => void progressQuery.refetch()}
                       >
                         {_('reader.progressRetry')}
-                      </button>
+                      </Button>
                     </div>
-                  </>
+                  </div>
                 ) : loadError ? (
-                  <>
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="12" y1="8" x2="12" y2="12" />
-                      <line x1="12" y1="16" x2="12.01" y2="16" />
-                    </svg>
+                  <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-500 dark:bg-red-500/20" aria-hidden="true">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                      </svg>
+                    </div>
                     <span className="font-medium text-red-500">{_('reader.bookLoadParseFailed')}</span>
                     <p className="max-w-xs text-center text-xs text-[var(--bd-read-sub)]">
                       {_('reader.bookLoadFileHint')}
                     </p>
-                    <div className="pointer-events-auto mt-2 flex gap-3">
+                    <div className="pointer-events-auto mt-2 flex items-center justify-center gap-2">
                       <Link to="/">
-                        <button className="rounded-lg border border-stone-300 bg-white px-4 py-1.5 text-xs font-medium text-stone-700 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700">
+                        <Button type="button" variant="secondary" size="sm">
                           {_('reader.back')}
-                        </button>
+                        </Button>
                       </Link>
-                      <button
-                        className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700"
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
                         onClick={() => window.location.reload()}
                       >
                         {_('reader.refresh')}
-                      </button>
+                      </Button>
                     </div>
-                  </>
+                  </div>
                 ) : (
-                  <div className={cn('flex flex-col items-center gap-2', !showLoading && 'invisible')}>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="animate-spin text-[var(--bd-read-sub)]">
-                      <path d="M21 12a9 9 0 11-6.219-8.56" />
-                    </svg>
-                    {_('reader.loading')}
+                  <div className={cn('flex flex-col items-center gap-3', !showLoading && 'invisible')}>
+                    <ReaderLoadingBadge />
                     {slowLoad && (
-                      <span className="text-xs text-[var(--bd-read-sub)]">{_('reader.bookLoadSlow')}</span>
+                      <span className="text-xs text-[var(--bd-read-sub)] opacity-70 transition-opacity">
+                        {_('reader.bookLoadSlow')}
+                      </span>
                     )}
                   </div>
                 )}
