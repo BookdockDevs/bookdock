@@ -4,13 +4,31 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-10-24
+
+### Highlights
+
+- EPUB and TXT reading loads chapters on demand, prepares nearby content as you read, and keeps the current page visible until an updated revision is ready.
+- Reading history now uses rebuildable server-side projections and paginated session history, improving reliability and avoiding full-history downloads.
+
+### Added
+
+- Reading history projections can be rebuilt from durable session facts, with bounded recovery when stored projection versions are inconsistent.
+
 ### Changed
 
-- EPUB and TXT reading now loads chapters on demand and prepares nearby content as you read. Content updates switch silently on the next chapter navigation while preserving the current page until the replacement is ready.
 - The default service port is now **18423** instead of **3000** for Docker and source deployments. The frontend development port remains **5173**; explicit `PORT` settings remain supported.
+- Reader chapter delivery uses bounded shared caches, cancellation, and nearby-content prefetch. Reader loading and error states now use consistent, theme-aware views.
+- Notification, note archive, review, and catalog trash reads batch database work while preserving existing access checks and pagination.
+
+### Fixed
+
+- Owners can open their hidden private books directly and continue reading them without making those books appear in default listings.
+- Reader content updates keep the current page until the replacement renderer is ready; failed replacements preserve the existing reader.
 
 ### Upgrade notes
 
+- Back up the complete `DATA_DIR` before upgrading. Migration 0056 adds reading projection state and fields used to rebuild daily projections and paginate session history. Downgrading requires the pre-upgrade data with the matching previous release.
 - Update Docker port mappings and reverse-proxy upstreams for the new default, or keep the public port with a mapping such as `3000:18423`. Pull/rebuild the image and recreate the container; in-app updates do not replace the old launcher or health check. If retaining an old image for in-app updates, first recreate it with `PORT=3000` explicitly set.
 
 ## [0.6.3] - 2026-10-23
@@ -852,13 +870,31 @@ All notable changes to Bookdock are documented here.
 
 ### [Unreleased]
 
-#### 变更
+### [0.6.4] - 2026-10-24
 
-- EPUB / TXT 阅读改为按需加载章节，并随阅读准备附近正文；书籍内容更新后在下次章节导航时静默切换，新内容准备完成前保留当前页面。
-- Docker 和源码部署的默认服务端口由 **3000** 调整为 **18423**。前端开发端口仍为 **5173**，继续支持通过 `PORT` 自定义服务端口。
+#### 亮点
+
+- EPUB / TXT 阅读改为按需加载章节，并随阅读准备附近正文；新版本准备就绪前保留当前页面。
+- 阅读历史改用服务端可重建投影并支持会话记录游标分页，提升可靠性，避免一次性下载完整历史。
+
+#### 新增
+
+- 阅读历史投影可根据持久化会话事实重建；检测到已存投影版本不一致时，会进行有界恢复。
+
+#### 优化
+
+- Docker 与源码部署的默认服务端口由 **3000** 调整为 **18423**。前端开发端口仍为 **5173**，继续支持通过 `PORT` 自定义服务端口。
+- 阅读器章节传输增加有界共享缓存、请求取消与附近正文预取；阅读加载和错误状态统一为适配主题的界面。
+- 通知、笔记归档、书评和书库回收站查询批量读取数据库，同时保留原有访问校验与分页行为。
+
+#### 修复
+
+- 书籍所有者可直接打开自己隐藏的私有书并继续阅读，书籍仍不会出现在默认列表中。
+- 阅读内容更新时会保留当前页面，直到新阅读器准备完成；替换失败时继续显示原阅读器。
 
 #### 升级说明
 
+- 升级前请备份完整 `DATA_DIR`。迁移 0056 新增阅读投影状态及字段，用于重建每日投影并支持会话历史分页。降级须使用升级前的数据和对应旧版本。
 - 请同步调整 Docker 端口映射和反向代理上游地址；如需保留原访问端口，可使用 `3000:18423` 映射。请拉取或重新构建镜像并重建容器，面板更新不会替换旧启动器和健康检查。若保留旧镜像使用面板更新，需先显式设置 `PORT=3000` 并重建容器。
 
 ### [0.6.3] - 2026-10-23

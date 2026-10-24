@@ -430,9 +430,9 @@ function refreshReadingProjectionIncrementally(tx: Db, userId: string, bookId: s
 export async function ensureReadingArchive(userId: string, bookId: string, showHidden = false, includePendingDeletion = false) {
   const db = getDb()
   if (!includePendingDeletion && pendingBookDataDeletionVersionIds(db, userId).includes(bookId)) throw new AppError('BOOK_NOT_FOUND')
-  const book = await getBook(userId, bookId, { showHidden })
   const existing = db.select().from(readingArchives).where(archiveWhere(userId, bookId)).get()
   if (existing) return existing
+  const book = await getBook(userId, bookId, { showHidden })
   await readProgressFile(userId, bookId)
   const state = db.select().from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
   const now = Date.now()
