@@ -412,6 +412,22 @@ export const batchOrganizeSchema = batchSelectionSchema.extend({
   message: 'Choose an existing category or a recommendation', path: ['categoryTemplateKey'],
 })
 
+export const privateBatchUpdateSchema = batchSelectionSchema.extend({
+  pinned: z.boolean().optional(),
+  hidden: z.boolean().optional(),
+}).refine((value) => value.pinned !== undefined || value.hidden !== undefined, {
+  message: 'At least one private book field is required',
+})
+export type PrivateBatchUpdateReq = z.infer<typeof privateBatchUpdateSchema>
+
+export const privateBatchShelfSchema = batchSelectionSchema.extend({
+  shelfId: z.string().min(1).max(128).nullable(),
+})
+export type PrivateBatchShelfReq = z.infer<typeof privateBatchShelfSchema>
+
+export const privateBatchTrashSchema = batchSelectionSchema.extend({ deleteUserData: z.boolean().optional() })
+export type PrivateBatchTrashReq = z.infer<typeof privateBatchTrashSchema>
+
 export type BatchOrganizeReq = z.infer<typeof batchOrganizeSchema>
 
 /** Multipart placement fields; everything is optional and library-scoped. */

@@ -8,6 +8,9 @@ import { resolveReadingTheme } from '../lib/reading-theme'
 import { queryClient } from '../lib/query-client'
 import '@/i18n/i18n'
 import { Toast } from '../components/ui/Toast'
+import { DEFAULT_UNDO_QUERY_KEYS, hasUndoOpportunity, runUndo } from '../lib/undo'
+import { useAuthStore } from '../stores/auth.store'
+import { isReaderModalOpen, readReaderShortcuts, shortcutMatches } from '@/features/reader/lib/reader-shortcuts'
 import { router } from '../router'
 import { SettingsSync } from './SettingsSync'
 
@@ -47,12 +50,46 @@ export default function AppProviders({ children }: { children?: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <ThemeStyleInjector />
       <SettingsSync />
+      <UndoHotkey />
       <RouterProvider router={router} />
       <Toast />
       <DownloadDialogHost />
       {children}
     </QueryClientProvider>
   )
+}
+
+export function UndoHotkey() {
+  const userId = useAuthStore((state) => state.user?.id ?? null)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const path = event.composedPath()
+      const typing = path.some((entry) => entry instanceof HTMLElement && (
+        entry.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(entry.tagName)
+      ))
+      if (typing || event.isComposing || (event as KeyboardEvent & { keyCode?: number }).keyCode === 229
+        || event.repeat || isReaderModalOpen() || !hasUndoOpportunity()) return
+      const shortcut = readReaderShortcuts(userId).undo
+      if (!shortcutMatches(event, shortcut)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      void runUndo()
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [userId])
+
+  useEffect(() => {
+    const invalidate = (event: Event) => {
+      const queryKeys = (event as CustomEvent<{ queryKeys?: readonly (readonly unknown[])[] }>).detail?.queryKeys ?? DEFAULT_UNDO_QUERY_KEYS
+      for (const queryKey of queryKeys) void queryClient.invalidateQueries({ queryKey })
+    }
+    window.addEventListener('bd:undo-complete', invalidate)
+    return () => window.removeEventListener('bd:undo-complete', invalidate)
+  }, [])
+
+  return null
 }
 
 function ThemeStyleInjector() {

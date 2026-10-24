@@ -123,6 +123,64 @@ describe('toast store', () => {
     expect(useToastStore.getState().toasts.map((toast) => toast.id)).toEqual(expect.arrayContaining([persistent, focused]))
   })
 
+  it('keeps a high-priority undo toast visible ahead of ordinary notifications', () => {
+    const store = useToastStore.getState()
+    store.addToast('One')
+    store.addToast('Two')
+    store.addToast('Three')
+    const undoId = store.addToast('Undo available', 'success', {
+      priority: 'high', duration: 10_000, action: { label: 'Undo', icon: 'undo', onClick: vi.fn() },
+    })
+    store.addToast('Ordinary result')
+
+    expect(useToastStore.getState().toasts.map((toast) => toast.id)).toContain(undoId)
+    expect(useToastStore.getState().queuedToasts.map((toast) => toast.message)).toContain('Ordinary result')
+  })
+
+  it('caps the total lifetime of a paused undo toast at ninety seconds', () => {
+    const id = useToastStore.getState().addToast('Undo available', 'success', {
+      priority: 'high', duration: 10_000, action: { label: 'Undo', icon: 'undo', onClick: vi.fn() },
+    })
+    useToastStore.getState().pauseToast(id, 'focus')
+    vi.advanceTimersByTime(89_999)
+    expect(useToastStore.getState().toasts).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('renews the bounded lifetime after an explicit undo retry', () => {
+    const store = useToastStore.getState()
+    const id = store.addToast('Undo available', 'success', {
+      priority: 'high', duration: 10_000, action: { label: 'Undo', icon: 'undo', onClick: vi.fn() },
+    })
+    store.pauseToast(id, 'focus')
+    vi.advanceTimersByTime(80_000)
+    store.updateToast(id, {
+      action: { label: 'Retry', icon: 'retry', onClick: vi.fn() },
+      restartHardLifetime: true,
+    })
+    vi.advanceTimersByTime(89_999)
+    expect(useToastStore.getState().toasts).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('keeps an executing undo visible until the response updates it', () => {
+    const store = useToastStore.getState()
+    const id = store.addToast('Undo available', 'success', {
+      priority: 'high', duration: 10_000, action: { label: 'Undo', icon: 'undo', onClick: vi.fn() },
+    })
+    store.updateToast(id, {
+      action: { label: 'Loading', icon: 'loading', disabled: true, onClick: vi.fn() },
+      duration: 'persistent',
+    })
+    vi.advanceTimersByTime(180_000)
+    expect(useToastStore.getState().toasts).toHaveLength(1)
+    store.updateToast(id, { action: undefined, message: 'Undone', duration: 4_000 })
+    vi.advanceTimersByTime(4_000)
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+  })
+
   it('replaces obsolete actions, titles, and persistent lifetimes for a keyed result', () => {
     const store = useToastStore.getState()
     const id = store.addToast('Failed', 'error', {

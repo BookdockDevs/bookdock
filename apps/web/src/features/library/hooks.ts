@@ -33,6 +33,7 @@ import {
   type ShelfListItem,
   type TagListItem,
   type TocRulePattern,
+  type UndoReceipt,
 } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload, BASE_URL } from '@/api/client'
@@ -1545,9 +1546,9 @@ export function useDeleteBook() {
   return useMutation({
     mutationFn: ({ id, deleteUserData }: { id: string; title: string; isCollected?: boolean; deleteUserData?: boolean }) => {
       const query = deleteUserData ? '?deleteUserData=true' : ''
-      return apiDelete<{ data: null }>(`/books/${id}${query}`)
+      return apiDelete<{ data: null; undo?: UndoReceipt }>(`/books/${id}${query}`)
     },
-    onSuccess: (_, { title, isCollected, deleteUserData }) => {
+    onSuccess: (result, { title, isCollected, deleteUserData }) => {
       for (const queryKey of BOOK_MEMBERSHIP_KEYS) queryClient.invalidateQueries({ queryKey })
       // Removing a collected card also changes the source library's catalog.
       queryClient.invalidateQueries({ queryKey: ['libraries'] })
@@ -1556,7 +1557,7 @@ export function useDeleteBook() {
         notify.success({
           key: 'library.bookRemovedFromLibrary',
           params: { title },
-        })
+        }, { undo: result.undo })
         return
       }
       // The server deletes permanently when trash is off; match the toast.
@@ -1566,7 +1567,7 @@ export function useDeleteBook() {
       notify.success({
         key: trashOn ? 'library.bookMovedToTrash' : 'library.bookPermanentlyDeleted',
         params: { title },
-      })
+      }, { undo: result.undo })
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.deleteBookFailed'))
@@ -1809,14 +1810,14 @@ export function useUpdateBook() {
 
   return useMutation({
     mutationFn: ({ bookId, ...data }: { bookId: string } & Partial<{ readStatus: ReadStatus; progress: number; pinned: boolean; title: string; author: string; authors: string[]; hidden: boolean; bookmeta: BookMetadata; coverPaletteId: CoverPaletteId | null }>) =>
-      apiPatch<{ data: BookListItem }>(`/books/${bookId}`, data),
-    onSuccess: async (_result, { bookId }) => {
+      apiPatch<{ data: BookListItem; undo?: UndoReceipt }>(`/books/${bookId}`, data),
+    onSuccess: async (result, { bookId }) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['books'] }),
         queryClient.invalidateQueries({ queryKey: ['books', 'detail', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['book', bookId] }),
       ])
-      notify.success({ key: 'toast.bookUpdated' })
+      notify.success({ key: 'toast.bookUpdated' }, { undo: result.undo })
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.updateBookFailed'))
@@ -2038,18 +2039,14 @@ export function useUpdateBookMembership() {
 
   return useMutation({
     mutationFn: async ({ bookId, shelfId, categoryId, categoryTemplateKey, tagIds }: { bookId: string; shelfId?: string | null; categoryId?: string | null; categoryTemplateKey?: string; tagIds?: string[] }) => {
-      await Promise.all([
-        shelfId !== undefined || categoryId !== undefined || categoryTemplateKey !== undefined
-          ? apiPut<{ data: null }>(`/books/${bookId}/shelves`, {
-              ...(shelfId !== undefined ? { shelfId } : {}),
-              ...(categoryId !== undefined ? { categoryId } : {}),
-              ...(categoryTemplateKey !== undefined ? { categoryTemplateKey } : {}),
-            })
-          : Promise.resolve(),
-        tagIds !== undefined ? apiPut<{ data: null }>(`/books/${bookId}/tags`, { tagIds }) : Promise.resolve(),
-      ])
+      return apiPut<{ data: null; undo?: UndoReceipt }>(`/books/${bookId}/organization`, {
+        ...(shelfId !== undefined ? { shelfId } : {}),
+        ...(categoryId !== undefined ? { categoryId } : {}),
+        ...(categoryTemplateKey !== undefined ? { categoryTemplateKey } : {}),
+        ...(tagIds !== undefined ? { tagIds } : {}),
+      })
     },
-    onSuccess: async (_result, { bookId }) => {
+    onSuccess: async (result, { bookId }) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['books'] }),
         queryClient.invalidateQueries({ queryKey: ['book', bookId] }),
@@ -2059,7 +2056,7 @@ export function useUpdateBookMembership() {
         queryClient.invalidateQueries({ queryKey: ['libraries'] }),
         queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY }),
       ])
-      notify.success({ key: 'toast.membershipUpdated' })
+      notify.success({ key: 'toast.membershipUpdated' }, { undo: result.undo })
     },
     onError: (error) => {
       notify.error(getUserErrorNotification(error, 'toast.updateMembershipFailed'))
@@ -2089,29 +2086,24 @@ export function useMoveBooksToShelf() {
 
   return useMutation({
     mutationFn: ({ bookIds, shelfId }: { bookIds: string[]; shelfId: string | null }) =>
-      Promise.allSettled(
-        bookIds.map((bookId) => apiPut<{ data: null }>(`/books/${bookId}/shelves`, { shelfId })),
-      ),
-    onSuccess: (results, variables) => {
+      apiPatch<{ data: { succeeded: number; failed: number; failedIds: string[] }; undo?: UndoReceipt }>('/books/batch/move-shelf', { ids: bookIds, shelfId }),
+    onSuccess: (result, variables) => {
+      const { data } = result
       queryClient.invalidateQueries({ queryKey: ['books'] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
-      const failed = results.filter((r) => r.status === 'rejected').length
-      if (failed > 0) {
-        const succeeded = results.length - failed
-        const showResult = succeeded > 0 ? notify.warning : notify.error
-        showResult({
-          key: succeeded > 0 ? 'library.moveBooksPartial' : 'library.moveBooksFailed',
-          params: { succeeded: results.length - failed, failed },
-        })
+      if (data.failed > 0) {
+        const showResult = data.succeeded > 0 ? notify.warning : notify.error
+        showResult({ key: data.succeeded > 0 ? 'library.moveBooksPartial' : 'library.moveBooksFailed', params: { succeeded: data.succeeded, failed: data.failed } }, { undo: result.undo })
         return
       }
       const shelves = queryClient.getQueryData<{ data: ShelfListItem[] }>(['shelves'])
       const name = shelves?.data.find((s) => s.id === variables.shelfId)?.name
       notify.success(name
-        ? { key: 'toast.movedToShelf', params: { name, count: variables.bookIds.length } }
-        : { key: 'toast.movedOutOfShelf', params: { count: variables.bookIds.length } })
+        ? { key: 'toast.movedToShelf', params: { name, count: data.succeeded } }
+        : { key: 'toast.movedOutOfShelf', params: { count: data.succeeded } }, { undo: result.undo })
     },
+    onError: (_error, { bookIds }) => notify.error({ key: 'library.moveBooksFailed', params: { succeeded: 0, failed: bookIds.length } }),
   })
 }
 

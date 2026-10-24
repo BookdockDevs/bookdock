@@ -4,7 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 
 import { useAuthStore } from '@/stores/auth.store'
 
-import type { BookListItem, CatalogBook, Library, Review } from '@bookdock/shared'
+import type { BookListItem, CatalogBook, Library, Review, UndoReceipt } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
@@ -309,17 +309,19 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
         patch.bookmeta = draftToBookmetaPreserving(bookmeta, draft)
         patch.coverPaletteId = draft.coverPaletteId
       }
-      const requests: Promise<unknown>[] = [
-        apiPatch(`/books/${book.id}`, patch),
-        apiPut(`/books/${book.id}/shelves`, categorySel.categoryTemplateKey
-          ? { categoryTemplateKey: categorySel.categoryTemplateKey }
-          : { categoryId: categorySel.categoryId }),
-        apiPut(`/books/${book.id}/tags`, { tagIds: [...tagSel] }),
+      const requests: Promise<{ undo?: UndoReceipt }>[] = [
+        apiPatch<{ undo?: UndoReceipt }>(`/books/${book.id}`, patch),
+        apiPut<{ undo?: UndoReceipt }>(`/books/${book.id}/organization`, {
+          ...(categorySel.categoryTemplateKey
+            ? { categoryTemplateKey: categorySel.categoryTemplateKey }
+            : { categoryId: categorySel.categoryId }),
+          tagIds: [...tagSel],
+        }),
       ]
       if (coverRemovalPending) {
-        requests.push(apiDelete(`/books/${book.id}/cover`))
+        requests.push(apiDelete<{ undo?: UndoReceipt }>(`/books/${book.id}/cover`))
       } else if (pendingCoverFile) {
-        requests.push(apiUpload(`/books/${book.id}/cover`, pendingCoverFile, 'PUT'))
+        requests.push(apiUpload<{ undo?: UndoReceipt }>(`/books/${book.id}/cover`, pendingCoverFile, 'PUT'))
       }
       const results = await Promise.allSettled(requests)
       queryClient.invalidateQueries({ queryKey: ['books'] })
@@ -335,7 +337,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           ? { key: 'library.bookUpdatePartial', params: { succeeded: results.length - failed.length, failed: failed.length, reason: _(reason.key) } }
           : reason)
       } else {
-        notify.success({ key: 'toast.bookUpdated' })
+        const organizationResult = results[1]
+        notify.success({ key: 'toast.bookUpdated' }, { undo: organizationResult?.status === 'fulfilled' ? organizationResult.value.undo : undefined })
         discardEdit()
       }
     } catch (err) {

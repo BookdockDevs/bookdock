@@ -269,6 +269,25 @@ describe('SelectionBar', () => {
     expect(apiDelete).toHaveBeenCalledWith('/books/b?deleteUserData=true')
   })
 
+  it('sends private trash batches through one undoable request and retains only failures', async () => {
+    selectionItems = [item('a'), item('b')]
+    apiPost.mockImplementation((url: string, body: { ids: string[] }) => url === '/books/batch/trash'
+      ? Promise.resolve({ data: { succeeded: 1, failed: 1, failedIds: ['b'] }, undo: { token: 'receipt', label: 'undo.action' } })
+      : Promise.resolve({ data: body.ids.map((id) => selectionItems.find((row) => row.id === id)) }))
+    const onRetainSelection = vi.fn()
+    render(<SelectionBar selectedIds={['a', 'b']} trashEnabled onRetainSelection={onRetainSelection} />, { wrapper })
+
+    await clickReady('library.batchDelete')
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'library.batchDelete' }))
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/books/batch/trash', { ids: ['a', 'b'] }))
+    expect(apiDelete).not.toHaveBeenCalled()
+    expect(onRetainSelection).toHaveBeenCalledWith(['b'])
+    expect(useToastStore.getState().toasts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'warning', message: { key: 'library.batchPartial', params: { action: 'library.batchActionDelete', succeeded: 1, failed: 1 } } }),
+    ]))
+  })
+
   it('counts all versions in shared-work deletion confirmation', async () => {
     selectionItems = [item('w1', { kind: undefined, versionCount: 3 })]
     render(<SelectionBar selectedIds={['w1']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
@@ -294,11 +313,12 @@ describe('SelectionBar', () => {
 
   it('keeps only failed identities selected after a partial update', async () => {
     selectionItems = [item('a'), item('b')]
-    apiPatch.mockImplementation((url: string) => url === '/books/b' ? Promise.reject(new Error('failed')) : Promise.resolve({ data: null }))
+    apiPatch.mockResolvedValue({ data: { succeeded: 1, failed: 1, failedIds: ['b'] } })
     const onRetainSelection = vi.fn()
     render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} onRetainSelection={onRetainSelection} />, { wrapper })
 
     await clickReady('library.pin')
+    expect(apiPatch).toHaveBeenCalledWith('/books/batch/update', { ids: ['a', 'b'], pinned: true })
     await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['b']))
     expect(useToastStore.getState().toasts[0]).toMatchObject({ type: 'warning', message: { key: 'library.batchPartial', params: { succeeded: 1, failed: 1 } } })
   })

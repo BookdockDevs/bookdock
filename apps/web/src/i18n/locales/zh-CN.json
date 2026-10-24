@@ -1155,6 +1155,7 @@
     "keyboardShortcutChapterStart": "跳到本章开头",
     "keyboardShortcutChapterEnd": "跳到本章末尾",
     "keyboardShortcutMenu": "打开/关闭快捷键菜单",
+    "keyboardShortcutUndo": "撤销最近操作",
     "sectionTheme": "主题",
     "fontSize": "字号",
     "fontWeight": "字体粗细",
@@ -2125,6 +2126,19 @@
     "cannotDeleteOwner": "实例所有者须先转让，再删除",
     "cannotDeleteLibraryOwner": "拥有书库（{{names}}），须先转让或删除这些书库",
     "confirm": "确定"
+  },
+  "undo": {
+    "available": "操作已完成，可撤销",
+    "partialAvailable": "撤销已成功的操作（成功 {{succeeded}} 项，失败 {{failed}} 项）",
+    "partialSucceeded": "已撤销成功的 {{succeeded}} 项，失败的 {{failed}} 项仍可重试",
+    "action": "撤销",
+    "running": "正在撤销",
+    "retry": "重试撤销",
+    "retryableFailure": "撤销暂时失败，请重试",
+    "permissionChanged": "当前账号权限已变化，无法撤销",
+    "conflict": "相关内容已变化，无法撤销",
+    "expired": "撤销机会已过期",
+    "succeeded": "操作已撤销"
   },
   "toast": {
     "categoryCreated": "分类已创建",

@@ -11,6 +11,7 @@ import { contentFileAssociationSchema } from './content-file'
 import { readingCoverageSchema, readingDateSchema, readingTimeFragmentSchema, readingTimezoneSchema } from './reading-ledger'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
+export const undoReceiptSchema = z.object({ token: z.string().uuid(), label: z.string().max(120), expiresAt: z.number().int().optional(), generation: z.number().int().optional() })
 
 // Fields configurable per position on the header/footer info bar (F4).
 export const marginalFieldSchema = z.enum(['none', 'bookTitle', 'chapter', 'chapterProgress', 'bookProgress', 'chapterWordCount', 'time'])

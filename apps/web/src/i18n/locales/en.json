@@ -1163,6 +1163,7 @@
     "keyboardShortcutChapterStart": "Jump to chapter start",
     "keyboardShortcutChapterEnd": "Jump to chapter end",
     "keyboardShortcutMenu": "Toggle keyboard shortcuts menu",
+    "keyboardShortcutUndo": "Undo last action",
     "sectionTheme": "Theme",
     "fontSize": "Font Size",
     "fontWeight": "Font Weight",
@@ -2135,6 +2136,19 @@
     "cannotDeleteOwner": "Transfer instance ownership first",
     "cannotDeleteLibraryOwner": "Owns libraries ({{names}}); transfer or delete them first",
     "confirm": "Confirm"
+  },
+  "undo": {
+    "available": "Action completed. You can undo it.",
+    "partialAvailable": "Undo successful operations ({{succeeded}} succeeded, {{failed}} failed)",
+    "partialSucceeded": "Undid {{succeeded}} successful items; {{failed}} failed items can still be retried",
+    "action": "Undo",
+    "running": "Undoing",
+    "retry": "Retry undo",
+    "retryableFailure": "Undo failed temporarily. Try again.",
+    "permissionChanged": "Your account permissions changed. This action cannot be undone.",
+    "conflict": "The affected content changed and cannot be restored.",
+    "expired": "This undo action has expired.",
+    "succeeded": "Action undone"
   },
   "toast": {
     "categoryCreated": "Category created",

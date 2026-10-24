@@ -1,4 +1,6 @@
-export type ReaderShortcutId = 'sidebar' | 'toc' | 'notes' | 'settings' | 'fontIncrease' | 'fontDecrease' | 'search' | 'historyBack' | 'historyForward' | 'tts' | 'autoReading' | 'chapterStart' | 'chapterEnd' | 'shortcutsMenu'
+import { hasUndoOpportunity } from '@/lib/undo'
+
+export type ReaderShortcutId = 'sidebar' | 'toc' | 'notes' | 'settings' | 'fontIncrease' | 'fontDecrease' | 'search' | 'historyBack' | 'historyForward' | 'tts' | 'autoReading' | 'chapterStart' | 'chapterEnd' | 'shortcutsMenu' | 'undo'
 export interface ReaderShortcut { key: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }
 export type ReaderShortcutMap = Record<ReaderShortcutId, ReaderShortcut | null>
 
@@ -18,8 +20,8 @@ export const READER_SHORTCUT_DEFAULTS: ReaderShortcutMap = {
   chapterStart: { key: 'Home', ctrl: false, alt: false, shift: false, meta: false },
   chapterEnd: { key: 'End', ctrl: false, alt: false, shift: false, meta: false },
   shortcutsMenu: { key: '/', ctrl: false, alt: false, shift: true, meta: false },
+  undo: { key: 'z', ctrl: true, alt: false, shift: false, meta: false },
 }
-
 export function readerShortcutStorageKey(userId: string | null): string {
   return `${READER_SHORTCUT_STORAGE_PREFIX}${userId ?? 'guest'}`
 }
@@ -111,8 +113,11 @@ export function isReaderContentTarget(target: EventTarget | null, viewport: HTML
 export function forwardReaderShortcut(event: KeyboardEvent, host: HTMLElement, shortcuts: ReaderShortcutMap): boolean {
   const target = event.target as HTMLElement | null
   const typing = !!target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
-  const matches = !typing && !event.isComposing && (event as KeyboardEvent & { keyCode?: number }).keyCode !== 229
-    && Object.values(shortcuts).some((shortcut) => shortcutMatches(event, shortcut))
+  const validEvent = !typing && !event.isComposing && (event as KeyboardEvent & { keyCode?: number }).keyCode !== 229
+  const matchesUndo = validEvent && hasUndoOpportunity() && shortcutMatches(event, shortcuts.undo)
+  const matchesReaderCommand = validEvent
+    && (Object.keys(shortcuts) as ReaderShortcutId[]).filter((id) => id !== 'undo').some((id) => shortcutMatches(event, shortcuts[id]))
+  const matches = matchesUndo || matchesReaderCommand
   if (!matches) return false
   event.preventDefault()
   event.stopImmediatePropagation()

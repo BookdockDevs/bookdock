@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Toast } from '@/components/ui/Toast'
@@ -43,6 +43,25 @@ describe('Toast', () => {
     expect(screen.queryByText('Failed')).not.toBeInTheDocument()
   })
 
+  it('renders an undo action as an accessible icon and keeps its notice open while it runs', () => {
+    const onClick = vi.fn()
+    useToastStore.getState().addToast('可撤销', 'success', {
+      priority: 'high',
+      action: { label: '撤销', icon: 'undo', keepOpen: true, onClick },
+    })
+    render(<Toast />)
+
+    const undoButton = screen.getByRole('button', { name: '撤销' })
+    const closeButton = screen.getByRole('button', { name: '关闭通知' })
+    expect(undoButton.className).toBe(closeButton.className)
+
+    fireEvent.click(undoButton)
+
+    expect(onClick).toHaveBeenCalledOnce()
+    expect(screen.getByRole('status')).toHaveTextContent('可撤销')
+    expect(screen.getByRole('button', { name: '撤销' })).toBeInTheDocument()
+  })
+
   it('pauses independently for pointer and keyboard focus', () => {
     vi.useFakeTimers()
     try {
@@ -56,6 +75,30 @@ describe('Toast', () => {
       expect(screen.getByText('Saved')).toBeInTheDocument()
       fireEvent.blur(card, { relatedTarget: document.body })
       vi.advanceTimersByTime(4_000)
+      expect(useToastStore.getState().toasts).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resumes the toast timer when an undo button is removed while focused', () => {
+    vi.useFakeTimers()
+    try {
+      const id = useToastStore.getState().addToast('可撤销', 'success', {
+        priority: 'high', duration: 10_000, undoActionSlot: 'action',
+        action: { label: '撤销', icon: 'undo', keepOpen: true, onClick: vi.fn() },
+      })
+      render(<Toast />)
+      fireEvent.focus(screen.getByRole('button', { name: '撤销' }))
+
+      act(() => {
+        useToastStore.getState().updateToast(id, {
+          message: '操作已撤销', type: 'success', action: undefined, undoActionSlot: undefined,
+          priority: undefined, hardExpiresAt: undefined, duration: 4_000,
+        })
+      })
+      act(() => vi.advanceTimersByTime(4_000))
+
       expect(useToastStore.getState().toasts).toHaveLength(0)
     } finally {
       vi.useRealTimers()

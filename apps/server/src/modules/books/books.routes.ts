@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono'
-import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
+import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, privateBatchShelfSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -24,6 +24,7 @@ import {
   getBookCoverContent,
   setBookMembership,
   setBookTags,
+  setBookOrganization,
   getBookShelf,
   getBookTags,
   stripMetaChapters,
@@ -35,8 +36,12 @@ import {
   assertReadableBook,
   getPrivateBatchSelection,
   organizePrivateBatch,
+  trashPrivateBatch,
+  updatePrivateBatch,
+  movePrivateBatchToShelf,
 } from './books.service'
 import { updateReaderBookSettings } from './reader-settings.service'
+import { executeUndoReceipt, getUndoReceiptInfo } from '../../lib/undo'
 import { forkLocalBook } from '../libraries/fork.service'
 import { getPrivateBookMetadataSource } from '../libraries/metadata-source.service'
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
@@ -52,6 +57,11 @@ import { exportEpubBook, exportTxtBook } from './txt-export'
 const booksRoutes = new Hono()
 const appendOptionsSchema = appendContentSchema.pick({ startOffset: true })
 
+function undoReceipt(token: string, label = 'undo.action') {
+  const info = getUndoReceiptInfo(token)
+  return { token, label, ...(info ?? {}) }
+}
+
 booksRoutes.post('/batch/selection', async (c) => {
   const user = c.get('user')
   if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
@@ -65,7 +75,50 @@ booksRoutes.patch('/batch/organize', async (c) => {
   if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const parsed = batchOrganizeSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid batch organization', parsed.error.flatten())
-  return c.json({ data: organizePrivateBatch(user.id, parsed.data) })
+  const undo: { token?: string } = {}
+  const result = organizePrivateBatch(user.id, parsed.data, undo)
+  return c.json({ data: result, ...(undo.token ? { undo: undoReceipt(undo.token, 'Books organized') } : {}) })
+})
+
+booksRoutes.patch('/batch/update', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const parsed = privateBatchUpdateSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid batch update', parsed.error.flatten())
+  const undo: { token?: string } = {}
+  const result = updatePrivateBatch(user.id, parsed.data, undo)
+  return c.json({ data: result, ...(undo.token ? { undo: {
+    ...undoReceipt(undo.token),
+    ...(result.failed ? { messageKey: 'undo.partialAvailable', params: { succeeded: result.succeeded, failed: result.failed } } : {}),
+  } } : {}) })
+})
+
+booksRoutes.patch('/batch/move-shelf', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const parsed = privateBatchShelfSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid shelf move', parsed.error.flatten())
+  const undo: { token?: string } = {}
+  const result = movePrivateBatchToShelf(user.id, parsed.data, undo)
+  return c.json({ data: result, ...(undo.token ? { undo: {
+    ...undoReceipt(undo.token),
+    ...(result.failed ? { messageKey: 'undo.partialAvailable', params: { succeeded: result.succeeded, failed: result.failed } } : {}),
+  } } : {}) })
+})
+
+booksRoutes.post('/batch/trash', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  if (!isTrashEnabled(user.id)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
+  const body = await c.req.json().catch(() => null)
+  const parsed = privateBatchTrashSchema.safeParse(body)
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid batch trash request', parsed.error.flatten())
+  const undo: { token?: string } = {}
+  const result = await trashPrivateBatch(user.id, parsed.data.ids, parsed.data.deleteUserData === true, undo)
+  return c.json({ data: result, ...(undo.token ? { undo: {
+    ...undoReceipt(undo.token),
+    ...(result.failed ? { messageKey: 'undo.partialAvailable', params: { succeeded: result.succeeded, failed: result.failed } } : {}),
+  } } : {}) })
 })
 
 // Private-library display preference: showHidden changes list results only;
@@ -309,8 +362,16 @@ booksRoutes.patch('/:id', async (c) => {
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
-  const book = await updateBook(user.id, id, parsed.data)
-  return c.json({ data: book })
+  const undo: { token?: string } = {}
+  const book = await updateBook(user.id, id, parsed.data, undo)
+  return c.json({ data: book, ...(undo.token ? { undo: undoReceipt(undo.token) } : {}) })
+})
+
+booksRoutes.post('/undo/:token', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  await executeUndoReceipt(user.id, c.req.param('token'))
+  return c.json({ data: null })
 })
 
 booksRoutes.post('/:id/toc-preview', async (c) => {
@@ -376,7 +437,9 @@ booksRoutes.delete('/:id', async (c) => {
   if (isCollected) {
     await deleteBook(user.id, id, { deleteUserData })
   } else if (isTrashEnabled(user.id)) {
-    await trashBook(user.id, id, { deleteUserData })
+    const undo: { token?: string } = {}
+    await trashBook(user.id, id, { deleteUserData }, undo)
+    return c.json({ data: null, ...(undo.token ? { undo: undoReceipt(undo.token) } : {}) })
   } else {
     await deleteBook(user.id, id, { deleteUserData })
   }
@@ -479,8 +542,19 @@ booksRoutes.put('/:id/shelves', async (c) => {
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
-  await setBookMembership(user.id, bookId, parsed.data)
-  return c.json({ data: null })
+  const undo: { token?: string } = {}
+  await setBookMembership(user.id, bookId, parsed.data, undo)
+  return c.json({ data: null, ...(undo.token ? { undo: undoReceipt(undo.token) } : {}) })
+})
+
+booksRoutes.put('/:id/organization', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const parsed = bookMembershipSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid book organization', parsed.error.flatten())
+  const undo: { token?: string } = {}
+  setBookOrganization(user.id, c.req.param('id'), parsed.data, undo)
+  return c.json({ data: null, ...(undo.token ? { undo: undoReceipt(undo.token) } : {}) })
 })
 
 booksRoutes.put('/:id/tags', async (c) => {
@@ -492,8 +566,9 @@ booksRoutes.put('/:id/tags', async (c) => {
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
-  await setBookTags(user.id, bookId, parsed.data.tagIds ?? [])
-  return c.json({ data: null })
+  const undo: { token?: string } = {}
+  await setBookTags(user.id, bookId, parsed.data.tagIds ?? [], undo)
+  return c.json({ data: null, ...(undo.token ? { undo: undoReceipt(undo.token) } : {}) })
 })
 
 booksRoutes.get('/:id/shelves', async (c) => {

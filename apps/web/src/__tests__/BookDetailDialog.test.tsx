@@ -177,22 +177,17 @@ beforeEach(async () => {
 })
 
 describe('BookDetailDialog classification editor', () => {
-  it('waits for every save request and retains a partial result in the form for retry', async () => {
-    let finishShelf!: () => void
-    apiPut.mockImplementationOnce(() => new Promise((resolve) => { finishShelf = () => resolve({}) }))
-      .mockRejectedValueOnce(new TypeError('Network failed'))
+  it('waits for the combined organization save before closing the editor', async () => {
+    let finishOrganization!: () => void
+    apiPut.mockImplementationOnce(() => new Promise((resolve) => { finishOrganization = () => resolve({}) }))
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(apiPut).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledTimes(1))
     expect(screen.getByRole('button', { name: '保存...' })).toBeDisabled()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    await act(async () => { finishShelf() })
-    expect(screen.getByRole('alert')).toHaveTextContent('已保存 2 项，1 项未完成')
-    expect(screen.getByDisplayValue('Test Book')).toBeInTheDocument()
-    expect(useToastStore.getState().toasts).toHaveLength(0)
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    await act(async () => { finishOrganization() })
+    await waitFor(() => expect(screen.queryByRole('button', { name: '保存...' })).not.toBeInTheDocument())
     expect(useToastStore.getState().toasts).toHaveLength(1)
   })
 
@@ -231,7 +226,7 @@ describe('BookDetailDialog classification editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { categoryId: 'category-1' })
+      expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryId: 'category-1', tagIds: [] })
     })
   })
 
@@ -258,7 +253,7 @@ describe('BookDetailDialog classification editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { categoryId: null })
+      expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryId: null, tagIds: [] })
     })
   })
 })
@@ -276,7 +271,7 @@ describe('BookDetailDialog tag chips', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/tags', { tagIds: ['tag-1'] })
+      expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryId: null, tagIds: ['tag-1'] })
     })
   })
 
@@ -292,7 +287,7 @@ describe('BookDetailDialog tag chips', () => {
     await waitFor(() => expect(createTagMutate).toHaveBeenCalledWith('科幻'))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/tags', { tagIds: ['tag-new'] })
+      expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryId: null, tagIds: ['tag-new'] })
     })
   })
 
@@ -334,7 +329,7 @@ describe('BookDetailDialog recommended categories', () => {
     expect(apiPut).not.toHaveBeenCalled()
     expect(createShelfMutate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/books/book-1/shelves', { categoryTemplateKey: 'literature.essays' }))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryTemplateKey: 'literature.essays', tagIds: [] }))
   })
 
   it('cancels a selected recommendation without creating or saving a category', () => {

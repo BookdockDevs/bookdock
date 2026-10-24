@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 
-import type { BookDetailRes, BookListItem, ReadStatus, Review } from '@bookdock/shared'
+import type { BookDetailRes, BookListItem, ReadStatus, Review, UndoReceipt } from '@bookdock/shared'
 
 import { apiPatch } from '@/api/client'
 import { Button } from '@/components/ui/Button'
@@ -169,8 +169,9 @@ export default function BookDetailView({
 
   async function toggleHidden() {
     try {
-      await apiPatch(`/books/${book.id}`, { hidden: !displayBook.hidden })
+      const result = await apiPatch<{ undo?: UndoReceipt }>(`/books/${book.id}`, { hidden: !displayBook.hidden })
       void queryClient.invalidateQueries({ queryKey: ['books'] })
+      notify.success({ key: 'toast.bookUpdated' }, { undo: result.undo })
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'toast.updateBookFailed'))
     }

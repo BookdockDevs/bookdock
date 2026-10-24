@@ -72,13 +72,13 @@ describe('detail quick-edit mutations', () => {
     expect(notify.success).not.toHaveBeenCalled()
   })
 
-  it('writes only the shelf and invalidates detail, membership, lists, counts and reader cache', async () => {
+  it('writes organization fields through one endpoint and invalidates detail, membership, lists and reader cache', async () => {
     const { client, wrapper } = setup()
     const keys = [['books', 'detail', 'b1'], ['books', 'b1', 'shelves'], ['books', 'infinite', {}], ['book', 'b1'], ['shelves'], ['tags'], ['batch-selection']]
     for (const key of keys) client.setQueryData(key, { data: book })
     const { result } = renderHook(useUpdateBookMembership, { wrapper })
     await act(() => result.current.mutateAsync({ bookId: 'b1', shelfId: null }))
-    expect(apiPut).toHaveBeenCalledExactlyOnceWith('/books/b1/shelves', { shelfId: null })
+    expect(apiPut).toHaveBeenCalledExactlyOnceWith('/books/b1/organization', { shelfId: null })
     for (const key of keys) expect(client.getQueryState(key)?.isInvalidated).toBe(true)
     expect(notify.success).toHaveBeenCalledTimes(1)
   })
@@ -87,7 +87,7 @@ describe('detail quick-edit mutations', () => {
     const { wrapper } = setup()
     const { result } = renderHook(useUpdateBookMembership, { wrapper })
     await act(() => result.current.mutateAsync({ bookId: 'b1', tagIds: [] }))
-    expect(apiPut).toHaveBeenCalledExactlyOnceWith('/books/b1/tags', { tagIds: [] })
+    expect(apiPut).toHaveBeenCalledExactlyOnceWith('/books/b1/organization', { tagIds: [] })
   })
 
   it.each(['status', 'shelf'])('retains confirmed caches when the %s write fails and notifies once', async (field) => {

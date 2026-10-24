@@ -17,6 +17,7 @@ import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { executeUndoReceipt } from '../../lib/undo'
 import { TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { readProgressFile } from '../../lib/progress-file'
 import { registerParser } from '../../formats/registry'
@@ -30,6 +31,7 @@ import {
   getActiveBook,
   updateBook,
   trashBook,
+  trashPrivateBatch,
   restoreBook,
   deleteBook,
   purgeExpiredTrash,
@@ -38,10 +40,14 @@ import {
   listBooks,
   setBookShelf,
   setBookMembership,
+  setBookTags,
+  setBookOrganization,
+  movePrivateBatchToShelf,
   getBookShelf,
   getBookTags,
   getPrivateBatchSelection,
   organizePrivateBatch,
+  updatePrivateBatch,
   uploadBook,
   reTocBook,
   resetBookMetadata,
@@ -1592,11 +1598,11 @@ describe('GET /api/v1/books/:id/file range requests', () => {
   // 100 bytes, byte value = offset, so range slices are easy to assert
   const blob = Buffer.from(Array.from({ length: 100 }, (_, i) => i))
 
-  function createFileApp(role: 'owner' | 'guest' = 'owner', guest = false) {
+  function createFileApp(role: 'owner' | 'guest' = 'owner', guest = false, actorId = userId) {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/books/*', async (c, next) => {
-      c.set('user', guest ? null : { id: userId, username: role, role, avatarKey: null })
+      c.set('user', guest ? null : { id: actorId, username: role, role, avatarKey: null })
       if (guest) c.set('guest', true)
       return next()
     })
@@ -1709,6 +1715,13 @@ describe('GET /api/v1/books/:id/file range requests', () => {
     expect(res.status).toBe(404)
     const meta = await createFileApp('guest', true).request(`/api/v1/books/${book.id}`)
     expect(meta.status).toBe(404)
+  })
+
+  it('keeps ordinary download and export routes scoped to the requesting reader', async () => {
+    const outsiderId = seedUser(db, 'download-outsider')
+    const app = createFileApp('owner', false, outsiderId)
+    expect((await app.request(`/api/v1/books/${book.id}/file`)).status).toBe(404)
+    expect((await app.request(`/api/v1/books/${book.id}/export.txt`)).status).toBe(404)
   })
 
   it('serves the cover route with thumbnail by default and original for download', async () => {
@@ -1982,6 +1995,220 @@ describe('listBooks shelfName and tags', () => {
     const res = await listBooks(ownerId, 1, 20)
     expect(res.total).toBe(1)
     expect(res.data).toHaveLength(1)
+  })
+})
+
+describe('private-library undo', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    ownerId = seedUser(db, 'undo-owner')
+  })
+
+  it('restores each batch row and only the touched tag memberships', async () => {
+    const shelfA = createId('shelf')
+    const shelfB = createId('shelf')
+    const shelfTarget = createId('shelf')
+    const libraryId = ensureLibrary(db, ownerId)
+    db.insert(schema.shelves).values([shelfA, shelfB, shelfTarget].map((id, index) => ({ id, libraryId, userId: ownerId, name: `Shelf ${index}`, sortOrder: index, createdAt: 1, updatedAt: 1 }))).run()
+    const oldTag = await createTag(ownerId, 'Undo old')
+    const addedTag = await createTag(ownerId, 'Undo add')
+    const unrelatedTag = await createTag(ownerId, 'Undo unrelated')
+    const first = seedBook(db, ownerId, { shelfId: shelfA })
+    const second = seedBook(db, ownerId, { shelfId: shelfB })
+    const firstWork = libraryBookOf(db, first.id)!
+    const secondWork = libraryBookOf(db, second.id)!
+    db.insert(schema.libraryBookTags).values({ libraryBookId: firstWork.id, tagId: oldTag.id }).run()
+    const undo: { token?: string } = {}
+
+    organizePrivateBatch(ownerId, {
+      ids: [first.id, second.id], shelfId: shelfTarget,
+      addTagIds: [addedTag.id], removeTagIds: [oldTag.id],
+    }, undo)
+    expect(undo.token).toBeTruthy()
+    db.update(schema.libraryBooks).set({ title: 'Changed later' }).where(eq(schema.libraryBooks.id, firstWork.id)).run()
+    db.insert(schema.libraryBookTags).values({ libraryBookId: firstWork.id, tagId: unrelatedTag.id }).run()
+
+    await executeUndoReceipt(ownerId, undo.token!)
+
+    expect(libraryBookOf(db, first.id)).toMatchObject({ shelfId: shelfA, title: 'Changed later' })
+    expect(libraryBookOf(db, second.id)?.shelfId).toBe(shelfB)
+    const firstTags = new Set(db.select({ tagId: schema.libraryBookTags.tagId }).from(schema.libraryBookTags).where(eq(schema.libraryBookTags.libraryBookId, firstWork.id)).all().map((row) => row.tagId))
+    const secondTags = new Set(db.select({ tagId: schema.libraryBookTags.tagId }).from(schema.libraryBookTags).where(eq(schema.libraryBookTags.libraryBookId, secondWork.id)).all().map((row) => row.tagId))
+    expect(firstTags).toEqual(new Set([oldTag.id, unrelatedTag.id]))
+    expect(secondTags).toEqual(new Set())
+  })
+
+  it('removes only category rows created by a private assignment undo when they remain unused', async () => {
+    const book = seedBook(db, ownerId)
+    const undo: { token?: string } = {}
+    await setBookMembership(ownerId, book.id, { categoryTemplateKey: 'web-fiction.mystery' }, undo)
+    expect(db.select().from(schema.libraryCategories).all()).toHaveLength(2)
+    await executeUndoReceipt(ownerId, undo.token!)
+    expect(libraryBookOf(db, book.id)?.categoryId).toBeNull()
+    expect(db.select().from(schema.libraryCategories).all()).toHaveLength(0)
+  })
+
+  it('restores a single book shelf without replacing unrelated edits', async () => {
+    const libraryId = ensureLibrary(db, ownerId)
+    const oldShelf = createId('shelf')
+    const newShelf = createId('shelf')
+    db.insert(schema.shelves).values([oldShelf, newShelf].map((id, index) => ({ id, libraryId, userId: ownerId, name: `Single ${index}`, sortOrder: index, createdAt: 1, updatedAt: 1 }))).run()
+    const book = seedBook(db, ownerId, { shelfId: oldShelf })
+    const undo: { token?: string } = {}
+    await setBookMembership(ownerId, book.id, { shelfId: newShelf }, undo)
+    const work = libraryBookOf(db, book.id)!
+    db.update(schema.libraryBooks).set({ title: 'Later title' }).where(eq(schema.libraryBooks.id, work.id)).run()
+    await executeUndoReceipt(ownerId, undo.token!)
+    expect(libraryBookOf(db, book.id)).toMatchObject({ shelfId: oldShelf, title: 'Later title' })
+  })
+
+  it('undoes a single tag addition without removing pre-existing or later unrelated tags', async () => {
+    const oldTag = await createTag(ownerId, 'Single old')
+    const addedTag = await createTag(ownerId, 'Single add')
+    const unrelatedTag = await createTag(ownerId, 'Single unrelated')
+    const book = seedBook(db, ownerId)
+    const work = libraryBookOf(db, book.id)!
+    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: oldTag.id }).run()
+    const undo: { token?: string } = {}
+    await setBookTags(ownerId, book.id, [oldTag.id, addedTag.id], undo)
+    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: unrelatedTag.id }).run()
+    await executeUndoReceipt(ownerId, undo.token!)
+    expect(new Set(await getBookTags(ownerId, book.id))).toEqual(new Set([oldTag.id, unrelatedTag.id]))
+  })
+
+  it('restores one combined organization save as a single undo unit', async () => {
+    const libraryId = ensureLibrary(db, ownerId)
+    const oldShelf = createId('shelf')
+    const newShelf = createId('shelf')
+    db.insert(schema.shelves).values([oldShelf, newShelf].map((id, index) => ({ id, libraryId, userId: ownerId, name: `Combined ${index}`, sortOrder: index, createdAt: 1, updatedAt: 1 }))).run()
+    const originalTag = await createTag(ownerId, 'Combined original')
+    const addedTag = await createTag(ownerId, 'Combined added')
+    const unrelatedTag = await createTag(ownerId, 'Combined unrelated')
+    const book = seedBook(db, ownerId, { shelfId: oldShelf })
+    const work = libraryBookOf(db, book.id)!
+    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: originalTag.id }).run()
+    const undo: { token?: string } = {}
+
+    setBookOrganization(ownerId, book.id, { shelfId: newShelf, tagIds: [originalTag.id, addedTag.id] }, undo)
+    expect(undo.token).toBeTruthy()
+    db.update(schema.libraryBooks).set({ title: 'Later title' }).where(eq(schema.libraryBooks.id, work.id)).run()
+    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: unrelatedTag.id }).run()
+    await executeUndoReceipt(ownerId, undo.token!)
+
+    expect(libraryBookOf(db, book.id)).toMatchObject({ shelfId: oldShelf, title: 'Later title' })
+    expect(new Set(await getBookTags(ownerId, book.id))).toEqual(new Set([originalTag.id, unrelatedTag.id]))
+  })
+
+  it('restores pin and hidden fields while preserving later title edits, and rejects changed target state', async () => {
+    const book = seedBook(db, ownerId)
+    const work = libraryBookOf(db, book.id)!
+    const link = db.select().from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, book.id)).get()!
+    const undo: { token?: string } = {}
+    await updateBook(ownerId, book.id, { pinned: true, hidden: true }, undo)
+    expect(undo.token).toBeTruthy()
+    await updateBook(ownerId, book.id, { title: 'A later title' })
+    await executeUndoReceipt(ownerId, undo.token!)
+    expect(libraryBookOf(db, book.id)).toMatchObject({ hidden: false, title: 'A later title' })
+    expect(db.select().from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.id, link.id)).get()?.pinnedAt).toBeNull()
+
+    const secondUndo: { token?: string } = {}
+    await updateBook(ownerId, book.id, { hidden: true }, secondUndo)
+    db.update(schema.libraryBooks).set({ hidden: false }).where(eq(schema.libraryBooks.id, work.id)).run()
+    await expect(executeUndoReceipt(ownerId, secondUndo.token!)).rejects.toMatchObject({ code: 'UNDO_CONFLICT' })
+  })
+
+  it('keeps the prior receipt when a repeated pin request changes nothing', async () => {
+    const book = seedBook(db, ownerId)
+    const first: { token?: string } = {}
+    await updateBook(ownerId, book.id, { pinned: true }, first)
+    const noOp: { token?: string } = {}
+    await updateBook(ownerId, book.id, { pinned: true }, noOp)
+    expect(noOp.token).toBeUndefined()
+    await executeUndoReceipt(ownerId, first.token!)
+    const link = db.select().from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, book.id)).get()!
+    expect(link.pinnedAt).toBeNull()
+  })
+
+  it('reports a conflict when an original tag was deleted before recovery', async () => {
+    const book = seedBook(db, ownerId)
+    const tag = await createTag(ownerId, 'Deleted tag')
+    const work = libraryBookOf(db, book.id)!
+    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: tag.id }).run()
+    const undo: { token?: string } = {}
+    await setBookTags(ownerId, book.id, [], undo)
+    db.delete(schema.libraryTags).where(eq(schema.libraryTags.id, tag.id)).run()
+    await expect(executeUndoReceipt(ownerId, undo.token!)).rejects.toMatchObject({ code: 'UNDO_CONFLICT' })
+  })
+
+  it('treats multi-book pin and hide as one undo unit with per-book old values', async () => {
+    const first = seedBook(db, ownerId)
+    const second = seedBook(db, ownerId)
+    db.update(schema.libraryBooks).set({ hidden: true }).where(eq(schema.libraryBooks.id, libraryBookOf(db, second.id)!.id)).run()
+    const firstWork = libraryBookOf(db, first.id)!
+    const undo: { token?: string } = {}
+    const result = updatePrivateBatch(ownerId, { ids: [first.id, second.id], pinned: true, hidden: false }, undo)
+    expect(result).toMatchObject({ succeeded: 2, failed: 0 })
+    db.update(schema.libraryBooks).set({ title: 'Later edit' }).where(eq(schema.libraryBooks.id, firstWork.id)).run()
+
+    await executeUndoReceipt(ownerId, undo.token!)
+
+    expect(libraryBookOf(db, first.id)).toMatchObject({ hidden: false, title: 'Later edit' })
+    expect(libraryBookOf(db, second.id)?.hidden).toBe(true)
+    for (const id of [first.id, second.id]) {
+      const link = db.select().from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, id)).get()!
+      expect(link.pinnedAt).toBeNull()
+    }
+  })
+
+  it('undoes trash without touching shelf or tags and does not issue a receipt when personal data cleanup was requested', async () => {
+    const shelfId = createId('shelf')
+    const libraryId = ensureLibrary(db, ownerId)
+    db.insert(schema.shelves).values({ id: shelfId, libraryId, userId: ownerId, name: 'Keep', sortOrder: 0, createdAt: 1, updatedAt: 1 }).run()
+    const tag = await createTag(ownerId, 'Keep tag')
+    const book = seedBook(db, ownerId, { shelfId })
+    const work = libraryBookOf(db, book.id)!
+    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: tag.id }).run()
+    const undo: { token?: string } = {}
+    await trashBook(ownerId, book.id, undefined, undo)
+    await executeUndoReceipt(ownerId, undo.token!)
+    expect(libraryBookOf(db, book.id)).toMatchObject({ deletedAt: null, shelfId })
+    expect(await getBookTags(ownerId, book.id)).toEqual([tag.id])
+
+    const cleanupUndo: { token?: string } = {}
+    await trashBook(ownerId, book.id, { deleteUserData: true }, cleanupUndo)
+    expect(cleanupUndo.token).toBeUndefined()
+  })
+
+  it('groups successful private trash moves into one receipt and leaves failed ids untouched', async () => {
+    const book = seedBook(db, ownerId)
+    const missingId = createId('book')
+    const undo: { token?: string } = {}
+    const result = await trashPrivateBatch(ownerId, [book.id, missingId], false, undo)
+    expect(result).toMatchObject({ succeeded: 1, failed: 1, failedIds: [missingId] })
+    await executeUndoReceipt(ownerId, undo.token!)
+    expect(libraryBookOf(db, book.id)?.deletedAt).toBeNull()
+    expect(libraryBookOf(db, missingId)).toBeUndefined()
+  })
+
+  it('groups successful batch shelf moves and restores only those rows', async () => {
+    const libraryId = ensureLibrary(db, ownerId)
+    const shelfId = createId('shelf')
+    db.insert(schema.shelves).values({ id: shelfId, libraryId, userId: ownerId, name: 'Batch shelf', sortOrder: 0, createdAt: 1, updatedAt: 1 }).run()
+    const first = seedBook(db, ownerId)
+    const second = seedBook(db, ownerId)
+    const missingId = createId('book')
+    const undo: { token?: string } = {}
+
+    const result = movePrivateBatchToShelf(ownerId, { ids: [first.id, second.id, missingId], shelfId }, undo)
+    expect(result).toMatchObject({ succeeded: 2, failed: 1, failedIds: [missingId] })
+    expect(libraryBookOf(db, first.id)?.shelfId).toBe(shelfId)
+    await executeUndoReceipt(ownerId, undo.token!)
+    expect(libraryBookOf(db, first.id)?.shelfId).toBeNull()
+    expect(libraryBookOf(db, second.id)?.shelfId).toBeNull()
   })
 })
 

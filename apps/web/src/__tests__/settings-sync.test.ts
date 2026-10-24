@@ -69,6 +69,13 @@ describe('SettingsSync persistence', () => {
     ))
   }
 
+  function findPutWithSetting(key: string) {
+    return vi.mocked(fetch).mock.calls.find(([, init]) => {
+      if (init?.method !== 'PUT' || typeof init.body !== 'string') return false
+      return key in JSON.parse(init.body)
+    })
+  }
+
   it('saves a preset even though creation also changes the active pointer', async () => {
     mountSync()
     await vi.runAllTimersAsync()
@@ -76,10 +83,24 @@ describe('SettingsSync persistence', () => {
     useUiStore.getState().createReadingPreset('护眼')
     await vi.advanceTimersByTimeAsync(1000)
 
-    const put = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    const put = findPutWithSetting('readingConfig')
     expect(put).toBeDefined()
     const body = JSON.parse(String(put?.[1]?.body)) as { readingConfig: string }
     expect(body.readingConfig).toContain('护眼')
+  })
+
+  it('backfills the default undo shortcut into older account settings', async () => {
+    const oldShortcuts = JSON.stringify({ toc: READER_SHORTCUT_DEFAULTS.toc })
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ data: { readerShortcuts: oldShortcuts } }), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    const put = findPutWithSetting('readerShortcuts')
+    expect(put).toBeDefined()
+    const body = JSON.parse(String(put?.[1]?.body)) as { readerShortcuts: string }
+    expect(JSON.parse(body.readerShortcuts)).toMatchObject({ undo: READER_SHORTCUT_DEFAULTS.undo, toc: READER_SHORTCUT_DEFAULTS.toc })
   })
 
   it('keeps uncached account preferences blocked until a successful retry has been applied', async () => {
@@ -102,7 +123,7 @@ describe('SettingsSync persistence', () => {
     useUiStore.getState().setFontSize(26)
     await vi.advanceTimersByTimeAsync(1000)
 
-    const put = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    const put = findPutWithSetting('readingConfig')
     expect(put).toBeDefined()
     const body = JSON.parse(String(put?.[1]?.body)) as { readingConfig: string }
     expect(body.readingConfig).toContain('"fontSize":26')
@@ -115,7 +136,7 @@ describe('SettingsSync persistence', () => {
     useUiStore.getState().setFontPreference('serif', { enabled: false, displayName: '正文' })
     await vi.advanceTimersByTimeAsync(1000)
 
-    const put = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    const put = findPutWithSetting('fontPreferences')
     expect(put).toBeDefined()
     const body = JSON.parse(String(put?.[1]?.body)) as { fontPreferences: Record<string, unknown> }
     expect(body.fontPreferences).toEqual({ serif: { enabled: false, displayName: '正文' } })
@@ -128,7 +149,7 @@ describe('SettingsSync persistence', () => {
     useUiStore.getState().setFontOrder(['noto-sans-sc', 'serif', 'custom-1'])
     await vi.advanceTimersByTimeAsync(1000)
 
-    const put = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+    const put = findPutWithSetting('fontOrder')
     expect(put).toBeDefined()
     const body = JSON.parse(String(put?.[1]?.body)) as { fontOrder: string[] }
     expect(body.fontOrder).toEqual(['noto-sans-sc', 'serif', 'custom-1'])
@@ -176,7 +197,7 @@ describe('SettingsSync persistence', () => {
 
     expect(vi.mocked(fetch)).not.toHaveBeenCalledWith('/api/v1/settings', expect.objectContaining({ method: 'GET' }))
     expect(useUiStore.getState().readingConfig).toContain('护眼')
-    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+    expect(findPutWithSetting('readingConfig')).toBeDefined()
   })
 
   it('does not answer a foreign broadcast that changed nothing', async () => {
@@ -346,10 +367,15 @@ describe('SettingsSync persistence', () => {
     expect(localStorage.getItem('bd-settings-pending')).toBeNull()
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
 
-    // Re-login replays nothing: no PUT means the server config stands.
+    // Re-login may backfill the new shortcut field, but must not replay the
+    // logout reset over the server's reading preferences.
     useAuthStore.getState().setAuth(user)
     await vi.runAllTimersAsync()
-    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    const reloginPuts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(reloginPuts.every(([, init]) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return 'readerShortcuts' in body && !('readingConfig' in body)
+    })).toBe(true)
   })
 
   it('hydrates useUiStore immediately on mount from cached user settings', () => {

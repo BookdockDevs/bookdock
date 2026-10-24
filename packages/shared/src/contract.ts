@@ -8,6 +8,14 @@ import type { ReplacementTransferFile, TocTransferFile } from './rule-transfer'
 
 export interface ApiResponse<T> {
   data: T
+  undo?: UndoReceipt
+}
+
+export interface UndoReceipt {
+  token: string
+  label: string
+  messageKey?: string
+  params?: Record<string, string | number>
 }
 
 export interface ApiErrorBody {

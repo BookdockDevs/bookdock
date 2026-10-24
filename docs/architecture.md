@@ -847,6 +847,52 @@ see it. Trash auto-clean reuses the private rules per library (retention days,
 then oldest-deleted-first capacity), triggered lazily on the owner trash list
 plus a boot sweep; disabling the switch permanently deletes the current trash.
 
+### Application undo
+
+Undo is one volatile, user-scoped opportunity per browser session, represented
+by an opaque server-issued receipt. The server stores recovery data and checks
+ownership, expiry and post-operation state inside the database transaction
+that restores it. Receipts expire 120 seconds after issue. Responses include a
+per-user generation and absolute expiry so delayed responses cannot replace a
+newer opportunity and the client never advertises a receipt beyond its
+server-confirmed deadline. A retryable server failure may keep the receipt
+usable on the server, but the client does not extend the visible retry entry
+without a new confirmed expiry. The operation's ordinary success notification
+is augmented with the undo icon; partial success keeps its failed-item retry
+action and adds the undo icon to that same notification. The undo entry is
+bounded by a 10-second notification lifetime and the absolute receipt deadline;
+pointer/focus pauses do not extend server validity. A retryable failure keeps
+the undo action in its original slot, with the same deadline and expiry cleanup,
+so a partial operation's failed-item retry action remains available. While a
+restore request is running the notification stays visible until its response.
+On success, a normal notification becomes a regular short-lived success notice;
+a partial notice preserves its failed-item retry action and lifetime. Removing
+the focused undo control must also release the notification's focus pause, since
+browsers may not dispatch blur when a focused node is removed. Closing the
+notification or changing account clears the browser opportunity, and responses
+from an earlier auth session are ignored. Receipts are not durable or
+synchronized; successful duplicate requests are acknowledged without restoring
+twice, and server restart invalidates receipts.
+
+The supported operations are private-library shelf/category assignment, tag
+membership changes, pinning, card hiding and moving a card to trash. A single detail save
+that changes both classification and tags uses one `/books/:id/organization`
+request and one receipt, so both changes undo together. Shelf moves from the
+library hook use `/books/batch/move-shelf`, which captures successful changed
+rows in one receipt and preserves its per-item success/failure summary. Other
+batch operations also use one
+receipt containing only successful changed rows; the notification reports
+success/failure counts. Retrying only failed rows is a new operation: if it
+changes state, it replaces the prior receipt and its notification, and its
+receipt covers only the retry's changed rows. Recovery patches only affected
+fields/relations. Tag receipts record per-book membership deltas rather than
+replacing the full tag set. Trash recovery uses the existing owner-only
+restore path and is available only when user-data cleanup was not requested;
+that deletion variant suspends personal reading data and is intentionally not
+undoable. Any later write to a receipt's affected state makes that item
+conflict instead of overwriting it. Permanent deletion, empty trash, reading
+state, shared-library actions, content changes and redo are not supported.
+
 A private B with a readable source can be forked into a local C:
 the same card keeps its work, shelf and tags, but its version link swaps to a
 new independent `BookVersion` (a fresh revision reusing the pinned blob, no

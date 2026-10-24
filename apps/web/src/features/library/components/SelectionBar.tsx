@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { BatchSelectionItem, ReadStatus } from '@bookdock/shared'
+import type { BatchSelectionItem, ReadStatus, UndoReceipt } from '@bookdock/shared'
 import { apiDelete, apiPatch, apiPost } from '@/api/client'
 import { READING_RECORDS_KEY } from '@/api/hooks/reading-records'
 import { Button } from '@/components/ui/Button'
@@ -188,6 +188,39 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
     return failed === 0
   }
 
+  async function runPrivateBatchUpdate(
+    update: { hidden?: boolean; pinned?: boolean },
+    successKey: string,
+    actionKey: string,
+    ids = selectedIds,
+    retryDedupeKey = `private-batch-update:${actionKey}:${[...ids].sort().join(':')}`,
+  ): Promise<boolean> {
+    setMarking(true)
+    try {
+      const result = await apiPatch<{ data: { succeeded: number; failed: number; failedIds: string[] }; undo?: UndoReceipt }>('/books/batch/update', { ids, ...update })
+      const { succeeded, failed, failedIds } = result.data
+      void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
+      if (failed > 0) {
+        onRetainSelection?.(failedIds)
+        notify.warning(
+          { key: succeeded > 0 ? 'library.batchPartial' : 'library.batchFailed', params: { action: _(actionKey), succeeded, failed } },
+          { duration: 'persistent', dedupeKey: retryDedupeKey, undo: result.undo, action: { label: _('library.batchRetryFailed'), onClick: () => { void runPrivateBatchUpdate(update, successKey, actionKey, failedIds, retryDedupeKey).then((ok) => { if (ok) onComplete() }) } } },
+        )
+      } else {
+        notify.success({ key: successKey, params: { count: succeeded } }, { dedupeKey: retryDedupeKey, undo: result.undo })
+        onComplete()
+      }
+      return failed === 0
+    } catch {
+      notify.error({ key: 'library.batchFailed', params: { action: _(actionKey), failed: ids.length } })
+      onRetainSelection?.(ids)
+      return false
+    } finally {
+      setMarking(false)
+    }
+  }
+
   async function handleBatchStatus(value: ReadStatus) {
     const ok = await runBatch(
       (bookId) => apiPatch(`/books/${bookId}`, { readStatus: value }),
@@ -210,8 +243,12 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   }
 
   async function handleBatchHide(hidden: boolean) {
-    // Private ids are version ids, shared-library ids are work ids; each
-    // endpoint hides the caller's own row without touching anything else.
+    if (!libraryId) {
+      await runPrivateBatchUpdate({ hidden }, 'library.batchHideSucceeded', 'library.batchActionHide')
+      return
+    }
+    // Shared-library ids identify works; the manager endpoint mutates the
+    // library-owned row without touching its versions.
     const ok = await runBatch(
       (id) => libraryId
         ? apiPatch(`/libraries/${libraryId}/books/${id}`, { hidden })
@@ -228,6 +265,10 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
   }
 
   async function handleBatchPin(pinned: boolean) {
+    if (!libraryId) {
+      await runPrivateBatchUpdate({ pinned }, 'library.batchSucceeded', pinned ? 'library.pin' : 'library.unpin')
+      return
+    }
     const ok = await runBatch(
       (id) => libraryId
         ? apiPatch(`/libraries/${libraryId}/books/${id}`, { pinned })
@@ -529,7 +570,7 @@ function BatchClassifyDialog({ ids, items, libraryId, taxonomyLibraryId, onClose
     if (saving) return
     setSaving(true)
     try {
-      await apiPatch(libraryId ? `/libraries/${libraryId}/books/batch/organize` : '/books/batch/organize', {
+      const result = await apiPatch<{ undo?: UndoReceipt }>(libraryId ? `/libraries/${libraryId}/books/batch/organize` : '/books/batch/organize', {
         ids,
         ...(selectedShelf !== undefined ? { shelfId: selectedShelf } : {}),
         ...(selectedTemplateKey ? { categoryTemplateKey: selectedTemplateKey } : selectedCategory !== undefined ? { categoryId: selectedCategory } : {}),
@@ -548,7 +589,7 @@ function BatchClassifyDialog({ ids, items, libraryId, taxonomyLibraryId, onClose
         void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] })
         void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
       }
-      notify.success({ key: 'library.batchClassifySucceeded', params: { count: ids.length } })
+      notify.success({ key: 'library.batchClassifySucceeded', params: { count: ids.length } }, { undo: result.undo })
       onDone()
       onClose()
     } catch {
@@ -656,11 +697,41 @@ function BatchDeleteDialog({ ids, items, libraryId, trashEnabled, onRetainSelect
 
   async function handleDelete() {
     setDeleting(true)
-    const results = await settleBatch(ids, (id) => libraryId
-      ? apiDelete(`/libraries/${libraryId}/books/${id}`)
-      : apiDelete(`/books/${id}${deleteUserData ? '?deleteUserData=true' : ''}`))
-    const failed = results.filter((r) => r.status === 'rejected').length
-    const succeeded = results.length - failed
+    let succeeded = 0
+    let failed = 0
+    let failedIds: string[] = []
+    let undo: UndoReceipt | undefined
+    if (!libraryId && trashEnabled && !deleteUserData) {
+      const ownedIds = items.filter((item) => item.kind !== 'shared').map((item) => item.id)
+      const collectedIds = items.filter((item) => item.kind === 'shared').map((item) => item.id)
+      if (ownedIds.length) {
+        try {
+          const result = await apiPost<{ data: { succeeded: number; failed: number; failedIds: string[] }; undo?: UndoReceipt }>('/books/batch/trash', { ids: ownedIds })
+          succeeded += result.data.succeeded
+          failed += result.data.failed
+          failedIds.push(...result.data.failedIds)
+          undo = result.undo
+        } catch {
+          notify.error(_('library.batchDeleteFailed'))
+          onRetainSelection?.(ids)
+          setDeleting(false)
+          return
+        }
+      }
+      if (collectedIds.length) {
+        const results = await settleBatch(collectedIds, (id) => apiDelete(`/books/${id}`))
+        failed += results.filter((result) => result.status === 'rejected').length
+        succeeded += results.length - results.filter((result) => result.status === 'rejected').length
+        failedIds.push(...collectedIds.filter((_, index) => results[index]?.status === 'rejected'))
+      }
+    } else {
+      const results = await settleBatch(ids, (id) => libraryId
+        ? apiDelete(`/libraries/${libraryId}/books/${id}`)
+        : apiDelete(`/books/${id}${deleteUserData ? '?deleteUserData=true' : ''}`))
+      failed = results.filter((r) => r.status === 'rejected').length
+      succeeded = results.length - failed
+      failedIds = ids.filter((_, index) => results[index]?.status === 'rejected')
+    }
     void queryClient.invalidateQueries({ queryKey: ['books'] })
     void queryClient.invalidateQueries({ queryKey: ['shelves'] })
     void queryClient.invalidateQueries({ queryKey: ['tags'] })
@@ -671,14 +742,14 @@ function BatchDeleteDialog({ ids, items, libraryId, trashEnabled, onRetainSelect
     }
     if (!trashEnabled || deleteUserData) void invalidatePermanentlyDeletedBookQueries(queryClient)
     if (failed === 0) {
-      notify.success({ key: 'library.batchDeleteSucceeded', params: { count: succeeded } })
+      notify.success({ key: 'library.batchDeleteSucceeded', params: { count: succeeded } }, { undo })
     } else {
       const showResult = succeeded > 0 ? notify.warning : notify.error
       showResult({
         key: succeeded > 0 ? 'library.batchPartial' : 'library.batchFailed',
         params: { action: _('library.batchActionDelete'), succeeded, failed },
-      })
-      onRetainSelection?.(ids.filter((_, index) => results[index]?.status === 'rejected'))
+      }, { undo })
+      onRetainSelection?.(failedIds)
     }
     if (failed === 0) {
       onDone()

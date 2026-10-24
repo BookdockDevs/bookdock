@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { notify } from '@/lib/notifications'
+import { publishUndoOpportunity } from '@/lib/undo'
+import { useToastStore } from '@/stores/toast.store'
 import { forwardReaderShortcut, isReaderContentTarget, isReaderModalOpen, READER_SHORTCUT_DEFAULTS, readReaderShortcuts, readerShortcutStorageKey, shortcutConflict, shortcutMatches, shortcutRejection, writeReaderShortcuts } from '../features/reader/lib/reader-shortcuts'
 
 describe('reader shortcuts', () => {
-  beforeEach(() => localStorage.clear())
+  beforeEach(() => { localStorage.clear(); useToastStore.getState().clearToasts() })
 
   it('provides the requested defaults and keeps each account cache separate', () => {
     expect(READER_SHORTCUT_DEFAULTS.sidebar?.key).toBe('p')
@@ -17,6 +20,7 @@ describe('reader shortcuts', () => {
       chapterStart: { key: 'Home' },
       chapterEnd: { key: 'End' },
       shortcutsMenu: { key: '/', shift: true },
+      undo: { key: 'z', ctrl: true },
     })
     const changed = { ...READER_SHORTCUT_DEFAULTS, toc: null }
     writeReaderShortcuts('alice', changed)
@@ -27,12 +31,13 @@ describe('reader shortcuts', () => {
 
   it('fills defaults for commands missing from an older saved map', () => {
     localStorage.setItem(readerShortcutStorageKey('alice'), JSON.stringify({ toc: null, search: READER_SHORTCUT_DEFAULTS.search }))
-    expect(readReaderShortcuts('alice')).toMatchObject({ toc: null, historyBack: READER_SHORTCUT_DEFAULTS.historyBack, chapterEnd: READER_SHORTCUT_DEFAULTS.chapterEnd })
+    expect(readReaderShortcuts('alice')).toMatchObject({ toc: null, historyBack: READER_SHORTCUT_DEFAULTS.historyBack, chapterEnd: READER_SHORTCUT_DEFAULTS.chapterEnd, undo: READER_SHORTCUT_DEFAULTS.undo })
   })
 
   it('matches modified keys, rejects collisions, and protects fixed/browser shortcuts', () => {
     expect(shortcutMatches({ key: 'f', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }, READER_SHORTCUT_DEFAULTS.search)).toBe(true)
     expect(shortcutConflict(READER_SHORTCUT_DEFAULTS, 'toc', READER_SHORTCUT_DEFAULTS.sidebar!)).toBe('sidebar')
+    expect(shortcutConflict(READER_SHORTCUT_DEFAULTS, 'search', READER_SHORTCUT_DEFAULTS.undo!)).toBe('undo')
     expect(shortcutRejection({ key: 'z', ctrl: true, meta: false, alt: false, shift: false })).toBeNull()
     expect(shortcutRejection({ key: 'w', ctrl: true, meta: false, alt: false, shift: false })).toBeTruthy()
     expect(shortcutRejection({ key: 'ArrowLeft', ctrl: false, meta: false, alt: false, shift: false })).toBeTruthy()
@@ -89,6 +94,11 @@ describe('reader shortcuts', () => {
     expect(forwardReaderShortcut(search, host, READER_SHORTCUT_DEFAULTS)).toBe(true)
     expect(search.defaultPrevented).toBe(true)
     expect(received).toHaveLength(1)
+
+    const undo = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, cancelable: true })
+    Object.defineProperty(undo, 'target', { value: document.body })
+    expect(forwardReaderShortcut(undo, host, READER_SHORTCUT_DEFAULTS)).toBe(false)
+    expect(undo.defaultPrevented).toBe(false)
     expect(received[0]).toMatchObject({ key: 'f', ctrlKey: true })
 
     Object.defineProperty(frameInput, 'isContentEditable', { value: true })
@@ -126,5 +136,21 @@ describe('reader shortcuts', () => {
     Object.defineProperty(oldBinding, 'target', { value: document.body })
     expect(forwardReaderShortcut(oldBinding, host, cleared)).toBe(false)
     expect(oldBinding.defaultPrevented).toBe(false)
+  })
+
+  it('forwards an active application undo from reader iframe focus once', () => {
+    const receipt = { token: 'iframe-receipt' }
+    publishUndoOpportunity(receipt)
+    notify.success('ok', { undo: receipt })
+    const host = document.createElement('div')
+    const received: KeyboardEvent[] = []
+    host.addEventListener('keydown', (event) => received.push(event as KeyboardEvent))
+    const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'target', { value: document.body })
+
+    expect(forwardReaderShortcut(event, host, READER_SHORTCUT_DEFAULTS)).toBe(true)
+    expect(event.defaultPrevented).toBe(true)
+    expect(received).toHaveLength(1)
+    expect(received[0]).toMatchObject({ key: 'z', ctrlKey: true })
   })
 })

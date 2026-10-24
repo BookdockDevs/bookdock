@@ -107,6 +107,15 @@ export function Toast() {
     }
   }, [visible])
 
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    for (const toast of toasts) {
+      const card = [...host.querySelectorAll<HTMLElement>('[data-toast-id]')].find((element) => element.dataset.toastId === toast.id)
+      if (card && !card.contains(document.activeElement)) resumeToast(toast.id, 'focus')
+    }
+  }, [resumeToast, toasts])
+
   if (toasts.length === 0) return null
 
   return (
@@ -114,6 +123,7 @@ export function Toast() {
       {toasts.map((toast) => (
         <div
           key={toast.id}
+          data-toast-id={toast.id}
           className="pointer-events-auto flex shrink-0 items-start gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700 shadow-md shadow-stone-900/10 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:shadow-black/20 animate-toast-in"
           onPointerEnter={(event) => { if (event.pointerType !== 'touch') pauseToast(toast.id, 'pointer') }}
           onPointerLeave={() => resumeToast(toast.id, 'pointer')}
@@ -131,7 +141,7 @@ export function Toast() {
             <p className="leading-5 [overflow-wrap:anywhere]">
               {typeof toast.message === 'string' ? toast.message : _(toast.message.key, toast.message.params)}
             </p>
-            {toast.action && (
+            {toast.action && !toast.action.icon && (
               <Button
                 type="button"
                 variant="secondary"
@@ -139,13 +149,58 @@ export function Toast() {
                 className="mt-2 max-w-full whitespace-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
                 onClick={() => {
                   toast.action?.onClick()
-                  removeToast(toast.id)
+                  if (!toast.action?.keepOpen) removeToast(toast.id)
                 }}
               >
                 {toast.action.label}
               </Button>
             )}
           </div>
+          {[toast.secondaryAction, toast.action].filter((action): action is NonNullable<typeof action> => Boolean(action?.icon)).map((action, index) => {
+            const icon = action.icon === 'loading' ? (
+              <svg aria-hidden="true" className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.37 0 0 5.37 0 12h4Z" /></svg>
+            ) : action.icon === 'retry' ? (
+              <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M5.6 9a7 7 0 0 1 11.5-2L20 12M4 12l2.9 5a7 7 0 0 0 11.5-2" /></svg>
+            ) : action.icon === 'undo' ? (
+              <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-2" /></svg>
+            ) : null
+            const onClick = () => {
+              action.onClick()
+              if (!action.keepOpen) removeToast(toast.id)
+            }
+
+            if (action.icon === 'undo') {
+              return (
+                <button
+                  key={`${action.icon}-${index}`}
+                  type="button"
+                  aria-label={action.label}
+                  title={action.label}
+                  disabled={action.disabled}
+                  className="-my-1.5 -mr-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                  onClick={onClick}
+                >
+                  {icon}
+                </button>
+              )
+            }
+
+            return (
+              <Button
+                key={`${action.icon}-${index}`}
+                type="button"
+                variant="secondary"
+                size="sm"
+                aria-label={action.label}
+                title={action.label}
+                disabled={action.disabled}
+                className="-my-1.5 -mr-2 inline-flex h-8 w-8 shrink-0 items-center justify-center p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                onClick={onClick}
+              >
+                {icon}
+              </Button>
+            )
+          })}
           <button
             type="button"
             aria-label={_('toast.dismiss')}

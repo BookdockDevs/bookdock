@@ -7,7 +7,7 @@ import { useMoveBooksToShelf } from '../features/library/hooks'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof apiClient>()
-  return { ...actual, apiPut: vi.fn() }
+  return { ...actual, apiPatch: vi.fn() }
 })
 
 function wrapper(queryClient: QueryClient) {
@@ -23,26 +23,25 @@ describe('useMoveBooksToShelf', () => {
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
-    vi.mocked(apiClient.apiPut).mockResolvedValue({ data: null } as never)
+    vi.mocked(apiClient.apiPatch).mockResolvedValue({ data: { succeeded: 2, failed: 0, failedIds: [] } } as never)
   })
 
-  it('PUTs each book to the target shelf', async () => {
+  it('sends one batch organize request for all books', async () => {
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
 
     result.current.mutate({ bookIds: ['b1', 'b2'], shelfId: 's1' })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(apiClient.apiPut).toHaveBeenCalledWith('/books/b1/shelves', { shelfId: 's1' })
-    expect(apiClient.apiPut).toHaveBeenCalledWith('/books/b2/shelves', { shelfId: 's1' })
+    expect(apiClient.apiPatch).toHaveBeenCalledExactlyOnceWith('/books/batch/move-shelf', { ids: ['b1', 'b2'], shelfId: 's1' })
   })
 
-  it('PUTs shelfId null when moving out of a shelf', async () => {
+  it('sends shelfId null when moving out of a shelf', async () => {
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
 
     result.current.mutate({ bookIds: ['b1'], shelfId: null })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(apiClient.apiPut).toHaveBeenCalledWith('/books/b1/shelves', { shelfId: null })
+    expect(apiClient.apiPatch).toHaveBeenCalledWith('/books/batch/move-shelf', { ids: ['b1'], shelfId: null })
   })
 
   it('invalidates the batch-selection snapshot so the organize dialog re-reads membership', async () => {

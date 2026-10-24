@@ -55,6 +55,7 @@ const commands: CommandItem[] = [
   { id: 'fontIncrease', label: 'keyboardShortcutFontIncrease' },
   { id: 'fontDecrease', label: 'keyboardShortcutFontDecrease' },
   { id: 'settings', label: 'keyboardShortcutSettings' },
+  { id: 'undo', label: 'keyboardShortcutUndo' },
   { id: 'shortcutsMenu', label: 'keyboardShortcutMenu' },
 ]
 

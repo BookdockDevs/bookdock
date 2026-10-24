@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AiChatReq } from '@bookdock/shared'
 
 import { apiGet, apiStreamAiChat, apiUpload } from '@/api/client'
+import { hasUndoOpportunity } from '@/lib/undo'
 import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
 
@@ -75,6 +76,24 @@ describe('expired hidden display session', () => {
     expect(useAuthStore.getState().user).toBeNull()
     expect(useUiStore.getState().revealHidden).toBe(false)
     expect(localStorage.getItem('bd-reveal-hidden:expired-user')).toBe('true')
+  })
+})
+
+describe('undo receipt response session boundary', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    useAuthStore.getState().clearAuth()
+  })
+
+  it('ignores an undo receipt returned after the request account changes', async () => {
+    useAuthStore.getState().setAuth({ id: 'account-a', username: 'a', role: 'member' })
+    let respond!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { respond = resolve })))
+    const request = apiGet('/books')
+    useAuthStore.getState().setAuth({ id: 'account-b', username: 'b', role: 'member' })
+    respond(new Response(JSON.stringify({ data: null, undo: { token: 'receipt-a', expiresAt: Date.now() + 120_000, generation: 1 } }), { status: 200 }))
+    await request
+    expect(hasUndoOpportunity()).toBe(false)
   })
 })
 

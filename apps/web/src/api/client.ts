@@ -1,12 +1,22 @@
-import { useAuthStore } from '@/stores/auth.store'
-
 import type { AiChatReq, AiCitation, AiContextReceipt } from '@bookdock/shared'
+
+import { DEFAULT_UNDO_QUERY_KEYS, publishUndoOpportunity } from '@/lib/undo'
+import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 
 export const BASE_URL = '/api/v1'
 
 // Dispatched when a non-public request comes back 401; RootComponent listens
 // and redirects to /login. An event keeps this module free of router imports.
 export const UNAUTHORIZED_EVENT = 'bd:unauthorized'
+
+function undoQueryKeys(path: string, method = 'GET'): readonly (readonly unknown[])[] {
+  const singleBook = path.split('?')[0]?.match(/^\/books\/([^/]+)$/)
+  if (method === 'PATCH' && singleBook) {
+    const bookId = decodeURIComponent(singleBook[1]!)
+    return [['books'], ['books', 'detail', bookId], ['book', bookId]]
+  }
+  return DEFAULT_UNDO_QUERY_KEYS
+}
 
 const PUBLIC_AUTH_PATHS = [
   '/auth/login',
@@ -71,6 +81,8 @@ async function parseError(res: Response): Promise<ApiError> {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const requestUserId = useAuthStore.getState().user?.id ?? null
+  const requestSessionRevision = getAuthSessionRevision()
   const headers = new Headers({ 'Content-Type': 'application/json' })
   if (options?.headers) {
     const extra = new Headers(options.headers)
@@ -84,7 +96,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     if (res.status === 401) handleUnauthorized(path)
     throw await parseError(res)
   }
-  return res.json() as Promise<T>
+  const body = await res.json() as T & { undo?: { token: string; expiresAt?: number; generation?: number } }
+  if (body && typeof body === 'object' && body.undo && typeof body.undo.token === 'string'
+    && requestUserId === (useAuthStore.getState().user?.id ?? null)
+    && requestSessionRevision === getAuthSessionRevision()) {
+    publishUndoOpportunity({ ...body.undo, queryKeys: undoQueryKeys(path, options?.method ?? 'GET') })
+  }
+  return body
 }
 
 export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {

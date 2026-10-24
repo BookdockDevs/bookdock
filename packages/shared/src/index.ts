@@ -40,6 +40,7 @@ export type {
 
 export type {
   ApiResponse,
+  UndoReceipt,
   ApiErrorBody,
   PaginatedResponse,
   BookListRes,
@@ -374,6 +375,9 @@ export type {
   ForkLocalRes,
   BatchSelectionItem,
   BatchOrganizeReq,
+  PrivateBatchUpdateReq,
+  PrivateBatchShelfReq,
+  PrivateBatchTrashReq,
 } from './library'
 
 export { categoryScopeSchema } from './library'
@@ -401,6 +405,9 @@ export {
   catalogBookUpdateSchema,
   batchSelectionSchema,
   batchOrganizeSchema,
+  privateBatchUpdateSchema,
+  privateBatchShelfSchema,
+  privateBatchTrashSchema,
   catalogVersionUpdateSchema,
   catalogVersionMoveSchema,
   catalogSimilarQuerySchema,

@@ -10,7 +10,7 @@ import { useDeleteBook, useEmptyLibraryTrash, useEmptyTrash, useMoveBooksToShelf
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof apiClient>()
-  return { ...actual, apiDelete: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn() }
+  return { ...actual, apiDelete: vi.fn(), apiPatch: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn() }
 })
 
 vi.mock('@/lib/notifications', () => ({
@@ -37,6 +37,7 @@ describe('book action notifications', () => {
     })
     vi.mocked(apiClient.apiDelete).mockResolvedValue({ data: null } as never)
     vi.mocked(apiClient.apiPost).mockResolvedValue({ data: null } as never)
+    vi.mocked(apiClient.apiPatch).mockResolvedValue({ data: { succeeded: 2, failed: 0, failedIds: [] } } as never)
     vi.mocked(notify.success).mockReset()
     vi.mocked(notify.error).mockReset()
     vi.mocked(notify.warning).mockReset()
@@ -56,20 +57,20 @@ describe('book action notifications', () => {
     })
   })
 
-  it('reports a completely failed shelf move as an error', async () => {
-    vi.mocked(apiClient.apiPut).mockRejectedValue(new Error('Failed'))
-    const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
-    result.current.mutate({ bookIds: ['a', 'b'], shelfId: 'shelf-1' })
-    await waitFor(() => expect(notify.error).toHaveBeenCalledWith({ key: 'library.moveBooksFailed', params: { succeeded: 0, failed: 2 } }))
-    expect(notify.warning).not.toHaveBeenCalled()
-  })
-
-  it('reports shelf move partial success with both counts', async () => {
-    vi.mocked(apiClient.apiPut).mockResolvedValueOnce({ data: null }).mockRejectedValueOnce(new Error('Failed'))
+  it('reports partial shelf move counts from the single batch response', async () => {
+    vi.mocked(apiClient.apiPatch).mockResolvedValue({ data: { succeeded: 1, failed: 1, failedIds: ['b'] } } as never)
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
     result.current.mutate({ bookIds: ['a', 'b'], shelfId: 'shelf-1' })
     await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'library.moveBooksPartial', params: { succeeded: 1, failed: 1 } }))
     expect(notify.error).not.toHaveBeenCalled()
+  })
+
+  it('uses one batch shelf request for a multi-book move', async () => {
+    const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
+    result.current.mutate({ bookIds: ['a', 'b'], shelfId: 'shelf-1' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(apiClient.apiPatch).toHaveBeenCalledWith('/books/batch/move-shelf', { ids: ['a', 'b'], shelfId: 'shelf-1' })
+    expect(notify.warning).not.toHaveBeenCalled()
   })
 
   it('includes the title when restoring a book', async () => {

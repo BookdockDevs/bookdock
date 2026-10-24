@@ -205,6 +205,15 @@ export function SettingsSync() {
     applySettings(settingsRes.data)
     suppressSyncRef.current = false
     useSettingsSyncStore.setState({ userId, ready: true, failed: false })
+    const normalizedShortcuts = JSON.stringify(readReaderShortcuts(userId))
+    if (normalizedShortcuts !== settingsRes.data.readerShortcuts) {
+      void apiPut('/settings', { readerShortcuts: normalizedShortcuts }).catch(() => {
+        const pending = { ...(getPendingSettings(userId) ?? {}), readerShortcuts: normalizedShortcuts } as SettingsRes
+        persistPendingSettings(userId, pending)
+        window.dispatchEvent(new Event('bd-settings-pending'))
+        notify.warning({ key: 'settings.syncFailed' }, { dedupeKey: 'settings-sync' })
+      })
+    }
   }, [isGuest, settingsRes, userId])
 
   useEffect(() => {
