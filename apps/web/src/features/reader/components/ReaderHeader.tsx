@@ -80,7 +80,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
       return
     }
     const currentHistoryIndex = location.state.__TSR_index
-    if (readerReturn.sourceHistoryIndex !== undefined && currentHistoryIndex !== undefined && readerReturn.sourceHistoryIndex < currentHistoryIndex) {
+    if (readerReturn.sourceHistoryIndex !== undefined && readerReturn.sourceHistoryIndex > 0 && currentHistoryIndex !== undefined && readerReturn.sourceHistoryIndex < currentHistoryIndex) {
       event.preventDefault()
       router.history.go(readerReturn.sourceHistoryIndex - currentHistoryIndex)
       return

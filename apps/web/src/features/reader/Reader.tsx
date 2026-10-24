@@ -752,11 +752,9 @@ export default function Reader() {
     notify.error({ key: 'reader.chapterLoadFailed' })
   }, [chaptersQuery.error, chaptersQuery.isError])
 
-  // Gated on bookQuery resolution: the reader mounts only once the success
-  // branch's container div exists — mounting earlier grabs the loading-branch
-  // div, which React replaces when bookQuery resolves, leaving the view
-  // appended to a detached subtree (iframe never loads -> first-open hang).
-  const contentUrl = id && bookQuery.isFetchedAfterMount && bookQuery.data?.data
+  // Gated on bookQuery data: the reader mounts once bookQuery data exists (from
+  // cache on reopen or after the initial fetch).
+  const contentUrl = id && bookQuery.data?.data
     ? withReveal(`/api/v1/books/${id}/file?reader=1&revisionId=${encodeURIComponent(bookQuery.data.data.revisionId ?? '')}&v=${bookQuery.data.data.updatedAt}`)
     : ''
   const [revisionUrlOverride, setRevisionUrlOverride] = useState<string | null>(null)
@@ -843,13 +841,6 @@ export default function Reader() {
   // false timeout card (which then self-healed when the load arrived late).
   // Real failures keep coming through the renderer's onError.
   const [slowLoad, setSlowLoad] = useState(false)
-  const [showLoading, setShowLoading] = useState(false)
-  useEffect(() => {
-    setShowLoading(false)
-    if (readerReady) return
-    const timer = setTimeout(() => setShowLoading(true), 200)
-    return () => clearTimeout(timer)
-  }, [readerReady, contentUrl])
   useEffect(() => {
     if (revisionSwitchingRef.current) return
     setBookReady(false)
@@ -2139,7 +2130,7 @@ export default function Reader() {
                     </div>
                   </div>
                 ) : (
-                  <div className={cn('flex flex-col items-center gap-3', !showLoading && 'invisible')}>
+                  <div className="flex flex-col items-center gap-3">
                     <ReaderLoadingBadge />
                     {slowLoad && (
                       <span className="text-xs text-[var(--bd-read-sub)] opacity-70 transition-opacity">

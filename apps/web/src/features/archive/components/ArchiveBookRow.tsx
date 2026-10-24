@@ -123,6 +123,7 @@ export default function ArchiveBookRow({
     <Link
       to={to.to}
       search={to.search}
+      replace
       // Forward history state (the recorded archive exit source); a Link
       // without state resets it.
       state={(previous) => ({ ...previous })}

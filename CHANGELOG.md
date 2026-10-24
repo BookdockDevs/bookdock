@@ -4,6 +4,13 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Archive navigation replaces history entries during in-page book selection and view filtering to avoid history stack pollution and prevent stepping back through browsed books.
+- Page back navigation in archive and reader guards against popping out to browser blank pages or new tabs when accessed directly without in-app history.
+- Book covers in library listings retain their loaded state in client memory to eliminate placeholder flicker when navigating back from the reader.
+- Reader reopening no longer gates on post-mount network checks or displays a 200ms loading overlay flicker.
+
 ## [0.6.4] - 2026-10-24
 
 ### Highlights
@@ -869,6 +876,13 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### [Unreleased]
+
+#### 修复
+
+- 阅读档案内的书籍点选与视图筛选改为替换历史记录（replace），避免污染浏览器历史栈，解决返回时逐本倒退看过的书的问题。
+- 阅读档案与阅读器的左上角返回按钮增加无应用内历史的安全守卫，防止在新建标签页直接打开时意外回退到浏览器空白页。
+- 书架列表封面在客户端保留已加载状态缓存，消除从阅读器返回首页时封面从占位图闪烁的问题。
+- 重新进入书籍阅读时移除初次挂载网络轮询门禁与 200ms 加载遮罩闪烁，实现秒开体验。
 
 ### [0.6.4] - 2026-10-24
 

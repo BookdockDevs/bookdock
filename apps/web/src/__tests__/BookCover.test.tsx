@@ -45,6 +45,11 @@ describe('BookCover', () => {
     expect(screen.getByText('Real Cover')).toBeInTheDocument()
   })
 
+  it('renders immediately with opacity-100 when remounting a previously loaded cover', () => {
+    render(<BookCover book={{ ...baseBook, title: 'Cached Cover', coverKey: 'covers/book-1.jpg' }} />)
+    expect(screen.getByRole('img')).toHaveClass('opacity-100')
+  })
+
   it('renders an explicitly supplied cover source', () => {
     render(<BookCover book={baseBook} coverSrc="blob:cover-preview" />)
     expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:cover-preview')

@@ -148,6 +148,7 @@ export default function ArchiveSidebar({
       <Link
         to="/archive"
         search={{ ...baseSearch, bookId: undefined }}
+        replace
         // Keep the recorded archive exit source across this in-feature move.
         state={(previous) => ({ ...previous })}
         onClick={onSelectOverview}

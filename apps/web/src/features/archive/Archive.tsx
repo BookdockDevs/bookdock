@@ -125,7 +125,13 @@ export default function Archive() {
     const recorded = location.state.archiveReturn
     const searchReturn = location.state.librarySearchReturn
     const currentHistoryIndex = location.state.__TSR_index
-    if (recorded?.sourceHistoryIndex !== undefined && recorded.sourceHistoryIndex < currentHistoryIndex) {
+    if (
+      recorded?.sourceHistoryIndex !== undefined &&
+      recorded.sourceHistoryIndex > 0 &&
+      currentHistoryIndex !== undefined &&
+      currentHistoryIndex > 0 &&
+      recorded.sourceHistoryIndex < currentHistoryIndex
+    ) {
       router.history.go(recorded.sourceHistoryIndex - currentHistoryIndex)
       return
     }
@@ -152,7 +158,12 @@ export default function Archive() {
   const patch = (next: Partial<typeof search>) => {
     // Forward history state: navigating without it resets the recorded
     // archive exit source on the first internal move.
-    void navigate({ to: '/archive', search: { ...scopedSearch, ...next }, state: (previous) => ({ ...previous }) })
+    void navigate({
+      to: '/archive',
+      search: { ...scopedSearch, ...next },
+      replace: true,
+      state: (previous) => ({ ...previous }),
+    })
   }
 
   const listParams: ArchiveSidebarParams = {

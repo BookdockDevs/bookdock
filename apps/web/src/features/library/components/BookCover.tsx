@@ -6,6 +6,9 @@ import { cn } from '@/lib/utils'
 
 import { getCoverPalette } from './cover-palettes'
 
+/** In-memory cache of cover URLs loaded during the current browser session. */
+const loadedCoverCache = new Set<string>()
+
 /**
  * The only cover fields this component reads. Narrowing the prop to exactly
  * these is what lets a shared library's version reuse the same cover as a
@@ -41,25 +44,31 @@ function displayTitle(title: string): string {
 }
 
 export default function BookCover({ book, size = 'md', showFormat = true, className, coverSrc, coverPaletteId }: BookCoverProps) {
+  const source = coverSrc === undefined
+    ? (book.coverKey || book.format === 'epub'
+      ? `/api/v1/books/${book.id}/cover?v=${encodeURIComponent(book.coverKey ?? 'auto')}`
+      : null)
+    : coverSrc
+  const isCached = Boolean(source && loadedCoverCache.has(source))
   const [error, setError] = useState(false)
-  const [loaded, setLoaded] = useState(false)
+  const [loaded, setLoaded] = useState(isCached)
   const coverFit = useUiStore((s) => s.coverFit)
   // Hash by stable content identity, not a library work/card id or title:
   // moving a version between libraries and renaming it must not repaint it.
   const palette = getCoverPalette(book.coverPaletteKey ?? book.id, coverPaletteId ?? book.coverPaletteId)
   const isSm = size === 'sm'
   const isCard = size === 'card'
-  const source = coverSrc === undefined
-    ? (book.coverKey || book.format === 'epub'
-      ? `/api/v1/books/${book.id}/cover?v=${encodeURIComponent(book.coverKey ?? 'auto')}`
-      : null)
-    : coverSrc
   const hasCover = Boolean(source) && !error
 
   useEffect(() => {
     setError(false)
-    setLoaded(false)
+    setLoaded(Boolean(source && loadedCoverCache.has(source)))
   }, [source])
+
+  const markLoaded = () => {
+    if (source) loadedCoverCache.add(source)
+    setLoaded(true)
+  }
 
   const title = displayTitle(book.title)
   const initial = title.match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? '?'
@@ -131,21 +140,25 @@ export default function BookCover({ book, size = 'md', showFormat = true, classN
         <img
           ref={(img) => {
             if (img?.complete && img?.naturalWidth > 0 && !loaded) {
-              setLoaded(true)
+              markLoaded()
             }
           }}
           src={source ?? undefined}
           alt={book.title}
           decoding="async"
-          onLoad={() => setLoaded(true)}
+          onLoad={markLoaded}
           className={cn(
-            'absolute inset-0 block h-full w-full transition-opacity duration-300',
+            'absolute inset-0 block h-full w-full',
+            isCached ? 'opacity-100' : 'transition-opacity duration-300',
             loaded ? 'opacity-100' : 'opacity-0',
             coverFit === 'full'
               ? 'bg-stone-100 object-contain p-1 dark:bg-stone-800'
               : 'object-cover',
           )}
-          onError={() => setError(true)}
+          onError={() => {
+            if (source) loadedCoverCache.delete(source)
+            setError(true)
+          }}
           loading="lazy"
         />
       )}

@@ -216,6 +216,41 @@ describe('Archive top-bar exit (real component)', () => {
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 150 }))
     expect(sessionStorage.getItem('bd-archive-scroll')).toBeNull()
   })
+
+  it('replaces internal book selection and exits directly to the origin without stepping backwards through books', async () => {
+    const history = createMemoryHistory({ initialEntries: ['/'] })
+    const router = buildRouter(history)
+    await router.load()
+
+    await act(async () => {
+      await router.navigate({
+        to: '/archive',
+        state: (previous) => ({
+          ...previous,
+          ...archiveEntryState(ENTRY_SEARCH, ENTRY_SCROLL, previous.archiveReturn),
+        }),
+      })
+    })
+    render(<RouterProvider router={router} />)
+    expect(await screen.findByText('阅读档案')).toBeInTheDocument()
+    const archiveIndex = router.state.location.state.__TSR_index
+
+    // Selecting Book A via sidebar search (patch)
+    fireEvent.change(screen.getByLabelText('搜索书名'), { target: { value: 'Book A' } })
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ q: 'Book A' }))
+    expect(router.state.location.state.__TSR_index).toBe(archiveIndex)
+
+    // Selecting Book B via sidebar search (patch)
+    fireEvent.change(screen.getByLabelText('搜索书名'), { target: { value: 'Book B' } })
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ q: 'Book B' }))
+    expect(router.state.location.state.__TSR_index).toBe(archiveIndex)
+
+    // Exit click must return directly to '/' without stopping at Book A
+    const header = screen.getByText('阅读档案').closest('header')!
+    fireEvent.click(within(header).getByLabelText('返回'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'))
+    expect(router.state.location.search).toMatchObject({ q: 'entry', page: 2 })
+  })
 })
 
 function render(ui: React.ReactNode) {

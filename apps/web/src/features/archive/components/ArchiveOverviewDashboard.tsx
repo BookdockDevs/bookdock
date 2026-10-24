@@ -130,6 +130,7 @@ export default function ArchiveOverviewDashboard({
           key={card.type}
           to="/archive"
           search={{ ...baseSearch, type: card.type }}
+          replace
           // Keep the recorded archive exit source across this in-feature move.
           state={(previous) => ({ ...previous })}
           onClick={() => onSelectType?.(card.type)}
