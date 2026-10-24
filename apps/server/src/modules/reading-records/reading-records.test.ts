@@ -174,9 +174,11 @@ describe('reading-records service', () => {
       .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
       .where(eq(schema.libraryBookVersions.bookVersionId, book2Id)).get()!
     db.update(schema.libraryBooks).set({ hidden: true }).where(eq(schema.libraryBooks.id, work2.id)).run()
+    await expect(addReadingTime(ownerId, { bookId: book2Id, date: '2026-07-31', durationSeconds: 45 }))
+      .resolves.toMatchObject({ bookId: book2Id, durationSeconds: 45 })
 
     expect((await getSummary(ownerId, '2026-07-30')).totalSeconds).toBe(60)
-    expect((await getSummary(ownerId, '2026-07-30', true)).totalSeconds).toBe(150)
+    expect((await getSummary(ownerId, '2026-07-30', true)).totalSeconds).toBe(195)
     expect((await getByBook(ownerId, {})).map((b) => b.bookId)).toEqual([bookId])
     expect((await getByBook(ownerId, {}, true)).map((b) => b.bookId).sort()).toEqual([bookId, book2Id].sort())
   })

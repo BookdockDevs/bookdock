@@ -29,7 +29,7 @@ import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
 import { assertCanContribute, assertLibraryBrowsable, assertMutableContent, ensurePrivateLibrary, getOwnsSourceVersionIds, isLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
 import { assertUserUploadAllowed } from '../auth/auth.service'
-import { categoryFilter, libraryOrderBy, classifyWorkHidden, getWorkHiddenDetail, isWorkEffectivelyHidden, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
+import { categoryFilter, libraryOrderBy, classifyWorkHidden, getWorkHiddenDetail, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
 import { resolveSharedVersionRead } from '../libraries/library-access'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
@@ -153,7 +153,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     eq(libraryBooks.userId, userId),
     trash ? isNotNull(libraryBooks.deletedAt) : isNull(libraryBooks.deletedAt),
   ]
-  // Private vault: hidden works stay out of the list unless the owner reveals
+  // Hidden works stay out of the list unless the owner reveals
   // them explicitly; trash rows are never hidden-filtered (Phase 3 owns trash).
   if (!showHidden && !trash) {
     conditions.push(workHiddenExclusion(loadLibraryHiddenTaxonomy(db, library.id)))
@@ -298,7 +298,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     shelfName: shelves.name,
     categoryId: libraryBooks.categoryId,
     categoryName: libraryCategories.name,
-    // Work-level hide; surfaced so the vault reveal mode can badge rows.
+    // Work-level hide; surfaced so the display toggle can badge rows.
     hidden: libraryBooks.hidden,
     // 7.7: a B carries its single source; A/C rows resolve to null.
     sourceLibraryId: libraryBookVersions.sourceLibraryId,
@@ -1105,7 +1105,7 @@ export async function getActiveBook(userId: string | null, bookId: string, opts?
  * so additionally needs a materialized revision; the two agree on who may read
  * what, and both live here so that stays reviewable in one place.
  */
-export async function assertReadableBook(userId: string | null, bookId: string, showHidden = false): Promise<'private' | 'library'> {
+export async function assertReadableBook(userId: string | null, bookId: string, _showHidden = false): Promise<'private' | 'library'> {
   const db = getDb()
   // Anonymous guests own no private library: they only ever reach the shared
   // verdict below, which applies the guest triple gate.
@@ -1124,11 +1124,6 @@ export async function assertReadableBook(userId: string | null, bookId: string, 
       const lb = db.select().from(libraryBooks)
         .where(eq(libraryBooks.id, lbv.libraryBookId)).get()
       if (!lb || lb.deletedAt) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-      // Private vault: hidden works read as NOT_FOUND unless the owner
-      // reveals them with showHidden (lists, detail and content agree).
-      if (!showHidden && isWorkEffectivelyHidden(db, library.id, lb)) {
-        throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-      }
       // A collected B only while its source is still readable (7.2/7.3), the
       // same rule the read core applies.
       if (lbv.kind === 'shared' && !(await sourceStillReadable(userId, bookId))) {
@@ -1341,11 +1336,6 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
   const lb = db.select().from(libraryBooks).where(eq(libraryBooks.id, lbv.libraryBookId)).get()
   if (!lb) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   if (lb.deletedAt && !opts?.allowDeleted) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-  // Private vault (same rule as assertReadableBook): owner-verified writes
-  // pass showHidden explicitly; casual reads need the reveal flag.
-  if (!opts?.showHidden && isWorkEffectivelyHidden(db, library.id, lb)) {
-    throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-  }
   const bv = db.select().from(bookVersions).where(eq(bookVersions.id, bookId)).get()
   if (!bv) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   // (7.2/7.3) A B reads its pinned revision and only while its source is still
@@ -1427,7 +1417,7 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     cfi: state?.cfi ?? null,
     chapter: state?.chapter ?? null,
     readFraction: state?.readFraction ?? 0,
-    // Work-level hide; surfaced so the vault reveal mode can badge the row.
+    // Work-level hide; surfaced so the display toggle can badge the row.
     hidden: lb.hidden,
     effectiveHidden: hiddenDetail.reason !== null,
     hiddenReason: hiddenDetail.reason,
@@ -2881,7 +2871,7 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
     db.update(libraryBooks).set({
       ...(data.title ? { title: data.title } : {}),
       ...(normalized ? { author: normalized.author, authors: normalized.authors } : {}),
-      // Card-local vault flag: hiding a collected B only hides the caller's
+      // Card-local hide flag: hiding a collected B only hides the caller's
       // own card, never the shared source (same boundary as title/pin).
       ...(data.hidden !== undefined ? { hidden: data.hidden } : {}),
       updatedAt: now,

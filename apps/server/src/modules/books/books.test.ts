@@ -796,7 +796,7 @@ describe('multi-author metadata', () => {
   })
 })
 
-describe('private vault (hidden works)', () => {
+describe('private hidden works', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
 
@@ -806,7 +806,7 @@ describe('private vault (hidden works)', () => {
     ownerId = seedUser(db, 'owner')
   })
 
-  it('excludes hidden works from lists and reads unless revealed', async () => {
+  it('excludes hidden works from default lists but keeps owner read access', async () => {
     const shown = seedBook(db, ownerId, { title: 'Shown' })
     const hiddenBook = seedBook(db, ownerId, { title: 'Hidden' })
     await updateBook(ownerId, hiddenBook.id, { hidden: true })
@@ -817,14 +817,13 @@ describe('private vault (hidden works)', () => {
     const revealed = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, true)
     expect(revealed.data.map((b) => b.id).sort()).toEqual([hiddenBook.id, shown.id].sort())
     expect(revealed.data.find((b) => b.id === hiddenBook.id)?.hidden).toBe(true)
-    await expect(getActiveBook(ownerId, hiddenBook.id)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
-    expect((await getActiveBook(ownerId, hiddenBook.id, { showHidden: true })).id).toBe(hiddenBook.id)
+    expect((await getActiveBook(ownerId, hiddenBook.id)).id).toBe(hiddenBook.id)
     // Unhiding restores the default list without touching anything else.
     await updateBook(ownerId, hiddenBook.id, { hidden: false })
     expect((await listBooks(ownerId, 1, 20)).data.map((b) => b.id).sort()).toEqual([hiddenBook.id, shown.id].sort())
   })
 
-  it('marks taxonomy-hidden works effectiveHidden in reveal mode', async () => {
+  it('marks taxonomy-hidden works while keeping direct owner reads available', async () => {
     const shelf = await createShelf(ownerId, 'Vault')
     const shelved = seedBook(db, ownerId, { title: 'Shelved' })
     const work = libraryBookOf(db, shelved.id)!
@@ -842,7 +841,7 @@ describe('private vault (hidden works)', () => {
     expect(row?.hiddenReason).toBe('shelf')
     expect(row?.hiddenVia).toEqual({ shelfName: 'Vault' })
     // Detail agrees with the list.
-    const detail = await getActiveBook(ownerId, shelved.id, { showHidden: true })
+    const detail = await getActiveBook(ownerId, shelved.id)
     expect(detail.effectiveHidden).toBe(true)
     expect(detail.hiddenReason).toBe('shelf')
   })

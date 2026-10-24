@@ -9,7 +9,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { registerBeforeHideHiddenReader, withReveal } from '@/lib/reveal-hidden'
+import { withReveal } from '@/lib/reveal-hidden'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { useSettingsSyncStore } from '@/stores/settings-sync.store'
@@ -66,7 +66,30 @@ import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
 import { ImageViewer } from './components/ImageViewer'
 import { BOOKMARK_CONTEXT_MAX_LENGTH } from '@bookdock/shared'
-import type { AnnotationRes, BookDetailRes, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+import type { AnnotationRes, BookDetailRes, BookListRes, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+
+const RECENTLY_READ_QUERY = {
+  page: 1,
+  pageSize: 30,
+  search: '',
+  sortBy: 'lastReadAt',
+  sortOrder: 'desc',
+  shelfId: null,
+  tagId: null,
+  format: null,
+  readStatus: null,
+  trash: false,
+  author: null,
+  series: null,
+  showHidden: false,
+}
+
+function isRecentlyReadQueryKey(queryKey: readonly unknown[]): boolean {
+  if (queryKey[0] !== 'books' || !queryKey[1] || typeof queryKey[1] !== 'object') return false
+  const params = queryKey[1] as Record<string, unknown>
+  return Object.keys(params).length === Object.keys(RECENTLY_READ_QUERY).length
+    && Object.entries(RECENTLY_READ_QUERY).every(([key, value]) => params[key] === value)
+}
 
 function isSelectionIdea(
   currentSelection: SelectionInfo | null,
@@ -583,19 +606,40 @@ export default function Reader() {
     enabled: !!id,
   })
 
-  const progressSaveRef = useRef<Promise<{ data: ReadingProgressRes | null }> | null>(null)
   const progressMutation = useMutation({
     mutationFn: async (body: ReadingProgressUpdateReq) => {
       if (isGuest) return { data: saveGuestProgress(id, body) }
-      const save = apiPut<{ data: ReadingProgressRes | null }>(withReveal(`/progress/${id}`), body)
-      progressSaveRef.current = save
       try {
-        return await save
+        return await apiPut<{ data: ReadingProgressRes | null }>(withReveal(`/progress/${id}`), body)
       } catch (error) {
         pendingProgress.current ??= body
         throw error
-      } finally {
-        if (progressSaveRef.current === save) progressSaveRef.current = null
+      }
+    },
+    onMutate: async (body) => {
+      if (!authUser) return
+      await queryClient.cancelQueries({ queryKey: ['books'] })
+      const book = bookQuery.data?.data
+      const lastReadAt = Date.now()
+      for (const query of queryClient.getQueryCache().findAll({ queryKey: ['books'] })) {
+        if (!isRecentlyReadQueryKey(query.queryKey)) continue
+        queryClient.setQueryData<BookListRes>(query.queryKey, (old) => {
+          if (!old) return old
+          const existing = old.data.find((item) => item.id === id)
+          const source = existing ?? book
+          if (!source) return old
+          const promoted = {
+            ...source,
+            progress: body.percent,
+            lastReadAt,
+          }
+          return {
+            ...old,
+            data: [promoted, ...old.data.filter((item) => item.id !== id)]
+              .sort((a, b) => (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0))
+              .slice(0, old.data.length),
+          }
+        })
       }
     },
     onSuccess: (result) => {
@@ -612,11 +656,14 @@ export default function Reader() {
         mergeProgressSaveCache(old, result),
       )
       void queryClient.invalidateQueries({ queryKey: ['progress', id, isGuest ? 'guest' : 'user'], refetchType: 'none' })
+      if (!isGuest) void queryClient.invalidateQueries({ queryKey: ['books'] })
+    },
+    onError: () => {
+      if (!isGuest) void queryClient.invalidateQueries({ queryKey: ['books'] })
     },
   })
 
   const pendingProgress = useRef<ReadingProgressUpdateReq | null>(null)
-  const closingHiddenReader = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mutateProgressRef = useRef(progressMutation.mutate)
   mutateProgressRef.current = progressMutation.mutate
@@ -670,7 +717,6 @@ export default function Reader() {
   const scheduleProgressSave = useCallback(
     (body: ReadingProgressUpdateReq) => {
       pendingProgress.current = body
-      if (closingHiddenReader.current) return
       // While a saved position awaits restore, buffer only — openRestoreGate
       // (rendered / explicit jump) re-arms the timer with the settled body
       if (restoreGateRef.current?.isPending()) return
@@ -822,30 +868,6 @@ export default function Reader() {
   const { flush: flushReadingTimer, ping: pingReadingTimer } = useReadingTimer(
     !isGuest && (readingTimerMode === 'auto' || readingTimerMode === 'both') ? (readerReady ? id : undefined) : undefined,
   )
-  const saveProgressAsync = progressMutation.mutateAsync
-  useEffect(() => registerBeforeHideHiddenReader(async () => {
-    const book = bookQuery.data?.data
-    if (!book?.effectiveHidden || book.collected === false) return
-    if (saveTimer.current) {
-      clearTimeout(saveTimer.current)
-      saveTimer.current = null
-    }
-    closingHiddenReader.current = true
-    try {
-      await progressSaveRef.current
-      if (useAuthStore.getState().user?.id !== authUser?.id) return
-      while (!restoreGateRef.current?.isPending() && pendingProgress.current) {
-        const body = pendingProgress.current
-        await saveProgressAsync(body)
-        if (useAuthStore.getState().user?.id !== authUser?.id) return
-        if (pendingProgress.current === body) pendingProgress.current = null
-      }
-      flushReadingTimer()
-      await navigate({ to: '/' })
-    } finally {
-      closingHiddenReader.current = false
-    }
-  }), [authUser?.id, bookQuery.data, saveProgressAsync, flushReadingTimer, navigate])
   // Warm the sidebar stats tab's queries so first open is instant
   usePrefetchBookReadingStats(isGuest ? undefined : id)
 

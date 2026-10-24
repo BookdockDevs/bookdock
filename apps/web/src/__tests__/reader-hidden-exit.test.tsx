@@ -65,36 +65,18 @@ async function mountAndRelocate() {
   return view
 }
 
-describe('hidden private reader exit', () => {
-  it.each(['direct', 'category', 'tag'] as const)('saves progress before leaving a reader hidden by %s', async (reason) => {
+describe('hidden private reader access', () => {
+  it.each(['direct', 'category', 'tag'] as const)('keeps the reader open when hiding is disabled for %s', async (reason) => {
     currentBook = { ...book, hidden: reason === 'direct', hiddenReason: reason }
     await mountAndRelocate()
-    let finish!: (value: { data: null }) => void
-    vi.mocked(apiPut).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }) as never)
-    let closing!: Promise<void>
-    await act(async () => { closing = toggleRevealHidden() })
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/progress/hidden-book?showHidden=1', expect.objectContaining({ cfi: 'txt:50', percent: 50 })))
-    expect(navigate).not.toHaveBeenCalled()
-    expect(useUiStore.getState().revealHidden).toBe(true)
-    await act(async () => { finish({ data: null }); await closing })
-    expect(navigate).toHaveBeenCalledWith({ to: '/' })
-    expect(timerFlush).toHaveBeenCalled()
-    expect(useUiStore.getState().revealHidden).toBe(false)
-  })
-
-  it('keeps buffered progress after a failed close and saves it on retry', async () => {
-    await mountAndRelocate()
-    vi.mocked(apiPut).mockRejectedValueOnce(new Error('offline'))
-    await act(async () => { await expect(toggleRevealHidden()).rejects.toThrow('offline') })
-    expect(navigate).not.toHaveBeenCalled()
-    expect(useUiStore.getState().revealHidden).toBe(true)
     await act(async () => { await toggleRevealHidden() })
-    expect(apiPut).toHaveBeenCalledTimes(2)
-    expect(navigate).toHaveBeenCalledWith({ to: '/' })
+    expect(navigate).not.toHaveBeenCalled()
+    expect(apiPut).not.toHaveBeenCalled()
+    expect(timerFlush).not.toHaveBeenCalled()
     expect(useUiStore.getState().revealHidden).toBe(false)
   })
 
-  it('keeps shared-library hidden reads governed by shared permissions', async () => {
+  it('does not navigate when the display toggle closes while reading a shared book', async () => {
     currentBook = { ...book, collected: false }
     await mountAndRelocate()
     await act(async () => { await toggleRevealHidden() })
@@ -103,18 +85,4 @@ describe('hidden private reader exit', () => {
     expect(useUiStore.getState().revealHidden).toBe(false)
   })
 
-  it('does not navigate or restore cached progress after the account expires during saving', async () => {
-    await mountAndRelocate()
-    let finish!: (value: { data: null }) => void
-    vi.mocked(apiPut).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }) as never)
-    let closing!: Promise<void>
-    await act(async () => { closing = toggleRevealHidden() })
-    await waitFor(() => expect(apiPut).toHaveBeenCalled())
-    await act(async () => { useAuthStore.getState().clearAuth(); client.clear() })
-    await act(async () => { finish({ data: null }); await closing })
-    expect(navigate).not.toHaveBeenCalled()
-    expect(useUiStore.getState().revealHidden).toBe(false)
-    expect(localStorage.getItem('bd-reveal-hidden:reader')).toBe('true')
-    expect(client.getQueryData(['progress', 'hidden-book', 'user'])).toBeUndefined()
-  })
 })

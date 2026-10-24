@@ -68,8 +68,8 @@ booksRoutes.patch('/batch/organize', async (c) => {
   return c.json({ data: organizePrivateBatch(user.id, parsed.data) })
 })
 
-// Private-vault reveal: the owner passes ?showHidden=1 to see hidden rows;
-// guests (requestUserId null) can never reveal.
+// Private-library display preference: showHidden changes list results only;
+// guests cannot reveal hidden rows.
 function requestShowHidden(c: Context): boolean {
   return requestUserId(c) !== null && c.req.query('showHidden') === '1'
 }

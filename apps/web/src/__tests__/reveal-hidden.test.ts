@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { queryClient } from '@/lib/query-client'
-import { registerBeforeHideHiddenReader, toggleRevealHidden, withReveal } from '@/lib/reveal-hidden'
+import { toggleRevealHidden, withReveal } from '@/lib/reveal-hidden'
 import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
 
@@ -77,51 +77,10 @@ describe('account-local hidden display', () => {
     expect(queryClient.getQueryData(['book', 'alice'])).toBeUndefined()
   })
 
-  it('waits for reader saving and exit before collapsing and ignores duplicate closes', async () => {
+  it('closes the list display preference without waiting for reader exit', async () => {
     useAuthStore.getState().setAuth(alice)
     await toggleRevealHidden()
-    let finish!: () => void
-    const save = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
-    const unregister = registerBeforeHideHiddenReader(save)
-    try {
-      const closing = toggleRevealHidden()
-      await toggleRevealHidden()
-      expect(save).toHaveBeenCalledTimes(1)
-      expect(useUiStore.getState().revealHidden).toBe(true)
-      finish()
-      await closing
-      expect(useUiStore.getState().revealHidden).toBe(false)
-    } finally { unregister() }
-  })
-
-  it('keeps reveal open on save failure and permits retry', async () => {
-    useAuthStore.getState().setAuth(alice)
     await toggleRevealHidden()
-    const save = vi.fn().mockRejectedValueOnce(new Error('save failed')).mockResolvedValueOnce(undefined)
-    const unregister = registerBeforeHideHiddenReader(save)
-    try {
-      await expect(toggleRevealHidden()).rejects.toThrow('save failed')
-      expect(useUiStore.getState().revealHidden).toBe(true)
-      await toggleRevealHidden()
-      expect(useUiStore.getState().revealHidden).toBe(false)
-    } finally { unregister() }
-  })
-
-  it('collapses immediately on expiry and does not overwrite a new account during a save', async () => {
-    useAuthStore.getState().setAuth(alice)
-    await toggleRevealHidden()
-    let finish!: () => void
-    const unregister = registerBeforeHideHiddenReader(() => new Promise<void>((resolve) => { finish = resolve }))
-    try {
-      const closing = toggleRevealHidden()
-      useAuthStore.getState().clearAuth()
-      expect(useUiStore.getState().revealHidden).toBe(false)
-      localStorage.setItem('bd-reveal-hidden:bob', 'true')
-      useAuthStore.getState().setAuth(bob)
-      finish()
-      await closing
-      expect(useUiStore.getState().revealHidden).toBe(true)
-      expect(localStorage.getItem('bd-reveal-hidden:alice')).toBe('true')
-    } finally { unregister() }
+    expect(useUiStore.getState().revealHidden).toBe(false)
   })
 })

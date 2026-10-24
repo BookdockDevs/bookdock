@@ -12,6 +12,7 @@ import { AppError } from '../../middleware/error'
 import { readProgressFile } from '../../lib/progress-file'
 import { projectReadingCoverage, readingCompatibleRevisions, type ReadingCoverageBasis } from '../../lib/reading-coverage'
 import { getBook } from '../books/books.service'
+import { pendingBookDataDeletionVersionIds } from '../libraries/library-query'
 import { mergeTimeFragments, splitReadingTime } from './time-fragments'
 import { excludedReadingBookVersionIds } from './reading-visibility'
 
@@ -428,10 +429,10 @@ function refreshReadingProjectionIncrementally(tx: Db, userId: string, bookId: s
 
 export async function ensureReadingArchive(userId: string, bookId: string, showHidden = false, includePendingDeletion = false) {
   const db = getDb()
-  if (!includePendingDeletion && excludedReadingBookVersionIds(db, userId, showHidden).includes(bookId)) throw new AppError('BOOK_NOT_FOUND')
+  if (!includePendingDeletion && pendingBookDataDeletionVersionIds(db, userId).includes(bookId)) throw new AppError('BOOK_NOT_FOUND')
+  const book = await getBook(userId, bookId, { showHidden })
   const existing = db.select().from(readingArchives).where(archiveWhere(userId, bookId)).get()
   if (existing) return existing
-  const book = await getBook(userId, bookId, { showHidden })
   await readProgressFile(userId, bookId)
   const state = db.select().from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
   const now = Date.now()
