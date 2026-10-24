@@ -1750,6 +1750,26 @@ implementation details change.
 - **Legado source indentation preservation**: The EPUB-to-`<usehtml>` serializer preserves whitespace-only text nodes made of full-width spaces (`U+3000`) because they are meaningful paragraph indentation before inline elements such as colored `<span>` dialogue. Other formatting-only whitespace remains discarded, preventing XHTML pretty-printing from becoming visible in the Reading text layout.
 - **EPUB source indentation normalization**: Imported EPUB paragraphs may contain literal full-width leading spaces while Bookdock's reader-layout mode also applies the user's paragraph-indent setting. When layout override is enabled, the reader removes leading whitespace from the first text node of each `p` and applies the configured `text-indent` exactly once; when it is disabled, the original prefix is restored and the book's CSS remains authoritative. The normalization is reversible at runtime, keeps generated TXT EPUBs stable, avoids double indentation in converted TXT-based books, and does not alter the Legado projection, which preserves the source text for its own renderer.
 
+### Batch book downloads
+
+Batch downloads remain a Web client orchestration over the existing per-book
+file and export routes. The batch-selection response includes the selected
+book's effective title, source format, and version id; shared-library rows use
+the work's configured default version (or the same first visible version used
+by catalog cards). Each prepared file still passes the ordinary per-book
+authorization check and TXT exports continue to use the normalized export
+pipeline. The existing dialog can keep source formats per book or normalize
+every export to EPUB/TXT and keeps its single and batch preferences separate.
+Edited variants are determined per book from effective replacement rules;
+only failed required rule lookups fail that book. Prepared files remain
+available for retry or successful-only delivery, while a failed ZIP assembly
+can be retried without preparing those files again. ZIP compression observes
+dialog cancellation and account teardown. The browser packages successful
+files into one ZIP for multi-book downloads, with sequential file preparation
+and unique archive paths; total staged Blob memory still scales with selected
+file size and has not been validated for very large batches. No batch download
+endpoint, durable job, or alternate permission model is added.
+
 ### Identity/configuration retirement boundary (0040)
 
 The supported upgrade input has completed migration 0039 and contains one valid `instance` row for an initialized database. Its owner must be an enabled account with credentials. No legacy role fallback or old key/value configuration conversion runs after retirement. Existing real accounts, credentials, sessions, content and personal data are retained. Migration closes registration and guest access once; later explicit owner changes remain supported. Other effective instance switches and upload limits stay unchanged. Unknown legacy settings are discarded with the old table.

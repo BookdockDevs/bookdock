@@ -9,5 +9,6 @@ export default function DownloadDialogHost() {
   const close = useDownloadStore((state) => state.close)
   const user = useAuthStore((state) => state.user)
   if (!target || !user || user.id !== targetUserId) return null
-  return <DownloadDialog key={`${user.id}:${target.id}`} bookId={target.id} title={target.title} sourceFormat={target.format} versionLabel={target.versionLabel} userId={user.id} onClose={close} />
+  const books = target.map(({ bookVersionId, ...book }) => ({ ...book, id: bookVersionId ?? book.id }))
+  return <DownloadDialog key={`${user.id}:${books.map((book) => book.id).join('|')}`} books={books} userId={user.id} onClose={close} />
 }

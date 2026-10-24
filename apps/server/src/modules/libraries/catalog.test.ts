@@ -397,8 +397,13 @@ describe('shared library catalog', () => {
 
   it('deletes every version of one selected shared work', async () => {
     const first = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'a'), { title: 'Alpha' })
-    await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'b'), { libraryBookId: first.libraryBookId })
-    expect((await getCatalogBatchSelection(ownerId, libraryId, [first.libraryBookId]))[0]?.versionCount).toBe(2)
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'b'), { libraryBookId: first.libraryBookId, title: 'Beta' })
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { defaultVersionLinkId: second.versionLinkId! })
+    const card = await getCatalogBook(ownerId, libraryId, first.libraryBookId)
+    const defaultVersion = card.versions[0]!
+    expect(await getCatalogBatchSelection(ownerId, libraryId, [first.libraryBookId])).toMatchObject([{
+      versionCount: 2, bookVersionId: defaultVersion.bookVersionId, title: defaultVersion.effective.title, format: defaultVersion.format,
+    }])
     await expect(deleteCatalogBook(memberId, libraryId, first.libraryBookId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
     // Trash is on by default: manager delete soft-deletes into the owner trash.
     expect(await deleteCatalogBook(ownerId, libraryId, first.libraryBookId)).toMatchObject({ trashed: true, versionCount: 2 })

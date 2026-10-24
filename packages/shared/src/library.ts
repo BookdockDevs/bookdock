@@ -384,6 +384,9 @@ export interface CatalogListRes {
 
 export interface BatchSelectionItem {
   id: string
+  bookVersionId: string
+  title: string
+  format: BookFormat
   categoryId: string | null
   shelfId?: string | null
   tagIds: string[]

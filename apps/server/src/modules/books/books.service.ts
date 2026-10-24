@@ -4042,13 +4042,17 @@ export function getPrivateBatchSelection(userId: string, ids: string[]): BatchSe
   const uniqueIds = [...new Set(ids)]
   const rows = db.select({
     id: libraryBookVersions.bookVersionId,
+    bookVersionId: libraryBookVersions.bookVersionId,
     libraryBookId: libraryBooks.id,
+    title: libraryBooks.title,
+    format: bookVersions.format,
     categoryId: libraryBooks.categoryId,
     shelfId: libraryBooks.shelfId,
     hidden: libraryBooks.hidden,
     pinnedAt: libraryBookVersions.pinnedAt,
     kind: libraryBookVersions.kind,
   }).from(libraryBookVersions)
+    .innerJoin(bookVersions, eq(bookVersions.id, libraryBookVersions.bookVersionId))
     .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
     .where(and(eq(libraryBooks.libraryId, libraryId), inArray(libraryBookVersions.bookVersionId, uniqueIds))).all()
   if (rows.length !== uniqueIds.length) throw new AppError('BOOK_NOT_FOUND')
@@ -4062,6 +4066,9 @@ export function getPrivateBatchSelection(userId: string, ids: string[]): BatchSe
   }
   const byId = new Map(rows.map((row) => [row.id, {
     id: row.id,
+    bookVersionId: row.bookVersionId,
+    title: row.title,
+    format: row.format,
     categoryId: row.categoryId,
     shelfId: row.shelfId,
     tagIds: tagIdsByWork.get(row.libraryBookId) ?? [],

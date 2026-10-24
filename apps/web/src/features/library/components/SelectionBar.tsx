@@ -9,6 +9,7 @@ import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
+import { useDownloadStore } from '@/stores/download.store'
 
 import { invalidatePermanentlyDeletedBookQueries, useLibraryCategories, useLibraryTags, useShelves, useTags } from '../hooks'
 import { categoryChoices } from '../taxonomy'
@@ -306,6 +307,27 @@ export default function SelectionBar({ selectedIds, onClear, onComplete = onClea
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
                 {_('library.batchOrganize')}
+              </Button>
+              <Button
+                className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5"
+                variant="ghost"
+                size="sm"
+                aria-label={_('library.download')}
+                title={_('library.download')}
+                disabled={marking || !selectionReady || selectionItems.some((item) => !item.bookVersionId)}
+                onClick={() => useDownloadStore.getState().open(selectionItems.map((item) => ({
+                  id: item.bookVersionId,
+                  bookVersionId: item.bookVersionId,
+                  title: item.title,
+                  format: item.format,
+                })))}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-500 dark:text-stone-400">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                {_('library.download')}
               </Button>
               {!libraryId && (
                 <Button

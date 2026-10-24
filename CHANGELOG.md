@@ -6,6 +6,7 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
+- Batch book downloads from the selection toolbar. Single selections use the existing download dialog and multi-book selections prepare a ZIP with each book's original or chosen export format, per-book replacement rules, partial retry, and existing permission checks.
 - Reader keyboard shortcuts can be customized, synchronized with the user's account, and opened directly with Shift + /. The reader supports configurable navigation history, playback, chapter-boundary, sidebar, search, settings, and font-size commands.
 
 ### Fixed
@@ -883,6 +884,7 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
+- 书籍批量下载：可从批量操作栏下载所选书籍。单本沿用现有下载弹窗，多本打包为 ZIP，并支持保持原格式、统一 EPUB/TXT、逐本应用可用的文本替换规则，以及失败项重试；每本书仍使用现有下载权限校验。
 - 阅读器现支持自定义键盘快捷键并同步到当前账号，也可按 Shift + / 直接打开快捷键菜单。可配置命令涵盖阅读位置历史、朗读、章节首尾、侧页、搜索、设置和字号调整。
 
 #### 修复

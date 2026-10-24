@@ -62,6 +62,13 @@ beforeEach(() => {
 })
 
 describe('SelectionBar', () => {
+  it('shows a download label beside the batch download icon', () => {
+    selectionItems = [item('a', { bookVersionId: 'version-a', title: 'A', format: 'epub' })]
+    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+
+    expect(screen.getByText('library.download')).toBeVisible()
+  })
+
   it('organizes works through the shared library in one request', async () => {
     selectionItems = [item('w1', { kind: undefined }), item('w2', { kind: undefined })]
     categories = [{ id: 'c1', name: '科幻', bookCount: 2 }]

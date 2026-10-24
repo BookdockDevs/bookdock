@@ -6,15 +6,16 @@ import { useAuthStore } from './auth.store'
 
 interface DownloadTarget {
   id: string
+  bookVersionId?: string
   title: string
   format: BookFormat
   versionLabel?: string
 }
 
 interface DownloadState {
-  target: DownloadTarget | null
+  target: DownloadTarget[] | null
   userId: string | null
-  open: (target: DownloadTarget) => void
+  open: (target: DownloadTarget | DownloadTarget[]) => void
   close: () => void
 }
 
@@ -24,7 +25,7 @@ export const useDownloadStore = create<DownloadState>((set) => ({
   userId: null,
   open: (target) => {
     const user = useAuthStore.getState().user
-    if (user) set({ target, userId: user.id })
+    if (user) set({ target: Array.isArray(target) ? target : [target], userId: user.id })
   },
   close: () => set({ target: null, userId: null }),
 }))

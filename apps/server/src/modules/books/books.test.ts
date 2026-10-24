@@ -1903,7 +1903,12 @@ describe('private batch organization', () => {
     linkLibraryTag(db, first.id, tagA)
     linkLibraryTag(db, first.id, tagB)
     const ids = [first.id, second.id]
-    expect(getPrivateBatchSelection(ownerId, ids).map((item) => item.tagIds.sort())).toEqual([[tagA, tagB].sort(), []])
+    const selection = getPrivateBatchSelection(ownerId, ids)
+    expect(selection.map((item) => item.tagIds.sort())).toEqual([[tagA, tagB].sort(), []])
+    expect(selection.map(({ bookVersionId, title, format }) => ({ bookVersionId, title, format }))).toEqual([
+      { bookVersionId: first.id, title: first.title, format: 'txt' },
+      { bookVersionId: second.id, title: second.title, format: 'txt' },
+    ])
     organizePrivateBatch(ownerId, { ids, addTagIds: [tagA], removeTagIds: [tagB] })
     expect(await getBookTags(ownerId, first.id)).toEqual([tagA])
     expect(await getBookTags(ownerId, second.id)).toEqual([tagA])

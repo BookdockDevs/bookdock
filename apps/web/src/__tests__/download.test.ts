@@ -1,36 +1,58 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { BlobReader, BlobWriter, ZipReader } from '@zip.js/zip.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { downloadEditedTxt } from '@/features/library/download'
+import { createBooksArchive, prepareBookFile } from '@/features/library/download'
 
-describe('book download response', () => {
-  const filenames: string[] = []
+afterEach(() => vi.unstubAllGlobals())
 
-  beforeEach(() => {
-    filenames.length = 0
-    vi.stubGlobal('fetch', vi.fn())
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { filenames.push(this.download) })
-    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:download') })
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+describe('batch download file preparation', () => {
+  it('uses existing endpoints for raw EPUB, normalized original TXT and edited EPUB exports', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Disposition': "attachment; filename*=UTF-8''Book.epub" }),
+      blob: async () => new Blob(['file'], { type: 'application/epub+zip' }),
+    } as Response))
+    vi.stubGlobal('fetch', fetchMock)
+    const signal = new AbortController().signal
+
+    await prepareBookFile({ id: 'raw', title: 'Raw', sourceFormat: 'epub', format: 'epub', edited: false }, signal)
+    await prepareBookFile({ id: 'plain', title: 'Plain', sourceFormat: 'txt', format: 'txt', edited: false }, signal)
+    await prepareBookFile({ id: 'edited', title: 'Edited', sourceFormat: 'txt', format: 'epub', edited: true }, signal)
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      '/api/v1/books/raw/file',
+      '/api/v1/books/plain/export.txt?plain=1',
+      '/api/v1/books/edited/export.epub',
+    ])
+    expect(fetchMock.mock.calls.every(([, init]) => init?.signal === signal)).toBe(true)
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-    vi.unstubAllGlobals()
+  it('sanitizes and de-duplicates archive names without dropping same-title books', async () => {
+    const archive = await createBooksArchive([
+      { blob: new Blob(['one'], { type: 'text/plain' }), filename: 'same.txt' },
+      { blob: new Blob(['two'], { type: 'text/plain' }), filename: 'same.txt' },
+      { blob: new Blob(['three'], { type: 'text/plain' }), filename: 'bad/name?.txt' },
+    ])
+    const reader = new ZipReader(new BlobReader(archive))
+    const entries = await reader.getEntries()
+    expect(entries.map((entry) => entry.filename)).toEqual(['same.txt', 'same (2).txt', 'bad_name_.txt'])
+    const contents = await Promise.all(entries.map(async (entry) => {
+      const writer = new BlobWriter()
+      await entry.getData!(writer)
+      return await (await writer.getData()).text()
+    }))
+    expect(contents).toEqual(['one', 'two', 'three'])
+    await reader.close()
   })
 
-  it('honors the server filename when edited output falls back to original', async () => {
-    vi.mocked(fetch).mockResolvedValue(new Response('body', { headers: {
-      'Content-Type': 'text/plain',
-      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent('书名.txt')}`,
-    } }))
-    await downloadEditedTxt('book', '书名')
-    expect(filenames).toEqual(['书名.txt'])
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:download')
-  })
+  it('cancels ZIP preparation when its signal is aborted', async () => {
+    const controller = new AbortController()
+    const preparing = createBooksArchive([
+      { blob: new Blob([new Uint8Array(1024 * 1024)], { type: 'text/plain' }), filename: 'book.txt' },
+    ], controller.signal)
+    controller.abort()
 
-  it('preserves the empty-text error code for the download dialog', async () => {
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ error: { code: 'NO_EXPORTABLE_TEXT', message: 'No text' } }), { status: 422 }))
-    await expect(downloadEditedTxt('book', 'Book')).rejects.toMatchObject({ code: 'NO_EXPORTABLE_TEXT' })
-    expect(filenames).toHaveLength(0)
+    await expect(preparing).rejects.toMatchObject({ name: 'AbortError' })
   })
 })

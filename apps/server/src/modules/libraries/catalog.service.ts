@@ -907,8 +907,16 @@ export async function getCatalogBatchSelection(actorId: string, libraryId: strin
   const works = db.select().from(libraryBooks)
     .where(and(eq(libraryBooks.libraryId, libraryId), inArray(libraryBooks.id, uniqueIds))).all()
   if (works.length !== uniqueIds.length) throw new AppError('LIBRARY_BOOK_NOT_FOUND')
-  const links = db.select({ libraryBookId: libraryBookVersions.libraryBookId }).from(libraryBookVersions)
-    .where(inArray(libraryBookVersions.libraryBookId, uniqueIds)).all()
+  const links = db.select({
+    id: libraryBookVersions.id,
+    libraryBookId: libraryBookVersions.libraryBookId,
+    bookVersionId: libraryBookVersions.bookVersionId,
+    title: libraryBookVersions.title,
+    createdAt: libraryBookVersions.createdAt,
+  }).from(libraryBookVersions)
+    .where(inArray(libraryBookVersions.libraryBookId, uniqueIds))
+    .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
+  const versionFacts = loadVersionFacts(links.map((link) => link.bookVersionId))
   const tags = db.select().from(libraryBookTags)
     .where(inArray(libraryBookTags.libraryBookId, uniqueIds)).all()
   const versionCounts = new Map<string, number>()
@@ -919,15 +927,30 @@ export async function getCatalogBatchSelection(actorId: string, libraryId: strin
     tagIds.push(tag.tagId)
     tagIdsByWork.set(tag.libraryBookId, tagIds)
   }
-  const byId = new Map(works.map((work) => [work.id, {
+  const linksByWork = new Map<string, typeof links>()
+  for (const link of links) {
+    const rows = linksByWork.get(link.libraryBookId) ?? []
+    rows.push(link)
+    linksByWork.set(link.libraryBookId, rows)
+  }
+  const byId = new Map(works.map((work) => {
+    const defaultLinkId = work.defaultVersionLinkId
+    const selectedLink = (linksByWork.get(work.id) ?? []).find((link) => link.id === defaultLinkId)
+      ?? linksByWork.get(work.id)?.[0]
+    const version = selectedLink ? versionFacts.versions.get(selectedLink.bookVersionId) : undefined
+    return [work.id, {
     id: work.id,
+    bookVersionId: selectedLink?.bookVersionId ?? '',
+    title: selectedLink?.title ?? work.title,
+    format: version?.format ?? 'epub',
     categoryId: work.categoryId,
     shelfId: work.shelfId,
     tagIds: tagIdsByWork.get(work.id) ?? [],
     hidden: work.hidden,
     pinnedAt: work.pinnedAt,
     versionCount: versionCounts.get(work.id) ?? 0,
-  }]))
+  }] as const
+  }))
   return ids.map((id) => byId.get(id)!).filter(Boolean)
 }
 
