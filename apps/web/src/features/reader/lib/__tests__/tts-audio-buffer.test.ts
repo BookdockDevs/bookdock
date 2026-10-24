@@ -17,8 +17,8 @@ class FakeAudioContext {
   currentTime = 10
   destination = {}
   readonly sources: FakeSource[] = []
-  readonly resume = vi.fn(async () => undefined)
-  readonly suspend = vi.fn(async () => undefined)
+  readonly resume = vi.fn(async () => { this.state = 'running' })
+  readonly suspend = vi.fn(async () => { this.state = 'suspended' })
   readonly createBufferSource = vi.fn(() => {
     const source = new FakeSource()
     this.sources.push(source)
@@ -90,5 +90,40 @@ describe('TtsAudioBufferPlayer', () => {
     await Promise.all([firstPlayback, secondPlayback])
     vi.useRealTimers()
     expect(second.onEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('tracks word boundaries on the audio clock across rate changes', async () => {
+    vi.useFakeTimers()
+    const context = sharedTestContext ?? new FakeAudioContext()
+    context.currentTime = 10
+    context.sources.length = 0
+    sharedTestContext = context
+    vi.stubGlobal('AudioContext', class { constructor() { return context } })
+    const player = new TtsAudioBufferPlayer()
+    const callbacks = events()
+    const onWordBoundary = vi.fn()
+    const playback = player.schedule({
+      ...audio(1),
+      boundaries: [
+        { offsetSec: 0.15, durationSec: 0.1, text: 'hi', start: 0, length: 2 },
+        { offsetSec: 0.3, durationSec: 0.1, text: 'by', start: 3, length: 2 },
+      ],
+    }, 1, new AbortController().signal, { ...callbacks, onWordBoundary })
+    await Promise.resolve()
+    await Promise.resolve()
+    context.currentTime = 10.08
+    await vi.advanceTimersByTimeAsync(20)
+    await player.pause()
+    await vi.advanceTimersByTimeAsync(40)
+    expect(onWordBoundary).not.toHaveBeenCalled()
+    await player.resume()
+    player.setRate(2)
+    context.currentTime = 10.13
+    await vi.advanceTimersByTimeAsync(20)
+    expect(onWordBoundary).toHaveBeenCalledTimes(1)
+    expect(onWordBoundary).toHaveBeenCalledWith(0, 2)
+    await player.stop()
+    await playback.catch(() => undefined)
+    vi.useRealTimers()
   })
 })

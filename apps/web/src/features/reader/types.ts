@@ -310,6 +310,7 @@ export interface BookReader {
   previousTtsSegment(): Promise<TtsSegment | null>
   revealTtsSegment(segment: TtsSegment): Promise<void>
   highlightTtsSegment(segment: TtsSegment): Promise<void>
+  highlightTtsBoundary?(segment: TtsSegment, start: number, length: number): Promise<boolean>
   clearTtsHighlight(): void
   on<K extends keyof RendererEvents>(type: K, fn: RendererEvents[K]): () => void
   destroy(): void

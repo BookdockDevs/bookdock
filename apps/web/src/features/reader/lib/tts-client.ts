@@ -1,9 +1,10 @@
-import type { TtsServiceRes } from '@bookdock/shared'
+import type { TtsEdgeSpeechRes, TtsServiceRes } from '@bookdock/shared'
 
-import { apiPostBlob } from '@/api/client'
+import { apiPost, apiPostBlob } from '@/api/client'
 
 import type { TtsSegment } from '../types'
 import { TtsAudioBufferPlayer, type DecodedTtsAudio } from './tts-audio-buffer'
+import { mapTtsBoundaryTexts } from './tts-text-range'
 
 export interface TtsVoice {
   id: string
@@ -192,9 +193,14 @@ export class EdgeSpeechClient implements TtsClient {
 
   async prepare(segment: TtsSegment, options: TtsSpeakOptions, signal: AbortSignal) {
     const voice = options.voiceId || EDGE_VOICES[0].id
-    const blob = await apiPostBlob('/tts/edge/speech', { text: segment.text, voice, rate: 1 }, signal)
+    const response = await apiPost<{ data: TtsEdgeSpeechRes }>('/tts/edge/speech', { text: segment.text, voice, rate: 1 }, signal)
     if (signal.aborted) throw abortedError()
-    return this.audioPlayer.decode(await blob.arrayBuffer())
+    const binary = atob(response.data.audioBase64)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
+    const audio = await this.audioPlayer.decode(bytes.buffer)
+    audio.boundaries = mapTtsBoundaryTexts(segment.text, response.data.boundaries)
+    return audio
   }
 
   async playPrepared(_segment: TtsSegment, audio: TtsPreparedAudio, options: TtsSpeakOptions, signal: AbortSignal, events: TtsPlaybackEvents) {

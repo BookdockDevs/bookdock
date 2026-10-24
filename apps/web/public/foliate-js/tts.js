@@ -713,6 +713,15 @@ export class TTS {
             this.#compatGetCfi?.(item.range.cloneRange?.()) === cfi)
         return this.#compatResult(entry, { highlight: true })
     }
+    highlightRange(range) {
+        if (!this.#compat || !this.#compatHighlight || range?.startContainer?.ownerDocument !== this.doc)
+            return null
+        return this.#compatHighlight(range.cloneRange(), 'word') ?? null
+    }
+    clearWordHighlight() {
+        if (this.#compat && this.#compatHighlight)
+            this.#compatHighlight(null, 'word')
+    }
     getLastRange() {
         if (this.#lastMark) {
             const range = this.#ranges.get(this.#lastMark)

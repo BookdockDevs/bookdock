@@ -109,6 +109,8 @@ export type {
   TtsVoiceRes,
   TtsSpeechReq,
   TtsEdgeSpeechReq,
+  TtsWordBoundary,
+  TtsEdgeSpeechRes,
   AiContextReq,
   AiHistoryMessage,
   AiChatReq,

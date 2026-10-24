@@ -36,7 +36,7 @@ logs
 *.local
 artifacts/
 /tmp/
-/tmp-book-retirement/
+.tmp/
 
 # pnpm
 .pnpm-store/

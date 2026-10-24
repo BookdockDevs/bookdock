@@ -1,5 +1,13 @@
 export interface DecodedTtsAudio {
   buffer: AudioBuffer
+  boundaries?: Array<{ offsetSec: number; durationSec: number; text: string; start: number; length: number }>
+}
+
+interface PlaybackEvents {
+  onStart: () => void
+  onWordBoundary?: (start: number, length: number) => void
+  onEnd: () => void
+  onError: (error: Error) => void
 }
 
 interface AudioContextConstructor {
@@ -17,9 +25,13 @@ function getAudioContextConstructor() {
 
 interface ScheduledPlayback {
   source: AudioBufferSourceNode
-  events: { onStart: () => void; onEnd: () => void; onError: (error: Error) => void }
+  events: PlaybackEvents
   startTime: number
   startTimer: ReturnType<typeof setTimeout> | null
+  wordTimer: ReturnType<typeof setInterval> | null
+  boundaryIndex: number
+  mediaTimeSec: number
+  lastClockTime: number
   gapSec: number
   started: boolean
   settled: boolean
@@ -65,12 +77,12 @@ export class TtsAudioBufferPlayer {
     }
   }
 
-  async play(audio: DecodedTtsAudio, rate: number, signal: AbortSignal, events: { onStart: () => void; onEnd: () => void; onError: (error: Error) => void }, gapSec = 0) {
+  async play(audio: DecodedTtsAudio, rate: number, signal: AbortSignal, events: PlaybackEvents, gapSec = 0) {
     await this.stop()
     return this.schedule(audio, rate, signal, events, gapSec)
   }
 
-  async schedule(audio: DecodedTtsAudio, rate: number, signal: AbortSignal, events: { onStart: () => void; onEnd: () => void; onError: (error: Error) => void }, gapSec = 0) {
+  async schedule(audio: DecodedTtsAudio, rate: number, signal: AbortSignal, events: PlaybackEvents, gapSec = 0) {
     if (signal.aborted) throw abortedError()
     const context = this.getContext()
     try {
@@ -98,6 +110,10 @@ export class TtsAudioBufferPlayer {
         events,
         startTime: start,
         startTimer: null,
+        wordTimer: null,
+        boundaryIndex: 0,
+        mediaTimeSec: 0,
+        lastClockTime: start,
         gapSec: Math.max(gapSec, 0),
         started: this.scheduled.length === 0,
         settled: false,
@@ -113,6 +129,10 @@ export class TtsAudioBufferPlayer {
         if (playback.startTimer !== null) {
           clearTimeout(playback.startTimer)
           playback.startTimer = null
+        }
+        if (playback.wordTimer !== null) {
+          clearInterval(playback.wordTimer)
+          playback.wordTimer = null
         }
         source.onended = null
         const index = this.scheduled.indexOf(playback)
@@ -141,12 +161,14 @@ export class TtsAudioBufferPlayer {
           const delayMs = next.gapSec > 0 ? Math.max(0, (next.startTime - context.currentTime) * 1000) : 0
           if (delayMs === 0) {
             next.started = true
+            next.lastClockTime = context.currentTime
             next.events.onStart()
           } else {
             next.startTimer = setTimeout(() => {
               next.startTimer = null
               if (next.settled || next.started) return
               next.started = true
+              next.lastClockTime = context.currentTime
               next.events.onStart()
             }, delayMs)
           }
@@ -155,6 +177,17 @@ export class TtsAudioBufferPlayer {
       source.onended = finish
       signal.addEventListener('abort', abort, { once: true })
       this.scheduled.push(playback)
+      if (audio.boundaries?.length && events.onWordBoundary) {
+        playback.wordTimer = setInterval(() => {
+          if (!playback.started || playback.settled || context.state !== 'running' || context.currentTime < playback.startTime) return
+          playback.mediaTimeSec += Math.max(0, context.currentTime - playback.lastClockTime) * source.playbackRate.value
+          playback.lastClockTime = context.currentTime
+          while (playback.boundaryIndex < audio.boundaries!.length && audio.boundaries![playback.boundaryIndex]!.offsetSec <= playback.mediaTimeSec) {
+            const boundary = audio.boundaries![playback.boundaryIndex++]!
+            events.onWordBoundary?.(boundary.start, boundary.length)
+          }
+        }, 20)
+      }
       try {
         source.start(start)
         if (playback.started) events.onStart()
@@ -168,7 +201,13 @@ export class TtsAudioBufferPlayer {
 
   setRate(rate: number) {
     for (const playback of this.scheduled) {
-      if (!playback.settled) playback.source.playbackRate.value = rate
+      if (!playback.settled) {
+        if (playback.started && this.context) {
+          playback.mediaTimeSec += Math.max(0, this.context.currentTime - playback.lastClockTime) * playback.source.playbackRate.value
+          playback.lastClockTime = this.context.currentTime
+        }
+        playback.source.playbackRate.value = rate
+      }
     }
   }
 

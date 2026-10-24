@@ -585,6 +585,17 @@ export interface TtsEdgeSpeechReq {
   rate?: number
 }
 
+export interface TtsWordBoundary {
+  offset: number
+  duration: number
+  text: string
+}
+
+export interface TtsEdgeSpeechRes {
+  audioBase64: string
+  boundaries: TtsWordBoundary[]
+}
+
 export type AiProvider =
   | 'openai'
   | 'anthropic'

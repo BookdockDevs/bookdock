@@ -1,13 +1,15 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 
-import type { TtsEdgeSpeechReq } from '@bookdock/shared'
+import type { TtsEdgeSpeechReq, TtsWordBoundary } from '@bookdock/shared'
 import WebSocket from 'ws'
 
 import { AppError } from '../../middleware/error'
+import { generateEdgeSecMsGec } from './edge-sec-ms-gec'
 
 const EDGE_API_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4'
 const EDGE_SPEECH_URL = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1'
 const EDGE_CHROMIUM_VERSION = '143.0.3650.75'
+const EDGE_CHROMIUM_MAJOR_VERSION = EDGE_CHROMIUM_VERSION.split('.')[0]
 const EDGE_REQUEST_TIMEOUT_MS = 20_000
 
 const DEFAULT_VOICE = 'zh-CN-XiaoxiaoNeural'
@@ -15,14 +17,6 @@ const DEFAULT_VOICE = 'zh-CN-XiaoxiaoNeural'
 function edgeLanguage(voice: string) {
   const parts = voice.split('-')
   return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : 'zh-CN'
-}
-
-function edgeGec() {
-  const windowsEpochSeconds = 11_644_473_600
-  let seconds = Math.floor(Date.now() / 1000) + windowsEpochSeconds
-  seconds -= seconds % 300
-  const ticks = seconds * 10_000_000
-  return createHash('sha256').update(`${ticks}${EDGE_API_TOKEN}`).digest('hex').toUpperCase()
 }
 
 function escapeXml(text: string) {
@@ -50,17 +44,35 @@ function edgeHeaders(message: string) {
   return headers
 }
 
-function edgeAudioFrame(data: Buffer) {
+export function parseEdgeTextFrame(message: string) {
+  const separator = message.search(/\r?\n\r?\n/)
+  const headerEnd = separator >= 0 ? separator : message.length
+  return { path: edgeHeaders(message).path, body: separator >= 0 ? message.slice(headerEnd).replace(/^\r?\n\r?\n/, '') : '' }
+}
+
+export function parseEdgeBinaryFrame(data: Buffer) {
   if (data.length < 2) return null
   const headerLength = data.readUInt16BE(0)
   const bodyStart = headerLength + 2
   if (bodyStart > data.length) throw new Error('Edge TTS returned an invalid audio frame')
   const path = edgeHeaders(data.subarray(2, bodyStart).toString('utf8')).path
-  if (path !== 'audio' || bodyStart === data.length) return null
-  return data.subarray(bodyStart)
+  return { path, body: data.subarray(bodyStart) }
 }
 
-function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<Buffer> {
+export function parseEdgeWordBoundaries(body: string): TtsWordBoundary[] {
+  try {
+    const metadata = JSON.parse(body) as { Metadata?: Array<{ Type?: unknown; Data?: { Offset?: unknown; Duration?: unknown; text?: { Text?: unknown } } }> }
+    return (metadata.Metadata ?? []).flatMap((item) => {
+      const { Offset: offset, Duration: duration, text } = item.Data ?? {}
+      if (item.Type !== 'WordBoundary' || typeof offset !== 'number' || !Number.isFinite(offset) || offset < 0 || typeof text?.Text !== 'string' || !text.Text) return []
+      return [{ offset, duration: typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : 0, text: text.Text }]
+    })
+  } catch {
+    return []
+  }
+}
+
+function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<{ audio: Buffer; boundaries: TtsWordBoundary[] }> {
   if (signal.aborted) return Promise.reject(new Error('Edge TTS request was cancelled'))
   const voice = input.voice || DEFAULT_VOICE
   const rate = Math.min(2, Math.max(0.5, input.rate ?? 1))
@@ -68,8 +80,8 @@ function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<Buff
   const params = new URLSearchParams({
     ConnectionId: connectionId,
     TrustedClientToken: EDGE_API_TOKEN,
-    'Sec-MS-GEC': edgeGec(),
-    'Sec-MS-GEC-Version': `1-${EDGE_CHROMIUM_VERSION}`,
+    'Sec-MS-GEC': generateEdgeSecMsGec(),
+    'Sec-MS-GEC-Version': `2-${EDGE_CHROMIUM_VERSION}`,
   })
   const date = new Date().toString()
   const config = edgeFrame({
@@ -80,7 +92,7 @@ function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<Buff
     context: {
       synthesis: {
         audio: {
-          metadataoptions: { sentenceBoundaryEnabled: false, wordBoundaryEnabled: false },
+          metadataoptions: { sentenceBoundaryEnabled: false, wordBoundaryEnabled: true },
           outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
         },
       },
@@ -95,6 +107,7 @@ function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<Buff
 
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
+    const boundaries: TtsWordBoundary[] = []
     let pendingBinary: Promise<void> = Promise.resolve()
     let turnEnded = false
     let settled = false
@@ -106,8 +119,8 @@ function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<Buff
         'Cache-Control': 'no-cache',
         Origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
         Pragma: 'no-cache',
-        Cookie: `muid=${randomUUID().replaceAll('-', '')};`,
-        'User-Agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${EDGE_CHROMIUM_VERSION} Safari/537.36 Edg/${EDGE_CHROMIUM_VERSION}`,
+        Cookie: `muid=${randomUUID().replaceAll('-', '').toUpperCase()};`,
+        'User-Agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${EDGE_CHROMIUM_MAJOR_VERSION}.0.0.0 Safari/537.36 Edg/${EDGE_CHROMIUM_MAJOR_VERSION}.0.0.0`,
       },
     })
 
@@ -130,7 +143,7 @@ function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<Buff
         reject(new Error('Edge TTS returned no audio'))
         return
       }
-      resolve(Buffer.concat(chunks))
+      resolve({ audio: Buffer.concat(chunks), boundaries })
     }
     const finishAfterBinary = () => {
       void pendingBinary.then(finish).catch(() => fail(new Error('Edge TTS returned an invalid audio frame')))
@@ -149,7 +162,9 @@ function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<Buff
     socket.on('message', (data, isBinary) => {
       try {
         if (!isBinary) {
-          if (edgeHeaders(data.toString('utf8')).path === 'turn.end') {
+          const parsed = parseEdgeTextFrame(data.toString('utf8'))
+          if (parsed.path === 'audio.metadata') boundaries.push(...parseEdgeWordBoundaries(parsed.body))
+          if (parsed.path === 'turn.end') {
             turnEnded = true
             finishAfterBinary()
           }
@@ -157,8 +172,9 @@ function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<Buff
         }
         const read = async () => {
           const frame = Buffer.isBuffer(data) ? data : Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data)
-          const audio = edgeAudioFrame(frame)
-          if (audio) chunks.push(audio)
+          const parsed = parseEdgeBinaryFrame(frame)
+          if (parsed?.path === 'audio' && parsed.body.length) chunks.push(parsed.body)
+          else if (parsed?.path === 'audio.metadata') boundaries.push(...parseEdgeWordBoundaries(parsed.body.toString('utf8')))
         }
         pendingBinary = pendingBinary.then(read)
         void pendingBinary.catch(() => fail(new Error('Edge TTS returned an invalid audio frame')))
@@ -177,7 +193,8 @@ function edgeRequest(input: TtsEdgeSpeechReq, signal: AbortSignal): Promise<Buff
 
 export async function synthesizeEdgeSpeech(input: TtsEdgeSpeechReq, signal: AbortSignal) {
   try {
-    return { audio: await edgeRequest(input, signal), contentType: 'audio/mpeg' }
+    const result = await edgeRequest(input, signal)
+    return { audio: result.audio, audioBase64: result.audio.toString('base64'), boundaries: result.boundaries }
   } catch (error) {
     if (signal.aborted) throw new AppError('TTS_PROVIDER_ERROR', 'TTS request was cancelled')
     throw new AppError('TTS_PROVIDER_ERROR', error instanceof Error ? error.message : 'Edge TTS request failed')

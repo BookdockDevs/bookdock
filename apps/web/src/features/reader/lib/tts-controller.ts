@@ -61,6 +61,7 @@ export class TtsController {
   private unbindInvalidation: (() => void) | null = null
   private bufferedQueue: BufferedQueueEntry[] = []
   private preparationGeneration = 0
+  private wordBoundaryGeneration = -1
   private activePreparations = 0
   private preparedCache = new Map<string, TtsPreparedAudio>()
   private activation?: () => Promise<PlaybackClaim>
@@ -321,14 +322,22 @@ export class TtsController {
 
   private handleSegmentStart(segment: TtsSegment, generation: number) {
     if (generation !== this.generation) return
+    this.wordBoundaryGeneration = -1
     const navigation = this.preferences.autoNext ? this.renderer.revealTtsSegment(segment) : Promise.resolve()
     if (this.preferences.highlight) {
       void navigation.then(() => {
-        if (generation === this.generation) void this.renderer.highlightTtsSegment(segment)
+        if (generation === this.generation && this.wordBoundaryGeneration !== generation) void this.renderer.highlightTtsSegment(segment)
       })
     }
     this.state = { ...this.state, status: 'playing', segment, error: null }
     this.emit()
+  }
+
+  private handleWordBoundary(segment: TtsSegment, generation: number, signal: AbortSignal, start: number, length: number) {
+    if (!this.preferences.highlight || generation !== this.generation || signal.aborted || this.state.status !== 'playing' || this.state.segment?.id !== segment.id) return
+    if (!Number.isInteger(start) || start < 0 || !Number.isInteger(length) || length <= 0 || start + length > segment.text.length) return
+    this.wordBoundaryGeneration = generation
+    void this.renderer.highlightTtsBoundary?.(segment, start, length)
   }
 
   private preparedCacheKey(segment: TtsSegment) {
@@ -459,7 +468,7 @@ export class TtsController {
       if (generation !== this.generation || controller.signal.aborted || !current.prepared) return
       await client.playPrepared(current.segment, current.prepared, { voiceId: this.preferences.voiceId, rate: this.preferences.rate, gapSec: SENTENCE_GAP_SEC / Math.max(this.preferences.rate, 0.01) }, controller.signal, {
         onStart: () => this.handleSegmentStart(current.segment, generation),
-        onWordBoundary: () => undefined,
+        onWordBoundary: (start, length) => this.handleWordBoundary(current.segment, generation, controller.signal, start, length),
         onEnd: () => undefined,
         onError: () => undefined,
       })
@@ -511,7 +520,7 @@ export class TtsController {
       if (!playback) {
         playback = client.schedulePrepared(current.segment, current.prepared, playbackOptions, controller.signal, {
           onStart: () => this.handleSegmentStart(current.segment, generation),
-          onWordBoundary: () => undefined,
+          onWordBoundary: (start, length) => this.handleWordBoundary(current.segment, generation, controller.signal, start, length),
           onEnd: () => undefined,
           onError: () => undefined,
         })
@@ -525,7 +534,7 @@ export class TtsController {
           if (generation !== this.generation || controller.signal.aborted || !next.prepared) return
           scheduled.set(next.segment.id, client.schedulePrepared(next.segment, next.prepared, playbackOptions, controller.signal, {
             onStart: () => this.handleSegmentStart(next.segment, generation),
-            onWordBoundary: () => undefined,
+            onWordBoundary: (start, length) => this.handleWordBoundary(next.segment, generation, controller.signal, start, length),
             onEnd: () => undefined,
             onError: () => undefined,
           }))

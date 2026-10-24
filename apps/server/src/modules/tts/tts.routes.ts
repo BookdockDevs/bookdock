@@ -88,11 +88,7 @@ ttsRoutes.post('/edge/speech', async (c) => {
   const parsed = ttsEdgeSpeechSchema.safeParse(await c.req.json())
   if (!parsed.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid Edge speech request', details: parsed.error.flatten() } }, 400)
   const result = await synthesizeEdgeSpeech(parsed.data, c.req.raw.signal)
-  return c.newResponse(new Uint8Array(result.audio), 200, {
-    'Content-Type': result.contentType,
-    'Content-Length': String(result.audio.length),
-    'Cache-Control': 'no-store',
-  })
+  return c.json({ data: { audioBase64: result.audioBase64, boundaries: result.boundaries } }, 200, { 'Cache-Control': 'no-store' })
 })
 
 ttsRoutes.post('/speech', async (c) => {

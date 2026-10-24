@@ -41,6 +41,7 @@ import { canFallbackReaderContent, consumePreparedReaderContentText, fetchReader
 import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
 import { forwardTextPaths } from '../lib/forward-text-paths'
 import { getSelectionGeometry } from '../lib/selection-geometry'
+import { ttsBoundaryRange } from '../lib/tts-text-range'
 import { waitForReaderFonts } from '../lib/reader-font-ready'
 import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, type BookFormat, type ReaderManifestEntry } from '@bookdock/shared'
 
@@ -105,6 +106,10 @@ function normalizeBookHref(value: string): string {
 
 export function ttsHighlightColor(theme: { bg: string; text: string; primary?: string }): string {
   return mix(theme.primary ?? theme.text, theme.bg, 0.25)
+}
+
+export function ttsWordHighlightColor(theme: { bg: string; text: string; primary?: string }): string {
+  return mix(theme.primary ?? theme.text, theme.bg, 0.08)
 }
 
 export function searchHighlightColor(theme: { bg: string; text: string; primary?: string }): string {
@@ -2316,6 +2321,7 @@ export class FoliateReader implements BookReader {
         letter-spacing: ${this.paragraph.letterSpacing}px !important;
         color: ${this.theme.text} !important;
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
+        --bd-tts-word-highlight: ${ttsWordHighlightColor(this.theme)} !important;
         --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
         --bd-search-active-highlight: ${searchActiveHighlightColor(this.theme)} !important;
         --bd-search-active-border: ${searchActiveBorderColor(this.theme)} !important;
@@ -3321,6 +3327,7 @@ export class FoliateReader implements BookReader {
     this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
     this.view.renderer.style.setProperty('--bd-tts-highlight', ttsHighlightColor(theme))
+    this.view.renderer.style.setProperty('--bd-tts-word-highlight', ttsWordHighlightColor(theme))
     this.view.renderer.style.setProperty('--bd-search-highlight', searchHighlightColor(theme))
     this.view.renderer.style.setProperty('--bd-search-active-highlight', searchActiveHighlightColor(theme))
     this.view.renderer.style.setProperty('--bd-search-active-border', searchActiveBorderColor(theme))
@@ -3924,7 +3931,23 @@ export class FoliateReader implements BookReader {
   }
 
   async highlightTtsSegment(segment: TtsSegment): Promise<void> {
-    ;(await this.ensureTts())?.highlightCfi?.(segment.cfi)
+    const tts = await this.ensureTts()
+    tts?.clearWordHighlight?.()
+    tts?.highlightCfi?.(segment.cfi)
+  }
+
+  async highlightTtsBoundary(segment: TtsSegment, start: number, length: number): Promise<boolean> {
+    const base = this.rangeForTtsCfi(segment.cfi)
+    if (!base) return false
+    const range = ttsBoundaryRange(base, segment.text, start, length)
+    if (!range) return false
+    try {
+      const tts = await this.ensureTts()
+      if (tts?.doc !== range.startContainer.ownerDocument) return false
+      return Boolean(tts.highlightRange?.(range))
+    } catch {
+      return false
+    }
   }
 
   clearTtsHighlight() {
@@ -5613,6 +5636,7 @@ export class FoliateReader implements BookReader {
         ${layoutDeclarations}
         color: ${this.theme.text} !important;
         --bd-tts-highlight: ${ttsHighlightColor(this.theme)} !important;
+        --bd-tts-word-highlight: ${ttsWordHighlightColor(this.theme)} !important;
         --bd-search-highlight: ${searchHighlightColor(this.theme)} !important;
         --bd-search-active-highlight: ${searchActiveHighlightColor(this.theme)} !important;
         --bd-search-active-border: ${searchActiveBorderColor(this.theme)} !important;

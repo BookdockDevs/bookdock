@@ -303,9 +303,13 @@
     - 对应版本：Bookdock `v0.2.2` legacy TTS sentence behavior plus current upstream SSML core。
     - 需求：`initTTS(false)` 继续跳过隐藏/ARIA/inert/CFI-inert 内容和局部链接，并保留旧标点/引号断句；新 SSML mark navigation 的属性 selector 必须完整闭合。
     - 实现：只在 legacy facade 内恢复旧节点过滤、Range 文本过滤和句段切分；SSML 主实现、marks、prepare 和 navigation API 保持上游结构。
-    - 影响/验证：不改变新 SSML 语义；`tts.test.ts` 覆盖从当前位置、lookahead、隐藏内容和局部脚注链接。
 
-34. **`epub.js` / script policy and manifest-first archive fallback**
+34. **`tts.js` / legacy facade arbitrary Range highlighting**
+    - 需求：Edge 真实 word-boundary 通过正文 Range 定位单词；高亮不能先转成 CFI 再调用 `highlightCfi`，因为该方法只查找 legacy 句段列表中的精确 CFI。
+    - 实现：在 legacy facade 暴露 `highlightRange(range)` 与 `clearWordHighlight()`；回调以 word layer 参数绘制/清除独立 Overlayer key，保留句段 key，并仅接受属于当前 TTS document 的 Range。句段播放、系统语音和新 SSML API 保持原样。
+    - 影响/验证：句子底色持续显示，当前词用更深的独立颜色叠加；新句开始时清除上句的词层，停止时一起清理。验证 `tts.test.ts`、文本 Range 映射测试和高亮回调行为。
+
+35. **`epub.js` / script policy and manifest-first archive fallback**
     - 对应版本：Bookdock current security/product policy，兼容 v0.2.2 的默认脚本拒绝边界。
     - 需求：脚本默认不加载；未来设置项不得绕过核心策略。manifest 未列出的本地资源若实际存在于同一 ZIP，可经过规范化、无歧义查找后按扩展名推断 MIME 并加载；不存在的资源保留自然失败。
     - 实现：`EPUB`/`Loader` 默认 `allowScript = false`，可由未来受控核心策略显式传入；资源 fallback 统一检查精确/大小写安全 entry，覆盖 CSS、SVG、图片、字体、音视频及文档类型，不猜测冲突路径。每个 section 还暴露 `loadHref` 与 `observeDynamicResources`，分页版和 fixed-layout 版在 iframe 建立后挂载资源观察器，在 View/frame 销毁或移除时断开观察器并释放动态资源引用。

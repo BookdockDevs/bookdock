@@ -1,3 +1,5 @@
+import { vi } from 'vitest'
+
 import { TTS } from '../../public/foliate-js/tts.js'
 
 describe('foliate TTS positioning', () => {
@@ -36,5 +38,25 @@ describe('foliate TTS positioning', () => {
 
     expect(tts.start({ highlight: false })).toBe('第一句。')
     expect(tts.next()).toBe('第二句。')
+  })
+
+  it('highlights an arbitrary word range through the legacy TTS highlighter', () => {
+    const doc = document.implementation.createHTMLDocument()
+    doc.body.innerHTML = '<p>上午，四城科技总部大楼。</p>'
+    const highlight = vi.fn((range: Range | null, layer?: string) => `${layer ?? 'sentence'}:${range?.toString() ?? ''}`)
+    const tts = new TTS(doc, undefined, highlight, () => '')
+    const word = doc.createRange()
+    const text = doc.querySelector('p')?.firstChild
+    if (!text) throw new Error('test paragraph did not render')
+    word.setStart(text, 3)
+    word.setEnd(text, 6)
+
+    expect(tts.highlightRange(word)).toBe('word:四城科')
+    expect(highlight).toHaveBeenCalledTimes(1)
+    expect(highlight.mock.calls[0]?.[0].toString()).toBe('四城科')
+    expect(highlight.mock.calls[0]?.[1]).toBe('word')
+
+    tts.clearWordHighlight()
+    expect(highlight).toHaveBeenLastCalledWith(null, 'word')
   })
 })

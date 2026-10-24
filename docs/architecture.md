@@ -1280,9 +1280,15 @@ enumeration follows the browser's `voiceschanged` lifecycle and applies the sele
 language when available, with the browser's default voice kept as a fallback when a platform
 reports no voices. Edge TTS is acquired through the authenticated same-origin
 server gateway, which hides the unstable consumer WebSocket protocol from browsers and allows
-the server to provide a complete audio response. The web client does not open the consumer
-WebSocket directly; native Android/iOS TTS remains outside the web deployment and requires a
-platform bridge in a future client.
+the server to provide a complete audio response. Its consumer connection uses the current
+upstream v2 `Sec-MS-GEC` handshake. The Edge gateway requests word-boundary
+metadata and returns it with the same synthesis audio in a structured response body; the web
+client maps boundary text into the visible segment and schedules highlights against the shared
+AudioContext playback clock. Sentence highlighting stays visible under a deeper highlight for the
+current word. Missing or unmappable boundaries retain sentence highlighting. The
+web client does not open the consumer WebSocket directly; native Android/iOS TTS remains outside
+the web deployment and requires a platform bridge in a future client. Real upstream boundary
+quality and browser playback synchronization still require runtime acceptance.
 EPUB3 Media Overlay is treated as book media, not as a synthetic-TTS voice. A media-overlay section
 parses SMIL `par` entries into ordered text ranges and exposes the referenced publisher audio to an
 inline reader media control. The control is shown in the current reading surface when the current
@@ -1566,7 +1572,7 @@ A private work may carry `meta.pendingUserDataDeletion`, set when the owner move
 
 **Progress storage**: SQLite (`book_states.progress_data` + `read_fraction`) is authoritative for signed-in users. Legacy per-book JSON files (`progress/{bookId}.json`, shape `{ cfi?, chapter?, chapterIndex?, percent, fraction, intervals, updatedAt }`) are imported once at startup by `importProgressFiles` (ledger batch `phase1-progress-database-migration-v2`, skips books that already have DB progress); after the batch completes there is zero file I/O. `chapterIndex` is the zero-based chapter position from the current book TOC and is persisted for server-side consumers such as AI spoiler bounds; AI applies this boundary at chapter granularity, so the whole current chapter is available and later chapters are not. `fraction` is the foliate book-wide position (0–1); `intervals` is the merged union of `[start, end]` fraction ranges the user has actually read — the web reader closes the current segment when a relocate jump exceeds `JUMP_THRESHOLD` (0.02) and reports `segmentStartFraction` on PUT. GET additionally returns `readFraction` (total union length, computed server-side). Guests never read or write this server progress; their reader position uses the browser-local `bd-guest-reading-progress` namespace instead.
 | `/api/v1/settings` | settings | `GET /` `PUT /` |
-| `/api/v1/tts` | tts | `GET /providers` `GET/POST /services` `POST /services/test` `GET/PUT/DELETE /services/:id` `GET /services/:id/voices` `POST /services/:id/test` `POST /speech` (server-side provider gateways) |
+| `/api/v1/tts` | tts | `GET /providers` `GET/POST /services` `POST /services/test` `GET/PUT/DELETE /services/:id` `GET /services/:id/voices` `POST /services/:id/test` `POST /speech` (server-side provider gateways); `POST /edge/speech` returns Edge audio and same-request word-boundary metadata together |
 | `/api/v1/ai` | ai | `GET /providers` `GET /status` `GET/PATCH /config`(active Chat/Embedding profiles, prompt templates, and assistant modes) `POST/PATCH/DELETE /profiles` `POST /models` `POST /test` `GET/POST /threads` `GET/PATCH/DELETE /threads/:id` `GET /runs/:id` `POST /runs/:id/cancel` `GET /retrieval/status` `POST /retrieval/index` `POST /retrieval/index/cancel` `DELETE /retrieval/index` `POST /retrieval/search` `POST /chat` (server-side multi-provider Chat LLM gateway; provider metadata includes key requirements; status exposes only the active profile's non-sensitive model options, enabled quick prompts, and assistant modes for the reader picker; model discovery/test are non-persistent draft operations; existing-profile drafts identify their profile so saved secrets are never borrowed by new profiles; retrieval status exposes user-visible lexical/embedding progress and the embedding provider/model fingerprint, and its derived index can be cancelled, rolled back, cleared, and rebuilt on demand; chat may use an allowlisted, bounded read-only tool set for the owned book, accepts bounded Reader-visible chapter references and the selected assistant-mode prompt, persists user-visible messages and bounded retry recipes by thread, and exposes only bounded generation-run/checkpoint projections) |
 | `/api/v1/reading-records` | reading | `POST /` `GET /summary` `GET /daily` `GET /by-book` `GET /by-category` (direct category groups, including null Uncategorized; current holding metadata) `GET /by-tag` (deduplicated version/tag associations) `GET /hourly`(?from&to&tzOffset&bookId?) `GET /book/:bookId` (range aggregate) `GET /book/:bookId/ledger` (overview) `GET /book/:bookId/stats` (range projection) `GET /book/:bookId/sessions` (stable cursor page) |
 

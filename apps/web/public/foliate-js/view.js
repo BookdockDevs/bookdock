@@ -237,6 +237,7 @@ export class View extends HTMLElement {
     #searchResults = new Map()
     #suppressedImageClicks = new WeakSet()
     #ttsValue
+    #ttsWordValue
     #cursorAutohider = new CursorAutohider(this, () =>
         this.hasAttribute('autohide-cursor'))
     isFixedLayout = false
@@ -328,6 +329,10 @@ export class View extends HTMLElement {
         if (this.#ttsValue) {
             this.#getOverlayer()?.overlayer.remove(this.#ttsValue)
             this.#ttsValue = null
+        }
+        if (this.#ttsWordValue) {
+            this.#getOverlayer()?.overlayer.remove(this.#ttsWordValue)
+            this.#ttsWordValue = null
         }
         this.renderer?.destroy()
         this.renderer?.remove()
@@ -939,6 +944,10 @@ export class View extends HTMLElement {
                 this.#getOverlayer(primaryIndex)?.overlayer.remove(this.#ttsValue)
                 this.#ttsValue = null
             }
+            if (this.#ttsWordValue) {
+                this.#getOverlayer(primaryIndex)?.overlayer.remove(this.#ttsWordValue)
+                this.#ttsWordValue = null
+            }
             this.tts = null
             return
         }
@@ -946,14 +955,23 @@ export class View extends HTMLElement {
         const { TTS } = await import('./tts.js')
         if (granularity === false) {
             const getCfi = range => this.getCFI(primaryIndex, range)
-            const legacyHighlighter = range => {
+            const legacyHighlighter = (range, layer = 'sentence') => {
                 const obj = this.#getOverlayer(primaryIndex)
                 if (!obj) return null
-                if (this.#ttsValue) obj.overlayer.remove(this.#ttsValue)
-                const value = `tts:${getCfi(range)}`
-                obj.overlayer.add(value, range, Overlayer.highlight,
-                    { color: 'var(--bd-tts-highlight)' })
-                this.#ttsValue = value
+                const isWord = layer === 'word'
+                const previous = isWord ? this.#ttsWordValue : this.#ttsValue
+                if (previous) obj.overlayer.remove(previous)
+                if (!range) {
+                    if (isWord) this.#ttsWordValue = null
+                    else this.#ttsValue = null
+                    return null
+                }
+                const value = `${isWord ? 'tts-word:' : 'tts:'}${getCfi(range)}`
+                obj.overlayer.add(value, range, Overlayer.highlight, isWord
+                    ? { color: 'var(--bd-tts-word-highlight)', fillOpacity: 0.62 }
+                    : { color: 'var(--bd-tts-highlight)' })
+                if (isWord) this.#ttsWordValue = value
+                else this.#ttsValue = value
                 return value
             }
             this.tts = new TTS(doc, textWalker, legacyHighlighter, getCfi)

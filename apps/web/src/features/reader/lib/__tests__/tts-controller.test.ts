@@ -30,6 +30,7 @@ function fakeRenderer(segments: TtsSegment[]) {
       previousTtsSegment: vi.fn(async () => segments[Math.max(0, --index)]),
       revealTtsSegment: vi.fn(async () => undefined),
       highlightTtsSegment: vi.fn(async () => undefined),
+      highlightTtsBoundary: vi.fn(async () => true),
       clearTtsHighlight: vi.fn(),
       on: vi.fn((type: string, listener: () => void) => {
         listeners.set(type, listener)
@@ -137,6 +138,41 @@ describe('TtsController', () => {
     speech.current?.onend?.()
     await start
     expect(controller.getSnapshot()).toMatchObject({ status: 'idle', segment: null })
+    controller.dispose()
+  })
+
+  it('routes buffered boundaries only to the playing segment and ignores them after pause or stop', async () => {
+    const segment = { id: 's1', text: 'hello world', cfi: 'epubcfi(/6/2)', chapterIndex: 0 }
+    const fake = fakeRenderer([segment])
+    let playbackEvents: TtsPlaybackEvents | undefined
+    const client: TtsClient = {
+      id: 'edge',
+      pauseResume: true,
+      listVoices: () => [],
+      prepare: vi.fn(async () => ({ buffer: {} as AudioBuffer })),
+      playPrepared: vi.fn(async () => undefined),
+      schedulePrepared: vi.fn((_segment, _audio, _options, signal, events) => new Promise<void>((resolve, reject) => {
+        playbackEvents = events
+        signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+        events.onStart()
+      })),
+      pause: vi.fn(async () => true),
+      resume: vi.fn(async () => true),
+      stop: vi.fn(async () => undefined),
+    }
+    const controller = new TtsController(fake.renderer, { engine: 'edge', voiceId: '', rate: 1, autoNext: false, highlight: true }, client)
+    const start = controller.start()
+    await vi.waitFor(() => expect(playbackEvents).toBeDefined())
+
+    playbackEvents?.onWordBoundary(0, 5)
+    expect(fake.renderer.highlightTtsBoundary).toHaveBeenCalledWith(segment, 0, 5)
+    await controller.pause()
+    playbackEvents?.onWordBoundary(6, 5)
+    expect(fake.renderer.highlightTtsBoundary).toHaveBeenCalledTimes(1)
+    await controller.stop()
+    playbackEvents?.onWordBoundary(6, 5)
+    expect(fake.renderer.highlightTtsBoundary).toHaveBeenCalledTimes(1)
+    await start
     controller.dispose()
   })
 

@@ -85,9 +85,8 @@ export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = fals
 
   const state = useSyncExternalStore(controller?.subscribe ?? (() => () => undefined), controller?.getSnapshot ?? (() => IDLE_TTS_STATE), () => IDLE_TTS_STATE)
   useEffect(() => {
-    // Mirror AutoReadingPanel: failures toast so dismissing the popover on
-    // start never hides them. The panel renders the same generic message
-    // in-panel; the controller's raw error strings are not i18n keys.
+    // Starting playback closes the settings popover, so failures surface in a
+    // toast instead of leaving an error message in the TTS menu.
     if (state.error) notify.error({ key: 'reader.ttsPlaybackFailed' })
   }, [state.error])
   return <TtsSessionContext.Provider value={{ controller, state }}>{children}</TtsSessionContext.Provider>
