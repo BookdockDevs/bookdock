@@ -40,11 +40,12 @@ const AI_MENU_WIDTH = 184
 
 interface SelectionToolbarProps {
   bookId: string
+  revisionId?: string
   fontStack?: string
   fontCss?: string
 }
 
-export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolbarProps) {
+export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: SelectionToolbarProps) {
   const _ = useTranslation()
   const selection = useReaderState((s) => s.selection)
   const setAiContext = useReaderState((s) => s.setAiContext)
@@ -66,7 +67,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
   const del = useDeleteAnnotation(bookId)
   const { data: annotations } = useAnnotations(bookId, { enabled: !!user })
   const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
-  const publicIdeas = useReaderIdeas(bookId, showFriendIdeas)
+  const publicIdeas = useReaderIdeas(bookId, showFriendIdeas, revisionId)
   const composer = useIdeaComposer(bookId, !!user)
   const orphanedKeys = useReaderState((state) => state.orphanedAnnotationKeys)
   const { commands: aiCommands } = useAiQuickCommands()
@@ -175,6 +176,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
         cfiRange: selection.cfiRange,
         cfiAnchor: selection.cfiRange,
         type: 'highlight',
+        revisionId,
         color: last.color,
         style: last.style,
         // rawText keeps block-level line breaks; `text` is whitespace-collapsed
@@ -253,7 +255,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
           type: 'note',
           visibility,
           ...files,
-          revisionId: composer.data?.data.revisionId ?? undefined,
+          revisionId,
           color: DEFAULT_IDEA_COLOR,
           style: 'underline',
           text: selection.rawText ?? selection.text,
@@ -464,7 +466,7 @@ export function SelectionToolbar({ bookId, fontStack, fontCss }: SelectionToolba
             type: 'note',
             visibility,
             ...files,
-            revisionId: composer.data?.data.revisionId ?? undefined,
+            revisionId,
             color: DEFAULT_IDEA_COLOR,
             style: 'underline',
             text: selection.rawText ?? selection.text,

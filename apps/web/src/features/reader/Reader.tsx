@@ -37,6 +37,8 @@ import { consumeEscFlag } from './lib/esc-consumed'
 import { createRestoreGate, type RestoreGate } from './lib/restore-gate'
 import { cfiRangesIntersect, loadCfiModule } from './lib/cfi-overlap'
 import { mergeProgressSaveCache } from './lib/progress-cache'
+import { buildRevisionContentUrl, prepareRevisionNavigation } from './lib/revision-navigation'
+import { clearPreparedReaderContentText, primeReaderContentText, ReaderContentError } from './lib/reader-content-client'
 import { getGuestProgress, saveGuestProgress } from './lib/guest-progress'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
@@ -57,6 +59,7 @@ import ReplacementForm from '../settings/components/ReplacementForm'
 import { ViewSettingsContext } from './view-settings-context'
 import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
 import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
+import { getSessionEpoch } from '@/lib/session-scope'
 import type { PerBookSettingKey, PerBookSettingValue, GlobalViewSettings } from './lib/view-settings'
 import type { BookReader, FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnotation, SelectionInfo } from './types'
 import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
@@ -90,6 +93,9 @@ export default function Reader() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [percent, setPercent] = useState(0)
+  const [displayedRevisionId, setDisplayedRevisionId] = useState<string | null>(null)
+  const displayedRevisionIdRef = useRef<string | null>(null)
+  const [revisionQuarantined, setRevisionQuarantined] = useState(false)
   const [pageInfo, setPageInfo] = useState<{ page: number; total: number } | null>(null)
   const [currentContentCfi, setCurrentContentCfi] = useState<string | null>(null)
   const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
@@ -299,9 +305,9 @@ export default function Reader() {
   const dialogInset = !isTouch && (sidebarOpen || toolbarLocked) ? 56 + (sidebarOpen ? sidebarWidth : 0) : 0
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
-  const { data: annotations } = useAnnotations(id, { enabled: !isGuest })
+  const { data: annotations } = useAnnotations(id, { enabled: !isGuest && !revisionQuarantined })
   const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
-  const publicIdeas = useReaderIdeas(id, showFriendIdeas)
+  const publicIdeas = useReaderIdeas(id, showFriendIdeas && !revisionQuarantined, displayedRevisionId)
   const publicMarkers = useMemo(() => publicIdeas.isError || !showFriendIdeas ? [] : (publicIdeas.data?.data ?? []).filter((idea) => !idea.own && idea.locationAvailable), [publicIdeas.isError, publicIdeas.data, showFriendIdeas])
   const deepLinkHandled = useRef(false)
   const pendingDeepLink = useRef<string | null>(null)
@@ -316,8 +322,10 @@ export default function Reader() {
   )
 
   const bookmarks = useMemo(
-    () => (annotations?.data ?? []).filter((annotation) => annotation.type === 'bookmark'),
-    [annotations?.data],
+    () => displayedRevisionId
+      ? (annotations?.data ?? []).filter((annotation) => annotation.type === 'bookmark' && annotation.revisionId === displayedRevisionId)
+      : [],
+    [annotations?.data, displayedRevisionId],
   )
   const [currentBookmarkId, setCurrentBookmarkId] = useState<string | null>(null)
 
@@ -361,7 +369,7 @@ export default function Reader() {
   const bookQuery = useQuery({
     queryKey: ['book', id],
     queryFn: () => apiGet<{ data: BookDetailRes }>(withReveal(`/books/${id}`)),
-    enabled: !!id,
+    enabled: !!id && !revisionQuarantined,
     staleTime: 0,
     refetchOnMount: 'always',
   })
@@ -646,7 +654,7 @@ export default function Reader() {
     }
     // A body buffered while the restore gate is closed must never reach the
     // server — it holds a book-start position that would erase the saved one
-    if (restoreGateRef.current?.isPending()) return
+    if (restoreGateRef.current?.isPending() || revisionQuarantinedRef.current) return
     if (pendingProgress.current) {
       mutateProgressRef.current(pendingProgress.current)
       pendingProgress.current = null
@@ -681,7 +689,7 @@ export default function Reader() {
     }
   }, [flushPendingProgress])
 
-  const chaptersQuery = useBookChapters(id)
+  const chaptersQuery = useBookChapters(id, !revisionQuarantined)
 
   // Progress load failures get a dedicated in-page prompt (retry / start
   // over) instead of a toast — the reader must not silently mount anywhere
@@ -704,6 +712,36 @@ export default function Reader() {
   const contentUrl = id && bookQuery.isFetchedAfterMount && bookQuery.data?.data
     ? withReveal(`/api/v1/books/${id}/file?reader=1&revisionId=${encodeURIComponent(bookQuery.data.data.revisionId ?? '')}&v=${bookQuery.data.data.updatedAt}`)
     : ''
+  const [revisionUrlOverride, setRevisionUrlOverride] = useState<string | null>(null)
+  const [revisionMountGeneration, setRevisionMountGeneration] = useState(0)
+  const committedMountGenerationRef = useRef(0)
+  const revisionSwitchRef = useRef<{ generation: number; controller: AbortController; revisionId: string } | null>(null)
+  const revisionSwitchGeneration = useRef(0)
+  const revisionStartupTargetRef = useRef<string | null>(null)
+  const latestTocSelectionRef = useRef<{ revisionId: string; previousRevisionId: string; previousContentHash: string | null } | null>(null)
+  const revisionSwitchingRef = useRef(false)
+  const revisionQuarantinedRef = useRef(false)
+  const lastRenderedContentUrlRef = useRef<string | null>(null)
+  const rendererContentUrl = revisionUrlOverride ?? contentUrl
+
+  useEffect(() => {
+    clearPreparedReaderContentText()
+    revisionSwitchRef.current?.controller.abort()
+    revisionSwitchRef.current = null
+    revisionSwitchingRef.current = false
+    revisionQuarantinedRef.current = false
+    setRevisionQuarantined(false)
+    displayedRevisionIdRef.current = null
+    setDisplayedRevisionId(null)
+    lastRenderedContentUrlRef.current = null
+    revisionStartupTargetRef.current = null
+    latestTocSelectionRef.current = null
+    setRevisionUrlOverride(null)
+    return () => {
+      revisionSwitchRef.current?.controller.abort()
+      revisionSwitchRef.current = null
+    }
+  }, [id, authUser?.id])
 
   // Latch initialCfi at first resolve: later refetches of ['progress'] (e.g.
   // StatsPanel mounting) must not remount the renderer
@@ -748,7 +786,9 @@ export default function Reader() {
   // conversion. While that happens the reading area is empty, so the loading
   // surface has to come back — it is keyed to the renderer, not to the file.
   const [viewRebuilding, setViewRebuilding] = useState(false)
-  const readerReady = bookReady && readyContentUrl === contentUrl && !viewRebuilding
+  const readerReady = bookReady
+    && (readyContentUrl === rendererContentUrl || revisionSwitchingRef.current)
+    && !viewRebuilding
   // kind=parse: renderer onError, the file itself failed to load
   const [loadError, setLoadError] = useState<{ kind: 'parse' } | null>(null)
   // Slow-network hint: the Range path has no global time budget, so a load
@@ -764,17 +804,18 @@ export default function Reader() {
     return () => clearTimeout(timer)
   }, [readerReady, contentUrl])
   useEffect(() => {
+    if (revisionSwitchingRef.current) return
     setBookReady(false)
     setReadyContentUrl(null)
     setLoadError(null)
     setSlowLoad(false)
-  }, [contentUrl])
+  }, [rendererContentUrl])
 
   useEffect(() => {
-    if (readerReady || !contentUrl) return
+    if (readerReady || !rendererContentUrl) return
     const timer = setTimeout(() => setSlowLoad(true), 30000)
     return () => clearTimeout(timer)
-  }, [readerReady, contentUrl])
+  }, [readerReady, rendererContentUrl])
 
   // Both mode uses automatic capture until the manual timer takes ownership.
   const readingTimerMode = useUiStore((s) => s.readingTimerMode)
@@ -882,9 +923,94 @@ export default function Reader() {
   const resolvedBoundPresetId = useUiStore((s) => s.boundPresetId)
   const settingsReady = isGuest || (settingsSync.userId === authUser?.id && settingsSync.ready)
   const settingsFailed = !isGuest && settingsSync.userId === authUser?.id && settingsSync.failed
+
+  const switchRevisionForNavigation = useCallback(async (intent: {
+    target?: string
+    sectionHref?: string
+    chapterNavigation: boolean
+    previousRevisionId: string
+    previousContentHash: string | null
+    explicitRevisionId?: string
+  }) => {
+    if (!contentUrl || !bookQuery.data?.data) return
+    const generation = ++revisionSwitchGeneration.current
+    revisionSwitchRef.current?.controller.abort()
+    const controller = new AbortController()
+    revisionSwitchRef.current = { generation, controller, revisionId: '' }
+    revisionSwitchingRef.current = true
+    revisionQuarantinedRef.current = true
+    setRevisionQuarantined(true)
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    pendingProgress.current = null
+    navInFlightRef.current = true
+
+    try {
+      const prepared = await prepareRevisionNavigation(contentUrl, {
+        bookId: id,
+        revisionId: intent.previousRevisionId,
+        contentHash: intent.previousContentHash,
+        generated: bookQuery.data.data.format === 'txt',
+      }, intent, controller.signal)
+      if (generation !== revisionSwitchGeneration.current || controller.signal.aborted) return
+      const { latest, target, targetPath, targetText, toc } = prepared
+      if (!target) {
+        if (toc.length) {
+          latestTocSelectionRef.current = {
+            revisionId: latest.manifest.revisionId,
+            previousRevisionId: intent.previousRevisionId,
+            previousContentHash: intent.previousContentHash,
+          }
+          setTocItems(toc, id)
+          setSidebarOpen(true)
+        }
+        navInFlightRef.current = false
+        revisionSwitchingRef.current = false
+        revisionSwitchRef.current = null
+        setNavPending(false)
+        setPendingNavChapter(null)
+        return
+      }
+
+      const latestUrl = buildRevisionContentUrl(contentUrl, latest.manifest.revisionId)
+      if (generation !== revisionSwitchGeneration.current || controller.signal.aborted || getSessionEpoch() !== latest.epoch) return
+      if (!targetPath || targetText === null) throw new ReaderContentError('READER_ENTRY_FAILED', 'The prepared reader chapter could not be transferred')
+      primeReaderContentText(latest.manifest, latest.accountScope, targetPath, targetText)
+
+      revisionStartupTargetRef.current = target
+      if (intent.explicitRevisionId) {
+        latestTocSelectionRef.current = {
+          revisionId: latest.manifest.revisionId,
+          previousRevisionId: intent.previousRevisionId,
+          previousContentHash: intent.previousContentHash,
+        }
+      }
+      revisionSwitchRef.current = { generation, controller, revisionId: latest.manifest.revisionId }
+      setNavError(null)
+      setPendingNavChapter(null)
+      setNavPending(true)
+      setRevisionUrlOverride(latestUrl)
+      setRevisionMountGeneration((current) => current + 1)
+    } catch (error) {
+      if (controller.signal.aborted || generation !== revisionSwitchGeneration.current) return
+      navInFlightRef.current = false
+      revisionSwitchingRef.current = false
+      revisionSwitchRef.current = null
+      setNavPending(false)
+      setPendingNavChapter(null)
+      if (error instanceof ReaderContentError && ['UNAUTHORIZED', 'FORBIDDEN', 'BOOK_NOT_FOUND', 'BOOK_FILE_MISSING', 'BOOK_NOT_ACCESSIBLE'].includes(error.code)) {
+        return
+      }
+      notify.error({ key: 'reader.navigationLoadFailed' })
+    }
+  }, [bookQuery.data, contentUrl, id, setSidebarOpen, setTocItems])
+
   const { containerRef, renderer, fontStack, fontCss, preparationFailed, retryPreparation } = useReaderRenderer({
     ready: settingsReady && resolvedBoundPresetId === boundPresetId && replacementsReady,
-    url: contentUrl,    // undefined while progress is still loading: the renderer defers mounting
+    url: rendererContentUrl,    // undefined while progress is still loading: the renderer defers mounting
+    mountGeneration: revisionMountGeneration,
     bookId: id,
     format: bookQuery.data?.data?.format,
     bookSize: bookQuery.data?.data?.size,
@@ -896,21 +1022,69 @@ export default function Reader() {
     onFontFallback: () => notify.warning({ key: 'reader.fontLoadFallback' }, { dedupeKey: `reader-font:${id}` }),
     onViewRebuilding: (pending) => setViewRebuilding(pending),
     chapterWordCounts,
-    onRendered: () => {
+    onRendered: (renderedUrl) => {
+      if (renderedUrl) lastRenderedContentUrlRef.current = renderedUrl
+      committedMountGenerationRef.current = revisionMountGeneration
+      const activeSwitch = revisionSwitchRef.current
+      const renderedRevisionId = renderedUrl
+        ? new URLSearchParams(new URL(renderedUrl, window.location.href).search).get('revisionId')
+        : null
+      if (activeSwitch?.revisionId && activeSwitch.revisionId === renderedRevisionId) {
+        revisionSwitchRef.current = null
+        revisionSwitchingRef.current = false
+        revisionQuarantinedRef.current = false
+        setRevisionQuarantined(false)
+        revisionStartupTargetRef.current = null
+        latestTocSelectionRef.current = null
+        displayedRevisionIdRef.current = activeSwitch.revisionId
+        setDisplayedRevisionId(activeSwitch.revisionId)
+        void queryClient.invalidateQueries({ queryKey: ['progress', id, isGuest ? 'guest' : 'user'] })
+        void queryClient.invalidateQueries({ queryKey: ['chapters', id] })
+        void queryClient.invalidateQueries({ queryKey: ['annotations', id] })
+        void queryClient.invalidateQueries({ queryKey: ['reader-ideas', id] })
+        void queryClient.invalidateQueries({ queryKey: ['idea-composer', id] })
+      }
+      if (!activeSwitch?.revisionId && renderedRevisionId) {
+        displayedRevisionIdRef.current = renderedRevisionId
+        setDisplayedRevisionId(renderedRevisionId)
+      }
       setBookReady(true)
-      setReadyContentUrl(contentUrl)
+      if (renderedUrl) {
+        setReadyContentUrl(renderedUrl)
+        setRevisionUrlOverride((current) => current ?? renderedUrl)
+      }
       setLoadError(null)
       // Initial navigation (saved position, fraction fallback, or book
       // start) has settled — relocate-driven saves may write back again
       openRestoreGate()
     },
     onReady: () => {
+      const revisionTarget = revisionStartupTargetRef.current
+      if (revisionTarget) {
+        revisionStartupTargetRef.current = null
+        return revisionTarget
+      }
       const pendingHref = useReaderState.getState().pendingTocHref
       if (!pendingHref) return undefined
       setPendingTocHref(null)
       return pendingHref
     },
-    onError: () => setLoadError({ kind: 'parse' }),
+    onError: () => {
+      clearPreparedReaderContentText()
+      if (revisionSwitchRef.current?.revisionId) {
+        revisionSwitchRef.current = null
+        revisionSwitchingRef.current = false
+        navInFlightRef.current = false
+        setNavPending(false)
+        setPendingNavChapter(null)
+        setRevisionUrlOverride(lastRenderedContentUrlRef.current)
+        setRevisionMountGeneration(committedMountGenerationRef.current)
+        setLoadError(null)
+        notify.warning(_('reader.navigationLoadFailed'))
+        return
+      }
+      setLoadError({ kind: 'parse' })
+    },
     onFootnoteOpen: (entry) => {
       clearReaderSelection(rendererRef.current)
       setSettingsOpen(false)
@@ -989,6 +1163,9 @@ export default function Reader() {
       // TTS maintains its own position and must not overwrite the user's
       // reading progress while it moves the renderer internally.
       if (e.source === 'tts') return
+      const eventRevisionId = e.revisionId
+      const expectedRevisionId = revisionSwitchRef.current?.revisionId || displayedRevisionIdRef.current
+      if (revisionQuarantinedRef.current || !expectedRevisionId || eventRevisionId !== expectedRevisionId) return
       // Navigation-aware coverage belongs to the record, independently of position saves.
       const segmentStartFraction = readingTimerMode !== 'off' && e.fraction !== undefined
         ? trackPosition(segmentTrackerRef.current, e.fraction)
@@ -1002,7 +1179,7 @@ export default function Reader() {
         : undefined
       if (sample) lastSampleAtRef.current = now
       const readingPosition = { cfi: e.cfi, fraction: e.fraction, segmentStart: segmentStartFraction,
-        revisionId: bookQuery.data?.data.revisionId ?? undefined, wordCount: bookQuery.data?.data.meta?.wordCount ?? undefined }
+        revisionId: expectedRevisionId, wordCount: bookQuery.data?.data.meta?.wordCount ?? undefined }
       pingReadingTimer(readingPosition)
       useManualTimerStore.getState().updatePosition(id, { ...readingPosition, fraction: e.fraction ?? null, chapterIndex: e.chapterIndex })
       scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, sample })
@@ -1031,8 +1208,9 @@ export default function Reader() {
       // A range can hold both a highlight and ideas; the highlight wins the
       // click (same rule as SelectionToolbar), ideas stay reachable from the
       // notes side panel
-      const annotation = annotations?.data?.find((a) => a.cfiRange === e.cfiRange && a.type === 'highlight')
-        ?? annotations?.data?.find((a) => a.cfiRange === e.cfiRange)
+      const currentRevisionAnnotations = annotations?.data?.filter((a) => a.revisionId === displayedRevisionId)
+      const annotation = currentRevisionAnnotations?.find((a) => a.cfiRange === e.cfiRange && a.type === 'highlight')
+        ?? currentRevisionAnnotations?.find((a) => a.cfiRange === e.cfiRange)
         ?? publicMarkers.find((idea) => idea.annotation.cfiRange === e.cfiRange)?.annotation
       const isSameSelection = current?.cfiRange === e.cfiRange && Boolean(current?.isIdea) === (annotation?.type === 'note')
       if (!annotation || isSameSelection) {
@@ -1079,6 +1257,21 @@ export default function Reader() {
         // optimistically would leave the progress bar on the failed target.
       }
     },
+    onRevisionChanged: () => {
+      revisionQuarantinedRef.current = true
+      setRevisionQuarantined(true)
+      void queryClient.cancelQueries({ queryKey: ['progress', id, isGuest ? 'guest' : 'user'] })
+      void queryClient.cancelQueries({ queryKey: ['chapters', id] })
+      void queryClient.cancelQueries({ queryKey: ['annotations', id] })
+      void queryClient.cancelQueries({ queryKey: ['reader-ideas', id] })
+      closeSegment(segmentTrackerRef.current)
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current)
+        saveTimer.current = null
+      }
+      pendingProgress.current = null
+    },
+    onRevisionNavigation: (intent) => void switchRevisionForNavigation(intent),
     onNavigateError: (e) => {
       navInFlightRef.current = false
       setNavPending(false)
@@ -1118,6 +1311,7 @@ export default function Reader() {
       useReaderState.getState().addOrphanedAnnotationKeys([`${e.cfiRange}|${e.type}`])
     },
     onInstantAnnotation: (e) => {
+      if (revisionQuarantinedRef.current || !displayedRevisionId) return
       const lastStyle = getLastHighlightStyle()
       createAnnotation.mutate({
         cfiRange: e.cfiRange,
@@ -1128,6 +1322,7 @@ export default function Reader() {
         color: lastStyle.color,
         style: lastStyle.style,
         chapter: currentChapter ?? undefined,
+        revisionId: displayedRevisionId ?? undefined,
         ...(currentChapterHref ? { chapterHref: currentChapterHref } : {}),
       }, { onError: (err) => notify.error(getUserErrorNotification(err, 'annotation.saveFailed')) })
       // "选中即划" keeps the toolbar open so the fresh highlight can be restyled
@@ -1168,7 +1363,7 @@ export default function Reader() {
       }
       return
     }
-    if (annotation && (annotation.locationAvailable === false || (annotation.revisionId != null && annotation.revisionId !== bookQuery.data?.data.revisionId))) {
+    if (annotation && (annotation.locationAvailable === false || (annotation.revisionId != null && annotation.revisionId !== displayedRevisionId))) {
       deepLinkHandled.current = true
       notify.warning(_('profileArchive.positionUnavailable'))
       return
@@ -1180,7 +1375,7 @@ export default function Reader() {
     void renderer.display(target).finally(() => {
       if (pendingDeepLink.current === target) pendingDeepLink.current = null
     })
-  }, [annotations?.data, bookQuery.data?.data.revisionId, readerReady, deepLinkAnnotation, deepLinkCfi, renderer, _])
+  }, [annotations?.data, displayedRevisionId, readerReady, deepLinkAnnotation, deepLinkCfi, renderer, _])
 
   // A TOC jump clicked before the renderer became available is queued in the
   // store — apply it as soon as the live renderer can accept navigation.
@@ -1188,8 +1383,20 @@ export default function Reader() {
     if (!renderer || !pendingTocHref) return
     const href = pendingTocHref
     setPendingTocHref(null)
+    const latestTocSelection = latestTocSelectionRef.current
+    if (latestTocSelection && revisionQuarantinedRef.current) {
+      void switchRevisionForNavigation({
+        target: href,
+        sectionHref: href.split('#', 1)[0],
+        chapterNavigation: true,
+        previousRevisionId: latestTocSelection.previousRevisionId,
+        previousContentHash: latestTocSelection.previousContentHash,
+        explicitRevisionId: latestTocSelection.revisionId,
+      })
+      return
+    }
     void renderer.display(href)
-  }, [pendingTocHref, renderer, setPendingTocHref])
+  }, [pendingTocHref, renderer, setPendingTocHref, switchRevisionForNavigation])
 
   // Rule-set changes after mount must invalidate the cached sections: the
   // renderer tears the view down and reopens it (same mechanism as the
@@ -1223,7 +1430,8 @@ export default function Reader() {
   useEffect(() => {
     if (!renderer?.setAnnotations) return
     const list: ReaderAnnotation[] = (annotations?.data ?? [])
-      .filter((a) => a.type === 'highlight' || (a.type === 'note' && a.locationAvailable !== false && (a.revisionId == null || bookQuery.data?.data.revisionId == null || a.revisionId === bookQuery.data?.data.revisionId)))
+      .filter((a) => a.revisionId == null || a.revisionId === displayedRevisionId)
+      .filter((a) => a.type === 'highlight' || (a.type === 'note' && a.locationAvailable !== false))
       .map((a) => ({ cfiRange: a.cfiRange, type: a.type as 'highlight' | 'note', color: a.color, style: a.style, note: a.note }))
     list.push(...publicMarkers.map((idea) => ({ cfiRange: idea.annotation.cfiRange, type: 'note' as const, color: DEFAULT_IDEA_COLOR, style: 'underline' as const, note: idea.annotation.note })))
     // An idea being composed has no row yet; a pseudo note keeps the dashed
@@ -1232,7 +1440,7 @@ export default function Reader() {
       list.push({ cfiRange: noteEditorRange, type: 'note', color: DEFAULT_IDEA_COLOR, style: 'underline' })
     }
     renderer.setAnnotations(list)
-  }, [renderer, annotations?.data, publicMarkers, bookQuery.data?.data.revisionId, noteEditorRange])
+  }, [renderer, annotations?.data, publicMarkers, displayedRevisionId, noteEditorRange])
 
   useEffect(() => {
     // A locked desktop toolbar is persistent by intent — reopen the sidebar
@@ -1539,6 +1747,7 @@ export default function Reader() {
   }, [])
 
   const onAddBookmark = useCallback(async () => {
+    if (revisionQuarantinedRef.current || !displayedRevisionId) return
     const bookmarkCfi = currentContentCfi
     if (!bookmarkCfi) return
     if (currentBookmark) {
@@ -1559,6 +1768,7 @@ export default function Reader() {
         cfiRange: bookmarkCfi,
         cfiAnchor: bookmarkCfi,
         type: 'bookmark',
+        revisionId: displayedRevisionId ?? undefined,
         text: Array.from(snippet?.split(/\n/).find((line) => line.trim())?.trim() || currentChapter || _('reader.bookmark')).slice(0, 40).join(''),
         contextText: snippet || undefined,
         chapter: currentChapter ?? undefined,
@@ -1568,7 +1778,7 @@ export default function Reader() {
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'reader.bookmarkFailed'))
     }
-  }, [currentBookmark, currentChapter, currentChapterHref, currentContentCfi, createAnnotation, deleteAnnotation, _])
+  }, [displayedRevisionId, currentBookmark, currentChapter, currentChapterHref, currentContentCfi, createAnnotation, deleteAnnotation, _])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1975,8 +2185,8 @@ export default function Reader() {
             </div>
           </div>
         </div>
-        <ContentUpdateNotice bookId={id} book={bookQuery.isFetchedAfterMount ? bookQuery.data?.data : undefined} ready={readerReady} guest={isGuest} />
-        {!isGuest && <SelectionToolbar bookId={id} fontStack={fontStack} fontCss={fontCss} />}
+        <ContentUpdateNotice bookId={id} book={bookQuery.isFetchedAfterMount && bookQuery.data?.data ? { ...bookQuery.data.data, revisionId: displayedRevisionId ?? bookQuery.data.data.revisionId } : undefined} ready={readerReady} guest={isGuest} />
+        {!isGuest && !revisionQuarantined && displayedRevisionId && <SelectionToolbar bookId={id} revisionId={displayedRevisionId} fontStack={fontStack} fontCss={fontCss} />}
         {footnoteEntry && (
           <FootnotePopup
             entry={footnoteEntry}

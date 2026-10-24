@@ -16,6 +16,7 @@ import authRoutes from './modules/auth/auth.routes'
 import usersRoutes from './modules/users/users.routes'
 import avatarsRoutes from './modules/avatars/avatars.routes'
 import booksRoutes from './modules/books/books.routes'
+import readerContentRoutes from './modules/books/reader-content.routes'
 import legadoRoutes from './modules/books/legado.routes'
 import extRoutes from './modules/ext/ext.routes'
 import progressRoutes from './modules/progress/progress.routes'
@@ -70,6 +71,7 @@ app.route('/api/v1/system', systemRoutes)
 app.route('/api/v1/auth', authRoutes)
 app.route('/api/v1/users', usersRoutes)
 app.route('/api/v1/avatars', avatarsRoutes)
+app.route('/api/v1/books', readerContentRoutes)
 app.route('/api/v1/books', booksRoutes)
 app.route('/api/v1/legado', legadoRoutes)
 app.route('/api/v1/ext', extRoutes)

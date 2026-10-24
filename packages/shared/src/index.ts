@@ -312,6 +312,7 @@ export {
 } from './schema'
 
 export { ErrorCode, ErrorHttpStatus } from './errors'
+export * from './reader-content'
 export * from './reading-ledger'
 export { calendarDateSchema, isOrderedReadingRange, readingRangeShape, readingRangeSchema } from './reading-range'
 export type { ReadingRange } from './reading-range'

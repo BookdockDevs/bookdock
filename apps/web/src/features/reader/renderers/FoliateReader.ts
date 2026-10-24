@@ -37,10 +37,12 @@ import { MediaOverlaySection, type MediaOverlayCue } from '../lib/media-overlay'
 import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../lib/text-replacements'
 import { NavigationPending, type NavigationTarget } from '../lib/navigation-pending'
 import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
+import { canFallbackReaderContent, consumePreparedReaderContentText, fetchReaderManifest, ReaderContentSession } from '../lib/reader-content-client'
 import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
+import { forwardTextPaths } from '../lib/forward-text-paths'
 import { getSelectionGeometry } from '../lib/selection-geometry'
 import { waitForReaderFonts } from '../lib/reader-font-ready'
-import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, type BookFormat } from '@bookdock/shared'
+import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, type BookFormat, type ReaderManifestEntry } from '@bookdock/shared'
 
 import {
   createExcerptBuilder,
@@ -54,6 +56,7 @@ import {
 } from '../lib/book-search'
 import { convertChinese } from '@/lib/chinese'
 import { mix, isDark } from '@/lib/color'
+import { getContentAccountScope, getSessionEpoch, onSessionScopeChange } from '@/lib/session-scope'
 
 const ANNOTATION_COLORS: Record<string, string> = {
   amber: '#f59e0b',
@@ -1248,41 +1251,84 @@ export async function openZipFromWholeFile(url: string, foliate: any) {
 // it is GC'd when the parse cache evicts the book.
 const TEXT_MEMO_MAX = 20
 
-export type MemoizedLoadText = ((name: string) => Promise<string | null>) & {
+export type MemoizedLoadText = ((name: string, signal?: AbortSignal) => Promise<string | null>) & {
   has: (name: string) => boolean
 }
 
 export function memoizeLoadText(
-  loadText: (name: string) => Promise<string | null> | string | null,
+  loadText: (name: string, signal?: AbortSignal) => Promise<string | null> | string | null,
+  assertReadable?: () => void,
 ): MemoizedLoadText {
-  const memo = new Map<string, { promise: Promise<string | null>; resolved: boolean }>()
-  const memoized = (name: string) => {
-    const cached = memo.get(name)
+  const memo = new Map<string, {
+    promise: Promise<string | null>
+    resolved: boolean
+    controller: AbortController
+    consumers: number
+    hasUncancellableConsumer: boolean
+    settled: boolean
+  }>()
+  const memoized = (name: string, signal?: AbortSignal) => {
+    assertReadable?.()
+    if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Reader text request was cancelled', 'AbortError'))
+    let cached = memo.get(name)
     if (cached) {
       // refresh recency
       memo.delete(name)
       memo.set(name, cached)
+    } else {
+      cached = {
+        promise: null as unknown as Promise<string | null>, resolved: false,
+        controller: new AbortController(), consumers: 0, hasUncancellableConsumer: false, settled: false,
+      }
+      const entry = cached
+      entry.promise = Promise.resolve()
+        .then(() => loadText(name, entry.controller.signal))
+        .then((value) => {
+          entry.settled = true
+          entry.resolved = value !== null
+          return value
+        })
+        .catch((error) => {
+          entry.settled = true
+          if (memo.get(name) === entry) memo.delete(name)
+          throw error
+        })
+      void entry.promise.catch(() => {})
+      memo.set(name, entry)
+      while (memo.size > TEXT_MEMO_MAX) {
+        const oldest = memo.keys().next().value
+        if (oldest === undefined) break
+        memo.delete(oldest)
+      }
+    }
+    if (!signal) {
+      cached.hasUncancellableConsumer = true
       return cached.promise
     }
-    const entry = { promise: null as unknown as Promise<string | null>, resolved: false }
-    const promise = Promise.resolve()
-      .then(() => loadText(name))
-      .then((value) => {
-        entry.resolved = value !== null
-        return value
-      })
-    entry.promise = promise
-    memo.set(name, entry)
-    while (memo.size > TEXT_MEMO_MAX) {
-      const oldest = memo.keys().next().value
-      if (oldest === undefined) break
-      memo.delete(oldest)
-    }
-    // never memo a failure — the next request must retry
-    promise.catch(() => {
-      if (memo.get(name) === entry) memo.delete(name)
+    const entry = cached
+    entry.consumers += 1
+    return new Promise<string | null>((resolve, reject) => {
+      let settled = false
+      const release = () => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', onAbort)
+        entry.consumers = Math.max(0, entry.consumers - 1)
+        if (!entry.settled && entry.consumers === 0 && !entry.hasUncancellableConsumer) {
+          if (memo.get(name) === entry) memo.delete(name)
+          entry.controller.abort(new DOMException('Reader text has no remaining consumers', 'AbortError'))
+        }
+      }
+      const onAbort = () => {
+        release()
+        reject(signal.reason ?? new DOMException('Reader text request was cancelled', 'AbortError'))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      entry.promise.then(
+        (value) => { if (!settled) { release(); resolve(value) } },
+        (error) => { if (!settled) { release(); reject(error) } },
+      )
     })
-    return promise
   }
   // Only resolved, non-missing text is warm. A prefetch inserts its promise
   // immediately, so treating every map entry as warm hides the spinner while
@@ -1297,6 +1343,11 @@ const RESOURCE_BLOB_CACHE_MAX_BYTES = 64 * 1024 * 1024
 interface ResourceBlobCacheEntry {
   promise: Promise<Blob | null>
   size: number
+  ready: boolean
+  controller: AbortController
+  consumers: number
+  hasUncancellableConsumer: boolean
+  settled: boolean
 }
 
 const resourceBlobCache = new Map<string, ResourceBlobCacheEntry>()
@@ -1313,45 +1364,103 @@ function evictResourceBlobCache() {
   }
 }
 
-export type MemoizedLoadBlob = (name: string, type?: string) => Promise<Blob | null>
+// One controlled fallback per open session. Destroying the reader removes the
+// marker so reopening a book probes the shared index again.
+const fallbackReaderContent = new Set<string>()
 
+function clearReaderRuntimeCaches(): void {
+  parseCache.clear()
+  searchCache.clear()
+  resourceBlobCache.clear()
+  resourceBlobCacheBytes = 0
+  fallbackReaderContent.clear()
+}
+
+onSessionScopeChange(clearReaderRuntimeCaches)
+
+export type MemoizedLoadBlob = (name: string, type?: string, signal?: AbortSignal) => Promise<Blob | null>
 export function memoizeLoadBlob(
   cacheKey: string,
-  loadBlob: (name: string, type?: string) => Promise<Blob | null> | Blob | null,
+  loadBlob: (name: string, type?: string, signal?: AbortSignal) => Promise<Blob | null> | Blob | null,
+  assertReadable?: () => void,
 ): MemoizedLoadBlob {
-  return (name, type) => {
+  return (name, type, signal) => {
+    assertReadable?.()
+    if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Reader resource request was cancelled', 'AbortError'))
     const key = `${cacheKey}\u0000${name}`
-    const cached = resourceBlobCache.get(key)
-    if (cached) {
+    let entry = resourceBlobCache.get(key)
+    if (!entry) {
+      entry = {
+        promise: null as unknown as Promise<Blob | null>, size: 0, ready: false,
+        controller: new AbortController(), consumers: 0, hasUncancellableConsumer: false, settled: false,
+      }
+      const currentEntry = entry
+      currentEntry.promise = Promise.resolve()
+        .then(() => loadBlob(name, type, currentEntry.controller.signal))
+        .then((blob) => {
+          currentEntry.settled = true
+          if (!blob) {
+            if (resourceBlobCache.get(key) === currentEntry) resourceBlobCache.delete(key)
+            return null
+          }
+          if (resourceBlobCache.get(key) === currentEntry) {
+            currentEntry.size = blob.size
+            currentEntry.ready = true
+            resourceBlobCacheBytes += currentEntry.size
+            evictResourceBlobCache()
+          }
+          return blob
+        })
+        .catch((error) => {
+          currentEntry.settled = true
+          if (resourceBlobCache.get(key) === currentEntry) resourceBlobCache.delete(key)
+          throw error
+        })
+      void currentEntry.promise.catch(() => {})
+      resourceBlobCache.set(key, currentEntry)
+      evictResourceBlobCache()
+    } else {
       resourceBlobCache.delete(key)
-      resourceBlobCache.set(key, cached)
-      return cached.promise
+      resourceBlobCache.set(key, entry)
     }
-
-    const entry = { promise: null as unknown as Promise<Blob | null>, size: 0 }
-    const promise = Promise.resolve()
-      .then(() => loadBlob(name, type))
-      .then((blob) => {
-        if (!blob) {
-          if (resourceBlobCache.get(key) === entry) resourceBlobCache.delete(key)
-          return null
+    if (!signal) {
+      entry.hasUncancellableConsumer = true
+      return entry.promise
+    }
+    const sharedEntry = entry
+    sharedEntry.consumers += 1
+    return new Promise<Blob | null>((resolve, reject) => {
+      let settled = false
+      const release = () => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', onAbort)
+        sharedEntry.consumers = Math.max(0, sharedEntry.consumers - 1)
+        if (!sharedEntry.settled && sharedEntry.consumers === 0 && !sharedEntry.hasUncancellableConsumer) {
+          if (resourceBlobCache.get(key) === sharedEntry) resourceBlobCache.delete(key)
+          sharedEntry.controller.abort(new DOMException('Reader resource has no remaining consumers', 'AbortError'))
         }
-        if (resourceBlobCache.get(key) === entry) {
-          entry.size = blob.size
-          resourceBlobCacheBytes += entry.size
-          evictResourceBlobCache()
-        }
-        return blob
-      })
-      .catch((error) => {
-        if (resourceBlobCache.get(key) === entry) resourceBlobCache.delete(key)
-        throw error
-      })
-    entry.promise = promise
-    resourceBlobCache.set(key, entry)
-    evictResourceBlobCache()
-    return promise
+      }
+      const onAbort = () => {
+        release()
+        reject(signal.reason ?? new DOMException('Reader resource request was cancelled', 'AbortError'))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      sharedEntry.promise.then(
+        (blob) => { if (!settled) { release(); resolve(blob) } },
+        (error) => { if (!settled) { release(); reject(error) } },
+      )
+    })
   }
+}
+
+function isMemoizedLoadBlobReady(cacheKey: string, name: string): boolean {
+  const key = `${cacheKey}\u0000${name}`
+  const entry = resourceBlobCache.get(key)
+  if (!entry?.ready) return false
+  resourceBlobCache.delete(key)
+  resourceBlobCache.set(key, entry)
+  return true
 }
 
 // Attached once per book (the parse cache hands the same book object to
@@ -1362,18 +1471,24 @@ const prefetchAttachedBooks = new WeakSet<object>()
 // switch is served from the text memo instead of the network/inflate path.
 // Also exposes the memoized loadText as `book.loadSectionText` so the book
 // search (lib/book-search.ts) reads raw section markup through the same memo.
-function attachTextPrefetch(book: any, loadText: (name: string) => Promise<unknown>) {
+export function attachTextPrefetch(
+  book: any,
+  loadText: (name: string) => Promise<unknown>,
+  prefetchTexts?: (paths: Iterable<string>) => void,
+  loadSearchText?: (name: string, signal?: AbortSignal) => Promise<unknown>,
+) {
   if (!book || prefetchAttachedBooks.has(book)) return
   prefetchAttachedBooks.add(book)
-  book.loadSectionText = loadText
+  book.loadSectionText = loadSearchText ?? loadText
   book.textPrefetch = (index: number) => {
-    for (const i of [index - 1, index + 1]) {
-      const section = book.sections?.[i]
-      // sections[i].id is the manifest href — the same key the Loader passes
-      // to loadText (epub.js loadItem); non-linear sections are skipped
-      if (!section || section.linear === 'no') continue
-      Promise.resolve(loadText(section.id)).catch(() => {})
+    const paths = forwardTextPaths(book.sections ?? [], index)
+    if (prefetchTexts) {
+      prefetchTexts(paths)
+      return
     }
+    // The Range compatibility path has no reader session to enforce the byte window.
+    const next = paths.next()
+    if (!next.done) Promise.resolve(loadText(next.value)).catch(() => {})
   }
 }
 
@@ -1411,6 +1526,58 @@ export function sanitizeCleanReadingMarkup(source: string, mediaType = 'applicat
   return new XMLSerializer().serializeToString(doc)
 }
 
+function manifestSizeLookup(entries: ReaderManifestEntry[]): (name: string) => number {
+  const sizes = new Map<string, number>()
+  for (const entry of entries) {
+    sizes.set(entry.path, entry.size)
+    const lower = entry.path.toLowerCase()
+    if (!sizes.has(lower)) sizes.set(lower, entry.size)
+  }
+  return (name: string) => sizes.get(name) ?? sizes.get(name.toLowerCase()) ?? 0
+}
+
+async function openManifestBook(
+  url: string,
+  foliate: any,
+  cacheKey: string,
+  cleanReading: boolean,
+): Promise<any> {
+  const { manifest, epoch, accountScope } = await fetchReaderManifest(url)
+  const session = new ReaderContentSession(manifest, accountScope, epoch, url, cleanReading)
+  try {
+    const entries = manifest.entries.map((entry) => ({
+      filename: entry.path,
+      uncompressedSize: entry.size,
+      compressedSize: entry.compressedSize,
+    }))
+    const getSize = manifestSizeLookup(manifest.entries)
+    const loadText = memoizeLoadText((name: string, signal?: AbortSignal) => session.loadText(name, 'foreground', signal), () => session.assertReadable())
+    let cleanResources = false
+    const loadBlob = memoizeLoadBlob(cacheKey, (name: string, type?: string, signal?: AbortSignal) => {
+      if (cleanResources && shouldSkipCleanReadingResource(type, name)) return null
+      return session.loadBlob(name, type, 'foreground', signal)
+    }, () => session.assertReadable())
+    const book = await new foliate.EPUB({
+      entries,
+      loadText,
+      loadBlob,
+      getSize,
+      assertReadable: () => session.assertReadable(),
+      isBlobCached: (name: string) => isMemoizedLoadBlobReady(cacheKey, name),
+    }).init()
+    cleanResources = cleanReading && canUseCleanReading('epub', book?.rendition?.layout)
+    session.setResourcePrefetchFilter(cleanResources ? shouldSkipCleanReadingResource : null)
+    attachBookDataTransform(book, cleanResources)
+    attachTextPrefetch(book, loadText, (paths) => session.prefetchTextWindow(paths), (name, signal) => session.loadText(name, 'search', signal))
+    book.contentSession = session
+    book.contentSource = 'manifest'
+    return book
+  } catch (error) {
+    session.destroy()
+    throw error
+  }
+}
+
 function getParsedBook(url: string, foliate: any, bookSize?: number, cleanReading = false): Promise<any> {
   const cacheKey = `${url}\u0000${cleanReading ? 'clean' : 'normal'}`
   const cached = parseCache.get(cacheKey)
@@ -1418,10 +1585,24 @@ function getParsedBook(url: string, foliate: any, bookSize?: number, cleanReadin
     // refresh recency
     parseCache.delete(cacheKey)
     parseCache.set(cacheKey, cached)
-    return cached
+    return cached.then((book) => {
+      if (book?.contentSession instanceof ReaderContentSession) consumePreparedReaderContentText(book.contentSession)
+      return book
+    })
   }
-  const { EPUB } = foliate
+  const sessionEpoch = getSessionEpoch()
   const promise = (async () => {
+    if (!fallbackReaderContent.has(cacheKey)) {
+      try {
+        return await openManifestBook(url, foliate, cacheKey, cleanReading)
+      } catch (error) {
+        if (!canFallbackReaderContent(error)) throw error
+        fallbackReaderContent.add(cacheKey)
+        console.warn('[FoliateReader] shared reader content unavailable; using the Range fallback:', error)
+      }
+    }
+
+    const { EPUB } = foliate
     const { map, entries, TextWriter, BlobWriter } = await openZipEntryMap(url, foliate, bookSize)
 
     const load = (fn: (entry: any, type?: string) => any) => (name: string, type?: string) => {
@@ -1442,12 +1623,15 @@ function getParsedBook(url: string, foliate: any, bookSize?: number, cleanReadin
       }
       return null
     }
-    // memo (this mount) → IndexedDB (cross-session, keyed by bookId|updatedAt)
+    // memo (this mount) → IndexedDB (cross-session, account+revision scoped)
     // → network. Only reached on a miss, so reopen reloads nothing that was
     // cached before; imported TXT artifacts use the same EPUB loading path.
     const loadText = memoizeLoadText(withTextCache(
       load((entry: any) => loadEntryData(entry, () => new TextWriter())),
-      { namespace: chapterTextNamespaceFromUrl(url) },
+      {
+        namespace: chapterTextNamespaceFromUrl(url, getContentAccountScope()),
+        canWrite: () => getSessionEpoch() === sessionEpoch,
+      },
     ))
     let cleanResources = false
     const loadBlob = memoizeLoadBlob(cacheKey, (name: string, type?: string) => {
@@ -1457,10 +1641,17 @@ function getParsedBook(url: string, foliate: any, bookSize?: number, cleanReadin
     })
     const getSize = (name: string) => map.get(name)?.uncompressedSize ?? 0
 
-    const book = await new EPUB({ entries, loadText, loadBlob, getSize }).init()
+    const book = await new EPUB({
+      entries,
+      loadText,
+      loadBlob,
+      getSize,
+      isBlobCached: (name: string) => isMemoizedLoadBlobReady(cacheKey, name),
+    }).init()
     cleanResources = cleanReading && canUseCleanReading('epub', book?.rendition?.layout)
     attachBookDataTransform(book, cleanResources)
     attachTextPrefetch(book, loadText)
+    book.contentSource = 'range'
     return book
   })()
   // never cache a failure — the next mount must retry
@@ -1546,8 +1737,14 @@ export function setActiveReplacements(rules: TextReplacementRule[]) {
 // callback here on mount and clears it on destroy — same pattern as the rule
 // set above. Without a live reader the report is dropped, which is correct.
 let replacementInvalidListener: ((ids: string[]) => void) | null = null
-export function setReplacementInvalidListener(fn: ((ids: string[]) => void) | null) {
+export function setReplacementInvalidListener(fn: ((ids: string[]) => void) | null): () => void {
   replacementInvalidListener = fn
+  return () => {
+    if (replacementInvalidListener === fn) replacementInvalidListener = null
+  }
+}
+export function reportInvalidReplacementIds(ids: string[]): void {
+  replacementInvalidListener?.(ids)
 }
 // "选中即划": auto-create a highlight the moment a selection settles, keeping
 // the toolbar open for restyling. Module-level like conversionMode because the
@@ -1611,7 +1808,7 @@ function attachBookDataTransform(book: any, cleanReading = false) {
         // Text replacements run after book CSS normalization, and only markup
         // receives text conversion; images, fonts and CSS remain untouched.
         transformed = rules.length
-          ? await applyReplacementsWithWorker(transformed, rules, docType, detail.name, (ids) => replacementInvalidListener?.(ids))
+          ? await applyReplacementsWithWorker(transformed, rules, docType, detail.name, reportInvalidReplacementIds)
           : transformed
         if (mode !== 'off') transformed = await convertChinese(transformed, mode)
       }
@@ -1706,6 +1903,10 @@ export class FoliateReader implements BookReader {
   private container: HTMLElement | null = null
   private view: any | null = null
   private book: any | null = null
+  private contentSession: ReaderContentSession | null = null
+  private releaseContentSession: (() => void) | null = null
+  private releaseReplacementInvalidListener: (() => void) | null = null
+  private unsubscribeRevisionChanged: (() => void) | null = null
   private listeners: { type: string; fn: (...args: unknown[]) => void }[] = []
   private tocHrefToIndex = new Map<string, number>()
   private readingMode: ReadingMode = 'scroll'
@@ -1886,7 +2087,14 @@ export class FoliateReader implements BookReader {
   private handleWindowBlur = () => this.handleActivationBlur(document, false)
   private handleWindowFocus = () => this.handleActivationRefocus(false)
   private handleActivationVisibilityChange = () => {
-    if (document.hidden || !this.activationGuardReady) return
+    if (document.hidden) {
+      this.contentSession?.pauseBackgroundPrefetch()
+      if (!this.activationGuardReady) return
+      return
+    }
+    this.contentSession?.resumeBackgroundPrefetch()
+    if (this.currentSectionIndex >= 0) this.scheduleTextPrefetch(this.currentSectionIndex)
+    if (!this.activationGuardReady) return
     this.awaitingActivationClick = false
     this.lastBlurAt = 0
     this.lastBlurFromFrame = false
@@ -2357,6 +2565,10 @@ export class FoliateReader implements BookReader {
     return this.view?.isFixedLayout === true
   }
 
+  get hasRevisionChanged(): boolean {
+    return this.contentSession?.hasRevisionChanged === true
+  }
+
   getCurrentPosition(): { cfi: string | null; fraction: number | null } {
     return { cfi: this.lastCfi, fraction: this.lastFraction }
   }
@@ -2384,12 +2596,18 @@ export class FoliateReader implements BookReader {
       // zombie view stacked on top of the surviving one
       if (this.destroyed) return
       this.book = epub
+      this.contentSession = epub?.contentSession ?? null
+      this.releaseContentSession = this.contentSession?.retain() ?? null
+      this.unsubscribeRevisionChanged = this.contentSession?.onRevisionChanged((revisionId) => {
+        this.emit('revisionChanged', { revisionId })
+      }) ?? null
       // Snapshot the rules in force at open time; later rule changes go
       // through applyTextReplacements, which detects the diff and reloads.
       this.replacementsJson = JSON.stringify(activeReplacements)
       // Point patches report their invalid ids here (P2); the module-level
       // listener is shared with the load-time data pipeline.
-      setReplacementInvalidListener((ids) => this.emit('replacementInvalid', { ids }))
+      this.releaseReplacementInvalidListener?.()
+      this.releaseReplacementInvalidListener = setReplacementInvalidListener((ids) => this.emit('replacementInvalid', { ids }))
       attachBookDataTransform(epub, this.cleanReading && canUseCleanReading(this.bookFormat, epub?.rendition?.layout))
       await applyTocConversion(epub, this.conversion)
 
@@ -2661,6 +2879,7 @@ export class FoliateReader implements BookReader {
     }
     const location: ReaderLocation = {
       cfi: effectiveCfi,
+      revisionId: this.contentSession?.manifest.revisionId,
       contentCfi,
       percent: frac != null ? Math.round(frac * 100) : 0,
       fraction: frac ?? undefined,
@@ -2688,7 +2907,7 @@ export class FoliateReader implements BookReader {
     if (this.prefetchTimer !== null) clearTimeout(this.prefetchTimer)
     this.prefetchTimer = setTimeout(() => {
       this.prefetchTimer = null
-      if (this.destroyed) return
+      if (this.destroyed || document.hidden) return
       try { this.book?.textPrefetch?.(chapterIndex) } catch { /* prefetch is best-effort */ }
     }, 300)
   }
@@ -2707,7 +2926,20 @@ export class FoliateReader implements BookReader {
       index = typeof hrefIndex === 'number' ? hrefIndex : null
     }
     if (index === null || index < 0 || index >= (this.book?.sections?.length ?? 0)) return null
-    return { sectionIndex: index, isJump: true }
+    const sectionHref = this.book?.sections?.[index]?.id
+    const chapterNavigation = Boolean(target && !/^(?:epubcfi\(|search-hit:|chapter:|\d+(?:\.\d+)?$)/.test(target))
+    return { sectionIndex: index, ...(sectionHref ? { sectionHref } : {}), ...(target ? { target } : {}), isJump: true, chapterNavigation }
+  }
+
+  private emitRevisionNavigation(target?: string, sectionIndex = this.resolveNavigationTarget(target)?.sectionIndex, chapterNavigation?: boolean) {
+    const sectionHref = sectionIndex === undefined ? undefined : this.book?.sections?.[sectionIndex]?.id
+    this.emit('revisionNavigation', {
+      ...(target ? { target } : {}),
+      ...(sectionHref ? { sectionHref } : {}),
+      chapterNavigation: chapterNavigation ?? Boolean(target && !/^(?:epubcfi\(|search-hit:|chapter:|\d+(?:\.\d+)?$)/.test(target)),
+      previousRevisionId: this.contentSession?.manifest.revisionId ?? '',
+      previousContentHash: this.contentSession?.manifest.contentHash ?? null,
+    })
   }
 
   // Arm the loading indicator and publish the destination hint immediately —
@@ -2723,6 +2955,10 @@ export class FoliateReader implements BookReader {
 
   async display(target?: string, opts?: { internal?: boolean; showPending?: boolean }) {
     if (!this.view) return
+    if (this.hasRevisionChanged && !opts?.internal) {
+      this.emitRevisionNavigation(target)
+      return
+    }
     // History back/forward is user-initiated but marks itself internal so it
     // doesn't re-enter the back stack; showPending re-arms the indicator.
     if (!opts?.internal || opts?.showPending) {
@@ -2738,6 +2974,10 @@ export class FoliateReader implements BookReader {
         // rejection; initial internal navigation still reaches mount's error
         // path below.
         const error = err instanceof Error ? err : new Error(String(err))
+        if ((error as Error & { code?: string }).code === 'READER_REVISION_CHANGED') {
+          this.emitRevisionNavigation(target, resolvedTarget?.sectionIndex, resolvedTarget?.chapterNavigation)
+          return
+        }
         console.warn('[FoliateReader] navigation failed:', error)
         if (intent === this.navigationIntent) {
           this.emit('navigateError', {
@@ -2950,6 +3190,10 @@ export class FoliateReader implements BookReader {
     // boundary is continuous reading (that page was read) and must not close
     if (this.readingMode === 'scroll') this.emit('userJump')
     const nextIndex = this.currentSectionIndex + 1
+    if (this.hasRevisionChanged) {
+      if (nextIndex < (this.book?.sections?.length ?? 0)) this.emitRevisionNavigation(undefined, nextIndex, true)
+      return
+    }
     const armTarget = nextIndex < (this.book?.sections?.length ?? 0) ? { sectionIndex: nextIndex } : undefined
     const pending = shouldArmPending(1, this.book, this.currentSectionIndex) || armTarget
       ? this.beginPendingNavigation(armTarget)
@@ -2962,6 +3206,10 @@ export class FoliateReader implements BookReader {
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
+      if ((error as Error & { code?: string }).code === 'READER_REVISION_CHANGED') {
+        this.emitRevisionNavigation(undefined, nextIndex, true)
+        return
+      }
       console.warn('[FoliateReader] next navigation failed:', error)
       this.emit('navigateError', { target: `chapter:${nextIndex}`, sectionIndex: nextIndex, error })
     } finally {
@@ -2987,6 +3235,10 @@ export class FoliateReader implements BookReader {
     }
     if (this.readingMode === 'scroll') this.emit('userJump')
     const prevIndex = this.currentSectionIndex - 1
+    if (this.hasRevisionChanged) {
+      if (prevIndex >= 0) this.emitRevisionNavigation(undefined, prevIndex, true)
+      return
+    }
     const armTarget = prevIndex >= 0 ? { sectionIndex: prevIndex } : undefined
     const pending = shouldArmPending(-1, this.book, this.currentSectionIndex) || armTarget
       ? this.beginPendingNavigation(armTarget)
@@ -2999,6 +3251,10 @@ export class FoliateReader implements BookReader {
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
+      if ((error as Error & { code?: string }).code === 'READER_REVISION_CHANGED') {
+        this.emitRevisionNavigation(undefined, prevIndex, true)
+        return
+      }
       console.warn('[FoliateReader] previous navigation failed:', error)
       this.emit('navigateError', { target: `chapter:${prevIndex}`, sectionIndex: prevIndex, error })
     } finally {
@@ -4028,21 +4284,37 @@ export class FoliateReader implements BookReader {
       || book !== this.book || conversion !== this.conversion || replacementKey !== this.replacementsJson
     let batchStarted = performance.now()
     const pendingChapters = new Map<number, ReturnType<typeof getChapterText>>()
+    const chapterControllers = new Map<number, AbortController>()
     let nextChapter = 0
+    const searchSession = this.contentSession
+    searchSession?.beginSearch()
 
+    try {
     for (let done = 0; done < indices.length; done++) {
       if (stale()) break
       // Bound both active loads and completed chapters waiting behind a slow one.
       while (nextChapter < indices.length && pendingChapters.size < SEARCH_CHAPTER_CONCURRENCY) {
+        const chapterController = new AbortController()
+        const abortChapter = () => chapterController.abort(controller.signal.reason)
+        controller.signal.addEventListener('abort', abortChapter, { once: true })
+        if (controller.signal.aborted) abortChapter()
+        chapterControllers.set(nextChapter, chapterController)
         pendingChapters.set(nextChapter, getChapterText(book, indices[nextChapter]!, {
           chineseConversion: conversion,
           replacements,
-        }, timings))
+        }, timings, chapterController.signal).finally(() => controller.signal.removeEventListener('abort', abortChapter)))
         nextChapter++
       }
       const index = indices[done]!
-      const chapterText = await pendingChapters.get(done)!
+      let chapterText
+      try {
+        chapterText = await pendingChapters.get(done)!
+      } catch (error) {
+        if (controller.signal.aborted) break
+        throw error
+      }
       pendingChapters.delete(done)
+      chapterControllers.delete(done)
       if (stale()) break
       if (!chapterText) status.incomplete = true
       scannedChapters++
@@ -4096,6 +4368,13 @@ export class FoliateReader implements BookReader {
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         batchStarted = performance.now()
       }
+    }
+    } finally {
+      for (const chapterController of chapterControllers.values()) {
+        chapterController.abort(new DOMException('Reader search no longer needs pending chapters', 'AbortError'))
+      }
+      await Promise.allSettled(pendingChapters.values())
+      searchSession?.endSearch()
     }
     if (!stale()) {
       if (cacheable && !status.incomplete) {
@@ -4575,7 +4854,8 @@ export class FoliateReader implements BookReader {
     this.disposeFootnoteEntries()
     this.footnoteHandler?.removeEventListener?.('before-render', this.handleFootnoteBeforeRender)
     this.footnoteHandler = null
-    setReplacementInvalidListener(null)
+    this.releaseReplacementInvalidListener?.()
+    this.releaseReplacementInvalidListener = null
     this.navigationPending.dispose()
     window.removeEventListener('blur', this.handleWindowBlur)
     window.removeEventListener('focus', this.handleWindowFocus)
@@ -4616,6 +4896,13 @@ export class FoliateReader implements BookReader {
     this.listeners = []
     this.view = null
     this.book = null
+    this.unsubscribeRevisionChanged?.()
+    this.unsubscribeRevisionChanged = null
+    this.releaseContentSession?.()
+    this.releaseContentSession = null
+    this.contentSession = null
+    fallbackReaderContent.delete(`${this.url}\u0000${this.cleanReading ? 'clean' : 'normal'}`)
+    parseCache.delete(`${this.url}\u0000${this.cleanReading ? 'clean' : 'normal'}`)
     this.container = null
   }
 

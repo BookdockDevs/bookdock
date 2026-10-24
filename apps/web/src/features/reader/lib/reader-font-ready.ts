@@ -1,11 +1,13 @@
-/** Wait for font styles and visible glyphs; core reader CSS is independent. */
+/** Wait briefly for font styles; core reader CSS is independent. */
+const FONT_WAIT_MS = 200
+
 export async function waitForReaderFonts(doc: Document, signal: AbortSignal, viewport?: { top: number; bottom: number }): Promise<boolean> {
   if (!doc.fonts?.load || signal.aborted) return true
   let timer: ReturnType<typeof setTimeout> | undefined
   let stop: () => void = () => {}
   const deadline = new Promise<boolean>((resolve) => {
     stop = () => resolve(false)
-    timer = setTimeout(stop, 8000)
+    timer = setTimeout(stop, FONT_WAIT_MS)
     signal.addEventListener('abort', stop, { once: true })
   })
   const load = async () => {

@@ -8,6 +8,33 @@ function pathKey(value: string): string {
 }
 
 describe('vendored EPUB compatibility baseline', () => {
+  it('checks readability before returning cached chapter XHTML', async () => {
+    const text = new Map<string, string>([
+      ['meta-inf/container.xml', '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'],
+      ['ops/package.opf', '<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0"><metadata><dc:title>权限测试</dc:title></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>'],
+      ['ops/chapter.xhtml', '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>缓存正文</p></body></html>'],
+    ].map(([key, value]) => [pathKey(key), value]))
+    let readable = true
+    let chapterReads = 0
+    const loadText = async (name: string) => {
+      if (pathKey(name) === 'ops/chapter.xhtml') chapterReads += 1
+      return text.get(pathKey(name)) ?? null
+    }
+    const book = await new EPUB({
+      entries: [...text.keys()].map((filename) => ({ filename })),
+      loadText,
+      loadBlob: async () => null,
+      getSize: () => 1,
+      assertReadable: () => { if (!readable) throw new Error('access revoked') },
+    }).init()
+
+    await expect(book.sections[0]!.loadContent()).resolves.toContain('缓存正文')
+    expect(chapterReads).toBe(1)
+    readable = false
+    await expect(book.sections[0]!.loadContent()).rejects.toThrow('access revoked')
+    expect(chapterReads).toBe(1)
+  })
+
   it('loads extended EPUB metadata, TOC, case-mismatched resources, and cover pages', async () => {
     const text = new Map<string, string>([
       ['meta-inf/container.xml', `<?xml version="1.0"?>
@@ -156,6 +183,8 @@ describe('vendored EPUB compatibility baseline', () => {
     try {
       const book = await new EPUB({ entries, loadText, loadBlob, getSize: () => 1 }).init()
       const content = await book.sections[0]!.loadContent()
+      expect(content).toContain('data-bd-deferred-src="../Images/diagram.svg"')
+      await book.sections[0]!.loadHref('../Images/diagram.svg')
 
       expect(created.map(blob => blob.type), content).toEqual(expect.arrayContaining([
         'text/css',
@@ -251,8 +280,9 @@ describe('vendored EPUB compatibility baseline', () => {
 
       expect(doc.querySelector('parsererror')).toBeNull()
       expect(doc.querySelector('br')).not.toBeNull()
-      expect(doc.querySelector('img')?.getAttribute('src')).toBe('blob:void-image')
+      expect(doc.querySelector('img')?.getAttribute('data-bd-deferred-src')).toBe('../Images/cover.jpg')
       expect(doc.documentElement.namespaceURI).toBe('http://www.w3.org/1999/xhtml')
+      expect(await book.sections[0]!.loadHref('../Images/cover.jpg')).toBe('blob:void-image')
       expect(requested).toEqual(['OPS/Images/cover.jpg'])
     } finally {
       if (originalCreate) Object.defineProperty(URL, 'createObjectURL', originalCreate)
@@ -285,6 +315,7 @@ describe('vendored EPUB compatibility baseline', () => {
         getSize: () => 1,
       }).init()
       await book.sections[0]!.loadContent()
+      expect(await book.sections[0]!.loadHref('../images/COVER.JPG')).toBe('blob:case-image')
       expect(requested).toEqual(['OPS/Images/Cover.JPG'])
     } finally {
       if (originalCreate) Object.defineProperty(URL, 'createObjectURL', originalCreate)
@@ -374,6 +405,90 @@ describe('vendored EPUB compatibility baseline', () => {
       if (originalRevoke) Object.defineProperty(URL, 'revokeObjectURL', originalRevoke)
       else delete (globalThis.URL as typeof URL & { revokeObjectURL?: unknown }).revokeObjectURL
     }
+  })
+
+  it('keeps shared image URLs valid until every mounted document releases them', async () => {
+    const text = new Map([
+      ['META-INF/container.xml', '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'],
+      ['OPS/package.opf', '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/><item id="image" href="logo.png" media-type="image/png"/></manifest><spine><itemref idref="chapter"/></spine></package>'],
+    ])
+    const originalCreate = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
+    const originalRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')
+    const revoked: string[] = []
+    let created = 0
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => `blob:shared-${++created}` })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: (url: string) => revoked.push(url) })
+    try {
+      let resolveBlob!: (blob: Blob) => void
+      const pendingBlob = new Promise<Blob>(resolve => { resolveBlob = resolve })
+      const book = await new EPUB({
+        entries: [...text.keys(), 'OPS/logo.png'].map(filename => ({ filename })),
+        loadText: async (name: string) => text.get(name) ?? null,
+        loadBlob: () => pendingBlob,
+        getSize: () => 1,
+      }).init()
+      const makeDocument = () => new DOMParser().parseFromString(
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body><img src="logo.png"/><img src="logo.png"/></body></html>',
+        'application/xhtml+xml',
+      )
+      const first = makeDocument()
+      const second = makeDocument()
+      const disposeFirst = book.sections[0]!.observeDynamicResources(first)
+      const disposeSecond = book.sections[0]!.observeDynamicResources(second)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      resolveBlob(new Blob(['image'], { type: 'image/png' }))
+      await vi.waitFor(() => {
+        expect([...first.querySelectorAll('img'), ...second.querySelectorAll('img')]
+          .every(image => image.getAttribute('src')?.startsWith('blob:'))).toBe(true)
+      })
+      const src = second.querySelector('img')!.getAttribute('src')!
+      expect(created).toBe(1)
+      expect(first.querySelector('img')!.getAttribute('src')).toBe(src)
+      disposeFirst()
+      expect(revoked).not.toContain(src)
+      disposeSecond()
+      expect(revoked).toEqual([src])
+      book.destroy()
+    } finally {
+      if (originalCreate) Object.defineProperty(URL, 'createObjectURL', originalCreate)
+      else delete (globalThis.URL as typeof URL & { createObjectURL?: unknown }).createObjectURL
+      if (originalRevoke) Object.defineProperty(URL, 'revokeObjectURL', originalRevoke)
+      else delete (globalThis.URL as typeof URL & { revokeObjectURL?: unknown }).revokeObjectURL
+    }
+  })
+
+  it('cancels dynamic resource consumers when their document is disposed', async () => {
+    const text = new Map([
+      ['META-INF/container.xml', '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'],
+      ['OPS/package.opf', '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/><item id="image" href="image.png" media-type="image/png"/></manifest><spine><itemref idref="chapter"/></spine></package>'],
+    ])
+    const resourceSignals: AbortSignal[] = []
+    const book = await new EPUB({
+      entries: [...text.keys(), 'OPS/image.png'].map(filename => ({ filename })),
+      loadText: async (name: string) => text.get(name) ?? null,
+      loadBlob: (_name: string, _mediaType?: string, signal?: AbortSignal) => {
+        if (signal) resourceSignals.push(signal)
+        return new Promise<Blob>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+      },
+      getSize: () => 1,
+    }).init()
+    const makeDoc = () => new DOMParser().parseFromString(
+      '<html xmlns="http://www.w3.org/1999/xhtml"><body><img src="image.png"/></body></html>',
+      'application/xhtml+xml',
+    )
+    const removedDoc = makeDoc()
+    const disposedDoc = makeDoc()
+    book.sections[0]!.observeDynamicResources(removedDoc)
+    const dispose = book.sections[0]!.observeDynamicResources(disposedDoc)
+    await vi.waitFor(() => expect(resourceSignals).toHaveLength(2))
+    removedDoc.querySelector('img')!.remove()
+    await vi.waitFor(() => expect(resourceSignals[0]?.aborted).toBe(true))
+    expect(resourceSignals[1]?.aborted).toBe(false)
+    dispose()
+    expect(resourceSignals[1]?.aborted).toBe(true)
+    book.destroy()
   })
 
   it('defers heavy media (video/audio) during loadContent to prioritize immediate text rendering', async () => {

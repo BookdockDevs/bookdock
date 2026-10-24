@@ -76,15 +76,20 @@ describe('reader search lifecycle', () => {
   })
 
   it('stops consuming chapters after clearSearch', async () => {
-    const releases: Array<(value: string) => void> = []
-    const load = vi.fn(() => new Promise<string>((done) => { releases.push(done) }))
+    const signals: AbortSignal[] = []
+    const load = vi.fn((_href: string, signal?: AbortSignal) => new Promise<string>((_resolve, reject) => {
+      if (signal) {
+        signals.push(signal)
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      }
+    }))
     const reader = makeReader(load, ['a', 'b', 'c', 'd', 'e', 'f'])
     const progress = vi.fn()
     const pending = reader.search('x', undefined, progress)
     reader.clearSearch()
-    for (const resolve of releases) resolve(markup('x'))
     expect(await pending).toEqual([])
     expect(load).toHaveBeenCalledTimes(4)
+    expect(signals.every((signal) => signal.aborted)).toBe(true)
     expect(progress).not.toHaveBeenCalled()
   })
 

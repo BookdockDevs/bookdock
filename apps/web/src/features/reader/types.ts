@@ -5,6 +5,7 @@ import type { MediaOverlayCue } from './lib/media-overlay'
 
 export interface ReaderLocation {
   cfi: string
+  revisionId?: string
   /** Raw EPUB CFI for the live visible range; unlike cfi, this is not rewritten to a scroll fraction */
   contentCfi?: string
   percent: number
@@ -166,7 +167,9 @@ export interface RendererEvents {
    * `target.fraction` is the book-wide landing estimate (section start
    * boundary); chapter-internal position cannot be pre-computed and stays unset.
    */
-  navigatePending: (e: { pending: boolean; started?: boolean; target?: { sectionIndex: number; fraction?: number; isJump?: boolean } }) => void
+  navigatePending: (e: { pending: boolean; started?: boolean; target?: { sectionIndex: number; sectionHref?: string; target?: string; fraction?: number; isJump?: boolean; chapterNavigation?: boolean } }) => void
+  revisionNavigation: (e: { target?: string; sectionHref?: string; chapterNavigation: boolean; previousRevisionId: string; previousContentHash: string | null }) => void
+  revisionChanged: (e: { revisionId: string }) => void
   /** The latest explicit navigation failed after the previous view was kept visible. */
   navigateError: (e: { target?: string; sectionIndex?: number; error: Error }) => void
   /**

@@ -33,6 +33,13 @@ describe('chapterTextNamespaceFromUrl', () => {
   it('stops the version at a trailing hash or extra query param', () => {
     expect(chapterTextNamespaceFromUrl('/api/v1/books/b1/file?v=42&x=1')).toBe('b1|42')
   })
+
+  it('prefers the content revision and prefixes the viewing account', () => {
+    expect(chapterTextNamespaceFromUrl(
+      '/api/v1/books/b1/file?reader=1&revisionId=rev-2&v=42',
+      'u:user-1',
+    )).toBe('u:user-1|b1|rev-2')
+  })
 })
 
 describe('makeChapterTextKey', () => {
@@ -82,12 +89,42 @@ describe('withTextCache', () => {
     expect(store.enforceBudget).toHaveBeenCalledWith('ns', CHAPTER_TEXT_BUDGET_BYTES)
   })
 
+  it('waits for the durable write before enforcing the whole-store budget', async () => {
+    const order: string[] = []
+    const store = fakeStore({
+      put: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        order.push('put')
+      },
+      enforceBudget: async () => { order.push('budget') },
+    })
+    const wrapped = withTextCache(async () => 'network', { namespace: 'ns', store })
+
+    expect(await wrapped('chapter.xhtml')).toBe('network')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(order).toEqual(['put', 'budget'])
+  })
+
   it('never caches misses or missing entries', async () => {
     const store = fakeStore()
     const wrapped = withTextCache(async () => null, { namespace: 'ns', store })
     expect(await wrapped('c1.xhtml')).toBeNull()
     await flush()
     expect(store.put).not.toHaveBeenCalled()
+  })
+
+  it('does not persist a response after the reader session becomes stale', async () => {
+    const store = fakeStore()
+    let current = true
+    const wrapped = withTextCache(async () => {
+      current = false
+      return 'late response'
+    }, { namespace: 'ns', store, canWrite: () => current })
+    expect(await wrapped('c1.xhtml')).toBe('late response')
+    await flush()
+    expect(store.put).not.toHaveBeenCalled()
+    expect(store.enforceBudget).not.toHaveBeenCalled()
   })
 
   it('degrades to the network when storage reads or writes throw', async () => {

@@ -885,13 +885,15 @@ class Loader {
     #refCount = new Map()
     eventTarget = new EventTarget()
     allowScript = false
-    constructor({ loadText, loadBlob, resources, entries, allowScript = false }) {
+    constructor({ loadText, loadBlob, resources, entries, allowScript = false, isBlobCached, assertReadable = () => {} }) {
         this.loadText = loadText
         this.loadBlob = loadBlob
         this.manifest = resources.manifest
         this.assets = resources.manifest
         this.entries = entries
         this.allowScript = allowScript
+        this.isBlobCached = isBlobCached
+        this.assertReadable = assertReadable
         // needed only when replacing in (X)HTML w/o parsing (see below)
         //.filter(({ mediaType }) => ![MIME.XHTML, MIME.HTML].includes(mediaType))
     }
@@ -903,6 +905,9 @@ class Loader {
         this.eventTarget.dispatchEvent(event)
         const newData = await event.detail.data
         const newType = await event.detail.type
+        // Concurrent deferred images can finish together. Reuse the first URL
+        // rather than overwrite its ownership count and revoke a live image.
+        if (this.#cache.has(href)) return this.ref(href, parent)
         const url = URL.createObjectURL(new Blob([newData], { type: newType }))
         this.#cache.set(href, url)
         this.#refCount.set(href, 1)
@@ -956,7 +961,9 @@ class Loader {
         this.#children.delete(parent)
     }
     // load manifest item, recursively loading all resources as needed
-    async loadItem(item, parents = []) {
+    async loadItem(item, parents = [], signal) {
+        this.assertReadable()
+        if (signal?.aborted) throw signal.reason ?? new DOMException('Reader resource request was cancelled', 'AbortError')
         if (!item) return null
         const { href, mediaType } = item
 
@@ -975,14 +982,15 @@ class Loader {
             (isScript || [MIME.XHTML, MIME.HTML, MIME.CSS, MIME.SVG].includes(mediaType))
             // prevent circular references
             && parents.every(p => p !== href)
-        if (shouldReplace) return this.loadReplaced(item, parents)
+        if (shouldReplace) return this.loadReplaced(item, parents, signal)
         // NOTE: this can be replaced with `Promise.try()`
-        const blob = await Promise.resolve().then(() => this.loadBlob(href))
+        const blob = await Promise.resolve().then(() => this.loadBlob(href, mediaType, signal))
         if (!blob) return null
         return this.createURL(href, blob, mediaType, parent)
     }
-    async loadItemXHTMLContent(item, parents = []) {
-        const url = this.#cache.get(item?.href) ?? await this.loadItem(item, parents)
+    async loadItemXHTMLContent(item, parents = [], signal) {
+        this.assertReadable()
+        const url = this.#cache.get(item?.href) ?? await this.loadItem(item, parents, signal)
         if (url) return this.#cacheXHTMLContent.get(url)?.data
     }
     getArchiveEntryItem(path) {
@@ -990,7 +998,7 @@ class Loader {
         if (!entry) return null
         return { href: path, mediaType: getFallbackMediaType(path) }
     }
-    async loadHref(href, base, parents = [], parent) {
+    async loadHref(href, base, parents = [], parent, signal) {
         if (isExternal(href)) return href
         const path = resolveURL(href, base)
         let item = this.manifest.find(item => item.href === path)
@@ -1003,7 +1011,7 @@ class Loader {
         if (!item) return href
         const loadParents = parents.concat(base)
         if (parent !== undefined) loadParents.push(parent)
-        const url = await this.loadItem(item, loadParents)
+        const url = await this.loadItem(item, loadParents, signal)
         return url ?? href
     }
     observeDynamicResources(doc, base) {
@@ -1013,18 +1021,76 @@ class Loader {
 
         const parent = {}
         let disposed = false
-        const load = async href => {
-            const resolved = await this.loadHref(href, base, [], parent)
+        const controllers = new Map()
+        const load = async (href, signal) => {
+            const resolved = await this.loadHref(href, base, [], parent, signal)
             if (disposed) this.#releaseChildren(parent)
             return resolved
         }
+        const afterFirstPaint = fn => {
+            const win = doc.defaultView
+            if (win?.requestAnimationFrame) {
+                win.requestAnimationFrame(() => win.requestAnimationFrame(fn))
+            } else setTimeout(fn, 0)
+        }
+        const hydrateDeferredImage = (el, signal) => {
+            const src = el.getAttribute('data-bd-deferred-src')
+            const srcset = el.getAttribute('data-bd-deferred-srcset')
+            const href = el.getAttribute('data-bd-deferred-href')
+            const xlinkHref = el.getAttribute('data-bd-deferred-xlink-href')
+            if (!src && !srcset && !href && !xlinkHref) return
+            afterFirstPaint(async () => {
+                if (disposed || !el.isConnected) return
+                try {
+                    if (src) {
+                        const resolved = await load(src, signal)
+                        if (disposed || signal.aborted || controllers.get(el)?.signal !== signal || !el.isConnected) return
+                        el.setAttribute('src', resolved)
+                        el.removeAttribute('data-bd-deferred-src')
+                    }
+                    if (srcset) {
+                        const replaced = await replaceSeries(srcset,
+                            /(\s*)(.+?)\s*((?:\s[\d.]+[wx])+\s*(?:,|$)|,\s+|$)/g,
+                            (_, p1, p2, p3) => load(p2, signal).then(p2 => `${p1}${p2}${p3}`))
+                        if (!disposed && el.isConnected) {
+                            el.setAttribute('srcset', replaced)
+                            el.removeAttribute('data-bd-deferred-srcset')
+                        }
+                    }
+                    if (href) {
+                        const resolved = await load(href, signal)
+                        if (disposed || signal.aborted || controllers.get(el)?.signal !== signal || !el.isConnected) return
+                        el.setAttribute('href', resolved)
+                        el.removeAttribute('data-bd-deferred-href')
+                    }
+                    if (xlinkHref) {
+                        const resolved = await load(xlinkHref, signal)
+                        if (!disposed && el.isConnected) {
+                            el.setAttributeNS(NS.XLINK, 'href', resolved)
+                            el.removeAttribute('data-bd-deferred-xlink-href')
+                        }
+                    }
+                } catch {
+                    // Keep the deferred marker: a later retry can hydrate it,
+                    // and a failed image must never take the text down with it.
+                }
+            })
+        }
         const process = async el => {
             if (disposed || !el.isConnected) return
+            controllers.get(el)?.abort()
+            const controller = new AbortController()
+            controllers.set(el, controller)
+            const signal = controller.signal
+            if (el.localName === 'img' || el.localName === 'image') {
+                hydrateDeferredImage(el, signal)
+                if (!el.hasAttribute('src') && !el.hasAttribute('href')) return
+            }
             const resolve = async attr => {
                 const value = el.getAttribute(attr)
                 if (!value) return
-                const resolved = await load(value)
-                if (disposed) return
+                const resolved = await load(value, signal)
+                if (disposed || signal.aborted || controllers.get(el) !== controller) return
                 if (resolved !== value) el.setAttribute(attr, resolved)
             }
             if (el.hasAttribute('src')) await resolve('src')
@@ -1037,40 +1103,47 @@ class Loader {
                 const value = el.getAttribute('srcset')
                 const replaced = await replaceSeries(value,
                     /(\s*)(.+?)\s*((?:\s[\d.]+[wx])+\s*(?:,|$)|,\s+|$)/g,
-                    (_, p1, p2, p3) => load(p2)
+                    (_, p1, p2, p3) => load(p2, signal)
                         .then(p2 => `${p1}${p2}${p3}`))
-                if (!disposed && replaced !== value) el.setAttribute('srcset', replaced)
+                if (!disposed && !signal.aborted && controllers.get(el) === controller && replaced !== value) el.setAttribute('srcset', replaced)
             }
             if (el.hasAttribute('style')) {
                 const value = el.getAttribute('style')
-                const replaced = await this.replaceCSS(value, base, [], parent)
-                if (!disposed && replaced !== value) el.setAttribute('style', replaced)
+                const replaced = await this.replaceCSS(value, base, [], parent, signal)
+                if (!disposed && !signal.aborted && controllers.get(el) === controller && replaced !== value) el.setAttribute('style', replaced)
             }
             const xlinkHref = el.getAttributeNS(NS.XLINK, 'href')
             if (xlinkHref && !el.hasAttribute('href')) {
-                const resolved = await load(xlinkHref)
-                if (!disposed && resolved !== xlinkHref)
+                const resolved = await load(xlinkHref, signal)
+                if (!disposed && !signal.aborted && controllers.get(el) === controller && resolved !== xlinkHref)
                     el.setAttributeNS(NS.XLINK, 'href', resolved)
             }
         }
         const collect = (node, elements) => {
             if (node.nodeType !== 1) return
             elements.add(node)
-            node.querySelectorAll?.('[src], [poster], object[data], link[href], [srcset], [style], [*|href]:not([href])')
+            node.querySelectorAll?.('[src], [poster], object[data], link[href], [srcset], [style], [*|href]:not([href]), [data-bd-deferred-src], [data-bd-deferred-srcset], [data-bd-deferred-href], [data-bd-deferred-xlink-href]')
                 .forEach(el => elements.add(el))
+        }
+        const cancelRemoved = node => {
+            if (node.nodeType !== 1) return
+            controllers.get(node)?.abort()
+            node.querySelectorAll?.('*').forEach(el => controllers.get(el)?.abort())
         }
         const processRecords = records => {
             const elements = new Set()
             for (const record of records) {
                 if (record.type === 'attributes') elements.add(record.target)
-                else for (const node of record.addedNodes) collect(node, elements)
+                else {
+                    for (const node of record.addedNodes) collect(node, elements)
+                    for (const node of record.removedNodes) cancelRemoved(node)
+                }
             }
             return Promise.all([...elements].map(process))
         }
 
-        let pending = Promise.resolve()
         const observer = new Observer(records => {
-            pending = pending.then(() => processRecords(records)).catch(() => {})
+            void processRecords(records).catch(() => {})
         })
         observer.observe(doc.documentElement, {
             subtree: true,
@@ -1079,21 +1152,23 @@ class Loader {
             attributeFilter: ['src', 'poster', 'data', 'href', 'srcset', 'style', 'xlink:href'],
         })
         const initial = [...doc.querySelectorAll(
-            '[src], [poster], object[data], link[href], [srcset], [style], [*|href]:not([href])')]
-        pending = pending.then(() => Promise.all(initial.map(process))).catch(() => {})
+            '[src], [poster], object[data], link[href], [srcset], [style], [*|href]:not([href]), [data-bd-deferred-src], [data-bd-deferred-srcset], [data-bd-deferred-href], [data-bd-deferred-xlink-href]')]
+        for (const el of initial) void process(el).catch(() => {})
         return () => {
             if (disposed) return
             disposed = true
             observer.disconnect()
+            for (const controller of controllers.values()) controller.abort()
+            controllers.clear()
             this.#releaseChildren(parent)
         }
     }
-    async loadReplaced(item, parents = []) {
+    async loadReplaced(item, parents = [], signal) {
         const { href, mediaType } = item
         const parent = parents.at(-1)
         let str = ''
         try {
-            str = await this.loadText(href)
+            str = await this.loadText(href, signal)
         } catch (e) {
             return this.createURL(href, Promise.reject(e), mediaType, parent)
         }
@@ -1128,7 +1203,7 @@ class Loader {
                     if (child.data) {
                         const replacedData = await replaceSeries(child.data,
                             /(?:^|\s*)(href\s*=\s*['"])([^'"]*)(['"])/i,
-                            (_, p1, p2, p3) => this.loadHref(p2, href, parents)
+                            (_, p1, p2, p3) => this.loadHref(p2, href, parents, undefined, signal)
                                 .then(p2 => `${p1}${p2}${p3}`))
                         child.replaceWith(doc.createProcessingInstruction(
                             child.target, replacedData))
@@ -1138,7 +1213,7 @@ class Loader {
             }
             // replace hrefs (excluding anchors)
             const replace = async (el, attr) => el.setAttribute(attr,
-                await this.loadHref(el.getAttribute(attr), href, parents))
+                await this.loadHref(el.getAttribute(attr), href, parents, undefined, signal))
             const isHeavyMedia = el => {
                 const tag = el.localName?.toLowerCase()
                 if (tag === 'video' || tag === 'audio') return true
@@ -1148,17 +1223,41 @@ class Loader {
                 }
                 return false
             }
+            const isImageElement = el => {
+                const tag = el.localName?.toLowerCase()
+                return tag === 'img' || tag === 'image'
+            }
+            const deferAttribute = (el, attr, marker) => {
+                const value = el.getAttribute(attr)
+                if (!value) return false
+                el.setAttribute(marker, value)
+                el.removeAttribute(attr)
+                return true
+            }
+            // Inline images are marked deferred and hydrated after the section
+            // has painted its text. This keeps a multi-MB illustration or a slow
+            // media response from holding the whole chapter behind it.
             const srcElements = []
             for (const el of doc.querySelectorAll('[src]')) {
-                if (isHeavyMedia(el)) {
-                    const rawSrc = el.getAttribute('src')
-                    if (rawSrc) {
-                        el.setAttribute('data-bd-deferred-src', rawSrc)
-                        el.removeAttribute('src')
-                    }
+                const imagePath = isImageElement(el) && el.getAttribute('src')
+                    ? resolveURL(el.getAttribute('src'), href) : null
+                const imageIsCached = imagePath && this.isBlobCached?.(imagePath)
+                if (isHeavyMedia(el) || (isImageElement(el) && !imageIsCached)) {
+                    deferAttribute(el, 'src', 'data-bd-deferred-src')
                     continue
                 }
                 srcElements.push(el)
+            }
+            for (const el of doc.querySelectorAll('img[srcset], image[srcset]'))
+                deferAttribute(el, 'srcset', 'data-bd-deferred-srcset')
+            for (const el of doc.querySelectorAll('image')) {
+                const xlink = el.getAttributeNS(NS.XLINK, 'href')
+                if (xlink) {
+                    el.setAttribute('data-bd-deferred-xlink-href', xlink)
+                    el.removeAttributeNS(NS.XLINK, 'href')
+                } else {
+                    deferAttribute(el, 'href', 'data-bd-deferred-href')
+                }
             }
             await Promise.all([...doc.querySelectorAll('link[href]')].map(el => replace(el, 'href')))
             await Promise.all(srcElements.map(el => replace(el, 'src')))
@@ -1166,43 +1265,43 @@ class Loader {
             await Promise.all([...doc.querySelectorAll('object[data]')].map(el => replace(el, 'data')))
             await Promise.all([...doc.querySelectorAll('[*|href]:not([href])')].map(async el =>
                 el.setAttributeNS(NS.XLINK, 'href', await this.loadHref(
-                    el.getAttributeNS(NS.XLINK, 'href'), href, parents))))
+                    el.getAttributeNS(NS.XLINK, 'href'), href, parents, undefined, signal))))
             await Promise.all([...doc.querySelectorAll('[srcset]')].map(async el =>
                 el.setAttribute('srcset', await replaceSeries(el.getAttribute('srcset'),
                     /(\s*)(.+?)\s*((?:\s[\d.]+[wx])+\s*(?:,|$)|,\s+|$)/g,
-                    (_, p1, p2, p3) => this.loadHref(p2, href, parents)
+                    (_, p1, p2, p3) => this.loadHref(p2, href, parents, undefined, signal)
                         .then(p2 => `${p1}${p2}${p3}`)))))
             // replace inline styles
             await Promise.all([...doc.querySelectorAll('style')].map(async el => {
                 if (el.textContent) el.textContent =
-                    await this.replaceCSS(el.textContent, href, parents)
+                    await this.replaceCSS(el.textContent, href, parents, undefined, signal)
             }))
             await Promise.all([...doc.querySelectorAll('[style]')].map(async el =>
                 el.setAttribute('style',
-                    await this.replaceCSS(el.getAttribute('style'), href, parents))))
+                    await this.replaceCSS(el.getAttribute('style'), href, parents, undefined, signal))))
             // TODO: replace inline scripts? probably not worth the trouble
             const result = new XMLSerializer().serializeToString(doc)
             return this.createURL(href, result, item.mediaType, parent)
         }
 
         const result = mediaType === MIME.CSS
-            ? await this.replaceCSS(str, href, parents)
-            : await this.replaceString(str, href, parents)
+            ? await this.replaceCSS(str, href, parents, undefined, signal)
+            : await this.replaceString(str, href, parents, signal)
         return this.createURL(href, result, mediaType, parent)
     }
-    async replaceCSS(str, href, parents = [], parent) {
+    async replaceCSS(str, href, parents = [], parent, signal) {
         const replacedUrls = await replaceSeries(str,
             /url\(\s*["']?([^'"\n]*?)\s*["']?\s*\)/gi,
-            (_, url) => this.loadHref(url, href, parents, parent)
+            (_, url) => this.loadHref(url, href, parents, parent, signal)
                 .then(url => `url("${url}")`))
         // apart from `url()`, strings can be used for `@import` (but why?!)
         return replaceSeries(replacedUrls,
             /@import\s*["']([^"'\n]*?)["']/gi,
-            (_, url) => this.loadHref(url, href, parents, parent)
+            (_, url) => this.loadHref(url, href, parents, parent, signal)
                 .then(url => `@import "${url}"`))
     }
     // find & replace all possible relative paths for all assets without parsing
-    replaceString(str, href, parents = []) {
+    replaceString(str, href, parents = [], signal) {
         const assetMap = new Map()
         const urls = this.assets.map(asset => {
             // do not replace references to the file itself
@@ -1220,7 +1319,7 @@ class Loader {
         const regex = new RegExp(urls.map(regexEscape).join('|'), 'g')
         return replaceSeries(str, regex, async match =>
             this.loadItem(assetMap.get(match.replace(/^\//, '')),
-                parents.concat(href)))
+                parents.concat(href), signal))
     }
     unloadItem(item) {
         this.unref(item?.href)
@@ -1273,7 +1372,7 @@ export class EPUB {
     parser = new DOMParser()
     #loader
     #encryption
-    constructor({ entries, loadText, loadBlob, getSize, sha1, allowScript = false }) {
+    constructor({ entries, loadText, loadBlob, getSize, sha1, allowScript = false, isBlobCached, assertReadable = () => {} }) {
         this.entries = entries.reduce((map, entry) => {
             map.set(entry.filename, entry)
             const key = entry.filename.toLowerCase()
@@ -1285,6 +1384,8 @@ export class EPUB {
         this.loadBlob = loadBlob
         this.getSize = getSize
         this.allowScript = allowScript
+        this.isBlobCached = isBlobCached
+        this.assertReadable = assertReadable
         this.#encryption = new Encryption(deobfuscators(sha1))
     }
     async #loadXML(uri) {
@@ -1320,11 +1421,13 @@ ${doc.querySelector('parsererror').innerText}`)
         })
         this.#loader = new Loader({
             loadText: this.loadText,
-            loadBlob: uri => Promise.resolve(this.loadBlob(uri))
+                loadBlob: (uri, mediaType, signal) => Promise.resolve(this.loadBlob(uri, mediaType, signal))
                 .then(this.#encryption.getDecoder(uri)),
             resources: this.resources,
             entries: this.entries,
             allowScript: this.allowScript,
+            isBlobCached: this.isBlobCached,
+            assertReadable: this.assertReadable,
         })
         this.transformTarget = this.#loader.eventTarget
         this.sections = this.resources.spine.map((spineItem, index) => {
@@ -1336,10 +1439,10 @@ ${doc.querySelector('parsererror').innerText}`)
             }
             return {
                 id: item.href,
-                load: () => this.#loader.loadItem(item),
+                load: signal => this.#loader.loadItem(item, [], signal),
                 unload: () => this.#loader.unloadItem(item),
                 loadText: () => this.#loader.loadText(item.href),
-                loadContent: () => this.#loader.loadItemXHTMLContent(item),
+                loadContent: signal => this.#loader.loadItemXHTMLContent(item, [], signal),
                 loadHref: (href, base = item.href) => this.#loader.loadHref(href, base),
                 observeDynamicResources: doc =>
                     this.#loader.observeDynamicResources(doc, item.href),

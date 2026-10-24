@@ -985,6 +985,112 @@ timeout may reveal fallback glyphs, but never unstyled book content. Connected
 chapter documents must expose the computed reader-style marker before reveal;
 the final document and font stylesheet are rechecked after startup navigation.
 
+### Reader content delivery
+
+Readable EPUB and generated-TXT sources are resolved through the existing book
+ACL and current content revision before reader bytes are served. The books
+module exposes a manifest of ZIP structure and startup files, bounded raw-entry
+reads, and bounded text batches over the existing `StorageDriver`; the format
+module owns ZIP indexing and safe entry extraction. Derived indexes are
+rebuildable and keyed by immutable source blob identity, with both count and
+estimated-byte limits in memory. Compressed ZIP entry bytes are bounded before
+range reads; stored sizes, archive ranges, decompressed output and CRC are
+checked. A bounded in-memory raw-entry cache is shared by Web and Legado.
+Neither cache grants access or retains old revisions after source deletion.
+
+The Web reader uses account, book, revision, format-version and entry scoped
+browser caches. Derived text additionally uses a markup-cache version: changing
+layout hints must not reuse earlier XHTML just because the source revision and
+wire format are unchanged. Raw resource caches retain their source identity;
+upgrading derived text does not require deleting existing browser records.
+Its foreground, search and prefetch work shares a bounded scheduler. Requests
+have a 30-second per-attempt timeout and at most one transport/5xx retry;
+search items larger than the background byte budget may run alone while
+charging only that fixed budget. Foreground callers use a batch result once
+text reaches memory, without waiting for IndexedDB persistence; a foreground
+caller joining an unresolved batch gets its own cancellable consumer lease and
+waits for at most two seconds before using the single-entry endpoint. Explicit
+access revocation blocks later reads from session and Foliate memos while
+leaving already-rendered text in place. Access revocation, content revision
+changes, and unavailable revision targets are handled without toast notifications.
+An unavailable target retains the current text and opens the latest table of contents.
+Shared
+sessions use view leases, while individual scheduled reads have separate
+cancellable consumer subscriptions. A shared transport is aborted only after its
+last consumer leaves; removing the last queued consumer removes that task. Auth
+transitions, including cross-tab account changes, invalidate
+in-flight work and warm per-tab reader sessions, and prevent stale responses
+from repopulating persistent content caches. During migration, only classified
+transport or endpoint-availability failures may use the existing Range
+reader. Permission, revision and missing-source errors never fall back. A
+revision-change response must be recorded and stop background prefetch. On the
+next user navigation, the reader must refresh access and the manifest, then
+replace reader structure only after the target is reliably reconciled. Equal
+source content hashes preserve an exact position. Existing exact-href matching
+remains available for ordinary EPUB spine navigation; generated TXT EPUBs are
+the exception because their filenames are ordinal and shift after chapter
+insertion or deletion. Without an explicit correspondence for those generated
+books, the reader must retain the old-revision view and ask the reader to
+choose from the new table of contents. A replacement renderer is staged in a hidden host and only
+becomes current after its first successful render; initialization failure keeps
+the prior host and its revision-bound peripheral state. Dynamic resource loads
+are individual consumers and are cancelled with their element/document owner.
+Exact implementation and acceptance status are tracked in the reader delivery
+plan.
+
+Browser reader-cache LRU maintenance reads a separate lightweight metadata
+store for text and media sizes and access times, then applies eviction and
+metadata updates in one IndexedDB read/write transaction. Existing cache
+records are indexed into that store during a versioned upgrade with cursors;
+their text and binary payloads remain readable in the original stores. A
+same-tab budget check is coalesced, while IndexedDB transaction serialization
+coordinates concurrent tabs without a custom lock protocol. The limit is an
+eventually enforced target: simultaneous writers may temporarily exceed it,
+and quota or blocked-upgrade failures leave online reading on the network path.
+Image-dimension hints required for a chapter response are prepared before the
+response; rebuildable derived-index persistence and disk-budget maintenance
+run asynchronously with bounded, per-source coalescing.
+After a content write publishes its blob and revision, the books domain may
+enqueue that immutable source for shared ZIP-index and startup-structure
+preparation. The in-process queue has one background worker and at most 32
+waiting sources, deduplicated by content hash (or blob key when unavailable).
+Queue saturation and derivation failure are best-effort skips: they never
+change the write result, and a foreground read can build or join the same
+in-flight preparation. This prepares EPUB structure only; it does not prefetch
+full-book text or media, preserve old revisions, change read authorization, or
+replace reference-checked source deletion. Memory preparation and atomic
+derived-index disk persistence are distinct completion points.
+Legado consumes the same raw entries but retains its existing per-user chapter
+projection and resource URL behavior. These boundaries are implemented under
+`docs/local/archive/completed/2026-10-reader-content-delivery.md`; browser, real-client and deployment
+acceptance remain separate from unit/type checks.
+
+The current forward text window targets 256 KiB of uncompressed text across at
+most 16 original body files, selected in spine order from manifest entry sizes.
+Cached and shared in-flight body files count toward coverage. A single next
+chapter above the target may be fetched alone when it remains under the existing
+single-entry prefetch safety limit; oversized or unknown next entries stop the
+window. Windows may span multiple batches, each retaining the existing eight
+item and server byte limits. A completed batch never advances the window. The
+window does not fetch a fixed rear range; navigation recomputes forward coverage
+and fills only missing content. Images keep their independent small-image
+budget across the whole window, and audio/video are not prefetched with body
+text. The nearest missing chapter is sent in the first small batch so a distant
+chapter cannot delay its response. Candidate traversal stops as soon as a
+window limit or a safety boundary is reached. These values are
+engineering starting points pending performance measurement, not tuned optima.
+When clean reading is effective for the current reflowable EPUB, the same
+resource-skip policy used by the foreground Loader also filters opportunistic
+image prefetch; fixed-layout EPUBs retain the existing clean-reading exception.
+Clean reading also omits optional image-dimension preparation from entry and
+text-batch requests. The batch contract defaults this option on for older
+clients; the entry query does the same when omitted. Raw source entry caches
+remain shared, while derived-markup caches distinguish whether dimensions were
+included in the response.
+The classified Range compatibility fallback does not have manifest entry sizes,
+so it conservatively prefetches only the immediately following linear spine
+file rather than consuming every later candidate.
+
 ### Reader book-style boundary
 
 The reader separates format-specific book layout semantics from renderer safety

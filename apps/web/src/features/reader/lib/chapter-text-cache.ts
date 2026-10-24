@@ -1,4 +1,4 @@
-import { idbChapterTextStore, type ChapterTextStore } from './idb-chapter-store'
+import { idbChapterTextStore, READER_CONTENT_BUDGET_BYTES, type ChapterTextStore } from './idb-chapter-store'
 
 // EPUB chapter XHTML text is stable per content version, but the in-memory
 // text memo and the parse cache die with the page — reopening a book re-pays
@@ -7,32 +7,40 @@ import { idbChapterTextStore, type ChapterTextStore } from './idb-chapter-store'
 // unusable here because Chrome stalls 300-400ms reading back multi-MB cached
 // Range entries. TXT books (offset-sliced files) are out of scope.
 
-export const CHAPTER_TEXT_BUDGET_BYTES = 20 * 1024 * 1024
+export const CHAPTER_TEXT_BUDGET_BYTES = READER_CONTENT_BUDGET_BYTES
 
 export interface ChapterTextEntry {
   key: string
   text: string
 }
 
-// The version rides in the key namespace (from the `?v=updatedAt` content
-// URL), so any re-conversion or metadata edit strands the old generation's
-// entries; each book's entries are capped by the store's per-namespace LRU.
+// The version rides in the key namespace, so any re-conversion or revision
+// switch strands the old generation's entries; the store enforces the global
+// reader-content LRU across books.
 export function makeChapterTextKey(namespace: string, href: string): string {
   return `${namespace}|${href}`
 }
 
-// `/api/v1/books/{id}/file?v={updatedAt}` -> `{id}|{updatedAt}`.
+// `/api/v1/books/{id}/file?reader=1&revisionId={rev}&v={updatedAt}`. Revision
+// wins over the display timestamp; an account scope prefixes the key so one
+// viewer's cache can never answer another's read.
 // Returns null for any other URL shape — no cache rather than a wrong-namespace cache.
-export function chapterTextNamespaceFromUrl(url: string): string | null {
-  const match = /^\/api\/v1\/books\/([^/]+)\/file\?v=([^&#]+)(?:[#&]|$)/.exec(url)
+export function chapterTextNamespaceFromUrl(url: string, accountScope?: string): string | null {
+  const match = /^\/api\/v1\/books\/([^/]+)\/file\?(.*)$/.exec(url)
   if (!match) return null
-  return `${match[1]}|${match[2]}`
+  const id = match[1]
+  const params = new URLSearchParams(match[2])
+  const version = params.get('revisionId') || params.get('v')
+  if (!id || !version) return null
+  const namespace = `${id}|${version}`
+  return accountScope ? `${accountScope}|${namespace}` : namespace
 }
 
 export interface WithTextCacheOptions {
   namespace: string | null
   store?: ChapterTextStore | null
   budgetBytes?: number
+  canWrite?: () => boolean
 }
 
 // Wraps the raw (uncached) loader below the in-memory memo:
@@ -40,7 +48,7 @@ export interface WithTextCacheOptions {
 // network read; failures are never cached at any level.
 export function withTextCache(
   load: (href: string) => Promise<string | null>,
-  { namespace, store = idbChapterTextStore, budgetBytes = CHAPTER_TEXT_BUDGET_BYTES }: WithTextCacheOptions,
+  { namespace, store = idbChapterTextStore, budgetBytes = CHAPTER_TEXT_BUDGET_BYTES, canWrite }: WithTextCacheOptions,
 ): (href: string) => Promise<string | null> {
   if (!namespace || !store) return load
   return async (href: string) => {
@@ -53,9 +61,11 @@ export function withTextCache(
     }
     if (hit) return hit.text
     const text = await load(href)
-    if (text) {
-      store.put(key, text).catch(() => {})
-      store.enforceBudget(namespace, budgetBytes).catch(() => {})
+    if (text && (!canWrite || canWrite())) {
+      void (async () => {
+        await (canWrite ? store.put(key, text, canWrite) : store.put(key, text))
+        await store.enforceBudget(namespace, budgetBytes)
+      })().catch(() => {})
     }
     return text
   }

@@ -45,6 +45,7 @@ import { categoryTemplatePath, LibrarySearchError, normalizeAuthors, type Append
 import { compileSearchExpression } from '../libraries/search-expression'
 
 import { getReaderBookSettings } from './reader-settings.service'
+import { enqueueReaderArchivePreparation } from './reader-content.service'
 import { readTxtEpubCandidate, sameEpubArchive } from './txt-epub-correspondence'
 import { resolveOrCreateCategoryPath } from '../libraries/library-category-path'
 
@@ -708,6 +709,7 @@ export async function uploadBook(
 
   const upload = await materializeUpload(userId, file, buffer, versionId, opts)
   const now = Date.now()
+  const revisionId = createId('rev')
   const libraryBookId = createId('lb')
   try {
     db.transaction((tx) => {
@@ -715,7 +717,7 @@ export async function uploadBook(
         id: versionId, format: upload.format, size: upload.size, createdAt: now, updatedAt: now,
       }).run()
       tx.insert(contentRevisions).values({
-        id: createId('rev'), bookVersionId: versionId, revisionNo: 1, blobKey: upload.fileKey,
+        id: revisionId, bookVersionId: versionId, revisionNo: 1, blobKey: upload.fileKey,
         size: upload.size, wordCount: upload.wordCount,
         chapterCount: upload.chapterCount, meta: upload.meta, createdAt: now,
       }).run()
@@ -751,7 +753,12 @@ export async function uploadBook(
     await cleanupStagedUpload(upload)
     throw err
   }
-  return { book: stripMetaChapters(await resolvePrivateBook(userId, versionId, { allowDeleted: true, showHidden: true })), duplicated: false }
+  const resolvedBook = stripMetaChapters(await resolvePrivateBook(userId, versionId, { allowDeleted: true, showHidden: true }))
+  enqueueReaderArchivePreparation({
+    id: versionId, filePath: upload.fileKey, format: upload.format, revisionId,
+    contentHash: hashFromBlobKey(upload.fileKey), size: upload.size,
+  })
+  return { book: resolvedBook, duplicated: false }
 }
 
 /**
@@ -829,6 +836,7 @@ export async function uploadCatalogBook(
 
   const upload = await materializeUpload(userId, file, buffer, versionId, opts)
   const now = Date.now()
+  const revisionId = createId('rev')
   // An existing work keeps its own defaults; the new version carries the parsed
   // metadata as overrides so the upload is never silently lost.
   let libraryBookId = targetLibraryBookId ?? createId('lb')
@@ -839,7 +847,7 @@ export async function uploadCatalogBook(
         id: versionId, format: upload.format, size: upload.size, createdAt: now, updatedAt: now,
       }).run()
       tx.insert(contentRevisions).values({
-        id: createId('rev'), bookVersionId: versionId, revisionNo: 1, blobKey: upload.fileKey,
+        id: revisionId, bookVersionId: versionId, revisionNo: 1, blobKey: upload.fileKey,
         size: upload.size, wordCount: upload.wordCount,
         chapterCount: upload.chapterCount, meta: upload.meta, createdAt: now,
       }).run()
@@ -897,6 +905,10 @@ export async function uploadCatalogBook(
     await cleanupStagedUpload(upload)
     throw err
   }
+  enqueueReaderArchivePreparation({
+    id: versionId, filePath: upload.fileKey, format: upload.format, revisionId,
+    contentHash: hashFromBlobKey(upload.fileKey), size: upload.size,
+  })
   return { bookVersionId: versionId, libraryBookId, versionLinkId: linkId, duplicated: false }
 }
 
@@ -1869,7 +1881,12 @@ export async function appendTxtBookContent(userId: string, bookId: string, appen
     await deleteUnreferencedRevision(oldFilePath)
   }
 
-  return stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, showHidden: true }))
+  const resolvedBook = stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, showHidden: true }))
+  enqueueReaderArchivePreparation({
+    id: bookId, filePath, format: 'txt', revisionId: newRevisionId,
+    contentHash, size: epubBuffer.length,
+  })
+  return resolvedBook
 }
 
 /**
@@ -1994,6 +2011,7 @@ async function rebuildTocBook(
   )
   const newFileKey = blobKey(sha256(epubBuffer), '.epub')
   const updatedAt = Date.now()
+  let prebuildRevisionId: string | null = null
   if (newFileKey !== book.filePath) {
     // Content changed: the new bytes land as a new revision under their own
     // key. The old revision stays intact; its file is collected only when no
@@ -2002,6 +2020,7 @@ async function rebuildTocBook(
     const maxRevision = db.select({ revisionNo: contentRevisions.revisionNo }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
     const newRevisionId = createId('rev')
+    prebuildRevisionId = newRevisionId
     try {
       db.transaction((tx) => {
         tx.insert(contentRevisions).values({
@@ -2036,6 +2055,7 @@ async function rebuildTocBook(
     const latestRevision = db.select({ id: contentRevisions.id, revisionNo: contentRevisions.revisionNo, size: contentRevisions.size }).from(contentRevisions)
       .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
     const newRevisionId = createId('rev')
+    prebuildRevisionId = newRevisionId
     db.transaction((tx) => {
       tx.insert(contentRevisions).values({
         id: newRevisionId, bookVersionId: bookId, revisionNo: (latestRevision?.revisionNo ?? 0) + 1,
@@ -2078,6 +2098,12 @@ async function rebuildTocBook(
   }
 
   db.update(libraryBooks).set({ updatedAt }).where(eq(libraryBooks.id, resolveLibraryBook(userId, bookId).libraryBookId)).run()
+  if (prebuildRevisionId) {
+    enqueueReaderArchivePreparation({
+      id: bookId, filePath: newFileKey, format: 'txt', revisionId: prebuildRevisionId,
+      contentHash: hashFromBlobKey(newFileKey), size: epubBuffer.length,
+    })
+  }
   return normalized
 }
 
@@ -2668,6 +2694,10 @@ async function rebuildCityToc(
     })
     invalidateCachedNormalized(link.bookVersionId)
     await deleteUnreferencedRevision(latest.blobKey)
+    enqueueReaderArchivePreparation({
+      id: link.bookVersionId, filePath: newFileKey, format: 'txt', revisionId: newRevisionId,
+      contentHash: hashFromBlobKey(newFileKey), size: epubBuffer.length,
+    })
     return { revisionId: newRevisionId, revisionNo: nextRevisionNo, chaptersChanged }
   }
 
@@ -2694,6 +2724,10 @@ async function rebuildCityToc(
       scaleActorPercent: false,
     })
     invalidateCachedNormalized(link.bookVersionId)
+    enqueueReaderArchivePreparation({
+      id: link.bookVersionId, filePath: latest.blobKey, format: 'txt', revisionId: newRevisionId,
+      contentHash: hashFromBlobKey(latest.blobKey), size: epubBuffer.length,
+    })
     return { revisionId: newRevisionId, revisionNo: nextRevisionNo, chaptersChanged }
   }
 
@@ -3408,6 +3442,10 @@ export async function pushPrivateToVersion(
   }
   const inserted = db.select({ id: contentRevisions.id }).from(contentRevisions)
     .where(and(eq(contentRevisions.bookVersionId, link.bookVersionId), eq(contentRevisions.revisionNo, nextRevisionNo))).get()!
+  enqueueReaderArchivePreparation({
+    id: link.bookVersionId, filePath: sourceLatest.blobKey, format: sourceVersion?.format ?? 'epub', revisionId: inserted.id,
+    contentHash: hashFromBlobKey(sourceLatest.blobKey), size: sourceLatest.size ?? 0,
+  })
   // Unreachable as diverged: the guard above refuses that case outright.
   return { revisionId: inserted.id, revisionNo: nextRevisionNo, alreadyUpToDate: false, diverged: false }
 }
@@ -3630,6 +3668,10 @@ export async function appendCityVersionContent(
   if (oldBlobKey !== fileKey) {
     await deleteUnreferencedRevision(oldBlobKey)
   }
+  enqueueReaderArchivePreparation({
+    id: link.bookVersionId, filePath: fileKey, format: 'txt', revisionId: newRevisionId,
+    contentHash: hashFromBlobKey(fileKey), size: epubBuffer.length,
+  })
   return { revisionId: newRevisionId, revisionNo: nextRevisionNo }
 }
 

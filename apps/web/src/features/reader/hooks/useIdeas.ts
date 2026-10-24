@@ -19,14 +19,14 @@ export function useIdeaComposer(bookId: string, enabled = true) {
   })
 }
 
-export function useReaderIdeas(bookId: string, enabled = true) {
+export function useReaderIdeas(bookId: string, enabled = true, displayedRevisionId?: string | null) {
   const book = useQuery({
     queryKey: ['book', bookId],
     queryFn: () => apiGet<{ data: BookDetailRes }>(withReveal(`/books/${bookId}`)),
     enabled: !!bookId,
   })
   const source = book.data?.data.source
-  const revisionId = book.data?.data.revisionId
+  const revisionId = displayedRevisionId ?? book.data?.data.revisionId
   return useQuery({
     queryKey: ['reader-ideas', bookId, source?.libraryId, source?.libraryBookVersionId, revisionId],
     queryFn: () => apiGet<{ data: ReaderIdea[] }>(`/ideas/book/${bookId}?${new URLSearchParams({ libraryId: source!.libraryId, listingId: source!.libraryBookVersionId!, revisionId: revisionId! })}`),

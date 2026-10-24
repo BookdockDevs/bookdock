@@ -12,6 +12,7 @@ import type { EffectiveViewSettings } from '../lib/view-settings'
 interface UseReaderRendererOptions {
   ready?: boolean
   url: string
+  mountGeneration?: number
   bookId?: string
   format?: BookFormat
   /** Known file size from the book-detail response; lets the renderer pick
@@ -38,7 +39,7 @@ interface UseReaderRendererOptions {
   onMediaError?: (e: Parameters<RendererEvents['mediaError']>[0]) => void
   onMediaPlay?: (e: Parameters<RendererEvents['mediaPlay']>[0]) => void
   onInstantAnnotation?: (e: Parameters<RendererEvents['instantAnnotation']>[0]) => void
-  onRendered?: () => void
+  onRendered?: (url: string) => void
   onFontFallback?: () => void
   /** The view is torn down and rebuilt; the host must cover the reading area. */
   onViewRebuilding?: (pending: boolean) => void
@@ -46,6 +47,8 @@ interface UseReaderRendererOptions {
   onTocReady?: (items: { label: string; href: string; level?: number }[]) => void
   onJumpConfirmed?: (e: { cfi: string }) => void
   onNavigatePending?: (e: Parameters<RendererEvents['navigatePending']>[0]) => void
+  onRevisionNavigation?: (e: Parameters<RendererEvents['revisionNavigation']>[0]) => void
+  onRevisionChanged?: (e: Parameters<RendererEvents['revisionChanged']>[0]) => void
   onNavigateError?: (e: Parameters<RendererEvents['navigateError']>[0]) => void
   onChromeToggle?: () => void
   onUserJump?: () => void
@@ -55,9 +58,19 @@ interface UseReaderRendererOptions {
   onFootnoteClose?: () => void
 }
 
+interface RendererMount {
+  renderer: BookReader
+  host: HTMLDivElement
+  bookId: string | undefined
+  url: string
+  mountGeneration: number
+  dispose: () => void
+}
+
 export function useReaderRenderer({
   ready = true,
   url,
+  mountGeneration = 0,
   bookId,
   format,
   bookSize,
@@ -82,6 +95,8 @@ export function useReaderRenderer({
   onTocReady,
   onJumpConfirmed,
   onNavigatePending,
+  onRevisionNavigation,
+  onRevisionChanged,
   onNavigateError,
   onChromeToggle,
   onUserJump,
@@ -92,6 +107,13 @@ export function useReaderRenderer({
 }: UseReaderRendererOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<BookReader | null>(null)
+  const activeMountRef = useRef<RendererMount | null>(null)
+  const desiredUrlRef = useRef(url)
+  const desiredBookIdRef = useRef(bookId)
+  const desiredMountGenerationRef = useRef(mountGeneration)
+  desiredUrlRef.current = url
+  desiredBookIdRef.current = bookId
+  desiredMountGenerationRef.current = mountGeneration
   const [renderer, setRenderer] = useState<BookReader | null>(null)
   const remountPositionRef = useRef<{ key: string; cfi: string | null; fraction: number | null } | null>(null)
 
@@ -180,6 +202,8 @@ export function useReaderRenderer({
   const onTocReadyRef = useRef(onTocReady)
   const onJumpConfirmedRef = useRef(onJumpConfirmed)
   const onNavigatePendingRef = useRef(onNavigatePending)
+  const onRevisionNavigationRef = useRef(onRevisionNavigation)
+  const onRevisionChangedRef = useRef(onRevisionChanged)
   const onNavigateErrorRef = useRef(onNavigateError)
   const onChromeToggleRef = useRef(onChromeToggle)
   const onUserJumpRef = useRef(onUserJump)
@@ -224,6 +248,8 @@ export function useReaderRenderer({
   onTocReadyRef.current = onTocReady
   onJumpConfirmedRef.current = onJumpConfirmed
   onNavigatePendingRef.current = onNavigatePending
+  onRevisionNavigationRef.current = onRevisionNavigation
+  onRevisionChangedRef.current = onRevisionChanged
   onNavigateErrorRef.current = onNavigateError
   onChromeToggleRef.current = onChromeToggle
   onUserJumpRef.current = onUserJump
@@ -254,12 +280,31 @@ export function useReaderRenderer({
 
   useEffect(() => {
     if (!containerRef.current || !url || !canMount) return
+    const activeMount = activeMountRef.current
+    if (activeMount && activeMount.bookId === bookId && activeMount.url === url
+      && activeMount.mountGeneration === mountGeneration
+      && rendererRef.current === activeMount.renderer) {
+      setRenderer(activeMount.renderer)
+      requestAnimationFrame(() => onRenderedRef.current?.(url))
+      return () => {
+        if (activeMountRef.current?.renderer === activeMount.renderer
+          && desiredBookIdRef.current === bookId
+          && (desiredUrlRef.current !== url || desiredMountGenerationRef.current !== mountGeneration)) return
+        activeMount.dispose()
+        setRenderer((current) => (current === activeMount.renderer ? null : current))
+      }
+    }
     // Wait until the start position is known ('' means "no saved progress")
     // so mount navigates exactly once instead of goTo(0) then display(cfi).
     // Safe in deps: queries have staleTime Infinity, so initialCfi only
     // transitions undefined -> value once per book.
     if (initialCfi === undefined) return
 
+    const currentMount = activeMountRef.current
+    const previousMount = currentMount && currentMount.bookId === bookId
+      && (currentMount.url !== url || currentMount.mountGeneration !== mountGeneration)
+      ? currentMount
+      : null
     const rendererKey = `${bookId ?? ''}\u0000${url}`
     const carriedPosition = remountPositionRef.current?.key === rendererKey
       ? remountPositionRef.current
@@ -267,6 +312,12 @@ export function useReaderRenderer({
     remountPositionRef.current = null
     const newRenderer = createRenderer()
     rendererRef.current = newRenderer
+    const host = document.createElement('div')
+    if (getComputedStyle(containerRef.current).position === 'static') containerRef.current.style.position = 'relative'
+    host.style.position = 'absolute'
+    host.style.inset = '0'
+    host.style.visibility = previousMount ? 'hidden' : 'visible'
+    containerRef.current.append(host)
     const theme = themeRef.current
 
     newRenderer.applyReadingMode(readingModeRef.current)
@@ -285,7 +336,29 @@ export function useReaderRenderer({
     newRenderer.applyMarginals(marginalConfigRef.current)
 
     let cancelled = false
-    const isCurrentRenderer = () => !cancelled && rendererRef.current === newRenderer
+    const isMountedRenderer = () => !cancelled && rendererRef.current === newRenderer
+    const isCurrentRenderer = () => isMountedRenderer()
+      && (!previousMount || activeMountRef.current?.renderer === newRenderer)
+    let disposed = false
+    let teardown = () => {}
+    let stagedRelocated: Parameters<RendererEvents['relocated']>[0] | undefined
+    let stagedToc: { label: string; href: string; level?: number }[] | undefined
+    const mountRecord: RendererMount = {
+      renderer: newRenderer,
+      host,
+      bookId,
+      url,
+      mountGeneration,
+      dispose: () => {
+        if (disposed) return
+        disposed = true
+        teardown()
+        newRenderer.destroy()
+        host.remove()
+        if (activeMountRef.current?.renderer === newRenderer) activeMountRef.current = null
+        if (rendererRef.current === newRenderer) rendererRef.current = null
+      },
+    }
     const initialTarget = carriedPosition?.cfi ?? initialCfi
     const initialPositionFraction = carriedPosition?.fraction ?? initialFraction
     // Fires once the view is live but BEFORE the initial chapter load resolves:
@@ -294,27 +367,38 @@ export function useReaderRenderer({
     // not the carried live position: the saved-position effect must not replay
     // an older startup CFI over a same-book rebuild or a user jump.
     const markReady = () => {
-      if (!isCurrentRenderer()) return undefined
+      if (!isMountedRenderer()) return undefined
       handledInitialCfiRef.current = initialCfi
-      setRenderer(newRenderer)
+      if (!previousMount) setRenderer(newRenderer)
       return onReadyRef.current?.()
     }
-    newRenderer.mount(containerRef.current, initialTarget, initialPositionFraction, markReady).then(async () => {
+    newRenderer.mount(host, initialTarget, initialPositionFraction, markReady).then(async () => {
       // StrictMode double-invokes this effect: the loser must not become the
       // current renderer — its view already bailed out of mount
-      if (!isCurrentRenderer()) return
+      if (!isMountedRenderer()) return
       // mount already navigated (initialTarget may be '' for "book start")
       handledInitialCfiRef.current = initialCfi
-      setRenderer(newRenderer)
+      if (!previousMount) setRenderer(newRenderer)
     }).catch((err) => {
       console.error('[FoliateReader] mount failed:', err)
-      if (isCurrentRenderer()) {
+      if (isMountedRenderer()) {
+        if (previousMount) {
+          previousMount.host.style.visibility = 'visible'
+          activeMountRef.current = previousMount
+          rendererRef.current = previousMount.renderer
+          setRenderer(previousMount.renderer)
+        }
+        mountRecord.dispose()
         onViewRebuildingRef.current?.(false)
         onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)))
       }
     })
 
-    const unsubRelocated = newRenderer.on('relocated', (e) => { if (isCurrentRenderer()) onRelocatedRef.current?.(e) })
+    const unsubRelocated = newRenderer.on('relocated', (e) => {
+      if (!isMountedRenderer()) return
+      if (previousMount && activeMountRef.current?.renderer !== newRenderer) stagedRelocated = e
+      else onRelocatedRef.current?.(e)
+    })
     const unsubSelected = newRenderer.on('selected', (e) => { if (isCurrentRenderer()) onSelectedRef.current?.(e) })
     const unsubTextSelectionStart = newRenderer.on('textSelectionStart', () => { if (isCurrentRenderer()) onTextSelectionStartRef.current?.() })
     const unsubAnnotationClicked = newRenderer.on('annotationClicked', (e) => { if (isCurrentRenderer()) onAnnotationClickedRef.current?.(e) })
@@ -324,15 +408,34 @@ export function useReaderRenderer({
     const unsubMediaPlay = newRenderer.on('mediaPlay', (e) => { if (isCurrentRenderer()) onMediaPlayRef.current?.(e) })
     const unsubInstantAnnotation = newRenderer.on('instantAnnotation', (e) => { if (isCurrentRenderer()) onInstantAnnotationRef.current?.(e) })
     const unsubRendered = newRenderer.on('rendered', () => {
-      if (!isCurrentRenderer()) return
+      if (!isMountedRenderer()) return
+      if (previousMount && activeMountRef.current?.renderer !== newRenderer) {
+        host.style.visibility = 'visible'
+        previousMount.host.style.visibility = 'hidden'
+        activeMountRef.current = mountRecord
+        setRenderer(newRenderer)
+        previousMount.dispose()
+        if (stagedToc) onTocReadyRef.current?.(stagedToc)
+        if (stagedRelocated) onRelocatedRef.current?.(stagedRelocated)
+      }
       onViewRebuildingRef.current?.(false)
-      onRenderedRef.current?.()
+      onRenderedRef.current?.(url)
     })
     const unsubFontFallback = newRenderer.on('fontFallback', () => { if (isCurrentRenderer()) onFontFallbackRef.current?.() })
     const unsubViewRebuilding = newRenderer.on('viewRebuilding', (e) => { if (isCurrentRenderer()) onViewRebuildingRef.current?.(e.pending) })
-    const unsubToc = newRenderer.on('tocReady', (items) => { if (isCurrentRenderer()) onTocReadyRef.current?.(items) })
+    const unsubToc = newRenderer.on('tocReady', (items) => {
+      if (!isMountedRenderer()) return
+      if (previousMount && activeMountRef.current?.renderer !== newRenderer) stagedToc = items
+      else onTocReadyRef.current?.(items)
+    })
     const unsubJumpConfirmed = newRenderer.on('jumpConfirmed', (e) => { if (isCurrentRenderer()) onJumpConfirmedRef.current?.(e) })
     const unsubNavigatePending = newRenderer.on('navigatePending', (e) => { if (isCurrentRenderer()) onNavigatePendingRef.current?.(e) })
+    const unsubRevisionNavigation = newRenderer.on('revisionNavigation', (e) => {
+      if (!cancelled && (isCurrentRenderer() || activeMountRef.current?.renderer === newRenderer)) {
+        onRevisionNavigationRef.current?.(e)
+      }
+    })
+    const unsubRevisionChanged = newRenderer.on('revisionChanged', (e) => { if (isCurrentRenderer()) onRevisionChangedRef.current?.(e) })
     const unsubNavigateError = newRenderer.on('navigateError', (e) => { if (isCurrentRenderer()) onNavigateErrorRef.current?.(e) })
     const unsubChromeToggle = newRenderer.on('chromeToggle', () => { if (isCurrentRenderer()) onChromeToggleRef.current?.() })
     const unsubUserJump = newRenderer.on('userJump', () => { if (isCurrentRenderer()) onUserJumpRef.current?.() })
@@ -340,15 +443,7 @@ export function useReaderRenderer({
     const unsubAnnotationOrphaned = newRenderer.on('annotationOrphaned', (e) => { if (isCurrentRenderer()) onAnnotationOrphanedRef.current?.(e) })
     const unsubFootnoteOpen = newRenderer.on('footnoteOpen', (e) => { if (isCurrentRenderer()) onFootnoteOpenRef.current?.(e) })
     const unsubFootnoteClose = newRenderer.on('footnoteClose', () => { if (isCurrentRenderer()) onFootnoteCloseRef.current?.() })
-
-    return () => {
-      cancelled = true
-      if (rendererRef.current === newRenderer) onViewRebuildingRef.current?.(true)
-      const position = newRenderer.getCurrentPosition?.()
-      if (rendererRef.current === newRenderer && position
-        && (position.cfi !== null || position.fraction !== null)) {
-        remountPositionRef.current = { key: rendererKey, ...position }
-      }
+    teardown = () => {
       unsubRelocated()
       unsubSelected()
       unsubTextSelectionStart()
@@ -364,6 +459,8 @@ export function useReaderRenderer({
       unsubToc()
       unsubJumpConfirmed()
       unsubNavigatePending()
+      unsubRevisionNavigation()
+      unsubRevisionChanged()
       unsubNavigateError()
       unsubChromeToggle()
       unsubUserJump()
@@ -371,11 +468,29 @@ export function useReaderRenderer({
       unsubAnnotationOrphaned()
       unsubFootnoteOpen()
       unsubFootnoteClose()
-      newRenderer.destroy()
-      if (rendererRef.current === newRenderer) rendererRef.current = null
+    }
+    if (!previousMount) activeMountRef.current = mountRecord
+
+    return () => {
+      if (activeMountRef.current?.renderer === newRenderer
+        && desiredBookIdRef.current === bookId
+        && (desiredUrlRef.current !== url || desiredMountGenerationRef.current !== mountGeneration)) return
+      cancelled = true
+      if (previousMount && activeMountRef.current?.renderer === previousMount.renderer
+        && (desiredBookIdRef.current !== bookId
+          || (desiredUrlRef.current === url && desiredMountGenerationRef.current === mountGeneration))) {
+        previousMount.dispose()
+      }
+      if (rendererRef.current === newRenderer) onViewRebuildingRef.current?.(true)
+      const position = newRenderer.getCurrentPosition?.()
+      if (rendererRef.current === newRenderer && position
+        && (position.cfi !== null || position.fraction !== null)) {
+        remountPositionRef.current = { key: rendererKey, ...position }
+      }
+      mountRecord.dispose()
       setRenderer((current) => (current === newRenderer ? null : current))
     }
-  }, [url, bookId, createRenderer, initialCfi, initialFraction, canMount])
+  }, [url, bookId, createRenderer, initialCfi, initialFraction, canMount, mountGeneration])
 
   // Navigate to the saved position once both renderer and progress are ready.
   // Skipping when initialCfi is undefined avoids a spurious goTo({ index: 0 })

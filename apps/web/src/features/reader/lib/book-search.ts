@@ -294,24 +294,33 @@ export function offsetsToRange(doc: Document, start: number, end: number): Range
 
 interface SearchableBook {
   sections?: { id?: string; linear?: string }[] | null
-  loadSectionText?: (href: string) => Promise<string | null>
+  loadSectionText?: (href: string, signal?: AbortSignal) => Promise<string | null>
 }
 
 // Chapter text cache keyed by (book, section index). Stored on a WeakMap so
 // it shares the book object's lifetime — which is the module-level parse
 // cache's lifetime in FoliateReader (evicting the book drops this too).
-const chapterTextCaches = new WeakMap<object, Map<string, Promise<ChapterText | null>>>()
+interface ChapterTextCacheEntry {
+  promise: Promise<ChapterText | null>
+  controller: AbortController
+  consumers: number
+  hasUncancellableConsumer: boolean
+  settled: boolean
+}
+
+const chapterTextCaches = new WeakMap<object, Map<string, ChapterTextCacheEntry>>()
 
 async function loadChapterText(
   book: SearchableBook,
   index: number,
   options?: ChapterTextOptions,
   timings?: SearchTimings,
+  signal?: AbortSignal,
 ): Promise<ChapterText | null> {
   const section = book.sections?.[index]
   if (!section?.id || typeof book.loadSectionText !== 'function') return null
   let started = performance.now()
-  const markup = await book.loadSectionText(section.id)
+  const markup = await book.loadSectionText(section.id, signal)
   if (timings) timings.load += performance.now() - started
   if (typeof markup !== 'string') return null
   const parser = new DOMParser()
@@ -353,6 +362,7 @@ export function getChapterText(
   index: number,
   options?: ChapterTextOptions,
   timings?: SearchTimings,
+  signal?: AbortSignal,
 ): Promise<ChapterText | null> {
   let cache = chapterTextCaches.get(book as object)
   if (!cache) {
@@ -363,16 +373,55 @@ export function getChapterText(
     chineseConversion: options?.chineseConversion ?? 'off',
     replacements: options?.replacements ?? [],
   })}`
-  const cached = cache.get(cacheKey)
-  if (cached) {
-    if (timings) timings.chapterCacheHits++
-    return cached
+  let cached = cache.get(cacheKey)
+  const isCacheHit = cached !== undefined
+  if (!cached) {
+    const controller = new AbortController()
+    const entry: ChapterTextCacheEntry = {
+      controller,
+      consumers: 0,
+      hasUncancellableConsumer: !signal,
+      settled: false,
+      promise: Promise.resolve(null),
+    }
+    const promise = loadChapterText(book, index, options, timings, controller.signal).catch(() => null)
+    entry.promise = promise
+    cache.set(cacheKey, entry)
+    cached = entry
+    void promise.then((value) => {
+      entry.settled = true
+      if (value === null && cache?.get(cacheKey) === entry) cache.delete(cacheKey)
+    })
   }
-  // Failures resolve to null but are evicted, so the next search retries
-  const promise = loadChapterText(book, index, options, timings).catch(() => null)
-  cache.set(cacheKey, promise)
-  void promise.then((value) => {
-    if (value === null && cache.get(cacheKey) === promise) cache.delete(cacheKey)
-  })
-  return promise
+  if (cached) {
+    if (isCacheHit && timings) timings.chapterCacheHits++
+    if (!signal) {
+      cached.hasUncancellableConsumer = true
+      return cached.promise
+    }
+    if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException('Reader search was cancelled', 'AbortError'))
+    cached.consumers += 1
+    return new Promise<ChapterText | null>((resolve, reject) => {
+      let settled = false
+      const release = () => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', onAbort)
+        cached!.consumers = Math.max(0, cached!.consumers - 1)
+        if (!cached!.settled && cached!.consumers === 0 && !cached!.hasUncancellableConsumer) {
+          cached!.controller.abort(new DOMException('Reader search has no remaining consumers', 'AbortError'))
+        }
+      }
+      const onAbort = () => {
+        release()
+        reject(signal.reason ?? new DOMException('Reader search was cancelled', 'AbortError'))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      cached!.promise.then(
+        (value) => { if (!settled) { release(); resolve(value) } },
+        (error) => { if (!settled) { release(); reject(error) } },
+      )
+    })
+  }
+  return Promise.resolve(null)
 }

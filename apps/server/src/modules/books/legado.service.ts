@@ -5,7 +5,7 @@ import { applyTitleReplacements, type LegadoExploreConfigRes, type LegadoExplore
 
 import { getDb } from '../../db/client'
 import { contentRevisions, libraryCategories, libraryMemberships, libraryTags, libraries, shelves } from '../../db/schema'
-import { isEpubMediaPath, loadEpubChapterMarkup, loadEpubResource, resolveEpubResourcePath, type EpubChapterMedia } from '../../formats/epub'
+import { isEpubMediaPath, resolveEpubResourcePath, type EpubChapterMedia } from '../../formats/epub'
 import { AppError } from '../../middleware/error'
 import { getUserTimezone } from '../auth/auth.service'
 import { formatTimestamp } from '../../lib/format-timestamp'
@@ -16,8 +16,8 @@ import {
   getActiveBook,
   getBookChapterContent,
   getBookChapters,
-  getBookEpubBuffer,
 } from './books.service'
+import { loadReaderChapterMarkup, loadReaderEpubResource } from './reader-content.service'
 import { applyEpubChapterReplacements, applyChapterReplacements, loadEffectiveBookReplacementRules, type BookReplacementRule } from './replacement-rules'
 
 const SKIPPED_TAGS = new Set(['script', 'style', 'head'])
@@ -596,7 +596,7 @@ export async function getLegadoChapterContent(
     chapter.title,
     rules.filter((rule) => rule.matchType === 'pattern' && rule.effectiveEnabled),
   )
-  const markup = await loadEpubChapterMarkup(await getBookEpubBuffer(userId, bookId, LEGADO_READ), chapterIndex)
+  const markup = await loadReaderChapterMarkup(book, chapterIndex)
   if (markup) {
     try {
       const content = projectEpubChapterMarkup(markup.markup, rules, markup.href, resourceUrl, markup.media, title, includeMedia)
@@ -614,7 +614,7 @@ export async function getLegadoChapterContent(
 export async function getLegadoBookResource(userId: string, bookId: string, resourcePath: string) {
   const book = await getActiveBook(userId, bookId, LEGADO_READ)
   if (book.format !== 'epub') throw new AppError('UNSUPPORTED_FORMAT', 'Only EPUB books expose media resources')
-  const resource = await loadEpubResource(await getBookEpubBuffer(userId, bookId, LEGADO_READ), resourcePath)
+  const resource = await loadReaderEpubResource(book, resourcePath)
   if (!resource) throw new AppError('BOOK_FILE_MISSING', 'EPUB media resource not found')
   return resource
 }

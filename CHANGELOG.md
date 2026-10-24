@@ -6,6 +6,7 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- EPUB and TXT reading now loads chapters on demand and prepares nearby content as you read. Content updates switch silently on the next chapter navigation while preserving the current page until the replacement is ready.
 - The default service port is now **18423** instead of **3000** for Docker and source deployments. The frontend development port remains **5173**; explicit `PORT` settings remain supported.
 
 ### Upgrade notes
@@ -853,6 +854,7 @@ All notable changes to Bookdock are documented here.
 
 #### 变更
 
+- EPUB / TXT 阅读改为按需加载章节，并随阅读准备附近正文；书籍内容更新后在下次章节导航时静默切换，新内容准备完成前保留当前页面。
 - Docker 和源码部署的默认服务端口由 **3000** 调整为 **18423**。前端开发端口仍为 **5173**，继续支持通过 `PORT` 自定义服务端口。
 
 #### 升级说明

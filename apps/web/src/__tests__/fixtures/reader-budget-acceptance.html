@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Isolated reader cache acceptance</title>
+<body><pre id="result">Running isolated cache acceptance…</pre>
+<script type="module">
+const output = document.querySelector('#result')
+const modulePath = '/src/features/reader/lib/idb-chapter-store.ts'
+const dbName = 'bookdock-chapter-text'
+const checks = []
+const check = (condition, name) => {
+  if (!condition) throw new Error(name)
+  checks.push(name)
+  output.textContent = JSON.stringify({ status: 'RUNNING', checks }, null, 2)
+}
+const open = version => new Promise((resolve, reject) => {
+  const request = indexedDB.open(dbName, version)
+  request.onupgradeneeded = () => {
+    for (const name of ['text', 'blob']) {
+      const store = request.result.createObjectStore(name, { keyPath: 'key' })
+      store.createIndex('ns', 'ns')
+    }
+  }
+  request.onsuccess = () => resolve(request.result)
+  request.onerror = () => reject(request.error)
+})
+const transactionDone = tx => new Promise((resolve, reject) => {
+  tx.oncomplete = resolve
+  tx.onerror = tx.onabort = () => reject(tx.error)
+})
+const readRows = (db, store) => new Promise((resolve, reject) => {
+  const request = db.transaction(store).objectStore(store).getAll()
+  request.onsuccess = () => resolve(request.result)
+  request.onerror = () => reject(request.error)
+})
+try {
+  if (location.hostname !== '127.0.0.1' || location.port !== '51887') {
+    throw new Error('Run only on disposable origin http://127.0.0.1:51887')
+  }
+  if (new URLSearchParams(location.search).has('reset') || new URLSearchParams(location.search).has('cleanup')) {
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(dbName)
+      request.onsuccess = resolve
+      request.onerror = () => reject(request.error)
+    })
+    if (new URLSearchParams(location.search).has('cleanup')) {
+      output.textContent = 'Disposable acceptance database removed'
+    } else location.replace(location.pathname)
+  } else if (new URLSearchParams(location.search).has('worker')) {
+    const { idbChapterTextStore: text, idbReaderBlobStore: blob } = await import(/* @vite-ignore */ modulePath)
+    const id = new URLSearchParams(location.search).get('worker')
+    for (let i = 0; i < 48; i++) {
+      await blob.put(`${id}|image-${i}`, new ArrayBuffer(65536), 'image/png')
+      await text.put(`${id}|chapter-${i}`, '正文'.repeat(8192))
+      await text.enforceBudget('', 1048576)
+    }
+    parent.postMessage({ readerAcceptanceWorker: id }, location.origin)
+    output.textContent = 'Worker complete'
+  } else {
+    const existing = await indexedDB.databases()
+    check(!existing.some(db => db.name === dbName), 'Origin starts without a reader database')
+    const legacy = await open(2)
+    const tx = legacy.transaction(['text', 'blob'], 'readwrite')
+    tx.objectStore('text').put({ key: 'legacy|chapter', ns: 'legacy', text: 'legacy', bytes: 12, savedAt: 1, lastReadAt: 1 })
+    tx.objectStore('blob').put({ key: 'legacy|image', ns: 'legacy', data: new ArrayBuffer(4), bytes: 4, mediaType: 'image/png', savedAt: 1, lastReadAt: 1 })
+    await transactionDone(tx)
+    const blocked = await import(/* @vite-ignore */ modulePath + '?acceptance=blocked')
+    await blocked.idbChapterTextStore.put('blocked|chapter', 'not persisted')
+    check(await blocked.idbChapterTextStore.get('blocked|chapter') === undefined, 'Blocked upgrade degrades without a hanging caller')
+    legacy.close()
+    const { idbChapterTextStore: text, idbReaderBlobStore: blob, READER_CONTENT_BUDGET_BYTES: budget } = await import(/* @vite-ignore */ modulePath)
+    check((await text.get('legacy|chapter'))?.text === 'legacy', 'Native v2 to v3 migration preserves text')
+    check((await blob.get('legacy|image'))?.data.byteLength === 4, 'Native v2 to v3 migration preserves media')
+    await text.put('stale-account|chapter', 'must not persist', () => false)
+    check(await text.get('stale-account|chapter') === undefined, 'Stale account write guard rejects persistence')
+    const db = await open(3)
+    check((await readRows(db, 'reader-meta')).length === 2, 'Migration creates matching lightweight metadata')
+    const start = performance.now()
+    for (let i = 0; i < 68; i++) await blob.put(`pressure|${i}`, new ArrayBuffer(4 * 1048576), 'image/png')
+    await text.enforceBudget('', budget)
+    let metadata = await readRows(db, 'reader-meta')
+    const storedBytes = metadata.reduce((sum, row) => sum + row.bytes, 0)
+    check(storedBytes <= budget, 'Native 272 MiB pressure converges to the 256 MiB budget')
+    check(metadata.some(row => row.key === 'pressure|67'), 'Most recent media survives eviction')
+    check(!metadata.some(row => row.key === 'pressure|0'), 'Least recent media is evicted')
+    const pressureMs = Math.round(performance.now() - start)
+    await new Promise((resolve, reject) => {
+      const completed = new Set()
+      const timeout = setTimeout(() => reject(new Error('Concurrent cache contexts timed out')), 30000)
+      const listener = event => {
+        if (event.origin !== location.origin || !event.data.readerAcceptanceWorker) return
+        completed.add(event.data.readerAcceptanceWorker)
+        if (completed.size === 2) {
+          clearTimeout(timeout)
+          removeEventListener('message', listener)
+          resolve()
+        }
+      }
+      addEventListener('message', listener)
+      for (const id of ['a', 'b']) {
+        const frame = document.createElement('iframe')
+        frame.src = location.pathname + '?worker=' + id
+        frame.hidden = true
+        document.body.append(frame)
+      }
+    })
+    await text.enforceBudget('', 1048576)
+    metadata = await readRows(db, 'reader-meta')
+    check(metadata.reduce((sum, row) => sum + row.bytes, 0) <= 1048576, 'Two native IDB contexts converge to their shared budget')
+    const keys = new Set(metadata.map(row => row.key))
+    for (const store of ['text', 'blob']) {
+      const tx = db.transaction(store)
+      const request = tx.objectStore(store).getAllKeys()
+      const actual = await new Promise(resolve => { request.onsuccess = () => resolve(request.result) })
+      check(actual.every(key => keys.has(key)), `No orphan ${store} payloads after concurrent eviction`)
+    }
+    db.close()
+    output.textContent = JSON.stringify({ status: 'PASS', checks, pressureMs, storedBytes, concurrentMetadataRows: metadata.length,
+      scope: 'Disposable origin; actual IndexedDB and production store module; two iframe contexts; no reader UI or quota exhaustion' }, null, 2)
+  }
+} catch (error) {
+  output.textContent = JSON.stringify({ status: 'FAIL', checks, error: String(error) }, null, 2)
+}
+</script></body></html>

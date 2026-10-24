@@ -265,7 +265,45 @@ describe('getChapterText', () => {
     expect(first?.text).toBe('正文')
     expect(second).toBe(first)
     expect(loadSectionText).toHaveBeenCalledTimes(1)
-    expect(loadSectionText).toHaveBeenCalledWith('a.xhtml')
+    expect(loadSectionText).toHaveBeenCalledWith('a.xhtml', expect.any(AbortSignal))
+  })
+
+  it('cancels a search waiter without aborting a second consumer of the same chapter', async () => {
+    let requestSignal: AbortSignal | undefined
+    let resolveMarkup!: (markup: string) => void
+    const book = {
+      sections: [{ id: 'a.xhtml' }],
+      loadSectionText: vi.fn((_href: string, signal?: AbortSignal) => {
+        requestSignal = signal
+        return new Promise<string>((resolve) => { resolveMarkup = resolve })
+      }),
+    }
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+    const first = getChapterText(book, 0, undefined, undefined, firstController.signal)
+    const second = getChapterText(book, 0, undefined, undefined, secondController.signal)
+    firstController.abort()
+
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requestSignal?.aborted).toBe(false)
+    resolveMarkup(`${XHTML_HEAD}<p>共享章节</p>${XHTML_TAIL}`)
+    await expect(second).resolves.toMatchObject({ text: '共享章节' })
+  })
+
+  it('aborts the chapter request when its final search consumer cancels', async () => {
+    let requestSignal: AbortSignal | undefined
+    const book = {
+      sections: [{ id: 'a.xhtml' }],
+      loadSectionText: vi.fn((_href: string, signal?: AbortSignal) => {
+        requestSignal = signal
+        return new Promise<string>((_resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true }))
+      }),
+    }
+    const controller = new AbortController()
+    const pending = getChapterText(book, 0, undefined, undefined, controller.signal)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requestSignal?.aborted).toBe(true)
   })
 
   it('falls back to lenient HTML parsing for malformed XHTML', async () => {

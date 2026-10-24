@@ -778,11 +778,12 @@ class View {
                     img.src = bgUrl
                     // Bound the wait so a missing, broken, or hung image (one
                     // that fires neither load nor error) can never block the
-                    // section from rendering.
+                    // section from rendering. Text-first: let the glyphs paint,
+                    // then grow the view if the image arrives late.
                     let timer
                     await Promise.race([
                         waited,
-                        new Promise(res => { timer = setTimeout(res, 3000) }),
+                        new Promise(res => { timer = setTimeout(res, 200) }),
                     ])
                     clearTimeout(timer)
                 }
@@ -1420,6 +1421,7 @@ export class Paginator extends HTMLElement {
     // A navigation may be superseded while a section or adjacent preload is
     // still loading. Only the newest navigation may reveal or re-anchor DOM.
     #displayGeneration = 0
+    #navigationController = null
     #lastLayout = null // cached layout from the last #beforeRender call
     // Cache of section index → vertical (boolean). Populated as views
     // are loaded so we can check direction *before* loading a section.
@@ -3793,8 +3795,9 @@ export class Paginator extends HTMLElement {
         let loaded = false
         try {
             if (isPrepend) this.#container.style.overflowAnchor = 'none'
-            const src = await section.load()
-            const data = await section.loadContent?.()
+            const signal = this.#navigationController?.signal
+            const src = await section.load(signal)
+            const data = await section.loadContent?.(signal)
             const expandHandler = isPrepend
                 ? expandedView => {
                     if (!loaded || this.#views.get(index) !== expandedView
@@ -3974,6 +3977,7 @@ export class Paginator extends HTMLElement {
             this.#renderedStart,
             maxDistance,
         )
+        const startBefore = this.#renderedStart
         let removedSize = 0
         for (const index of trim) {
             const view = this.#views.get(index)
@@ -3981,7 +3985,13 @@ export class Paginator extends HTMLElement {
             removedSize += view.element.getBoundingClientRect()[this.sideProp]
             this.#destroyView(index)
         }
-        if (removedSize > 0) this.containerPosition += removedSize
+        if (removedSize > 0) {
+            // Use the pre-removal position: native scroll anchoring may have
+            // already compensated for DOM removal by the time we write it.
+            const target = Math.max(0, startBefore - removedSize)
+            this.containerPosition = this.#vertical ? -target : target
+            this.#lastScrollPosition = target
+        }
     }
     #canGoToIndex(index) {
         return index >= 0 && index <= this.sections.length - 1
@@ -3990,6 +4000,9 @@ export class Paginator extends HTMLElement {
         this.#selectionDrag.stop(true)
         const generation = ++this.#displayGeneration
         const isCurrent = () => generation === this.#displayGeneration
+        this.#navigationController?.abort(new DOMException('Reader navigation was replaced', 'AbortError'))
+        const navigationController = new AbortController()
+        this.#navigationController = navigationController
         this.#clearContinuousBufferTimer()
         this.#backwardEdgePending = false
         this.#backwardWheelIntent = 0
@@ -4112,12 +4125,12 @@ export class Paginator extends HTMLElement {
                 this.#clearViewsExcept(keep)
             }
             try {
-                await this.#display(Promise.resolve(this.sections[index].load())
+                await this.#display(Promise.resolve(this.sections[index].load(navigationController.signal))
                     .then(async src => {
                         if (typeof src !== 'string' || !src) {
                             throw new Error(`Section ${index} has no readable source`)
                         }
-                        const data = await this.sections[index].loadContent?.()
+                        const data = await this.sections[index].loadContent?.(navigationController.signal)
                         return { index, src, data, anchor, onLoad, select }
                     }).catch(e => {
                         console.warn(e)
@@ -4372,6 +4385,8 @@ export class Paginator extends HTMLElement {
         this.#primaryView?.destroyLoupe()
     }
     destroy() {
+        this.#navigationController?.abort(new DOMException('Reader view was destroyed', 'AbortError'))
+        this.#navigationController = null
         this.#selectionDrag.destroy()
         this.#clearContinuousBufferTimer()
         const transition = (this.#vtDrag ?? this.#vtFinishing)?.transition

@@ -23,6 +23,8 @@ import {
   shouldSkipCleanReadingResource,
   canUseCleanReading,
   markEpubChapterTitle,
+  reportInvalidReplacementIds,
+  setReplacementInvalidListener,
 } from '../features/reader/renderers/FoliateReader'
 import type { ReaderAnnotation } from '../features/reader/types'
 import type { TextReplacementRule } from '../features/reader/lib/text-replacements'
@@ -44,6 +46,63 @@ describe('personal marker theme changes', () => {
     reader.applyReadingTheme({ bg: '#101010', text: '#ffffff' })
 
     expect(repaint).toHaveBeenCalledExactlyOnceWith('marker|highlight', false)
+  })
+})
+
+describe('replacement invalid listener ownership', () => {
+  it('does not let destroying a parked renderer clear the active renderer callback', () => {
+    const parked = new FoliateReader('old')
+    const active = new FoliateReader('new')
+    const parkedReport = vi.fn()
+    const activeReport = vi.fn()
+    ;(parked as any).releaseReplacementInvalidListener = setReplacementInvalidListener(parkedReport)
+    ;(active as any).releaseReplacementInvalidListener = setReplacementInvalidListener(activeReport)
+
+    parked.destroy()
+    reportInvalidReplacementIds(['rule-1'])
+
+    expect(parkedReport).not.toHaveBeenCalled()
+    expect(activeReport).toHaveBeenCalledWith(['rule-1'])
+    active.destroy()
+    reportInvalidReplacementIds(['rule-2'])
+    expect(activeReport).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Foliate request memo cancellation', () => {
+  it('releases one resource waiter while another consumer keeps the shared transfer alive', async () => {
+    let transferSignal: AbortSignal | undefined
+    let resolveBlob!: (blob: Blob) => void
+    const load = vi.fn((_name: string, _type?: string, signal?: AbortSignal) => {
+      transferSignal = signal
+      return new Promise<Blob>((resolve) => { resolveBlob = resolve })
+    })
+    const memoized = memoizeLoadBlob(`cancel-test-${Math.random()}`, load)
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+    const first = memoized('image.png', 'image/png', firstController.signal)
+    const second = memoized('image.png', 'image/png', secondController.signal)
+    await vi.waitFor(() => expect(transferSignal).toBeDefined())
+    firstController.abort()
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+    expect(transferSignal?.aborted).toBe(false)
+    resolveBlob(new Blob(['shared'], { type: 'image/png' }))
+    await expect(second).resolves.toMatchObject({ size: 6, type: 'image/png' })
+    expect(load).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts the resource transfer when its final consumer leaves', async () => {
+    let transferSignal: AbortSignal | undefined
+    const memoized = memoizeLoadBlob(`cancel-last-${Math.random()}`, (_name, _type, signal) => {
+      transferSignal = signal
+      return new Promise<Blob>((_resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true }))
+    })
+    const controller = new AbortController()
+    const pending = memoized('font.woff2', 'font/woff2', controller.signal)
+    await vi.waitFor(() => expect(transferSignal).toBeDefined())
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(transferSignal?.aborted).toBe(true)
   })
 })
 

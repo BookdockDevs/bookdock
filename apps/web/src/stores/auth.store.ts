@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 
+import { clearReaderContentStore } from '@/features/reader/lib/idb-chapter-store'
 import { clearLibraryNamesSnapshot } from '@/lib/library-name-cache'
+import { invalidateReaderSession, resetSessionScope, setSessionAccount } from '@/lib/session-scope'
 import { clearStoredSettings } from '@/lib/settings-cache'
 import { useUiStore } from './ui.store'
 
@@ -42,13 +44,30 @@ export function getAuthSessionRevision(): number {
 
 // The session lives in an HttpOnly cookie; the store only mirrors the user profile for
 // UI display so a reload does not flash logged-out chrome before /auth/me resolves.
+const initialUser = readStoredUser()
+setSessionAccount(initialUser?.id ?? null)
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'bd-user') void clearReaderContentStore()
+  })
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
-  user: readStoredUser(),
+  user: initialUser,
   setAuth: (user) => {
     const previousUser = useAuthStore.getState().user
-    if (!previousUser || previousUser.id !== user.id || previousUser.role !== user.role) {
+    const accountChanged = setSessionAccount(user.id)
+    const identityChanged = !previousUser || previousUser.id !== user.id || previousUser.role !== user.role
+    if (identityChanged) {
       authSessionRevision += 1
       clearLibraryNamesSnapshot()
+    }
+    if (accountChanged) {
+      void clearReaderContentStore()
+    } else if (identityChanged) {
+      invalidateReaderSession()
+      void clearReaderContentStore()
     }
     if (typeof window !== 'undefined') {
       localStorage.setItem('bd-user', JSON.stringify(user))
@@ -62,6 +81,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (patch.role !== undefined && patch.role !== state.user.role) {
         authSessionRevision += 1
         clearLibraryNamesSnapshot()
+        invalidateReaderSession()
+        void clearReaderContentStore()
       }
       const user = { ...state.user, ...patch }
       if (typeof window !== 'undefined') {
@@ -73,6 +94,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   clearAuth: () => {
     authSessionRevision += 1
     clearLibraryNamesSnapshot()
+    resetSessionScope()
+    void clearReaderContentStore()
     if (!useAuthStore.getState().user) return
     // Drop the session before resetting preferences: the settings subscription
     // skips syncing while logged out, so the reset below stays local and can
