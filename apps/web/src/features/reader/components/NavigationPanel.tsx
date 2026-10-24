@@ -492,6 +492,12 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const searchActive = searchExpanded && query.trim().length > 0
 
   useEffect(() => {
+    const toggleSearch = () => setSearchExpanded((expanded) => !expanded)
+    window.addEventListener('bd-reader-search', toggleSearch)
+    return () => window.removeEventListener('bd-reader-search', toggleSearch)
+  }, [])
+
+  useEffect(() => {
     if (tab === 'toc' && searchExpanded) {
       searchInputRef.current?.focus()
     }
@@ -1343,6 +1349,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             <div className="relative flex items-center">
               <input
                 ref={searchInputRef}
+                data-reader-book-search
                 type="text"
                 value={query}
                 onChange={(e) => {

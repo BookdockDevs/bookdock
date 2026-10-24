@@ -115,6 +115,27 @@ describe('Settings routes - Integrations', () => {
   })
 })
 
+describe('Settings routes - reader shortcuts', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('stores synchronized shortcuts inside the current user settings', async () => {
+    vi.mocked(settingsService.getSettings).mockReturnValue({ readingConfig: '{"global":{}}' })
+    const app = createApp()
+    const readerShortcuts = JSON.stringify({ toc: { key: 't', ctrl: false, alt: false, shift: false, meta: false } })
+    const res = await app.request('http://test/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readerShortcuts }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(settingsService.updateSettings).toHaveBeenCalledWith('u1', {
+      readingConfig: '{"global":{}}',
+      readerShortcuts,
+    })
+  })
+})
+
 describe('Settings routes - Library preferences', () => {
   beforeEach(() => {
     vi.clearAllMocks()

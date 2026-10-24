@@ -159,6 +159,7 @@ export const settingsUpdateSchema = z.object({
   ttsFollow: z.boolean().optional(),
   // Named reading-setting profiles; JSON serialized by the web client, server passes it through.
   readingConfig: z.string().optional(),
+  readerShortcuts: z.string().max(4096).optional(),
   customThemes: z.string().optional(),
   // Partial updates are allowed; the server merges onto the stored settings.
   trash: z.object({

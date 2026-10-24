@@ -44,6 +44,22 @@ function NestedMenuHarness() {
 }
 
 describe('Modal', () => {
+  it('can focus the dialog container without selecting a header action', () => {
+    render(
+      <Modal
+        title="Test modal"
+        onClose={() => undefined}
+        initialFocus="dialog"
+        actions={<button type="button">Reset</button>}
+      >
+        Content
+      </Modal>,
+    )
+
+    expect(screen.getByRole('dialog')).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Reset' })).not.toHaveFocus()
+  })
+
   it('leaves the modal open when Escape originates from an editor portal', () => {
     const close = vi.fn()
     render(<Modal title="Test modal" onClose={close}>Content</Modal>)

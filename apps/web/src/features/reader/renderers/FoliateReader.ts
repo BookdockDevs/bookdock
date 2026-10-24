@@ -57,6 +57,8 @@ import {
 import { convertChinese } from '@/lib/chinese'
 import { mix, isDark } from '@/lib/color'
 import { getContentAccountScope, getSessionEpoch, onSessionScopeChange } from '@/lib/session-scope'
+import { useAuthStore } from '@/stores/auth.store'
+import { forwardReaderShortcut, readReaderShortcuts } from '../lib/reader-shortcuts'
 
 const ANNOTATION_COLORS: Record<string, string> = {
   amber: '#f59e0b',
@@ -4709,7 +4711,7 @@ export class FoliateReader implements BookReader {
             doc.removeEventListener('selectionchange', sel.selectionChangeHandler)
             doc.removeEventListener('touchend', sel.handler)
             doc.removeEventListener('dblclick', sel.dblHandler)
-            doc.removeEventListener('keydown', sel.keyForwardHandler)
+            doc.removeEventListener('keydown', sel.keyForwardHandler, true)
             this.selectionDocs.delete(doc)
           }
         }
@@ -4811,13 +4813,16 @@ export class FoliateReader implements BookReader {
         // handler already owns them inside the iframe.
         const forwardedKeys = ['Escape', ' ']
         const keyForwardHandler = (e: KeyboardEvent) => {
-          if (!forwardedKeys.includes(e.key)) return
+          const shortcuts = readReaderShortcuts(useAuthStore.getState().user?.id ?? null)
           const host = this.container ?? document.body
-          if (host) {
-            host.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, bubbles: true }))
-          }
+          if (!host) return
+          if (forwardReaderShortcut(e, host, shortcuts)) return
+          if (!forwardedKeys.includes(e.key)) return
+          host.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, bubbles: true }))
         }
-        doc.addEventListener('keydown', keyForwardHandler)
+        // Configured shortcuts must run before Foliate's own document handler;
+        // Alt+ArrowLeft/Right otherwise can turn a page before the host sees it.
+        doc.addEventListener('keydown', keyForwardHandler, true)
         this.selectionDocs.set(doc, { index, handler, selectionChangeHandler, startHandler, dblHandler, keyForwardHandler })
       }
       this.activeDocs = docs

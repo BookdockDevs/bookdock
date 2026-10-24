@@ -12,6 +12,7 @@ import { notify } from '@/lib/notifications'
 import { withReveal } from '@/lib/reveal-hidden'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
+import { isReaderContentTarget, isReaderModalOpen, isReaderShortcutModalOpen, readReaderShortcuts, shortcutMatches } from './lib/reader-shortcuts'
 import { useSettingsSyncStore } from '@/stores/settings-sync.store'
 
 import { cn } from '@/lib/utils'
@@ -44,6 +45,7 @@ import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hook
 import { ReaderHeader } from './components/ReaderHeader'
 import { ReaderSidebar } from './components/ReaderSidebar'
 import { ReaderLoadingBadge } from './components/ReaderPending'
+import ReaderKeyboardShortcuts from './components/ReaderKeyboardShortcuts'
 import { Ribbon } from './components/Ribbon'
 import { SelectionToolbar } from './components/SelectionToolbar'
 import { clearReaderSelection } from './lib/reader-selection'
@@ -125,6 +127,7 @@ export default function Reader() {
   const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
   const [_atChapterStart, setAtChapterStart] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [shortcutDialogOpen, setShortcutDialogOpen] = useState(false)
   const [ttsOpen, setTtsOpen] = useState(false)
   const [autoReadingOpen, setAutoReadingOpen] = useState(false)
   const [footnoteEntry, setFootnoteEntry] = useState<FootnoteEntry | null>(null)
@@ -1797,6 +1800,8 @@ export default function Reader() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
+      const isBookSearchInput = target.matches('[data-reader-book-search]')
+      const shortcuts = readReaderShortcuts(useAuthStore.getState().user?.id ?? null)
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         // A focused input's own Esc handler (or a window-level popup handler)
         // marks the consumed flag synchronously. Consume it in the next tick so
@@ -1806,9 +1811,69 @@ export default function Reader() {
             consumeEscFlag()
           }, 0)
         }
-        return
+        if (!isBookSearchInput || e.isComposing || (e as KeyboardEvent & { keyCode?: number }).keyCode === 229 || !shortcutMatches(e, shortcuts.search)) return
       }
       if (e.defaultPrevented && e.key !== 'Escape') return
+      if (e.isComposing || (e as KeyboardEvent & { keyCode?: number }).keyCode === 229) return
+      const state = useReaderState.getState()
+      const ui = useUiStore.getState()
+      const inReaderInput = target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)
+      const modal = isReaderModalOpen()
+      const shortcutModal = isReaderShortcutModalOpen()
+      const run = (id: keyof typeof shortcuts, action: () => void) => {
+        if (inReaderInput && !(id === 'search' && isBookSearchInput)) return false
+        if (!shortcutMatches(e, shortcuts[id])) return false
+        e.preventDefault()
+        e.stopPropagation()
+        action()
+        return true
+      }
+      if ((!modal || shortcutModal) && run('shortcutsMenu', () => {
+        if (shortcutModal) {
+          setShortcutDialogOpen(false)
+          window.dispatchEvent(new Event('bd-reader-shortcuts-close'))
+        } else {
+          setShortcutDialogOpen(true)
+        }
+      })) return
+      if (!modal) {
+        if (run('sidebar', () => {
+          if (state.sidebarOpen) state.setSidebarOpen(false)
+          else {
+            const remembered = ui.navTabRemembered
+            state.setActiveNavTab(isGuest && remembered !== 'toc' ? 'toc' : remembered)
+            state.setSidebarOpen(true)
+          }
+        })) return
+        if (run('toc', () => { const closing = state.sidebarOpen && state.activeNavTab === 'toc'; if (!closing) { state.setActiveNavTab('toc'); ui.setNavTabRemembered('toc') }; state.setSidebarOpen(!closing) })) return
+        if (run('notes', () => { const closing = state.sidebarOpen && state.activeNavTab === 'notes'; if (!closing) { state.setActiveNavTab('notes'); ui.setNavTabRemembered('notes') }; state.setSidebarOpen(!closing) })) return
+        if (run('settings', onToggleSettings)) return
+        if (run('fontIncrease', () => {
+          const next = Math.min(64, effectiveSettings.fontSize + 1)
+          if (next !== effectiveSettings.fontSize) updateSetting('fontSize', next)
+        })) return
+        if (run('fontDecrease', () => {
+          const next = Math.max(12, effectiveSettings.fontSize - 1)
+          if (next !== effectiveSettings.fontSize) updateSetting('fontSize', next)
+        })) return
+        if (run('search', () => {
+          state.setActiveNavTab('toc')
+          ui.setNavTabRemembered('toc')
+          state.setSidebarOpen(true)
+          window.setTimeout(() => window.dispatchEvent(new CustomEvent('bd-reader-search')), 0)
+        })) return
+        if (run('historyBack', onHistoryBack)) return
+        if (run('historyForward', onHistoryForward)) return
+        if (run('tts', () => playbackCoordinator.command('tts'))) return
+        if (run('autoReading', () => playbackCoordinator.command('auto'))) return
+        const isReadingBody = isReaderContentTarget(e.target, containerEl)
+        if (isReadingBody && run('chapterStart', () => {
+          if (currentChapterIndex != null) void rendererRef.current?.display(`chapter:${currentChapterIndex}:0`)
+        })) return
+        if (isReadingBody && run('chapterEnd', () => {
+          if (currentChapterIndex != null) void rendererRef.current?.display(`chapter:${currentChapterIndex}:1`)
+        })) return
+      }
       if (e.key === 'Escape') {
         // Boss key: popups mark the consumed flag synchronously in their own
         // Esc branches; listeners run in registration order (ours first), so
@@ -1839,6 +1904,7 @@ export default function Reader() {
         else toggleChrome()
         return
       }
+      if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
       if (e.key === 'ArrowLeft' || (readingMode === 'page' && e.key === 'ArrowUp')) {
         e.preventDefault()
         if (readingMode === 'page' && rendererRef.current?.scrollByPages) {
@@ -1865,7 +1931,7 @@ export default function Reader() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [playbackCoordinator, readingMode, navigate, toggleChrome])
+  }, [playbackCoordinator, readingMode, navigate, toggleChrome, isGuest, onToggleSettings, onHistoryBack, onHistoryForward, currentChapterIndex, containerEl, effectiveSettings.fontSize, updateSetting])
 
   // Belt-and-braces: a stale "consumed" mark from a previous session (Esc
   // closed a popup, then the reader was left without another Esc) must not
@@ -1948,8 +2014,8 @@ export default function Reader() {
       <ViewSettingsContext.Provider value={viewSettingsContextValue}>
       <DialogLayoutContext.Provider value={dialogInset}>
       <RendererContext.Provider value={rendererContextValue}>
-      <AutoReadingSessionProvider renderer={renderer} coordinator={playbackCoordinator}>
-      <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator} guestReadOnly={isGuest}>
+      <AutoReadingSessionProvider renderer={renderer} coordinator={playbackCoordinator} onStart={onAutoReadingStart}>
+      <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator} guestReadOnly={isGuest} onStart={onTtsStart}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div className="flex h-full w-full">
             <ReaderSidebar
@@ -2245,6 +2311,7 @@ export default function Reader() {
             }}
           />
         )}
+        {shortcutDialogOpen && <ReaderKeyboardShortcuts onClose={() => setShortcutDialogOpen(false)} />}
       </div>
       </TtsSessionProvider>
       </AutoReadingSessionProvider>

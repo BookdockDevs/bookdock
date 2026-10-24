@@ -42,7 +42,9 @@ export function ExpandingSearchBar({
   const showHistory = !!history && history.length > 0 && !query
 
   useEffect(() => {
-    if (expanded) inputRef.current?.focus()
+    const input = inputRef.current
+    if (expanded) input?.focus()
+    else if (input === document.activeElement) input?.blur()
   }, [expanded])
 
   return (
@@ -66,6 +68,7 @@ export function ExpandingSearchBar({
           </svg>
           <input
             ref={inputRef}
+            data-reader-book-search
             type="text"
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}

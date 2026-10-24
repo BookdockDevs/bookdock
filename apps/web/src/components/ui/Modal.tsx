@@ -23,6 +23,7 @@ interface ModalProps {
   variant?: 'default' | 'reader'
   size?: 'sm' | 'default' | 'xl' | 'wide' | 'idea'
   centered?: boolean
+  initialFocus?: 'dialog' | 'firstFocusable'
   panelClassName?: string
   contentClassName?: string
   children: ReactNode
@@ -50,6 +51,7 @@ export default function Modal({
   variant = 'default',
   size = 'default',
   centered = false,
+  initialFocus = 'firstFocusable',
   panelClassName = '',
   contentClassName = '',
   children,
@@ -64,6 +66,8 @@ export default function Modal({
   )
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  const initialFocusRef = useRef(initialFocus)
+  initialFocusRef.current = initialFocus
 
   const reader = variant === 'reader'
   const width =
@@ -82,14 +86,18 @@ export default function Modal({
     activeModalCount += 1
     const dialog = dialogRef.current
     if (dialog && !dialog.contains(document.activeElement)) {
-      const focusable = dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-      const autoFocusEl = dialog.querySelector<HTMLElement>('[autofocus]')
-      if (autoFocusEl) {
-        autoFocusEl.focus()
-      } else if (focusable.length > 0) {
-        focusable[0]?.focus()
-      } else {
+      if (initialFocusRef.current === 'dialog') {
         dialog.focus()
+      } else {
+        const focusable = dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+        const autoFocusEl = dialog.querySelector<HTMLElement>('[autofocus]')
+        if (autoFocusEl) {
+          autoFocusEl.focus()
+        } else if (focusable.length > 0) {
+          focusable[0]?.focus()
+        } else {
+          dialog.focus()
+        }
       }
     }
 

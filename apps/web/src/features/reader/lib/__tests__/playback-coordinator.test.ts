@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { ReaderPlaybackCoordinator } from '../playback-coordinator'
 
@@ -14,6 +14,19 @@ function makeToggle(state: { available: boolean }) {
 }
 
 describe('ReaderPlaybackCoordinator pause/resume toggle', () => {
+  it('routes explicit playback commands to the registered owner action', () => {
+    const coordinator = new ReaderPlaybackCoordinator()
+    const tts = vi.fn()
+    const auto = vi.fn()
+    coordinator.registerCommand('tts', tts)
+    coordinator.registerCommand('auto', auto)
+
+    coordinator.command('tts')
+    coordinator.command('auto')
+    expect(tts).toHaveBeenCalledOnce()
+    expect(auto).toHaveBeenCalledOnce()
+  })
+
   it('reports no toggle before any owner has claimed playback', () => {
     const coordinator = new ReaderPlaybackCoordinator()
     const auto = makeToggle({ available: true })

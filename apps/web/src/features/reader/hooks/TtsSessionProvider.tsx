@@ -9,7 +9,7 @@ import type { BookReader } from '../types'
 import { TtsController, type TtsPreferences } from '../lib/tts-controller'
 import { IDLE_TTS_STATE, TtsSessionContext } from './tts-session-context'
 
-export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = false, children }: { renderer: BookReader | null; coordinator: ReaderPlaybackCoordinator; guestReadOnly?: boolean; children: ReactNode }) {
+export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = false, onStart, children }: { renderer: BookReader | null; coordinator: ReaderPlaybackCoordinator; guestReadOnly?: boolean; onStart?: () => void; children: ReactNode }) {
   const { data } = useTtsServices({ enabled: !guestReadOnly })
   const engine = useUiStore((state) => state.ttsEngine)
   const serviceId = useUiStore((state) => state.ttsServiceId)
@@ -57,6 +57,19 @@ export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = fals
       },
     })
   }, [controller, coordinator])
+
+  useEffect(() => {
+    if (!controller || guestReadOnly) return
+    return coordinator.registerCommand('tts', () => {
+      const status = controller.getSnapshot().status
+      if (status === 'idle' || status === 'error') {
+        void controller.start()
+        onStart?.()
+      } else {
+        void controller.stop()
+      }
+    })
+  }, [controller, coordinator, guestReadOnly, onStart])
 
   useEffect(() => {
     if (!controller) return

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { SettingsRes } from '@bookdock/shared'
 
 import { apiPut } from '@/api/client'
+import { readReaderShortcuts, readerShortcutStorageKey } from '@/features/reader/lib/reader-shortcuts'
 import { customThemesFromSync } from '@/lib/reading-theme'
 import { notify } from '@/lib/notifications'
 import { fetchSettings, readStoredSettings } from '@/lib/settings-cache'
@@ -100,6 +101,10 @@ function clearPendingSettings(userId: string, payload: SettingsRes) {
 }
 
 function applySettings(settings: Partial<SettingsRes>) {
+  if (typeof settings.readerShortcuts === 'string') {
+    try { localStorage.setItem(readerShortcutStorageKey(useAuthStore.getState().user?.id ?? null), settings.readerShortcuts) } catch { /* ignore */ }
+    window.dispatchEvent(new Event('bd-reader-shortcuts-loaded'))
+  }
   useUiStore.setState((state) => {
     const patch: Partial<typeof state> = {}
     for (const key of SETTINGS_KEYS) {
@@ -215,7 +220,7 @@ export function SettingsSync() {
       channel.onmessage = (event) => {
         if (event.data?.sessionId === SESSION_ID) return
         const currentUser = useAuthStore.getState().user
-        if (!currentUser) return
+        if (!currentUser || event.data?.userId !== currentUser.id) return
         const data = event.data?.settings as Partial<Record<string, unknown>> | undefined
         if (!data) return
         applySettings(data as Partial<SettingsRes>)
@@ -228,7 +233,24 @@ export function SettingsSync() {
       }
     }
 
+    const retryPending = () => {
+      const currentUserId = useAuthStore.getState().user?.id
+      if (!currentUserId) return
+      const pending = getPendingSettings(currentUserId)
+      if (pending) mutateRef.current(pending, { onSuccess: () => clearPendingSettings(currentUserId, pending) })
+    }
+    const broadcastShortcuts = () => {
+      const currentUser = useAuthStore.getState().user
+      if (currentUser && channel) channel.postMessage({ userId: currentUser.id, sessionId: SESSION_ID, settings: { readerShortcuts: JSON.stringify(readReaderShortcuts(currentUser.id)) } })
+    }
+    window.addEventListener('bd-settings-pending', retryPending)
+    window.addEventListener('online', retryPending)
+    window.addEventListener('bd-reader-shortcuts-updated', broadcastShortcuts)
+
     return () => {
+      window.removeEventListener('bd-settings-pending', retryPending)
+      window.removeEventListener('online', retryPending)
+      window.removeEventListener('bd-reader-shortcuts-updated', broadcastShortcuts)
       channel?.close()
     }
   }, [])
@@ -270,7 +292,7 @@ export function SettingsSync() {
             },
           })
         }
-        bcRef.current?.postMessage({ sessionId: SESSION_ID, settings: { ...payload, activePresetId: latestState.activePresetId } })
+        bcRef.current?.postMessage({ userId: user?.id ?? null, sessionId: SESSION_ID, settings: { ...payload, activePresetId: latestState.activePresetId } })
       }, 1000)
     })
     return () => {

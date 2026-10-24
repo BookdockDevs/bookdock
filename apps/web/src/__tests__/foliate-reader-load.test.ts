@@ -70,6 +70,28 @@ describe('replacement invalid listener ownership', () => {
 })
 
 describe('Foliate request memo cancellation', () => {
+  it('uses the current spine section and endpoint fraction for chapter boundary jumps', async () => {
+    const reader = new FoliateReader('')
+    const goTo = vi.fn(() => {
+      ;(reader as any).handleRelocate({ cfi: 'chapter:3:1', section: { current: 3, total: 5 }, fraction: 0.5 })
+      return Promise.resolve()
+    })
+    const onUserJump = vi.fn()
+    const onJumpConfirmed = vi.fn()
+    reader.on('userJump', onUserJump)
+    reader.on('jumpConfirmed', onJumpConfirmed)
+    ;(reader as any).view = { renderer: { goTo } }
+    ;(reader as any).book = { sections: [{}, {}, {}, {}, {}] }
+    ;(reader as any).currentSectionIndex = 3
+    ;(reader as any).lastCfi = 'chapter:3:0.42'
+
+    await reader.display('chapter:3:1')
+
+    expect(goTo).toHaveBeenCalledExactlyOnceWith({ index: 3, anchor: 1 })
+    expect(onUserJump).toHaveBeenCalledOnce()
+    expect(onJumpConfirmed).toHaveBeenCalledExactlyOnceWith({ cfi: 'chapter:3:0.42' })
+  })
+
   it('releases one resource waiter while another consumer keeps the shared transfer alive', async () => {
     let transferSignal: AbortSignal | undefined
     let resolveBlob!: (blob: Blob) => void

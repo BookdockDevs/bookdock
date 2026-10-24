@@ -11,6 +11,8 @@ export interface PlaybackToggle {
   apply: () => void
 }
 
+export type PlaybackCommand = () => void
+
 type Stopper = () => void | Promise<void>
 
 /** Serializes reader playback features so a stale async start cannot take over later. */
@@ -19,6 +21,7 @@ export class ReaderPlaybackCoordinator {
   private owner: ReaderPlaybackOwner | null = null
   private stoppers = new Map<ReaderPlaybackOwner, Stopper>()
   private toggles = new Map<ReaderPlaybackOwner, PlaybackToggle>()
+  private commands = new Map<Exclude<ReaderPlaybackOwner, 'media'>, PlaybackCommand>()
 
   register(owner: ReaderPlaybackOwner, stopper: Stopper) {
     this.stoppers.set(owner, stopper)
@@ -32,6 +35,17 @@ export class ReaderPlaybackCoordinator {
     return () => {
       if (this.toggles.get(owner) === toggle) this.toggles.delete(owner)
     }
+  }
+
+  registerCommand(owner: Exclude<ReaderPlaybackOwner, 'media'>, command: PlaybackCommand) {
+    this.commands.set(owner, command)
+    return () => {
+      if (this.commands.get(owner) === command) this.commands.delete(owner)
+    }
+  }
+
+  command(owner: Exclude<ReaderPlaybackOwner, 'media'>) {
+    this.commands.get(owner)?.()
   }
 
   /**

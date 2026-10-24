@@ -503,6 +503,8 @@ export interface SettingsRes {
    * must not grow flat duplicates of them.
    */
   readingConfig?: string
+  /** Per-account configurable reader key bindings, serialized by the web client. */
+  readerShortcuts?: string
   /**
    * User-created reading themes, serialized as JSON by the web client.
    * Synced because reading configs reference custom themes by id.

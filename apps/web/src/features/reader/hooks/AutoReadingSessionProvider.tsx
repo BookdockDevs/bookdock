@@ -11,10 +11,11 @@ import { AutoReadingSessionContext, IDLE_AUTO_READING_STATE } from './auto-readi
 interface AutoReadingSessionProviderProps {
   renderer: BookReader | null
   coordinator: ReaderPlaybackCoordinator
+  onStart?: () => void
   children: ReactNode
 }
 
-export function AutoReadingSessionProvider({ renderer, coordinator, children }: AutoReadingSessionProviderProps) {
+export function AutoReadingSessionProvider({ renderer, coordinator, onStart, children }: AutoReadingSessionProviderProps) {
   const readingMode = useUiStore((state) => state.readingMode)
   const mode = useUiStore((state) => state.autoReadingMode)
   const speed = useUiStore((state) => state.autoReadingSpeed)
@@ -57,6 +58,19 @@ export function AutoReadingSessionProvider({ renderer, coordinator, children }: 
       },
     })
   }, [controller, coordinator])
+
+  useEffect(() => {
+    if (!controller) return
+    return coordinator.registerCommand('auto', () => {
+      const status = controller.getSnapshot().status
+      if (status === 'idle') {
+        void controller.start()
+        onStart?.()
+      } else {
+        void controller.stop()
+      }
+    })
+  }, [controller, coordinator, onStart])
 
   useEffect(() => () => {
     controller?.dispose()

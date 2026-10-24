@@ -905,6 +905,16 @@ describe('NavigationPanel', () => {
       expect(screen.queryByText('直线划线甲')).toBeNull()
     })
 
+    it('toggles the book search bar from the reader shortcut event', () => {
+      useReaderState.setState({ activeNavTab: 'toc' })
+      render(<NavigationPanel bookId="book-1" open />)
+      act(() => window.dispatchEvent(new CustomEvent('bd-reader-search')))
+      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
+      expect(input).toHaveAttribute('data-reader-book-search')
+      act(() => window.dispatchEvent(new CustomEvent('bd-reader-search')))
+      expect(screen.queryByPlaceholderText('reader.searchPlaceholder')).toBeNull()
+    })
+
     it('opens the filter panel from the header funnel and closes on outside click', () => {
       render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('annotation.filter'))

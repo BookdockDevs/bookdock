@@ -11,6 +11,7 @@ import { useSettingsSyncStore } from '../stores/settings-sync.store'
 import { customThemesFromSync } from '../lib/reading-theme'
 import { writeStoredSettings } from '../lib/settings-cache'
 import { useToastStore } from '../stores/toast.store'
+import { READER_SHORTCUT_DEFAULTS, readerShortcutStorageKey } from '../features/reader/lib/reader-shortcuts'
 
 const theme = { id: 't1', name: 'Theme', colors: { bg: '#fff', fg: '#000', primary: '#00f' } }
 
@@ -203,6 +204,7 @@ describe('SettingsSync persistence', () => {
     // Another tab answers with byte-identical settings.
     inbox!.onmessage!({
       data: {
+        userId: user.id,
         sessionId: 'another-tab',
         settings: { customThemes: JSON.stringify([theme]) },
         activePresetId: null,
@@ -234,6 +236,7 @@ describe('SettingsSync persistence', () => {
     const night = { id: 't2', name: 'Night', colors: { bg: '#000', fg: '#eee', primary: '#0af' } }
     inbox!.onmessage!({
       data: {
+        userId: user.id,
         sessionId: 'another-tab',
         settings: { customThemes: JSON.stringify([night]) },
         activePresetId: null,
@@ -243,6 +246,50 @@ describe('SettingsSync persistence', () => {
 
     // A real change is still adopted, which is the whole point of the channel.
     expect(useUiStore.getState().customThemes).toEqual([night])
+    expect(channels.flatMap((channel) => channel.posted)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: user.id }),
+    ]))
+  })
+
+  it('ignores cross-tab settings from a different account', async () => {
+    const channels: FakeChannel[] = []
+    class FakeChannel {
+      onmessage: ((e: { data: unknown }) => void) | null = null
+      posted: unknown[] = []
+      constructor() { channels.push(this) }
+      postMessage(data: unknown) { this.posted.push(data) }
+      close() { /* nothing to release */ }
+    }
+    vi.stubGlobal('BroadcastChannel', FakeChannel)
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    const inbox = channels.find((channel) => channel.onmessage)
+    expect(inbox).toBeDefined()
+    const currentThemes = useUiStore.getState().customThemes
+    const otherTheme = { id: 'other', name: 'Other account', colors: { bg: '#000', fg: '#fff', primary: '#f00' } }
+    inbox!.onmessage!({
+      data: {
+        userId: 'user-2',
+        sessionId: 'other-account-tab',
+        settings: {
+          customThemes: JSON.stringify([otherTheme]),
+          readerShortcuts: JSON.stringify({ ...READER_SHORTCUT_DEFAULTS, toc: null }),
+        },
+      },
+    })
+
+    expect(useUiStore.getState().customThemes).toEqual(currentThemes)
+    expect(localStorage.getItem(readerShortcutStorageKey(user.id))).toBeNull()
+    expect(localStorage.getItem(readerShortcutStorageKey('user-2'))).toBeNull()
+
+    window.dispatchEvent(new Event('bd-reader-shortcuts-updated'))
+    expect(channels.flatMap((channel) => channel.posted)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        userId: user.id,
+        settings: expect.objectContaining({ readerShortcuts: expect.any(String) }),
+      }),
+    ]))
   })
 
   it('ignores a synced custom-theme list that is identical in content', () => {

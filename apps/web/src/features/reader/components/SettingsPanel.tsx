@@ -17,6 +17,7 @@ import { useReaderState } from '../state/reader-state'
 import { DownloadIcon, SpinnerIcon } from './annotation-icons'
 import ReadingPresetPicker from './ReadingPresetPicker'
 import BookReplacementsDialog from './BookReplacementsDialog'
+import ReaderKeyboardShortcuts from './ReaderKeyboardShortcuts'
 
 type Section = 'font' | 'layout' | 'display' | 'behavior' | 'theme'
 
@@ -1059,11 +1060,10 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
             <ReadingPresetPicker />
           </div>
 
-          {bookId && (
-            <div className="border-t border-[var(--bd-read-accent)]/20 pt-1">
-              <ReplacementsEntryRow bookId={bookId} />
-            </div>
-          )}
+          <div className="flex flex-col gap-2 border-t border-[var(--bd-read-accent)]/20 pt-3">
+            {bookId && <ReplacementsEntryRow bookId={bookId} />}
+            <KeyboardShortcutsEntryRow />
+          </div>
         </div>
       )}
 
@@ -1246,6 +1246,37 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
         </div>
       )}
     </div>
+  )
+}
+
+function KeyboardShortcutsEntryRow() {
+  const _ = useTranslation()
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center justify-between gap-2 rounded-xl border border-stone-200/70 bg-stone-500/5 px-3.5 py-2.5 text-left transition-all duration-150 hover:border-stone-300/80 hover:bg-stone-500/10 active:scale-[0.99] dark:border-stone-800/80 dark:hover:border-stone-700/80"
+      >
+        <span className="text-[13.5px] font-medium text-current">{_('reader.keyboardShortcuts')}</span>
+        <div className="flex shrink-0 items-center gap-1.5 text-xs text-[var(--bd-read-sub)]">
+          <svg
+            className="h-3.5 w-3.5 opacity-60"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </div>
+      </button>
+      {open && <ReaderKeyboardShortcuts onClose={() => setOpen(false)} />}
+    </>
   )
 }
 

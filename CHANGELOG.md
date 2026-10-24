@@ -4,6 +4,10 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Reader keyboard shortcuts can be customized, synchronized with the user's account, and opened directly with Shift + /. The reader supports configurable navigation history, playback, chapter-boundary, sidebar, search, settings, and font-size commands.
+
 ### Fixed
 
 - Archive navigation replaces history entries during in-page book selection and view filtering to avoid history stack pollution and prevent stepping back through browsed books.
@@ -876,6 +880,10 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### [Unreleased]
+
+#### 新增
+
+- 阅读器现支持自定义键盘快捷键并同步到当前账号，也可按 Shift + / 直接打开快捷键菜单。可配置命令涵盖阅读位置历史、朗读、章节首尾、侧页、搜索、设置和字号调整。
 
 #### 修复
 
