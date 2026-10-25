@@ -11,7 +11,7 @@ import ReviewDetailView from './ReviewDetailView'
 vi.mock('@tanstack/react-router', () => import('@/__tests__/mocks/router-link'))
 
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
-vi.mock('./ReviewDiscussionPanel', () => ({ default: () => null }))
+vi.mock('./ReviewDiscussionPanel', () => ({ default: (props: { headerRight?: React.ReactNode }) => <div>{props.headerRight}</div> }))
 
 const sharedReview: Review = {
   id: 'r1',

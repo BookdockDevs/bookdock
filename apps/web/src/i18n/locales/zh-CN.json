@@ -2474,6 +2474,8 @@
     "submit": "发表",
     "save": "保存",
     "cancel": "取消",
+    "copy": "复制",
+    "discussionFailedRetry": "讨论加载失败，点击重试",
     "like": "赞",
     "unlike": "取消赞",
     "deletedNotice": "评论已删除"

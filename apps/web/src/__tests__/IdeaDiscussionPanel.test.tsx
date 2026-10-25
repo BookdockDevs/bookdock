@@ -7,6 +7,7 @@ import IdeaDiscussionPanel from '../features/reader/components/IdeaDiscussionPan
 import { useAuthStore } from '../stores/auth.store'
 
 vi.mock('@tanstack/react-router', () => import('@/__tests__/mocks/router-link'))
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 
 const mocks = vi.hoisted(() => ({ mutate: vi.fn(), data: null as IdeaDiscussion | null }))
 vi.mock('../features/reader/hooks/useIdeas', () => ({

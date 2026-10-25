@@ -44,14 +44,14 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
   const modalVariant = theme === 'reader' ? 'reader' : 'default'
   if (discussion.isPending) {
     return (
-      <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant} size="idea" centered hideHeader contentClassName="!flex-none !overflow-hidden !p-0">
+      <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant} size="xl" centered hideHeader contentClassName="!flex-none !overflow-hidden !p-0">
         <div className="p-4"><div role="status" className="h-48 animate-pulse rounded-xl bg-stone-500/10" /></div>
       </Modal>
     )
   }
   if (discussion.isError || !discussion.data) {
     return (
-      <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant} size="idea" centered hideHeader contentClassName="!flex-none !overflow-hidden !p-0">
+      <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant} size="xl" centered hideHeader contentClassName="!flex-none !overflow-hidden !p-0">
         <div className="p-4"><QueryErrorState isRetrying={discussion.isFetching} onRetry={() => void discussion.refetch()} /></div>
       </Modal>
     )
@@ -73,7 +73,7 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
     ? `/books/${encodeURIComponent(bookVersionId)}?annotation=${encodeURIComponent(idea.annotation.id)}`
     : null
   return (
-    <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant} size="idea" centered hideHeader contentClassName="!flex-none !overflow-hidden !p-0">
+    <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant} size="xl" centered hideHeader contentClassName="!flex-none !overflow-hidden !p-0">
       <div className="flex min-h-0 max-h-[calc(100dvh-2rem)] flex-col overflow-hidden">
         <IdeaDetailCard
           detail={entry}
@@ -114,6 +114,8 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
             initialLikeCount={idea.likeCount}
             initialTab={initialTab}
             focusCommentId={focusCommentId}
+            createdAt={idea.annotation.createdAt}
+            editedAt={idea.annotation.editedAt}
           />
         </IdeaDetailCard>
       </div>

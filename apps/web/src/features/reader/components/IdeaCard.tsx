@@ -43,6 +43,7 @@ export default function IdeaCard({
   isExpanded = false,
 }: IdeaCardProps) {
   const [quoteExpanded, setQuoteExpanded] = useState(false)
+  const [noteExpanded, setNoteExpanded] = useState(false)
   const contextMenu = useContextMenu()
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const touchStartPos = useRef<{ x: number; y: number } | null>(null)
@@ -140,7 +141,21 @@ export default function IdeaCard({
           )}
         </div>
 
-        <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6">{entry.annotation.note}</p>
+        <p className={cn('mt-2 whitespace-pre-wrap text-sm leading-6', !noteExpanded && !isExpanded && 'line-clamp-4')}>
+          {entry.annotation.note}
+        </p>
+        {(entry.annotation.note?.length ?? 0) > 120 && !isExpanded && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setNoteExpanded(!noteExpanded)
+            }}
+            className="relative z-10 mt-1 text-[11px] font-medium text-[var(--bd-read-primary)] hover:underline cursor-pointer"
+          >
+            {_(noteExpanded ? 'annotation.collapse' : 'annotation.expand')}
+          </button>
+        )}
         <ContentImages images={entry.annotation.images} />
         <button
           type="button"

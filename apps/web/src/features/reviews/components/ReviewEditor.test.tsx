@@ -5,6 +5,7 @@ import type { Review, ReviewComposerContext } from '@bookdock/shared'
 
 const mutateAsync = vi.fn()
 
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 vi.mock('../hooks/useReviews', () => ({
   useSaveReview: () => ({ mutateAsync, isPending: false }),
 }))

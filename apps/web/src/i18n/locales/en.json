@@ -2484,6 +2484,8 @@
     "submit": "Post",
     "save": "Save",
     "cancel": "Cancel",
+    "copy": "Copy",
+    "discussionFailedRetry": "Failed to load the discussion. Click to retry.",
     "like": "Like",
     "unlike": "Unlike",
     "deletedNotice": "Comment deleted"

@@ -407,7 +407,7 @@ export function IdeaOverlay({
                         fontStack={fontStack}
                       />
                       {isExpanded && (
-                        <div className="mt-1.5 ml-3 border-l-2 border-[var(--bd-read-primary)]/40 pl-3 pb-2 pt-1 animate-in fade-in-50 duration-150">
+                        <div className="mt-1.5 ml-3 max-h-80 overflow-y-auto reader-scrollbar border-l-2 border-[var(--bd-read-primary)]/40 pl-3 pb-2 pt-1 animate-in fade-in-50 duration-150">
                           <IdeaDiscussionPanel
                             ideaId={entry.annotation.id}
                             bookId={bookId}
@@ -554,7 +554,7 @@ export function IdeaOverlay({
           }}
         >
           {detail ? (
-            <div className={`${card} flex min-h-0 max-h-[calc(100dvh-2rem)] w-full max-w-[420px] flex-col overflow-hidden`}>
+            <div className={`${card} flex min-h-0 max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col overflow-hidden`}>
               <IdeaDetailCard
                 detail={detail}
                 quoteText={quoteText}
@@ -576,11 +576,13 @@ export function IdeaOverlay({
                   detailLayout
                   initialCommentCount={detail.commentCount}
                   initialLikeCount={detail.likeCount}
+                  createdAt={detail.annotation.createdAt}
+                  editedAt={detail.annotation.editedAt}
                 />
               </IdeaDetailCard>
             </div>
           ) : (
-            <div className="w-full max-w-[420px]">
+            <div className="w-full max-w-xl">
               <div className={card}>
                 <div className="relative px-5 pt-4">
                   <span className="text-[var(--bd-read-sub)]">

@@ -15,6 +15,8 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- Unified discussion threads and detail modals across book reviews and reader ideas: extracted a shared `DiscussionThread` with tabbed comments and likes, keyboard shortcuts (Ctrl/Cmd+Enter), and right-aligned publication timestamps on the tab bar. Time display logic between reviews and ideas now aligns to relative/short dates by default with full minute-accurate timestamps in hover tooltips. Standardized header action bar with consistent button ordering, tooltips, and private lock icon indicator.
+- Reader sidebar idea cards now support inline expansion for long notes (> 120 chars) and bounded discussion streams, eliminating extraneous modal navigation while reading.
 - Redesigned confirmation dialogs to unify standard, destructive, and text-verified confirmation flows with consistent modal chrome, header close action, balanced button proportions, Enter-key submission for text matching, and background scroll-lock guards.
 - Updated the Edge TTS consumer WebSocket handshake to the upstream v2 `Sec-MS-GEC` flow. A single synthesis now returns its audio and word-boundary metadata together through the server gateway.
 
@@ -906,6 +908,8 @@ All notable changes to Bookdock are documented here.
 
 #### 优化
 
+- 书评与想法详情弹窗及讨论流交互统一：抽象并共用 `DiscussionThread` 讨论流组件，将发表时间整合至 Tab 栏（评论/赞）同行右侧，消除冗余分割线与垂直空隙。想法与书评详情时间统一采用相对/短日期展示，悬停浮现精确到分钟的完整时间戳；规范作者信息栏，私密状态统一以锁图标呈现。
+- 阅读器侧栏抽屉中的想法卡片支持长文本（>120字）就地折叠展开与内嵌有界讨论流，保持阅读单流连续性。
 - 确认弹窗重构与交互统一：重构确认弹窗视觉与结构，统一普通确认、危险操作与文本验证输入；对齐标准窗口系统的 Header/Footer 与关闭按钮，优化按键比例，支持文本确认回车提交与页面背景防穿透。
 - Edge TTS consumer WebSocket 握手更新为上游 v2 `Sec-MS-GEC` 流程；服务端在同一次合成中一并取得音频和词级时间元数据，再通过网关结构化返回。
 
