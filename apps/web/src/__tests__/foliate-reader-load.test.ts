@@ -907,11 +907,11 @@ describe('normalizeEpubDocumentImages', () => {
   it('adds controls and playsinline attributes to video and audio elements lacking controls', () => {
     document.body.innerHTML = `
       <div class="videoplay">
-        <video class="embedded-video" poster="poster.jpg">
+        <video class="embedded-video" poster="poster.jpg" preload="auto">
           <source src="blob:http://localhost/video.mp4" type="video/mp4" />
         </video>
       </div>
-      <audio src="audio.mp3"></audio>
+      <audio src="audio.mp3" preload="auto"></audio>
     `
 
     normalizeEpubDocumentImages(document)
@@ -922,12 +922,12 @@ describe('normalizeEpubDocumentImages', () => {
     expect(video.hasAttribute('controls')).toBe(true)
     expect(video.hasAttribute('playsinline')).toBe(true)
     expect(video.hasAttribute('preload')).toBe(true)
-    expect(video.preload).toBe('auto')
+    expect(video.preload).toBe('metadata')
     expect(video.controls).toBe(true)
     expect(video.src).toBe('blob:http://localhost/video.mp4')
     expect(audio.hasAttribute('controls')).toBe(true)
     expect(audio.hasAttribute('preload')).toBe(true)
-    expect(audio.preload).toBe('auto')
+    expect(audio.preload).toBe('metadata')
     expect(audio.controls).toBe(true)
 
     // Verify wrapper and play button overlay
@@ -1160,6 +1160,68 @@ describe('normalizeEpubDocumentImages', () => {
     expect(playBtn.style.display).not.toBe('none')
     const video = doc.querySelector('video') as HTMLVideoElement
     expect(video.src).toBe('blob:recovered')
+  })
+
+  it('restores the retry UI after a direct media URL fails in the native player', async () => {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString('<video><source data-bd-deferred-src="remote.mp4" type="video/mp4" /></video>', 'text/html')
+    const loadHref = vi.fn()
+      .mockResolvedValueOnce('/api/v1/books/b1/reader/media?path=remote.mp4')
+      .mockResolvedValueOnce('/api/v1/books/b1/reader/media?path=remote.mp4')
+    const onMediaError = vi.fn()
+    normalizeEpubDocumentImages(doc, { section: { id: 's', loadHref }, onMediaError })
+    const video = doc.querySelector('video') as HTMLVideoElement
+    const wrapper = doc.querySelector('.bd-video-wrapper') as HTMLElement
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(video.src).toContain('/reader/media?path=remote.mp4')
+
+    video.dispatchEvent(new Event('error'))
+    const retry = wrapper.querySelector('.bd-video-error-badge') as HTMLButtonElement
+    expect(retry).not.toBeNull()
+    expect(wrapper.classList.contains('is-media-error')).toBe(true)
+    expect(onMediaError).toHaveBeenCalledWith(expect.objectContaining({ kind: 'video', src: 'remote.mp4' }))
+
+    retry.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(loadHref).toHaveBeenCalledTimes(2)
+    expect(wrapper.classList.contains('is-media-error')).toBe(false)
+    expect(video.src).toContain('/reader/media?path=remote.mp4')
+  })
+
+  it('cancels stale video fade callbacks after a native error and quick retry', async () => {
+    vi.useFakeTimers()
+    const userAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent')
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 Chrome' })
+    try {
+      const parser = new DOMParser()
+      const doc = parser.parseFromString('<video><source data-bd-deferred-src="remote.mp4" type="video/mp4" /></video>', 'text/html')
+      const loadHref = vi.fn().mockResolvedValue('/api/v1/books/b1/reader/media?path=remote.mp4')
+      normalizeEpubDocumentImages(doc, { section: { id: 's', loadHref } })
+      await vi.advanceTimersByTimeAsync(0)
+      const video = doc.querySelector('video') as HTMLVideoElement
+      const wrapper = doc.querySelector('.bd-video-wrapper') as HTMLElement
+      const playButton = wrapper.querySelector('.bd-video-play-btn') as HTMLElement
+
+      expect(wrapper.querySelector('.bd-video-spinner')).not.toBeNull()
+      video.dispatchEvent(new Event('loadeddata'))
+      expect(wrapper.querySelector('.bd-video-spinner')?.classList.contains('is-fade-out')).toBe(true)
+
+      video.dispatchEvent(new Event('error'))
+      const retry = wrapper.querySelector('.bd-video-error-badge') as HTMLButtonElement
+      retry.click()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(loadHref).toHaveBeenCalledTimes(2)
+      expect(wrapper.classList.contains('is-media-loading')).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(250)
+      expect(wrapper.classList.contains('is-media-loading')).toBe(true)
+      expect(playButton.style.display).toBe('none')
+      expect(wrapper.classList.contains('is-media-error')).toBe(false)
+    } finally {
+      if (userAgent) Object.defineProperty(navigator, 'userAgent', userAgent)
+      else Reflect.deleteProperty(navigator, 'userAgent')
+      vi.useRealTimers()
+    }
   })
 })
 

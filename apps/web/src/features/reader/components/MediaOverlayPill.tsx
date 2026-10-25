@@ -100,7 +100,8 @@ export const MediaOverlayPill = memo(function MediaOverlayPill({ coordinator, in
   const releaseAudio = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause()
-      audioRef.current.src = ''
+      audioRef.current.removeAttribute('src')
+      audioRef.current.load()
       audioRef.current = null
     }
     if (objectUrlRef.current) {
@@ -138,13 +139,18 @@ export const MediaOverlayPill = memo(function MediaOverlayPill({ coordinator, in
     let audio = audioRef.current
     if (!audio || activeHrefRef.current !== cue.audioHref) {
       releaseAudio()
-      const blob = await renderer.getMediaOverlayAudioByHref(cue.audioHref)
-      if (!claim.isCurrent() || !blob) return
-      const url = URL.createObjectURL(blob)
-      objectUrlRef.current = url
+      let url = renderer.getMediaOverlayAudioUrl(cue.audioHref)
+      if (!url) {
+        const blob = await renderer.getMediaOverlayAudioByHref(cue.audioHref)
+        if (blob) {
+          url = URL.createObjectURL(blob)
+          objectUrlRef.current = url
+        }
+      }
+      if (!claim.isCurrent() || !url) return
       activeHrefRef.current = cue.audioHref
       audio = new Audio(url)
-      audio.preload = 'auto'
+      audio.preload = 'metadata'
       audioRef.current = audio
 
       audio.addEventListener('loadedmetadata', () => {

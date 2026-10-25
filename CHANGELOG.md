@@ -11,6 +11,7 @@ All notable changes to Bookdock are documented here.
 - Reader keyboard shortcuts can be customized, synchronized with the user's account, and opened directly with Shift + /. The reader supports configurable navigation history, playback, chapter-boundary, sidebar, search, settings, and font-size commands.
 - Undo recent private-library actions—shelf and category changes, tag adjustments, pinning, hiding, and moving books to trash—from the original notification or the configurable Ctrl/Command+Z shortcut.
 - Edge TTS supports word-level highlighting from the service's real timing metadata. The sentence highlight remains visible while the current mapped word receives a deeper overlay; missing or unmappable boundaries keep sentence-level highlighting.
+- EPUB embedded audio/video and Media Overlay use authenticated on-demand media URLs with HTTP Range seeking. The server prepares stored and deflated entries into a bounded disk cache, supports media up to 1 GiB per entry, and restores the existing retry control after native video errors.
 
 ### Changed
 
@@ -901,6 +902,7 @@ All notable changes to Bookdock are documented here.
 - 阅读器现支持自定义键盘快捷键并同步到当前账号，也可按 Shift + / 直接打开快捷键菜单。可配置命令涵盖阅读位置历史、朗读、章节首尾、侧页、搜索、设置和字号调整。
 - 私有书库支持撤销书架/归类、标签调整、置顶、隐藏和移入回收站等操作；可点击原操作通知中的撤销图标，也可使用可配置的 Ctrl/Command+Z 快捷键。
 - Edge TTS 现支持根据服务返回的真实时间元数据进行词级高亮：整句底色持续保留，当前可映射的词叠加更深的高亮；缺少或无法映射边界时继续使用句级高亮。
+- EPUB 正文音视频及 Media Overlay 改用鉴权的按需媒体 URL，并支持 HTTP Range 拖动播放。服务端将 ZIP stored/deflate entry 准备到有界磁盘缓存，每个媒体 entry 支持最大 1 GiB；原生视频加载失败时恢复现有重试入口。
 
 #### 优化
 

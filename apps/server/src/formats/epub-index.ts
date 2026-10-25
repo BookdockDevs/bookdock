@@ -113,7 +113,7 @@ export class EpubIndexError extends Error {
   }
 }
 
-function decodeZipName(bytes: Buffer, flags: number): string {
+export function decodeZipName(bytes: Buffer, flags: number): string {
   if (flags & 0x800) return bytes.toString('utf8')
   let out = ''
   for (const byte of bytes) {
@@ -179,15 +179,32 @@ function readUInt64(buffer: Buffer, offset: number): number {
   return Number(value)
 }
 
+const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
+  let crc = value
+  for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0)
+  return crc >>> 0
+})
+
 function crc32(data: Buffer): number {
   let crc = 0xffffffff
   for (const byte of data) {
-    crc ^= byte
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0)
-    }
+    crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ byte) & 0xff]!
   }
   return (crc ^ 0xffffffff) >>> 0
+}
+
+export class EpubCrc32 {
+  private value = 0xffffffff
+
+  update(data: Buffer): void {
+    for (const byte of data) {
+      this.value = (this.value >>> 8) ^ CRC32_TABLE[(this.value ^ byte) & 0xff]!
+    }
+  }
+
+  digest(): number {
+    return (this.value ^ 0xffffffff) >>> 0
+  }
 }
 
 async function readExact(source: EpubByteSource, start: number, length: number): Promise<Buffer> {

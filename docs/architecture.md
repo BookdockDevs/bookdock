@@ -1116,6 +1116,53 @@ projection and resource URL behavior. These boundaries are implemented under
 `docs/local/archive/completed/2026-10-reader-content-delivery.md`; browser, real-client and deployment
 acceptance remain separate from unit/type checks.
 
+### EPUB media delivery
+
+EPUB audio/video entries use a separate same-origin authenticated media endpoint
+bound to the current readable book revision and normalized ZIP entry path. The
+endpoint rechecks current read authorization and revision on every request,
+including cache hits. It serves the uncompressed media bytes with single-range
+HTTP semantics; text and ordinary resources retain the existing bounded entry
+endpoint and its 32 MiB limit. The media resource ceiling is 1 GiB per entry and
+the independent prepared-media disk cache targets 1 GiB. Existing synthetic
+delivery samples exercise media up to 8 MiB; the larger limit allows 32× the
+former entry ceiling, while an equal cache target bounds derived storage to one
+maximum-sized resource before eviction. These are server
+resource safety limits, not promises that every browser/device can decode a
+format or that a cache target is synchronously enforced during active reads.
+
+The server prepares an immutable media file on first use by streaming the ZIP
+entry through stored-copy or raw-deflate decoding into a temporary file, checking
+declared length and CRC before atomically publishing it. Preparation is
+single-flight per content hash and entry; distinct preparations run one at a
+time. The cache budget reserves each in-progress entry's full declared size,
+including its temporary output, before decompression starts. A request that
+disconnects aborts a preparation once no other request is waiting for it. If a
+new request arrives while that aborted task is still cleaning up, it waits for
+the old task to settle and then starts a fresh preparation; it never joins the
+canceled task.
+Prepared cache identity excludes user and revision labels because authorization
+and current revision are resolved before it is consulted. Failed preparations
+remove temporary files and can be retried. Opening a cache file and registering
+its active-transfer lease share the eviction lock; active leases protect the
+opened file until the response stream closes, including on Windows. This permits
+a cold read to wait for full decompression while keeping the large uncompressed
+resource out of process memory; it does not promise decompression-time streaming.
+
+The reader rewrites only EPUB audio/video sources to the direct media URL.
+Native controls request metadata first and the browser requests media bytes on
+play/seek using Range; ordinary chapter resource prefetch never fetches media
+payloads. Media Overlay cue playback uses the same revision-bound endpoint while
+retaining cue timing, highlighting and playback ownership. Existing Blob-based
+resource APIs remain for images, fonts, small resources and controlled legacy
+fallbacks. Renderer teardown, chapter/source changes and playback stop release
+media element sources. Native video load errors restore the existing retry
+control and loading-state cleanup; delayed button restoration is tied to the
+current load generation and canceled on errors or retries. Automated checks
+cover the endpoint and preparation;
+browser/device playback, throttled-network seeking and real external-storage
+behavior remain operator acceptance tasks.
+
 The current forward text window targets 256 KiB of uncompressed text across at
 most 16 original body files, selected in spine order from manifest entry sizes.
 Cached and shared in-flight body files count toward coverage. A single next

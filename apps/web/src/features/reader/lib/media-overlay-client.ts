@@ -35,6 +35,8 @@ export class MediaOverlayClient implements TtsClient {
   private releaseAudio() {
     this.cancelHandoff()
     this.audio?.pause()
+    this.audio?.removeAttribute('src')
+    this.audio?.load()
     this.audio = null
     this.audioHref = null
     if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
@@ -58,15 +60,22 @@ export class MediaOverlayClient implements TtsClient {
     let audio = this.audio
     if (!audio || this.audioHref !== href) {
       await this.stop()
-      const blob = await this.renderer.getMediaOverlayAudio(segment)
-      if (!blob) throw new Error(`Media Overlay audio is unavailable: ${href}`)
+      let url = this.renderer.getMediaOverlayAudioUrl(href)
+      let objectUrl: string | null = null
+      if (!url) {
+        const blob = await this.renderer.getMediaOverlayAudio(segment)
+        if (blob) {
+          url = URL.createObjectURL(blob)
+          objectUrl = url
+        }
+      }
+      if (!url) throw new Error(`Media Overlay audio is unavailable: ${href}`)
       if (signal.aborted) throw abortedError()
-      const url = URL.createObjectURL(blob)
       audio = new Audio(url)
-      audio.preload = 'auto'
+      audio.preload = 'metadata'
       this.audio = audio
       this.audioHref = href
-      this.objectUrl = url
+      this.objectUrl = objectUrl
     } else {
       audio.pause()
     }

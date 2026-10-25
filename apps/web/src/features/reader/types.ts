@@ -306,6 +306,7 @@ export interface BookReader {
   previousMediaOverlaySegment(segment: TtsSegment): Promise<TtsSegment | null>
   getMediaOverlayAudio(segment: TtsSegment): Promise<Blob | null>
   getMediaOverlayAudioByHref(audioHref: string): Promise<Blob | null>
+  getMediaOverlayAudioUrl(audioHref: string): string | null
   pauseInlineMedia(): void
   setMediaOverlayHighlight(range: Range | null): void
   clearMediaOverlayHighlight(): void

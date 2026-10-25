@@ -822,7 +822,7 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
   }
 
   // Ensure embedded media (e.g. legacy video markup) expose native
-  // playback controls, warm preloading, and click-to-play when authoring markup omits them.
+  // playback controls, metadata-only preloading, and click-to-play when authoring markup omits them.
   for (const video of Array.from(doc.querySelectorAll('video'))) {
     const isDeferred = !video.src && Boolean(
       video.dataset.bdDeferredSrc
@@ -835,10 +835,8 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
     if (!video.hasAttribute('playsinline')) {
       video.setAttribute('playsinline', '')
     }
-    if (!video.hasAttribute('preload')) {
-      video.setAttribute('preload', 'auto')
-      video.preload = 'auto'
-    }
+    video.setAttribute('preload', 'metadata')
+    video.preload = 'metadata'
 
     if (!video.hasAttribute('controlslist')) {
       video.setAttribute('controlslist', 'nodownload noplaybackrate')
@@ -924,9 +922,65 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
 
     if (!video.src && deferredSrc && wrapper) {
       const isJsdom = typeof navigator !== 'undefined' && navigator.userAgent.includes('jsdom')
+      let loadGeneration = 0
+      let fadeTimer: ReturnType<typeof setTimeout> | null = null
+      const showMediaFailure = () => {
+        if (!video.isConnected || video.dataset.bdMediaErrorHandled === 'true') return
+        loadGeneration += 1
+        if (fadeTimer !== null) clearTimeout(fadeTimer)
+        fadeTimer = null
+        video.dataset.bdMediaErrorHandled = 'true'
+        wrapper?.classList.remove('is-media-loading')
+        wrapper?.classList.add('is-media-error')
+        wrapper?.querySelector('.bd-video-spinner')?.remove()
+        delete video.dataset.bdMediaFetchStarted
+        delete video.dataset.bdMediaPlayIntent
+
+        const btn = wrapper?.querySelector('.bd-video-play-btn') as HTMLElement | null
+        if (btn) {
+          btn.style.setProperty('display', 'none', 'important')
+          btn.setAttribute('aria-hidden', 'true')
+        }
+
+        let errorBadge = wrapper?.querySelector('.bd-video-error-badge') as HTMLButtonElement | null
+        if (!errorBadge && wrapper) {
+          errorBadge = doc.createElement('button')
+          errorBadge.className = 'bd-video-error-badge'
+          errorBadge.type = 'button'
+          errorBadge.setAttribute('aria-label', 'Retry loading media')
+          const icon = doc.createElement('span')
+          icon.className = 'bd-video-error-icon'
+          icon.textContent = '!'
+          const text = doc.createElement('span')
+          text.className = 'bd-video-error-text'
+          text.textContent = '媒体加载失败，点击重试'
+          errorBadge.appendChild(icon)
+          errorBadge.appendChild(text)
+          errorBadge.addEventListener('click', (e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            errorBadge?.remove()
+            wrapper?.classList.remove('is-media-error')
+            video.removeAttribute('src')
+            video.querySelector('source')?.removeAttribute('src')
+            delete video.dataset.bdMediaErrorHandled
+            startFetch()
+          })
+          wrapper.appendChild(errorBadge)
+        }
+        options?.onMediaError?.({
+          sectionIndex: options.sectionIndex ?? 0,
+          kind: 'video',
+          src: deferredSrc,
+        })
+      }
       const startFetch = () => {
         if (video.dataset.bdMediaFetchStarted || video.src) return
+        if (fadeTimer !== null) clearTimeout(fadeTimer)
+        fadeTimer = null
+        const generation = ++loadGeneration
         video.dataset.bdMediaFetchStarted = 'true'
+        delete video.dataset.bdMediaErrorHandled
         wrapper.classList.add('is-media-loading')
         wrapper.classList.remove('is-media-error')
         wrapper.querySelector('.bd-video-error-badge')?.remove()
@@ -960,7 +1014,7 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
         if (options?.section?.loadHref) {
           options.section.loadHref(deferredSrc)
             .then((blobUrl: string) => {
-              if (!video.isConnected) return
+              if (!video.isConnected || generation !== loadGeneration) return
               const firstSource = video.querySelector('source')
               if (firstSource) {
                 firstSource.src = blobUrl
@@ -971,12 +1025,13 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
               wrapper?.classList.remove('is-empty-placeholder')
 
               const finishLoading = (immediate = false) => {
-                if (!video.isConnected) return
+                if (!video.isConnected || generation !== loadGeneration || video.dataset.bdMediaErrorHandled === 'true') return
                 if (!video.hasAttribute('controls')) {
                   video.setAttribute('controls', '')
                   video.controls = true
                 }
                 const restorePlayBtn = () => {
+                  if (!video.isConnected || generation !== loadGeneration || video.dataset.bdMediaErrorHandled === 'true') return
                   wrapper?.classList.remove('is-media-loading')
                   const btn = wrapper?.querySelector('.bd-video-play-btn') as HTMLElement | null
                   if (btn) {
@@ -990,10 +1045,13 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
                   restorePlayBtn()
                 } else if (spinner) {
                   spinner.classList.add('is-fade-out')
-                  setTimeout(() => {
+                  const timer = setTimeout(() => {
+                    if (fadeTimer === timer) fadeTimer = null
+                    if (generation !== loadGeneration || video.dataset.bdMediaErrorHandled === 'true') return
                     spinner?.remove()
                     restorePlayBtn()
                   }, 250)
+                  fadeTimer = timer
                 } else {
                   restorePlayBtn()
                 }
@@ -1021,52 +1079,14 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
                 const timer = setTimeout(onReady, 1200)
               }
             })
-            .catch((_err: unknown) => {
-              if (!video.isConnected) return
-              wrapper?.classList.remove('is-media-loading')
-              wrapper?.classList.add('is-media-error')
-              spinner?.remove()
-              delete video.dataset.bdMediaFetchStarted
-              delete video.dataset.bdMediaPlayIntent
-
-              const btn = wrapper?.querySelector('.bd-video-play-btn') as HTMLElement | null
-              if (btn) {
-                btn.style.setProperty('display', 'none', 'important')
-                btn.setAttribute('aria-hidden', 'true')
-              }
-
-              let errorBadge = wrapper.querySelector('.bd-video-error-badge') as HTMLButtonElement | null
-              if (!errorBadge) {
-                errorBadge = doc.createElement('button')
-                errorBadge.className = 'bd-video-error-badge'
-                errorBadge.type = 'button'
-                errorBadge.setAttribute('aria-label', 'Retry loading media')
-                const icon = doc.createElement('span')
-                icon.className = 'bd-video-error-icon'
-                icon.textContent = '!'
-                const text = doc.createElement('span')
-                text.className = 'bd-video-error-text'
-                text.textContent = '媒体加载失败，点击重试'
-                errorBadge.appendChild(icon)
-                errorBadge.appendChild(text)
-                errorBadge.addEventListener('click', (e) => {
-                  e.stopPropagation()
-                  e.preventDefault()
-                  errorBadge?.remove()
-                  wrapper.classList.remove('is-media-error')
-                  startFetch()
-                })
-                wrapper.appendChild(errorBadge)
-              }
-
-              options?.onMediaError?.({
-                sectionIndex: options.sectionIndex ?? 0,
-                kind: 'video',
-                src: deferredSrc,
-              })
+            .catch(() => {
+              if (generation === loadGeneration) showMediaFailure()
             })
         }
       }
+      video.addEventListener('error', () => {
+        if (video.dataset.bdMediaFetchStarted === 'true') showMediaFailure()
+      })
       startDeferredFetch = startFetch
       const mediaWindow = (video.ownerDocument as Document | null)?.defaultView ?? view
       if (mediaWindow) mediaWindow.setTimeout(startFetch, 0)
@@ -1106,10 +1126,8 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
       audio.setAttribute('controls', '')
       audio.controls = true
     }
-    if (!audio.hasAttribute('preload')) {
-      audio.setAttribute('preload', 'auto')
-      audio.preload = 'auto'
-    }
+    audio.setAttribute('preload', 'metadata')
+    audio.preload = 'metadata'
 
     const deferredAudioSrc = audio.dataset.bdDeferredSrc
       || audio.querySelector('[data-bd-deferred-src]')?.getAttribute('data-bd-deferred-src')
@@ -1574,7 +1592,7 @@ async function openManifestBook(
     }).init()
     cleanResources = cleanReading && canUseCleanReading('epub', book?.rendition?.layout)
     session.setResourcePrefetchFilter(cleanResources ? shouldSkipCleanReadingResource : null)
-    attachBookDataTransform(book, cleanResources)
+    attachBookDataTransform(book, cleanResources, (name) => session.mediaUrl(name))
     attachTextPrefetch(book, loadText, (paths) => session.prefetchTextWindow(paths), (name, signal) => session.loadText(name, 'search', signal))
     book.contentSession = session
     book.contentSource = 'manifest'
@@ -1762,14 +1780,20 @@ export function setAutoMarkSelectionMode(enabled: boolean) {
 }
 const CONVERTIBLE_MEDIA_TYPES = new Set(['application/xhtml+xml', 'text/html'])
 
-function attachBookDataTransform(book: any, cleanReading = false) {
+function attachBookDataTransform(book: any, cleanReading = false, mediaUrl?: (path: string) => string) {
   const target = book?.transformTarget as EventTarget | undefined
   if (!target || transformedBooks.has(book)) return
   transformedBooks.add(book)
   const isFixedLayout = book?.rendition?.layout === 'pre-paginated'
   target.addEventListener('load', (event: Event) => {
-    if (!cleanReading || isFixedLayout) return
     const detail = (event as CustomEvent).detail
+    const type = typeof detail?.type === 'string' ? detail.type.toLowerCase() : ''
+    if (mediaUrl && (type.startsWith('audio/') || type.startsWith('video/')) && typeof detail?.href === 'string') {
+      detail.allow = true
+      detail.url = mediaUrl(detail.href)
+      return
+    }
+    if (!cleanReading || isFixedLayout) return
     if (!shouldSkipCleanReadingResource(detail?.type, detail?.href)) return
     // Loader.loadItem checks this event before touching loadBlob. Returning a
     // tiny data URL keeps dynamic resource observation ordered without reading
@@ -3812,6 +3836,12 @@ export class FoliateReader implements BookReader {
     const loadBlob = this.book?.loadBlob
     if (!audioHref || typeof loadBlob !== 'function') return null
     return loadBlob.call(this.book, audioHref)
+  }
+
+  getMediaOverlayAudioUrl(audioHref: string): string | null {
+    const session = this.book?.contentSession as ReaderContentSession | undefined
+    if (!audioHref || !session || this.book?.contentSource !== 'manifest') return null
+    return session.mediaUrl(audioHref)
   }
 
   private ttsDetailToSegment(detail: any): TtsSegment | null {

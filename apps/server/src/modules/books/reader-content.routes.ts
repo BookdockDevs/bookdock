@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { Readable } from 'node:stream'
 
 import { readerMarkupEntryDataSchema, readerMarkupEntryQuerySchema, readerTextBatchSchema } from '@bookdock/shared'
 
@@ -14,6 +15,7 @@ import {
 import { EpubIndexError } from '../../formats/epub-index'
 import { requestUserId } from '../../middleware/auth.guard'
 import { AppError } from '../../middleware/error'
+import { acquireReaderMedia } from './reader-media.service'
 
 const readerContentRoutes = new Hono()
 
@@ -31,6 +33,23 @@ function assertRevision(book: ReaderContentBook, revisionId: string | null | und
   if (revisionId && revisionId !== book.revisionId) {
     throw new AppError('READER_REVISION_CHANGED', 'Content revision changed; reload the book')
   }
+}
+
+function parseMediaRange(header: string | undefined, size: number): { start: number; end: number } | 'invalid' | null {
+  if (!header) return null
+  if (size <= 0) return 'invalid'
+  if (header.includes(',')) return 'invalid'
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim())
+  if (!match || (!match[1] && !match[2])) return 'invalid'
+  if (!match[1]) {
+    const suffix = Number(match[2])
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return 'invalid'
+    return { start: Math.max(0, size - suffix), end: size - 1 }
+  }
+  const start = Number(match[1])
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || start >= size || start > requestedEnd) return 'invalid'
+  return { start, end: Math.min(requestedEnd, size - 1) }
 }
 
 async function readerBook(c: Context): Promise<ReaderContentBook> {
@@ -65,6 +84,49 @@ readerContentRoutes.get('/:id/reader/manifest', async (c) => {
       'Cache-Control': 'private, no-store',
     })
   } catch (error) {
+    entryError(error)
+  }
+})
+
+readerContentRoutes.on(['GET', 'HEAD'], '/:id/reader/media', async (c) => {
+  const book = await readerBook(c)
+  const path = c.req.query('path') ?? ''
+  if (!path) throw new AppError('VALIDATION_ERROR', 'EPUB media path is required')
+  let media: Awaited<ReturnType<typeof acquireReaderMedia>> | null = null
+  try {
+    const opened = await acquireReaderMedia(book, path, c.req.raw.signal)
+    media = opened
+    const range = parseMediaRange(c.req.header('Range'), opened.size)
+    if (range === 'invalid') {
+      await media.release()
+      media = null
+      return c.newResponse(null, 416, {
+        'Accept-Ranges': 'bytes', 'Content-Range': `bytes */${opened.size}`,
+        'Cache-Control': 'private, no-store',
+      })
+    }
+    const selected = opened.size === 0 ? null : range ?? { start: 0, end: opened.size - 1 }
+    if (c.req.method === 'HEAD' || !selected) {
+      await media.release()
+      media = null
+    }
+    const stream = media && selected ? opened.createStream(selected) : null
+    if (stream) media = null
+    return c.newResponse(stream ? Readable.toWeb(stream) as ReadableStream : null, range ? 206 : 200, {
+      'Content-Type': opened.mediaType,
+      'Content-Length': String(selected ? selected.end - selected.start + 1 : 0),
+      'Accept-Ranges': 'bytes',
+      ...(range ? { 'Content-Range': `bytes ${range.start}-${range.end}/${opened.size}` } : {}),
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    })
+  } catch (error) {
+    await media?.release()
+    if (error instanceof ReaderEntryLimitError) throw new AppError('READER_ENTRY_TOO_LARGE', 'EPUB media exceeds the media resource limit')
+    if (error instanceof EpubIndexError) {
+      if (error.code === 'LIMIT') throw new AppError('READER_ENTRY_TOO_LARGE', 'EPUB media exceeds the media resource limit')
+      throw new AppError(error.code === 'UNSUPPORTED' ? 'READER_ENTRY_UNSUPPORTED' : 'READER_ENTRY_FAILED', 'EPUB media could not be prepared')
+    }
     entryError(error)
   }
 })

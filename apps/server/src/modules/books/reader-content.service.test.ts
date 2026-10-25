@@ -49,7 +49,7 @@ vi.mock('../../storage', () => ({
   }),
 }))
 
-async function fixture(includeLargeImage = false, includeSecondImage = false): Promise<Buffer> {
+async function fixture(includeLargeImage = false, includeSecondImage = false, mediaBytes = 0, mediaCompression: 'STORE' | 'DEFLATE' = 'DEFLATE', secondMediaBytes = 0): Promise<Buffer> {
   fixturePng = await sharp({ create: { width: 64, height: 32, channels: 4, background: '#336699' } }).png().toBuffer()
   let chapterImage = fixturePng
   if (includeLargeImage) {
@@ -71,6 +71,8 @@ async function fixture(includeLargeImage = false, includeSecondImage = false): P
         <item id="ch2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
         <item id="img" href="images/cover.png" media-type="image/png"/>
         <item id="opaque-image" href="images/cover.asset" media-type="image/png"/>
+        ${mediaBytes ? '<item id="audio" href="audio/track.mp3" media-type="audio/mpeg"/>' : ''}
+        ${secondMediaBytes ? '<item id="audio-2" href="audio/second.mp3" media-type="audio/mpeg"/>' : ''}
         ${includeSecondImage ? '<item id="second-image" href="images/second.png" media-type="image/png"/>' : ''}
       </manifest>
       <spine><itemref idref="ch1"/><itemref idref="ch2"/></spine>
@@ -89,6 +91,8 @@ async function fixture(includeLargeImage = false, includeSecondImage = false): P
   zip.file('OEBPS/images/cover.png', chapterImage)
   if (includeSecondImage) zip.file('OEBPS/images/second.png', await sharp({ create: { width: 20, height: 10, channels: 4, background: '#993366' } }).png().toBuffer())
   zip.file('OEBPS/images/cover.asset', Buffer.from([4, 3, 2, 1]))
+  if (mediaBytes) zip.file('OEBPS/audio/track.mp3', Buffer.alloc(mediaBytes, 47), { compression: mediaCompression })
+  if (secondMediaBytes) zip.file('OEBPS/audio/second.mp3', Buffer.alloc(secondMediaBytes, 48), { compression: mediaCompression })
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 }
 
@@ -117,6 +121,7 @@ describe('shared reader content service', () => {
     failNextSourceRead = false
     resetReaderContentCachesForTests()
     await fs.rm(path.join(testDataDir, 'reader-content-index'), { recursive: true, force: true })
+    await fs.rm(path.join(testDataDir, 'reader-media-cache'), { recursive: true, force: true })
   })
 
   afterAll(async () => {
@@ -343,6 +348,151 @@ describe('shared reader content service', () => {
     const rebuilt = await getReaderManifest(content)
     expect(rebuilt.entries).toHaveLength(manifest.entries.length)
     expect(sourceReadCount).toBeGreaterThan(sourceReadsAfterBuild)
+  })
+
+  it.each(['STORE', 'DEFLATE'] as const)('streams and caches %s media above the ordinary 32 MiB entry limit', async (compression) => {
+    const { acquireReaderMedia } = await import('./reader-media.service')
+    const bytes = 33 * 1024 * 1024 + 17
+    sourceBuffer = await fixture(false, false, bytes, compression)
+    resetReaderContentCachesForTests()
+    const media = await acquireReaderMedia({ ...book, size: sourceBuffer.length }, 'OEBPS/audio/track.mp3')
+    const payload: Buffer[] = []
+    for await (const chunk of media.createStream({ start: 101, end: 108 })) payload.push(Buffer.from(chunk))
+    expect(Buffer.concat(payload)).toEqual(Buffer.alloc(8, 47))
+    expect(media.size).toBe(bytes)
+    expect(media.mediaType).toBe('audio/mpeg')
+    await media.release()
+    const cacheDirectory = path.join(testDataDir, 'reader-media-cache', 'v1')
+    expect((await fs.readdir(cacheDirectory)).filter((name) => name.endsWith('.media'))).toHaveLength(1)
+  }, 30_000)
+
+  it('coalesces concurrent media preparation and removes failed temporary output for retry', async () => {
+    const { acquireReaderMedia } = await import('./reader-media.service')
+    sourceBuffer = await fixture(false, false, 2 * 1024 * 1024, 'DEFLATE')
+    resetReaderContentCachesForTests()
+    const cacheDirectory = path.join(testDataDir, 'reader-media-cache', 'v1')
+    await fs.mkdir(cacheDirectory, { recursive: true })
+    const orphan = path.join(cacheDirectory, `${'c'.repeat(64)}.media.tmp-deadbeef`)
+    await fs.writeFile(orphan, 'stale')
+    const content = { ...book, contentHash: 'isolated-concurrent-media', size: sourceBuffer.length }
+    const [first, second] = await Promise.all([
+      acquireReaderMedia(content, 'OEBPS/audio/track.mp3'),
+      acquireReaderMedia(content, 'OEBPS/audio/track.mp3'),
+    ])
+    expect(first.file).toBe(second.file)
+    expect(await fs.stat(orphan).then(() => true, () => false)).toBe(false)
+    expect((await fs.readdir(path.dirname(first.file))).filter((name) => name.includes('.tmp-'))).toHaveLength(0)
+    await first.release()
+    await second.release()
+    await fs.unlink(first.file)
+
+    const broken = Buffer.from(sourceBuffer)
+    const name = Buffer.from('OEBPS/audio/track.mp3')
+    const headerOffset = broken.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
+    let cursor = headerOffset
+    let dataOffset = -1
+    while (cursor >= 0) {
+      const nameLength = broken.readUInt16LE(cursor + 26)
+      const extraLength = broken.readUInt16LE(cursor + 28)
+      const localName = broken.subarray(cursor + 30, cursor + 30 + nameLength)
+      if (localName.equals(name)) { dataOffset = cursor + 30 + nameLength + extraLength; break }
+      cursor = broken.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]), cursor + 4)
+    }
+    expect(dataOffset).toBeGreaterThan(0)
+    broken[dataOffset] = (broken[dataOffset]! ^ 0xff)
+    sourceBuffer = broken
+    resetReaderContentCachesForTests()
+    await expect(acquireReaderMedia(content, 'OEBPS/audio/track.mp3')).rejects.toThrow()
+    expect((await fs.readdir(path.dirname(first.file))).filter((file) => file.includes('.tmp-'))).toHaveLength(0)
+    sourceBuffer = await fixture(false, false, 2 * 1024 * 1024, 'DEFLATE')
+    resetReaderContentCachesForTests()
+    const retried = await acquireReaderMedia({ ...book, size: sourceBuffer.length }, 'OEBPS/audio/track.mp3')
+    expect(retried.size).toBe(2 * 1024 * 1024)
+    await retried.release()
+  }, 30_000)
+
+  it('serializes distinct media preparations and aborts an abandoned preparation', async () => {
+    const { acquireReaderMedia } = await import('./reader-media.service')
+    sourceBuffer = await fixture(false, false, 2 * 1024 * 1024, 'DEFLATE', 2 * 1024 * 1024)
+    resetReaderContentCachesForTests()
+    const content = { ...book, size: sourceBuffer.length }
+    await (await import('./reader-content.service')).getReaderManifest(content)
+    let releaseRead!: () => void
+    let enteredReads = 0
+    sourceReadGate = () => {
+      enteredReads += 1
+      if (enteredReads === 1) return new Promise<void>((resolve) => { releaseRead = resolve })
+      return Promise.resolve()
+    }
+    const first = acquireReaderMedia(content, 'OEBPS/audio/track.mp3')
+    await vi.waitFor(() => expect(enteredReads).toBe(1))
+    const second = acquireReaderMedia(content, 'OEBPS/audio/second.mp3')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(enteredReads).toBe(1)
+    releaseRead()
+    const [firstLease, secondLease] = await Promise.all([first, second])
+    expect(enteredReads).toBeGreaterThan(1)
+    await firstLease.release()
+    await secondLease.release()
+    sourceReadGate = null
+
+    sourceBuffer = await fixture(false, false, 2 * 1024 * 1024, 'DEFLATE')
+    resetReaderContentCachesForTests()
+    const abandonedContent = { ...book, contentHash: 'isolated-abandoned-media', size: sourceBuffer.length }
+    await (await import('./reader-content.service')).getReaderManifest(abandonedContent)
+    let releaseAbortedRead!: () => void
+    let blockAbortedRead = true
+    let abortedSourceReads = 0
+    sourceReadGate = () => {
+      abortedSourceReads += 1
+      if (!blockAbortedRead) return Promise.resolve()
+      blockAbortedRead = false
+      return new Promise<void>((resolve) => { releaseAbortedRead = resolve })
+    }
+    const controller = new AbortController()
+    const abandoned = acquireReaderMedia(abandonedContent, 'OEBPS/audio/track.mp3', controller.signal)
+    await vi.waitFor(() => expect(releaseAbortedRead).toBeTypeOf('function'))
+    controller.abort(new DOMException('Request disconnected', 'AbortError'))
+    await expect(abandoned).rejects.toThrow('Request disconnected')
+    const retry = acquireReaderMedia(abandonedContent, 'OEBPS/audio/track.mp3')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(abortedSourceReads).toBe(1)
+    releaseAbortedRead()
+    const retried = await retry
+    expect(abortedSourceReads).toBeGreaterThan(1)
+    await retried.release()
+    sourceReadGate = null
+    const cacheDirectory = path.join(testDataDir, 'reader-media-cache', 'v1')
+    expect((await fs.readdir(cacheDirectory)).filter((name) => name.includes('.tmp-'))).toHaveLength(0)
+  }, 30_000)
+
+  it('evicts least-recent media cache files and protects active transfers', async () => {
+    const { acquireReaderMedia, setReaderMediaCacheBudgetForTests } = await import('./reader-media.service')
+    const directory = path.join(testDataDir, 'reader-media-cache', 'v1')
+    await fs.mkdir(directory, { recursive: true })
+    const oldest = path.join(directory, `${'a'.repeat(64)}.media`)
+    const newest = path.join(directory, `${'b'.repeat(64)}.media`)
+    await fs.writeFile(oldest, Buffer.alloc(4))
+    await fs.writeFile(newest, Buffer.alloc(4))
+    await fs.utimes(oldest, new Date(1), new Date(1))
+    await fs.utimes(newest, new Date(2), new Date(2))
+    await setReaderMediaCacheBudgetForTests(4)
+    expect(await fs.stat(oldest).then(() => true, () => false)).toBe(false)
+    expect(await fs.stat(newest).then(() => true, () => false)).toBe(true)
+    await setReaderMediaCacheBudgetForTests(null)
+    sourceBuffer = await fixture(false, false, 12, 'STORE')
+    resetReaderContentCachesForTests()
+    const media = await acquireReaderMedia({ ...book, size: sourceBuffer.length }, 'OEBPS/audio/track.mp3')
+    await setReaderMediaCacheBudgetForTests(0)
+    expect(await fs.stat(media.file).then(() => true, () => false)).toBe(true)
+    const stream = media.createStream()
+    const closed = new Promise<void>((resolve) => stream.once('close', resolve))
+    stream.destroy()
+    await closed
+    await media.release()
+    await setReaderMediaCacheBudgetForTests(0)
+    expect(await fs.stat(media.file).then(() => true, () => false)).toBe(false)
+    await setReaderMediaCacheBudgetForTests(null)
   })
 
   it('shares prepared and raw caches by immutable content hash across book revisions', async () => {

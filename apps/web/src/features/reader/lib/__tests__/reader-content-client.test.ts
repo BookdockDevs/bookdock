@@ -74,6 +74,17 @@ describe('reader content client', () => {
     }
   }
 
+  it('builds revision-bound same-origin media URLs while preserving reader capability parameters', () => {
+    const session = new ReaderContentSession(manifest, 'u:user-a', getSessionEpoch(), '/api/v1/books/b1/file?reader=1&showHidden=1')
+    const url = new URL(session.mediaUrl('OEBPS/Audio/track one.mp3'), 'http://localhost')
+    expect(url.pathname).toBe('/api/v1/books/b1/reader/media')
+    expect(url.searchParams.get('reader')).toBe('1')
+    expect(url.searchParams.get('showHidden')).toBe('1')
+    expect(url.searchParams.get('revisionId')).toBe('rev-1')
+    expect(url.searchParams.get('path')).toBe('OEBPS/Audio/track one.mp3')
+    session.destroy()
+  })
+
   it('requests the manifest from the revision-bearing content URL and reuses session memory', async () => {
     setSessionAccount('user-a')
     const fetchMock = manifestFetch()
