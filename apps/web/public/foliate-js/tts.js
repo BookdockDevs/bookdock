@@ -155,7 +155,7 @@ const isLegacyLocalLink = href => {
 const shouldSkipLegacyTextNode = node => {
     const parent = node.parentElement
     if (!parent) return false
-    if (parent.closest('script, style, noscript, template, [hidden], [aria-hidden="true"], [inert], [cfi-inert]')) return true
+    if (parent.closest('script, style, noscript, template, [hidden], [aria-hidden="true"], [inert], [cfi-inert], [data-tts-skip]')) return true
     const anchor = parent.closest('a')
     return !!anchor && isLegacyLocalLink(anchor.getAttribute('href'))
 }

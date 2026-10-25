@@ -26,7 +26,7 @@ interface ReadingPosition {
 export function useReadingTimer(bookId: string | undefined) {
   const userId = useAuthStore((state) => state.user?.id)
   const observedPositionRef = useRef<ReadingPosition | undefined>(undefined)
-  const settleRef = useRef<() => void>(() => {})
+  const settleRef = useRef<(options?: { finished?: boolean }) => void>(() => {})
   const pingRef = useRef<(position?: ReadingPosition) => void>(() => {})
 
   useEffect(() => {
@@ -107,11 +107,14 @@ export function useReadingTimer(bookId: string | undefined) {
         useReadingSaveState.setState({ storageFailed: true })
       }
     }
-    function settle() {
+    function settle(finished?: boolean) {
       const now = Date.now()
       pause(now)
       const record = body(now)
-      if (record && record.durationSeconds * 1000 >= MIN_SESSION_MS) queueReadingRecord(ownerId, record)
+      if (record) {
+        if (finished) record.finished = true
+        if (record.durationSeconds * 1000 >= MIN_SESSION_MS || finished) queueReadingRecord(ownerId, record)
+      }
       try {
         const drafts = readDrafts()
         delete drafts[id]
@@ -238,9 +241,12 @@ export function useReadingTimer(bookId: string | undefined) {
     }, 10_000)
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('pagehide', onPageHide)
-    settleRef.current = () => {
+    settleRef.current = (options?: { finished?: boolean }) => {
       const wasRunning = stretchStart !== null
-      if ((body(Date.now())?.durationSeconds ?? 0) >= 60) {
+      if (options?.finished) {
+        settle(true)
+        if (wasRunning) resume(Date.now())
+      } else if ((body(Date.now())?.durationSeconds ?? 0) >= 60) {
         settle()
         if (wasRunning) resume(Date.now())
       } else checkpoint()
@@ -265,7 +271,7 @@ export function useReadingTimer(bookId: string | undefined) {
   }, [bookId, userId])
 
   return {
-    flush: useCallback(() => settleRef.current(), []),
+    flush: useCallback((options?: { finished?: boolean }) => settleRef.current(options), []),
     ping: useCallback((position?: ReadingPosition) => {
       if (position?.fraction !== undefined && Number.isFinite(position.fraction) && position.fraction >= 0 && position.fraction <= 1) observedPositionRef.current = position
       pingRef.current(position)

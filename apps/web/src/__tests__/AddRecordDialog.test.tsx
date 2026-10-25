@@ -131,4 +131,69 @@ describe('retroactive reading entry', () => {
     fireEvent.submit(form)
     expect(state.mutate.mock.calls[2][0]).not.toHaveProperty('replaceSessionIds')
   })
+
+  it('prefills manual session facts, allows toggling markFinished, and calls onManualSaved on success', () => {
+    const onManualSaved = vi.fn()
+    const onClose = vi.fn()
+    const manualSession = {
+      bookId: 'b1',
+      userId: 'u1',
+      requestId: 'req-manual-1',
+      timezone: 'Asia/Shanghai',
+      date: '2026-10-25',
+      phase: 'paused' as const,
+      startedAt: Date.parse('2026-10-25T14:30:00Z'),
+      elapsedMs: 45 * 60_000,
+      lastResumeAt: null,
+      suspendedAt: null,
+      startCfi: 'epubcfi(/6/2!/4)',
+      startFraction: 0.125,
+      startChapterIndex: 1,
+      lastCfi: 'epubcfi(/6/4!/8)',
+      lastFraction: 0.375,
+      lastChapterIndex: 2,
+      fragments: [{ startedAt: 1000, endedAt: 2000 }],
+      coverage: [[0.125, 0.375]] as [number, number][],
+      revisionId: 'rev-1',
+      wordCount: 50000,
+    }
+
+    render(
+      <AddRecordDialog
+        bookId="b1"
+        variant="reader"
+        manualSession={manualSession}
+        initialFinished={true}
+        onClose={onClose}
+        onManualSaved={onManualSaved}
+      />,
+    )
+
+    expect(screen.getByText('reader.manualTimerSaveTitle')).toBeInTheDocument()
+    expect(screen.getByLabelText('reader.addRecordHours')).toHaveValue(0)
+    expect(screen.getByLabelText('reader.addRecordMinutes')).toHaveValue(45)
+    expect(screen.getByLabelText('reader.sessionStartPercent')).toHaveValue(12.5)
+    expect(screen.getByLabelText('reader.sessionEndPercent')).toHaveValue(37.5)
+    expect(screen.getByLabelText('readingData.markFinished')).toBeChecked()
+
+    fireEvent.submit(screen.getByText('reader.manualTimerSave').closest('form')!)
+
+    expect(state.mutate).toHaveBeenCalledTimes(1)
+    const req = state.mutate.mock.calls[0][0]
+    expect(req).toMatchObject({
+      bookId: 'b1',
+      source: 'manual',
+      requestId: 'req-manual-1',
+      finished: true,
+      durationSeconds: 2700,
+      startFraction: 0.125,
+      endFraction: 0.375,
+      revisionId: 'rev-1',
+      wordCount: 50000,
+    })
+
+    act(() => state.mutate.mock.calls[0][1].onSuccess())
+    expect(onManualSaved).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 })

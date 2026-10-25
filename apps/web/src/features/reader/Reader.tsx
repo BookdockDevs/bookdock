@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError, apiGet, apiPatch, apiPut } from '@/api/client'
-import { usePrefetchBookReadingStats } from '@/api/hooks/reading-records'
+import { usePrefetchBookReadingStats, useReadingRound } from '@/api/hooks/reading-records'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -52,6 +53,7 @@ import { clearReaderSelection } from './lib/reader-selection'
 import { ImageContextMenu } from './components/ImageContextMenu'
 import ShareCardDialog from './components/share/ShareCardDialog'
 import { ProgressStrip } from './components/ProgressStrip'
+import EndOfBookView from './components/EndOfBookView'
 import ContentUpdateNotice from './components/ContentUpdateNotice'
 import HistoryCapsule from './components/HistoryCapsule'
 import ReaderFooterControls from './components/ReaderFooterControls'
@@ -126,6 +128,8 @@ export default function Reader() {
   const [currentContentCfi, setCurrentContentCfi] = useState<string | null>(null)
   const [chapterFraction, setChapterFraction] = useState<number | undefined>(undefined)
   const [_atChapterStart, setAtChapterStart] = useState(false)
+  const [endOfBookMount, setEndOfBookMount] = useState<HTMLElement | null>(null)
+  const readingRoundMutation = useReadingRound(id)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [shortcutDialogOpen, setShortcutDialogOpen] = useState(false)
   const [ttsOpen, setTtsOpen] = useState(false)
@@ -1345,6 +1349,9 @@ export default function Reader() {
       // "选中即划" keeps the toolbar open so the fresh highlight can be restyled
       if (!e.keepSelection) clearReaderSelection(rendererRef.current)
     },
+    onEndOfBookMount: (el) => {
+      setEndOfBookMount(el)
+    },
   })
 
   // Renderer replacement briefly clears `renderer`; keep the last confirmed
@@ -1626,6 +1633,20 @@ export default function Reader() {
   // Stable context value: a fresh `{ renderer }` object per render would
   // re-render every consumer on each relocate tick, defeating memo below
   const rendererContextValue = useMemo(() => ({ renderer }), [renderer])
+
+  const handleMarkFinished = useCallback(async () => {
+    flushReadingTimer()
+    if (!isGuest) {
+      try {
+        await readingRoundMutation.mutateAsync('finish')
+        notify.success({ key: 'reader.markedAsFinished' })
+      } catch (err) {
+        notify.error(getUserErrorNotification(err, 'errors.saveFailed'))
+      }
+    } else {
+      notify.success({ key: 'reader.markedAsFinished' })
+    }
+  }, [flushReadingTimer, isGuest, readingRoundMutation])
 
   const onPrevChapter = useCallback(() => {
     keepChromePinnedRef.current = true
@@ -2082,6 +2103,17 @@ export default function Reader() {
               )}
             />
             <AutoReadingProgressBar readingMode={readingMode} />
+            {endOfBookMount && createPortal(
+              <EndOfBookView
+                bookId={id}
+                bookTitle={book.title}
+                readStatus={book.readStatus}
+                guestReadOnly={isGuest}
+                onMarkFinished={handleMarkFinished}
+                isMarkingFinished={readingRoundMutation.isPending}
+              />,
+              endOfBookMount
+            )}
             {navPending && (
               <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
                 <ReaderLoadingBadge />
@@ -2233,6 +2265,8 @@ export default function Reader() {
                   onPageUp={onPageUp}
                   onPageDown={onPageDown}
                   onSeek={onSeek}
+
+
                 />
               </div>
               {(historyCaps.canBack || historyCaps.canForward) && (

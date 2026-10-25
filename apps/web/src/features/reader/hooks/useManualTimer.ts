@@ -77,6 +77,7 @@ export function useManualTimer(bookId: string | undefined) {
 
   return {
     phase,
+    session,
     transferred: session?.transferred ?? false,
     elapsedMs: durationMs,
     graceMs,

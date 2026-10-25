@@ -26,6 +26,8 @@ export interface ReaderLocation {
   movedScreens?: number
   /** Internal relocation caused by TTS chapter navigation. */
   source?: 'reader' | 'tts'
+  /** Viewport is positioned at the very end of the book */
+  atEnd?: boolean
 }
 
 /** Rect in main-viewport client coordinates, used to position popups */
@@ -177,6 +179,10 @@ export interface RendererEvents {
    * click-area setting only governs page turning, so this fires in every mode).
    */
   chromeToggle: () => void
+  /** User attempted to navigate past the end of the book (forward click/next at end) */
+  atEndReached: () => void
+  /** In-document mount node for end-of-book content attached/detached in the final section */
+  endOfBookMount: (mountEl: HTMLElement | null) => void
   /**
    * An explicit user navigation is about to happen (TOC click, progress seek,
    * search/bookmark jump, scroll-mode chapter switch) — the reader must close
@@ -256,6 +262,7 @@ export interface BookReader {
   /** Returns false when the active reading mode blocks further auto movement. */
   scrollByPixels(delta: number): Promise<boolean>
   isAtEnd(): boolean
+  getEndOfBookMount?(): HTMLElement | null
   /** Coordinates smooth auto reading with the paginator's snap boundary state. */
   setAutoReadingActive(active: boolean): void
   /**

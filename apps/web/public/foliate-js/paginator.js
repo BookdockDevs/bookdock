@@ -710,6 +710,12 @@ class View {
     get contentPages() {
         return this.#contentPages
     }
+    refreshContent() {
+        const doc = this.document
+        if (!doc?.body) return
+        this.#contentRange.selectNodeContents(doc.body)
+        this.expand()
+    }
     async load(src, data, afterLoad, beforeRender, observeDynamicResources) {
         if (typeof src !== 'string') throw new Error(`${src} is not string`)
         return new Promise((resolve, reject) => {
@@ -4349,6 +4355,13 @@ export class Paginator extends HTMLElement {
             })
         }
         return contents
+    }
+    refreshContent(index) {
+        const views = index == null
+            ? this.#views.values()
+            : [this.#views.get(index)].filter(Boolean)
+        for (const view of views) view.refreshContent()
+        requestAnimationFrame(() => this.#replaceBackground())
     }
     setStyles(styles) {
         this.#styles = styles

@@ -56,6 +56,8 @@ interface UseReaderRendererOptions {
   onAnnotationOrphaned?: (e: Parameters<RendererEvents['annotationOrphaned']>[0]) => void
   onFootnoteOpen?: (e: Parameters<RendererEvents['footnoteOpen']>[0]) => void
   onFootnoteClose?: () => void
+  onAtEndReached?: () => void
+  onEndOfBookMount?: (mountEl: HTMLElement | null) => void
 }
 
 interface RendererMount {
@@ -104,6 +106,8 @@ export function useReaderRenderer({
   onAnnotationOrphaned,
   onFootnoteOpen,
   onFootnoteClose,
+  onAtEndReached,
+  onEndOfBookMount,
 }: UseReaderRendererOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<BookReader | null>(null)
@@ -211,6 +215,8 @@ export function useReaderRenderer({
   const onAnnotationOrphanedRef = useRef(onAnnotationOrphaned)
   const onFootnoteOpenRef = useRef(onFootnoteOpen)
   const onFootnoteCloseRef = useRef(onFootnoteClose)
+  const onAtEndReachedRef = useRef(onAtEndReached)
+  const onEndOfBookMountRef = useRef(onEndOfBookMount)
   const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
   const themeRef = useRef(theme)
   const fontRef = useRef({ fontFamily, cjkFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
@@ -257,6 +263,8 @@ export function useReaderRenderer({
   onAnnotationOrphanedRef.current = onAnnotationOrphaned
   onFootnoteOpenRef.current = onFootnoteOpen
   onFootnoteCloseRef.current = onFootnoteClose
+  onAtEndReachedRef.current = onAtEndReached
+  onEndOfBookMountRef.current = onEndOfBookMount
   themeRef.current = theme
   fontRef.current = { fontFamily, cjkFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont }
   paragraphRef.current = { paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
@@ -443,6 +451,8 @@ export function useReaderRenderer({
     const unsubAnnotationOrphaned = newRenderer.on('annotationOrphaned', (e) => { if (isCurrentRenderer()) onAnnotationOrphanedRef.current?.(e) })
     const unsubFootnoteOpen = newRenderer.on('footnoteOpen', (e) => { if (isCurrentRenderer()) onFootnoteOpenRef.current?.(e) })
     const unsubFootnoteClose = newRenderer.on('footnoteClose', () => { if (isCurrentRenderer()) onFootnoteCloseRef.current?.() })
+    const unsubAtEndReached = newRenderer.on('atEndReached', () => { if (isCurrentRenderer()) onAtEndReachedRef.current?.() })
+    const unsubEndOfBookMount = newRenderer.on('endOfBookMount', (el) => { if (isCurrentRenderer()) onEndOfBookMountRef.current?.(el) })
     teardown = () => {
       unsubRelocated()
       unsubSelected()
@@ -468,6 +478,8 @@ export function useReaderRenderer({
       unsubAnnotationOrphaned()
       unsubFootnoteOpen()
       unsubFootnoteClose()
+      unsubAtEndReached()
+      unsubEndOfBookMount()
     }
     if (!previousMount) activeMountRef.current = mountRecord
 
@@ -488,6 +500,7 @@ export function useReaderRenderer({
         remountPositionRef.current = { key: rendererKey, ...position }
       }
       mountRecord.dispose()
+      onEndOfBookMountRef.current?.(null)
       setRenderer((current) => (current === newRenderer ? null : current))
     }
   }, [url, bookId, createRenderer, initialCfi, initialFraction, canMount, mountGeneration])

@@ -1976,6 +1976,8 @@ export class FoliateReader implements BookReader {
   private resizeObserver: ResizeObserver | null = null
   private lastScrollVPad = -1
   private activeDocs = new Set<Document>()
+  private endOfBookMountEl: HTMLElement | null = null
+  private endOfBookResizeObserver: ResizeObserver | null = null
   private marginalPointerListeners = new Map<Document, (event: PointerEvent) => void>()
   // The last reader stylesheet that was handed to the renderer; reused when a
   // section document has to be styled directly.
@@ -2030,6 +2032,10 @@ export class FoliateReader implements BookReader {
     // Must bubble: listeners on document (e.g. popup dismiss handlers) rely on
     // the event travelling up from the container
     this.container?.dispatchEvent(new CustomEvent('content-click', { bubbles: true }))
+  }
+
+  private handleWheel = () => {
+    this.emit('userInteraction')
   }
 
   // Click-to-turn (F3): the vendored view emits window-relative `click-view`
@@ -2636,10 +2642,10 @@ export class FoliateReader implements BookReader {
       view.addEventListener('open-media-menu', this.handleOpenMediaMenu)
       view.addEventListener('media-error', this.handleMediaError)
       view.addEventListener('media-play', this.handleMediaPlay)
-      view.addEventListener('wheel', () => this.emit('userInteraction'), { passive: true })
+      view.addEventListener('wheel', this.handleWheel, { passive: true })
       view.addEventListener('doctouchstart', () => this.emit('userInteraction'))
       view.addEventListener('doctouchend', () => this.emit('userInteractionEnd'))
-      view.addEventListener('docwheel', () => this.emit('userInteraction'), { passive: true })
+      view.addEventListener('docwheel', this.handleWheel, { passive: true })
       view.addEventListener('dockeydown', (event: Event) => {
         // Space never moves the text, so it must not rebase timed auto-reading:
         // the same press pauses the session, and a rebase would clear the step
@@ -2872,6 +2878,26 @@ export class FoliateReader implements BookReader {
     } catch {
       // renderer not ready
     }
+    const rangeDocument = range?.startContainer?.nodeType === 9
+      ? range.startContainer as Document
+      : range?.startContainer?.ownerDocument
+    const mount = rangeDocument?.getElementById('bookdock-end-of-book')
+    if (chapterIndex !== undefined && mount) {
+      try {
+        const endpointInMount = (node: Node | null | undefined) => {
+          while (node) {
+            if (node === mount) return true
+            node = node.parentNode
+          }
+          return false
+        }
+        if (endpointInMount(range?.startContainer) || endpointInMount(range?.endContainer) || range?.intersectsNode?.(mount)) {
+          effectiveCfi = `chapter:${chapterIndex}:1`
+        }
+      } catch {
+        // Ignore ranges from a detached section.
+      }
+    }
     if (chapterFraction === undefined && chapterLocation && Number.isFinite(chapterLocation.current) && Number.isFinite(chapterLocation.total) && chapterLocation.total > 0) {
       chapterFraction = chapterLocation.current / chapterLocation.total
     }
@@ -2900,6 +2926,7 @@ export class FoliateReader implements BookReader {
       pageInChapter,
       movedScreens,
       source: this.ttsNavigation ? 'tts' : 'reader',
+      atEnd: this.isAtEnd(),
     }
     this.lastTocLabel = tocItem?.label ?? ''
     this.lastChapterFraction = chapterFraction
@@ -3598,10 +3625,42 @@ export class FoliateReader implements BookReader {
     return false
   }
 
+  private getLastSectionIndex(): number {
+    const sections = this.book?.sections
+    if (!sections || sections.length === 0) return 0
+    for (let i = sections.length - 1; i >= 0; i--) {
+      if (sections[i]?.linear !== 'no') return i
+    }
+    return Math.max(0, sections.length - 1)
+  }
+
   isAtEnd(): boolean {
     const renderer = this.view?.renderer
     if (!renderer) return false
-    return Boolean(renderer.atBookEnd ?? renderer.atEnd)
+    const lastSectionIndex = this.getLastSectionIndex()
+    const isLastSection = this.currentSectionIndex >= lastSectionIndex
+    if (isLastSection) {
+      if (renderer.atBookEnd || renderer.atEnd) return true
+      if (this.readingMode === 'page' && renderer.page != null && renderer.pages != null && renderer.page >= renderer.pages - 1) return true
+      if (this.readingMode === 'scroll') {
+        if (typeof renderer.end === 'number' && typeof renderer.viewSize === 'number' && renderer.viewSize - renderer.end <= 10) {
+          return true
+        }
+      }
+    }
+    return Boolean(renderer.atBookEnd || renderer.atEnd)
+  }
+
+  getEndOfBookMount(): HTMLElement | null {
+    return this.endOfBookMountEl
+  }
+
+  private clearEndOfBookMount() {
+    this.endOfBookResizeObserver?.disconnect()
+    this.endOfBookResizeObserver = null
+    if (!this.endOfBookMountEl) return
+    this.endOfBookMountEl = null
+    this.emit('endOfBookMount', null)
   }
 
   setAutoReadingActive(active: boolean) {
@@ -4713,7 +4772,11 @@ export class FoliateReader implements BookReader {
       const docs = new Set<Document>(contents.map((c) => c.doc).filter(Boolean))
       for (const doc of this.activeDocs) {
         if (!docs.has(doc)) {
+          if (this.endOfBookMountEl && doc.contains(this.endOfBookMountEl)) {
+            this.clearEndOfBookMount()
+          }
           doc.removeEventListener('click', this.handleDocInteraction)
+          doc.removeEventListener('wheel', this.handleWheel)
           const pointerListener = this.marginalPointerListeners.get(doc)
           if (pointerListener) {
             doc.removeEventListener('pointermove', pointerListener)
@@ -4737,6 +4800,27 @@ export class FoliateReader implements BookReader {
             doc.removeEventListener('keydown', sel.keyForwardHandler, true)
             this.selectionDocs.delete(doc)
           }
+        }
+      }
+      const lastIndex = this.getLastSectionIndex()
+      for (const { doc, index } of contents) {
+        if (!doc || index !== lastIndex || !doc.body) continue
+        let mountEl = doc.getElementById('bookdock-end-of-book')
+        if (!mountEl) {
+          mountEl = doc.createElement('div')
+          mountEl.id = 'bookdock-end-of-book'
+          doc.body.appendChild(mountEl)
+        }
+        mountEl.className = 'bookdock-end-of-book-mount'
+        if (mountEl !== this.endOfBookMountEl) {
+          this.endOfBookResizeObserver?.disconnect()
+          this.endOfBookMountEl = mountEl
+          this.endOfBookResizeObserver = new ResizeObserver(() => {
+            if (this.destroyed || this.endOfBookMountEl !== mountEl) return
+            this.view?.renderer?.refreshContent?.(index)
+          })
+          this.endOfBookResizeObserver.observe(mountEl)
+          this.emit('endOfBookMount', mountEl)
         }
       }
       for (const { doc, index } of contents) {
@@ -4767,6 +4851,7 @@ export class FoliateReader implements BookReader {
           onMediaError: (detail) => this.emit('mediaError', detail),
         })
         doc.addEventListener('click', this.handleDocInteraction)
+        doc.addEventListener('wheel', this.handleWheel, { passive: true })
         const pointerListener = (event: PointerEvent) => {
           if (!doc.defaultView?.frameElement || event.pointerType === 'touch') return
           const frameRect = doc.defaultView.frameElement.getBoundingClientRect()
@@ -4903,6 +4988,7 @@ export class FoliateReader implements BookReader {
     try { this.view?.remove() } catch { /* ignore */ }
     for (const doc of this.activeDocs) {
       doc.removeEventListener('click', this.handleDocInteraction)
+      doc.removeEventListener('wheel', this.handleWheel)
       const pointerListener = this.marginalPointerListeners.get(doc)
       if (pointerListener) doc.removeEventListener('pointermove', pointerListener)
       const sel = this.selectionDocs.get(doc)
@@ -4914,6 +5000,9 @@ export class FoliateReader implements BookReader {
         doc.removeEventListener('touchend', sel.handler)
         doc.removeEventListener('dblclick', sel.dblHandler)
       }
+    }
+    if (this.endOfBookMountEl) {
+      this.clearEndOfBookMount()
     }
     this.selectionDocs.clear()
     this.marginalPointerListeners.clear()
@@ -5666,6 +5755,287 @@ export class FoliateReader implements BookReader {
         padding-bottom: ${vPad}px !important;
         padding-left: ${this.readingMode === 'page' ? 0 : this.paragraph.horizontalPadding}px !important;
         padding-right: ${this.readingMode === 'page' ? 0 : this.paragraph.horizontalPadding}px !important;
+      }
+      .bookdock-end-of-book {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        box-sizing: border-box !important;
+        margin: 24px auto 16px !important;
+        padding: 12px 16px 8px !important;
+        max-width: 420px !important;
+        width: 100% !important;
+        text-align: center !important;
+        color: inherit !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+        text-indent: 0 !important;
+      }
+      .bookdock-end-of-book-mount {
+        display: flow-root !important;
+      }
+      .bookdock-end-of-book-mount:has(> .bookdock-end-of-book) {
+        break-before: column !important;
+        -webkit-column-break-before: always !important;
+        break-inside: avoid-column !important;
+        -webkit-column-break-inside: avoid !important;
+      }
+      .bookdock-end-of-book,
+      .bookdock-end-of-book * {
+        box-sizing: border-box !important;
+        text-indent: 0 !important;
+        margin: 0;
+        padding: 0;
+      }
+      .bookdock-eob-title {
+        font-family: "Songti SC", "Source Han Serif SC", "Noto Serif CJK SC", "SimSun", "STSong", serif !important;
+        font-size: 30px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.12em !important;
+        margin: 0 0 6px !important;
+        line-height: 1.2 !important;
+        text-align: center !important;
+      }
+      .bookdock-eob-booktitle {
+        font-size: 13px !important;
+        opacity: 0.45 !important;
+        margin: 0 auto 20px !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        max-width: 85% !important;
+        text-align: center !important;
+        letter-spacing: 0.04em !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif !important;
+      }
+      .bookdock-eob-badge-wrap {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        margin-bottom: 24px !important;
+      }
+      .bookdock-eob-circle {
+        width: 76px !important;
+        height: 76px !important;
+        border-radius: 50% !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+      }
+      .bookdock-eob-circle-finished {
+        background: linear-gradient(145deg, #2563eb 0%, #1d4ed8 100%) !important;
+        box-shadow: 0 8px 24px -2px rgba(37, 99, 235, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3) !important;
+        color: #ffffff !important;
+        border: none !important;
+      }
+      .bookdock-eob-circle-sub {
+        font-size: 11px !important;
+        font-weight: 500 !important;
+        letter-spacing: 0.05em !important;
+        opacity: 0.9 !important;
+        margin-bottom: 2px !important;
+      }
+      .bookdock-eob-circle-main {
+        font-size: 22px !important;
+        font-weight: 800 !important;
+        line-height: 1 !important;
+        letter-spacing: -0.01em !important;
+      }
+      .bookdock-eob-badge-label {
+        margin-top: 10px !important;
+        font-size: 12px !important;
+        color: ${isDarkTheme ? '#94a3b8' : 'color-mix(in srgb, currentColor 60%, transparent)'} !important;
+        font-weight: 500 !important;
+        letter-spacing: 0.05em !important;
+      }
+      .bookdock-eob-card {
+        width: 100% !important;
+        border-radius: 16px !important;
+        border: 1px solid ${isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)'} !important;
+        background: ${isDarkTheme ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.025)'} !important;
+        padding: 16px 16px !important;
+        margin: 0 0 16px !important;
+        text-align: center !important;
+      }
+      .bookdock-eob-card.has-start-date {
+        padding: 16px 16px 13px !important;
+      }
+      .bookdock-eob-grid-three {
+        display: grid !important;
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 6px !important;
+        align-items: flex-start !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      .bookdock-eob-col {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        text-align: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      .bookdock-eob-label {
+        font-size: 12px !important;
+        line-height: 1.2 !important;
+        opacity: 0.5 !important;
+        font-weight: 500 !important;
+        margin: 0 0 6px !important;
+        padding: 0 !important;
+        letter-spacing: 0.02em !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif !important;
+      }
+      .bookdock-eob-val {
+        display: flex !important;
+        align-items: baseline !important;
+        justify-content: center !important;
+        line-height: 1 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif !important;
+      }
+      .bookdock-eob-num {
+        font-size: 26px !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.02em !important;
+        font-variant-numeric: tabular-nums !important;
+        line-height: 1 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      .bookdock-eob-unit {
+        font-size: 13px !important;
+        font-weight: 500 !important;
+        opacity: 0.55 !important;
+        margin: 0 0 0 2px !important;
+        padding: 0 !important;
+        line-height: 1 !important;
+      }
+      .bookdock-eob-start-date {
+        margin: 10px 0 0 !important;
+        padding: 0 !important;
+        line-height: 1.2 !important;
+        font-size: 11px !important;
+        opacity: 0.45 !important;
+        text-align: center !important;
+        letter-spacing: 0.02em !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif !important;
+      }
+      .bookdock-eob-actions {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        gap: 10px !important;
+        width: 100% !important;
+      }
+      .bookdock-eob-btn-primary {
+        width: 100% !important;
+        max-width: 320px !important;
+        height: 48px !important;
+        border-radius: 9999px !important;
+        background: ${isDarkTheme ? '#ffffff' : '#18181b'} !important;
+        color: ${isDarkTheme ? '#09090b' : '#ffffff'} !important;
+        font-size: 15px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.04em !important;
+        border: none !important;
+        cursor: pointer !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-shadow: ${isDarkTheme ? '0 4px 16px rgba(255, 255, 255, 0.15), 0 2px 4px rgba(0, 0, 0, 0.4)' : '0 4px 14px rgba(24, 24, 27, 0.18)'} !important;
+        transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif !important;
+        margin: 0 auto !important;
+      }
+      .bookdock-eob-btn-primary:hover {
+        opacity: 0.94 !important;
+        transform: scale(1.01) !important;
+        box-shadow: ${isDarkTheme ? '0 6px 20px rgba(255, 255, 255, 0.22)' : '0 6px 18px rgba(24, 24, 27, 0.25)'} !important;
+      }
+      .bookdock-eob-btn-primary:active {
+        transform: scale(0.985) !important;
+      }
+      .bookdock-eob-btn-primary:disabled {
+        opacity: 0.65 !important;
+        cursor: not-allowed !important;
+      }
+      @keyframes bookdock-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      .bookdock-eob-spinner {
+        animation: bookdock-spin 0.8s linear infinite !important;
+        margin-right: 8px !important;
+        flex-shrink: 0 !important;
+      }
+      .bookdock-eob-review-wrap {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        gap: 8px !important;
+        width: 100% !important;
+      }
+      .bookdock-eob-review-meta {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        gap: 4px !important;
+        margin-bottom: 2px !important;
+      }
+      .bookdock-eob-stars-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+      }
+      .bookdock-eob-stars {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 2.5px !important;
+        line-height: 1 !important;
+      }
+      .bookdock-eob-star {
+        width: 15px !important;
+        height: 15px !important;
+        min-width: 15px !important;
+        max-width: 15px !important;
+        flex-shrink: 0 !important;
+        display: block !important;
+      }
+      .bookdock-eob-rating-num {
+        font-size: 13px !important;
+        font-weight: 600 !important;
+        opacity: 0.8 !important;
+      }
+      .bookdock-eob-review-preview-title {
+        font-size: 12px !important;
+        opacity: 0.55 !important;
+        max-width: 280px !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+      }
+      .bookdock-eob-btn-secondary {
+        width: 100% !important;
+        max-width: 320px !important;
+        height: 44px !important;
+        border-radius: 9999px !important;
+        background: ${isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)'} !important;
+        color: inherit !important;
+        border: 1px solid ${isDarkTheme ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)'} !important;
+        font-size: 14px !important;
+        font-weight: 500 !important;
+        cursor: pointer !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 6px !important;
+        transition: background 0.15s, border-color 0.15s !important;
+      }
+      .bookdock-eob-btn-secondary:hover {
+        background: ${isDarkTheme ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)'} !important;
       }
     `
     this.appStyleSheet = css

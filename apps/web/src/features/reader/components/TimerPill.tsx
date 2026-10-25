@@ -4,6 +4,8 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { useManualTimer } from '../hooks/useManualTimer'
+import { useReaderApi } from '../hooks/useReaderApi'
+import AddRecordDialog from './AddRecordDialog'
 
 interface TimerPillProps {
   bookId: string
@@ -145,8 +147,12 @@ const actionBtn =
 export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
   const _ = useTranslation()
   const timer = useManualTimer(bookId)
-  const { phase, elapsedMs, graceMs, lastSummary, clearSummary, start, pause, resume, terminate, discard } = timer
+  const { session, phase, elapsedMs, graceMs, lastSummary, clearSummary, start, pause, resume, discard } = timer
+  const { renderer } = useReaderApi()
   const [expanded, setExpanded] = useState(false)
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+
+  const isAtEnd = renderer?.isAtEnd?.() ?? false
 
   useEffect(() => {
     if (!lastSummary) return
@@ -154,38 +160,97 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
     clearSummary()
   }, [lastSummary, clearSummary])
 
-  if (phase === 'idle') {
-    return (
-      <div className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
-        <button
-          onClick={() => start()}
-          title={_('reader.manualTimerStart')}
-          className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 text-[var(--bd-read-sub)] shadow-lg backdrop-blur-md transition-all hover:text-[var(--bd-read-text)] active:scale-95"
-        >
-          <StopwatchIcon />
-        </button>
-      </div>
-    )
-  }
-
   const stopButton = (
     <StopHoldButton
       title={_('reader.manualTimerTerminate')}
       onTerminate={() => {
         setExpanded(false)
-        terminate()
+        pause()
+        setShowSaveDialog(true)
       }}
       onDiscard={() => {
         setExpanded(false)
+        setShowSaveDialog(false)
         discard()
         notify.info({ key: 'reader.manualTimerDiscarded' })
       }}
     />
   )
 
+  const saveDialog = showSaveDialog && session && (
+    <AddRecordDialog
+      bookId={bookId}
+      variant="reader"
+      manualSession={session}
+      initialFinished={isAtEnd}
+      onClose={() => setShowSaveDialog(false)}
+      onManualSaved={() => {
+        setShowSaveDialog(false)
+        discard()
+      }}
+    />
+  )
+
+  if (phase === 'idle') {
+    return (
+      <>
+        <div className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
+          <button
+            onClick={() => start()}
+            title={_('reader.manualTimerStart')}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 text-[var(--bd-read-sub)] shadow-lg backdrop-blur-md transition-all hover:text-[var(--bd-read-text)] active:scale-95"
+          >
+            <StopwatchIcon />
+          </button>
+        </div>
+        {saveDialog}
+      </>
+    )
+  }
+
   if (phase === 'running') {
     return (
-      <div className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
+      <>
+        <div className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
+          <div
+            className={cn(
+              'group flex h-11 items-center rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 shadow-lg backdrop-blur-md transition-all',
+              expanded ? 'pl-2 pr-4' : 'px-4',
+            )}
+          >
+            <div
+              className={cn(
+                'flex items-center gap-0.5 overflow-hidden transition-all duration-200',
+                expanded
+                  ? 'mr-1.5 max-w-24 opacity-100'
+                  : 'max-w-0 opacity-0 group-hover:mr-1.5 group-hover:max-w-24 group-hover:opacity-100 group-focus-within:mr-1.5 group-focus-within:max-w-24 group-focus-within:opacity-100',
+              )}
+            >
+              <button type="button" onClick={pause} title={_('reader.manualTimerPause')} className={actionBtn}>
+                <PauseIcon />
+              </button>
+              {stopButton}
+              <div className="mx-1 h-4 w-px shrink-0 bg-[var(--bd-read-accent)]/50" />
+            </div>
+            <button
+              type="button"
+              onClick={() => setExpanded(!expanded)}
+              title={expanded ? undefined : _('reader.manualTimerPause')}
+              className="flex h-full items-center gap-2 text-sm font-medium tabular-nums text-[var(--bd-read-text)] select-none"
+            >
+              <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500/90 shadow-sm animate-pulse" />
+              <span>{formatDuration(elapsedMs)}</span>
+            </button>
+          </div>
+        </div>
+        {saveDialog}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div title={timer.transferred ? _('reader.manualTimerTransferred') : undefined} className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
         <div
           className={cn(
             'group flex h-11 items-center rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 shadow-lg backdrop-blur-md transition-all',
@@ -200,8 +265,8 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
                 : 'max-w-0 opacity-0 group-hover:mr-1.5 group-hover:max-w-24 group-hover:opacity-100 group-focus-within:mr-1.5 group-focus-within:max-w-24 group-focus-within:opacity-100',
             )}
           >
-            <button type="button" onClick={pause} title={_('reader.manualTimerPause')} className={actionBtn}>
-              <PauseIcon />
+            <button type="button" onClick={resume} title={_('reader.manualTimerResume')} className={actionBtn}>
+              <PlayIcon />
             </button>
             {stopButton}
             <div className="mx-1 h-4 w-px shrink-0 bg-[var(--bd-read-accent)]/50" />
@@ -209,54 +274,20 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            title={expanded ? undefined : _('reader.manualTimerPause')}
-            className="flex h-full items-center gap-2 text-sm font-medium tabular-nums text-[var(--bd-read-text)] select-none"
+            className="flex h-full items-center gap-2 text-sm font-medium tabular-nums text-[var(--bd-read-sub)] select-none"
           >
-            <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500/90 shadow-sm animate-pulse" />
-            <span>{formatDuration(elapsedMs)}</span>
+            <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500/90 shadow-sm" />
+            <span className="min-w-[3.25rem] text-right">
+              {timer.transferred && expanded
+                ? _('reader.manualTimerTransferred')
+                : phase === 'suspended'
+                  ? _('reader.manualTimerRemaining', { duration: formatDuration(graceMs) })
+                  : formatDuration(elapsedMs)}
+            </span>
           </button>
         </div>
       </div>
-    )
-  }
-
-  return (
-    <div title={timer.transferred ? _('reader.manualTimerTransferred') : undefined} className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
-      <div
-        className={cn(
-          'group flex h-11 items-center rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 shadow-lg backdrop-blur-md transition-all',
-          expanded ? 'pl-2 pr-4' : 'px-4',
-        )}
-      >
-        <div
-          className={cn(
-            'flex items-center gap-0.5 overflow-hidden transition-all duration-200',
-            expanded
-              ? 'mr-1.5 max-w-24 opacity-100'
-              : 'max-w-0 opacity-0 group-hover:mr-1.5 group-hover:max-w-24 group-hover:opacity-100 group-focus-within:mr-1.5 group-focus-within:max-w-24 group-focus-within:opacity-100',
-          )}
-        >
-          <button type="button" onClick={resume} title={_('reader.manualTimerResume')} className={actionBtn}>
-            <PlayIcon />
-          </button>
-          {stopButton}
-          <div className="mx-1 h-4 w-px shrink-0 bg-[var(--bd-read-accent)]/50" />
-        </div>
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="flex h-full items-center gap-2 text-sm font-medium tabular-nums text-[var(--bd-read-sub)] select-none"
-        >
-          <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-amber-500/90 shadow-sm" />
-          <span className="min-w-[3.25rem] text-right">
-            {timer.transferred && expanded
-              ? _('reader.manualTimerTransferred')
-              : phase === 'suspended'
-                ? _('reader.manualTimerRemaining', { duration: formatDuration(graceMs) })
-                : formatDuration(elapsedMs)}
-          </span>
-        </button>
-      </div>
-    </div>
+      {saveDialog}
+    </>
   )
 }

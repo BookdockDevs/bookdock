@@ -16,13 +16,17 @@ import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
 import { cn } from '@/lib/utils'
 
 import { markEscConsumed } from '../lib/esc-consumed'
+import { sessionDurationMs, type ManualSession } from '../lib/manual-timer-store'
 
 interface AddRecordDialogProps {
   bookId: string
   onClose: () => void
   variant?: 'default' | 'reader'
   initialStartFraction?: number
+  initialFinished?: boolean
   editingSession?: ReadingLedgerSession | null
+  manualSession?: ManualSession | null
+  onManualSaved?: () => void
 }
 
 const DURATION_PRESETS = [15, 30, 45, 60]
@@ -37,20 +41,37 @@ export default function AddRecordDialog({
   onClose,
   variant = 'reader',
   initialStartFraction,
+  initialFinished,
   editingSession,
+  manualSession,
+  onManualSaved,
 }: AddRecordDialogProps) {
   const _ = useTranslation()
   const addRecord = useAddReadingRecord(bookId)
   const updateSession = useUpdateSession()
   const isEditing = Boolean(editingSession)
   const progressBounds = editingSession ? ledgerProgressBounds(editingSession) : null
-  const initialStartPct = progressBounds ? progressBounds.start === null ? '' : String(Number((progressBounds.start * 100).toFixed(4))) : initialStartFraction === undefined ? '' : String(initialStartFraction * 100)
-  const initialEndPct = progressBounds?.end == null ? '' : String(Number((progressBounds.end * 100).toFixed(4)))
+  const initialStartPct = progressBounds
+    ? progressBounds.start === null ? '' : String(Number((progressBounds.start * 100).toFixed(4)))
+    : manualSession?.startFraction != null
+      ? String(Number((manualSession.startFraction * 100).toFixed(4)))
+      : initialStartFraction === undefined
+        ? ''
+        : String(initialStartFraction * 100)
+  const initialEndPct = progressBounds?.end == null
+    ? manualSession?.lastFraction != null
+      ? String(Number((manualSession.lastFraction * 100).toFixed(4)))
+      : ''
+    : String(Number((progressBounds.end * 100).toFixed(4)))
   const progressEditable = !progressBounds || (progressBounds.scale !== null && progressBounds.scale > 0)
   const maxProgress = progressBounds?.scale == null ? 100 : progressBounds.scale * 100
 
-  const [date, setDate] = useState(() => editingSession?.date ?? localDateString())
+  const [date, setDate] = useState(() => manualSession?.date ?? editingSession?.date ?? localDateString())
   const [hours, setHours] = useState(() => {
+    if (manualSession) {
+      const totalMins = Math.round(sessionDurationMs(manualSession, Date.now()) / 60_000)
+      return Math.floor(totalMins / 60)
+    }
     if (editingSession) {
       const totalMins = Math.round((editingSession.durationSeconds || 0) / 60)
       return Math.floor(totalMins / 60)
@@ -58,6 +79,11 @@ export default function AddRecordDialog({
     return 0
   })
   const [minutes, setMinutes] = useState(() => {
+    if (manualSession) {
+      const totalMins = Math.round(sessionDurationMs(manualSession, Date.now()) / 60_000)
+      const mins = totalMins % 60
+      return totalMins === 0 && manualSession.elapsedMs > 0 ? 1 : mins
+    }
     if (editingSession) {
       const totalMins = Math.round((editingSession.durationSeconds || 0) / 60)
       return totalMins % 60
@@ -66,6 +92,10 @@ export default function AddRecordDialog({
   })
   // Default start time to session's startedAt, or current time for new record
   const [startTime, setStartTime] = useState(() => {
+    if (manualSession?.startedAt) {
+      const d = new Date(manualSession.startedAt)
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    }
     if (editingSession) {
       if (editingSession.startedAt) {
         const d = new Date(editingSession.startedAt)
@@ -76,7 +106,7 @@ export default function AddRecordDialog({
     return currentHourMinute()
   })
   const [startPct, setStartPct] = useState(initialStartPct)
-  const [finished, setFinished] = useState(false)
+  const [finished, setFinished] = useState(() => initialFinished ?? false)
   const [endPct, setEndPct] = useState(initialEndPct)
   const submission = useRef<{ fingerprint: string; requestId: string } | null>(null)
   const [conflicts, setConflicts] = useState<string[]>([])
@@ -223,20 +253,35 @@ export default function AddRecordDialog({
       return
     }
 
+    const originalManualDuration = manualSession ? Math.round(manualSession.elapsedMs / 1000) : 0
+    const manualDurationChanged = manualSession ? Math.abs(durationSeconds - originalManualDuration) > 60 : false
+
     const body: ReadingRecordCreateReq = {
       bookId, date, durationSeconds, startedAt, endedAt,
-      source: 'retroactive', continuous: startTime !== '', finished,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      source: manualSession ? 'manual' : 'retroactive', continuous: startTime !== '', finished,
+      timezone: manualSession?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      ...(manualSession?.requestId ? { requestId: manualSession.requestId } : {}),
+      ...(manualSession?.fragments && manualSession.fragments.length > 0 && !manualDurationChanged
+        ? { fragments: manualSession.fragments }
+        : startedAt !== null ? { fragments: [{ startedAt, endedAt }] } : {}),
+      ...(manualSession?.coverage ? { coverage: manualSession.coverage } : {}),
+      ...(manualSession?.revisionId ? { revisionId: manualSession.revisionId } : {}),
+      ...(manualSession?.wordCount ? { wordCount: manualSession.wordCount } : {}),
+      ...(manualSession?.startCfi ? { startCfi: manualSession.startCfi } : {}),
+      ...(manualSession?.lastCfi ? { endCfi: manualSession.lastCfi } : {}),
+      ...(manualSession?.startChapterIndex != null ? { startChapterIndex: manualSession.startChapterIndex } : {}),
+      ...(manualSession?.lastChapterIndex != null ? { endChapterIndex: manualSession.lastChapterIndex } : {}),
       ...(hasStartPct ? { startFraction: start / 100, endFraction: end / 100 } : {}),
       ...(replaceConflicts ? { replaceSessionIds: conflicts } : {}),
     }
     const fingerprint = JSON.stringify(body)
-    if (submission.current?.fingerprint !== fingerprint) submission.current = { fingerprint, requestId: crypto.randomUUID() }
+    if (submission.current?.fingerprint !== fingerprint) submission.current = { fingerprint, requestId: manualSession?.requestId ?? crypto.randomUUID() }
     addRecord.mutate(
       { ...body, requestId: submission.current.requestId },
       {
         onSuccess: () => {
-          notify.success({ key: 'reader.addRecordSuccess' })
+          notify.success({ key: manualSession ? 'reader.manualTimerSaved' : 'reader.addRecordSuccess' })
+          onManualSaved?.()
           handleClose()
         },
         onError: (err) => {
@@ -290,7 +335,7 @@ export default function AddRecordDialog({
 
   return (
     <Modal
-      title={isEditing ? _('readingData.editRecord') : _('reader.addRecordTitle')}
+      title={manualSession ? _('reader.manualTimerSaveTitle') : (isEditing ? _('readingData.editRecord') : _('reader.addRecordTitle'))}
       onClose={handleClose}
       size="sm"
       variant={variant}
@@ -304,6 +349,11 @@ export default function AddRecordDialog({
         }}
         className="flex flex-col gap-3.5"
       >
+        {manualSession && (
+          <p className="text-xs leading-5 text-[var(--bd-read-sub)]">
+            {_('reader.manualTimerSaveDescription')}
+          </p>
+        )}
         <fieldset disabled={isPending} className="flex flex-col gap-3.5">
           {/* Card 1: 日期与时间 (Date, Start Time & Duration) */}
           <div className={cardCls}>
@@ -788,7 +838,7 @@ export default function AddRecordDialog({
               disabled={isPending || durationSeconds <= 0 || (conflicts.length > 0 && !replaceConflicts)}
               className="flex-2 rounded-xl shadow-xs"
             >
-              {isPending ? `${_('library.save')}...` : _('library.save')}
+              {isPending ? `${_('library.save')}...` : (manualSession ? _('reader.manualTimerSave') : _('library.save'))}
             </Button>
           </div>
         </fieldset>

@@ -27,7 +27,12 @@ export function localDateString(d = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function useReadingSummary(from?: string, to?: string, timezone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+export function useReadingSummary(
+  from?: string,
+  to?: string,
+  timezone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  options: { enabled?: boolean } = {},
+) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
   const params = new URLSearchParams({ today, timezone })
   if (from) params.set('from', from)
@@ -35,6 +40,7 @@ export function useReadingSummary(from?: string, to?: string, timezone = Intl.Da
   return useQuery({
     queryKey: [...READING_RECORDS_KEY, 'summary', today, from, to, timezone],
     queryFn: () => apiGet<{ data: ReadingRecordSummaryRes }>(withReveal(`/reading-records/summary?${params}`)),
+    enabled: options.enabled !== false,
   })
 }
 
@@ -263,8 +269,8 @@ function readingLedgerOptions(bookId: string) {
   })
 }
 
-export function useReadingLedger(bookId: string) {
-  return useQuery(readingLedgerOptions(bookId))
+export function useReadingLedger(bookId: string, options: { enabled?: boolean } = {}) {
+  return useQuery({ ...readingLedgerOptions(bookId), enabled: !!bookId && options.enabled !== false })
 }
 
 export function useReadingRound(bookId: string) {

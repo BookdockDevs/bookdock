@@ -6,6 +6,26 @@ import TimerPill from '../features/reader/components/TimerPill'
 import { useToastStore } from '@/stores/toast.store'
 
 const timer = {
+  session: {
+    bookId: 'book-a',
+    userId: 'user-1',
+    requestId: 'req-1',
+    timezone: 'UTC',
+    date: '2026-10-25',
+    phase: 'running' as const,
+    startedAt: 1000,
+    elapsedMs: 12 * 60_000 + 34_000,
+    lastResumeAt: null,
+    suspendedAt: null,
+    startCfi: null,
+    startFraction: 0.1,
+    startChapterIndex: 0,
+    lastCfi: null,
+    lastFraction: 0.2,
+    lastChapterIndex: 1,
+    fragments: [],
+    coverage: [],
+  },
   phase: 'running' as string,
   elapsedMs: 12 * 60_000 + 34_000,
   graceMs: 0,
@@ -21,6 +41,16 @@ const timer = {
 
 vi.mock('../features/reader/hooks/useManualTimer', () => ({
   useManualTimer: () => timer,
+}))
+
+vi.mock('../features/reader/components/AddRecordDialog', () => ({
+  default: ({ bookId, onClose, onManualSaved }: any) => (
+    <div data-testid="save-dialog">
+      <span>{bookId}</span>
+      <button onClick={onManualSaved}>Save</button>
+      <button onClick={onClose}>Close</button>
+    </div>
+  ),
 }))
 
 const STOP_TITLE = '点击保存，长按丢弃'
@@ -56,14 +86,19 @@ describe('TimerPill', () => {
     expect(screen.getByText('12:34')).toBeInTheDocument()
   })
 
-  it('releasing the stop button before 600ms terminates and saves', () => {
+  it('releasing the stop button before 600ms pauses and opens the save dialog', () => {
     render(<TimerPill bookId="book-a" />)
     const stop = screen.getByTitle(STOP_TITLE)
     fireEvent.pointerDown(stop)
     act(() => vi.advanceTimersByTime(300))
     fireEvent.pointerUp(stop)
-    expect(timer.terminate).toHaveBeenCalledTimes(1)
+    expect(timer.pause).toHaveBeenCalledTimes(1)
     expect(timer.discard).not.toHaveBeenCalled()
+    expect(screen.getByTestId('save-dialog')).toBeInTheDocument()
+
+    // Saving in dialog discards live session
+    fireEvent.click(screen.getByText('Save'))
+    expect(timer.discard).toHaveBeenCalledTimes(1)
   })
 
   it('holding the stop button for 600ms discards without saving and toasts', () => {
@@ -72,15 +107,15 @@ describe('TimerPill', () => {
     fireEvent.pointerDown(stop)
     act(() => vi.advanceTimersByTime(600))
     expect(timer.discard).toHaveBeenCalledTimes(1)
-    expect(timer.terminate).not.toHaveBeenCalled()
+    expect(timer.pause).not.toHaveBeenCalled()
     expect(useToastStore.getState().toasts.some((t) => (
       typeof t.message !== 'string'
       && t.message.key === 'reader.manualTimerDiscarded'
       && t.type === 'info'
     ))).toBe(true)
-    // Releasing after the discard must not also terminate
+    // Releasing after the discard must not also open dialog
     fireEvent.pointerUp(stop)
-    expect(timer.terminate).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('save-dialog')).toBeNull()
   })
 
   it('leaving the button mid-press cancels the hold', () => {
@@ -91,7 +126,7 @@ describe('TimerPill', () => {
     fireEvent.pointerLeave(stop)
     act(() => vi.advanceTimersByTime(600))
     fireEvent.pointerUp(stop)
-    expect(timer.terminate).not.toHaveBeenCalled()
+    expect(timer.pause).not.toHaveBeenCalled()
     expect(timer.discard).not.toHaveBeenCalled()
   })
 
