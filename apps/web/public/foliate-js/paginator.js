@@ -1333,6 +1333,7 @@ export class Paginator extends HTMLElement {
     #marginBottom = 0
     #anchor = 0 // anchor view to a fraction (0-1), Range, or Element
     #justAnchored = false
+    #justAnchoredPosition = 0
     #locked = false // while true, prevent any further navigation
     #styles
     #styleMap = new WeakMap()
@@ -1651,15 +1652,12 @@ export class Paginator extends HTMLElement {
 
         this.#observer.observe(this.#container)
         const debouncedScroll = debounce(() => {
-            if (this.scrolled && !this.#isAnimating) {
-                // Skip entirely while stabilizing — preserve #justAnchored
-                // so the first post-stabilization fire still sees it.
-                if (this.#stabilizing) return
-                if (this.#justAnchored) this.#justAnchored = false
-                else this.#afterScroll('scroll')
-            } else if (!this.scrolled) {
-              this.#afterScroll('container-scroll')
+            if (this.#stabilizing || (this.scrolled && this.#isAnimating)) return
+            if (this.#justAnchored) {
+                if (Math.abs(this.containerPosition - this.#justAnchoredPosition) < 1) return
+                this.#justAnchored = false
             }
+            this.#afterScroll(this.scrolled ? 'scroll' : 'container-scroll')
         }, 250)
         this.#container.addEventListener('scroll', () => {
             if (this.#selectionDrag.active
@@ -1814,25 +1812,20 @@ export class Paginator extends HTMLElement {
         return this.#primaryIndex
     }
     setAttribute(name, value) {
-        // The scrolled-mode scroll handler is debounced, so #anchor and
-        // #primaryIndex can lag behind the user's actual viewport by up to
-        // ~250ms. Toggling out of scrolled mode within that window made
-        // render() restore the stale anchor — reverting the position to a
-        // previously visible section. Flush the pending scroll state here,
-        // before the attribute change so the layout is still in scrolled
-        // mode and `this.scrolled` (which reads the attribute) is still true.
         if (name === 'flow'
-            && this.scrolled
-            && String(value) !== 'scrolled'
+            && String(value) !== this.getAttribute('flow')
             && this.#views.size > 0) {
-            this.#flushScrolledState()
+            this.#flushVisibleState()
         }
         super.setAttribute(name, value)
     }
-    #flushScrolledState() {
-        if (this.#views.size > 1) this.#detectPrimaryView()
-        const result = this.#getVisibleRange()
-        if (result?.range && !result.range.collapsed) this.#anchor = result.range
+    #flushVisibleState() {
+        if (this.scrolled && this.#views.size > 1) this.#detectPrimaryView()
+        const visible = this.#getVisibleRange()
+        if (visible?.range) {
+            this.#primaryIndex = visible.index
+            this.#anchor = visible.range
+        }
     }
     attributeChangedCallback(name, oldValue, value) {
         if (oldValue === value) return
@@ -2327,14 +2320,15 @@ export class Paginator extends HTMLElement {
         // re-anchor against the live viewport first: without this the
         // measurement below is taken against a stale anchor and the reader is
         // thrown back to wherever that anchor happened to point.
-        if (this.scrolled) this.#flushScrolledState()
+        const preserveScrollPosition = this.scrolled && previousLayout?.flow === 'scrolled'
+        if (preserveScrollPosition) this.#flushVisibleState()
         // Re-anchoring snaps the anchor's top edge to the viewport top, which
         // discards however far into a line the reader had scrolled — a settings
         // toggle that does not even change the layout still shifted the page by
         // up to a line. Record the anchor's distance from the scroll origin and
         // restore that same distance, so the paragraph under the reader's eyes
         // stays exactly where it was.
-        const anchorOffset = this.scrolled ? this.#anchorScrollOffset() : null
+        const anchorOffset = preserveScrollPosition ? this.#anchorScrollOffset() : null
         this.#stabilizing = true
         const layout = this.#beforeRender({
             vertical: this.#vertical,
@@ -2345,11 +2339,15 @@ export class Paginator extends HTMLElement {
         for (const [, view] of this.#views) {
             if (view.document) view.render(layout)
         }
-        // Scroll synchronously to prevent visible layout shift during resize.
-        // RAF deferral is only needed for initial display and mode switches
-        // (handled by #display), not for resize re-renders.
-        if (anchorOffset == null || !this.#restoreAnchorScrollOffset(anchorOffset))
+        // Mode-specific reader styles are applied after the flow attribute,
+        // so restore the captured text after those styles have reflowed it.
+        const flowSwitch = previousLayout && previousLayout.flow !== layout.flow
+        if (flowSwitch) {
+            const anchor = this.#anchor
+            requestAnimationFrame(() => this.#scrollToAnchor(anchor, 'flow-switch'))
+        } else if (anchorOffset == null || !this.#restoreAnchorScrollOffset(anchorOffset)) {
             this.#scrollToAnchor(this.#anchor)
+        }
         this.#stabilizing = false
         // Pure container resizes re-render without growing any view, so the
         // expand hook above would never fire for them: consume a deferred
@@ -3454,9 +3452,18 @@ export class Paginator extends HTMLElement {
         if (!range) return
         this.#lastVisibleRange = range
         // don't set new anchor if relocation was to scroll to anchor
-        if (reason !== 'selection' && reason !== 'navigation' && reason !== 'anchor')
+        if (reason !== 'selection' && reason !== 'navigation' && reason !== 'anchor' && reason !== 'flow-switch')
             this.#anchor = range
-        else this.#justAnchored = true
+        else {
+            this.#justAnchored = true
+            this.#justAnchoredPosition = this.containerPosition
+        }
+
+        if (!this.scrolled && (reason === 'snap' || reason === 'page')) {
+            this.#flushVisibleState()
+            this.#justAnchored = true
+            this.#justAnchoredPosition = this.containerPosition
+        }
 
         const index = visibleIndex ?? this.#primaryIndex
         const primaryView = this.#primaryView

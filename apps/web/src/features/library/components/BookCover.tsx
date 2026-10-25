@@ -59,6 +59,7 @@ export default function BookCover({ book, size = 'md', showFormat = true, classN
   const isSm = size === 'sm'
   const isCard = size === 'card'
   const hasCover = Boolean(source) && !error
+  const showPlaceholderText = !hasCover || !loaded
 
   useEffect(() => {
     setError(false)
@@ -91,7 +92,7 @@ export default function BookCover({ book, size = 'md', showFormat = true, classN
         <>
           <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5 bg-gradient-to-r from-black/15 to-transparent dark:from-black/30" />
           <span className="pointer-events-none absolute inset-y-0 left-1.5 w-px bg-white/25 dark:bg-white/10" />
-          <span className="select-none font-serif text-lg font-medium">{initial}</span>
+          {showPlaceholderText && <span className="select-none font-serif text-lg font-medium">{initial}</span>}
         </>
       ) : isCard ? (
         <>
@@ -106,11 +107,9 @@ export default function BookCover({ book, size = 'md', showFormat = true, classN
           <span className="pointer-events-none absolute inset-y-0 right-0 w-1 bg-gradient-to-l from-black/5 to-transparent dark:from-white/5 dark:to-transparent" />
 
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-0.5 px-1.5 pl-2.5">
-            <span className="line-clamp-3 text-center font-serif text-[10px] font-medium leading-tight tracking-wide">
-              {title}
-            </span>
+            {showPlaceholderText && <span className="line-clamp-3 text-center font-serif text-[10px] font-medium leading-tight tracking-wide">{title}</span>}
           </div>
-          {showFormat && <span className="pb-1 text-center font-mono text-[8px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
+          {showPlaceholderText && showFormat && <span className="pb-1 text-center font-mono text-[8px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
         </>
       ) : (
         <>
@@ -125,17 +124,14 @@ export default function BookCover({ book, size = 'md', showFormat = true, classN
           <span className="pointer-events-none absolute inset-y-0 right-0 w-1.5 bg-gradient-to-l from-black/5 to-transparent dark:from-white/5 dark:to-transparent" />
 
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 pl-5">
-            <span className="line-clamp-4 text-center font-serif text-[13px] font-medium leading-snug tracking-wide">
-              {title}
-            </span>
+            {showPlaceholderText && <span className="line-clamp-4 text-center font-serif text-[13px] font-medium leading-snug tracking-wide">{title}</span>}
           </div>
-          {showFormat && <span className="pb-2 text-center font-mono text-[9px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
+          {showPlaceholderText && showFormat && <span className="pb-2 text-center font-mono text-[9px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
         </>
       )}
 
-      {/* Artwork is an overlay on the placeholder, not a replacement for it, so
-          a cover that is absent - or still in flight, as for every EPUB whose
-          artwork only the server can find - never blanks out the title. */}
+      {/* Keep the placeholder visible while the artwork is loading; its text is
+          hidden after load so transparent covers do not show duplicate titles. */}
       {hasCover && (
         <img
           ref={(img) => {

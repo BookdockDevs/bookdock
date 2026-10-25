@@ -23,6 +23,10 @@ All notable changes to Bookdock are documented here.
 - Page back navigation in archive and reader guards against popping out to browser blank pages or new tabs when accessed directly without in-app history.
 - Book covers in library listings retain their loaded state in client memory to eliminate placeholder flicker when navigating back from the reader.
 - Reader reopening no longer gates on post-mount network checks or displays a 200ms loading overlay flicker.
+- Preserved reading position when switching between scrolled and paginated reading modes by anchoring symmetrically to top visible content without optical offset bias.
+- Book covers hide placeholder title and format text once cover artwork loads to prevent transparent covers from showing duplicate background text.
+- Reader font preparation timeout applies fallback fonts silently without showing false warning toasts, letting background font loading settle naturally.
+- Heading elements in paginated mode (`h1:has(> img + div)`) enforce column break properties to prevent image-led volume titles from breaking awkwardly across pages.
 
 ## [0.6.4] - 2026-10-24
 
@@ -909,6 +913,10 @@ All notable changes to Bookdock are documented here.
 - 阅读档案与阅读器的左上角返回按钮增加无应用内历史的安全守卫，防止在新建标签页直接打开时意外回退到浏览器空白页。
 - 书架列表封面在客户端保留已加载状态缓存，消除从阅读器返回首页时封面从占位图闪烁的问题。
 - 重新进入书籍阅读时移除初次挂载网络轮询门禁与 200ms 加载遮罩闪烁，实现秒开体验。
+- 修复翻页与滚动阅读模式反复切换导致的章内阅读进度漂移，统一以视口顶端可见内容为对称锚点，消除非对称光学偏移带来的累积误差。
+- 修复带有透明通道的书籍封面在加载完成后透显底层占位标题与格式文字的重影问题。
+- 移除字体加载超时时的警告提示弹窗，字库加载超时后静默使用系统回退字体渲染，避免打断正常阅读。
+- 修复分页模式下带图的卷名大标题（`h1:has(> img + div)`）跨列溢出或断页不符合预期的问题。
 
 ### [0.6.4] - 2026-10-24
 

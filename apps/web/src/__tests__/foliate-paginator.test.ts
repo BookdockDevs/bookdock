@@ -1,4 +1,9 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { beforeAll, describe, expect, it, vi } from 'vitest'
+
+const paginatorSource = readFileSync(resolve(process.cwd(), 'public/foliate-js/paginator.js'), 'utf8')
 
 class ResizeObserverStub {
   observe() {}
@@ -39,6 +44,41 @@ describe('foliate paginator renderer contract', () => {
     expect(renderer.noContinuousScroll).toBe(true)
     expect(renderer.primaryIndex).toBe(-1)
   })
+
+  it('refreshes the viewport-position anchor before switching reading modes', () => {
+    const source = Paginator.prototype.setAttribute.toString()
+    const captureAt = source.indexOf('#flushVisibleState')
+    const attributeChangeAt = source.indexOf('super.setAttribute(name, value)')
+    const renderSource = Paginator.prototype.render.toString()
+
+    expect(source).toContain('name === "flow"')
+    expect(source).toContain('this.#views.size > 0')
+    expect(captureAt).toBeGreaterThan(-1)
+    expect(captureAt).toBeLessThan(attributeChangeAt)
+    expect(renderSource).toMatch(/this\.scrolled && previousLayout\?\.flow === ["']scrolled["']/)
+    expect(renderSource).toContain('anchorOffset = preserveScrollPosition ? this.#anchorScrollOffset() : null')
+    expect(renderSource).toContain('flow-switch')
+  })
+
+  it('keeps the captured text anchor when a flow switch settles', () => {
+    expect(paginatorSource).toContain("reason !== 'flow-switch'")
+  })
+
+  it('does not let the paginated scroll event replace a just-restored anchor', () => {
+    expect(paginatorSource).toMatch(/if \(this\.#justAnchored\) \{[\s\S]*Math\.abs\(this\.containerPosition - this\.#justAnchoredPosition\) < 1[\s\S]*this\.#afterScroll\(this\.scrolled \? 'scroll' : 'container-scroll'\)/)
+    expect(paginatorSource).toContain('this.#justAnchoredPosition = this.containerPosition')
+  })
+
+  it('updates the precise anchor after explicit page turns and snaps', () => {
+    expect(paginatorSource).toMatch(/if \(!this\.scrolled && \(reason === ['"]snap['"] \|\| reason === ['"]page['"]\)\) \{[\s\S]*#flushVisibleState\(\)[\s\S]*#justAnchoredPosition = this\.containerPosition/)
+  })
+
+  it('restores a flow-switch anchor after mode-dependent styles have reflowed the text', () => {
+    const source = Paginator.prototype.render.toString()
+
+    expect(source).toMatch(/if \(flowSwitch\)[\s\S]*requestAnimationFrame\(\(\) => this\.#scrollToAnchor\(anchor, ["']flow-switch["']\)\)/)
+  })
+
 
   it('keeps both reading flows on the full-width scroll surface', () => {
     const renderer = document.createElement('foliate-paginator') as InstanceType<typeof Paginator>
@@ -216,12 +256,12 @@ describe('foliate paginator renderer contract', () => {
   //   2. Re-anchoring snapped the anchor's top edge to the viewport top, which
   //      discarded how far into a line the reader had scrolled — the page
   //      visibly shifted by up to a line even when the layout did not change.
-  // render() now flushes the scrolled state, then preserves the anchor's
+  // render() now flushes the visible state, then preserves the anchor's
   // distance from the scroll origin instead of re-snapping it.
   it('re-anchors on the preserved scroll offset, not a top-edge snap', () => {
     const source = Paginator.prototype.render.toString()
 
-    const flushAt = source.indexOf('#flushScrolledState')
+    const flushAt = source.indexOf('#flushVisibleState')
     const measureAt = source.indexOf('#anchorScrollOffset()')
     const restoreAt = source.indexOf('#restoreAnchorScrollOffset')
     expect(flushAt).toBeGreaterThan(-1)

@@ -95,10 +95,10 @@
    - 不能只放适配层：这些值参与 shadow grid、列宽和 iframe layout，外部 CSS 无法可靠替代核心计算。
    - 影响/验证：page/scroll 两种 flow 和 vertical writing mode；paginator contract、Reader settings tests；核心 CSS 使用合法 `/* */` 注释，不使用会使声明静默失效的 `//`。
 
-6. **`paginator.js` / `#scrollToRect` scrolled anchor**
-   - 需求：搜索、标注、书签跳转把目标放在视口上方约 28% 处，保留上下文。
-   - 不能只放适配层：目标 rect 到 scroll position 的换算必须和连续视图、边距、方向在同一核心坐标系完成。
-   - 影响/验证：只影响 scrolled 定位；Reader search/annotation navigation tests 与浏览器定位验收。
+6. **`paginator.js` / `#scrollToRect` scrolled anchor 与 flow-switch 幂等对齐**
+   - 需求：搜索、标注、书签跳转把目标放在视口上方约 28% 处保留阅读上下文；而阅读模式切换（flow-switch）对齐视口顶端文字锚点（`localOffset - 3`），并在 `setAttribute('flow')` 时双向刷新可见状态，确保滚动与翻页模式反复切换时阅读进度幂等不漂移。
+   - 不能只放适配层：目标 rect 到 scroll position 的换算必须和连续视图、边距、方向在同一核心坐标系完成；模式切换时的可见范围刷新与 RAF 异步对齐由 Paginator 内部生命周期控制。
+   - 影响/验证：搜索/标注/书签跳转保留 28% 上下文，阅读模式切换顶端对齐；`foliate-paginator.test.ts`、Reader navigation tests 与来回切换模式验收。
 
 7. **`paginator.js` / scrolled 原生 scrollbar**
    - 需求：真实 scroll container 是 shadow DOM 内 `#container`，scrolled flow 显示原生滚动条，paginated flow 不显示。

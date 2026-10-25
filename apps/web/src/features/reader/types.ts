@@ -146,7 +146,6 @@ export interface RendererEvents {
   mediaPlay: (e: MediaPlayInfo) => void
   instantAnnotation: (e: SelectionInfo) => void
   rendered: () => void
-  fontFallback: () => void
   /**
    * The view is torn down and rebuilt (content replacements, Chinese
    * conversion). The reading area is empty while it is rebuilt, so the host

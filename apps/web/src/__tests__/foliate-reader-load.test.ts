@@ -568,6 +568,7 @@ describe('FoliateReader book-style overrides', () => {
     const reader = new FoliateReader('')
     const setStyles = vi.fn()
     ;(reader as any).view = { renderer: { setStyles } }
+    ;(reader as any).readingMode = 'page'
     ;(reader as any).font = { ...(reader as any).font, lineHeight: 1.9, overrideBookFont: true }
     ;(reader as any).paragraph = { ...(reader as any).paragraph, overrideBookLayout: true }
     ;(reader as any).theme = { bg: '#202020', text: '#f8f8f8' }
@@ -582,6 +583,9 @@ describe('FoliateReader book-style overrides', () => {
     expect(css).toContain('.duokan-image-gallery-cell')
     expect(css).toContain('p[width][height] > img:only-child')
     expect(css).toContain('.h5_mainbody')
+    expect(css).toContain('h1:has(> img + div):not(#bd-volume-title-page)')
+    expect(css).toContain('overflow: visible !important;')
+    expect(css).toContain('break-before: column !important;')
     expect(css).toContain('hanging-punctuation: allow-end last;')
     expect(css).toContain('widows: 2;')
     expect(css).toContain(':lang(zh), :lang(ja), :lang(ko)')

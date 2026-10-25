@@ -5067,6 +5067,19 @@ export class FoliateReader implements BookReader {
         text-indent: 0 !important;
         break-inside: avoid;
       }` : ''
+    const paginatedHeadingImageStyles = this.readingMode === 'page' ? `
+      /* Override legacy EPUB bleed rules only for image-led volume headings. */
+      h1:has(> img + div):not(#bd-volume-title-page) {
+        display: block !important;
+        overflow: visible !important;
+        break-inside: auto !important;
+        page-break-inside: auto !important;
+      }
+      h1:has(> img + div):not(#bd-volume-title-page) > img + div {
+        break-before: column !important;
+        -webkit-column-break-before: always !important;
+        page-break-before: always !important;
+      }` : ''
     const fontDeclarations = `
         font-size: ${this.font.size}px !important;
         font-weight: ${this.font.fontWeight};
@@ -5336,6 +5349,7 @@ export class FoliateReader implements BookReader {
         max-height: calc(var(--bd-available-height, 100%) * 1px);
       }`
     const templateCompatibilityStyles = `
+      ${paginatedHeadingImageStyles}
       #pg-header * {
         color: inherit !important;
       }
@@ -6061,12 +6075,10 @@ export class FoliateReader implements BookReader {
       // When book typography remains authoritative, a slow or device-specific
       // book font must not be reported as a failed Bookdock font.
       if (!this.shouldForceBookdockFont()) return snapshot
-      const fontsReady = await waitForReaderFonts(doc, this.startupAbort.signal, this.container?.getBoundingClientRect())
+      await waitForReaderFonts(doc, this.startupAbort.signal, this.container?.getBoundingClientRect())
       if (this.destroyed) return
-      if (!fontsReady) {
-        console.warn('[FoliateReader] font preparation failed or timed out; using available fallback fonts')
-        this.emit('fontFallback')
-      }
+      // Font loading can finish after this bounded startup wait; the browser
+      // applies the loaded face automatically, so keep the fallback silent.
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
       prepared = snapshot
     }

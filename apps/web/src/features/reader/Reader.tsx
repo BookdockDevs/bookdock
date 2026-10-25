@@ -1040,7 +1040,6 @@ export default function Reader() {
     initialCfi: initialCfiRef.current,
     initialFraction: initialFractionRef.current,
     settings: effectiveSettings,
-    onFontFallback: () => notify.warning({ key: 'reader.fontLoadFallback' }, { dedupeKey: `reader-font:${id}` }),
     onViewRebuilding: (pending) => setViewRebuilding(pending),
     chapterWordCounts,
     onRendered: (renderedUrl) => {

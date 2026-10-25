@@ -1,8 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FoliateReader } from '../features/reader/renderers/FoliateReader'
 
 const APP_STYLE_MARKER = '--bd-app-style'
+
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  })
+})
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
@@ -80,7 +88,7 @@ describe('reader stylesheet injection', () => {
     expect(second.querySelector('style[data-bd-reader-fonts]')?.textContent).toBe(prepared.fontCss)
   })
 
-  it('allows a font timeout only with the core reader settings already applied', async () => {
+  it('silently allows a font timeout only with the core reader settings already applied', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1 })
     const { reader } = readerWithStyles()
@@ -88,31 +96,23 @@ describe('reader stylesheet injection', () => {
     Object.defineProperty(doc, 'fonts', { value: { load: vi.fn() } })
     ;(reader as any).view.renderer.getContents = () => [{ doc, index: 0 }]
     reader.applyFont({ ...(reader as any).font, fontCss: '@import url("https://example.com/fonts.css");', overrideBookFont: true })
-    const fallback = vi.fn()
-    reader.on('fontFallback', fallback)
-
     const wait = (reader as any).prepareVisibleContents()
     await vi.advanceTimersByTimeAsync(8000)
     expect((await wait).doc).toBe(doc)
-    expect(fallback).toHaveBeenCalledOnce()
     expect((reader as any).documentHasAppStyles(doc)).toBe(true)
     expect(doc.querySelector('style[data-bd-app-style]')?.textContent).not.toContain('@import')
   })
 
-  it('does not report a timeout for book-owned fonts when override is disabled', async () => {
+  it('does not wait for book-owned fonts when override is disabled', async () => {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1 })
     const { reader } = readerWithStyles()
     const doc = bareChapter()
     Object.defineProperty(doc, 'fonts', { value: { load: vi.fn(() => new Promise<FontFace[]>(() => {})) } })
     ;(reader as any).view.renderer.getContents = () => [{ doc, index: 0 }]
     reader.applyFont({ ...(reader as any).font, fontCss: '@import url("https://example.com/fonts.css");', overrideBookFont: false })
-    const fallback = vi.fn()
-    reader.on('fontFallback', fallback)
-
     const prepared = await (reader as any).prepareVisibleContents()
 
     expect(prepared.doc).toBe(doc)
-    expect(fallback).not.toHaveBeenCalled()
     expect(doc.fonts.load).not.toHaveBeenCalled()
   })
 

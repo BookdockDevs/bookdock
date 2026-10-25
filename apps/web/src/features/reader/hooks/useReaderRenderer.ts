@@ -40,7 +40,6 @@ interface UseReaderRendererOptions {
   onMediaPlay?: (e: Parameters<RendererEvents['mediaPlay']>[0]) => void
   onInstantAnnotation?: (e: Parameters<RendererEvents['instantAnnotation']>[0]) => void
   onRendered?: (url: string) => void
-  onFontFallback?: () => void
   /** The view is torn down and rebuilt; the host must cover the reading area. */
   onViewRebuilding?: (pending: boolean) => void
   onError?: (err: Error) => void
@@ -91,7 +90,6 @@ export function useReaderRenderer({
   onMediaPlay,
   onInstantAnnotation,
   onRendered,
-  onFontFallback,
   onViewRebuilding,
   onError,
   onTocReady,
@@ -200,7 +198,6 @@ export function useReaderRenderer({
   const onMediaPlayRef = useRef(onMediaPlay)
   const onInstantAnnotationRef = useRef(onInstantAnnotation)
   const onRenderedRef = useRef(onRendered)
-  const onFontFallbackRef = useRef(onFontFallback)
   const onViewRebuildingRef = useRef(onViewRebuilding)
   const onErrorRef = useRef(onError)
   const onTocReadyRef = useRef(onTocReady)
@@ -248,7 +245,6 @@ export function useReaderRenderer({
   onMediaPlayRef.current = onMediaPlay
   onInstantAnnotationRef.current = onInstantAnnotation
   onRenderedRef.current = onRendered
-  onFontFallbackRef.current = onFontFallback
   onViewRebuildingRef.current = onViewRebuilding
   onErrorRef.current = onError
   onTocReadyRef.current = onTocReady
@@ -429,7 +425,6 @@ export function useReaderRenderer({
       onViewRebuildingRef.current?.(false)
       onRenderedRef.current?.(url)
     })
-    const unsubFontFallback = newRenderer.on('fontFallback', () => { if (isCurrentRenderer()) onFontFallbackRef.current?.() })
     const unsubViewRebuilding = newRenderer.on('viewRebuilding', (e) => { if (isCurrentRenderer()) onViewRebuildingRef.current?.(e.pending) })
     const unsubToc = newRenderer.on('tocReady', (items) => {
       if (!isMountedRenderer()) return
@@ -464,7 +459,6 @@ export function useReaderRenderer({
       unsubMediaPlay()
       unsubInstantAnnotation()
       unsubRendered()
-      unsubFontFallback()
       unsubViewRebuilding()
       unsubToc()
       unsubJumpConfirmed()
