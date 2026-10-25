@@ -824,6 +824,10 @@ export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEp
   // Ensure embedded media (e.g. legacy video markup) expose native
   // playback controls, metadata-only preloading, and click-to-play when authoring markup omits them.
   for (const video of Array.from(doc.querySelectorAll('video'))) {
+    // Clean-reading markup keeps hidden media nodes to preserve EPUB CFI paths;
+    // wrapping one would leave the empty black player placeholder visible.
+    if (video.hasAttribute('data-bd-clean-hidden')) continue
+
     const isDeferred = !video.src && Boolean(
       video.dataset.bdDeferredSrc
       || video.querySelector('[data-bd-deferred-src]')?.getAttribute('data-bd-deferred-src')

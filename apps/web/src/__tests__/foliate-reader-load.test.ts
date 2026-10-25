@@ -290,6 +290,16 @@ describe('clean reading resource and markup boundaries', () => {
     expect(clean).not.toContain('color: red')
     expect(clean).toContain('data-bd-clean-hidden')
   })
+
+  it('does not create a black video placeholder for hidden clean-reading media', () => {
+    const source = '<html xmlns="http://www.w3.org/1999/xhtml"><body><div class="videoplay"><video poster="poster.jpg"><source src="movie.mp4" type="video/mp4" /></video></div></body></html>'
+    const doc = new DOMParser().parseFromString(sanitizeCleanReadingMarkup(source), 'application/xhtml+xml')
+
+    normalizeEpubDocumentImages(doc)
+
+    expect(doc.querySelector('video')?.hasAttribute('data-bd-clean-hidden')).toBe(true)
+    expect(doc.querySelector('.bd-video-wrapper')).toBeNull()
+  })
 })
 
 describe('createZipEntryMap', () => {

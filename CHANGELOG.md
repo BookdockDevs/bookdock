@@ -4,6 +4,10 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Clean reading no longer leaves a black video placeholder after hiding embedded media.
+
 ## [0.6.5] - 2026-10-25
 
 ### Highlights
@@ -903,6 +907,10 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### [Unreleased]
+
+#### 修复
+
+- 纯净阅读隐藏内嵌媒体后，不再留下黑色视频占位框。
 
 ### [0.6.5] - 2026-10-25
 
