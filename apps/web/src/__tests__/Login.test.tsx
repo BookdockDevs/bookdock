@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import Login from '../features/auth/Login'
 import { ApiError } from '@/api/client'
+
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 import { useInstanceInfo, useLogin } from '@/features/auth/hooks'
 
 const navigateMock = vi.fn()

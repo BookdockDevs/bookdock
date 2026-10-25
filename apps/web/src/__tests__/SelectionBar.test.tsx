@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { BatchSelectionItem } from '@bookdock/shared'

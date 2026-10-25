@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
+
 import { AI_DEFAULT_ASSISTANT_MODE_PROMPT } from '@bookdock/shared'
 
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiStreamAiChat } from '../api/client'

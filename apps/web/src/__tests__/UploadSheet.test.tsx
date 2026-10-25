@@ -3,6 +3,8 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import UploadSheet from '../features/library/components/UploadSheet'
 import type { UploadItem } from '../features/library/hooks'
 
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
+
 function makeItems(overrides: Partial<UploadItem>[]): UploadItem[] {
   return overrides.map((o, i) => ({
     id: `up-${i}`,

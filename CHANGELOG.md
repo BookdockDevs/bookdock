@@ -4,11 +4,18 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-10-25
+
+### Highlights
+
+- The reader adds an end-of-book flow, configurable keyboard shortcuts, EPUB media playback, and word-level Edge TTS highlighting.
+- The library adds batch downloads and undo for recent private-library actions.
+
 ### Added
 
 - The reader shows an inline end-of-book card after the final section with reading statistics and actions to mark the book finished or write a review. Stopping a manual timer opens a save dialog prefilled with the captured session; its description explains that saving adds the session to reading history, and the finished option is preselected at the book's end.
-- Batch book downloads from the selection toolbar. Single selections use the existing download dialog and multi-book selections prepare a ZIP with each book's original or chosen export format, per-book replacement rules, partial retry, and existing permission checks.
 - Reader keyboard shortcuts can be customized, synchronized with the user's account, and opened directly with Shift + /. The reader supports configurable navigation history, playback, chapter-boundary, sidebar, search, settings, and font-size commands.
+- Batch book downloads from the selection toolbar. Single selections use the existing download dialog and multi-book selections prepare a ZIP with each book's original or chosen export format, per-book replacement rules, partial retry, and existing permission checks.
 - Undo recent private-library actions—shelf and category changes, tag adjustments, pinning, hiding, and moving books to trash—from the original notification or the configurable Ctrl/Command+Z shortcut.
 - Edge TTS supports word-level highlighting from the service's real timing metadata. The sentence highlight remains visible while the current mapped word receives a deeper overlay; missing or unmappable boundaries keep sentence-level highlighting.
 - EPUB embedded audio/video and Media Overlay use authenticated on-demand media URLs with HTTP Range seeking. The server prepares stored and deflated entries into a bounded disk cache, supports media up to 1 GiB per entry, and restores the existing retry control after native video errors.
@@ -22,14 +29,14 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
-- Archive navigation replaces history entries during in-page book selection and view filtering to avoid history stack pollution and prevent stepping back through browsed books.
-- Page back navigation in archive and reader guards against popping out to browser blank pages or new tabs when accessed directly without in-app history.
+- Archive book selection and view filters replace the current history entry, so Back no longer steps through each book viewed.
+- Back buttons in the archive and reader stay within the app when there is no in-app history, instead of navigating to a blank page or opening a new tab.
 - Book covers in library listings retain their loaded state in client memory to eliminate placeholder flicker when navigating back from the reader.
-- Reader reopening no longer gates on post-mount network checks or displays a 200ms loading overlay flicker.
-- Preserved reading position when switching between scrolled and paginated reading modes by anchoring symmetrically to top visible content without optical offset bias.
-- Book covers hide placeholder title and format text once cover artwork loads to prevent transparent covers from showing duplicate background text.
-- Reader font preparation timeout applies fallback fonts silently without showing false warning toasts, letting background font loading settle naturally.
-- Heading elements in paginated mode (`h1:has(> img + div)`) enforce column break properties to prevent image-led volume titles from breaking awkwardly across pages.
+- Reopening a book no longer waits for post-mount network checks or flashes a 200 ms loading overlay.
+- Switching between scrolled and paginated reading modes preserves the reading position without cumulative drift.
+- Transparent book covers no longer show duplicate placeholder text after the artwork loads.
+- When reader font preparation times out, the reader silently falls back to system fonts instead of showing a warning.
+- Image-led volume headings no longer split awkwardly across columns in paginated reading.
 
 ## [0.6.4] - 2026-10-24
 
@@ -897,11 +904,18 @@ All notable changes to Bookdock are documented here.
 
 ### [Unreleased]
 
+### [0.6.5] - 2026-10-25
+
+#### 亮点
+
+- 阅读器新增全书结束流程、自定义键盘快捷键、EPUB 音视频播放及 Edge TTS 词级高亮。
+- 书库新增批量下载，并支持撤销近期的私有书库操作。
+
 #### 新增
 
 - 阅读器在末章正文后展示全书结束卡片，汇总阅读数据并提供标记读完和书评入口。停止手动计时会打开预填本次会话信息的保存弹窗，说明保存后会将记录加入阅读历史；到达书末时默认勾选“标记为读完”。
-- 书籍批量下载：可从批量操作栏下载所选书籍。单本沿用现有下载弹窗，多本打包为 ZIP，并支持保持原格式、统一 EPUB/TXT、逐本应用可用的文本替换规则，以及失败项重试；每本书仍使用现有下载权限校验。
 - 阅读器现支持自定义键盘快捷键并同步到当前账号，也可按 Shift + / 直接打开快捷键菜单。可配置命令涵盖阅读位置历史、朗读、章节首尾、侧页、搜索、设置和字号调整。
+- 书籍批量下载：可从批量操作栏下载所选书籍。单本沿用现有下载弹窗，多本打包为 ZIP，并支持保持原格式、统一 EPUB/TXT、逐本应用可用的文本替换规则，以及失败项重试；每本书仍使用现有下载权限校验。
 - 私有书库支持撤销书架/归类、标签调整、置顶、隐藏和移入回收站等操作；可点击原操作通知中的撤销图标，也可使用可配置的 Ctrl/Command+Z 快捷键。
 - Edge TTS 现支持根据服务返回的真实时间元数据进行词级高亮：整句底色持续保留，当前可映射的词叠加更深的高亮；缺少或无法映射边界时继续使用句级高亮。
 - EPUB 正文音视频及 Media Overlay 改用鉴权的按需媒体 URL，并支持 HTTP Range 拖动播放。服务端将 ZIP stored/deflate entry 准备到有界磁盘缓存，每个媒体 entry 支持最大 1 GiB；原生视频加载失败时恢复现有重试入口。
@@ -915,14 +929,14 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
-- 阅读档案内的书籍点选与视图筛选改为替换历史记录（replace），避免污染浏览器历史栈，解决返回时逐本倒退看过的书的问题。
-- 阅读档案与阅读器的左上角返回按钮增加无应用内历史的安全守卫，防止在新建标签页直接打开时意外回退到浏览器空白页。
+- 阅读档案内点选书籍或筛选视图时替换当前历史记录，返回时不再逐本经过此前浏览过的书籍。
+- 阅读档案与阅读器的返回按钮在没有应用内历史时留在应用内，避免跳转到空白页或打开新标签页。
 - 书架列表封面在客户端保留已加载状态缓存，消除从阅读器返回首页时封面从占位图闪烁的问题。
-- 重新进入书籍阅读时移除初次挂载网络轮询门禁与 200ms 加载遮罩闪烁，实现秒开体验。
-- 修复翻页与滚动阅读模式反复切换导致的章内阅读进度漂移，统一以视口顶端可见内容为对称锚点，消除非对称光学偏移带来的累积误差。
-- 修复带有透明通道的书籍封面在加载完成后透显底层占位标题与格式文字的重影问题。
-- 移除字体加载超时时的警告提示弹窗，字库加载超时后静默使用系统回退字体渲染，避免打断正常阅读。
-- 修复分页模式下带图的卷名大标题（`h1:has(> img + div)`）跨列溢出或断页不符合预期的问题。
+- 重新打开书籍时不再等待挂载后的网络检查，也不再闪现 200ms 加载遮罩。
+- 翻页与滚动模式切换时保留阅读位置，避免反复切换造成进度漂移。
+- 透明封面加载完成后不再显示重复的占位书名和格式文字。
+- 字体准备超时后静默回退到系统字体，不再弹出警告打断阅读。
+- 分页阅读中的带图卷名标题不再在分栏间意外拆开。
 
 ### [0.6.4] - 2026-10-24
 

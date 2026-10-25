@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
+
 import type { TocRuleRes } from '@bookdock/shared'
 
 import TocRulesSettingsSection from '../features/settings/components/TocRulesSettingsSection'

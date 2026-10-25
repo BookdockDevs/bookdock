@@ -3,6 +3,8 @@ import { render as testingRender, screen, fireEvent, act } from '@testing-librar
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
+
 function render(element: ReactElement) {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
   return testingRender(element, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })

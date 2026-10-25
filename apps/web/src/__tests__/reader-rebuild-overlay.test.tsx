@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { BookDetailRes } from '@bookdock/shared'
+import type { AnnotationRes, BookDetailRes } from '@bookdock/shared'
 
 import { apiGet, apiPut } from '@/api/client'
 import Reader from '@/features/reader/Reader'
@@ -98,6 +98,29 @@ describe('reader loading surface', () => {
 
     await act(async () => { lastRendererOptions().onViewRebuilding?.(false) })
     expect(screen.queryByTestId('reader-loading-surface')).not.toBeInTheDocument()
+  })
+
+  it('opens a legacy idea marker without a revision id from the reading text', async () => {
+    const revisionBook = { ...book, revisionId: 'rev-1' }
+    const idea: AnnotationRes = {
+      id: 'legacy-idea', bookId: 'reader-book', cfiRange: 'epubcfi(/6/2!/4/2)', cfiAnchor: null,
+      type: 'note', color: 'yellow', style: 'underline', text: 'Quoted passage', note: 'A legacy idea',
+      chapter: null, createdAt: 1, updatedAt: 1, revisionId: null,
+    }
+    vi.mocked(apiGet).mockImplementation(async (path) => {
+      if (path.startsWith('/annotations/book/reader-book')) return { data: [idea] } as never
+      if (path.startsWith('/books/reader-book/chapters')) return { data: [] } as never
+      if (path.startsWith('/books/reader-book')) return { data: revisionBook } as never
+      if (path.startsWith('/progress/')) return { data: null } as never
+      return { data: [] } as never
+    })
+
+    render(<QueryClientProvider client={client}><Reader /></QueryClientProvider>)
+    await waitFor(() => expect(client.getQueryData(['annotations', 'reader-book'])).toEqual({ data: [idea] }))
+    await act(async () => { lastRendererOptions().onRendered?.('http://localhost/books/reader-book?revisionId=rev-1') })
+    await act(async () => { lastRendererOptions().onAnnotationClicked?.({ cfiRange: idea.cfiRange }) })
+
+    expect(useReaderState.getState().selection).toMatchObject({ cfiRange: idea.cfiRange, text: idea.text, isIdea: true })
   })
 
   it('refreshes on the next navigation, lets the latest rapid jump win, and quarantines old progress', async () => {

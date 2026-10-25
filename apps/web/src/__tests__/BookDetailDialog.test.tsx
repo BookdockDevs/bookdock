@@ -7,7 +7,7 @@ import type { BookListItem, CatalogBook, Category, Library } from '@bookdock/sha
 
 import i18n from '../i18n/i18n'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
-import { downloadBook, downloadEditedTxt, downloadEpub, downloadOriginalTxt } from '../features/library/download'
+import { prepareBookFile } from '../features/library/download'
 import BookDetailDialog from '../features/library/components/BookDetailDialog'
 import DownloadDialogHost from '../features/library/components/DownloadDialogHost'
 import { useDownloadStore } from '../stores/download.store'
@@ -19,11 +19,14 @@ const apiPatch = vi.fn()
 const apiPut = vi.fn()
 const apiDelete = vi.fn()
 const apiUpload = vi.fn()
+let downloadRules: { enabled: boolean; effectiveEnabled: boolean }[] = []
 /** Review context for the book/work under test; the review endpoints answer with it. */
 let reviewContext: unknown = { composer: null, own: null, summary: null, reviews: [] }
 const apiGet = vi.fn((url: string) =>
   url.startsWith('/reviews/')
     ? Promise.resolve({ data: reviewContext })
+    : url.startsWith('/replacements?bookId=')
+      ? Promise.resolve({ data: downloadRules })
     : Promise.resolve({ data: [] }),
 )
 const createShelfMutate = vi.fn()
@@ -59,6 +62,8 @@ vi.mock('../features/library/download', () => ({
   downloadEditedTxt: vi.fn(),
   downloadEpub: vi.fn(),
   downloadOriginalTxt: vi.fn(),
+  prepareBookFile: vi.fn(async (request: { title: string; format: string }) => ({ blob: new Blob(), filename: `${request.title}.${request.format}` })),
+  deliverBlob: vi.fn(),
 }))
 
 vi.mock('@tanstack/react-router', async () => ({
@@ -173,6 +178,7 @@ beforeEach(async () => {
   categoriesError = false
   queriedWork = undefined
   reviewContext = { composer: null, own: null, summary: null, reviews: [] }
+  downloadRules = []
   await i18n.changeLanguage('zh-CN')
 })
 
@@ -1189,44 +1195,57 @@ describe('BookDetailDialog download dialog', () => {
     return within(screen.getByRole('dialog', { name: /^下载《/ }))
   }
 
-  it('opens an EPUB download dialog without starting a download', () => {
+  it('opens an EPUB download dialog without starting a download', async () => {
     renderDialog()
     const dialog = openDownload()
     expect(dialog.getByRole('button', { name: 'EPUB' })).toHaveAttribute('aria-pressed', 'true')
-    expect(downloadBook).not.toHaveBeenCalled()
+    expect(prepareBookFile).not.toHaveBeenCalled()
     fireEvent.click(dialog.getByRole('button', { name: '下载' }))
-    expect(downloadBook).toHaveBeenCalledWith('book-1', 'Test Book')
+    await waitFor(() => expect(prepareBookFile).toHaveBeenCalledWith(
+      { id: 'book-1', title: 'Test Book', sourceFormat: 'epub', format: 'epub', edited: false },
+      expect.any(AbortSignal),
+    ))
   })
 
-  it('offers TXT for an EPUB and downloads extracted original text', () => {
+  it('offers TXT for an EPUB and downloads extracted original text', async () => {
     renderDialog()
     const dialog = openDownload()
     fireEvent.click(dialog.getByRole('button', { name: 'TXT' }))
     fireEvent.click(dialog.getByRole('button', { name: '下载' }))
-    expect(downloadOriginalTxt).toHaveBeenCalledWith('book-1', 'Test Book')
+    await waitFor(() => expect(prepareBookFile).toHaveBeenCalledWith(
+      { id: 'book-1', title: 'Test Book', sourceFormat: 'epub', format: 'txt', edited: false },
+      expect.any(AbortSignal),
+    ))
   })
 
-  it.each(['epub', 'txt'] as const)('offers edited %s for a TXT source', (format) => {
+  it.each(['epub', 'txt'] as const)('offers edited %s for a TXT source', async (format) => {
+    downloadRules = [{ enabled: true, effectiveEnabled: true }]
     vi.mocked(useBookReplacements).mockReturnValue({ data: { data: [{ enabled: true, effectiveEnabled: true }] } } as ReturnType<typeof useBookReplacements>)
     bookDetail = { data: { ...book, format: 'txt' } }
     renderDialog()
     const dialog = openDownload()
     fireEvent.click(dialog.getByRole('button', { name: format.toUpperCase() }))
-    fireEvent.click(dialog.getByRole('radio', { name: '校订版' }))
+    fireEvent.click(await dialog.findByRole('radio', { name: '校订版' }))
     fireEvent.click(dialog.getByRole('button', { name: '下载' }))
-    if (format === 'epub') expect(downloadEpub).toHaveBeenCalledWith('book-1', 'Test Book', { plain: false })
-    else expect(downloadEditedTxt).toHaveBeenCalledWith('book-1', 'Test Book')
+    await waitFor(() => expect(prepareBookFile).toHaveBeenCalledWith(
+      { id: 'book-1', title: 'Test Book', sourceFormat: 'txt', format, edited: true },
+      expect.any(AbortSignal),
+    ))
   })
 
-  it('hides edited EPUB for uploaded EPUB but offers edited TXT', () => {
+  it('hides edited EPUB for uploaded EPUB but offers edited TXT', async () => {
+    downloadRules = [{ enabled: true, effectiveEnabled: true }]
     vi.mocked(useBookReplacements).mockReturnValue({ data: { data: [{ enabled: true, effectiveEnabled: true }] } } as ReturnType<typeof useBookReplacements>)
     renderDialog()
     const dialog = openDownload()
     expect(dialog.queryByRole('radio', { name: '校订版' })).not.toBeInTheDocument()
     fireEvent.click(dialog.getByRole('button', { name: 'TXT' }))
-    fireEvent.click(dialog.getByRole('radio', { name: '校订版' }))
+    fireEvent.click(await dialog.findByRole('radio', { name: '校订版' }))
     fireEvent.click(dialog.getByRole('button', { name: '下载' }))
-    expect(downloadEditedTxt).toHaveBeenCalledWith('book-1', 'Test Book')
+    await waitFor(() => expect(prepareBookFile).toHaveBeenCalledWith(
+      { id: 'book-1', title: 'Test Book', sourceFormat: 'epub', format: 'txt', edited: true },
+      expect.any(AbortSignal),
+    ))
   })
 
   it('closes only the download dialog on Escape and restores focus', () => {
@@ -1713,7 +1732,10 @@ describe('BookDetailDialog shared work mode', () => {
     expect(dialog.getByRole('heading', { name: '下载《修订书名》' })).toBeInTheDocument()
     expect(dialog.getByText('修订版')).toBeInTheDocument()
     fireEvent.click(dialog.getByRole('button', { name: '下载' }))
-    await waitFor(() => expect(downloadBook).toHaveBeenCalledWith('v2', '修订书名'))
+    await waitFor(() => expect(prepareBookFile).toHaveBeenCalledWith(
+      { id: 'v2', title: '修订书名', sourceFormat: 'epub', format: 'epub', edited: false },
+      expect.any(AbortSignal),
+    ))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /^下载《/ })).not.toBeInTheDocument())
   })
 

@@ -54,14 +54,14 @@ describe('book action notifications', () => {
     expect(notify.success).toHaveBeenCalledWith({
       key: 'library.bookMovedToTrash',
       params: { title: '百年孤独' },
-    })
+    }, { undo: undefined })
   })
 
   it('reports partial shelf move counts from the single batch response', async () => {
     vi.mocked(apiClient.apiPatch).mockResolvedValue({ data: { succeeded: 1, failed: 1, failedIds: ['b'] } } as never)
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
     result.current.mutate({ bookIds: ['a', 'b'], shelfId: 'shelf-1' })
-    await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'library.moveBooksPartial', params: { succeeded: 1, failed: 1 } }))
+    await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'library.moveBooksPartial', params: { succeeded: 1, failed: 1 } }, { undo: undefined }))
     expect(notify.error).not.toHaveBeenCalled()
   })
 

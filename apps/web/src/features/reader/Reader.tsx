@@ -1228,7 +1228,7 @@ export default function Reader() {
       // A range can hold both a highlight and ideas; the highlight wins the
       // click (same rule as SelectionToolbar), ideas stay reachable from the
       // notes side panel
-      const currentRevisionAnnotations = annotations?.data?.filter((a) => a.revisionId === displayedRevisionId)
+      const currentRevisionAnnotations = annotations?.data?.filter((a) => a.revisionId == null || a.revisionId === displayedRevisionId)
       const annotation = currentRevisionAnnotations?.find((a) => a.cfiRange === e.cfiRange && a.type === 'highlight')
         ?? currentRevisionAnnotations?.find((a) => a.cfiRange === e.cfiRange)
         ?? publicMarkers.find((idea) => idea.annotation.cfiRange === e.cfiRange)?.annotation

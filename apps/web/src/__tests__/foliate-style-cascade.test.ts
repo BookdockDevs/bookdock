@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { FoliateReader, keepEpubTextAlignment } from '../features/reader/renderers/FoliateReader'
 
+vi.stubGlobal('ResizeObserver', class {
+  observe() {}
+  disconnect() {}
+})
+
 function appliedReaderStyles(configure?: (reader: FoliateReader) => void, format: 'epub' | 'txt' = 'epub'): string {
   const reader = new FoliateReader('', '', undefined, format)
   const setStyles = vi.fn()

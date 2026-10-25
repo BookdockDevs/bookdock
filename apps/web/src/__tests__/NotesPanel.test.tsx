@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render as testingRender, screen, fireEvent } from '@testing-library/react'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 import type { ReactElement } from 'react'
 
 function render(element: ReactElement) {

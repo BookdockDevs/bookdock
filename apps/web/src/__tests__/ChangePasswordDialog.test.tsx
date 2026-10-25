@@ -8,6 +8,10 @@ vi.mock('@/features/auth/hooks', () => ({
   useChangePassword: vi.fn(),
 }))
 
+vi.mock('@/hooks/useTranslation', () => ({
+  useTranslation: () => (key: string) => key,
+}))
+
 vi.mock('@/stores/toast.store', () => ({
   useToastStore: (selector: (state: { addToast: () => void }) => unknown) => selector({ addToast: vi.fn() }),
 }))

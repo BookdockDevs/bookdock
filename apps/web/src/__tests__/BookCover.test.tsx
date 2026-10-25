@@ -38,11 +38,11 @@ describe('BookCover', () => {
     expect(screen.getByText('Pending Book')).toBeVisible()
   })
 
-  it('keeps the title underneath a loaded cover', () => {
+  it('hides the placeholder title when the cover has loaded', () => {
     render(<BookCover book={{ ...baseBook, title: 'Real Cover', coverKey: 'covers/book-1.jpg' }} />)
     fireEvent.load(screen.getByRole('img'))
     expect(screen.getByRole('img')).toHaveClass('opacity-100')
-    expect(screen.getByText('Real Cover')).toBeInTheDocument()
+    expect(screen.queryByText('Real Cover')).not.toBeInTheDocument()
   })
 
   it('renders immediately with opacity-100 when remounting a previously loaded cover', () => {

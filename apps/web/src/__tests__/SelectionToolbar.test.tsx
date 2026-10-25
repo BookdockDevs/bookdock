@@ -2,6 +2,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render as testingRender, screen, fireEvent, waitFor, act } from '@testing-library/react'
 
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 
@@ -440,6 +442,7 @@ describe('SelectionToolbar', () => {
     fireEvent.click(screen.getAllByLabelText('annotation.openIdeaDetail')[0])
     expect(screen.getByTitle('annotation.editNote')).toBeInTheDocument()
     fireEvent.click(screen.getByTitle('annotation.deleteAnnotation'))
+    fireEvent.click(screen.getByRole('button', { name: 'common.delete' }))
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith('n1'))
     // Simulate the annotations refetch after deletion: the detail entry is gone
@@ -456,6 +459,7 @@ describe('SelectionToolbar', () => {
     render(<SelectionToolbar bookId="b1" />)
     fireEvent.click(screen.getByLabelText('annotation.openIdeaDetail'))
     fireEvent.click(screen.getByTitle('annotation.deleteAnnotation'))
+    fireEvent.click(screen.getByRole('button', { name: 'common.delete' }))
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => expect(deleteMutate).toHaveBeenCalledWith('a1'))
     await waitFor(() => expect(useReaderState.getState().selection).toBeNull())

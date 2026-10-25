@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { createRef } from 'react'
 import { NavigationPanel } from '../features/reader/components/NavigationPanel'
+
+vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 import { notify } from '@/lib/notifications'
 import { formatCardExcerpt } from '../features/reader/lib/book-search'
 import { READER_SESSION_ID, useReaderState } from '../features/reader/state/reader-state'
