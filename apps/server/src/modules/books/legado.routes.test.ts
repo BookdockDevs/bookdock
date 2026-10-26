@@ -1,4 +1,7 @@
+import { Readable } from 'node:stream'
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { Hono } from 'hono'
 
 import { errorHandler } from '../../middleware/error'
@@ -18,6 +21,7 @@ import { getActiveBook, getBookMembership } from './books.service'
 import { getLibraryVersionPublication, listLibraryVersionEntries, type LibraryVersionEntry } from '../libraries/catalog.service'
 import { isLegadoAccessKeyEnabled, isLegadoEnabled, isLegadoEpubMediaEnabled } from '../settings/settings.service'
 import { getOrCreateLegadoAccessKey, resolveLegadoAccessKey, rotateLegadoAccessKey } from './legado-access.service'
+import { acquireReaderMedia } from './reader-media.service'
 
 vi.mock('../settings/settings.service', () => ({
   isLegadoAccessKeyEnabled: vi.fn(() => true),
@@ -44,6 +48,9 @@ vi.mock('./legado.service', () => ({
   legadoJoinedLibraryIds: vi.fn(() => ['lib-private']),
   legadoLatestChapterTitles: vi.fn(() => new Map()),
   LEGADO_READ: { showHidden: true },
+}))
+vi.mock('./reader-media.service', () => ({
+  acquireReaderMedia: vi.fn(),
 }))
 
 vi.mock('../auth/auth.service', () => ({
@@ -100,6 +107,18 @@ function versionEntry(overrides: Partial<LibraryVersionEntry> = {}): LibraryVers
     updatedAt: 2,
     ...overrides,
   }
+}
+
+function mediaLease(size: number, mediaType: string) {
+  const release = vi.fn()
+  const createStream = vi.fn((range?: { start: number; end: number }) => {
+    const bytes = Buffer.from('abcdef')
+    const stream = Readable.from([bytes.subarray(range?.start ?? 0, (range?.end ?? size - 1) + 1)])
+    stream.once('end', () => { void release() })
+    stream.once('close', () => { void release() })
+    return stream
+  })
+  return { size, mediaType, createStream, release }
 }
 
 describe('Legado book-source adapter', () => {
@@ -703,6 +722,51 @@ describe('Legado book-source adapter', () => {
     expect(response.headers.get('cache-control')).toContain('private')
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
     expect(getLegadoBookResource).toHaveBeenCalledWith('user-1', 'book-1', 'OEBPS/Images/cover.png')
+  })
+
+  it('streams authenticated EPUB audio byte ranges for Legado', async () => {
+    const book = { id: 'book-1', format: 'epub' } as unknown as Awaited<ReturnType<typeof getActiveBook>>
+    vi.mocked(getActiveBook).mockResolvedValue(book)
+    const media = mediaLease(6, 'audio/mpeg')
+    vi.mocked(acquireReaderMedia).mockResolvedValue(media as Awaited<ReturnType<typeof acquireReaderMedia>>)
+
+    const response = await createApp().request('http://bookdock.test/api/v1/legado/books/book-1/resource?path=OEBPS%2FAudio%2Fclip.mp3', {
+      headers: { Range: 'bytes=2-4' },
+    })
+
+    expect(response.status).toBe(206)
+    expect(response.headers.get('content-type')).toBe('audio/mpeg')
+    expect(response.headers.get('accept-ranges')).toBe('bytes')
+    expect(response.headers.get('content-range')).toBe('bytes 2-4/6')
+    expect(response.headers.get('content-length')).toBe('3')
+    expect(await response.text()).toBe('cde')
+    expect(getActiveBook).toHaveBeenCalledWith('user-1', 'book-1', { showHidden: true })
+    expect(acquireReaderMedia).toHaveBeenCalledWith(book, 'OEBPS/Audio/clip.mp3', expect.any(AbortSignal))
+    expect(media.createStream).toHaveBeenCalledWith({ start: 2, end: 4 })
+  })
+
+  it('rejects invalid Legado media ranges and serves HEAD metadata without a stream', async () => {
+    const book = { id: 'book-1', format: 'epub' } as unknown as Awaited<ReturnType<typeof getActiveBook>>
+    vi.mocked(getActiveBook).mockResolvedValue(book)
+    const invalidLease = mediaLease(6, 'video/mp4')
+    vi.mocked(acquireReaderMedia).mockResolvedValueOnce(invalidLease as Awaited<ReturnType<typeof acquireReaderMedia>>)
+
+    const invalid = await createApp().request('http://bookdock.test/api/v1/legado/books/book-1/resource?path=OEBPS%2FVideo%2Fclip.mp4', {
+      headers: { Range: 'bytes=6-' },
+    })
+    expect(invalid.status).toBe(416)
+    expect(invalid.headers.get('content-range')).toBe('bytes */6')
+    expect(invalidLease.release).toHaveBeenCalledOnce()
+    expect(invalidLease.createStream).not.toHaveBeenCalled()
+
+    const headLease = mediaLease(6, 'video/mp4')
+    vi.mocked(acquireReaderMedia).mockResolvedValueOnce(headLease as Awaited<ReturnType<typeof acquireReaderMedia>>)
+    const head = await createApp().request('http://bookdock.test/api/v1/legado/books/book-1/resource?path=OEBPS%2FVideo%2Fclip.mp4', { method: 'HEAD' })
+    expect(head.status).toBe(200)
+    expect(head.headers.get('content-length')).toBe('6')
+    expect(await head.arrayBuffer()).toHaveProperty('byteLength', 0)
+    expect(headLease.release).toHaveBeenCalledOnce()
+    expect(headLease.createStream).not.toHaveBeenCalled()
   })
 
   it('escapes detail intro text and preserves description line breaks', async () => {

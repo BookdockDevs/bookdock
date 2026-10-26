@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream'
+
 import { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import type { Context } from 'hono'
@@ -12,6 +14,11 @@ import { AppError } from '../../middleware/error'
 import { getUserTimezone } from '../auth/auth.service'
 import { formatTimestamp } from '../../lib/format-timestamp'
 import { isLegadoAccessKeyEnabled, isLegadoEnabled, isLegadoEpubMediaEnabled } from '../settings/settings.service'
+import { isEpubAudioVideoPath } from '../../formats/epub'
+import { EpubIndexError } from '../../formats/epub-index'
+import { ReaderEntryLimitError } from './reader-content.service'
+import { acquireReaderMedia } from './reader-media.service'
+import { parseMediaRange } from './reader-media.range'
 
 const legadoRoutes = new Hono()
 // Legado uses this value to decide whether a same-URL source import contains
@@ -694,13 +701,59 @@ legadoRoutes.get('/books/:id/cover', async (c) => {
   return c.newResponse(new Uint8Array(cover.data), 200, { 'Content-Type': cover.contentType, 'Cache-Control': 'private, immutable, max-age=31536000' })
 })
 
-legadoRoutes.get('/books/:id/resource', async (c) => {
+legadoRoutes.on(['GET', 'HEAD'], '/books/:id/resource', async (c) => {
   const resourcePath = c.req.query('path')
   if (!resourcePath) throw new AppError('VALIDATION_ERROR', 'EPUB resource path is required')
   const user = c.get('user')
   if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+
+  if (isEpubAudioVideoPath(resourcePath)) {
+    let media: Awaited<ReturnType<typeof acquireReaderMedia>> | null = null
+    try {
+      const book = await getActiveBook(user.id, c.req.param('id'), LEGADO_READ)
+      media = await acquireReaderMedia(book, resourcePath, c.req.raw.signal)
+      const range = parseMediaRange(c.req.header('Range'), media.size)
+      if (range === 'invalid') {
+        const size = media.size
+        await media.release()
+        media = null
+        return c.newResponse(null, 416, {
+          'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes */${size}`,
+          'Cache-Control': 'private, no-store',
+        })
+      }
+      const opened = media
+      const selected = opened.size === 0 ? null : range ?? { start: 0, end: opened.size - 1 }
+      if (c.req.method === 'HEAD' || !selected) {
+        await opened.release()
+        media = null
+      }
+      const stream = media && selected ? opened.createStream(selected) : null
+      if (stream) media = null
+      return c.newResponse(stream ? Readable.toWeb(stream) as ReadableStream : null, range ? 206 : 200, {
+        'Content-Type': opened.mediaType,
+        'Content-Length': String(selected ? selected.end - selected.start + 1 : 0),
+        'Content-Disposition': 'inline',
+        'Accept-Ranges': 'bytes',
+        ...(range ? { 'Content-Range': `bytes ${range.start}-${range.end}/${opened.size}` } : {}),
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      })
+    } catch (error) {
+      await media?.release()
+      if (error instanceof AppError) throw error
+      if (error instanceof ReaderEntryLimitError) throw new AppError('READER_ENTRY_TOO_LARGE', 'EPUB media exceeds the media resource limit')
+      if (error instanceof EpubIndexError) {
+        if (error.code === 'LIMIT') throw new AppError('READER_ENTRY_TOO_LARGE', 'EPUB media exceeds the media resource limit')
+        throw new AppError(error.code === 'UNSUPPORTED' ? 'READER_ENTRY_UNSUPPORTED' : 'READER_ENTRY_FAILED', 'EPUB media could not be prepared')
+      }
+      throw error
+    }
+  }
+
   const resource = await getLegadoBookResource(user.id, c.req.param('id'), resourcePath)
-  return c.newResponse(new Uint8Array(resource.data), 200, {
+  return c.newResponse(c.req.method === 'HEAD' ? null : new Uint8Array(resource.data), 200, {
     'Content-Type': resource.mediaType,
     'Content-Length': String(resource.data.length),
     'Content-Disposition': 'inline',

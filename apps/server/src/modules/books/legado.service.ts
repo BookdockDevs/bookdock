@@ -551,22 +551,20 @@ export async function getLegadoToc(userId: string, bookId: string) {
   const book = await getActiveBook(userId, bookId, LEGADO_READ)
   const chapters = await getBookChapters(userId, bookId, LEGADO_READ)
   const rules = await loadEffectiveBookReplacementRules(userId, bookId)
-  // Legado renders TocRule.updateTime as a plain string beside every chapter
-  // title (BookChapter.tag), not as a timestamp, so this is a readable date and
-  // time. A chapter carries its own added time only once that differs from the
-  // revision it lives in, so an absent addedAt means every chapter of this book
-  // so far arrived with the file currently being read. Minutes are the useful
-  // ceiling: one append stamps all of its chapters with the same instant, so a
-  // seconds field would only expose how long the insert took.
+  // Legado stores updateTime as BookChapter.tag and uses a volume's tag as its
+  // reading content, so volume rows must not carry a timestamp.
   const timezone = getUserTimezone(userId)
-  return chapters.map((chapter, index) => ({
-    id: chapter.id,
-    index,
-    title: applyTitleReplacements(chapter.title, rules.filter((rule) => rule.matchType === 'pattern' && rule.effectiveEnabled)),
-    level: chapter.level,
-    isVolume: chapters[index + 1] !== undefined && chapters[index + 1]!.level > chapter.level,
-    contentUpdateDate: formatTimestamp(chapter.addedAt ?? book.contentUpdatedAt, timezone),
-  }))
+  return chapters.map((chapter, index) => {
+    const isVolume = chapters[index + 1] !== undefined && chapters[index + 1]!.level > chapter.level
+    return {
+      id: chapter.id,
+      index,
+      title: applyTitleReplacements(chapter.title, rules.filter((rule) => rule.matchType === 'pattern' && rule.effectiveEnabled)),
+      level: chapter.level,
+      isVolume,
+      contentUpdateDate: isVolume ? '' : formatTimestamp(chapter.addedAt ?? book.contentUpdatedAt, timezone),
+    }
+  })
 }
 
 export async function getLegadoChapterContent(

@@ -27,7 +27,14 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': process.env.BOOKDOCK_DEV_API_TARGET || 'http://localhost:18423',
+      '/api': {
+        target: process.env.BOOKDOCK_DEV_API_TARGET || 'http://localhost:18423',
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            if (req.headers.host) proxyReq.setHeader('host', req.headers.host)
+          })
+        },
+      },
     },
   },
 })

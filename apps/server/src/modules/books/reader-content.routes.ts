@@ -16,6 +16,7 @@ import { EpubIndexError } from '../../formats/epub-index'
 import { requestUserId } from '../../middleware/auth.guard'
 import { AppError } from '../../middleware/error'
 import { acquireReaderMedia } from './reader-media.service'
+import { parseMediaRange } from './reader-media.range'
 
 const readerContentRoutes = new Hono()
 
@@ -33,23 +34,6 @@ function assertRevision(book: ReaderContentBook, revisionId: string | null | und
   if (revisionId && revisionId !== book.revisionId) {
     throw new AppError('READER_REVISION_CHANGED', 'Content revision changed; reload the book')
   }
-}
-
-function parseMediaRange(header: string | undefined, size: number): { start: number; end: number } | 'invalid' | null {
-  if (!header) return null
-  if (size <= 0) return 'invalid'
-  if (header.includes(',')) return 'invalid'
-  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim())
-  if (!match || (!match[1] && !match[2])) return 'invalid'
-  if (!match[1]) {
-    const suffix = Number(match[2])
-    if (!Number.isSafeInteger(suffix) || suffix <= 0) return 'invalid'
-    return { start: Math.max(0, size - suffix), end: size - 1 }
-  }
-  const start = Number(match[1])
-  const requestedEnd = match[2] ? Number(match[2]) : size - 1
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || start >= size || start > requestedEnd) return 'invalid'
-  return { start, end: Math.min(requestedEnd, size - 1) }
 }
 
 async function readerBook(c: Context): Promise<ReaderContentBook> {

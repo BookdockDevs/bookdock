@@ -809,6 +809,11 @@ export function isEpubMediaPath(path: string): boolean {
   return epubResourceMediaType(path) !== null
 }
 
+export function isEpubAudioVideoPath(path: string): boolean {
+  const mediaType = epubResourceMediaType(path)
+  return mediaType?.startsWith('audio/') === true || mediaType?.startsWith('video/') === true
+}
+
 export async function loadEpubResource(buffer: Buffer, resourcePath: string): Promise<EpubResource | null> {
   if (!isSafeArchivePath(resourcePath)) return null
   const mediaType = epubResourceMediaType(resourcePath)

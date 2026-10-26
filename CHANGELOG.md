@@ -8,11 +8,13 @@ All notable changes to Bookdock are documented here.
 
 - Clean reading no longer leaves a black video placeholder after hiding embedded media.
 - Excerpt and idea share cards embed the selected fonts, including WenKai's imported stylesheets and Unicode subsets, so copied and saved images retain the chosen typeface. The preview displays the same prepared PNG used by both actions.
+- Legado volume rows no longer show their update timestamps as reading-page content.
 
 ### Changed
 
 - Share cards show a loading state until image preparation finishes, disable copy/save while preparing, and offer retry after a failure. Changing the card discards outdated preparations and releases the previous preview.
 - Reader bookmarks now retain their content revision, restoring the active bookmark button and ribbon marker; locatable legacy bookmarks remain visible.
+- Legado EPUB audio/video resources support authenticated byte-range requests and HEAD metadata; the Vite development proxy preserves the browser-facing host so generated source URLs use the LAN address.
 
 ## [0.6.5] - 2026-10-25
 
@@ -918,11 +920,13 @@ All notable changes to Bookdock are documented here.
 
 - 纯净阅读隐藏内嵌媒体后，不再留下黑色视频占位框。
 - 书摘和想法分享卡片正确嵌入所选字体，支持霞鹜文楷的导入样式表与字符分包，避免复制或保存图片时字体与预览不一致；预览、复制和保存共用同一张准备完成的 PNG。
+- 开源阅读书源不再把分卷更新时间显示成阅读页正文。
 
 #### 变更
 
 - 分享图片准备期间显示加载态并禁用复制、保存，失败后支持重试；切换卡片配置时丢弃过期任务并释放旧预览，不再先显示默认字体再切换。
 - 阅读器书签现在会保存所属内容修订，恢复书签按钮的激活状态和位置丝带标记；仍可定位的旧书签也会继续显示。
+- 开源阅读书源的 EPUB 音视频资源现支持鉴权字节范围请求与 HEAD 元数据；Vite 开发代理保留浏览器访问时的 Host，生成的书源链接因此使用局域网地址。
 
 ### [0.6.5] - 2026-10-25
 
