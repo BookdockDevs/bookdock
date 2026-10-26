@@ -158,7 +158,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
     return () => observer.disconnect()
   }, [selection?.cfiRange, hasStyleBar, noteEditing])
 
-  if (!selection) return null
+  if (!selection || (selection.visible === false && !noteEditing)) return null
 
   function close() {
     clearReaderSelection(renderer)

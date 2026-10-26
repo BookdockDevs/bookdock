@@ -7,6 +7,7 @@ All notable changes to Bookdock are documented here.
 ### Fixed
 
 - Clean reading no longer leaves a black video placeholder after hiding embedded media.
+- Selection toolbars now follow visible text while scrolling, hide when the selection leaves the reading viewport, and clear on page turns and navigation without interrupting open note editors.
 - Excerpt and idea share cards embed the selected fonts, including WenKai's imported stylesheets and Unicode subsets, so copied and saved images retain the chosen typeface. The preview displays the same prepared PNG used by both actions.
 - Legado volume rows no longer show their update timestamps as reading-page content.
 
@@ -919,6 +920,7 @@ All notable changes to Bookdock are documented here.
 #### 修复
 
 - 纯净阅读隐藏内嵌媒体后，不再留下黑色视频占位框。
+- 阅读器选中文本工具气泡会跟随可见文字滚动，选区离开正文视口时暂时隐藏，并在翻页或导航时清除临时选区；已打开的笔记编辑器不受影响。
 - 书摘和想法分享卡片正确嵌入所选字体，支持霞鹜文楷的导入样式表与字符分包，避免复制或保存图片时字体与预览不一致；预览、复制和保存共用同一张准备完成的 PNG。
 - 开源阅读书源不再把分卷更新时间显示成阅读页正文。
 

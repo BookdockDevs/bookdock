@@ -2019,6 +2019,50 @@ export class FoliateReader implements BookReader {
   private selectionDocs = new Map<Document, { index: number; handler: () => void; selectionChangeHandler: () => void; startHandler: () => void; dblHandler: () => void; keyForwardHandler: (e: KeyboardEvent) => void }>()
   private selectionActive = false
   private selectionDismissPending = false
+  private activeSelectionRange: Range | null = null
+  private activeSelectionInfo: SelectionInfo | null = null
+  private selectionPositionFrame = 0
+  private selectionPositionRenderer: EventTarget | null = null
+  private readonly refreshSelectionPosition = () => {
+    if (this.selectionPositionFrame || (!this.activeSelectionRange && !this.lastClickedAnnotation)) return
+    this.selectionPositionFrame = requestAnimationFrame(() => {
+      this.selectionPositionFrame = 0
+      const range = this.activeSelectionRange
+      const info = this.activeSelectionInfo
+      if ((!range || !info || !this.selectionActive) && this.lastClickedAnnotation) {
+        const { cfiRange, doc, range: annotationRange } = this.lastClickedAnnotation
+        const rect = this.popupRect(doc, annotationRange)
+        const viewport = this.container?.getBoundingClientRect()
+        const visible = Boolean(rect && viewport && rect.left + rect.width > viewport.left
+          && rect.left < viewport.right && rect.top + rect.height > viewport.top && rect.top < viewport.bottom)
+        const clipped = rect && viewport && visible ? {
+          left: Math.max(rect.left, viewport.left),
+          top: Math.max(rect.top, viewport.top),
+          width: Math.min(rect.left + rect.width, viewport.right) - Math.max(rect.left, viewport.left),
+          height: Math.min(rect.top + rect.height, viewport.bottom) - Math.max(rect.top, viewport.top),
+        } : undefined
+        this.emit('selectionPosition', { cfiRange, rect: clipped, visible })
+        return
+      }
+      if (!range || !info || !this.selectionActive) return
+      try {
+        const doc = range.startContainer.ownerDocument
+        if (!doc) return
+        const selection = doc.getSelection()
+        const viewport = this.container?.getBoundingClientRect()
+        const geometry = selection && viewport ? getSelectionGeometry(
+          doc, range, selection, viewport,
+          this.readingMode === 'page' ? this.view?.renderer?.columnCount ?? 1 : 1,
+        ) : undefined
+        const rect = geometry ? (geometry.backward ? geometry.rects[0] : geometry.rects.at(-1)) : undefined
+        this.activeSelectionInfo = { ...info, rect, geometry, visible: Boolean(geometry) }
+        this.emit('selectionPosition', { cfiRange: info.cfiRange, rect, geometry, visible: Boolean(geometry) })
+      } catch {
+        this.activeSelectionInfo = { ...info, rect: undefined, geometry: undefined, visible: false }
+        this.emit('selectionPosition', { cfiRange: info.cfiRange, visible: false })
+      }
+    })
+  }
   private foliateOverlayer: any = null
   // `${cfiRange}|${type}` -> annotation; a range may hold a highlight and an
   // idea at once, so the bare cfiRange cannot be the key
@@ -2726,10 +2770,13 @@ export class FoliateReader implements BookReader {
 
       container.appendChild(view)
       this.resizeObserver = new ResizeObserver(() => {
+        this.refreshSelectionPosition()
         if (this.destroyed || this.readingMode !== 'scroll') return
         if (this.scrollBlockPadding() !== this.lastScrollVPad) this.applyStyles()
       })
       this.resizeObserver.observe(container)
+      window.addEventListener('resize', this.refreshSelectionPosition, { passive: true })
+      window.visualViewport?.addEventListener('resize', this.refreshSelectionPosition, { passive: true })
       await view.open(epub)
       if (this.destroyed) {
         try { view.close() } catch { /* partial init */ }
@@ -2827,6 +2874,7 @@ export class FoliateReader implements BookReader {
   }
 
   private handleRelocate(detail: any) {
+    if (detail.reason === 'page' || detail.reason === 'snap' || detail.reason === 'navigation') this.clearSelection()
     const { cfi, fraction, startFraction, tocItem, section, chapterLocation, range } = detail
     // The content has become visible at this point. Do not keep a spinner up
     // while a paginator background-fill or font/layout promise finishes.
@@ -4111,6 +4159,8 @@ export class FoliateReader implements BookReader {
         if (!range || !text) {
           if (this.selectionActive) {
             this.selectionActive = false
+            this.activeSelectionRange = null
+            this.activeSelectionInfo = null
             this.emit('selected', null)
           }
           return
@@ -4126,11 +4176,6 @@ export class FoliateReader implements BookReader {
           doc, range, sel, viewport,
           this.readingMode === 'page' ? this.view?.renderer?.columnCount ?? 1 : 1,
         ) : undefined
-        if (viewport && !geometry) {
-          this.selectionActive = false
-          this.emit('selected', null)
-          return
-        }
         const info: SelectionInfo = {
           cfiRange,
           text: text.slice(0, 500),
@@ -4140,6 +4185,7 @@ export class FoliateReader implements BookReader {
           ...(paragraphText ? { paragraphText } : {}),
           rect: geometry ? (geometry.backward ? geometry.rects[0] : geometry.rects.at(-1)) : undefined,
           geometry,
+          visible: Boolean(geometry),
           pointText: textContentSelection(doc, range),
           // Point-patch anchors (P2): the offset is counted on the rendered
           // document (conversion is length-preserving, so it equals the
@@ -4150,6 +4196,8 @@ export class FoliateReader implements BookReader {
           sectionHref: this.book?.sections?.[index]?.id as string | undefined,
           singleTextNode: startNode === range.endContainer && startNode.nodeType === Node.TEXT_NODE,
         }
+        this.activeSelectionRange = range
+        this.activeSelectionInfo = info
         if (autoMarkSelectionMode) {
           // 选中即划: create immediately but keep the toolbar open (restyle)
           this.emit('instantAnnotation', { ...info, keepSelection: true })
@@ -4169,6 +4217,8 @@ export class FoliateReader implements BookReader {
     }
     if ((!sel || sel.isCollapsed || sel.rangeCount === 0) && this.selectionActive) {
       this.selectionActive = false
+      this.activeSelectionRange = null
+      this.activeSelectionInfo = null
       this.emit('selected', null)
     }
   }
@@ -4178,15 +4228,23 @@ export class FoliateReader implements BookReader {
     // selectionchange listener emits ('selected', null) and unmounts the
     // toolbar before it can show the fresh highlight's restyle state.
     // Callers that DO want the bubble gone emit the event themselves.
-    this.lastClickedAnnotation = null
     this.selectionActive = false
+    this.activeSelectionRange = null
+    this.activeSelectionInfo = null
+    if (this.selectionPositionFrame) cancelAnimationFrame(this.selectionPositionFrame)
+    this.selectionPositionFrame = 0
     try { this.view?.deselect?.() } catch { /* view may be gone */ }
   }
 
   clearSelection() {
-    const wasActive = this.selectionActive
+    const wasActive = this.selectionActive || Boolean(this.lastClickedAnnotation)
+    this.lastClickedAnnotation = null
     this.deselect()
     if (wasActive) this.emit('selected', null)
+  }
+
+  refreshSelectionPositionNow() {
+    this.refreshSelectionPosition()
   }
 
   setAnnotations(annotations: ReaderAnnotation[]) {
@@ -4803,6 +4861,13 @@ export class FoliateReader implements BookReader {
       const contents = this.view?.renderer?.getContents?.() as Array<{ doc: Document; index: number }> | undefined
       if (!contents) return
 
+      const positionRenderer = this.view?.renderer as (EventTarget & { addEventListener: EventTarget['addEventListener']; removeEventListener: EventTarget['removeEventListener'] }) | undefined
+      if (positionRenderer && positionRenderer !== this.selectionPositionRenderer) {
+        this.selectionPositionRenderer?.removeEventListener('scroll', this.refreshSelectionPosition)
+        positionRenderer.addEventListener('scroll', this.refreshSelectionPosition, { passive: true } as AddEventListenerOptions)
+        this.selectionPositionRenderer = positionRenderer
+      }
+
       const docs = new Set<Document>(contents.map((c) => c.doc).filter(Boolean))
       for (const doc of this.activeDocs) {
         if (!docs.has(doc)) {
@@ -4906,6 +4971,7 @@ export class FoliateReader implements BookReader {
         const handler = () => this.handleSelection(doc, index)
         const selectionChangeHandler = () => this.handleSelectionChange(doc)
         const startHandler = () => {
+          this.lastClickedAnnotation = null
           if (this.selectionActive) {
             this.selectionDismissPending = true
             this.selectionActive = false
@@ -5011,6 +5077,12 @@ export class FoliateReader implements BookReader {
     for (const win of this.frameFocusWatch.keys()) this.unwatchFrameFocus(win)
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
+    window.removeEventListener('resize', this.refreshSelectionPosition)
+    window.visualViewport?.removeEventListener('resize', this.refreshSelectionPosition)
+    this.selectionPositionRenderer?.removeEventListener('scroll', this.refreshSelectionPosition)
+    this.selectionPositionRenderer = null
+    if (this.selectionPositionFrame) cancelAnimationFrame(this.selectionPositionFrame)
+    this.selectionPositionFrame = 0
     if (this.prefetchTimer !== null) { clearTimeout(this.prefetchTimer); this.prefetchTimer = null }
     if (this.marginalTimer !== null) { clearTimeout(this.marginalTimer); this.marginalTimer = null }
     this.view?.removeEventListener('link', this.handleFootnoteLink)
@@ -6189,6 +6261,9 @@ export class FoliateReader implements BookReader {
   }
 
   private emit<K extends keyof RendererEvents>(type: K, data?: Parameters<RendererEvents[K]>[0]) {
+    if (type === 'readingSettingsChanged') {
+      this.refreshSelectionPosition()
+    }
     this.listeners
       .filter((l) => l.type === type)
       .forEach((l) => l.fn(data))

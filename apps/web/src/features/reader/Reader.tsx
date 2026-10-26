@@ -1206,8 +1206,14 @@ export default function Reader() {
     },
     onSelected: (e) => {
       setIsSelectingText(false)
+      if (!e && useReaderState.getState().noteEditorRange) return
       if (e) setChromePinned(false)
       setSelection(e)
+    },
+    onSelectionPosition: (e) => {
+      const current = useReaderState.getState().selection
+      if (!current || current.cfiRange !== e.cfiRange || (current.visible === false && !e.visible)) return
+      setSelection({ ...current, rect: e.rect, geometry: e.geometry, visible: e.visible })
     },
     onTextSelectionStart: () => {
       setIsSelectingText(true)
@@ -1558,21 +1564,6 @@ export default function Reader() {
     return () => renderer.popPopupGuard()
   }, [popupOpen, renderer])
 
-  // Dismiss popups on scroll (scrolled mode), but keep ideas open for side-by-side reading
-  useEffect(() => {
-    if (!containerEl) return
-    const onScroll = () => {
-      if (annotationClickHandledRef.current) return
-      const currentSelection = useReaderState.getState().selection
-      const activeNoteEditor = useReaderState.getState().noteEditorRange
-      if (!isSelectionIdea(currentSelection, activeNoteEditor, annotations?.data, publicMarkers)) {
-        clearReaderSelection(rendererRef.current)
-      }
-    }
-    containerEl.addEventListener('scroll', onScroll, { passive: true })
-    return () => containerEl.removeEventListener('scroll', onScroll)
-  }, [containerEl, setSelection, annotations?.data, publicMarkers])
-
   useEffect(() => {
     rendererRef.current = renderer
   }, [renderer])
@@ -1597,11 +1588,8 @@ export default function Reader() {
     historyAutoHideRef.current?.reset()
   }, [syncHistoryCaps])
 
-  // The stored selection rect goes stale when the reading area resizes
-  // (sidebar toggle/drag, window resize), so dismiss a bare selection bubble
-  // instead of leaving it floating at the old position. Modal dialogs like
-  // IdeaOverlay and NoteEditorPopup are centered/anchored views and should not
-  // be dismissed just because the sidebar opened or closed.
+  // Re-measure against the renderer's clipped text viewport after the reading
+  // area changes size; the renderer coalesces this with its own frame updates.
   useEffect(() => {
     if (!containerEl || typeof ResizeObserver === 'undefined') return
     let width = containerEl.clientWidth
@@ -1613,17 +1601,7 @@ export default function Reader() {
       const currentSelection = useReaderState.getState().selection
       const activeNoteEditor = useReaderState.getState().noteEditorRange
       if (isSelectionIdea(currentSelection, activeNoteEditor, annotations?.data, publicMarkers)) return
-      if (annotationClickHandledRef.current) {
-        const nextRect = rendererRef.current?.getActiveAnnotationRect?.(currentSelection?.cfiRange)
-        if (nextRect && currentSelection) {
-          setSelection({
-            ...currentSelection,
-            rect: nextRect,
-          })
-        }
-        return
-      }
-      clearReaderSelection(rendererRef.current)
+      rendererRef.current?.refreshSelectionPositionNow?.()
     })
     ro.observe(containerEl)
     return () => ro.disconnect()

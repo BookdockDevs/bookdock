@@ -91,6 +91,8 @@ export interface SelectionInfo {
   anchor?: string
   rect?: PopupRect
   geometry?: SelectionGeometry
+  /** False while the native range is outside the clipped reading viewport. */
+  visible?: boolean
   /** Point-patch anchor: character offset of the selection start in the
    * section's text content (same traversal applyReplacements counts). */
   startOffset?: number
@@ -137,6 +139,7 @@ export interface TtsSegment {
 export interface RendererEvents {
   relocated: (e: ReaderLocation) => void
   selected: (e: SelectionInfo | null) => void
+  selectionPosition: (e: { cfiRange: string; rect?: PopupRect; geometry?: SelectionGeometry; visible: boolean }) => void
   /** A non-collapsed text selection has started in the reading content. */
   textSelectionStart: () => void
   annotationClicked: (e: { cfiRange: string; rect?: PopupRect }) => void
@@ -291,6 +294,7 @@ export interface BookReader {
   setAnnotations(annotations: ReaderAnnotation[]): void
   /** Collapse any in-content text selection (e.g. after a toolbar action) */
   clearSelection(): void
+  refreshSelectionPositionNow?(): void
   /** Remove all search result highlights from the page */
   clearSearch(): void
   /** Clear the DOM selection without emitting events — keeps React toolbar state */

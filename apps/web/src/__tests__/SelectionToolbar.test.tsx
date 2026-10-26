@@ -127,6 +127,30 @@ describe('SelectionToolbar', () => {
     expect(useReaderState.getState().selection).not.toBeNull()
   })
 
+  it('hides an offscreen selection bubble without clearing its selection', () => {
+    setSelection()
+    const view = render(<SelectionToolbar bookId="b1" />)
+    expect(screen.getByTitle('annotation.drawHighlight')).toBeInTheDocument()
+
+    act(() => useReaderState.setState({ selection: { ...useReaderState.getState().selection!, visible: false } }))
+    expect(screen.queryByTitle('annotation.drawHighlight')).not.toBeInTheDocument()
+    expect(useReaderState.getState().selection?.cfiRange).toBe('epubcfi(/6/4!/2)')
+
+    act(() => useReaderState.setState({ selection: { ...useReaderState.getState().selection!, rect: RECT, visible: true } }))
+    expect(screen.getByTitle('annotation.drawHighlight')).toBeInTheDocument()
+    view.unmount()
+  })
+
+  it('keeps an open note editor when selection position changes', async () => {
+    setSelection()
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('annotation.writeNote'))
+    expect(await screen.findByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument()
+
+    act(() => useReaderState.setState({ selection: { ...useReaderState.getState().selection!, rect: { ...RECT, top: 120 } } }))
+    expect(screen.getByPlaceholderText('annotation.notePlaceholder')).toBeInTheDocument()
+  })
+
   it('shows highlight actions for a fresh selection', async () => {
     setSelection()
     render(<SelectionToolbar bookId="b1" />)
