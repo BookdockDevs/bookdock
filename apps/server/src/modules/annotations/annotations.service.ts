@@ -47,7 +47,7 @@ export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
       id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfi ?? '', cfiAnchor: null,
       type: 'bookmark', color: 'yellow', style: 'underline',
       text: row.title ?? '', contextText: row.contextText ?? null, note: null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
-      createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
+      revisionId: row.revisionId ?? null, createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
     }
   }
   return {
@@ -235,6 +235,8 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     })
   }
   if (data.type === 'bookmark') {
+    const revision = ideaRevision(userId, bookId)
+    if (data.revisionId && data.revisionId !== revision?.id) throw new AppError('VALIDATION_ERROR', 'The reading revision has changed')
     savePersonalBookSnapshot(db, userId, bookId, snapshot)
     const existing = db.select().from(bookmarks)
       .where(and(
@@ -250,6 +252,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
         // explicit new text wins, otherwise the surviving title stays.
         title: data.text ?? existing.title,
         contextText: data.contextText ?? existing.contextText,
+        revisionId: data.revisionId === null ? null : revision?.id ?? null,
         deletedAt: null,
         updatedAt: now,
       }).where(eq(bookmarks.id, existing.id)).run()
@@ -259,7 +262,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
       id: createId('bm'),
       userId,
       bookVersionId: bookId,
-      revisionId: null,
+      revisionId: data.revisionId === null ? null : revision?.id ?? null,
       cfi: data.cfiRange,
       chapter: data.chapter ?? null,
       chapterHref: data.chapterHref ?? null,

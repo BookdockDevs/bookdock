@@ -12,6 +12,7 @@ All notable changes to Bookdock are documented here.
 ### Changed
 
 - Share cards show a loading state until image preparation finishes, disable copy/save while preparing, and offer retry after a failure. Changing the card discards outdated preparations and releases the previous preview.
+- Reader bookmarks now retain their content revision, restoring the active bookmark button and ribbon marker; locatable legacy bookmarks remain visible.
 
 ## [0.6.5] - 2026-10-25
 
@@ -921,6 +922,7 @@ All notable changes to Bookdock are documented here.
 #### 变更
 
 - 分享图片准备期间显示加载态并禁用复制、保存，失败后支持重试；切换卡片配置时丢弃过期任务并释放旧预览，不再先显示默认字体再切换。
+- 阅读器书签现在会保存所属内容修订，恢复书签按钮的激活状态和位置丝带标记；仍可定位的旧书签也会继续显示。
 
 ### [0.6.5] - 2026-10-25
 

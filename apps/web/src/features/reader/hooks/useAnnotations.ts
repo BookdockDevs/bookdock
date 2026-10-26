@@ -43,6 +43,7 @@ export function useCreateAnnotation(bookId: string) {
       const optimistic: AnnotationRes = {
         id: `temp-${now}-${Math.random().toString(36).slice(2, 8)}`,
         bookId,
+        revisionId: body.revisionId ?? null,
         cfiRange: body.cfiRange,
         cfiAnchor: body.cfiAnchor ?? null,
         type: body.type,

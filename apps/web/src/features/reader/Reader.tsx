@@ -354,7 +354,7 @@ export default function Reader() {
 
   const bookmarks = useMemo(
     () => displayedRevisionId
-      ? (annotations?.data ?? []).filter((annotation) => annotation.type === 'bookmark' && annotation.revisionId === displayedRevisionId)
+      ? (annotations?.data ?? []).filter((annotation) => annotation.type === 'bookmark' && annotation.locationAvailable !== false && (annotation.revisionId == null || annotation.revisionId === displayedRevisionId))
       : [],
     [annotations?.data, displayedRevisionId],
   )

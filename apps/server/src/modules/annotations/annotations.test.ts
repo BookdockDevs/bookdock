@@ -296,6 +296,26 @@ describe('annotations service', () => {
     })
   })
 
+  it('persists the current revision on bookmarks in create responses and lists', async () => {
+    const revisionId = db.select().from(schema.contentRevisions).get()!.id
+    const saved = await createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/9)',
+      type: 'bookmark',
+      revisionId,
+    })
+
+    expect(saved.revisionId).toBe(revisionId)
+    expect((await listAnnotations(ownerId, bookId)).find((item) => item.id === saved.id)?.revisionId).toBe(revisionId)
+  })
+
+  it('rejects bookmarks created against a stale reading revision', async () => {
+    await expect(createAnnotation(ownerId, bookId, {
+      cfiRange: 'epubcfi(/6/2!/4/9)',
+      type: 'bookmark',
+      revisionId: 'stale-revision',
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+
   it('keeps the snippet text on bookmarks through create, rename and list', async () => {
     const saved = await createAnnotation(ownerId, bookId, {
       cfiRange: 'epubcfi(/6/2!/4/10)',
