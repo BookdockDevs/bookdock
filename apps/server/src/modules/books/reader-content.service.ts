@@ -780,6 +780,22 @@ export async function readReaderEntryForWeb(book: ReaderContentBook, pathValue: 
   return { path: result.entry.path, mediaType: result.mediaType, data: Buffer.from(withDimensions, 'utf8'), resources }
 }
 
+export async function readReaderSearchEntry(book: ReaderContentBook, pathValue: string, maxBytes = 8 * 1024 * 1024): Promise<ReaderEntryResult | null> {
+  const normalized = normalizeReaderEntryPath(pathValue)
+  if (!normalized) return null
+  const prepared = await prepareReaderArchive(book)
+  const entry = lookupArchiveEntry(prepared.archive, normalized)
+  if (!entry) return null
+  if (entry.size > Math.min(maxBytes, READER_ENTRY_MAX_BYTES)) throw new ReaderEntryLimitError()
+  const data = await readArchiveEntryBuffer(prepared.archive, entry, Math.min(maxBytes, READER_ENTRY_MAX_BYTES))
+  const mediaType = readerMediaTypeForPath(entry.path, prepared.mediaTypes.get(entry.path) ?? prepared.mediaTypes.get(entry.path.toLowerCase()))
+  return {
+    path: entry.path,
+    mediaType,
+    data: isReaderTextMediaType(mediaType) ? Buffer.from(decodeArchiveText(data), 'utf8') : data,
+  }
+}
+
 export function isReaderTextMediaType(mediaType: string): boolean {
   const type = mediaType.split(';', 1)[0]?.trim().toLowerCase()
   return type === 'application/xhtml+xml'

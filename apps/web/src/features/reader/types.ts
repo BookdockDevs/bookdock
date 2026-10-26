@@ -344,6 +344,9 @@ export interface SearchOptions {
 export interface SearchStatus {
   truncated: boolean
   incomplete: boolean
+  partial?: boolean
+  canceled?: boolean
+  offline?: boolean
   error?: 'regex-timeout' | 'regex-unavailable' | 'regex-failed'
 }
 

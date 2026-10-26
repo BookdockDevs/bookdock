@@ -1,7 +1,8 @@
 import { Hono, type Context } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { Readable } from 'node:stream'
 
-import { readerMarkupEntryDataSchema, readerMarkupEntryQuerySchema, readerTextBatchSchema } from '@bookdock/shared'
+import { readerMarkupEntryDataSchema, readerMarkupEntryQuerySchema, readerSearchRequestSchema, readerTextBatchSchema } from '@bookdock/shared'
 
 import { getActiveBook } from './books.service'
 import {
@@ -17,8 +18,10 @@ import { requestUserId } from '../../middleware/auth.guard'
 import { AppError } from '../../middleware/error'
 import { acquireReaderMedia } from './reader-media.service'
 import { parseMediaRange } from './reader-media.range'
+import { createReaderSearchStream, reserveReaderSearch } from './reader-search.service'
 
 const readerContentRoutes = new Hono()
+readerContentRoutes.use('/:id/reader/search', bodyLimit({ maxSize: 128 * 1024 }))
 
 function requestShowHidden(c: Context): boolean {
   return requestUserId(c) !== null && c.req.query('showHidden') === '1'
@@ -70,6 +73,23 @@ readerContentRoutes.get('/:id/reader/manifest', async (c) => {
   } catch (error) {
     entryError(error)
   }
+})
+
+readerContentRoutes.post('/:id/reader/search', async (c) => {
+  assertReaderGuestAllowed(c)
+  const book = await getActiveBook(requestUserId(c), c.req.param('id') ?? '', {
+    showHidden: requestShowHidden(c),
+  })
+  const parsed = readerSearchRequestSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid reader search request', parsed.error.flatten())
+  assertRevision(book, parsed.data.revisionId)
+  if (book.format !== 'epub' && book.format !== 'txt') throw new AppError('READER_ENTRY_UNSUPPORTED', 'Full-book search is supported for EPUB and TXT books')
+  if (!reserveReaderSearch()) throw new AppError('READER_SEARCH_BUSY', 'Reader search is busy; try again shortly')
+  return c.newResponse(createReaderSearchStream(book, parsed.data, c.req.raw.signal), 200, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'private, no-store, no-transform',
+    'X-Accel-Buffering': 'no',
+  })
 })
 
 readerContentRoutes.on(['GET', 'HEAD'], '/:id/reader/media', async (c) => {

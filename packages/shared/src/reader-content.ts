@@ -124,6 +124,47 @@ export const readerTextBatchSchema = z.object({
 
 export type ReaderTextBatchReq = z.infer<typeof readerTextBatchSchema>
 
+export const readerSearchReplacementSchema = z.object({
+  id: z.string().min(1).max(200),
+  matchType: z.enum(['pattern', 'point']),
+  pattern: z.string().max(512).nullable(),
+  replacement: z.string().max(1000).nullable(),
+  isRegex: z.boolean(),
+  applyTo: z.enum(['content', 'title', 'both']),
+  enabled: z.boolean(),
+  effectiveEnabled: z.boolean().nullable().optional(),
+  spineHref: z.string().max(READER_ENTRY_PATH_MAX_LENGTH).nullable(),
+  textOffset: z.number().int().nonnegative().nullable(),
+  originalText: z.string().max(1000).nullable(),
+})
+
+export const readerSearchRequestSchema = z.object({
+  revisionId: z.string().min(1).max(200),
+  query: z.string().min(1).max(1000),
+  mode: z.enum(['contains', 'regex']).default('contains'),
+  matchCase: z.boolean().default(false),
+  chineseConversion: z.enum(['off', 'simplified', 'traditional']).default('off'),
+  replacements: z.array(readerSearchReplacementSchema).max(40).default([]),
+})
+
+export type ReaderSearchRequest = z.infer<typeof readerSearchRequestSchema>
+
+export const readerSearchExcerptSchema = z.object({ pre: z.string().max(256), match: z.string().max(4001), post: z.string().max(256) })
+export const readerSearchHitSchema = z.object({
+  sectionIndex: z.number().int().nonnegative(),
+  chapter: z.string().max(500).optional(),
+  start: z.number().int().nonnegative(),
+  end: z.number().int().positive(),
+  excerpt: readerSearchExcerptSchema,
+})
+export const readerSearchEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('batch'), revisionId: z.string().min(1), scanned: z.number().int().nonnegative(), total: z.number().int().nonnegative(), hits: z.array(readerSearchHitSchema).max(100) }),
+  z.object({ type: z.literal('terminal'), revisionId: z.string().min(1), status: z.enum(['complete', 'truncated', 'partial', 'canceled']), scanned: z.number().int().nonnegative(), total: z.number().int().nonnegative(), error: z.enum(['regex-timeout', 'regex-failed']).optional() }),
+])
+
+export type ReaderSearchHit = z.infer<typeof readerSearchHitSchema>
+export type ReaderSearchEvent = z.infer<typeof readerSearchEventSchema>
+
 export function isReaderMarkupType(mediaType: string): boolean {
   const type = mediaType.split(';', 1)[0]?.trim().toLowerCase()
   return type === 'application/xhtml+xml' || type === 'text/html' || type === 'text/xml' || type === 'application/xml'

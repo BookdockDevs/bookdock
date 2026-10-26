@@ -1370,6 +1370,7 @@
     "searchRegexTimeout": "Regex matching timed out. Search is incomplete. Simplify the expression and try again.",
     "searchRegexFailed": "Regex matching could not run safely. Search is incomplete. Try again or use plain text search.",
     "searchIncomplete": "Some chapters failed to load. Search results are incomplete. Try again.",
+    "searchOffline": "Device-local search. Only chapters available to this device are included.",
     "searchScopeBook": "Entire book",
     "searchScopeChapter": "Current chapter",
     "searchModeContains": "Contains",

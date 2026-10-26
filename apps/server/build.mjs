@@ -22,4 +22,14 @@ await build({
   external,
 })
 
+await build({
+  entryPoints: ['src/modules/books/reader-search.worker.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  outfile: 'dist/reader-search.worker.mjs',
+  external,
+})
+
 cpSync('src/db/migrations', 'dist/migrations', { recursive: true })

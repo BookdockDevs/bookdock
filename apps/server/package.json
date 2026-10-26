@@ -33,6 +33,7 @@
     "jszip": "^3.10.1",
     "lie": "~3.3.0",
     "nanoid": "^5.0.0",
+    "opencc-js": "^1.4.1",
     "pako": "~1.0.2",
     "process-nextick-args": "~2.0.0",
     "readable-stream": "~2.3.6",

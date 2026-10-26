@@ -1354,6 +1354,7 @@
     "searchRegexTimeout": "正则匹配超时，搜索未完成。请简化表达式后重试。",
     "searchRegexFailed": "无法安全执行正则匹配，搜索未完成。请重试或使用普通搜索。",
     "searchIncomplete": "部分章节加载失败，搜索结果不完整。请重试。",
+    "searchOffline": "设备本地搜索，仅包含此设备当前可用的章节。",
     "searchScopeBook": "全书",
     "searchScopeChapter": "本章",
     "searchModeContains": "包含",

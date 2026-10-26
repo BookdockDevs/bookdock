@@ -4,6 +4,10 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Online full-book search for EPUB and TXT books now scans the reader's visible revision on the server and streams bounded hit excerpts and progress. It preserves reading search settings without transferring chapter bodies to the browser; current-chapter and offline searches remain local.
+
 ### Fixed
 
 - Clean reading no longer leaves a black video placeholder after hiding embedded media.
@@ -916,6 +920,10 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### [Unreleased]
+
+#### 新增
+
+- 在线阅读 EPUB/TXT 时，全书搜索改由服务端按阅读器当前可见修订逐章扫描，逐批返回命中摘要与进度，不向浏览器传输章节正文；沿用大小写、正则、文本替换和简繁设置，并区分完成、截断、部分失败与取消。当前章节及离线搜索仍使用本地流程。
 
 #### 修复
 

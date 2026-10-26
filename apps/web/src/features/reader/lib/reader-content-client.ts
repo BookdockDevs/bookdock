@@ -539,6 +539,14 @@ export class ReaderContentSession {
     return `${pathPart.replace(/\/file$/, '/reader/media')}?${params.toString()}`
   }
 
+  searchUrl(): string {
+    this.assertReadable()
+    const [pathPart, query = ''] = this.contentUrl.split('?', 2)
+    const params = new URLSearchParams(query)
+    params.set('revisionId', this.manifest.revisionId)
+    return `${pathPart.replace(/\/file$/, '/reader/search')}?${params.toString()}`
+  }
+
   private readonly contentUrl: string
 
   get size(): number {

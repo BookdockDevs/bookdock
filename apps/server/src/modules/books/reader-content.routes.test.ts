@@ -5,8 +5,9 @@ import { Readable } from 'node:stream'
 import { errorHandler, AppError } from '../../middleware/error'
 import readerContentRoutes from './reader-content.routes'
 import { getActiveBook } from './books.service'
-import { getReaderManifest, readReaderEntryForWeb, readReaderTextBatch } from './reader-content.service'
+import { getReaderManifest, readReaderEntryForWeb, readReaderSearchEntry, readReaderTextBatch } from './reader-content.service'
 import { acquireReaderMedia } from './reader-media.service'
+import { createReaderSearchStream, reserveReaderSearch } from './reader-search.service'
 
 vi.mock('./books.service', () => ({
   getActiveBook: vi.fn(),
@@ -15,9 +16,20 @@ vi.mock('./books.service', () => ({
 vi.mock('./reader-content.service', () => ({
   getReaderManifest: vi.fn(),
   readReaderEntryForWeb: vi.fn(),
+  readReaderSearchEntry: vi.fn(),
   readReaderTextBatch: vi.fn(),
   ReaderArchiveUnavailable: class ReaderArchiveUnavailable extends Error {},
   ReaderEntryLimitError: class ReaderEntryLimitError extends Error {},
+}))
+
+vi.mock('./reader-search.service', () => ({
+  reserveReaderSearch: vi.fn(() => true),
+  createReaderSearchStream: vi.fn(() => new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"type":"terminal","revisionId":"revision-1","status":"complete","scanned":0,"total":0}\n'))
+      controller.close()
+    },
+  })),
 }))
 
 vi.mock('./reader-media.service', () => ({
@@ -84,6 +96,51 @@ describe('reader content route authorization', () => {
     expect(response.status).toBe(409)
     expect(await response.json()).toMatchObject({ error: { code: 'READER_REVISION_CHANGED' } })
     expect(readReaderEntryForWeb).not.toHaveBeenCalled()
+  })
+
+  it('authorizes online search and binds it to the visible revision without returning chapter bodies', async () => {
+    vi.mocked(getActiveBook).mockResolvedValue(activeBook as Awaited<ReturnType<typeof getActiveBook>>)
+    const response = await appFor().request('/api/v1/books/book-1/reader/search', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revisionId: 'revision-1', query: 'needle' }),
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('application/x-ndjson')
+    expect(response.headers.get('cache-control')).toContain('no-store')
+    expect(getActiveBook).toHaveBeenCalledWith('reader-1', 'book-1', { showHidden: false })
+    expect(reserveReaderSearch).toHaveBeenCalledOnce()
+    expect(createReaderSearchStream).toHaveBeenCalledWith(expect.objectContaining({ id: 'book-1' }), expect.objectContaining({ revisionId: 'revision-1', query: 'needle' }), expect.any(AbortSignal))
+    expect(readReaderSearchEntry).not.toHaveBeenCalled()
+    expect(await response.text()).toContain('"status":"complete"')
+  })
+
+  it('rejects unauthorized guests and stale revisions before starting full-book search', async () => {
+    const guest = await appFor(null).request('/api/v1/books/book-1/reader/search', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revisionId: 'revision-1', query: 'needle' }),
+    })
+    expect(guest.status).toBe(403)
+    expect(getActiveBook).not.toHaveBeenCalled()
+
+    vi.mocked(getActiveBook).mockResolvedValue(activeBook as Awaited<ReturnType<typeof getActiveBook>>)
+    const readableGuest = await appFor(null).request('/api/v1/books/book-1/reader/search?reader=1', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revisionId: 'revision-1', query: 'needle' }),
+    })
+    expect(readableGuest.status).toBe(200)
+    expect(getActiveBook).toHaveBeenCalledWith(null, 'book-1', { showHidden: false })
+    await readableGuest.text()
+    vi.mocked(reserveReaderSearch).mockClear()
+    vi.mocked(createReaderSearchStream).mockClear()
+
+    vi.mocked(getActiveBook).mockResolvedValue(activeBook as Awaited<ReturnType<typeof getActiveBook>>)
+    const stale = await appFor().request('/api/v1/books/book-1/reader/search', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revisionId: 'old-revision', query: 'needle' }),
+    })
+    expect(stale.status).toBe(409)
+    expect(reserveReaderSearch).not.toHaveBeenCalled()
+    expect(createReaderSearchStream).not.toHaveBeenCalled()
   })
 
   it('serves full and byte-range media responses with exact headers', async () => {

@@ -1481,6 +1481,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                     {_('reader.searchTruncated', { count: searchResults.length })}
                   </p>
                 )}
+                {searchStatus.offline && (
+                  <p role="status" className="px-1 text-xs text-[var(--bd-read-sub)]">{_('reader.searchOffline')}</p>
+                )}
                 {searchStatus.incomplete && (
                   <p role="status" className="px-1 text-xs text-[var(--bd-read-sub)]">
                     {_(searchStatus.error === 'regex-timeout' ? 'reader.searchRegexTimeout'

@@ -43,7 +43,7 @@ import { forwardTextPaths } from '../lib/forward-text-paths'
 import { getSelectionGeometry } from '../lib/selection-geometry'
 import { ttsBoundaryRange } from '../lib/tts-text-range'
 import { waitForReaderFonts } from '../lib/reader-font-ready'
-import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, type BookFormat, type ReaderManifestEntry } from '@bookdock/shared'
+import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, readerSearchEventSchema, type BookFormat, type ReaderManifestEntry } from '@bookdock/shared'
 
 import {
   createExcerptBuilder,
@@ -3119,7 +3119,8 @@ export class FoliateReader implements BookReader {
       const liveText = extractChapterText(doc).text
       const liveRanges = mapMatchTextsToOffsets(liveText, matchTexts.slice(0, matchIndex + 1))
       const liveMatch = liveRanges[matchIndex]
-      if (liveMatch) return offsetsToRange(doc, liveMatch.start, liveMatch.end)
+      if (liveMatch) return offsetsToRange(doc, liveMatch.start, liveMatch.start + (match.end - match.start))
+      return null
     }
     return offsetsToRange(doc, match.start, match.end)
   }
@@ -4393,6 +4394,11 @@ export class FoliateReader implements BookReader {
     const book = this.book
     const conversion = this.conversion
     const replacements = [...this.replacements]
+    if (opts?.scope !== 'chapter' && this.contentSession && typeof navigator !== 'undefined' && navigator.onLine) {
+      const results = await this.searchOnline(q, opts, onProgress, controller)
+      if (this.searchAbort === controller) this.searchAbort = null
+      return results
+    }
     const started = performance.now()
     const timings = { load: 0, parse: 0, replacements: 0, conversion: 0, extract: 0, chapterCacheHits: 0 }
     let matchingMs = 0
@@ -4444,7 +4450,7 @@ export class FoliateReader implements BookReader {
 
     const results: SearchResult[] = []
     let scannedChapters = 0
-    const status: SearchStatus = { truncated: false, incomplete: false }
+    const status: SearchStatus = { truncated: false, incomplete: false, offline: opts?.scope !== 'chapter' }
     let progress: number | null = null
     let lastEmit = 0
     // Throttle partial-result emits: hundreds of matches arrive in quick bursts
@@ -4579,6 +4585,106 @@ export class FoliateReader implements BookReader {
       canceled: stale(), ...status,
     })
     if (this.searchAbort === controller) this.searchAbort = null
+    return results
+  }
+
+  private async searchOnline(
+    query: string,
+    opts: SearchOptions | undefined,
+    onProgress: ((results: SearchResult[], progress: number | null, status?: SearchStatus) => void) | undefined,
+    controller: AbortController,
+  ): Promise<SearchResult[]> {
+    const session = this.contentSession
+    if (!session) return []
+    const results: SearchResult[] = []
+    const bySection = new Map<number, SearchMatch[]>()
+    const textsBySection = new Map<number, string[]>()
+    let progress: number | null = 0
+    let status: SearchStatus = { truncated: false, incomplete: false }
+    let terminal = false
+    try {
+      const response = await fetch(session.searchUrl(), {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+        body: JSON.stringify({
+          revisionId: session.manifest.revisionId,
+          query,
+          mode: opts?.mode ?? 'contains',
+          matchCase: opts?.matchCase ?? false,
+          chineseConversion: this.conversion,
+          replacements: this.replacements,
+        }),
+      })
+      if (!response.ok || !response.body) throw new Error(`Reader search failed (${response.status})`)
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let pending = ''
+      while (!controller.signal.aborted) {
+        const { value, done } = await reader.read()
+        pending += decoder.decode(value, { stream: !done })
+        const lines = pending.split('\n')
+        pending = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line) continue
+          const parsed = readerSearchEventSchema.safeParse(JSON.parse(line))
+          if (!parsed.success || parsed.data.revisionId !== session.manifest.revisionId) throw new Error('Invalid reader search response')
+          const event = parsed.data
+          progress = event.total ? event.scanned / event.total : 1
+          if (event.type === 'batch') {
+            for (const hit of event.hits) {
+              const sectionMatches = bySection.get(hit.sectionIndex) ?? []
+              const match = { start: hit.start, end: hit.end }
+              sectionMatches.push(match)
+              bySection.set(hit.sectionIndex, sectionMatches)
+              const sectionTexts = textsBySection.get(hit.sectionIndex) ?? []
+              sectionTexts.push(hit.end - hit.start > hit.excerpt.match.length
+                ? hit.excerpt.match.slice(0, -1)
+                : hit.excerpt.match)
+              textsBySection.set(hit.sectionIndex, sectionTexts)
+              results.push({
+                cfi: `search-hit:${hit.sectionIndex}:${hit.start}:${hit.end}`,
+                text: `${hit.excerpt.pre}${hit.excerpt.match}${hit.excerpt.post}`,
+                excerpt: hit.excerpt,
+                index: results.length,
+                chapter: this.chapterLabel(hit.sectionIndex),
+              })
+            }
+            for (const [index, matches] of bySection) {
+              this.searchMatchOffsets.set(index, matches)
+              this.searchMatchTexts.set(index, textsBySection.get(index) ?? [])
+              this.drawSearchHighlights(index, matches)
+            }
+            onProgress?.([...results], progress, { ...status })
+          } else {
+            terminal = true
+            status = {
+              truncated: event.status === 'truncated',
+              incomplete: event.status === 'partial',
+              partial: event.status === 'partial',
+              canceled: event.status === 'canceled',
+              error: event.error,
+            }
+            progress = event.status === 'complete' ? 1 : progress
+            onProgress?.([...results], progress, { ...status })
+          }
+        }
+        if (done) break
+      }
+      if (controller.signal.aborted) status = { ...status, canceled: true }
+      if (pending.trim()) throw new Error('Incomplete reader search response')
+      if (!terminal && !controller.signal.aborted) {
+        status = { ...status, incomplete: true, partial: true }
+        onProgress?.([...results], progress, { ...status })
+      }
+    } catch (error) {
+      if (controller.signal.aborted) status = { ...status, canceled: true }
+      else status = { ...status, incomplete: true, partial: true }
+      onProgress?.([...results], progress, { ...status })
+      if (!controller.signal.aborted && import.meta.env.DEV) console.warn('[bd] reader search stream failed', error)
+    }
     return results
   }
 
