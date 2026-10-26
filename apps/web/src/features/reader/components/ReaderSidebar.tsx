@@ -77,8 +77,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
   const dragState = useRef({ clientX: 0, width: 0 })
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0 || resizingRef.current) return
     e.preventDefault()
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    e.currentTarget.setPointerCapture(e.pointerId)
+    panelRefWidth.current = panelWidth
     resizingRef.current = true
     dragState.current.width = panelWidth
     dragState.current.clientX = e.clientX
@@ -323,10 +325,36 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
     </div>
   )
 
+  const resizeTrack = sidebarOpen && !isTouch ? (
+    <div
+      data-testid="reader-sidebar-resize-handle"
+      className={cn(
+        'group absolute left-full top-0 h-full w-2 touch-none border-l reader-resize-cursor transition-colors duration-150',
+        resizing ? 'border-[var(--bd-read-primary)]/50' : 'border-[var(--bd-read-accent)]/40',
+      )}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onLostPointerCapture={handlePointerUp}
+      onDoubleClick={handleResetWidth}
+      title="双击恢复默认宽度"
+    >
+      <span
+        className={cn(
+          'pointer-events-none absolute left-1/2 top-1/2 h-7 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full transition-opacity duration-150',
+          resizing
+            ? 'bg-[var(--bd-read-primary)]/60 opacity-100'
+            : 'bg-[var(--bd-read-sub)]/40 opacity-0 group-hover:opacity-100',
+        )}
+      />
+    </div>
+  ) : null
+
   const navigationPanel = (
     <div
       className={cn(
-        'relative shrink-0 overflow-hidden',
+        'relative flex shrink-0 overflow-hidden',
         isTouch
           ? cn('order-1 w-full h-0 transition-[height]', sidebarOpen && (activeNavTab === 'ai' ? 'h-[80dvh] max-h-[720px]' : 'h-[65dvh] max-h-[520px]'))
           : cn('order-none h-full', !resizing && 'transition-[width] duration-200 will-change-[width]', sidebarOpen ? '' : 'w-0'),
@@ -336,7 +364,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
         : { width: sidebarOpen ? panelWidth : 0, backgroundColor: 'var(--bd-read-bg)' }}
     >
       <div
-        className={cn('h-full', isTouch && 'w-full')}
+        className={cn('h-full shrink-0', isTouch && 'w-full')}
         style={isTouch ? undefined : { width: panelWidth }}
       >
         <NavigationPanel
@@ -354,12 +382,6 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
           onClose={handleClosePanel}
         />
       </div>
-      {!isTouch && sidebarOpen && (
-        <div
-          className="pointer-events-none absolute right-0 top-0 bottom-0 z-10 w-px bg-[var(--bd-read-accent)]"
-          aria-hidden="true"
-        />
-      )}
     </div>
   )
 
@@ -407,37 +429,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
     >
       {toolDock}
       {navigationPanel}
-      {sidebarOpen && !isTouch && (
-        <div
-          data-testid="reader-sidebar-resize-handle"
-          className="group absolute right-0 top-0 z-50 h-full w-2.5 reader-resize-cursor"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onDoubleClick={handleResetWidth}
-          title="双击恢复默认宽度"
-        >
-          {/* Active dragging guide line along the seam: invisible on hover/rest, softly glows with theme primary color during drag */}
-          <div
-            className={cn(
-              'pointer-events-none absolute left-0 top-0 h-full w-[2px] -translate-x-1/2 transition-colors duration-150',
-              resizing
-                ? 'bg-[var(--bd-read-primary)]/85 shadow-[0_0_8px_var(--bd-read-primary)]/30'
-                : 'bg-transparent',
-            )}
-          />
-          {/* Tactile centered grip pill: understated indicator that gently reveals on hover and deepens on drag */}
-          <span
-            className={cn(
-              'pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all duration-150',
-              resizing
-                ? 'h-14 w-1 bg-[var(--bd-read-primary)] shadow-[0_0_0_2px_var(--bd-read-primary)]/20'
-                : 'h-10 w-1 bg-transparent group-hover:bg-[var(--bd-read-sub)]/50',
-            )}
-          />
-        </div>
-      )}
+      {resizeTrack}
     </div>
   )
 })

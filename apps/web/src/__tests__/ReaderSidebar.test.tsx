@@ -155,7 +155,7 @@ describe('ReaderSidebar on pointer devices', () => {
     act(() => useReaderState.setState({ sidebarOpen: true }))
     renderSidebar(false)
     expect(screen.getByTitle('固定工具栏')).toBeInTheDocument()
-    expect(screen.getByTestId('reader-sidebar-resize-handle')).toHaveClass('reader-resize-cursor', 'right-0')
+    expect(screen.getByTestId('reader-sidebar-resize-handle')).toHaveClass('reader-resize-cursor', 'absolute', 'left-full', 'w-2')
     expect(screen.queryByTestId('sidebar-backdrop')).toBeNull()
   })
 
@@ -181,8 +181,46 @@ describe('ReaderSidebar on pointer devices', () => {
     act(() => useReaderState.setState({ sidebarOpen: true }))
     const { container } = renderSidebar(false)
     const handle = screen.getByTestId('reader-sidebar-resize-handle')
+    const content = screen.getByTestId('navigation-panel').parentElement!
+    const panel = content.parentElement!
+    expect(panel).toHaveClass('flex')
     expect(handle.parentElement).toBe(outerEl(container))
-    expect(handle.closest('[data-testid="navigation-panel"]')).toBeNull()
+    expect(panel.nextElementSibling).toBe(handle)
+    expect(content).toHaveClass('shrink-0')
+    expect(Number.parseFloat(content.style.width)).toBe(Number.parseFloat(panel.style.width))
+    expect(Number.parseFloat(outerEl(container).style.width)).toBe(Number.parseFloat(panel.style.width) + 56)
+    expect(handle).toHaveClass('absolute', 'left-full')
+  })
+
+  it.each(['pointerup', 'pointercancel', 'lostpointercapture'])('ends resizing on %s and ignores later movement', (endEvent) => {
+    act(() => {
+      useReaderState.setState({ sidebarOpen: true })
+      useUiStore.setState({ sidebarWidth: 288 })
+    })
+    renderSidebar(false)
+    const handle = screen.getByTestId('reader-sidebar-resize-handle')
+    const capture = vi.fn()
+    handle.setPointerCapture = capture
+    const pointer = (type: string, clientX: number, button = 0) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, button })
+      Object.defineProperty(event, 'pointerId', { value: 1 })
+      fireEvent(handle, event)
+    }
+
+    pointer('pointerdown', 288, 2)
+    expect(capture).not.toHaveBeenCalled()
+    expect(document.body).not.toHaveClass('reader-resizing')
+    pointer('pointerdown', 288)
+    expect(capture).toHaveBeenCalledWith(1)
+    expect(document.body).toHaveClass('reader-resizing')
+    pointer('pointermove', 328)
+    pointer(endEvent, 328)
+    expect(document.body).not.toHaveClass('reader-resizing')
+    expect(useUiStore.getState().sidebarWidth).toBe(328)
+    pointer('pointermove', 400)
+    expect(useUiStore.getState().sidebarWidth).toBe(328)
+    fireEvent.doubleClick(handle)
+    expect(useUiStore.getState().sidebarWidth).toBe(288)
   })
 
   it('summons dock when hovering along the floating dock corridor and ignores header zone', () => {
