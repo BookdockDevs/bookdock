@@ -246,6 +246,7 @@ export function ensureBuiltinFontLoaded(id: string): void {
   link.href = font.cssUrl
   link.dataset.bdFont = id
   link.onload = () => {
+    link.dataset.loaded = 'true'
     if (typeof document.fonts?.load !== 'function') {
       useFontLoaderStore.setState((s) => {
         const loadedIds = s.loadedIds.includes(id) ? s.loadedIds : [...s.loadedIds, id]
@@ -274,10 +275,43 @@ export function ensureBuiltinFontLoaded(id: string): void {
     })
   }
   link.onerror = () => {
+    link.dataset.failed = 'true'
     injectedBuiltinIds.delete(id)
+    link.remove()
     useFontLoaderStore.setState((s) => ({ loadingIds: s.loadingIds.filter((v) => v !== id) }))
   }
   document.head.appendChild(link)
+}
+
+/** Wait until the selected face is available before html-to-image snapshots
+ *  the card. `document.fonts.ready` alone can resolve before a newly inserted
+ *  stylesheet has declared its @font-face rules. */
+export async function waitForCardFont(font: ResolvedFont, text: string): Promise<void> {
+  if (font.builtin) {
+    ensureBuiltinFontLoaded(font.builtin.id)
+    const link = Array.from(document.head.querySelectorAll<HTMLLinkElement>('link[data-bd-font]'))
+      .find((item) => item.dataset.bdFont === font.builtin?.id)
+    if (link && link.dataset.loaded !== 'true') {
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+          link.removeEventListener('load', loaded)
+          link.removeEventListener('error', failed)
+        }
+        const loaded = () => { cleanup(); resolve() }
+        const failed = () => { cleanup(); reject(new Error('card font stylesheet unavailable')) }
+        link.addEventListener('load', loaded, { once: true })
+        link.addEventListener('error', failed, { once: true })
+        if (link.dataset.loaded === 'true') loaded()
+        else if (link.dataset.failed === 'true') failed()
+      })
+    }
+  }
+  if (font.uploaded) await ensureUploadedFontLoaded(font.uploaded)
+  const family = font.stack.split(',')[0].trim()
+  if (typeof document.fonts?.load !== 'function') return
+  await Promise.all([400, 500, 600, 700].map(async (weight) => {
+    await document.fonts.load(`${weight} 16px ${family}`, text || '汉')
+  }))
 }
 
 export function ensureBuiltinFontsLoaded(): void {

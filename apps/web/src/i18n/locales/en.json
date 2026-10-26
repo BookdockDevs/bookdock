@@ -2334,6 +2334,7 @@
     "collapseSidebar": "Collapse sidebar"
   },
   "share": {
+    "preparing": "Preparing share image…",
     "saveImage": "Save Image",
     "copyImage": "Copy Image",
     "copied": "Copied to clipboard",

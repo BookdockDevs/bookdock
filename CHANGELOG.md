@@ -7,6 +7,11 @@ All notable changes to Bookdock are documented here.
 ### Fixed
 
 - Clean reading no longer leaves a black video placeholder after hiding embedded media.
+- Excerpt and idea share cards embed the selected fonts, including WenKai's imported stylesheets and Unicode subsets, so copied and saved images retain the chosen typeface. The preview displays the same prepared PNG used by both actions.
+
+### Changed
+
+- Share cards show a loading state until image preparation finishes, disable copy/save while preparing, and offer retry after a failure. Changing the card discards outdated preparations and releases the previous preview.
 
 ## [0.6.5] - 2026-10-25
 
@@ -911,6 +916,11 @@ All notable changes to Bookdock are documented here.
 #### 修复
 
 - 纯净阅读隐藏内嵌媒体后，不再留下黑色视频占位框。
+- 书摘和想法分享卡片正确嵌入所选字体，支持霞鹜文楷的导入样式表与字符分包，避免复制或保存图片时字体与预览不一致；预览、复制和保存共用同一张准备完成的 PNG。
+
+#### 变更
+
+- 分享图片准备期间显示加载态并禁用复制、保存，失败后支持重试；切换卡片配置时丢弃过期任务并释放旧预览，不再先显示默认字体再切换。
 
 ### [0.6.5] - 2026-10-25
 

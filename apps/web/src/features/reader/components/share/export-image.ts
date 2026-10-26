@@ -1,36 +1,26 @@
 import { toBlob } from 'html-to-image'
 
 export const EXPORT_PIXEL_RATIO = 2
+const EXPORT_TIMEOUT_MS = 30_000
 
-interface CardRenderCache {
-  key: string
-  promise: Promise<Blob>
+export function withCardExportTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    operation,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('card image export timed out')), EXPORT_TIMEOUT_MS)
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
 }
 
-let renderCache: CardRenderCache | null = null
-
-async function renderCardBlob(node: HTMLElement): Promise<Blob> {
-  // SVG serialization rasterizes whatever font state exists at call time;
-  // exporting before webfonts settle would bake fallback glyphs into the PNG
-  await document.fonts.ready
-  const blob = await toBlob(node, { pixelRatio: EXPORT_PIXEL_RATIO })
+/** The prepared PNG is also the visible preview, so export never re-renders
+ * a card that may have changed since the user saw it. */
+export async function getCardBlob(node: HTMLElement, fontEmbedCSS: string): Promise<Blob> {
+  const blob = await withCardExportTimeout(toBlob(node, { pixelRatio: EXPORT_PIXEL_RATIO, fontEmbedCSS }))
   if (!blob) throw new Error('card image export returned null')
   return blob
-}
-
-/** Shared single-flight render keyed by the card's full config snapshot: a
- *  background warm-up and a later copy/save click on the same key resolve to
- *  the same blob, while any config change restarts the render */
-export function getCardBlob(node: HTMLElement, key: string): Promise<Blob> {
-  const cached = renderCache
-  if (cached && cached.key === key) return cached.promise
-  const promise = renderCardBlob(node)
-  renderCache = { key, promise }
-  // a failed render must not poison the cache for the next attempt
-  promise.catch(() => {
-    if (renderCache?.key === key) renderCache = null
-  })
-  return promise
 }
 
 export function downloadCardBlob(blob: Blob, fileName: string): void {
