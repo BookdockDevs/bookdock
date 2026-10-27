@@ -10,7 +10,6 @@ import { setupRoute } from './routes/setup'
 import { readerRoute } from './routes/books.$id'
 import { settingsRoute } from './routes/settings'
 import { archiveRoute } from './routes/archive'
-import { updatePreviewRoute } from './routes/update-preview'
 import DefaultPending from '@/components/layout/DefaultPending'
 
 const routeTree = rootRoute.addChildren([
@@ -24,7 +23,6 @@ const routeTree = rootRoute.addChildren([
   readerRoute,
   settingsRoute,
   archiveRoute,
-  ...(import.meta.env.DEV ? [updatePreviewRoute] : []),
 ])
 
 export const router = createRouter({

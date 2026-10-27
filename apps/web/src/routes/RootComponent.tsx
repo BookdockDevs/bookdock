@@ -12,7 +12,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
 import type { MeRes } from '@bookdock/shared'
 
-const PUBLIC_PATHS = ['/login', '/register', '/setup', ...(import.meta.env.DEV ? ['/dev/update-preview'] : [])]
+const PUBLIC_PATHS = ['/login', '/register', '/setup']
 
 /** `/library/+<code>` carries its own code, so it is public by prefix. */
 function isPublicPath(pathname: string) {
@@ -29,7 +29,6 @@ export function RootComponent() {
   const authUser = useAuthStore((s) => s.user)
   const recoveringUnauthorizedSession = useRef(false)
   const pathname = location.pathname
-  const isUpdatePreview = import.meta.env.DEV && pathname === '/dev/update-preview'
   const isLegadoLogin = pathname === '/login' && new URLSearchParams(window.location.search).get('legado') === '1'
   const isPublic = isPublicPath(pathname)
   const isLibraryInvite = pathname.startsWith('/library/')
@@ -124,7 +123,7 @@ export function RootComponent() {
     if (!instance.allowGuestAccess) navigate({ to: '/login' })
   }, [instance, pathname, isPublic, isLibraryInvite, isLegadoLogin, meQuery.isPending, meQuery.isFetching, meQuery.isError, meQuery.data, navigate, setAuth, clearAuth])
 
-  if (instanceQuery.isError && !instance && !isUpdatePreview) {
+  if (instanceQuery.isError && !instance) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-50 p-4 dark:bg-stone-950">
         <div className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-6 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900">
@@ -151,8 +150,6 @@ export function RootComponent() {
       ready = instance.allowGuestAccess
     }
   }
-  if (isUpdatePreview) ready = true
-
   if (!ready) {
     return (
       <div
