@@ -26,10 +26,10 @@ describe('reader search lifecycle', () => {
     expect(results[0]!.cfi).toBe('search-hit:0:0:1')
     expect(results[1999]!.cfi).toBe('search-hit:0:1999:2000')
     expect(load).toHaveBeenCalledTimes(2)
-    expect(progress.mock.lastCall?.[2]).toEqual({ truncated: true, incomplete: false })
+    expect(progress.mock.lastCall?.[2]).toEqual({ truncated: true, incomplete: false, offline: true })
     const cached = vi.fn()
     expect(await reader.search('x', undefined, cached)).toEqual(results)
-    expect(cached.mock.lastCall?.[2]).toEqual({ truncated: true, incomplete: false })
+    expect(cached.mock.lastCall?.[2]).toEqual({ truncated: true, incomplete: false, offline: true })
     expect(load).toHaveBeenCalledTimes(2)
   })
 
@@ -37,7 +37,7 @@ describe('reader search lifecycle', () => {
     const exact = makeReader(async () => markup('x'.repeat(2000)), ['a'])
     const progress = vi.fn()
     expect(await exact.search('x', undefined, progress)).toHaveLength(2000)
-    expect(progress.mock.lastCall?.[2]).toEqual({ truncated: false, incomplete: false })
+    expect(progress.mock.lastCall?.[2]).toEqual({ truncated: false, incomplete: false, offline: true })
     const load = vi.fn(async () => markup('x'.repeat(2001)))
     expect(await makeReader(load, ['a', 'b', 'c', 'd', 'e', 'f']).search('x')).toHaveLength(2000)
     expect(load.mock.calls.map(([href]) => href)).toEqual(['a', 'b', 'c', 'd'])
@@ -52,11 +52,11 @@ describe('reader search lifecycle', () => {
     const reader = makeReader(load)
     const progress = vi.fn()
     expect(await reader.search('x', undefined, progress)).toHaveLength(1)
-    expect(progress.mock.lastCall?.[2]).toEqual({ truncated: false, incomplete: true })
+    expect(progress.mock.lastCall?.[2]).toEqual({ truncated: false, incomplete: true, offline: true })
     failed = false
     const results = await reader.search('x', undefined, progress)
     expect(results.map((result) => result.cfi)).toEqual(['search-hit:0:0:1', 'search-hit:1:0:1'])
-    expect(progress.mock.lastCall?.[2]).toEqual({ truncated: false, incomplete: false })
+    expect(progress.mock.lastCall?.[2]).toEqual({ truncated: false, incomplete: false, offline: true })
     expect(load).toHaveBeenCalledTimes(3)
   })
 
@@ -167,7 +167,7 @@ describe('reader search lifecycle', () => {
       const reader = makeReader(load, ['a', 'b', 'c', 'd', 'e', 'f'])
       const statuses: SearchStatus[] = []
       await reader.search('x', { mode: 'regex' }, (_results, _progress, status) => { if (status) statuses.push(status) })
-      expect(statuses.at(-1)).toEqual({ truncated: false, incomplete: true, error: 'regex-unavailable' })
+      expect(statuses.at(-1)).toEqual({ truncated: false, incomplete: true, offline: true, error: 'regex-unavailable' })
       expect(load).toHaveBeenCalledTimes(4)
     } finally {
       vi.unstubAllGlobals()

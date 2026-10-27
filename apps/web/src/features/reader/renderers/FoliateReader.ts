@@ -4968,10 +4968,16 @@ export class FoliateReader implements BookReader {
       if (!contents) return
 
       const positionRenderer = this.view?.renderer as (EventTarget & { addEventListener: EventTarget['addEventListener']; removeEventListener: EventTarget['removeEventListener'] }) | undefined
-      if (positionRenderer && positionRenderer !== this.selectionPositionRenderer) {
-        this.selectionPositionRenderer?.removeEventListener('scroll', this.refreshSelectionPosition)
-        positionRenderer.addEventListener('scroll', this.refreshSelectionPosition, { passive: true } as AddEventListenerOptions)
-        this.selectionPositionRenderer = positionRenderer
+      if (positionRenderer !== this.selectionPositionRenderer) {
+        if (typeof this.selectionPositionRenderer?.removeEventListener === 'function') {
+          this.selectionPositionRenderer.removeEventListener('scroll', this.refreshSelectionPosition)
+        }
+        if (typeof positionRenderer?.addEventListener === 'function') {
+          positionRenderer.addEventListener('scroll', this.refreshSelectionPosition, { passive: true } as AddEventListenerOptions)
+          this.selectionPositionRenderer = positionRenderer
+        } else {
+          this.selectionPositionRenderer = null
+        }
       }
 
       const docs = new Set<Document>(contents.map((c) => c.doc).filter(Boolean))

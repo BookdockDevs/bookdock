@@ -1177,15 +1177,15 @@ describe('BookDetailDialog primary action', () => {
   })
 })
 
-describe('BookDetailDialog TOC rule menu', () => {
-  it('opens the TOC rule picker from more actions menu', async () => {
+describe('BookDetailDialog content editor action', () => {
+  it('opens the content editor from more actions menu', async () => {
     bookDetail = { data: { ...book, format: 'txt', meta: {} } }
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    fireEvent.click(await screen.findByRole('button', { name: '更换目录规则' }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑正文' }))
 
-    expect(await screen.findByRole('heading', { name: '目录规则' })).toBeInTheDocument()
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/books/$id/editor', params: { id: 'book-1' } })
   })
 })
 
@@ -1284,23 +1284,24 @@ describe('BookDetailDialog publish action', () => {
 })
 
 describe('BookDetailDialog more actions', () => {
-  it('keeps TXT-only actions available for a TXT book', () => {
+  it('offers the content editor for a TXT book without exposing legacy maintenance actions', () => {
     render(<BookDetailDialog book={{ ...book, format: 'txt' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
 
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    expect(screen.getByRole('button', { name: '更换目录规则' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '追加内容' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑正文' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更换目录规则' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '追加内容' })).not.toBeInTheDocument()
   })
 
-  it('opens reading data from the action row and keeps TXT maintenance out of it', () => {
+  it('keeps reading data in the action row and the content editor in the overflow menu', () => {
     render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
     // Reading data is a drill-in, so it sits in the action row rather than
     // the overflow menu.
     fireEvent.click(screen.getByRole('button', { name: '阅读数据' }))
     expect(navigateMock).toHaveBeenCalledWith({ to: '/archive', search: { bookId: book.id, bookView: 'data' } })
 
-    // A non-TXT book has no content maintenance, so it needs no overflow.
-    expect(screen.queryByRole('button', { name: '更多操作' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    expect(screen.getByRole('button', { name: '编辑正文' })).toBeInTheDocument()
   })
 })
 
@@ -1607,13 +1608,14 @@ describe('BookDetailDialog shared work mode', () => {
     expect(screen.getByRole('button', { name: '上传新版本' })).toBeInTheDocument()
   })
 
-  it('offers content edits to a contributor on a version they uploaded', () => {
+  it('offers the content editor to a contributor on a version they uploaded', () => {
     renderWorkDialog(catalogWork({ versions: [catalogVersion({ maintainable: true })] }), { canContribute: true })
-    // Same overflow menu the private library uses for the same two actions,
-    // rather than a second pair of icons in the action row.
+    // Content editing stays in the overflow menu rather than adding a second
+    // pair of maintenance buttons to the action row.
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    expect(screen.getByRole('button', { name: '追加内容' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '更换目录规则' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑正文' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '追加内容' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更换目录规则' })).not.toBeInTheDocument()
   })
 
   it('hangs the work overflow off the action row, consistent with the private book', () => {

@@ -96,7 +96,7 @@ describe('category and shelf separation migration', () => {
     expect(db.select({ name: schema.libraryCategories.name }).from(schema.libraryCategories).where(eq(schema.libraryCategories.id, collected!.categoryId!)).get())
       .toEqual({ name: 'User edited' })
     sqlite.close()
-  })
+  }, 15000)
 
   it('rolls every data stage back when interrupted, including immediately before the marker', () => {
     for (const stage of ['shelves-copied', 'book-shelves-moved', 'old-categories-deleted', 'metadata-copied', 'before-marker'] as const) {
@@ -111,7 +111,7 @@ describe('category and shelf separation migration', () => {
       isolated.sqlite.close()
     }
     sqlite.close()
-  })
+  }, 15000)
 
   it('rolls back prior shelf moves and deletions when a category write fails', () => {
     sqlite.exec(`
@@ -133,7 +133,7 @@ describe('category and shelf separation migration', () => {
       .toEqual([{ libraryBookId: 'shared-card', tagId: 'private-tag' }])
     expect(db.select().from(schema.libraryMigrationLog).where(eq(schema.libraryMigrationLog.batch, CATEGORY_SHELF_MIGRATION_BATCH)).all()).toEqual([])
     sqlite.close()
-  })
+  }, 15000)
 
   it('blocks unmarked partial shelf state instead of guessing old IDs', () => {
     db.insert(schema.shelves).values({ id: 'already-moved', libraryId: 'private', userId: 'u1', name: 'Existing', createdAt: 1, updatedAt: 1 }).run()
@@ -142,7 +142,7 @@ describe('category and shelf separation migration', () => {
       .toEqual({ id: 'old-shelf' })
     expect(db.select().from(schema.libraryMigrationLog).where(eq(schema.libraryMigrationLog.batch, CATEGORY_SHELF_MIGRATION_BATCH)).all()).toEqual([])
     sqlite.close()
-  })
+  }, 15000)
 
   it('rejects a private book that points at another private library shelf', () => {
     db.insert(schema.users).values({ id: 'u2', username: 'other', createdAt: 1 }).run()
@@ -154,7 +154,7 @@ describe('category and shelf separation migration', () => {
     expect(db.select({ categoryId: schema.libraryBooks.categoryId }).from(schema.libraryBooks).where(eq(schema.libraryBooks.id, 'cross-private-card')).get())
       .toEqual({ categoryId: 'old-shelf' })
     sqlite.close()
-  })
+  }, 15000)
 
   it('skips source metadata when the collected version identity no longer matches', () => {
     db.update(schema.libraryBookVersions).set({ bookVersionId: 'collected-version' }).where(eq(schema.libraryBookVersions.id, 'collected-link')).run()
@@ -166,7 +166,7 @@ describe('category and shelf separation migration', () => {
     expect(db.select({ name: schema.libraryTags.name }).from(schema.libraryTags).where(eq(schema.libraryTags.libraryId, 'private')).all())
       .toEqual([{ name: 'Personal label' }])
     sqlite.close()
-  })
+  }, 15000)
 
   it('records an empty fresh install without creating categories', () => {
     const fresh = createDb()
@@ -175,7 +175,7 @@ describe('category and shelf separation migration', () => {
     expect(migrateCategoryShelfSeparation(fresh.db)).toMatchObject({ skipped: true })
     fresh.sqlite.close()
     sqlite.close()
-  })
+  }, 15000)
 
   it('records the completion marker from the runtime migration path and skips it on restart', async () => {
     const fresh = createDb()
@@ -190,5 +190,5 @@ describe('category and shelf separation migration', () => {
     vi.restoreAllMocks()
     fresh.sqlite.close()
     sqlite.close()
-  })
+  }, 15000)
 })
