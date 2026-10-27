@@ -8,7 +8,8 @@ import { useAuthStore } from '@/stores/auth.store'
 import PeriodSelector from '@/features/stats/components/PeriodSelector'
 import StatsSettingsButton from '@/features/stats/components/StatsSettingsButton'
 import { shiftPeriod, type StatsPeriod } from '@/features/stats/date-utils'
-import { localDateString, useReadingSummary } from '@/api/hooks/reading-records'
+import { localDateString, useReadingLedger, useReadingSummary } from '@/api/hooks/reading-records'
+import { useBook } from '@/features/library/hooks'
 
 import ArchiveOverviewDashboard from './components/ArchiveOverviewDashboard'
 import ArchiveSidebar, { type ArchiveSidebarParams } from './components/ArchiveSidebar'
@@ -18,10 +19,15 @@ import { resolveArchiveScope } from './archive-scope'
 
 export default function Archive() {
   const _ = useTranslation()
-  usePageTitle(_('archive.title'))
   const navigate = useNavigate()
   const router = useRouter({ warn: false })
   const search = useSearch({ from: '/archive' })
+  const selectedBook = useBook(search.bookId ?? null)
+  const selectedBookLedger = useReadingLedger(search.bookId ?? '', { enabled: Boolean(search.bookId) })
+  const selectedBookTitle = selectedBook.data?.data.title ?? selectedBookLedger.data?.data.title
+  usePageTitle(search.bookId && selectedBookTitle
+    ? _('archive.bookDocumentTitle', { title: selectedBookTitle })
+    : _('archive.title'))
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
   const isGuest = !user

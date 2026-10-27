@@ -36,7 +36,6 @@ type SectionId = 'general' | 'reading' | 'library' | 'integrations' | 'about' | 
 
 export default function Settings() {
   const _ = useTranslation()
-  usePageTitle(_('settings.title'))
   const onBack = useBackNavigation('/')
   const user = useAuthStore((s) => s.user)
   const isOwner = user?.role === 'owner'
@@ -59,6 +58,22 @@ export default function Settings() {
   const search = useSearch({ from: '/settings' })
   const navigate = useNavigate({ from: '/settings' })
   const active = search.section ?? 'general'
+  const activeSectionLabel = active === 'general'
+    ? _('settings.general')
+    : active === 'reading'
+      ? _('settings.reading')
+      : active === 'library'
+        ? _('settings.library')
+        : active === 'integrations'
+          ? _('settings.integrations')
+          : active === 'about' && !isGuest
+            ? _('settings.about')
+            : active === 'admin' && canAccessAdmin
+              ? _('settings.admin')
+              : undefined
+  usePageTitle(activeSectionLabel
+    ? _('settings.sectionDocumentTitle', { section: activeSectionLabel })
+    : _('settings.title'))
   const [visitedSections, setVisitedSections] = useState<Set<SectionId>>(() => new Set([search.section ?? 'general']))
   const [showBackToTop, setShowBackToTop] = useState(false)
 

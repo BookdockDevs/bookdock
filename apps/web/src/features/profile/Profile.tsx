@@ -17,7 +17,6 @@ import ActivityFeed from '@/features/activity/ActivityFeed'
 
 export default function Profile() {
   const _ = useTranslation()
-  usePageTitle(_('profile.title'))
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
@@ -25,6 +24,17 @@ export default function Profile() {
   const publicView = Boolean(search.userId && search.userId !== user?.id)
   const targetUserId = publicView ? search.userId : user?.id
   const reader = useReaderProfile(targetUserId)
+  const profileTitle = publicView && reader.data?.data.author.name
+    ? _('profile.userDocumentTitle', { name: reader.data.data.author.name })
+    : _('profile.title')
+  const activityTitle = search.activity === 'idea'
+    ? _('activity.ideas')
+    : search.activity === 'review'
+      ? _('activity.reviews')
+      : undefined
+  usePageTitle(activityTitle
+    ? _('profile.activityDocumentTitle', { title: profileTitle, activity: activityTitle })
+    : profileTitle)
   const isGuest = !user
   const [settingsOpen, setSettingsOpen] = useState(false)
   const onBack = useBackNavigation('/')
