@@ -12,6 +12,8 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Reading activity charts show consistent 24-hour labels, and library card menus become visible with a clear focus indicator when reached by keyboard.
+- Reader settings sliders expose their names to assistive technology, and the page-turn zone help pointer aligns with its trigger.
 - Dragging the reader sidebar scrollbar no longer resizes the sidebar. The scrollbar stays at the panel edge, with a separate resize area on the reading side and a subtle grip shown only on hover or drag.
 - Clean reading no longer leaves a black video placeholder after hiding embedded media.
 - Selection toolbars now follow visible text while scrolling, hide when the selection leaves the reading viewport, and clear on page turns and navigation without interrupting open note editors.
@@ -20,6 +22,7 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- Refined reader settings contrast, segmented controls, toggle alignment, and section spacing for a calmer, more legible panel.
 - Improved browser tab titles to clearly show current book titles and page names across views.
 - Removed the obsolete update preview page.
 - Share cards show a loading state until image preparation finishes, disable copy/save while preparing, and offer retry after a failure. Changing the card discards outdated preparations and releases the previous preview.
@@ -934,6 +937,8 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 阅读时段图统一使用 24 小时刻度；键盘焦点到达书库卡片的更多操作时，按钮和焦点边框会显示。
+- 阅读设置滑杆向辅助技术提供设置名称，翻页点击区说明的尖角与触发按钮对齐。
 - 修复拖动阅读侧页滚动条时误触宽度调整的问题。滚动条保持贴边，宽度拖拽区独立放在正文一侧，仅在悬停或拖动时显示轻量握柄。
 - 纯净阅读隐藏内嵌媒体后，不再留下黑色视频占位框。
 - 阅读器选中文本工具气泡会跟随可见文字滚动，选区离开正文视口时暂时隐藏，并在翻页或导航时清除临时选区；已打开的笔记编辑器不受影响。
@@ -942,6 +947,7 @@ All notable changes to Bookdock are documented here.
 
 #### 变更
 
+- 调整阅读设置的对比度、分段控件、开关对齐和分组间距，让面板更易读、观感更柔和。
 - 优化浏览器标签页标题，在各页面统一清晰显示当前书名与页面名称。
 - 移除已废弃的更新预览页面。
 - 分享图片准备期间显示加载态并禁用复制、保存，失败后支持重试；切换卡片配置时丢弃过期任务并释放旧预览，不再先显示默认字体再切换。

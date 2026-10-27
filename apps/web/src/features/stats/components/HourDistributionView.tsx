@@ -230,10 +230,9 @@ export default function HourDistributionView({
             </div>
           </div>
 
-          {/* X 轴刻度标签：0 AM, 4 AM, 8 AM, 12 PM, 16 PM, 20 PM */}
           <div className="relative mt-2.5 grid grid-cols-24 text-[10px] tabular-nums text-stone-400 sm:text-[11px] dark:text-stone-500">
             {X_AXIS_HOURS.map((hour) => {
-              const label = hour === 0 ? '0 AM' : hour === 12 ? '12 PM' : hour < 12 ? `${hour} AM` : `${hour} PM`
+              const label = String(hour)
               return (
                 <span
                   key={hour}

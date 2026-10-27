@@ -189,6 +189,8 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('覆盖书籍布局')).toBeInTheDocument()
     expect(screen.getByText('章节标题')).toBeInTheDocument()
     expect(screen.getByText('对齐方式')).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: '页面宽度' })).toHaveValue('800')
+    expect(screen.getByRole('slider', { name: '行间距' })).toHaveValue('1.8')
     expect(screen.getByText('字号')).toBeInTheDocument()
     expect(screen.getByText('上边距').parentElement?.parentElement?.querySelector('input[type="range"]')).toHaveAttribute('max', '6')
     expect(screen.getByText('下边距').parentElement?.parentElement?.querySelector('input[type="range"]')).toHaveAttribute('max', '6')

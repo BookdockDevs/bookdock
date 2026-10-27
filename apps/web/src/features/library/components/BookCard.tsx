@@ -99,7 +99,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             ref={menu.btnRef}
             type="button"
             onClick={handleMenuClick}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-900 dark:focus-visible:outline-white"
             aria-label={_('library.moreActions')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">

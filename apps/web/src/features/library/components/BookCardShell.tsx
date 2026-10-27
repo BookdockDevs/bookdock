@@ -116,7 +116,7 @@ export default function BookCardShell({
         {!selectionActive && pinAffordance}
         {selected && <SelectedRing />}
         {selectable && selectionActive && <SelectionCheckOverlay selected={selected} />}
-        {showMenu && <div className="absolute right-1.5 top-1.5 z-10 transition-opacity duration-150 opacity-100 md:opacity-0 md:group-hover:opacity-100">{menu}</div>}
+        {showMenu && <div className="absolute right-1.5 top-1.5 z-10 transition-opacity duration-150 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">{menu}</div>}
         {coverOverlay}
         {coverBadge && (
           <div className="absolute bottom-1.5 left-1.5 z-10 flex items-center gap-1">

@@ -66,8 +66,8 @@ function SliderRow({ label, value, min, max, step = 1, suffix = '', formatValue,
 
   return (
     <div className="mb-4">
-      <div className="mb-1.5 flex items-center justify-between text-xs">
-        <span className="text-[var(--bd-read-sub)]">{label}</span>
+      <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium text-current/75">{label}</span>
         {stepper ? (
           <div className="flex items-center rounded-md bg-stone-500/10 p-0.5 text-current dark:bg-stone-500/15">
             <button
@@ -98,6 +98,7 @@ function SliderRow({ label, value, min, max, step = 1, suffix = '', formatValue,
       </div>
       <input
         type="range"
+        aria-label={label}
         min={min}
         max={max}
         step={step}
@@ -125,11 +126,14 @@ function ToggleRow({ label, hint, checked, onChange }: ToggleRowProps) {
   return (
     <div
       onClick={() => onChange(!checked)}
-      className="group flex cursor-pointer select-none items-start justify-between gap-3 py-1.5 transition-colors"
+      className={cn(
+        'group flex cursor-pointer select-none justify-between gap-3 py-1.5 transition-colors',
+        hint ? 'items-start' : 'items-center',
+      )}
     >
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-current">{label}</div>
-        {hint && <div className="mt-0.5 text-xs leading-normal text-[var(--bd-read-sub)]">{hint}</div>}
+        {hint && <div className="mt-1 text-xs leading-relaxed text-current/65">{hint}</div>}
       </div>
       <button
         type="button"
@@ -137,7 +141,10 @@ function ToggleRow({ label, hint, checked, onChange }: ToggleRowProps) {
           e.stopPropagation()
           onChange(!checked)
         }}
-        className="relative mt-0.5 h-6 w-10 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
+        className={cn(
+          'relative h-6 w-10 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current',
+          hint && 'mt-0.5',
+        )}
         style={{ backgroundColor: checked ? 'var(--toggle-on-bg)' : 'var(--toggle-off-bg)' }}
         aria-checked={checked}
         aria-label={label}
@@ -218,7 +225,7 @@ function ButtonGroup<T extends string | number>({
   return (
     <div
       className={cn(
-        'grid bg-stone-500/10 dark:bg-stone-500/15',
+        'grid bg-current/[0.06]',
         isSm ? 'gap-0.5 rounded-lg p-0.5' : 'gap-1 rounded-xl p-1',
       )}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
@@ -238,8 +245,8 @@ function ButtonGroup<T extends string | number>({
                 ? 'min-h-[1.75rem] rounded-md px-2 py-1 text-xs'
                 : 'min-h-[2.125rem] rounded-lg px-2.5 py-1.5 text-[13px]',
               isSelected
-                ? 'bg-[var(--bd-read-bg)] font-medium text-current shadow-sm'
-                : 'font-normal text-current/60 hover:text-current hover:bg-stone-500/5',
+                ? 'bg-[var(--bd-read-bg)] font-medium text-current shadow-xs ring-1 ring-current/10'
+                : 'font-normal text-current/75 hover:text-current hover:bg-current/5',
             )}
           >
             {opt.icon ?? opt.label}
@@ -258,7 +265,7 @@ function fontChipClass(active: boolean) {
     'flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-[13.5px] transition-all duration-150 select-none active:scale-[0.98]',
     active
       ? 'border border-stone-400/40 bg-[var(--bd-read-bg)] font-medium text-current shadow-sm ring-1 ring-stone-400/20 dark:border-stone-600/40 dark:ring-stone-600/20'
-      : 'border border-stone-200/70 bg-stone-500/5 font-normal text-[var(--bd-read-sub)] hover:border-stone-300/80 hover:bg-stone-500/10 hover:text-current dark:border-stone-800/80 dark:hover:border-stone-700/80',
+      : 'border border-stone-200/70 bg-stone-500/5 font-normal text-current/75 hover:border-stone-300/80 hover:bg-stone-500/10 hover:text-current dark:border-stone-800/80 dark:hover:border-stone-700/80',
   )
 }
 
@@ -298,8 +305,8 @@ function SectionIcon({
       className={cn(
         'flex h-8 w-full items-center justify-center rounded-lg transition-all',
         active
-          ? 'bg-[var(--bd-read-bg)] text-current shadow-sm'
-          : 'text-[var(--bd-read-sub)] hover:text-current',
+          ? 'bg-[var(--bd-read-bg)] text-current shadow-xs ring-1 ring-current/10'
+          : 'text-current/65 hover:text-current',
       )}
     >
       {children}
@@ -548,7 +555,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
 
   return (
     <div className="p-4 text-sm" style={sliderVars}>
-      <div className="mb-4 grid grid-cols-5 gap-1 rounded-xl bg-stone-500/10 p-1">
+      <div className="mb-4 grid grid-cols-5 gap-1 rounded-xl bg-current/[0.06] p-1">
         <SectionIcon active={section === 'font'} onClick={() => onSetSection('font')} label={_('reader.sectionFont')}>
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M4 7V4h16v3M9 20h6M12 4v16" />
@@ -587,7 +594,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
       {section === 'font' && (
         <div>
           <div className="mb-5">
-            <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">
+            <label className="mb-2 block text-xs font-medium text-current/75">
               {showCjkFontPicker ? _('reader.primaryFont') : _('reader.sectionFont')}
             </label>
             <div className="grid grid-cols-2 gap-2">
@@ -612,7 +619,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
           </div>
           {showCjkFontPicker && (
             <div className="mb-5">
-              <label className="mb-2 block text-xs text-[var(--bd-read-sub)]">{_('reader.cjkFont')}</label>
+              <label className="mb-2 block text-xs font-medium text-current/75">{_('reader.cjkFont')}</label>
               <div className="grid grid-cols-2 gap-2">
                 {visibleCjkOptions.map((opt) => (
                   <button
@@ -680,7 +687,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
       {section === 'layout' && (
         <div className="space-y-4">
           <div>
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+            <div className="mb-3 text-xs font-semibold text-current/75">
               {_('reader.layoutPageGroup')}
             </div>
             <SliderRow
@@ -698,7 +705,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
           </div>
 
           <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+            <div className="mb-3 text-xs font-semibold text-current/75">
               {_('reader.layoutTextGroup')}
             </div>
             <SliderRow label={_('reader.lineHeight')} value={lineHeightBinding.value} min={1.2} max={2.5} step={0.1} onChange={lineHeightBinding.onChange} />
@@ -708,11 +715,11 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
           </div>
 
           <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+            <div className="mb-3 text-xs font-semibold text-current/75">
               {_('reader.chapterTitleGroup')}
             </div>
             <div className="mb-4">
-              <div className="mb-1.5 text-xs text-[var(--bd-read-sub)]">{_('reader.chapterTitleAlign')}</div>
+              <div className="mb-1.5 text-xs font-medium text-current/75">{_('reader.chapterTitleAlign')}</div>
               <ButtonGroup
                 options={[
                   { value: 'start', label: _('reader.chapterTitleStart') },
@@ -740,15 +747,15 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
       )}
 
       {section === 'display' && (
-        <div className="space-y-4">
+        <div className="space-y-2">
           <div>
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+            <div className="mb-3 text-xs font-semibold text-current/75">
               {_('reader.displayReadingMethodGroup')}
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.readingMode')}</label>
+                <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.readingMode')}</label>
                 <ButtonGroup
                   options={[
                     { value: 'scroll', label: _('reader.readingModeScroll') },
@@ -762,7 +769,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
               {readingMode === 'page' && (
                 <>
                   <div>
-                    <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.columnCount')}</label>
+                    <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.columnCount')}</label>
                     <ButtonGroup
                       size="sm"
                       options={[
@@ -790,7 +797,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
 
               {readingMode === 'scroll' && (
                 <div>
-                  <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.continuousScroll')}</label>
+                  <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.continuousScroll')}</label>
                   <ButtonGroup
                     size="sm"
                     options={[
@@ -813,13 +820,13 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
           </div>
 
           <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+            <div className="mb-3 text-xs font-semibold text-current/75">
               {_('reader.displayTextGroup')}
             </div>
 
             <div className="space-y-3">
               <div>
-                <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.chineseConversion')}</label>
+                <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.chineseConversion')}</label>
                 <ButtonGroup
                   size="sm"
                   options={[
@@ -843,7 +850,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
           </div>
 
           <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--bd-read-sub)]">
+            <div className="mb-3 text-xs font-semibold text-current/75">
               {_('reader.displayAidsGroup')}
             </div>
 
@@ -898,7 +905,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
                 <ToggleRow label={_('reader.showFriendIdeas')} checked={showFriendIdeas} onChange={setShowFriendIdeas} />
                 {showFriendIdeas && (
                   <div className="mt-1 mb-1">
-                    <label className="mb-1.5 block text-xs text-[var(--bd-read-sub)]">{_('reader.ideaDisplayMode')}</label>
+                    <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.ideaDisplayMode')}</label>
                     <ButtonGroup
                       size="sm"
                       options={[
@@ -954,6 +961,12 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
 
                   {showClickAreaHint && (
                     <div
+                      className="pointer-events-none absolute right-1 top-[26px] z-40 h-3 w-3 rotate-45 border-l border-t border-stone-300/90 bg-[var(--bd-read-bg)] dark:border-stone-700/90"
+                      aria-hidden="true"
+                    />
+                  )}
+                  {showClickAreaHint && (
+                    <div
                       role="dialog"
                       aria-label={_('reader.clickAreaHintTitle')}
                       className="absolute left-0 top-8 z-30 w-72 max-w-[calc(100vw-3rem)] rounded-xl border border-stone-300/90 bg-[var(--bd-read-bg)] p-3 text-xs shadow-xl dark:border-stone-700/90 animate-in fade-in zoom-in-95 duration-100"
@@ -961,11 +974,6 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
                         boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
                       }}
                     >
-                      <div
-                        className="absolute -top-1.5 left-20 h-3 w-3 -translate-x-1/2 rotate-45 border-l border-t border-stone-300/90 bg-[var(--bd-read-bg)] dark:border-stone-700/90"
-                        aria-hidden="true"
-                      />
-
                       <div className="flex flex-col gap-2 text-xs">
                         <div className="flex items-center gap-2.5">
                           <ClickAreaZoneWireframe left="prev" right="next" />
@@ -978,7 +986,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
                                 </span>
                               )}
                             </div>
-                            <span className="text-[11px] leading-tight text-[var(--bd-read-sub)] opacity-85">
+                            <span className="text-xs leading-snug text-current/70">
                               {_('reader.clickAreaStandardDesc')}
                             </span>
                           </div>
@@ -995,7 +1003,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
                                 </span>
                               )}
                             </div>
-                            <span className="text-[11px] leading-tight text-[var(--bd-read-sub)] opacity-85">
+                            <span className="text-xs leading-snug text-current/70">
                               {_('reader.clickAreaFullscreenDesc')}
                             </span>
                           </div>
@@ -1012,14 +1020,14 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
                                 </span>
                               )}
                             </div>
-                            <span className="text-[11px] leading-tight text-[var(--bd-read-sub)] opacity-85">
+                            <span className="text-xs leading-snug text-current/70">
                               {_('reader.clickAreaSwapDesc')}
                             </span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="mt-2.5 border-t border-stone-200/60 pt-1.5 text-[11px] text-[var(--bd-read-sub)] opacity-85 dark:border-stone-800/60">
+                      <div className="mt-2.5 border-t border-stone-200/60 pt-2 text-xs leading-snug text-current/70 dark:border-stone-800/60">
                         {clickAreaMode === 'none'
                           ? _('reader.clickAreaNoneDesc')
                           : _('reader.clickAreaToggleHint')}
