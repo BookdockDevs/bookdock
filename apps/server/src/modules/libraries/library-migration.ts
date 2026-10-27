@@ -380,12 +380,11 @@ export async function migrateAnnotations(): Promise<AnnotationsMigrationReport> 
           report.skipped += 1
           continue
         }
-        db.insert(bookmarks).values({
-          id: row.id, userId: row.userId, bookVersionId: row.bookId, revisionId: null,
-          cfi: row.cfiRange, chapter: row.chapter, chapterHref: row.chapterHref,
-          title: row.text,
-          createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt,
-        }).run()
+        db.run(sql`INSERT INTO bookmarks (id, user_id, book_version_id, revision_id,
+          cfi, chapter, chapter_href, title, created_at, updated_at, deleted_at)
+          VALUES (${row.id}, ${row.userId}, ${row.bookId}, NULL, ${row.cfiRange},
+          ${row.chapter}, ${row.chapterHref}, ${row.text}, ${row.createdAt},
+          ${row.updatedAt}, ${row.deletedAt})`)
         report.bookmarks += 1
       } else {
         const existing = db.select({ id: ideas.id }).from(ideas).where(eq(ideas.id, row.id)).get()
@@ -687,8 +686,8 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
     `${states.length}/${verifiableBooks.length}`)
 
   const annotationRows = db.select().from(annotations).all()
-  const highlightRows = db.select().from(highlights).all()
-  const bookmarkRows = db.select().from(bookmarks).all()
+  const highlightRows = db.select({ id: highlights.id }).from(highlights).all()
+  const bookmarkRows = db.select({ id: bookmarks.id }).from(bookmarks).all()
   const ideaRows = db.select({ id: ideas.id }).from(ideas).all()
   check('annotations', annotationRows.every((a) =>
     !versionIds.has(a.bookId)

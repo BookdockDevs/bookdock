@@ -118,5 +118,10 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
   const after = retainedTables.map((table) => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
   const libraryBooksIndex = retainedTables.indexOf('library_books')
   after[libraryBooksIndex] = (after[libraryBooksIndex] as Array<Record<string, unknown>>).map(({ shelf_id: _shelfId, ...row }) => row)
+  for (const table of ['bookmarks', 'ideas']) {
+    const index = retainedTables.indexOf(table)
+    after[index] = (after[index] as Array<Record<string, unknown>>).map(({ relocation: _relocation, ...row }) => row)
+    expect(sqlite.prepare(`SELECT relocation FROM ${table}`).all()).toEqual([{ relocation: 'ok' }])
+  }
   expect(after).toEqual(before)
 }, 30_000)

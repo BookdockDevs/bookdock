@@ -77,6 +77,24 @@ _Avoid_: hiding a recoverable page error in a disappearing toast.
 The persistent progress and final outcome of work that may outlive the initiating interaction, such as an upload or index build.
 _Avoid_: representing ongoing progress with repeated toasts.
 
+## Book Content and Revisions
+
+**Content revision**:
+An immutable version of a book's stored content and structure. A shared BookVersion can advance while each reader independently acknowledges the new revision.
+_Avoid_: current file when referring to historical revision content.
+
+**Revision map**:
+A conservative correspondence between unchanged locations in two content revisions. It can relocate a position or project coverage only where the source and target correspondence is unique.
+_Avoid_: percentage migration when referring to position mapping.
+
+**Current reading position**:
+A reader's restorable location in a specific content revision. If its location cannot be mapped to the current revision, it is unavailable even while its old revision and historical progress remain recorded.
+_Avoid_: reading history.
+
+**Reading coverage projection**:
+The portion of current book content that can be attributed to preserved read coverage from earlier revisions. New or rewritten text is not covered unless it was read after that revision.
+_Avoid_: historical reading fact.
+
 ## Books and Table of Contents
 
 **Library search expression**:

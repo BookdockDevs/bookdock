@@ -28,6 +28,7 @@ function toRes(row: ReplacementRow, override?: ReplacementOverrideRow | null): T
     spineHref: row.spineHref,
     textOffset: row.textOffset,
     originalText: row.originalText,
+    ...(row.matchType === 'point' && row.relocation === 'unresolved' ? { locationAvailable: false } : {}),
     sortOrder: row.sortOrder,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -123,6 +124,7 @@ export async function createReplacement(userId: string, data: ReplacementCreateR
     spineHref: data.spineHref ?? null,
     textOffset: data.textOffset ?? null,
     originalText: data.originalText ?? null,
+    relocation: 'ok',
     createdAt: now,
     updatedAt: now,
   }
@@ -160,6 +162,7 @@ export async function importReplacements(userId: string, file: unknown) {
     spineHref: null,
     textOffset: null,
     originalText: null,
+    relocation: 'ok',
     createdAt: now + index,
     updatedAt: now + index,
   }))

@@ -1,12 +1,19 @@
 import type { ReadingCoverageInterval } from '@bookdock/shared'
 
 import { mergeInterval } from './intervals'
+import { projectRevisionCoverage, type RevisionCoverageRange, type RevisionCoverageSection, type RevisionCoverageSegment } from './revision-coverage'
 
 export interface ReadingCoverageBasis {
   revisionId: string | null
   wordCount: number | null
   compatibleRevisionIds: readonly string[]
   equivalentRevisionIds?: readonly string[]
+  revisionMaps?: Record<string, {
+    sourceSections: RevisionCoverageSection[]
+    targetSections: RevisionCoverageSection[]
+    segments: RevisionCoverageSegment[]
+    structuralRanges: RevisionCoverageRange[]
+  }>
 }
 
 export function readingCompatibleRevisions(meta: Record<string, unknown>, previousId: string): string[] {
@@ -23,6 +30,12 @@ export function projectReadingCoverage(
   if (!intervals.length) return { intervals: [], unaligned: false }
   const equivalent = source.revisionId === target.revisionId
     || (source.revisionId !== null && target.equivalentRevisionIds?.includes(source.revisionId))
+  const revisionMap = source.revisionId ? target.revisionMaps?.[source.revisionId] : undefined
+  if (!equivalent && revisionMap) {
+    const projected = projectRevisionCoverage(intervals, revisionMap.sourceSections, revisionMap.targetSections,
+      revisionMap.segments, revisionMap.structuralRanges)
+    return { intervals: projected, unaligned: projected.length === 0 }
+  }
   let scale = 1
   if (!equivalent) {
     if (source.revisionId === null || !target.compatibleRevisionIds.includes(source.revisionId)

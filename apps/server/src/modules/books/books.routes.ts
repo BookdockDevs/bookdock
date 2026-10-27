@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
-import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, privateBatchShelfSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
+import { bodyLimit } from 'hono/body-limit'
+import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, editorEpubSaveSchema, editorTxtSaveSchema, privateBatchShelfSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -53,6 +54,7 @@ import { safeFileBase, streamBookFile } from './book-file-response'
 import { requestUserId } from '../../middleware/auth.guard'
 import { decodeTextBuffer } from '../../formats/txt'
 import { exportEpubBook, exportTxtBook } from './txt-export'
+import { getEditorAccess, getEditorEpubContent, saveEditorEpubContent, saveEditorTxtContent } from './content-editor.service'
 
 const booksRoutes = new Hono()
 const appendOptionsSchema = appendContentSchema.pick({ startOffset: true })
@@ -248,9 +250,59 @@ booksRoutes.get('/:id/content', async (c) => {
     throw new AppError('FORBIDDEN', 'Guest sessions cannot download books')
   }
   const id = c.req.param('id')
-  await getActiveBook(user.id, id, { showHidden: requestShowHidden(c) })
-  const content = await getBookContent(user.id, id, { showHidden: requestShowHidden(c) })
+  const revisionId = c.req.query('revisionId')
+  const content = await getBookContent(user.id, id, { showHidden: requestShowHidden(c), ...(revisionId ? { revisionId } : {}) })
   return c.newResponse(content)
+})
+
+booksRoutes.get('/:id/editor-access', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  return c.json({ data: await getEditorAccess(user.id, c.req.param('id')) }, 200, { 'Cache-Control': 'private, no-store' })
+})
+
+booksRoutes.put('/:id/editor-content', bodyLimit({ maxSize: CONTENT_EDITOR_MAX_REQUEST_BYTES, onError: () => { throw new AppError('UPLOAD_TOO_LARGE', 'Editor draft is too large') } }), async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const parsed = editorTxtSaveSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid editor draft', parsed.error.flatten())
+  const result = await saveEditorTxtContent(user.id, c.req.param('id'), parsed.data)
+  return c.json({ data: result })
+})
+
+booksRoutes.post('/:id/editor-txt-decode', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const id = c.req.param('id')
+  await assertReadableBook(user.id, id, requestShowHidden(c))
+  const book = await getActiveBook(user.id, id, { showHidden: requestShowHidden(c) })
+  if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'TXT import decoding requires a TXT book')
+  const body = await c.req.parseBody()
+  const file = body['file']
+  if (!(file instanceof File) || !file.name.toLowerCase().endsWith('.txt')) {
+    throw new AppError('VALIDATION_ERROR', 'A TXT file is required')
+  }
+  const maxBytes = effectiveUploadMaxBytes()
+  if (file.size > maxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
+  const buffer = Buffer.from(await file.arrayBuffer())
+  if (buffer.length > maxBytes) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
+  return c.json({ data: { text: decodeTextBuffer(buffer) } }, 200, { 'Cache-Control': 'private, no-store' })
+})
+
+booksRoutes.get('/:id/editor-epub-content', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const result = await getEditorEpubContent(user.id, c.req.param('id'))
+  return c.json({ data: result }, 200, { 'Cache-Control': 'private, no-store' })
+})
+
+booksRoutes.put('/:id/editor-epub-content', bodyLimit({ maxSize: CONTENT_EDITOR_MAX_REQUEST_BYTES, onError: () => { throw new AppError('UPLOAD_TOO_LARGE', 'Editor draft is too large') } }), async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const parsed = editorEpubSaveSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid EPUB editor draft', parsed.error.flatten())
+  const result = await saveEditorEpubContent(user.id, c.req.param('id'), parsed.data)
+  return c.json({ data: result })
 })
 
 booksRoutes.get('/:id/epub', async (c) => {

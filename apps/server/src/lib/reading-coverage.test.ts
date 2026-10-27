@@ -22,4 +22,11 @@ describe('reading coverage projection', () => {
   it('retains verified ancestry through metadata-only revisions', () => {
     expect(readingCompatibleRevisions({ readingCompatibleRevisions: ['r1', 'r1', 99] }, 'r2')).toEqual(['r1', 'r2'])
   })
+
+  it('does not ratio-scale coverage when a stored but incomplete revision map exists', () => {
+    expect(projectReadingCoverage([[0, 0.5]], { revisionId: 'old', wordCount: 1000 }, {
+      revisionId: 'new', wordCount: 2000, compatibleRevisionIds: ['old'],
+      revisionMaps: { old: { sourceSections: [], targetSections: [], segments: [], structuralRanges: [] } },
+    })).toEqual({ intervals: [], unaligned: true })
+  })
 })

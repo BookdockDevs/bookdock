@@ -185,6 +185,7 @@ export const textReplacements = sqliteTable('text_replacements', {
   spineHref: text('spine_href'),
   textOffset: integer('text_offset'),
   originalText: text('original_text'),
+  relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
@@ -631,6 +632,46 @@ export const contentRevisions = sqliteTable('content_revisions', {
   blobIdx: index('content_revisions_blob_idx').on(table.blobKey),
 }))
 
+export const contentRevisionMaps = sqliteTable('content_revision_maps', {
+  id: text('id').primaryKey(),
+  bookVersionId: text('book_version_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),
+  // Source ids are provenance only so a map can outlive pruned source blobs.
+  sourceRevisionId: text('source_revision_id').notNull(),
+  targetRevisionId: text('target_revision_id').notNull().references(() => contentRevisions.id, { onDelete: 'cascade' }),
+  segments: text('segments', { mode: 'json' }).$type<Array<{
+    sourceSpineHref?: string
+    targetSpineHref?: string
+    sourceStart: number
+    sourceEnd: number
+    targetStart: number
+    targetEnd: number
+  }>>().notNull().default([]),
+    sourceSections: text('source_sections', { mode: 'json' }).$type<Array<{
+      spineHref: string
+      size: number
+      textLength: number
+      title?: string
+    }>>().notNull().default([]),
+  targetSections: text('target_sections', { mode: 'json' }).$type<Array<{
+    spineHref: string
+    size: number
+    textLength: number
+    title?: string
+  }>>().notNull().default([]),
+  structuralRanges: text('structural_ranges', { mode: 'json' }).$type<Array<{
+    spineHref: string
+    start: number
+    end: number
+    sourceSpineHref?: string
+    sourceOffset?: number
+  }>>().notNull().default([]),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  sourceTargetUnique: uniqueIndex('content_revision_maps_source_target_unique').on(table.sourceRevisionId, table.targetRevisionId),
+  targetIdx: index('content_revision_maps_target_idx').on(table.bookVersionId, table.targetRevisionId),
+  sourceIdx: index('content_revision_maps_source_idx').on(table.bookVersionId, table.sourceRevisionId),
+}))
+
 export const blobs = sqliteTable('blobs', {
   key: text('key').primaryKey(),
   size: integer('size').notNull(),
@@ -763,6 +804,9 @@ export const bookStates = sqliteTable('book_states', {
    * dangling and the row simply reads as "has an update".
    */
   readRevisionId: text('read_revision_id'),
+  // Revision basis for this position; distinct from readRevisionId's update acknowledgment.
+  progressRevisionId: text('progress_revision_id'),
+  coverageRevisionId: text('coverage_revision_id'),
   progressData: text('progress_data', { mode: 'json' }).$type<ProgressFileData | null>(),
   readFraction: real('read_fraction').notNull().default(0),
   updatedAt: integer('updated_at').notNull(),
@@ -801,6 +845,7 @@ export const bookmarks = sqliteTable('bookmarks', {
   chapterHref: text('chapter_href'),
   title: text('title'),
   contextText: text('context_text'),
+  relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   deletedAt: integer('deleted_at'),
@@ -823,6 +868,7 @@ export const ideas = sqliteTable('ideas', {
   sharedLibraryId: text('shared_library_id'),
   sourceLibraryBookVersionId: text('source_library_book_version_id'),
   revisionId: text('revision_id'),
+  relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
   editedAt: integer('edited_at'),
   chapter: text('chapter'),
   chapterHref: text('chapter_href'),

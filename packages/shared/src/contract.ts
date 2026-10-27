@@ -1465,7 +1465,11 @@ export interface RateSample {
 }
 
 export interface ReadingProgressUpdateReq {
+  /** Revision that produced this visible reader position. */
+  revisionId?: string
   cfi?: string
+  /** Visible text location used to map progress when book content changes. */
+  contentCfi?: string
   chapter?: string
   /** Zero-based chapter position from the current book TOC, when known */
   chapterIndex?: number
@@ -1481,6 +1485,17 @@ export interface ReadingProgressUpdateReq {
 export interface ReadingProgressRes {
   id: string
   bookId: string
+  /** Revision that produced this saved position; separate from read acknowledgment. */
+  progressRevisionId?: string | null
+  /** Exact text location carried across content revisions. */
+  positionAnchor?: {
+    revisionId: string
+    spineHref: string
+    textOffset: number
+    cfi?: string
+  } | null
+  /** Revision represented by the current read-coverage projection. */
+  coverageRevisionId?: string | null
   cfi: string | null
   chapter: string | null
   /** Zero-based chapter position from the current book TOC. */
@@ -1489,6 +1504,12 @@ export interface ReadingProgressRes {
   fraction?: number | null
   /** Total union length of read intervals, 0-1. */
   readFraction: number
+  /** False when the saved position belongs to older content and cannot be restored here. */
+  locationAvailable?: boolean
+  /** False when saved intervals have not been projected to the active content revision. */
+  coverageAvailable?: boolean
+  /** Whether this account has yet to open the active content update. */
+  contentUpdateUnseen?: boolean
   /** Sliding window of reading-speed samples (most recent last) */
   rateSamples?: RateSample[]
   updatedAt: number
@@ -1707,6 +1728,7 @@ export interface TextReplacementRes {
   spineHref: string | null
   textOffset: number | null
   originalText: string | null
+  locationAvailable?: boolean
   /** Execution + display order (ascending); new and imported rules append. */
   sortOrder: number
   createdAt: number
@@ -1808,6 +1830,40 @@ export interface ReTocReq {
 export interface AppendContentReq {
   text?: string
   startOffset?: number
+}
+
+export interface EditorTxtSaveReq {
+  baseRevisionId: string
+  chapters: Array<{ id: string; title: string; content: string; level: number; structureOnlyTitle?: boolean }>
+  tocRuleSelection?: { ruleId: string | null; patterns: TocRulePattern[] | null; label: string | null; auto: boolean }
+}
+
+export interface EditorEpubSaveReq {
+  baseRevisionId: string
+  documents: Array<{ href: string; content: string }>
+  tocEntries: Array<{ href: string; title: string; level: number }>
+  spineOrder: string[]
+}
+
+export interface EditorAccessRes {
+  revisionId: string
+}
+
+export interface EditorEpubLoadRes {
+  revisionId: string
+  documents: Array<{ href: string; content: string }>
+  tocEntries: Array<{ href: string; title: string; level: number }>
+  spineOrder: string[]
+}
+
+export interface EditorTxtSaveRes {
+  revisionId: string
+  changed: boolean
+  unlocated: { progress: number; coverage: number; highlights: number; bookmarks: number; notes: number; pointReplacements: number }
+}
+
+export interface EditorTxtDecodeRes {
+  text: string
 }
 
 export interface AppendContentCandidate {

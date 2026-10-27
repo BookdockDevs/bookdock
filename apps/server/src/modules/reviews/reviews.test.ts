@@ -83,6 +83,17 @@ describe('book reviews', () => {
     `)
   }
 
+  function removeContentRevisionSchema() {
+    sqlite.exec(`
+      DROP TABLE content_revision_maps;
+      ALTER TABLE book_states DROP COLUMN progress_revision_id;
+      ALTER TABLE book_states DROP COLUMN coverage_revision_id;
+      ALTER TABLE bookmarks DROP COLUMN relocation;
+      ALTER TABLE ideas DROP COLUMN relocation;
+      ALTER TABLE text_replacements DROP COLUMN relocation;
+    `)
+  }
+
   function seed() {
     for (const id of ['owner', 'admin', 'member', 'outsider', 'author', 'critic']) {
       db.insert(schema.users).values({ id, username: id, createdAt: now }).run()
@@ -1060,6 +1071,7 @@ describe('book reviews', () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: '  **literal**\n', bodyFormat: 'plain', visibility: 'shared' })
     await createReviewComment('member', review.id, { body: 'before files', requestId: 'before_files_123456789' })
     removeReadingProjectionSchema()
+    removeContentRevisionSchema()
     sqlite.exec('DROP TABLE activity_events; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
     await client.runDatabaseMigrations(db)
     expect((await getReviewDiscussion('author', review.id)).review).toMatchObject({ body: '  **literal**\n', bodyFormat: 'plain', files: [] })
@@ -1099,6 +1111,7 @@ describe('book reviews', () => {
   it('upgrades populated stage-one review structures into notification persistence', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: 'baseline', visibility: 'shared' })
     removeReadingProjectionSchema()
+    removeContentRevisionSchema()
     sqlite.exec("DROP TABLE activity_events; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
     await client.runDatabaseMigrations(db)
     expect(db.select().from(schema.bookReviews).get()?.id).toBe(review.id)

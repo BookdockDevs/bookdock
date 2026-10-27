@@ -10,6 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 import sharp from 'sharp'
+import iconv from 'iconv-lite'
 
 import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
@@ -18,7 +19,7 @@ import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { executeUndoReceipt } from '../../lib/undo'
-import { TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
+import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { readProgressFile } from '../../lib/progress-file'
 import { registerParser } from '../../formats/registry'
 import { normalizeText, TxtParser } from '../../formats/txt'
@@ -57,6 +58,7 @@ import {
   predictAppendStartIndex,
   pruneOldContentRevisions,
   getBookContent,
+  getBookChapters,
   getBookChapterContent,
   getBookCover,
   getBookCoverContent,
@@ -68,6 +70,11 @@ import { getLegadoToc } from './legado.service'
 import { createShelf, updateShelf } from '../shelves/shelves.service'
 import { createTag, updateTag } from '../tags/tags.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
+import { getEditorAccess, getEditorEpubContent, saveEditorEpubContent, saveEditorTxtContent } from './content-editor.service'
+import { extractEpubSpineText } from './epub-revision-map'
+import { readEpubEditorPackage } from './epub-editor-package'
+import { loadEpubSpineMarkup } from '../../formats/epub'
+import { createEpubCfiTextOffset, createEpubCfiTextRange, resolveEpubCfiTextOffset, resolveEpubCfiTextRange } from './epub-cfi-position'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -2209,6 +2216,706 @@ describe('private-library undo', () => {
     await executeUndoReceipt(ownerId, undo.token!)
     expect(libraryBookOf(db, first.id)?.shelfId).toBeNull()
     expect(libraryBookOf(db, second.id)?.shelfId).toBeNull()
+  })
+})
+
+describe('editor TXT save', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let otherId: string
+
+  beforeAll(() => registerParser(new TxtParser()))
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    otherId = seedUser(db, 'other')
+  })
+
+  it('checks edit target ownership, linkage and current revision before local recovery', async () => {
+    const book = seedBook(db, ownerId)
+    const link = db.select().from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, book.id)).get()!
+    const target = { libraryId: link.libraryId, libraryBookId: link.libraryBookId, versionLinkId: link.id }
+    const revision = db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.bookVersionId, book.id)).get()!
+    expect(await getEditorAccess(ownerId, book.id)).toEqual({ revisionId: revision.id })
+    expect(await getEditorAccess(ownerId, book.id, target)).toEqual({ revisionId: revision.id })
+    await expect(getEditorAccess(otherId, book.id)).rejects.toThrow()
+    await expect(getEditorAccess(otherId, book.id, target)).rejects.toThrow()
+    await expect(getEditorAccess(ownerId, book.id, { ...target, libraryBookId: 'wrong' })).rejects.toThrow()
+    await expect(getEditorAccess(ownerId, 'wrong', target)).rejects.toThrow()
+  })
+
+  it('rejects shared-version recovery when contribution permission or linkage is lost', async () => {
+    const book = seedBook(db, ownerId)
+    const now = Date.now()
+    const libraryId = createId('lib')
+    const libraryBookId = createId('lb')
+    const versionLinkId = createId('lbv')
+    db.insert(schema.libraries).values({ id: libraryId, userId: ownerId, type: 'shared', name: 'Shared', description: '', visibility: 'public', allowMemberUpload: true, createdAt: now, updatedAt: now }).run()
+    db.insert(schema.libraryBooks).values({ id: libraryBookId, libraryId, userId: ownerId, title: 'Shared', author: '', createdAt: now, updatedAt: now }).run()
+    db.insert(schema.libraryBookVersions).values({ id: versionLinkId, libraryId, libraryBookId, bookVersionId: book.id, userId: otherId, kind: 'shared', status: 'published', createdAt: now, updatedAt: now }).run()
+    db.insert(schema.libraryMemberships).values({ id: createId('lbm'), libraryId, userId: otherId, role: 'member', createdAt: now, updatedAt: now }).run()
+    const target = { libraryId, libraryBookId, versionLinkId }
+    await expect(getEditorAccess(otherId, book.id, target)).resolves.toHaveProperty('revisionId')
+    db.update(schema.libraries).set({ allowMemberUpload: false }).where(eq(schema.libraries.id, libraryId)).run()
+    await expect(getEditorAccess(otherId, book.id, target)).rejects.toThrow()
+    await expect(getEditorAccess(ownerId, book.id, { ...target, libraryBookId: 'wrong' })).rejects.toThrow()
+  })
+
+  it('keeps saved chapter boundaries aligned with recovered text after paragraph trimming', async () => {
+    const { book } = await uploadBook(ownerId, new File(['第一章\n\n正文一\n\n第二章\n\n正文二'], 'book.txt', { type: 'text/plain' }))
+
+    const saved = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: book.revisionId!,
+      chapters: [
+        { id: 'one', title: '第一章', content: '正文一\n\n', level: 1 },
+        { id: 'two', title: '第二章', content: '正文二\n\n', level: 1 },
+      ],
+    })
+    const text = await getBookContent(ownerId, book.id, { revisionId: saved.revisionId })
+    const chapters = await getBookChapters(ownerId, book.id)
+
+    expect(chapters).toHaveLength(2)
+    expect(text.slice(chapters[0]!.contentStartOffset, chapters[0]!.endOffset)).toBe('正文一')
+    expect(text.slice(chapters[1]!.contentStartOffset, chapters[1]!.endOffset)).toBe('正文二')
+    expect(text.slice(chapters[0]!.endOffset, chapters[1]!.startOffset).trim()).toBe('')
+  })
+
+  it('keeps a third-chapter bookmark locatable when three chapters are merged', async () => {
+    const chapterBodies = [
+      '第一章正文写着河边清晨有一条安静的小路和许多树木，旅人整理地图并记录了独特的天气变化。',
+      '第二章正文描述旅人沿着山谷继续前进，观察河床、岩壁与云层，并把沿途发现写进旅行日志。',
+      '第三章独特书签原文出现在灯塔附近，夜色下灯塔仍然清楚可见，远处海面映着微弱月光。',
+    ]
+    const { book } = await uploadBook(ownerId, new File([
+      chapterBodies.map((body, index) => `第${index + 1}章\n\n${body}`).join('\n\n'),
+    ], 'book.txt', { type: 'text/plain' }))
+    const sourceRevision = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).get()!
+    const sourceEpub = await bufferFromStream(await storage.getStorage().get(sourceRevision.blobKey))
+    const sourceSpine = await loadEpubSpineMarkup(sourceEpub)
+    const sourceHref = sourceSpine[2]!.href
+    const sourceText = (await extractEpubSpineText(sourceEpub)).get(sourceHref)!
+    const quote = '第三章独特书签原文'
+    const sourceOffset = sourceText.indexOf(quote)
+    const bookmarkId = createId('bm')
+    db.insert(schema.bookmarks).values({
+      id: bookmarkId, userId: otherId, bookVersionId: book.id, revisionId: sourceRevision.id,
+      cfi: createEpubCfiTextOffset(sourceSpine[2]!.markup, 2, sourceOffset)!, chapterHref: sourceHref,
+      contextText: quote, createdAt: 100, updatedAt: 100,
+    }).run()
+
+    const result = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: sourceRevision.id,
+      chapters: [{ id: 'merged', title: '第一章', content: chapterBodies.join('\n\n'), level: 1 }],
+    })
+
+    const bookmark = db.select().from(schema.bookmarks).where(eq(schema.bookmarks.id, bookmarkId)).get()!
+    expect(bookmark).toMatchObject({ revisionId: result.revisionId, relocation: 'ok', contextText: quote })
+    expect(bookmark.chapterHref).not.toBe(sourceHref)
+    const targetRevision = db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, result.revisionId)).get()!
+    const targetEpub = await bufferFromStream(await storage.getStorage().get(targetRevision.blobKey))
+    const targetMarkup = (await loadEpubSpineMarkup(targetEpub)).find((section) => section.href === bookmark.chapterHref)!
+    const targetOffset = resolveEpubCfiTextOffset(targetMarkup.markup, bookmark.cfi!)
+    expect(targetOffset).not.toBeNull()
+    expect((await extractEpubSpineText(targetEpub)).get(bookmark.chapterHref!)?.slice(targetOffset!, targetOffset! + quote.length)).toBe(quote)
+  })
+
+  it('does not migrate bookmarks when one of two identical chapters is deleted', async () => {
+    const title = '第一章重复'
+    const body = '这一章的正文完全相同，无法仅凭文字判断删除的是哪一份。'.repeat(6)
+    const { book } = await uploadBook(ownerId, new File([`${title}\n\n${body}\n\n${title}\n\n${body}`], 'duplicates.txt', { type: 'text/plain' }))
+    const sourceRevision = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, book.id)).get()!
+    const sourceEpub = await bufferFromStream(await storage.getStorage().get(sourceRevision.blobKey))
+    const sourceSpine = await loadEpubSpineMarkup(sourceEpub)
+    expect(sourceSpine).toHaveLength(2)
+    const sourceTexts = await extractEpubSpineText(sourceEpub)
+    const quote = '正文完全相同'
+    const replacementId = createId('replacement')
+    for (const [index, section] of sourceSpine.entries()) {
+      const offset = sourceTexts.get(section.href)!.indexOf(quote)
+      db.insert(schema.bookmarks).values({
+        id: createId('bm'), userId: otherId, bookVersionId: book.id, revisionId: sourceRevision.id,
+        cfi: createEpubCfiTextOffset(section.markup, index, offset)!, chapterHref: section.href,
+        contextText: quote, createdAt: index + 1, updatedAt: index + 1,
+      }).run()
+      if (index === 0) {
+        db.insert(schema.textReplacements).values({
+          id: replacementId, userId: otherId, bookId: null, bookVersionId: book.id,
+          matchType: 'point', spineHref: section.href, textOffset: offset, originalText: quote,
+          createdAt: index + 1, updatedAt: index + 1,
+        }).run()
+      }
+    }
+
+    const result = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: sourceRevision.id,
+      chapters: [{ id: 'remaining', title, content: body, level: 1 }],
+    })
+
+    expect(result.unlocated.bookmarks).toBe(2)
+    expect(db.select().from(schema.bookmarks).all()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ revisionId: sourceRevision.id, relocation: 'unresolved', contextText: quote }),
+      expect.objectContaining({ revisionId: sourceRevision.id, relocation: 'unresolved', contextText: quote }),
+    ]))
+    expect(result.unlocated.pointReplacements).toBe(1)
+    expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, replacementId)).get()).toMatchObject({
+      relocation: 'unresolved',
+      spineHref: sourceSpine[0]!.href,
+      textOffset: expect.any(Number),
+      originalText: quote,
+    })
+  })
+
+  it('saves one revision and preserves every affected reader anchor as historical or unresolved', async () => {
+    const originalBody = Array.from({ length: 18 }, (_, index) => `第${index}节记录山路、河流、星光与远处的旧城，沿途留下不同的线索和时间。`).join('')
+    const { book } = await uploadBook(ownerId, new File([`第一章 启程\n\n${originalBody}`], 'book.txt', { type: 'text/plain' }))
+    const sourceRevisionId = book.revisionId!
+    const now = Date.now()
+    expect(db.select({ id: schema.bookVersions.id }).from(schema.bookVersions).where(eq(schema.bookVersions.id, book.id)).get()).toBeDefined()
+    expect(db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, otherId)).get()).toBeDefined()
+    db.insert(schema.bookStates).values({
+      userId: otherId, bookVersionId: book.id, readStatus: 'reading', percent: 48, cfi: 'old-cfi', chapter: '第一章 启程',
+      progressRevisionId: sourceRevisionId,
+      progressData: { progressRevisionId: sourceRevisionId, cfi: 'old-cfi', chapter: '第一章 启程', chapterIndex: 0, percent: 48, fraction: 0.48, intervals: [[0.2, 0.4]], updatedAt: now },
+      readFraction: 0.2, updatedAt: now,
+    }).run()
+    db.insert(schema.highlights).values({ id: createId('hl'), userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId, cfiRange: 'old-highlight-cfi', text: '原文引用', createdAt: now, updatedAt: now }).run()
+    db.insert(schema.bookmarks).values({ id: createId('bm'), userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId, cfi: 'old-bookmark-cfi', contextText: '书签上下文', createdAt: now, updatedAt: now }).run()
+    db.insert(schema.ideas).values({ id: createId('idea'), userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId, cfiRange: 'old-note-cfi', text: '原文引用', note: '笔记正文', createdAt: now, updatedAt: now }).run()
+    db.insert(schema.textReplacements).values({
+      id: createId('replacement'), userId: otherId, bookId: null, bookVersionId: book.id,
+      matchType: 'point', spineHref: 'chapter-0001.xhtml', textOffset: 4, originalText: '原文', createdAt: now, updatedAt: now,
+    }).run()
+
+    const result = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: sourceRevisionId,
+      chapters: [{ id: 'ch-0', title: '第一章 启程', content: `${originalBody.slice(0, 80)}改写${originalBody.slice(82)}`, level: 1 }],
+    })
+
+    expect(result).toMatchObject({ changed: true, unlocated: { progress: 1, highlights: 1, bookmarks: 1, notes: 1, pointReplacements: 1 } })
+    expect(db.select().from(schema.contentRevisionMaps).where(eq(schema.contentRevisionMaps.targetRevisionId, result.revisionId)).get()?.segments).not.toHaveLength(0)
+    const projectedState = db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, otherId)).get()!
+    expect(projectedState).toMatchObject({
+      percent: 0, cfi: null, chapter: null, progressRevisionId: sourceRevisionId, coverageRevisionId: result.revisionId,
+      progressData: { historicalPositions: [{ progressRevisionId: sourceRevisionId, cfi: 'old-cfi', percent: 48, intervals: [[0.2, 0.4]] }] },
+    })
+    expect(projectedState.progressData?.intervals?.[0]?.[0]).toBeCloseTo(0.2, 2)
+    expect(projectedState.progressData?.intervals?.[0]?.[1]).toBeCloseTo(0.4, 2)
+    expect(db.select().from(schema.highlights).get()?.relocation).toBe('unresolved')
+    expect(db.select().from(schema.bookmarks).get()?.relocation).toBe('unresolved')
+    expect(db.select().from(schema.ideas).get()?.relocation).toBe('unresolved')
+    expect(db.select().from(schema.textReplacements).get()?.relocation).toBe('unresolved')
+    expect(await getBookContent(ownerId, book.id)).toContain('改写')
+
+    const secondBody = originalBody.slice(0, 80) + '第二次' + originalBody.slice(82)
+    const second = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: result.revisionId,
+      chapters: [{ id: 'ch-0', title: '第一章 启程', content: secondBody, level: 1 }],
+    })
+    const composedMap = db.select().from(schema.contentRevisionMaps).where(and(
+      eq(schema.contentRevisionMaps.sourceRevisionId, sourceRevisionId),
+      eq(schema.contentRevisionMaps.targetRevisionId, second.revisionId),
+    )).get()
+    expect(composedMap?.segments).not.toHaveLength(0)
+    const mappedProgress = db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, otherId)).get()!
+    expect(mappedProgress.progressData?.historicalPositions).toHaveLength(2)
+    expect(mappedProgress).toMatchObject({
+      progressRevisionId: sourceRevisionId,
+      coverageRevisionId: second.revisionId,
+    })
+    expect(mappedProgress.progressData?.intervals).not.toContainEqual([0.2, 0.4])
+  })
+
+  it('preserves current positions and coverage for a level-only structural edit', async () => {
+    const body = '同一段正文保留所有已读覆盖和当前阅读位置。'.repeat(12)
+    const { book } = await uploadBook(ownerId, new File([`第一章 启程\n\n${body}`], 'book.txt', { type: 'text/plain' }))
+    const sourceRevisionId = book.revisionId!
+    db.insert(schema.bookStates).values({
+      userId: otherId, bookVersionId: book.id, readStatus: 'reading', percent: 45,
+      cfi: 'epubcfi(/6/2!/4/4/1:10)', chapter: '第一章 启程', progressRevisionId: sourceRevisionId,
+      progressData: { progressRevisionId: sourceRevisionId, cfi: 'epubcfi(/6/2!/4/4/1:10)', chapter: '第一章 启程', percent: 45, fraction: 0.45, intervals: [[0.1, 0.7]], updatedAt: 100 },
+      readFraction: 0.6, updatedAt: 100,
+    }).run()
+    db.insert(schema.highlights).values({
+      id: createId('hl'), userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId,
+      cfiRange: 'epubcfi(/6/2!/4/4/1:10)', text: '保留引用', createdAt: 100, updatedAt: 100,
+    }).run()
+
+    const result = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: sourceRevisionId,
+      chapters: [{ id: 'ch-0', title: '第一章 启程', content: body, level: 2 }],
+    })
+
+    expect(result.unlocated).toEqual({ progress: 0, coverage: 0, highlights: 0, bookmarks: 0, notes: 0, pointReplacements: 0 })
+    const savedState = db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, otherId)).get()!
+    expect(savedState).toMatchObject({
+      percent: 45, readFraction: 0.6, progressRevisionId: result.revisionId,
+      progressData: {
+        intervals: [[0.1, 0.7]], progressRevisionId: result.revisionId,
+      },
+    })
+    expect(savedState.cfi).toBe('epubcfi(/6/2!/4/4/1:10)')
+    expect(db.select().from(schema.highlights).get()).toMatchObject({ revisionId: result.revisionId, relocation: 'ok' })
+  })
+
+  it('moves a point replacement only when its original snapshot maps exactly', async () => {
+    const title = '第一章 路标'
+    const body = '前置段落。可定位片段在这里。后续内容保持不变。'
+    const { book } = await uploadBook(ownerId, new File([`${title}\n\n${body}`], 'book.txt', { type: 'text/plain' }))
+    const sourceBook = await getActiveBook(ownerId, book.id)
+    const sourceTexts = await extractEpubSpineText(await bufferFromStream(await storage.getStorage().get(sourceBook.filePath)))
+    const sourceHref = [...sourceTexts.keys()][0]!
+    const originalOffset = sourceTexts.get(sourceHref)!.indexOf('可定位片段')
+    const ruleId = createId('replacement')
+    db.insert(schema.textReplacements).values({
+      id: ruleId, userId: otherId, bookId: null, bookVersionId: book.id, matchType: 'point',
+      spineHref: sourceHref, textOffset: originalOffset,
+      originalText: '可定位片段', createdAt: 100, updatedAt: 100,
+    }).run()
+
+    const inserted = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: book.revisionId!,
+      chapters: [{ id: 'ch-0', title, content: `新增前缀。${body}`, level: 1 }],
+    })
+    const movedRule = db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, ruleId)).get()!
+    expect(inserted.unlocated.pointReplacements).toBe(0)
+    expect(movedRule).toMatchObject({
+      relocation: 'ok', spineHref: sourceHref, textOffset: originalOffset + '新增前缀。'.length,
+    })
+
+    const rewritten = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: inserted.revisionId,
+      chapters: [{ id: 'ch-0', title, content: `新增前缀。${body.replace('可定位片段', '已改写内容')}`, level: 1 }],
+    })
+    expect(rewritten.unlocated.pointReplacements).toBe(1)
+    expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, ruleId)).get()).toMatchObject({
+      relocation: 'unresolved', originalText: '可定位片段',
+    })
+  })
+
+  it('preserves every other TXT chapter after adding two characters to an existing chapter', async () => {
+    const source = '序言文字。\n\n第一卷\n\n第一章\n\n第一段正文。\n\n第二章\n\n第二段正文。\n\n第二卷\n\n第三章\n\n第三段正文。'
+    const { book } = await uploadBook(ownerId, new File([source], 'book.txt', { type: 'text/plain' }))
+    const text = await getBookContent(ownerId, book.id)
+    const original = await getBookChapters(ownerId, book.id)
+    const input = original.map((chapter) => ({
+      id: chapter.id, title: chapter.title, level: chapter.level,
+      content: text.slice(chapter.contentStartOffset, chapter.endOffset).trim(),
+    }))
+    const edited = input.findIndex((chapter) => chapter.title === '第二章')
+    expect(edited).toBeGreaterThanOrEqual(0)
+    input[edited]!.content += '新增'
+    await saveEditorTxtContent(ownerId, book.id, { baseRevisionId: book.revisionId!, chapters: input })
+    const savedText = await getBookContent(ownerId, book.id)
+    const savedChapters = await getBookChapters(ownerId, book.id)
+    expect(savedChapters.map((chapter) => ({ title: chapter.title, level: chapter.level, content: savedText.slice(chapter.contentStartOffset, chapter.endOffset) })))
+      .toEqual(input.map(({ title, level, content }) => ({ title, level, content })))
+  })
+
+  it('preserves chapter boundaries after saving TXT with empty volume nodes', async () => {
+    const { book } = await uploadBook(ownerId, new File(['第一卷\n\n第一章\n\n原来的正文。\n\n第二卷\n\n第二章\n\n另一段正文。'], 'book.txt', { type: 'text/plain' }))
+    const input = [
+      { id: 'v1', title: '第一卷', content: '', level: 0 },
+      { id: 'c1', title: '第一章', content: '修改后的正文。', level: 1 },
+      { id: 'v2', title: '第二卷', content: '', level: 0 },
+      { id: 'c2', title: '第二章', content: '另一段正文。', level: 1 },
+    ]
+    const saved = await saveEditorTxtContent(ownerId, book.id, { baseRevisionId: book.revisionId!, chapters: input })
+    const text = await getBookContent(ownerId, book.id)
+    const chapters = await getBookChapters(ownerId, book.id)
+    expect(chapters.map((chapter) => ({ title: chapter.title, level: chapter.level, content: text.slice(chapter.contentStartOffset, chapter.endOffset) })))
+      .toEqual(input.map(({ title, level, content }) => ({ title, level, content })))
+    expect(text).toBe('第一卷\n\n第一章\n\n修改后的正文。\n\n第二卷\n\n第二章\n\n另一段正文。')
+    const reopened = chapters.map((chapter) => ({
+      id: chapter.id, title: chapter.title, level: chapter.level,
+      content: text.slice(chapter.contentStartOffset, chapter.endOffset),
+    }))
+    await saveEditorTxtContent(ownerId, book.id, { baseRevisionId: saved.revisionId, chapters: reopened })
+    const reopenedText = await getBookContent(ownerId, book.id)
+    const reopenedChapters = await getBookChapters(ownerId, book.id)
+    expect(reopenedChapters.map((chapter) => ({ title: chapter.title, level: chapter.level, content: reopenedText.slice(chapter.contentStartOffset, chapter.endOffset) })))
+      .toEqual(input.map(({ title, level, content }) => ({ title, level, content })))
+    const current = await getActiveBook(ownerId, book.id)
+    const spine = await loadEpubSpineMarkup(await bufferFromStream(await storage.getStorage().get(current.filePath)))
+    expect(spine).toHaveLength(4)
+    expect(spine[1]!.markup).toContain('修改后的正文。')
+    expect(spine[3]!.markup).toContain('另一段正文。')
+  })
+
+  it('maps visible text from a scroll position after a small TXT edit', async () => {
+    const body = Array.from({ length: 24 }, (_, index) => `第${index}段记录北方旧城的独特街巷、河流和星光，保留可验证的正文锚点。`).join('')
+    const { book } = await uploadBook(ownerId, new File([`第一章 启程\n\n${body}`], 'book.txt', { type: 'text/plain' }))
+    const revisionId = book.revisionId!
+    db.insert(schema.bookStates).values({
+      userId: otherId, bookVersionId: book.id, readStatus: 'reading', percent: 42,
+      cfi: 'chapter:0:0.42', progressRevisionId: revisionId,
+      progressData: { progressRevisionId: revisionId, cfi: 'chapter:0:0.42', contentCfi: 'epubcfi(/6/2!/4/4,/1:40,/1:50)', chapterIndex: 0, percent: 42, fraction: 0.42, intervals: [], updatedAt: 100 },
+      updatedAt: 100,
+    }).run()
+    const result = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: revisionId,
+      chapters: [{ id: 'ch-0', title: '第一章 启程', content: body.slice(0, -2), level: 1 }],
+    })
+    const state = db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, otherId)).get()!
+    expect(result.unlocated.progress).toBe(0)
+    expect(state.progressRevisionId).toBe(result.revisionId)
+    expect(state.cfi).toMatch(/^epubcfi\(/)
+  })
+
+  it('maps a valid CFI through consecutive body edits using the revision-scoped text anchor', async () => {
+    const body = Array.from({ length: 24 }, (_, index) => `第${index}段记录北方旧城的独特街巷、河流和星光，保留可验证的正文锚点。`).join('')
+    const { book } = await uploadBook(ownerId, new File([`第一章 启程\n\n${body}`], 'book.txt', { type: 'text/plain' }))
+    const firstRevisionId = book.revisionId!
+    db.insert(schema.bookStates).values({
+      userId: otherId, bookVersionId: book.id, readStatus: 'reading', percent: 42,
+      cfi: 'epubcfi(/6/2!/4/4/1:40)', chapter: '第一章 启程', progressRevisionId: firstRevisionId,
+      progressData: {
+        progressRevisionId: firstRevisionId, cfi: 'epubcfi(/6/2!/4/4/1:40)', chapter: '第一章 启程',
+        chapterIndex: 0, percent: 42, fraction: 0.42, intervals: [], updatedAt: 100,
+      },
+      updatedAt: 100,
+    }).run()
+
+    const first = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: firstRevisionId,
+      chapters: [{ id: 'ch-0', title: '第一章 启程', content: `${body}新增段落一。`, level: 1 }],
+    })
+    const firstState = db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, otherId)).get()!
+    expect(first.unlocated.progress).toBe(0)
+    expect(firstState.progressRevisionId).toBe(first.revisionId)
+    expect(firstState.progressData?.positionAnchor).toMatchObject({
+      revisionId: first.revisionId, spineHref: 'OEBPS/chapter-0001.xhtml', textOffset: expect.any(Number),
+    })
+
+    const second = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: first.revisionId,
+      chapters: [{ id: 'ch-0', title: '第一章 启程', content: `${body}新增段落一。新增段落二。`, level: 1 }],
+    })
+    const secondState = db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, otherId)).get()!
+    expect(second.unlocated.progress).toBe(0)
+    expect(secondState.progressRevisionId).toBe(second.revisionId)
+    expect(secondState.progressData?.positionAnchor).toMatchObject({ revisionId: second.revisionId })
+    expect(secondState.progressData?.historicalPositions).toHaveLength(2)
+  })
+
+  it('stores a selected private TOC rule in the same content revision and rejects rules owned by another user', async () => {
+    const { book } = await uploadBook(ownerId, new File(['第一章\n\n正文'], 'book.txt', { type: 'text/plain' }))
+    const patterns = [{ level: 1, regex: '^第一章', replacement: null, enabled: true }]
+    const ruleId = createId('toc')
+    const ruleTime = Date.now()
+    db.insert(schema.tocRules).values({ id: ruleId, userId: ownerId, name: '章节规则', patterns, createdAt: ruleTime, updatedAt: ruleTime }).run()
+
+    const saved = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: book.revisionId!,
+      chapters: [{ id: 'ch-0', title: '第一章', content: '正文', level: 1 }],
+      tocRuleSelection: { ruleId, patterns, label: '章节规则', auto: false },
+    })
+    const revision = db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, saved.revisionId)).get()!
+    expect(revision.meta).toMatchObject({ tocRuleId: ruleId, tocRuleLabel: '章节规则', tocRuleAuto: false })
+
+    const secondBook = await uploadBook(ownerId, new File(['第一章\n\n正文'], 'other.txt', { type: 'text/plain' }))
+    const foreignRuleId = createId('toc')
+    db.insert(schema.tocRules).values({ id: foreignRuleId, userId: otherId, name: '他人规则', patterns, createdAt: ruleTime, updatedAt: ruleTime }).run()
+    await expect(saveEditorTxtContent(ownerId, secondBook.book.id, {
+      baseRevisionId: secondBook.book.revisionId!,
+      chapters: [{ id: 'ch-0', title: '第一章', content: '正文', level: 1 }],
+      tocRuleSelection: { ruleId: foreignRuleId, patterns, label: '他人规则', auto: false },
+    })).rejects.toThrow('does not belong')
+  })
+
+  it('leaves the active revision unchanged when storing the new content blob fails', async () => {
+    const memory = createMemoryStorage()
+    vi.spyOn(storage, 'getStorage').mockReturnValue(memory.driver)
+    const { book } = await uploadBook(ownerId, new File(['第一章\n\n原始正文'], 'book.txt', { type: 'text/plain' }))
+    const sourceRevisionId = book.revisionId!
+    vi.spyOn(memory.driver, 'put').mockRejectedValueOnce(new Error('simulated storage failure'))
+
+    await expect(saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: sourceRevisionId,
+      chapters: [{ id: 'ch-0', title: '第一章', content: '新正文', level: 1 }],
+    })).rejects.toThrow('simulated storage failure')
+
+    expect(db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.bookVersionId, book.id)).all()).toHaveLength(1)
+    expect((await getActiveBook(ownerId, book.id)).revisionId).toBe(sourceRevisionId)
+    expect(await getBookContent(ownerId, book.id)).toContain('原始正文')
+  })
+
+  it('decodes an imported TXT file with the existing server detector without writing a revision', async () => {
+    const { book } = await uploadBook(ownerId, new File(['第一章\n\n正文'], 'book.txt', { type: 'text/plain' }))
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('/api/v1/*', async (c, next) => {
+      c.set('user', { id: ownerId, username: 'owner', role: 'owner', avatarKey: null })
+      return next()
+    })
+    app.route('/api/v1/books', booksRoutes)
+    const form = new FormData()
+    const decodedText = '中文内容测试，这是一段用于确认 TXT 文件编码的文字。'.repeat(4)
+    form.append('file', new File([iconv.encode(decodedText, 'gbk')], 'import.txt', { type: 'text/plain' }))
+
+    const response = await app.request(`/api/v1/books/${book.id}/editor-txt-decode`, { method: 'POST', body: form })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ data: { text: decodedText } })
+    expect(db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.bookVersionId, book.id)).all()).toHaveLength(1)
+
+    const denied = new Hono()
+    denied.onError(errorHandler)
+    denied.use('/api/v1/*', async (c, next) => {
+      c.set('user', { id: otherId, username: 'other', role: 'user', avatarKey: null })
+      return next()
+    })
+    denied.route('/api/v1/books', booksRoutes)
+    const deniedForm = new FormData()
+    deniedForm.append('file', new File([iconv.encode(decodedText, 'gbk')], 'import.txt', { type: 'text/plain' }))
+    const deniedResponse = await denied.request(`/api/v1/books/${book.id}/editor-txt-decode`, { method: 'POST', body: deniedForm })
+    expect(deniedResponse.status).toBe(404)
+  })
+})
+
+describe('editor EPUB save', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let otherId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    otherId = seedUser(db, 'other')
+  })
+
+  it('keeps exact point replacements when only EPUB navigation and spine order change', async () => {
+    const epub = await convertTxtToEpub({ title: 'EPUB Draft', id: 'epub-navigation' }, [
+      { id: 'one', title: 'One', level: 0 }, { id: 'two', title: 'Two', level: 0 },
+    ], (index) => `<p>Body ${index + 1} has enough unchanged words and a link.</p>`)
+    const book = seedBook(db, ownerId, { format: 'epub', size: epub.length, filePath: `blobs/epub/${createId('hash')}.epub` })
+    await storage.getStorage().put(book.filePath, epub)
+    const source = await getEditorEpubContent(ownerId, book.id)
+    const firstHref = source.spineOrder[0]!
+    const firstText = (await extractEpubSpineText(epub)).get(firstHref)!
+    const textOffset = firstText.indexOf('Body 1')
+    expect(textOffset).toBeGreaterThanOrEqual(0)
+    const replacementId = createId('replacement')
+    db.insert(schema.textReplacements).values({
+      id: replacementId, userId: otherId, bookId: null, bookVersionId: book.id,
+      matchType: 'point', spineHref: firstHref, textOffset,
+      originalText: 'Body 1', createdAt: 100, updatedAt: 100,
+    }).run()
+
+    const saved = await saveEditorEpubContent(ownerId, book.id, {
+      baseRevisionId: source.revisionId,
+      documents: [],
+      tocEntries: source.tocEntries.map((entry, index) => index === 0 ? { ...entry, title: 'Renamed One' } : entry),
+      spineOrder: source.spineOrder.slice().reverse(),
+    })
+
+    expect(saved.unlocated.pointReplacements).toBe(0)
+    expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, replacementId)).get()).toMatchObject({
+      relocation: 'ok', spineHref: firstHref, textOffset,
+    })
+  })
+
+  it('loads raw spine XHTML and saves body, TOC and spine order as one revision for all readers', async () => {
+    const epub = await convertTxtToEpub({ title: 'EPUB Draft', id: 'epub-draft' }, [
+      { id: 'one', title: 'One', level: 0 }, { id: 'two', title: 'Two', level: 0 },
+    ], (index) => `<p>Body ${index + 1} has enough unchanged words and a link.</p>`)
+    const book = seedBook(db, ownerId, { format: 'epub', size: epub.length, filePath: `blobs/epub/${createId('hash')}.epub` })
+    await storage.getStorage().put(book.filePath, epub)
+    const source = await getEditorEpubContent(ownerId, book.id)
+    expect(source.documents[0]?.content).toContain('<body')
+    expect(source.tocEntries.map((entry) => entry.title)).toEqual(['One', 'Two'])
+    const sourceRevisionId = source.revisionId
+    const untouchedHref = source.spineOrder[1]!
+    const changedHref = source.spineOrder[0]!
+    const changedText = (await extractEpubSpineText(epub)).get(changedHref)!
+    const changedMarkup = source.documents.find((document) => document.href === changedHref)!.content
+    const stableQuote = 'enough unchanged words'
+    const stableStart = changedText.indexOf(stableQuote)
+    const editedQuote = 'Body 1'
+    const editedStart = changedText.indexOf(editedQuote)
+    const stableRangeCfi = createEpubCfiTextRange(changedMarkup, 0, stableStart, stableStart + stableQuote.length)!
+    const stablePointCfi = createEpubCfiTextOffset(changedMarkup, 0, stableStart + 2)!
+    const editedRangeCfi = createEpubCfiTextRange(changedMarkup, 0, editedStart, editedStart + editedQuote.length)!
+    const stableHighlightId = createId('hl')
+    const changedHighlightId = createId('hl')
+    const stableBookmarkId = createId('bm')
+    const stableIdeaId = createId('idea')
+    const changedIdeaId = createId('idea')
+    const stableReplacementId = createId('replacement')
+    const changedReplacementId = createId('replacement')
+    db.insert(schema.highlights).values({
+      id: stableHighlightId, userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId,
+      cfiRange: stableRangeCfi, chapterHref: changedHref, text: stableQuote, createdAt: 100, updatedAt: 100,
+    }).run()
+    db.insert(schema.highlights).values({
+      id: changedHighlightId, userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId,
+      cfiRange: editedRangeCfi, chapterHref: changedHref, text: editedQuote, createdAt: 100, updatedAt: 100,
+    }).run()
+    db.insert(schema.bookmarks).values({
+      id: stableBookmarkId, userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId,
+      cfi: stablePointCfi, chapterHref: changedHref, contextText: stableQuote, createdAt: 100, updatedAt: 100,
+    }).run()
+    db.insert(schema.ideas).values({
+      id: stableIdeaId, userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId,
+      cfiRange: stableRangeCfi, chapterHref: changedHref, text: stableQuote, note: 'same-document note', createdAt: 100, updatedAt: 100,
+    }).run()
+    db.insert(schema.ideas).values({
+      id: changedIdeaId, userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId,
+      cfiRange: editedRangeCfi, chapterHref: changedHref, text: editedQuote, note: 'keep original quote', createdAt: 100, updatedAt: 100,
+    }).run()
+    db.insert(schema.textReplacements).values({
+      id: stableReplacementId, userId: otherId, bookId: null, bookVersionId: book.id,
+      matchType: 'point', spineHref: changedHref, textOffset: stableStart,
+      originalText: stableQuote, createdAt: 100, updatedAt: 100,
+    }).run()
+    db.insert(schema.textReplacements).values({
+      id: changedReplacementId, userId: otherId, bookId: null, bookVersionId: book.id,
+      matchType: 'point', spineHref: changedHref, textOffset: editedStart,
+      originalText: editedQuote, createdAt: 100, updatedAt: 100,
+    }).run()
+    db.insert(schema.highlights).values({
+      id: createId('hl'), userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId,
+      cfiRange: 'epubcfi(/6/4[chapter-0002.xhtml]!/4/4/1:5)', chapterHref: untouchedHref,
+      text: '未修改章节中的划线', createdAt: 100, updatedAt: 100,
+    }).run()
+    db.insert(schema.bookmarks).values({
+      id: createId('bm'), userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId,
+      cfi: 'epubcfi(/6/4[chapter-0002.xhtml]!/4/4/1:5)', chapterHref: untouchedHref,
+      contextText: '未修改章节中的书签', createdAt: 100, updatedAt: 100,
+    }).run()
+    db.insert(schema.ideas).values({
+      id: createId('idea'), userId: otherId, bookVersionId: book.id, revisionId: sourceRevisionId,
+      cfiRange: 'epubcfi(/6/4[chapter-0002.xhtml]!/4/4/1:5)', chapterHref: untouchedHref,
+      text: '未修改章节中的引用', note: '保留笔记', createdAt: 100, updatedAt: 100,
+    }).run()
+    const otherStateTime = Date.now()
+    db.insert(schema.bookStates).values({
+      userId: otherId, bookVersionId: book.id, readStatus: 'reading', percent: 25,
+      progressRevisionId: sourceRevisionId, coverageRevisionId: sourceRevisionId,
+      progressData: { progressRevisionId: sourceRevisionId, coverageRevisionId: sourceRevisionId, percent: 25, fraction: 0.25, intervals: [[0.1, 0.5]], updatedAt: otherStateTime },
+      readFraction: 0.4, updatedAt: otherStateTime,
+    }).run()
+    const mappedReaderId = seedUser(db, 'mapped-reader')
+    db.insert(schema.bookStates).values({
+      userId: mappedReaderId, bookVersionId: book.id, readStatus: 'reading', percent: 35,
+      cfi: 'epubcfi(/6/2[chapter-0001.xhtml]!/4/4/1:30)', chapter: 'One',
+      progressRevisionId: sourceRevisionId, coverageRevisionId: sourceRevisionId,
+      progressData: {
+        progressRevisionId: sourceRevisionId, coverageRevisionId: sourceRevisionId,
+        cfi: 'epubcfi(/6/2[chapter-0001.xhtml]!/4/4/1:30)', chapter: 'One', chapterIndex: 0,
+        percent: 35, fraction: 0.35, intervals: [], updatedAt: otherStateTime,
+      },
+      updatedAt: otherStateTime,
+    }).run()
+    const unmappedReaderId = seedUser(db, 'unmapped-reader')
+    db.insert(schema.bookStates).values({
+      userId: unmappedReaderId, bookVersionId: book.id, readStatus: 'reading', percent: 70,
+      progressRevisionId: 'missing-old-revision', coverageRevisionId: 'missing-old-revision',
+      progressData: { progressRevisionId: 'missing-old-revision', coverageRevisionId: 'missing-old-revision', cfi: 'old-cfi', percent: 70, fraction: 0.7, intervals: [[0.2, 0.8]], updatedAt: otherStateTime },
+      readFraction: 0.6, updatedAt: otherStateTime,
+    }).run()
+    const first = source.documents[0]!
+    const styleOnlyDocument = source.documents.find((document) => document.href === untouchedHref)!
+    const result = await saveEditorEpubContent(ownerId, book.id, {
+      baseRevisionId: sourceRevisionId,
+      documents: [
+        { href: first.href, content: first.content.replace('Body 1', 'Edited body 1') },
+        { href: styleOnlyDocument.href, content: styleOnlyDocument.content.replace('Body 2', '<strong>Body 2</strong>') },
+      ],
+      tocEntries: [
+        { ...source.tocEntries[1]!, title: 'Renamed two' },
+        source.tocEntries[0]!,
+      ],
+      spineOrder: [...source.spineOrder].reverse(),
+    })
+
+    const reopened = await getEditorEpubContent(ownerId, book.id)
+    const storedPackage = await readEpubEditorPackage(await bufferFromStream(await storage.getStorage().get(
+      db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, result.revisionId)).get()!.blobKey,
+    )))
+    expect(reopened.revisionId).toBe(result.revisionId)
+    expect(reopened.spineOrder).toEqual(source.spineOrder.slice().reverse())
+    expect(reopened.documents.find((document) => document.href === first.href)?.content).toContain('Edited body 1')
+    expect(storedPackage.tocEntries[0]?.title).toBe('Renamed two')
+    expect(db.select().from(schema.highlights).where(eq(schema.highlights.chapterHref, untouchedHref)).get()).toMatchObject({ revisionId: result.revisionId, relocation: 'ok', chapterHref: untouchedHref })
+    expect(db.select().from(schema.bookmarks).where(eq(schema.bookmarks.chapterHref, untouchedHref)).get()).toMatchObject({ revisionId: result.revisionId, relocation: 'ok', chapterHref: untouchedHref })
+    expect(db.select().from(schema.ideas).where(eq(schema.ideas.chapterHref, untouchedHref)).get()).toMatchObject({ revisionId: result.revisionId, relocation: 'ok', chapterHref: untouchedHref, note: '保留笔记' })
+    const mappedStableHighlight = db.select().from(schema.highlights).where(eq(schema.highlights.id, stableHighlightId)).get()!
+    expect(mappedStableHighlight).toMatchObject({ revisionId: result.revisionId, relocation: 'ok', chapterHref: changedHref })
+    const mappedStableBookmark = db.select().from(schema.bookmarks).where(eq(schema.bookmarks.id, stableBookmarkId)).get()!
+    expect(mappedStableBookmark).toMatchObject({ revisionId: result.revisionId, relocation: 'ok', chapterHref: changedHref })
+    expect(db.select().from(schema.highlights).where(eq(schema.highlights.id, changedHighlightId)).get()).toMatchObject({
+      revisionId: sourceRevisionId, relocation: 'unresolved', cfiRange: editedRangeCfi, text: editedQuote,
+    })
+    expect(db.select().from(schema.ideas).where(eq(schema.ideas.id, stableIdeaId)).get()).toMatchObject({
+      revisionId: result.revisionId, relocation: 'ok', chapterHref: changedHref, cfiRange: mappedStableHighlight.cfiRange,
+    })
+    expect(db.select().from(schema.ideas).where(eq(schema.ideas.id, changedIdeaId)).get()).toMatchObject({
+      revisionId: sourceRevisionId, relocation: 'unresolved', cfiRange: editedRangeCfi, text: editedQuote, note: 'keep original quote',
+    })
+    expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, stableReplacementId)).get()).toMatchObject({
+      relocation: 'ok', spineHref: changedHref, textOffset: expect.any(Number), originalText: stableQuote,
+    })
+    expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, changedReplacementId)).get()).toMatchObject({
+      relocation: 'unresolved', spineHref: changedHref, textOffset: editedStart, originalText: editedQuote,
+    })
+    const savedEpub = await bufferFromStream(await storage.getStorage().get(
+      db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, result.revisionId)).get()!.blobKey,
+    ))
+    const savedSpine = await loadEpubSpineMarkup(savedEpub)
+    const mappedRange = resolveEpubCfiTextRange(savedSpine.find((section) => section.href === changedHref)!.markup, mappedStableHighlight.cfiRange!)
+    expect(mappedRange).not.toBeNull()
+    expect((await extractEpubSpineText(savedEpub)).get(changedHref)?.slice(mappedRange!.start, mappedRange!.end)).toBe(stableQuote)
+    const savedRevision = db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, result.revisionId)).get()!
+    expect(savedRevision.meta.chapters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: 'Renamed two', level: 1 }),
+      expect.objectContaining({ title: 'One', level: 1 }),
+    ]))
+    expect(savedRevision.meta.wordCount).toBeLessThan(source.documents.reduce((sum, document) => sum + document.content.length, 0))
+    const savedMap = db.select().from(schema.contentRevisionMaps).where(eq(schema.contentRevisionMaps.targetRevisionId, result.revisionId)).get()!
+    expect(savedMap.segments).not.toHaveLength(0)
+    expect(savedMap.sourceSections).toHaveLength(2)
+    expect(db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, otherId)).get()).toMatchObject({
+      progressRevisionId: sourceRevisionId, coverageRevisionId: result.revisionId,
+      progressData: { historicalPositions: [{ progressRevisionId: sourceRevisionId, percent: 25, intervals: [[0.1, 0.5]] }] },
+    })
+    expect(db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, mappedReaderId)).get()).toMatchObject({
+      progressRevisionId: result.revisionId,
+      progressData: {
+        positionAnchor: { revisionId: result.revisionId, spineHref: first.href, textOffset: expect.any(Number), cfi: expect.any(String) },
+        chapterIndex: 1,
+      },
+    })
+    expect(db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, unmappedReaderId)).get()).toMatchObject({
+      progressRevisionId: 'missing-old-revision', coverageRevisionId: 'missing-old-revision',
+      progressData: { intervals: [[0.2, 0.8]], historicalPositions: [{ coverageRevisionId: 'missing-old-revision', intervals: [[0.2, 0.8]] }] },
+    })
+    const secondDocument = reopened.documents[0]!
+    const secondSave = await saveEditorEpubContent(ownerId, book.id, {
+      baseRevisionId: result.revisionId,
+      documents: [{ href: secondDocument.href, content: secondDocument.content.replace('Body 2', 'Edited body 2') }],
+      tocEntries: reopened.tocEntries,
+      spineOrder: reopened.spineOrder,
+    })
+    const repeatedlyMapped = db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, otherId)).get()!
+    expect(repeatedlyMapped.progressRevisionId).toBe(sourceRevisionId)
+    expect(repeatedlyMapped.coverageRevisionId).toBe(secondSave.revisionId)
+    expect(repeatedlyMapped.progressData?.fraction).toBeNull()
+    expect(repeatedlyMapped.progressData?.historicalPositions).toHaveLength(2)
+    const composedMap = db.select().from(schema.contentRevisionMaps).where(and(
+      eq(schema.contentRevisionMaps.sourceRevisionId, sourceRevisionId),
+      eq(schema.contentRevisionMaps.targetRevisionId, secondSave.revisionId),
+    )).get()
+    expect(composedMap?.sourceSections).toHaveLength(2)
+    await expect(saveEditorEpubContent(ownerId, book.id, {
+      baseRevisionId: sourceRevisionId, documents: [], tocEntries: reopened.tocEntries, spineOrder: reopened.spineOrder,
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
   })
 })
 

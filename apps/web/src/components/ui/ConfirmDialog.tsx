@@ -14,6 +14,9 @@ export interface ConfirmDialogProps {
   warning?: ReactNode
   icon?: ReactNode
   confirmLabel: string
+  cancelLabel?: string
+  footerLeading?: ReactNode
+  dismissible?: boolean
   confirmVariant?: 'danger' | 'primary'
   confirmDisabled?: boolean
   confirmationText?: string
@@ -36,6 +39,9 @@ export default function ConfirmDialog({
   warning,
   icon,
   confirmLabel,
+  cancelLabel,
+  footerLeading,
+  dismissible = true,
   confirmVariant = 'danger',
   confirmDisabled,
   confirmationText,
@@ -60,7 +66,7 @@ export default function ConfirmDialog({
   const disabled = confirmDisabled || submitting || (needsText && (input === '' || input !== confirmationText))
 
   function close() {
-    if (!submittingRef.current) closeRef.current()
+    if (dismissible && !submittingRef.current) closeRef.current()
   }
 
   async function confirm() {
@@ -94,7 +100,7 @@ export default function ConfirmDialog({
         e.preventDefault()
         e.stopPropagation()
         e.stopImmediatePropagation()
-        if (!submittingRef.current) closeRef.current()
+        if (dismissible && !submittingRef.current) closeRef.current()
         return
       }
 
@@ -139,7 +145,7 @@ export default function ConfirmDialog({
         previousActiveElement.focus()
       }
     }
-  }, [])
+  }, [dismissible])
 
   return createPortal(
     <div
@@ -178,7 +184,7 @@ export default function ConfirmDialog({
               {title}
             </h2>
           </div>
-          <button
+          {dismissible && <button
             type="button"
             onClick={close}
             disabled={submitting}
@@ -189,7 +195,7 @@ export default function ConfirmDialog({
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
-          </button>
+          </button>}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] px-5 py-4 space-y-3.5 text-sm leading-relaxed text-stone-600 dark:text-stone-300">
@@ -246,8 +252,9 @@ export default function ConfirmDialog({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2.5 border-t border-stone-100 bg-stone-50/50 px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-stone-800 dark:bg-stone-900/60">
-          <Button
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2.5 border-t border-stone-100 bg-stone-50/50 px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-stone-800 dark:bg-stone-900/60">
+          {footerLeading}
+          {dismissible && <Button
             type="button"
             variant="secondary"
             size="md"
@@ -256,8 +263,8 @@ export default function ConfirmDialog({
             autoFocus={!needsText}
             className="h-9 px-4 text-xs sm:text-sm"
           >
-            {_('library.cancel')}
-          </Button>
+            {cancelLabel ?? _('library.cancel')}
+          </Button>}
           <Button
             type="button"
             variant={confirmVariant}

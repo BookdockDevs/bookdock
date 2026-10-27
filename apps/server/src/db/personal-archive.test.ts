@@ -54,9 +54,19 @@ describe('personal archive upgrade', () => {
         VALUES ('review-file','owner','review','attachment','review-draft','version','review','image.webp','review-file.txt','text/plain',10,1,1);
     `)
     const tables = ['highlights', 'bookmarks', 'ideas', 'idea_comments', 'idea_likes', 'idea_comment_likes', 'book_review_comments', 'book_review_likes', 'book_review_comment_likes', 'content_files']
-    const before = tables.map((table) => sqlite.prepare(`SELECT * FROM ${table}`).all())
+    const snapshot = () => tables.map((table) => (sqlite.prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>)
+      .map((row) => {
+        if (table === 'bookmarks' || table === 'ideas') {
+          const { relocation: _relocation, ...retained } = row
+          return retained
+        }
+        return row
+      }))
+    const before = snapshot()
     migrate(db, { migrationsFolder })
-    expect(tables.map((table) => sqlite.prepare(`SELECT * FROM ${table}`).all())).toEqual(before)
+    expect(snapshot()).toEqual(before)
+    expect(sqlite.prepare('SELECT relocation FROM bookmarks WHERE id = ?').get('bookmark')).toEqual({ relocation: 'ok' })
+    expect(sqlite.prepare('SELECT relocation FROM ideas WHERE id = ?').get('idea')).toEqual({ relocation: 'ok' })
     expect(sqlite.pragma('foreign_keys', { simple: true })).toBe(1)
     expect(sqlite.pragma('foreign_key_check')).toEqual([])
     expect(db.select().from(schema.readingArchives).where(eq(schema.readingArchives.userId, 'owner')).get()).toMatchObject({ title: 'Private title', author: 'Writer', format: 'epub', coverKey: 'cover.jpg' })
@@ -64,7 +74,7 @@ describe('personal archive upgrade', () => {
     expect(db.select().from(schema.bookReviews).get()?.readBookVersionId).toBe('version')
     db.delete(schema.libraryBooks).where(eq(schema.libraryBooks.id, 'work')).run()
     db.delete(schema.bookVersions).where(eq(schema.bookVersions.id, 'version')).run()
-    expect(tables.map((table) => sqlite.prepare(`SELECT * FROM ${table}`).all())).toEqual(before)
+    expect(snapshot()).toEqual(before)
     expect(db.select().from(schema.bookReviews).all()).toHaveLength(1)
     vi.spyOn(client, 'getDb').mockReturnValue(db)
     vi.spyOn(storage, 'getStorage').mockReturnValue({ exists: async (key: string) => key === 'cover.jpg', get: async () => Readable.from(Buffer.from('cover')) } as unknown as ReturnType<typeof storage.getStorage>)

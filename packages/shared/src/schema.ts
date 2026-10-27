@@ -4,7 +4,7 @@ import { isOrderedReadingRange, readingRangeShape } from './reading-range'
 
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
 import { BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, LIBRARY_SORT_MODES, RECENTLY_READ_STYLES } from './contract'
-import { ANNOTATION_MAX_TEXT_LENGTH, BOOKMARK_CONTEXT_MAX_LENGTH, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
+import { ANNOTATION_MAX_TEXT_LENGTH, BOOKMARK_CONTEXT_MAX_LENGTH, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, CONTENT_EDITOR_MAX_ITEMS, CONTENT_EDITOR_MAX_TEXT_CHARS, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 import { authorListSchema } from './library'
 import { contentFileAssociationSchema } from './content-file'
@@ -48,7 +48,9 @@ export const legadoExploreSchema = z.object({
 })
 
 export const readingProgressUpdateSchema = z.object({
+  revisionId: z.string().min(1).optional(),
   cfi: z.string().optional(),
+  contentCfi: z.string().max(10000).optional(),
   chapter: z.string().optional(),
   chapterIndex: z.number().int().min(-1).max(1_000_000).optional(),
   percent: z.number().min(0).max(100),
@@ -646,6 +648,43 @@ export const reTocSchema = z.object({
 export const appendContentSchema = z.object({
   text: z.string().min(1).refine((value) => value.trim().length > 0, 'text is required'),
   startOffset: z.coerce.number().int().min(0).optional(),
+})
+
+export const editorTxtSaveSchema = z.object({
+  baseRevisionId: z.string().min(1).max(128),
+  chapters: z.array(z.object({
+    id: z.string().min(1).max(128),
+    title: z.string().max(2000),
+    content: z.string(),
+    level: z.number().int().min(0).max(20),
+    structureOnlyTitle: z.boolean().optional(),
+  })).min(1).max(CONTENT_EDITOR_MAX_ITEMS),
+  tocRuleSelection: z.object({
+    ruleId: z.string().max(128).nullable(),
+    patterns: tocRulePatternsSchema.nullable(),
+    label: z.string().max(200).nullable(),
+    auto: z.boolean(),
+  }).optional(),
+}).refine((value) => value.chapters.reduce((sum, chapter) => sum + chapter.title.length + chapter.content.length, 0) <= CONTENT_EDITOR_MAX_TEXT_CHARS, {
+  message: 'editor content is too large',
+  path: ['chapters'],
+})
+
+export const editorEpubSaveSchema = z.object({
+  baseRevisionId: z.string().min(1).max(128),
+  documents: z.array(z.object({
+    href: z.string().min(1).max(2000),
+    content: z.string(),
+  })).max(CONTENT_EDITOR_MAX_ITEMS),
+  tocEntries: z.array(z.object({
+    href: z.string().min(1).max(2000),
+    title: z.string().max(2000),
+    level: z.number().int().min(1).max(20),
+  })).max(CONTENT_EDITOR_MAX_ITEMS),
+  spineOrder: z.array(z.string().min(1).max(2000)).max(CONTENT_EDITOR_MAX_ITEMS),
+}).refine((value) => value.documents.reduce((sum, document) => sum + document.content.length, 0) <= CONTENT_EDITOR_MAX_TEXT_CHARS, {
+  message: 'editor EPUB content is too large',
+  path: ['documents'],
 })
 
 export const setupSchema = z.object({

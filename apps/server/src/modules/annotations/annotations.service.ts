@@ -103,7 +103,7 @@ export async function listAnnotations(userId: string, bookId: string) {
 
   return [
     ...hl.map((row) => ({ ...toRes('highlight', row), revisionId: row.revisionId, locationAvailable: row.relocation !== 'unresolved' && (!row.revisionId || row.revisionId === currentRevisionId) })),
-    ...bm.map((row) => ({ ...toRes('bookmark', row), revisionId: row.revisionId, locationAvailable: !row.revisionId || row.revisionId === currentRevisionId })),
+    ...bm.map((row) => ({ ...toRes('bookmark', row), revisionId: row.revisionId, locationAvailable: row.relocation !== 'unresolved' && (!row.revisionId || row.revisionId === currentRevisionId) })),
     // Legacy ideas predate revision provenance (revisionId null): they remain
     // locatable via CFI, so only an explicit revision mismatch disables them.
     ...ideaRows.map((row) => {
@@ -114,7 +114,7 @@ export async function listAnnotations(userId: string, bookId: string) {
         likeCount: ideaLike?.count ?? 0,
         liked: ideaLike?.liked ?? false,
         commentCount,
-        locationAvailable: !row.revisionId || !currentRevisionId || row.revisionId === currentRevisionId,
+        locationAvailable: row.relocation !== 'unresolved' && (!row.revisionId || !currentRevisionId || row.revisionId === currentRevisionId),
       }
     }),
   ]

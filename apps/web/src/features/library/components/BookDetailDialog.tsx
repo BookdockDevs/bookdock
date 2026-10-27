@@ -359,28 +359,20 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     // library boundary, so the affordance never depends on which library a book
     // came from.
     const workMenuItems: MoreActionsMenuItem[] =
-      workVersion?.format === 'txt' && workCanEditContent
+      (workVersion?.format === 'txt' || workVersion?.format === 'epub') && workCanEditContent
         ? [
           {
-            key: 'toc',
-            label: _('library.changeTocRule'),
-            icon: (
-              <>
-                <line x1="8" y1="6" x2="21" y2="6" />
-                <line x1="8" y1="12" x2="21" y2="12" />
-                <line x1="8" y1="18" x2="21" y2="18" />
-                <line x1="3" y1="6" x2="3.01" y2="6" />
-                <line x1="3" y1="12" x2="3.01" y2="12" />
-                <line x1="3" y1="18" x2="3.01" y2="18" />
-              </>
-            ),
-            onSelect: () => setWorkTocOpen(true),
-          },
-          {
-            key: 'append',
-            label: _('library.appendContent'),
-            icon: <path d="M12 5v14M5 12h14" />,
-            onSelect: () => setWorkAppendOpen(true),
+            key: 'content-editor',
+            label: _('library.contentEditor'),
+            icon: <path d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-4-4L4 16v4M13.5 6.5l4 4" />,
+            onSelect: () => {
+              closeDialog()
+              void navigate({
+                to: '/books/$id/editor',
+                params: { id: workVersion.bookVersionId },
+                search: { libraryId: work.library.id, libraryBookId: work.work.id, versionLinkId: workVersion.id },
+              })
+            },
           },
         ]
         : []
@@ -539,28 +531,16 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const identifier = rawId && (bookmeta?.isbn || !isMachineId(rawId)) ? rawId : ''
 
   const privateMenuItems: MoreActionsMenuItem[] =
-    !readOnly && !isLibraryOwned && displayBook.format === 'txt'
+    !readOnly && !isLibraryOwned && (displayBook.format === 'txt' || displayBook.format === 'epub')
       ? [
         {
-          key: 'toc',
-          label: _('library.changeTocRule'),
-          icon: (
-            <>
-              <line x1="8" y1="6" x2="21" y2="6" />
-              <line x1="8" y1="12" x2="21" y2="12" />
-              <line x1="8" y1="18" x2="21" y2="18" />
-              <line x1="3" y1="6" x2="3.01" y2="6" />
-              <line x1="3" y1="12" x2="3.01" y2="12" />
-              <line x1="3" y1="18" x2="3.01" y2="18" />
-            </>
-          ),
-          onSelect: () => setTocRuleOpen(true),
-        },
-        {
-          key: 'append',
-          label: _('library.appendContent'),
-          icon: <path d="M12 5v14M5 12h14" />,
-          onSelect: () => setAppendContentOpen(true),
+          key: 'content-editor',
+          label: _('library.contentEditor'),
+          icon: <path d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-4-4L4 16v4M13.5 6.5l4 4" />,
+          onSelect: () => {
+            closeDialog()
+            void navigate({ to: '/books/$id/editor', params: { id: book.id } })
+          },
         },
       ]
       : []

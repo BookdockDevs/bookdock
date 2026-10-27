@@ -30,6 +30,7 @@ import { sourceStillReadable } from './library-access'
 import { createAnnotation, listAnnotations } from '../annotations/annotations.service'
 import { addReadingTime } from '../reading-records/reading-records.service'
 import { updateReaderBookSettings } from '../books/reader-settings.service'
+import { saveManagedEditorTxtContent } from '../books/content-editor.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -261,6 +262,36 @@ describe('add-to-private (7.x)', () => {
     // A later city write still marks exactly once.
     await appendCityVersionContent(ownerId, libraryId, city.libraryBookId, city.versionLinkId!, '第二章\n更新')
     expect((await (await app.request(url)).json()).data.hasUnreadUpdate).toBe(true)
+  })
+
+  it('saves a managed TXT revision for every reader of the shared BookVersion', async () => {
+    const city = await seedCityBook()
+    await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!)
+    const current = await getActiveBook(ownerId, city.bookVersionId)
+    db.update(schema.bookStates).set({
+      cfi: 'epubcfi(/6/2!/4/2:3)',
+      percent: 25,
+      progressRevisionId: current.revisionId,
+      progressData: { progressRevisionId: current.revisionId, cfi: 'epubcfi(/6/2!/4/2:3)', percent: 25, intervals: [], updatedAt: 10 },
+    }).where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).run()
+
+    await expect(saveManagedEditorTxtContent(outsiderId, libraryId, city.libraryBookId, city.versionLinkId!, city.bookVersionId, {
+      baseRevisionId: current.revisionId!,
+      chapters: [{ id: 'chapter-0', title: '第一章', content: '不应写入', level: 1 }],
+    })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+
+    const result = await saveManagedEditorTxtContent(ownerId, libraryId, city.libraryBookId, city.versionLinkId!, city.bookVersionId, {
+      baseRevisionId: current.revisionId!,
+      chapters: [{ id: 'chapter-0', title: '第一章', content: '改写后的正文', level: 1 }],
+    })
+    const memberState = db.select().from(schema.bookStates)
+      .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).get()!
+    expect(memberState).toMatchObject({ cfi: null, percent: 0, progressRevisionId: current.revisionId })
+    expect(memberState.progressData?.historicalPositions).toHaveLength(1)
+    expect(db.select().from(schema.libraryBookVersions).where(and(
+      eq(schema.libraryBookVersions.libraryId, memberPrivateId()),
+      eq(schema.libraryBookVersions.bookVersionId, city.bookVersionId),
+    )).get()?.pinnedRevisionId).toBe(result.revisionId)
   })
 
   it('collects a version into the private library with pinned source and metadata', async () => {

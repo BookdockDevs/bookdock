@@ -65,6 +65,12 @@ describe('activity migration', () => {
     removeReadingProjectionSchema(sqlite)
     sqlite.exec(`
       DROP TABLE activity_events;
+      DROP TABLE content_revision_maps;
+      ALTER TABLE book_states DROP COLUMN progress_revision_id;
+      ALTER TABLE book_states DROP COLUMN coverage_revision_id;
+      ALTER TABLE bookmarks DROP COLUMN relocation;
+      ALTER TABLE ideas DROP COLUMN relocation;
+      ALTER TABLE text_replacements DROP COLUMN relocation;
       DELETE FROM __drizzle_migrations WHERE created_at >= 1793300000000;
     `)
     sqlite.exec(`

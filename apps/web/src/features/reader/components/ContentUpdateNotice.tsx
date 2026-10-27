@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
-import type { BookDetailRes } from '@bookdock/shared'
+import type { BookDetailRes, ReadingProgressRes } from '@bookdock/shared'
 
 import { apiPut } from '@/api/client'
 import { notify } from '@/lib/notifications'
@@ -12,13 +12,16 @@ interface ContentUpdateNoticeProps {
   book?: BookDetailRes
   ready: boolean
   guest: boolean
+  progress?: ReadingProgressRes | null
+  progressReady?: boolean
 }
 
-export default function ContentUpdateNotice({ bookId, book, ready, guest }: ContentUpdateNoticeProps) {
+export default function ContentUpdateNotice({ bookId, book, progress, progressReady = true, ready, guest }: ContentUpdateNoticeProps) {
   const queryClient = useQueryClient()
   const unreadUpdate = useRef(false)
   const shownFor = useRef<string | null>(null)
   const acknowledged = useRef<string | null>(null)
+  const unavailable = useRef<{ location: boolean; coverage: boolean } | null>(null)
   const { mutate } = useMutation({
     mutationFn: ({ id, revisionId }: { id: string; revisionId: string }) =>
       apiPut(withReveal(`/books/${id}/read-revision`), { revisionId }),
@@ -36,14 +39,24 @@ export default function ContentUpdateNotice({ bookId, book, ready, guest }: Cont
   })
 
   useEffect(() => {
-    if (!book || book.id !== bookId) return
+    if (!book || book.id !== bookId || !progressReady) return
     if (shownFor.current !== bookId) {
       shownFor.current = bookId
       unreadUpdate.current = Boolean(book.hasUnreadUpdate)
+      unavailable.current = progress?.contentUpdateUnseen ? {
+        location: progress.locationAvailable === false,
+        coverage: progress.coverageAvailable === false,
+      } : null
     }
-    if (ready && !guest && unreadUpdate.current) {
+    if (ready && !guest && (unreadUpdate.current || unavailable.current?.location || unavailable.current?.coverage)) {
       unreadUpdate.current = false
-      notify.info({ key: 'reader.contentUpdated' })
+      const { location, coverage } = unavailable.current ?? { location: false, coverage: false }
+      unavailable.current = null
+      if (location || coverage) {
+        const key = location && coverage ? 'reader.positionAndCoverageUnavailableAfterEdit'
+          : location ? 'reader.positionUnavailableAfterEdit' : 'reader.coverageUnavailableAfterEdit'
+        notify.warning({ key }, { dedupeKey: `reader-progress:${bookId}` })
+      } else notify.info({ key: 'reader.contentUpdated' })
     }
     const revisionId = book.revisionId
     const key = `${bookId}:${revisionId}`
@@ -51,7 +64,7 @@ export default function ContentUpdateNotice({ bookId, book, ready, guest }: Cont
       acknowledged.current = key
       mutate({ id: bookId, revisionId })
     }
-  }, [book, bookId, ready, guest, mutate])
+  }, [book, bookId, progress, progressReady, ready, guest, mutate])
 
   return null
 }

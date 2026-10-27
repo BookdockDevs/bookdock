@@ -19,7 +19,10 @@ export default function Toggle({ checked, disabled, onChange, ariaLabel, label }
       aria-label={ariaLabel ?? label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={cn('disabled:cursor-not-allowed disabled:opacity-50', label != null && 'flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300')}
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center disabled:cursor-not-allowed disabled:opacity-50',
+        label != null && 'gap-2 text-xs text-stone-600 dark:text-stone-300',
+      )}
     >
       {/* block + shrink-0 + explicit left anchor on the knob: as a flex item the
           track would otherwise collapse or the knob would drift in tight rows */}

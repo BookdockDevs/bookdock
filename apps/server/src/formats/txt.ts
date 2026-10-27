@@ -1,19 +1,13 @@
 import type { Readable } from 'node:stream'
 import type { FormatParser, ParsedBook } from './registry'
+import { DEFAULT_TXT_TOC_PATTERNS, fallbackTxtChapters, normalizeTxtText, scanTxtChapterBoundaries, type TxtChapterBoundary } from '@bookdock/shared'
 import type { TocPatternLike } from './toc'
 
 import chardet from 'chardet'
 import iconv from 'iconv-lite'
 
-import { applyTitleReplacement } from './toc'
 
-export interface TxtChapter {
-  title: string
-  level: number
-  startOffset: number
-  endOffset: number
-  contentStartOffset: number
-  synthetic?: boolean
+export interface TxtChapter extends TxtChapterBoundary {
   contentRanges?: Array<{ startOffset: number; endOffset: number }>
 }
 
@@ -119,228 +113,26 @@ export function decodeTextBuffer(buffer: Buffer): string {
   }
 }
 
-/** Built-in default patterns used when no TOC rule is pinned or scored.
- * Kept in sync with SEED_TOC_RULES (modules/toc-rules/seeds.ts): the scrapped
- * section level stays out, otherwise rule-less rescans re-split content the
- * presets deliberately leave alone. */
-export const defaultTocPatterns: TocPatternLike[] = [
-  { level: 0, regex: '^[Vv]olume\\s+\\d+\\s*[：:]?\\s*(.+)?$' },
-  { level: 0, regex: '^[ \\t　]{0,4}(?:【|\\[|〖)?(?:第[一二三四五六七八九十百千万零\\d]+(?:卷|部(?![分是门落赛游]))|(?<!（)卷[一二三四五六七八九十百千万零\\d]+|[上中下][部卷]|终卷|最终卷)(?:】|\\]|〗)?(?:[\\s:：、_—\\-].{0,30}|[^\\n。，；]{0,30})$' },
-  { level: 1, regex: '^[ \\t　]{0,4}(?:【|\\[|〖)?第[一二三四五六七八九十百千万零\\d]+(?:章|回(?![合来事去])|篇(?!张)|话|集)(?:】|\\]|〗)?(?:[\\s:：、_—\\-].{0,35}|[^\\n。，；]{0,35})$' },
-  { level: 1, regex: '^[ \\t　]{0,4}(?:【|\\[|〖)?(?:序章|楔子|[末终]章|大结局|后记|尾声|番外)(?:】|\\]|〗)?(?:[\\s:：、_—\\-].{0,35}|[^\\n。，；]{0,35})$' },
-  { level: 1, regex: '^[Cc]hapter\\s+\\d+\\s*[：:]?\\s*(.+)?$' },
-  { level: 1, regex: '^#{1,2}\\s+(.+)$' },
-  { level: 1, regex: '^\\d+\\.\\s+(.+)$' },
-]
+export const defaultTocPatterns: TocPatternLike[] = DEFAULT_TXT_TOC_PATTERNS
 
-const continuationMarks = new Set(['，', '；', '：', '、', '—', '–', '~', '～'])
-
-function isChapterTitle(line: string): boolean {
-  const trimmed = line.trim()
-  return defaultTocPatterns.some((pattern) => new RegExp(pattern.regex, 'm').test(trimmed))
-}
-
-function isContinuationEnd(line: string): boolean {
-  const trimmed = line.trim()
-  if (trimmed.length === 0) return false
-  const lastChar = trimmed[trimmed.length - 1]
-  if (continuationMarks.has(lastChar)) return true
-  return false
-}
-
-/**
- * Normalize raw txt into a clean paragraph format:
- * - Remove BOM and normalize CRLF/CR to LF.
- * - Trim whitespace on each line.
- * - Keep each line as its own paragraph by default.
- * - Merge a line into the previous paragraph when the previous line ends with a
- *   continuation punctuation and the current line is not indented (common soft
- *   line-break in web novels).
- * - Separate paragraphs with a blank line (\n\n).
- */
 export function normalizeText(text: string): string {
-  // single regex pass (B5): the previous three .replace() chains each copied
-  // the whole book — one pass keeps a single transient copy
-  const normalized = text.replace(/^\uFEFF|\r\n|\r/g, (m) => (m === '\uFEFF' ? '' : '\n'))
-
-  const lines = normalized.split('\n')
-  const paragraphs: string[] = []
-  let current = ''
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim()
-    if (line === '') {
-      if (current !== '') {
-        paragraphs.push(current)
-        current = ''
-      }
-      continue
-    }
-
-    const startsWithIndent = /^[\s\u3000]/.test(rawLine)
-    const isTitle = isChapterTitle(line)
-
-    if (current === '') {
-      current = line
-    } else if (isTitle || startsWithIndent) {
-      paragraphs.push(current)
-      current = line
-    } else if (isContinuationEnd(current)) {
-      current = `${current}${line}`
-    } else {
-      paragraphs.push(current)
-      current = line
-    }
-  }
-
-  if (current !== '') {
-    paragraphs.push(current)
-  }
-
-  return paragraphs.join('\n\n')
+  return normalizeTxtText(text)
 }
 
 export function detectTxtChapters(text: string): TxtChapter[] {
   return scanTxtChapters(normalizeText(text))
 }
 
-/**
- * Chapter detection on already-normalized text (B5): the upload pipeline
- * normalizes once and reuses it here — the public detectTxtChapters keeps
- * normalizing internally for callers with raw input (tests, TxtParser).
- *
- * `patterns` is an optional TOC-rule preset (TocPatternLike[]); when omitted
- * the built-in default patterns are used. Matching runs against the WHOLE text
- * with 'g' + 'm' flags (not per trimmed line): this keeps lookbehinds such as
- * `(?<=[　\s])` functional. Patterns are applied in
- * order and each line is claimed by the first pattern that hits it; every
- * matched line is pinned to that pattern's level. Titles go through the
- * pattern's $1-style replacement when present. With no matches at all the book
- * falls back to ~10KB chunks aligned on newlines (never a single "全文"
- * chapter).
- */
 export function scanTxtChapters(
   normalized: string,
   patterns?: TocPatternLike[],
   outMeta?: { fallback?: boolean },
 ): TxtChapter[] {
-  const active = patterns && patterns.length > 0 ? patterns.filter((p) => p.enabled !== false) : defaultTocPatterns
-
-  const claimed = new Set<number>()
-  const titles: { offset: number; title: string; level: number }[] = []
-
-  for (const pattern of active) {
-    let re: RegExp
-    let lineRe: RegExp
-    try {
-      re = new RegExp(pattern.regex, 'gm')
-      lineRe = new RegExp(pattern.regex, 'm')
-    } catch {
-      continue
-    }
-    for (let m = re.exec(normalized); m !== null; m = re.exec(normalized)) {
-      const matchLen = m[0].length
-      if (matchLen === 0) {
-        re.lastIndex++
-        continue
-      }
-      const lineStart = normalized.lastIndexOf('\n', m.index - 1) + 1
-      if (claimed.has(lineStart)) continue
-      claimed.add(lineStart)
-      // Detection runs on the whole text (lookbehinds need the preceding char),
-      // but a title is a single line: `\s*` / `\s{n,m}` in a rule can span the
-      // \n\n separator, so m[0] may run past the line end. Re-match against the
-      // isolated line for the per-line match array the replacement expects.
-      const lineEnd = normalized.indexOf('\n', lineStart)
-      const line = lineEnd === -1 ? normalized.slice(lineStart) : normalized.slice(lineStart, lineEnd)
-      const lineMatch = lineRe.exec(line)
-      const title = (lineMatch ? applyTitleReplacement(lineMatch, pattern.replacement) : line.trim()).trim().slice(0, 120)
-      if (title) titles.push({ offset: lineStart, title, level: pattern.level })
-    }
-  }
-
-  titles.sort((a, b) => a.offset - b.offset)
-
-  if (titles.length === 0) {
-    if (outMeta) outMeta.fallback = true
-    return fallbackChapters(normalized)
-  }
-  if (outMeta) outMeta.fallback = false
-
-  // A preset may describe optional parent levels such as volume. Only levels
-  // observed in this book define its output depth; an unmatched parent must
-  // not make every matched child heading appear nested.
-  const observedLevels = [...new Set(titles.map((title) => title.level))].sort((a, b) => a - b)
-  const outputLevelByConfiguredLevel = new Map(
-    observedLevels.map((level, index) => [level, index + 1]),
-  )
-
-  const chapters: TxtChapter[] = []
-
-  if (titles[0].offset > 0) {
-    chapters.push({
-      title: '序章',
-      level: 1,
-      startOffset: 0,
-      endOffset: titles[0].offset,
-      contentStartOffset: 0,
-      synthetic: true,
-    })
-  }
-
-  for (let i = 0; i < titles.length; i++) {
-    const title = titles[i]
-    const start = title.offset
-    const end = i < titles.length - 1 ? titles[i + 1].offset : normalized.length
-
-    let contentStart = start
-    for (let j = start; j < end - 1; j++) {
-      if (normalized[j] === '\n' && normalized[j + 1] === '\n') {
-        contentStart = j + 2
-        break
-      }
-    }
-
-    chapters.push({
-      title: title.title,
-      level: outputLevelByConfiguredLevel.get(title.level) ?? 1,
-      startOffset: start,
-      endOffset: end,
-      contentStartOffset: contentStart,
-    })
-  }
-
-  return chapters
+  return scanTxtChapterBoundaries(normalized, patterns, (fallback) => { if (outMeta) outMeta.fallback = fallback })
 }
 
-/** Split long text into ~10KB blocks aligned to the previous newline. */
 export function fallbackChapters(normalized: string): TxtChapter[] {
-  const blockSize = 10 * 1024
-  const chapters: TxtChapter[] = []
-  let block = 0
-  let start = 0
-
-  while (start < normalized.length) {
-    let end = Math.min(start + blockSize, normalized.length)
-    if (end < normalized.length) {
-      const nl = normalized.lastIndexOf('\n', end)
-      if (nl > start) end = nl
-    }
-
-    if (end <= start) end = Math.min(start + blockSize, normalized.length)
-
-    chapters.push({
-      title: `第${block + 1}章(1)`,
-      level: 1,
-      startOffset: start,
-      endOffset: end,
-      contentStartOffset: start,
-    })
-    block++
-    start = end
-  }
-
-  return chapters.length > 0 ? chapters : [{ title: '全文', level: 1, startOffset: 0, endOffset: 0, contentStartOffset: 0 }]
+  return fallbackTxtChapters(normalized)
 }
 
 export class TxtParser implements FormatParser {

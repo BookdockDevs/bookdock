@@ -47,7 +47,7 @@ export async function loadEffectiveBookReplacementRules(userId: string, bookId: 
       replacement: row.replacement,
       isRegex: row.isRegex === 1,
       applyTo: row.applyTo as BookReplacementRule['applyTo'],
-      effectiveEnabled: override ? override.enabled === 1 : row.enabled === 1,
+      effectiveEnabled: (override ? override.enabled === 1 : row.enabled === 1) && row.relocation !== 'unresolved',
       spineHref: row.spineHref,
       textOffset: row.textOffset,
       originalText: row.originalText,

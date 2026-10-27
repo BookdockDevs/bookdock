@@ -96,7 +96,7 @@ export default function BookCustomTocEditor({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const saving = reToc.isPending
 
-  function setDraft(index: number, patch: Partial<Pick<PatternDraft, 'regex' | 'replacement'>>) {
+  function setDraft(index: number, patch: Partial<Pick<PatternDraft, 'regex' | 'replacement' | 'enabled'>>) {
     setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)))
     if (patch.regex !== undefined) {
       setErrors((prev) => prev.map((e, i) => (i === index ? null : e)))
@@ -262,6 +262,7 @@ export default function BookCustomTocEditor({
                     level={index + 1}
                     regex={draft.regex}
                     replacement={draft.replacement}
+                    enabled={draft.enabled}
                     error={errors[index] ?? null}
                     disabled={saving}
                     canRemove={drafts.length > 1}

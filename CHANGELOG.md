@@ -6,6 +6,8 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
+- Web-based content editor workbench for TXT and EPUB books: edit chapter outlines and body text directly in the browser, adjust chapter hierarchies and order, split or merge chapters, and review diffs before saving. Drafts are saved locally to prevent losing progress on accidental closure.
+- Automatic reading data migration after content edits: saving edits relocates reading progress, highlights, bookmarks, and notes to their matching text positions in the new version, preventing progress drift or loss.
 - Online full-book search for EPUB and TXT books now scans the reader's visible revision on the server and streams bounded hit excerpts and progress. It preserves reading search settings without transferring chapter bodies to the browser; current-chapter and offline searches remain local.
 
 ### Fixed
@@ -18,6 +20,8 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- Improved browser tab titles to clearly show current book titles and page names across views.
+- Removed the obsolete update preview page.
 - Share cards show a loading state until image preparation finishes, disable copy/save while preparing, and offer retry after a failure. Changing the card discards outdated preparations and releases the previous preview.
 - Reader bookmarks now retain their content revision, restoring the active bookmark button and ribbon marker; locatable legacy bookmarks remain visible.
 - Legado EPUB audio/video resources support authenticated byte-range requests and HEAD metadata; the Vite development proxy preserves the browser-facing host so generated source URLs use the LAN address.
@@ -924,6 +928,8 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
+- TXT 与 EPUB 书籍编辑工作台：支持在网页端直接编辑章节目录与正文内容、调整目录层级与顺序、合并或拆分章节，并在保存前查看修改差异。编辑过程中会自动保存本地草稿，防止意外关闭丢失内容。
+- 内容修改后自动平移阅读数据：书籍编辑保存后，会自动将所有读者的阅读进度、高亮划线、书签和想法平滑迁移到新版本对应的文字位置，避免进度错位或丢失。
 - 在线阅读 EPUB/TXT 时，全书搜索改由服务端按阅读器当前可见修订逐章扫描，逐批返回命中摘要与进度，不向浏览器传输章节正文；沿用大小写、正则、文本替换和简繁设置，并区分完成、截断、部分失败与取消。当前章节及离线搜索仍使用本地流程。
 
 #### 修复
@@ -936,6 +942,8 @@ All notable changes to Bookdock are documented here.
 
 #### 变更
 
+- 优化浏览器标签页标题，在各页面统一清晰显示当前书名与页面名称。
+- 移除已废弃的更新预览页面。
 - 分享图片准备期间显示加载态并禁用复制、保存，失败后支持重试；切换卡片配置时丢弃过期任务并释放旧预览，不再先显示默认字体再切换。
 - 阅读器书签现在会保存所属内容修订，恢复书签按钮的激活状态和位置丝带标记；仍可定位的旧书签也会继续显示。
 - 开源阅读书源的 EPUB 音视频资源现支持鉴权字节范围请求与 HEAD 元数据；Vite 开发代理保留浏览器访问时的 Host，生成的书源链接因此使用局域网地址。

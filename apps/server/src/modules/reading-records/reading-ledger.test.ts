@@ -12,6 +12,7 @@ import { readingRecordCreateSchema, readingTransferSchema } from '@bookdock/shar
 import * as client from '../../db/client'
 import { migrateBeforeBookRetirement } from '../../db/migration-stage'
 import * as schema from '../../db/schema'
+import { createId } from '../../lib/id'
 import { AppError } from '../../middleware/error'
 import * as books from '../books/books.service'
 import * as storage from '../../storage'
@@ -407,6 +408,29 @@ describe('reading ledger service', () => {
     expect(backup.archives[0].legacyRevisionId).toBe('old-revision')
     expect(backup.archives[0].sessions.every((session) => !('progressScale' in session))).toBe(true)
     expect(importReadingTransfer('u1', backup, true).duplicates).toBe(2)
+  })
+
+  it('projects ledger coverage through a persisted revision map before using legacy scaling', async () => {
+    vi.mocked(books.getBook).mockResolvedValue({} as Awaited<ReturnType<typeof books.getBook>>)
+    db.update(schema.readingArchives).set({ legacyIntervals: [], legacyRevisionId: 'old-map-source', legacyWordCount: 100 }).run()
+    db.insert(schema.contentRevisions).values({ id: 'old-map-source', bookVersionId: 'v1', revisionNo: 1, blobKey: 'old-map-blob', size: 100, wordCount: 100, createdAt: 1 }).run()
+    await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-02', source: 'manual', durationSeconds: 60, startFraction: 0, endFraction: 0.5, revisionId: 'old-map-source', wordCount: 100 })
+    db.insert(schema.contentRevisions).values({ id: 'new-map-target', bookVersionId: 'v1', revisionNo: 2, blobKey: 'new-map-blob', size: 150, wordCount: 150, createdAt: 2 }).run()
+    db.insert(schema.contentRevisionMaps).values({
+      id: createId('crm'), bookVersionId: 'v1', sourceRevisionId: 'old-map-source', targetRevisionId: 'new-map-target',
+      segments: [
+        { sourceSpineHref: 'chapter.xhtml', targetSpineHref: 'chapter.xhtml', sourceStart: 0, sourceEnd: 50, targetStart: 0, targetEnd: 50 },
+        { sourceSpineHref: 'chapter.xhtml', targetSpineHref: 'chapter.xhtml', sourceStart: 50, sourceEnd: 100, targetStart: 100, targetEnd: 150 },
+      ],
+      sourceSections: [{ spineHref: 'chapter.xhtml', size: 100, textLength: 100 }],
+      targetSections: [{ spineHref: 'chapter.xhtml', size: 150, textLength: 150 }],
+      structuralRanges: [], createdAt: 2,
+    }).run()
+
+    const ledger = await getReadingLedger('u1', 'v1')
+
+    expect(ledger.sessions[0]?.projectedCoverage).toEqual([[0, 1 / 3]])
+    expect(ledger.unalignedCoverage).toBe(false)
   })
 
   it('flags incompatible replacements but preserves recorded coverage when the source is unavailable', async () => {

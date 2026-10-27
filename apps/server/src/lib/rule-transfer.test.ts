@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../db/migration-stage'
+import { migrateBeforeBookRetirementIncluding as migrate } from '../db/migration-stage'
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -24,7 +24,7 @@ describe('rule transfer failure boundaries', () => {
     sqlite = new Database(':memory:')
     sqlite.pragma('foreign_keys = ON')
     db = drizzle(sqlite, { schema })
-    migrate(db, { migrationsFolder: fileURLToPath(new URL('../db/migrations', import.meta.url)) })
+    migrate(db, { migrationsFolder: fileURLToPath(new URL('../db/migrations', import.meta.url)) }, [])
     vi.spyOn(client, 'getDb').mockReturnValue(db)
     db.insert(schema.users).values({ id: 'u', username: 'review', role: 'owner', createdAt: 1 }).run()
   })

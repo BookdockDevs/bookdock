@@ -10,6 +10,8 @@ import {
   catalogVersionMoveSchema,
   catalogVersionUpdateSchema,
   collectBookSchema,
+  editorEpubSaveSchema,
+  editorTxtSaveSchema,
   pushVersionSchema,
   reTocSchema,
   tocPreviewSchema,
@@ -76,6 +78,7 @@ import { appendCityVersionContent, getVersionTocState, previewCityAppend, previe
 import { listSearchAuthors } from './search-expression'
 import { AppError } from '../../middleware/error'
 import { decodeTextBuffer } from '../../formats/txt'
+import { getEditorAccess, getEditorEpubContent, saveManagedEditorEpubContent, saveManagedEditorTxtContent } from '../books/content-editor.service'
 
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
@@ -428,6 +431,58 @@ librariesRoutes.put('/:id/books/:bookId/cover', async (c) => {
   }
   const book = await updateCatalogBookCover(user.id, c.req.param('id'), c.req.param('bookId'), file)
   return c.json({ data: book })
+})
+
+librariesRoutes.get('/:id/books/:bookId/versions/:versionLinkId/content/:bookVersionId/editor-access', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const data = await getEditorAccess(user.id, c.req.param('bookVersionId'), {
+    libraryId: c.req.param('id'), libraryBookId: c.req.param('bookId'), versionLinkId: c.req.param('versionLinkId'),
+  })
+  return c.json({ data }, 200, { 'Cache-Control': 'private, no-store' })
+})
+
+librariesRoutes.put('/:id/books/:bookId/versions/:versionLinkId/content/:bookVersionId/editor-content', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = editorTxtSaveSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const result = await saveManagedEditorTxtContent(
+    user.id,
+    c.req.param('id'),
+    c.req.param('bookId'),
+    c.req.param('versionLinkId'),
+    c.req.param('bookVersionId'),
+    parsed.data,
+  )
+  return c.json({ data: result })
+})
+
+librariesRoutes.get('/:id/books/:bookId/versions/:versionLinkId/content/:bookVersionId/editor-epub-content', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const result = await getEditorEpubContent(user.id, c.req.param('bookVersionId'))
+  return c.json({ data: result }, 200, { 'Cache-Control': 'private, no-store' })
+})
+
+librariesRoutes.put('/:id/books/:bookId/versions/:versionLinkId/content/:bookVersionId/editor-epub-content', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = editorEpubSaveSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid EPUB editor draft', details: parsed.error.flatten() } }, 400)
+  }
+  const result = await saveManagedEditorEpubContent(
+    user.id,
+    c.req.param('id'),
+    c.req.param('bookId'),
+    c.req.param('versionLinkId'),
+    c.req.param('bookVersionId'),
+    parsed.data,
+  )
+  return c.json({ data: result })
 })
 
 librariesRoutes.delete('/:id/books/:bookId/cover', async (c) => {

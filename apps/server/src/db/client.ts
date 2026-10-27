@@ -9,6 +9,7 @@ import * as schema from './schema'
 import { config } from '../config'
 import { migrateBeforeBookRetirement } from './migration-stage'
 import { repairReadingLedgerSchema } from './reading-ledger-repair'
+import { reconcileContentEditorMigration } from './content-editor-migration'
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
@@ -305,6 +306,7 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
     throw new Error('Identity retirement blocked: Guest has legacy TTS configuration')
   }
 
+  reconcileContentEditorMigration(db, migrationsFolder)
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
   migrate(db, { migrationsFolder })
   repairReadingLedgerSchema(db)
@@ -468,7 +470,7 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
     },
     {
       table: 'text_replacements',
-      columns: '`id`, `user_id`, `book_id`, `match_type`, `pattern`, `replacement`, `is_regex`, `enabled`, `name`, `group_name`, `spine_href`, `text_offset`, `original_text`, `created_at`, `updated_at`, `apply_to`, `sort_order`, `book_version_id`',
+      columns: '`id`, `user_id`, `book_id`, `match_type`, `pattern`, `replacement`, `is_regex`, `enabled`, `name`, `group_name`, `spine_href`, `text_offset`, `original_text`, `relocation`, `created_at`, `updated_at`, `apply_to`, `sort_order`, `book_version_id`',
       create: `CREATE TABLE \`text_replacements_new\` (
 	\`id\` text PRIMARY KEY NOT NULL,
 	\`user_id\` text NOT NULL REFERENCES \`users\`(\`id\`) ON UPDATE no action ON DELETE cascade,
@@ -532,15 +534,25 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
         )
       }
       let sourceColumns = spec.columns
+      let targetColumns = spec.columns
+      let createStatement = spec.create
       if (spec.table === 'text_replacements') {
         const columns = db.all(sql.raw('PRAGMA table_info(text_replacements)')) as Array<{ name: string }>
         // Manual legacy retargets may run before the sort-order migration.
         if (!columns.some((column) => column.name === 'sort_order')) {
           sourceColumns = sourceColumns.replace('`sort_order`', '0')
         }
+        if (!columns.some((column) => column.name === 'relocation')) {
+          sourceColumns = sourceColumns.replace('`relocation`, ', '')
+          targetColumns = targetColumns.replace('`relocation`, ', '')
+        } else {
+          createStatement = createStatement.replace(
+            '\t`original_text` text,',
+            "\t`original_text` text,\n\t`relocation` text NOT NULL DEFAULT 'ok' CHECK (`relocation` IN ('ok', 'unresolved')),")
+        }
       }
-      db.run(sql.raw(spec.create))
-      db.run(sql.raw(`INSERT INTO "${spec.table}_new" (${spec.columns}) SELECT ${sourceColumns} FROM "${spec.table}"`))
+      db.run(sql.raw(createStatement))
+      db.run(sql.raw(`INSERT INTO "${spec.table}_new" (${targetColumns}) SELECT ${sourceColumns} FROM "${spec.table}"`))
       db.run(sql.raw(`DROP TABLE "${spec.table}"`))
       db.run(sql.raw(`ALTER TABLE "${spec.table}_new" RENAME TO "${spec.table}"`))
       for (const index of spec.indexes) db.run(sql.raw(index))

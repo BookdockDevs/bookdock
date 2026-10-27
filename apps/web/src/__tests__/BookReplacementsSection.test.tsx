@@ -245,6 +245,24 @@ describe('BookReplacementsSection', () => {
     expect(screen.getByText('失效')).toBeInTheDocument()
   })
 
+  it('keeps unresolved point text visible without allowing a stale jump or re-enable', () => {
+    const onJump = vi.fn()
+    render(
+      <BookReplacementsSection
+        bookId="b1"
+        points={[point({ locationAvailable: false })]}
+        chapterOf={() => '第 12 章'}
+        onJump={onJump}
+      />,
+    )
+
+    expect(screen.getByText('每天我都是骑着那辆用了五年的雅迪电动车')).toBeInTheDocument()
+    expect(screen.getByText('失效')).toBeInTheDocument()
+    expect(screen.getByRole('switch')).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '第 12 章' })).not.toBeInTheDocument()
+    expect(onJump).not.toHaveBeenCalled()
+  })
+
   it('renders an unnamed rule as a single pattern line (no duplicated title)', () => {
     mockRules([rule({ id: 't1', pattern: '那也是我亲侄子', name: null })])
     render(<BookReplacementsSection bookId="b1" />)

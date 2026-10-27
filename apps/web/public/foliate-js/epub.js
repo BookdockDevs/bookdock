@@ -878,7 +878,7 @@ class Resources {
     }
 }
 
-class Loader {
+export class Loader {
     #cache = new Map()
     #cacheXHTMLContent = new Map()
     #children = new Map()

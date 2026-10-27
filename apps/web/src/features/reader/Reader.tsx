@@ -37,6 +37,7 @@ import { createJumpHistory } from './jump-history'
 import { createHistoryAutoHide, type HistoryAutoHide } from './history-auto-hide'
 import { consumeEscFlag } from './lib/esc-consumed'
 import { createRestoreGate, type RestoreGate } from './lib/restore-gate'
+import { getProgressRestoreTarget } from './lib/progress-restoration'
 import { cfiRangesIntersect, loadCfiModule } from './lib/cfi-overlap'
 import { mergeProgressSaveCache } from './lib/progress-cache'
 import { buildRevisionContentUrl, prepareRevisionNavigation } from './lib/revision-navigation'
@@ -614,6 +615,7 @@ export default function Reader() {
     enabled: !!id,
   })
 
+
   const progressMutation = useMutation({
     mutationFn: async (body: ReadingProgressUpdateReq) => {
       if (isGuest) return { data: saveGuestProgress(id, body) }
@@ -818,11 +820,12 @@ export default function Reader() {
   if (initialCfiRef.current === undefined) {
     if (progressQuery.isSuccess) {
       const data = progressQuery.data?.data
-      initialCfiRef.current = data?.cfi ?? ''
+      const restoreTarget = getProgressRestoreTarget(data)
+      initialCfiRef.current = restoreTarget.cfi
       // Book-level fraction fallback: used when no CFI was saved (stale after
       // a re-TOC) and by the renderer when the saved CFI fails to resolve
       // (content is unchanged, so the fraction still lands on the same text).
-      initialFractionRef.current = data && data.percent > 0 ? data.fraction ?? data.percent / 100 : undefined
+      initialFractionRef.current = restoreTarget.fraction
       restoreGateRef.current?.arm()
     } else if (bookQuery.data?.data && bookQuery.data.data.cfi !== undefined) {
       const bData = bookQuery.data.data
@@ -1202,7 +1205,7 @@ export default function Reader() {
         revisionId: expectedRevisionId, wordCount: bookQuery.data?.data.meta?.wordCount ?? undefined }
       pingReadingTimer(readingPosition)
       useManualTimerStore.getState().updatePosition(id, { ...readingPosition, fraction: e.fraction ?? null, chapterIndex: e.chapterIndex })
-      scheduleProgressSave({ cfi: e.cfi, chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, sample })
+      scheduleProgressSave({ ...(displayedRevisionIdRef.current ? { revisionId: displayedRevisionIdRef.current } : {}), cfi: e.cfi, ...(e.contentCfi ? { contentCfi: e.contentCfi } : {}), chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, sample })
     },
     onSelected: (e) => {
       setIsSelectingText(false)
@@ -2281,7 +2284,7 @@ export default function Reader() {
             </div>
           </div>
         </div>
-        <ContentUpdateNotice bookId={id} book={bookQuery.isFetchedAfterMount && bookQuery.data?.data ? { ...bookQuery.data.data, revisionId: displayedRevisionId ?? bookQuery.data.data.revisionId } : undefined} ready={readerReady} guest={isGuest} />
+        <ContentUpdateNotice bookId={id} book={bookQuery.isFetchedAfterMount && bookQuery.data?.data ? { ...bookQuery.data.data, revisionId: displayedRevisionId ?? bookQuery.data.data.revisionId } : undefined} progress={progressQuery.isFetchedAfterMount ? progressQuery.data?.data : undefined} progressReady={progressQuery.isFetchedAfterMount || progressQuery.isError} ready={readerReady} guest={isGuest} />
         {!isGuest && !revisionQuarantined && displayedRevisionId && <SelectionToolbar bookId={id} revisionId={displayedRevisionId} fontStack={fontStack} fontCss={fontCss} />}
         {footnoteEntry && (
           <FootnotePopup

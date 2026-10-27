@@ -393,6 +393,13 @@
       "when": 1793400000000,
       "tag": "0056_reading_projections",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1793500000000,
+      "tag": "0057_content_editor",
+      "breakpoints": true
     }
   ]
 }

@@ -2,14 +2,14 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import type { BookDetailRes } from '@bookdock/shared'
+import type { BookDetailRes, ReadingProgressRes } from '@bookdock/shared'
 
 import { apiPut } from '../api/client'
 import { notify } from '../lib/notifications'
 import ContentUpdateNotice from '../features/reader/components/ContentUpdateNotice'
 
 vi.mock('../api/client', () => ({ apiPut: vi.fn() }))
-vi.mock('../lib/notifications', () => ({ notify: { info: vi.fn() } }))
+vi.mock('../lib/notifications', () => ({ notify: { info: vi.fn(), warning: vi.fn() } }))
 
 const book = (over: Partial<BookDetailRes> = {}) => ({ id: 'b1', revisionId: 'r1', hasUnreadUpdate: true, ...over }) as BookDetailRes
 const client = () => new QueryClient({ defaultOptions: { mutations: { retry: false } } })
@@ -77,5 +77,24 @@ describe('ContentUpdateNotice', () => {
     show(book({ hasUnreadUpdate: false }), true, true)
     expect(apiPut).not.toHaveBeenCalled()
     expect(notify.info).not.toHaveBeenCalled()
+  })
+
+  it('reports an unavailable location once through the existing update acknowledgment', async () => {
+    const progress = { contentUpdateUnseen: true, locationAvailable: false, coverageAvailable: true } as ReadingProgressRes
+    const queryClient = client()
+    const view = (data: ReadingProgressRes, loaded = true) => (
+      <QueryClientProvider client={queryClient}>
+        <ContentUpdateNotice bookId="b1" book={book()} progress={data} progressReady={loaded} ready guest={false} />
+      </QueryClientProvider>
+    )
+    const result = render(view(progress, false))
+    expect(apiPut).not.toHaveBeenCalled()
+    result.rerender(view(progress))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledTimes(1))
+    expect(notify.warning).toHaveBeenCalledExactlyOnceWith({ key: 'reader.positionUnavailableAfterEdit' }, { dedupeKey: 'reader-progress:b1' })
+    expect(notify.info).not.toHaveBeenCalled()
+    result.unmount()
+    render(view({ ...progress, contentUpdateUnseen: false }))
+    expect(notify.warning).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,3 +1,5 @@
+import { pickTxtTocRule } from '@bookdock/shared'
+
 /**
  * TOC-rule scoring and selection. Pure functions only — callers own the sample
  * text and the database.
@@ -120,23 +122,5 @@ function scorePresetDetails(patterns: TocPatternLike[], sample: string): ScoredP
  * ties). Returns the rule id, or null when nothing clears the bar.
  */
 export function pickTocRule(rules: TocRuleLike[], sample: string): string | null {
-  let maxNum = 0
-  let bestId: string | null = null
-  let bestMatchedLevels = 0
-
-  for (const rule of rules) {
-    if (rule.patterns.length === 0) continue
-    const { csNum, numE, matchedLevels } = scorePresetDetails(rule.patterns, sample)
-    if (csNum < numE * 3) continue
-
-    const clearlyBetter = csNum > maxNum + 2
-    const structuredNearTie = bestId !== null && matchedLevels > bestMatchedLevels && csNum >= maxNum - 2
-    if (clearlyBetter || structuredNearTie) {
-      maxNum = csNum
-      bestId = rule.id
-      bestMatchedLevels = matchedLevels
-    }
-  }
-
-  return bestId
+  return pickTxtTocRule(rules, sample)?.id ?? null
 }

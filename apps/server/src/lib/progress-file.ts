@@ -9,15 +9,40 @@ import { getStorage } from '../storage'
 import { mergeInterval, unionLength, type FractionInterval } from './intervals'
 
 export interface ProgressFileData {
+  progressRevisionId?: string | null
+  coverageRevisionId?: string | null
   cfi?: string | null
+  contentCfi?: string | null
   chapter?: string | null
   chapterIndex?: number | null
+  positionAnchor?: {
+    revisionId: string
+    spineHref: string
+    textOffset: number
+    cfi?: string
+  } | null
   percent: number
   fraction?: number | null
   intervals: FractionInterval[]
+  historicalCoverage?: Array<{
+    revisionId: string | null
+    intervals: FractionInterval[]
+    retainedAt: number
+  }>
   /** Reading-speed samples; stored server-side, computed client-side. */
   rateSamples?: RateSample[]
   updatedAt: number
+  historicalPositions?: Array<{
+    progressRevisionId: string | null
+    coverageRevisionId?: string | null
+    cfi: string | null
+    chapter: string | null
+    chapterIndex: number | null
+    percent: number
+    fraction: number | null
+    intervals: FractionInterval[]
+    updatedAt: number
+  }>
   [key: string]: unknown
 }
 
@@ -56,10 +81,16 @@ export async function readProgressFile(userId: string, bookId: string): Promise<
   const db = getDb()
   const row = db.select({
     progressData: bookStates.progressData,
+    progressRevisionId: bookStates.progressRevisionId,
+    coverageRevisionId: bookStates.coverageRevisionId,
   }).from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
 
   if (row?.progressData) {
-    return row.progressData
+    return {
+      ...row.progressData,
+      progressRevisionId: row.progressRevisionId ?? row.progressData.progressRevisionId ?? null,
+      coverageRevisionId: row.coverageRevisionId ?? row.progressData.coverageRevisionId ?? null,
+    }
   }
 
   // If progress migration is complete, a missing/null progressData means NO progress.
@@ -76,6 +107,8 @@ export async function readProgressFile(userId: string, bookId: string): Promise<
     if (row) {
       db.update(bookStates).set({
         progressData: legacy,
+        progressRevisionId: legacy.progressRevisionId ?? null,
+        coverageRevisionId: legacy.coverageRevisionId ?? legacy.progressRevisionId ?? null,
         readFraction,
         updatedAt: now,
       }).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
@@ -88,6 +121,8 @@ export async function readProgressFile(userId: string, bookId: string): Promise<
         cfi: legacy.cfi ?? null,
         chapter: legacy.chapter ?? null,
         progressData: legacy,
+        progressRevisionId: legacy.progressRevisionId ?? null,
+        coverageRevisionId: legacy.coverageRevisionId ?? legacy.progressRevisionId ?? null,
         readFraction,
         updatedAt: now,
       }).run()
@@ -111,6 +146,8 @@ export async function writeProgressFile(
 
   const existing = db.select({
     userId: bookStates.userId,
+    progressRevisionId: bookStates.progressRevisionId,
+    coverageRevisionId: bookStates.coverageRevisionId,
     percent: bookStates.percent,
     cfi: bookStates.cfi,
     chapter: bookStates.chapter,
@@ -119,6 +156,8 @@ export async function writeProgressFile(
   if (existing) {
     db.update(bookStates).set({
       progressData: data,
+      progressRevisionId: data.progressRevisionId ?? existing.progressRevisionId ?? null,
+      coverageRevisionId: data.coverageRevisionId ?? existing.coverageRevisionId ?? null,
       readFraction,
       percent: data.percent ?? existing.percent,
       cfi: data.cfi !== undefined ? data.cfi : existing.cfi,
@@ -136,6 +175,8 @@ export async function writeProgressFile(
       chapter: data.chapter ?? null,
       lastReadAt: touch ? now : null,
       progressData: data,
+      progressRevisionId: data.progressRevisionId ?? null,
+      coverageRevisionId: data.coverageRevisionId ?? null,
       readFraction,
       updatedAt: now,
     }).run()

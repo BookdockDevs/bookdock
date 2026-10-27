@@ -1,3 +1,4 @@
+import Toggle from '@/components/ui/Toggle'
 import type { Ref } from 'react'
 
 import { useSortable } from '@dnd-kit/sortable'
@@ -16,15 +17,16 @@ interface TocPatternRowProps {
   level: number
   regex: string
   replacement: string
+  enabled: boolean
   error: TocPatternError
   disabled: boolean
   canRemove: boolean
   inputRef?: Ref<HTMLInputElement>
-  onChange: (patch: { regex?: string; replacement?: string }) => void
+  onChange: (patch: { regex?: string; replacement?: string; enabled?: boolean }) => void
   onRemove: () => void
 }
 
-export default function TocPatternRow({ id, level, regex, replacement, error, disabled, canRemove, inputRef, onChange, onRemove }: TocPatternRowProps) {
+export default function TocPatternRow({ id, level, regex, replacement, enabled, error, disabled, canRemove, inputRef, onChange, onRemove }: TocPatternRowProps) {
   const _ = useTranslation()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
@@ -37,7 +39,7 @@ export default function TocPatternRow({ id, level, regex, replacement, error, di
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn('overflow-hidden rounded-xl border border-stone-200 dark:border-stone-700', isDragging && 'relative z-10 opacity-60')}
     >
-      <div className="flex items-center gap-2 border-b border-stone-200 bg-stone-50 px-3 py-2.5 dark:border-stone-700 dark:bg-stone-800/60">
+      <div className="flex items-center gap-2 border-b border-stone-200 bg-stone-50 px-3 py-2 dark:border-stone-700 dark:bg-stone-800/60">
         <button
           type="button"
           {...attributes}
@@ -59,21 +61,31 @@ export default function TocPatternRow({ id, level, regex, replacement, error, di
         <span className="min-w-0 flex-1 text-xs font-medium text-stone-700 dark:text-stone-200">
           {_('settings.tocRulesLevel')} {level}
         </span>
-        <button
-          type="button"
-          onClick={onRemove}
-          disabled={disabled || !canRemove}
-          aria-label={_('settings.tocRulesRemovePattern')}
-          title={_('settings.tocRulesRemovePattern')}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-100 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 6h18M19 6v14c0 1-2 2-2 2H7a2 2 0 0 1-2-2V6M8 6V4c0-1 2-2 2-2h4c1 0 2 2 2 2v2" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="flex items-center" title={enabled ? (_('common.enabled') || '已启用') : (_('common.disabled') || '已停用')}>
+            <Toggle
+              checked={enabled}
+              disabled={disabled}
+              onChange={(checked) => onChange({ enabled: checked })}
+              ariaLabel={_('settings.tocRulesLevel') + ` ${level} ` + (enabled ? '已启用' : '已停用')}
+            />
+          </span>
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={disabled || !canRemove}
+            aria-label={_('settings.tocRulesRemovePattern')}
+            title={_('settings.tocRulesRemovePattern')}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-100 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 6h18M19 6v14c0 1-2 2-2 2H7a2 2 0 0 1-2-2V6M8 6V4c0-1 2-2 2-2h4c1 0 2 2 2 2v2" />
+            </svg>
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-3 p-3">
+      <div className={cn('flex flex-col gap-3 p-3 transition-opacity', !enabled && 'opacity-40')}>
         <SettingsFormField
           label={_('settings.tocRulesRegex')}
           required
@@ -83,8 +95,9 @@ export default function TocPatternRow({ id, level, regex, replacement, error, di
             ref={inputRef}
             type="text"
             value={regex}
+            aria-label={`第${level}层正则表达式`}
             onChange={(event) => onChange({ regex: event.target.value })}
-            disabled={disabled}
+            disabled={disabled || !enabled}
             aria-invalid={error !== null || undefined}
             className={cn(settingsInputClass, 'font-mono')}
           />
@@ -95,7 +108,7 @@ export default function TocPatternRow({ id, level, regex, replacement, error, di
             type="text"
             value={replacement}
             onChange={(event) => onChange({ replacement: event.target.value })}
-            disabled={disabled}
+            disabled={disabled || !enabled}
             placeholder={_('settings.tocRulesReplacementPlaceholder')}
             className={settingsInputClass}
           />

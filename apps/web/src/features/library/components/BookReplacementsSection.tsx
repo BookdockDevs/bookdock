@@ -295,7 +295,8 @@ function PointRow({
   // No arrow when the replacement is empty: a bare snapshot with strikethrough
   // signifies deletion of the text, never a literal "delete" badge.
   const replacement = patch.replacement?.trim() ?? ''
-  const effective = patch.enabled && !invalid
+  const unresolved = patch.locationAvailable === false
+  const effective = patch.enabled && !invalid && !unresolved
 
   return (
     <li
@@ -323,7 +324,7 @@ function PointRow({
         </p>
         {chapter && (
           <div className="mt-1 flex items-center gap-1.5">
-            {onJump && patch.spineHref ? (
+            {onJump && patch.spineHref && !unresolved ? (
               <button
                 type="button"
                 onClick={() => onJump(patch.spineHref!, patch.textOffset, patch.replacement)}
@@ -339,12 +340,12 @@ function PointRow({
           </div>
         )}
       </div>
-      {invalid && (
+      {(invalid || unresolved) && (
         <span className="shrink-0 rounded border border-red-300 px-1.5 py-0.5 text-[11px] text-red-500 dark:border-red-800 dark:text-red-400">
           {_('reader.replacementsInvalidBadge')}
         </span>
       )}
-      <Toggle checked={patch.enabled} onChange={onToggle} ariaLabel={_('settings.replacementsEnabled')} />
+      <Toggle checked={patch.enabled && !unresolved} onChange={onToggle} ariaLabel={_('settings.replacementsEnabled')} disabled={unresolved} />
       <RowActions onEdit={onEdit} onDelete={onDelete} />
     </li>
   )

@@ -8,6 +8,7 @@ import { notificationsRoute } from './routes/notifications'
 import { registerRoute } from './routes/register'
 import { setupRoute } from './routes/setup'
 import { readerRoute } from './routes/books.$id'
+import { contentEditorRoute } from './routes/books.$id.editor'
 import { settingsRoute } from './routes/settings'
 import { archiveRoute } from './routes/archive'
 import DefaultPending from '@/components/layout/DefaultPending'
@@ -21,6 +22,7 @@ const routeTree = rootRoute.addChildren([
   registerRoute,
   setupRoute,
   readerRoute,
+  contentEditorRoute,
   settingsRoute,
   archiveRoute,
 ])

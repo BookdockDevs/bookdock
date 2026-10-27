@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { BOOK_STATE_PROGRESS_TAG, migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
@@ -221,13 +221,18 @@ describe('progress service', () => {
   })
 
   it('should upsert and read progress for the book owner', async () => {
-    const saved = await upsertProgress(ownerId, bookId, { percent: 50, chapter: '第一章', chapterIndex: 2 })
+    const revisionId = db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.bookVersionId, bookId)).get()!.id
+    const saved = await upsertProgress(ownerId, bookId, { revisionId, percent: 50, chapter: '第一章', chapterIndex: 2 })
     expect(saved.percent).toBe(50)
     expect(saved.chapterIndex).toBe(2)
+    expect(saved.progressRevisionId).toBe(revisionId)
+    await expect(upsertProgress(ownerId, bookId, { revisionId: 'stale-revision', percent: 40 }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
 
     const loaded = await getProgress(ownerId, bookId)
     expect(loaded!.percent).toBe(50)
     expect(loaded!.chapterIndex).toBe(2)
+    expect(loaded!.progressRevisionId).toBe(revisionId)
   })
 
   it('mirrors the position into the version state row', async () => {
@@ -237,6 +242,80 @@ describe('progress service', () => {
     expect(state.percent).toBe(50)
     expect(state.chapter).toBe('第一章')
     expect(state.lastReadAt).not.toBeNull()
+  })
+
+  it('does not relabel unmapped historical coverage as the current revision on a progress write', async () => {
+    const oldRevisionId = db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.bookVersionId, bookId)).get()!.id
+    const currentRevisionId = createId('rev')
+    db.insert(schema.contentRevisions).values({
+      id: currentRevisionId, bookVersionId: bookId, revisionNo: 2, blobKey: 'books/test/v2.txt',
+      size: 120, chapterCount: 1, meta: {}, createdAt: Date.now(),
+    }).run()
+    db.insert(schema.bookStates).values({
+      userId: ownerId, bookVersionId: bookId, readStatus: 'reading', percent: 60,
+      progressRevisionId: oldRevisionId, coverageRevisionId: oldRevisionId,
+      progressData: { progressRevisionId: oldRevisionId, coverageRevisionId: oldRevisionId, percent: 60, fraction: 0.6, intervals: [[0.1, 0.7]], updatedAt: 1 },
+      readFraction: 0.6, updatedAt: 1,
+    }).run()
+
+    await upsertProgress(ownerId, bookId, { revisionId: currentRevisionId, percent: 40, segmentStartFraction: 0.3, fraction: 0.4 })
+
+    const state = db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, ownerId)).get()!
+    expect(state.coverageRevisionId).toBe(currentRevisionId)
+    expect(state.progressData?.intervals).toEqual([[0.3, 0.4]])
+    expect(state.progressData?.historicalCoverage).toEqual([{ revisionId: oldRevisionId, intervals: [[0.1, 0.7]], retainedAt: expect.any(Number) }])
+  })
+
+  it('keeps legacy coverage on the active revision when its coverage basis was never recorded', async () => {
+    const revisionId = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, bookId)).get()!.id
+    db.insert(schema.bookStates).values({
+      userId: ownerId, bookVersionId: bookId, readStatus: 'reading', percent: 60,
+      progressData: { percent: 60, fraction: 0.6, intervals: [[0.1, 0.6]], updatedAt: 1 },
+      readFraction: 0.5, updatedAt: 1,
+    }).run()
+
+    await upsertProgress(ownerId, bookId, { revisionId, percent: 62 })
+
+    const state = db.select().from(schema.bookStates).where(eq(schema.bookStates.userId, ownerId)).get()!
+    expect(state.coverageRevisionId).toBe(revisionId)
+    expect(state.progressData?.coverageRevisionId).toBe(revisionId)
+    expect(state.progressData?.intervals).toEqual([[0.1, 0.6]])
+    expect(state.progressData?.historicalCoverage).toBeUndefined()
+  })
+
+  it('clears a mapped startup anchor when the reader reports a newer CFI', async () => {
+    const revisionId = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, bookId)).get()!.id
+    db.insert(schema.bookStates).values({
+      userId: ownerId, bookVersionId: bookId, readStatus: 'reading', percent: 20, cfi: 'old-cfi',
+      progressRevisionId: revisionId, coverageRevisionId: revisionId,
+      progressData: {
+        progressRevisionId: revisionId, coverageRevisionId: revisionId,
+        cfi: 'old-cfi', positionAnchor: { revisionId, spineHref: 'chapter.xhtml', textOffset: 12, cfi: 'old-cfi' },
+        percent: 20, fraction: 0.2, intervals: [], updatedAt: 1,
+      },
+      updatedAt: 1,
+    }).run()
+
+    const moved = await upsertProgress(ownerId, bookId, { revisionId, cfi: 'current-cfi', percent: 35 })
+
+    expect(moved.cfi).toBe('current-cfi')
+    expect(moved.positionAnchor).toBeUndefined()
+  })
+
+  it('stores the visible text CFI separately from scroll position and clears stale text on movement', async () => {
+    const revisionId = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, bookId)).get()!.id
+    const cfi = 'epubcfi(/6/2!/4/2,/1:2,/1:8)'
+    const saved = await upsertProgress(ownerId, bookId, { revisionId, cfi: 'chapter:0:0.25', contentCfi: cfi, percent: 25 })
+    expect(saved).toMatchObject({ cfi: 'chapter:0:0.25', contentCfi: cfi })
+    expect(await getProgress(ownerId, bookId)).toMatchObject({ cfi: 'chapter:0:0.25', contentCfi: cfi })
+    expect((await getProgress(ownerId, bookId))?.contentUpdateUnseen).toBe(true)
+    db.update(schema.bookStates).set({ readRevisionId: revisionId }).where(and(eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, bookId))).run()
+    expect((await getProgress(ownerId, bookId))?.contentUpdateUnseen).toBe(false)
+    const moved = await upsertProgress(ownerId, bookId, { revisionId, cfi: 'chapter:0:0.5', percent: 50 })
+    expect(moved.contentCfi).toBeNull()
   })
 
   it('should return null when the owner has no progress yet', async () => {

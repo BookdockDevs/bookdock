@@ -5,7 +5,7 @@ import { and, desc, eq, inArray, lte, or, sql } from 'drizzle-orm'
 import type { ReadingCoverageInterval, ReadingLedgerOverview, ReadingLedgerRes, ReadingLedgerSession, ReadingLedgerSessionPage, ReadingLedgerStatsRes, ReadingRecordConflictDetails, ReadingRecordCreateReq, ReadingSessionUpdateReq, ReadingTimerClaim, ReadingTransfer, ReadingTransferPreview, ReadingWordState } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookStates, bookVersions, contentRevisions, readingArchives, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingTimerClaims, readingWriteReceipts } from '../../db/schema'
+import { bookStates, bookVersions, contentRevisionMaps, contentRevisions, readingArchives, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingTimerClaims, readingWriteReceipts } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { mergeInterval, unionLength } from '../../lib/intervals'
 import { AppError } from '../../middleware/error'
@@ -459,10 +459,23 @@ function activeRound(tx: Db, userId: string, bookId: string, at = Date.now()) {
 
 function readingCoverageBasis(tx: Db, bookId: string, sessions: Session[], archive: typeof readingArchives.$inferSelect, sourceAvailable = true): ReadingCoverageBasis {
   const latest = sourceAvailable ? tx.select().from(contentRevisions).where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).get() : undefined
-  if (latest) return {
+  if (latest) {
+    const targetMaps = tx.select().from(contentRevisionMaps).where(and(
+      eq(contentRevisionMaps.bookVersionId, bookId), eq(contentRevisionMaps.targetRevisionId, latest.id),
+    )).all()
+    const revisionMaps = Object.fromEntries(targetMaps
+      .map((map) => [map.sourceRevisionId, {
+        sourceSections: map.sourceSections,
+        targetSections: map.targetSections,
+        segments: map.segments,
+        structuralRanges: map.structuralRanges,
+      }]))
+    return {
     revisionId: latest.id, wordCount: latest.wordCount,
     compatibleRevisionIds: readingCompatibleRevisions(latest.meta, latest.id),
     equivalentRevisionIds: tx.select({ id: contentRevisions.id }).from(contentRevisions).where(and(eq(contentRevisions.bookVersionId, bookId), eq(contentRevisions.blobKey, latest.blobKey), eq(contentRevisions.wordCount, latest.wordCount ?? -1))).all().map((row) => row.id),
+      revisionMaps,
+    }
   }
   const recorded = [...sessions].sort((a, b) => b.date.localeCompare(a.date) || (b.startedAt ?? 0) - (a.startedAt ?? 0)).find((entry) => entry.wordCount !== null)
   return { revisionId: recorded?.revisionId ?? archive.legacyRevisionId, wordCount: recorded?.wordCount ?? archive.legacyWordCount, compatibleRevisionIds: [] }

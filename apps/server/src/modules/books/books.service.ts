@@ -1,3 +1,4 @@
+import { predictTxtContinuationStart } from '@bookdock/shared'
 import type { Readable } from 'node:stream'
 
 import { eq, lt, desc, asc, and, or, sql, inArray, isNull, isNotNull, type SQL } from 'drizzle-orm'
@@ -1564,87 +1565,16 @@ interface PreparedTxtAppend {
   preview: AppendContentPreviewRes
 }
 
-function chapterSequenceKey(chapter: Pick<AppendContentCandidate, 'title' | 'level'>): string {
-  return `${chapter.level}:${chapter.title.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase()}`
-}
-
-function parseChineseChapterNumber(value: string): number | null {
-  const digits: Record<string, number> = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
-  const units: Record<string, number> = { 十: 10, 百: 100, 千: 1_000, 万: 10_000, 亿: 100_000_000 }
-  if (!value || [...value].some((char) => digits[char] === undefined && units[char] === undefined)) return null
-
-  let total = 0
-  let section = 0
-  for (const char of value) {
-    const digit = digits[char]
-    if (digit !== undefined) {
-      section = digit
-      continue
-    }
-    const unit = units[char]!
-    if (unit >= 10_000) {
-      total += section
-      total *= unit
-      section = 0
-    } else {
-      total += (section || 1) * unit
-      section = 0
-    }
-  }
-  return total + section
-}
-
-function chapterNumber(title: string): number | null {
-  const arabic = title.match(/第\s*(\d+)\s*(?:章|回|节)/i)?.[1]
-    ?? title.match(/\bchapter\s+(\d+)\b/i)?.[1]
-  if (arabic) return Number(arabic)
-  const chinese = title.match(/第\s*([零〇一二两三四五六七八九十百千万亿]+)\s*(?:章|回|节)/)?.[1]
-  return chinese ? parseChineseChapterNumber(chinese) : null
-}
-
-function sumCandidateWords(candidates: AppendContentCandidate[], endExclusive: number): number {
-  return candidates.slice(0, endExclusive).reduce((sum, chapter) => sum + chapter.wordCount, 0)
-}
-
 export function predictAppendStartIndex(
   originalChapters: AppendContentCandidate[],
   candidates: AppendContentCandidate[],
   originalWordCount: number,
 ): number {
-  if (candidates.length === 0 || originalChapters.length === 0) return 0
-
-  const sequenceLength = Math.min(3, originalChapters.length)
-  for (let length = sequenceLength; length >= 1; length -= 1) {
-    const suffix = originalChapters.slice(-length).map(chapterSequenceKey)
-    const matches: number[] = []
-    for (let index = 0; index <= candidates.length - length; index += 1) {
-      const sequence = candidates.slice(index, index + length).map(chapterSequenceKey)
-      if (sequence.every((key, sequenceIndex) => key === suffix[sequenceIndex])) {
-        matches.push(index + length)
-      }
-    }
-    if (matches.length > 0) {
-      return matches.sort((left, right) =>
-        Math.abs(sumCandidateWords(candidates, left) - originalWordCount) -
-        Math.abs(sumCandidateWords(candidates, right) - originalWordCount),
-      )[0]!
-    }
-  }
-
-  const lastNumber = chapterNumber(originalChapters[originalChapters.length - 1]!.title)
-  if (lastNumber !== null) {
-    const nextNumber = lastNumber + 1
-    const nextIndex = candidates.findIndex((chapter) => chapterNumber(chapter.title) === nextNumber)
-    if (nextIndex >= 0) return nextIndex
-  }
-
-  if (candidates.length > originalChapters.length) {
-    const prefixWords = sumCandidateWords(candidates, originalChapters.length)
-    const tolerance = Math.max(100, originalWordCount * 0.15)
-    if (Math.abs(prefixWords - originalWordCount) <= tolerance) return originalChapters.length
-  }
-
-  return 0
+  return predictTxtContinuationStart(
+    originalChapters.map(({ title, level, wordCount }) => ({ title, level, content: '', wordCount })),
+    candidates.map(({ title, level, wordCount }) => ({ title, level, content: '', wordCount })),
+    originalWordCount,
+  )
 }
 
 function resolveAppendStartOffset(
@@ -2785,8 +2715,11 @@ export async function getVersionTocState(
   }
 }
 
-export async function getBookContent(userId: string | null, bookId: string, opts?: { showHidden?: boolean }): Promise<string> {
+export async function getBookContent(userId: string | null, bookId: string, opts?: { showHidden?: boolean; revisionId?: string }): Promise<string> {
   const book = await getActiveBook(userId, bookId, opts)
+  if (opts?.revisionId && opts.revisionId !== book.revisionId) {
+    throw new AppError('VALIDATION_ERROR', 'Content revision changed; reopen the editor')
+  }
   if (book.format !== 'txt') {
     throw new AppError('UNSUPPORTED_FORMAT', 'Content endpoint only supports txt')
   }

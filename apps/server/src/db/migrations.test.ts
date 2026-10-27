@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from './migration-stage'
+import { migrateBeforeBookRetirement as migrate, migrateBeforeBookRetirementIncluding } from './migration-stage'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { migrate as migrateAll } from 'drizzle-orm/better-sqlite3/migrator'
 import { describe, expect, it } from 'vitest'
@@ -244,6 +244,58 @@ describe('database baseline', () => {
     expect(sqlite.prepare('SELECT text FROM ai_chunks_fts WHERE chunk_id = ?').all('c1')).toHaveLength(0)
 
     sqlite.close()
+  })
+})
+
+describe('content revision map retention', () => {
+  it('keeps source provenance after source pruning and cascades maps with the target or version', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrateBeforeBookRetirementIncluding(db, { migrationsFolder: migrationsDir }, ['0057_content_editor'])
+    sqlite.prepare("INSERT INTO book_versions (id, format, size, created_at, updated_at) VALUES (?, 'txt', 1, 1, 1)").run('version')
+    sqlite.prepare("INSERT INTO content_revisions (id, book_version_id, revision_no, blob_key, size, chapter_count, meta, created_at) VALUES (?, 'version', 1, 'one', 1, 0, '{}', 1), (?, 'version', 2, 'two', 1, 0, '{}', 2)").run('source', 'target')
+    sqlite.prepare("INSERT INTO content_revision_maps (id, book_version_id, source_revision_id, target_revision_id, segments, created_at) VALUES ('map-source', 'version', 'source', 'target', '[]', 2)").run()
+
+    sqlite.prepare("DELETE FROM content_revisions WHERE id = 'source'").run()
+    expect(sqlite.prepare("SELECT source_revision_id FROM content_revision_maps WHERE id = 'map-source'").get()).toEqual({ source_revision_id: 'source' })
+    sqlite.prepare("DELETE FROM content_revisions WHERE id = 'target'").run()
+    expect(sqlite.prepare("SELECT id FROM content_revision_maps").all()).toEqual([])
+
+    sqlite.prepare("INSERT INTO content_revisions (id, book_version_id, revision_no, blob_key, size, chapter_count, meta, created_at) VALUES ('target-2', 'version', 3, 'three', 1, 0, '{}', 3)").run()
+    sqlite.prepare("INSERT INTO content_revision_maps (id, book_version_id, source_revision_id, target_revision_id, segments, created_at) VALUES ('map-version', 'version', 'source', 'target-2', '[]', 3)").run()
+    sqlite.prepare("DELETE FROM book_versions WHERE id = 'version'").run()
+    expect(sqlite.prepare("SELECT id FROM content_revision_maps").all()).toEqual([])
+    sqlite.close()
+  })
+})
+
+describe('content editor schema migration', () => {
+  it('adds all editor fields to fresh databases and preserves existing 0056 data', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrate(db, { migrationsFolder: migrationsDir })
+    retargetBookIdReferences(db)
+    migrateAllUpTo(db, '0057_content_editor')
+    sqlite.exec(`
+      INSERT INTO book_versions (id, format, size, created_at, updated_at) VALUES ('bv-old', 'txt', 1, 1, 1);
+      INSERT INTO content_revisions (id, book_version_id, revision_no, blob_key, size, created_at) VALUES ('rev-old', 'bv-old', 1, 'blob', 1, 1);
+    `)
+    migrateAll(db, { migrationsFolder: migrationsDir })
+    migrateAll(db, { migrationsFolder: migrationsDir })
+    expect(sqlite.prepare('SELECT id FROM content_revisions').all()).toEqual([{ id: 'rev-old' }])
+    const columns = sqlite.prepare('PRAGMA table_info(content_revision_maps)').all() as Array<{ name: string }>
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(['target_sections', 'source_sections', 'structural_ranges']))
+    sqlite.close()
+
+    const fresh = new Database(':memory:')
+    const freshDb = drizzle(fresh, { schema })
+    migrate(freshDb, { migrationsFolder: migrationsDir })
+    retargetBookIdReferences(freshDb)
+    migrateAll(freshDb, { migrationsFolder: migrationsDir })
+    expect(fresh.prepare('PRAGMA table_info(content_revision_maps)').all()).toEqual(columns)
+    fresh.close()
   })
 })
 
@@ -556,6 +608,8 @@ describe('book id retarget repair', () => {
     expect(sqlite.prepare('SELECT duration_seconds AS d FROM reading_records WHERE id = ?').get('r1')).toEqual({ d: 60 })
     expect(sqlite.prepare('SELECT enabled AS e FROM text_replacement_overrides WHERE id = ?').get('o1')).toEqual({ e: 0 })
     expect(sqlite.prepare('SELECT sort_order AS s FROM text_replacements WHERE id = ?').get('t1')).toEqual({ s: 0 })
+    expect(sqlite.prepare('PRAGMA table_info(text_replacements)').all())
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'relocation' })]))
     expect(sqlite.prepare('SELECT text AS t FROM ai_chunks WHERE id = ?').get('c1')).toEqual({ t: 'first text' })
     // book_id now points at versions, not legacy rows.
     const refs = sqlite.prepare('PRAGMA foreign_key_list(reading_records)').all() as { from: string; table: string }[]
@@ -582,6 +636,42 @@ describe('book id retarget repair', () => {
     // Reruns are no-ops once every table points at versions.
     retargetBookIdReferences(drizzle(sqlite, { schema }))
 
+    sqlite.close()
+  })
+
+  it('preserves unresolved point replacement state while retargeting a migrated table', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    applyBaseline(sqlite)
+    applyReleaseMigration(sqlite)
+    applyReplacementMigration(sqlite)
+    applyReplacementScopeMigration(sqlite)
+    applyLegadoAccessKeyMigration(sqlite)
+    applyAccessTokenMigration(sqlite)
+    applyAnnotationChapterHrefMigration(sqlite)
+    applyLibrarySortTimestampsMigration(sqlite)
+    applyLibraryFoundationMigration(sqlite)
+    applyReadingEntitiesMigration(sqlite)
+    applyBookVersionRefsMigration(sqlite)
+    applyRevisionMetaMigration(sqlite)
+    applyVersionPinMigration(sqlite)
+    applyCategoryPinMigration(sqlite)
+    applyAnnotationDedupMigration(sqlite)
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+      INSERT INTO books (id, user_id, title, format, file_path, size, created_at, updated_at)
+        VALUES ('b1', 'u1', 'B1', 'txt', 'k1', 1, 1, 1);
+      INSERT INTO book_versions (id, format, size, created_at, updated_at)
+        VALUES ('b1', 'txt', 1, 1, 1);
+      INSERT INTO text_replacements (id, user_id, match_type, created_at, updated_at)
+        VALUES ('t1', 'u1', 'point', 1, 1);
+      ALTER TABLE text_replacements ADD COLUMN relocation TEXT NOT NULL DEFAULT 'ok';
+      UPDATE text_replacements SET relocation = 'unresolved' WHERE id = 't1';
+    `)
+
+    retargetBookIdReferences(drizzle(sqlite, { schema }))
+
+    expect(sqlite.prepare('SELECT relocation AS r FROM text_replacements WHERE id = ?').get('t1')).toEqual({ r: 'unresolved' })
     sqlite.close()
   })
 
@@ -1010,6 +1100,29 @@ describe('category and shelf separation migration', () => {
       .toContain('shelf_id')
     expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'library_books_shelf_idx'").get())
       .toEqual({ name: 'library_books_shelf_idx' })
+    sqlite.close()
+  })
+})
+
+describe('coverage revision basis migration', () => {
+  it('backfills coverage provenance from the prior progress basis', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrate(db, { migrationsFolder: migrationsDir })
+    retargetBookIdReferences(db)
+    migrateAllUpTo(db, '0057_content_editor')
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u1', 'u1', 1);
+      INSERT INTO book_versions (id, format, size, created_at, updated_at) VALUES ('bv1', 'txt', 1, 1, 1);
+      INSERT INTO content_revisions (id, book_version_id, revision_no, blob_key, size, created_at) VALUES ('rev1', 'bv1', 1, 'blob', 1, 1);
+      INSERT INTO book_states (user_id, book_version_id, read_status, percent, progress_data, read_fraction, updated_at)
+        VALUES ('u1', 'bv1', 'reading', 25, '{"progressRevisionId":"rev1","intervals":[[0,0.25]]}', 0.25, 2);
+    `)
+    migrateAll(db, { migrationsFolder: migrationsDir })
+
+    expect(sqlite.prepare('SELECT coverage_revision_id FROM book_states WHERE user_id = ?').get('u1'))
+      .toEqual({ coverage_revision_id: 'rev1' })
     sqlite.close()
   })
 })
