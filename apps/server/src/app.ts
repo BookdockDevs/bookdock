@@ -101,7 +101,37 @@ app.route('/api/v1/integrations/webdav', webdavRoutes)
 // Serve the built web client (apps/web/dist) in production. Skipped in dev,
 // where the dist directory may not exist and Vite serves the client instead.
 // Resolves to the same relative location from both src/ (tsx) and dist/ (node).
+// Auto-redirect Kindle devices from root to the dedicated lightweight e-ink reader
+app.get('/', async (c, next) => {
+  const ua = c.req.header('user-agent') || ''
+  if (/Kindle\//i.test(ua) && !c.req.query('desktop')) {
+    return c.redirect('/eink')
+  }
+  return next()
+})
+
 const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url))
+const webPublic = fileURLToPath(new URL('../../web/public', import.meta.url))
+
+async function getEinkHtml(): Promise<string | null> {
+  const distFile = fileURLToPath(new URL('../../web/dist/eink.html', import.meta.url))
+  if (existsSync(distFile)) return readFile(distFile, 'utf8')
+  const publicFile = fileURLToPath(new URL('../../web/public/eink.html', import.meta.url))
+  if (existsSync(publicFile)) return readFile(publicFile, 'utf8')
+  return null
+}
+
+app.get('/eink', async (c) => {
+  const html = await getEinkHtml()
+  if (!html) return c.text('E-ink reader asset not found', 404)
+  c.header('Cache-Control', 'no-cache')
+  return c.html(html)
+})
+
+if (!existsSync(webDist) && existsSync(webPublic)) {
+  app.use('/eink/*', serveStatic({ root: webPublic }))
+  app.use('/foliate-js/*', serveStatic({ root: webPublic }))
+}
 if (existsSync(webDist)) {
   app.use('/*', async (c, next) => {
     if (c.req.path.startsWith('/api/')) return next()

@@ -10,7 +10,7 @@ describe('progress reader restoration', () => {
       cfi: null,
       percent: 45,
       fraction: 0.45,
-    })).toEqual({ cfi: 'epubcfi(/6/4!/4/2/1:25)', fraction: 0.45 })
+    })).toEqual({ cfi: 'epubcfi(/6/4!/4/2/1:25)', contentCfi: 'epubcfi(/6/4!/4/2/1:25)', fraction: 0.45 })
   })
 
   it('does not use an anchor or percentage from an unavailable historical location', () => {
@@ -21,6 +21,15 @@ describe('progress reader restoration', () => {
       cfi: 'old-cfi',
       percent: 75,
       fraction: 0.75,
-    })).toEqual({ cfi: '', fraction: undefined })
+    })).toEqual({ cfi: '', contentCfi: '', fraction: undefined })
+  })
+
+  it('retains a layout coordinate and its content CFI for different renderers', () => {
+    expect(getProgressRestoreTarget({ cfi: 'chapter:1:0.25', contentCfi: 'epubcfi(/6/4)', percent: 50, fraction: 0.5 }))
+      .toEqual({ cfi: 'chapter:1:0.25', contentCfi: 'epubcfi(/6/4)', fraction: 0.5 })
+  })
+
+  it('uses percentage as the fractional fallback', () => {
+    expect(getProgressRestoreTarget({ cfi: null, percent: 60 })).toEqual({ cfi: '', contentCfi: '', fraction: 0.6 })
   })
 })

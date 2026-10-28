@@ -1,3 +1,4 @@
+import sharp from 'sharp'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { Readable } from 'node:stream'
@@ -278,6 +279,37 @@ describe('reader content route authorization', () => {
     expect(await response.json()).toMatchObject({
       data: { resources: [{ path: 'OEBPS/images/cover.png', width: 640, height: 480 }] },
     })
+  })
+
+  it('only serves resized images to the Kindle variant after access and revision checks', async () => {
+    const original = await sharp({ create: { width: 2400, height: 1600, channels: 4, background: { r: 10, g: 20, b: 30, alpha: 0.5 } } }).png().toBuffer()
+    vi.mocked(getActiveBook).mockResolvedValue(activeBook as Awaited<ReturnType<typeof getActiveBook>>)
+    vi.mocked(readReaderEntryForWeb).mockResolvedValue({ path: 'cover.png', mediaType: 'image/png', data: original, resources: [] })
+    const url = '/api/v1/books/book-1/reader/entry?revisionId=revision-1&path=cover.png'
+    const resized = await appFor().request(`${url}&imageVariant=eink`)
+    const metadata = await sharp(Buffer.from(await resized.arrayBuffer())).metadata()
+    expect(resized.status).toBe(200)
+    expect(metadata).toMatchObject({ width: 1200, height: 800, hasAlpha: true, format: 'png' })
+    const normal = await appFor().request(url)
+    expect(Buffer.from(await normal.arrayBuffer()).equals(original)).toBe(true)
+    vi.mocked(getActiveBook).mockRejectedValue(new AppError('FORBIDDEN'))
+    expect((await appFor().request(`${url}&imageVariant=eink`)).status).toBe(403)
+  })
+
+  it('reports invalid Kindle images instead of returning the original', async () => {
+    vi.mocked(getActiveBook).mockResolvedValue(activeBook as Awaited<ReturnType<typeof getActiveBook>>)
+    vi.mocked(readReaderEntryForWeb).mockResolvedValue({ path: 'invalid.png', mediaType: 'image/png', data: Buffer.from('broken'), resources: [] })
+    const response = await appFor().request('/api/v1/books/book-1/reader/entry?revisionId=revision-1&path=invalid.png&imageVariant=eink')
+    expect(response.status).toBe(500)
+    expect(await response.json()).toMatchObject({ error: { code: 'READER_ENTRY_FAILED' } })
+  })
+
+  it('keeps small Kindle images unchanged', async () => {
+    const original = await sharp({ create: { width: 40, height: 30, channels: 3, background: 'white' } }).jpeg().toBuffer()
+    vi.mocked(getActiveBook).mockResolvedValue(activeBook as Awaited<ReturnType<typeof getActiveBook>>)
+    vi.mocked(readReaderEntryForWeb).mockResolvedValue({ path: 'small.jpg', mediaType: 'image/jpeg', data: original, resources: [] })
+    const response = await appFor().request('/api/v1/books/book-1/reader/entry?revisionId=revision-1&path=small.jpg&imageVariant=eink')
+    expect(Buffer.from(await response.arrayBuffer()).equals(original)).toBe(true)
   })
 
   it('omits optional image dimensions when a clean-reading entry request opts out', async () => {

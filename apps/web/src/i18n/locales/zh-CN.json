@@ -1,4 +1,27 @@
 {
+  "eink": {
+    "signOutConfirm": "确定要退出登录吗？",
+    "loadingShelf": "正在加载书库…",
+    "openingBook": "正在打开书籍…",
+    "requestFailed": "请求失败 ({{status}})",
+    "unknownError": "未知错误",
+    "errorTitle": "出错了",
+    "signingIn": "登录中…",
+    "page": "第 {{page}} 页",
+    "unnamedChapter": "未命名章节",
+    "chapterCount": "共 {{count}} 章节",
+    "fixedLayoutUnsupported": "固定版式书籍暂不支持",
+    "tabFont": "字体",
+    "tabLayout": "布局",
+    "tabOther": "其他",
+    "boldness": "粗体",
+    "fontSize": "大小",
+    "margins": "页边距",
+    "alignment": "对齐",
+    "lineSpacing": "行间距",
+    "paragraphSpacing": "段间距",
+    "letterSpacing": "字间距"
+  },
   "copied": "已复制",
   "common": {
     "retry": "重试",

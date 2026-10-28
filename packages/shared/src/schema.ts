@@ -48,6 +48,7 @@ export const legadoExploreSchema = z.object({
 })
 
 export const readingProgressUpdateSchema = z.object({
+  expectedUserId: z.string().min(1).max(100).optional(),
   revisionId: z.string().min(1).optional(),
   cfi: z.string().optional(),
   contentCfi: z.string().max(10000).optional(),

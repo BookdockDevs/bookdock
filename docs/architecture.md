@@ -38,6 +38,17 @@ The existing `/archive` single-book shell owns the complete Reading data and Not
 
 This section defines the current implementation boundary; older descriptions below continue to describe legacy storage until the corresponding migration/writer is replaced. The code, shared contracts, and migrations are the implementation reference; historical development records are not part of this public architecture document.
 
+### E-ink Lightweight Reader (2026-10)
+
+The e-ink reader provides a dedicated, zero-runtime-dependency reading client served at `/eink` for resource-constrained browsers, including the tested Kindle browser:
+- **Routing & Device Detection**: `/eink` serves a standalone ES2019-targeted HTML+JS bundle. Hash routes distinguish the shelf from `#/book/:id`, allowing refresh and browser history to restore the selected view. Kindle User-Agent (`Kindle/`) requests to `/` redirect to `/eink` (overridable via `?desktop=1`). Other devices can open `/eink` directly.
+- **Shelf layout**: The shelf chooses columns and complete visible rows from the available viewport and uses the resulting capacity for server pagination. Resizing preserves the previous page's first item within the new page, and re-requests the new page without relying on persistent client caching.
+- **Client Architecture**: Pure DOM with zero framework runtime. Integrates Foliate e-book engine using standard HTTP byte streaming (`/api/v1/books/:id/reader/manifest` and `/entry`).
+- **Typography & Geometry**: Uses single-column paginated flow with device-local margin and line-spacing settings (32px and 1.25 by default), a 3% column gap, and selectable justified or left alignment. Reader styles clear body padding; code and monospace blocks are preserved.
+- **Font & Theme Model**: Provides device-native Chinese font switching between 宋体 (Serif) and 黑体 (Sans-Serif / MYingHei). Visual preferences are persisted locally in `localStorage` (`bd-eink-*`) independently of desktop/mobile display settings.
+- **Progress Synchronization**: Reading position (CFI and fraction percentage) synchronizes bidirectionally with the account's `/api/v1/progress/:id` endpoint through the existing progress API. Saves are serialized within the Kindle session, and an account identifier prevents a pending write from being applied after an account change. Like the ordinary reader, it does not provide cross-device conflict resolution.
+- **Clean reading and resources**: A device-local, default-off clean-reading preference applies to reflowable EPUBs; generated TXT keeps its normal reader. Clean reading shares the normal reader's markup sanitization and resource exclusion rules, suppresses embedded imagery, fonts and authored styles, and preserves semantic structure and CFI node positions. Switching modes reopens the current revision at the current content CFI. The e-ink reader bounds its per-book text memo to five items and 4 MiB of estimated string storage, cancels prefetch and explicitly disposes the view and book on exit. It does not persist book content on the device. The HTML entry references the generated script with a content-derived version to prevent stale script reuse.
+
 ### Personal and library activity v1 (delivered in v0.6.3; 2026-10-22)
 
 Personal activity includes the author's shared and private ideas and work reviews
@@ -1035,6 +1046,14 @@ Core reader CSS is synchronous and independent of external font imports. A font
 timeout may reveal fallback glyphs, but never unstyled book content. Connected
 chapter documents must expose the computed reader-style marker before reveal;
 the final document and font stylesheet are rechecked after startup navigation.
+
+### E-ink progress account binding
+
+An e-ink progress request may include `expectedUserId`; a mismatch with the authenticated account is rejected. Position updates otherwise use the existing progress behavior and do not provide cross-device conflict resolution.
+
+### E-ink reader image delivery
+
+The revision-bound reader entry endpoint accepts an optional `imageVariant=eink` for e-ink raster-image requests. JPEG, PNG, WebP and GIF images exceeding 1200 pixels on either axis are proportionally reduced before delivery, without changing the source EPUB. Images within the limit are returned unchanged. Animated oversized images that cannot be safely resized are rejected instead of falling back to the original. The service preserves alpha and raster format, bounds decoder input, conversion concurrency and in-memory derived-image caching, and checks book access and revision before any cache lookup. A failed conversion returns an error rather than silently returning an oversized original. Ordinary readers and other resources keep their existing behavior.
 
 ### Reader content delivery
 

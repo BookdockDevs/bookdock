@@ -2,6 +2,13 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Added
+
+- A lightweight e-ink reader at `/eink` for signed-in users, with an adaptive personal bookshelf, paginated EPUB/TXT reading, a table of contents, device-local display settings, and account reading-position synchronization. Kindle browsers are redirected from the home page; other compatible devices can open the e-ink reader directly.
+- Reflowable EPUBs offer an optional clean-reading mode in the e-ink reader. It hides images and book styling, keeps the current reading location when toggled, and uses the device's reading settings.
+
 ## [0.7.0] - 2026-10-28
 
 ### Highlights
@@ -935,6 +942,13 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [未发布]
+
+#### 新增
+
+- 新增 `/eink` 墨水屏轻量阅读版：登录后可使用自适应个人书库、EPUB/TXT 分页阅读、章节目录、设备本地显示设置和账号阅读进度同步。Kindle 浏览器访问首页时自动进入，其他兼容设备可直接打开墨水屏入口。
+- 墨水屏阅读版为可重排 EPUB 提供纯净阅读模式，隐藏图片和书籍样式，使用设备阅读设置，并在切换时保留当前位置。
 
 ### [0.7.0] - 2026-10-28
 

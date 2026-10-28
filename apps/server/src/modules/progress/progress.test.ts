@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { Hono } from 'hono'
 import { and, eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
@@ -15,9 +16,11 @@ import * as storage from '../../storage'
 import { LocalFsDriver } from '../../storage/localfs'
 import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
+import { errorHandler } from '../../middleware/error'
 import { deleteProgressFile, mergeProgressInterval, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { importProgressFiles, isProgressMigrationCompleted, PROGRESS_MIGRATION_BATCH } from './progress-migration'
 import { getProgress, upsertProgress } from './progress.service'
+import progressRoutes from './progress.routes'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -233,6 +236,23 @@ describe('progress service', () => {
     expect(loaded!.percent).toBe(50)
     expect(loaded!.chapterIndex).toBe(2)
     expect(loaded!.progressRevisionId).toBe(revisionId)
+  })
+
+  it('rejects progress access after an account switch', async () => {
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('*', async (c, next) => {
+      c.set('user', { id: ownerId, username: 'owner', role: 'owner', avatarKey: null })
+      await next()
+    })
+    app.route('/progress', progressRoutes)
+    const switched = await app.request(`/progress/${bookId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedUserId: otherId, percent: 70, cfi: 'wrong-account' }),
+    })
+    expect(switched.status).toBe(403)
+    expect((await app.request(`/progress/${bookId}?expectedUserId=${otherId}`)).status).toBe(403)
+    expect(await getProgress(ownerId, bookId)).toBeNull()
   })
 
   it('mirrors the position into the version state row', async () => {

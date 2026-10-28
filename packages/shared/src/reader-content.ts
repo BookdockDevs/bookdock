@@ -78,6 +78,7 @@ export const readerMarkupEntryResponseSchema = z.object({ data: readerMarkupEntr
 
 export const readerMarkupEntryQuerySchema = z.object({
   includeResourceDimensions: z.enum(['true', 'false']).default('true').transform((value) => value === 'true'),
+  imageVariant: z.enum(['eink']).optional(),
 })
 
 export type ReaderTextItemError =

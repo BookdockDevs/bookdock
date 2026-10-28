@@ -1,4 +1,27 @@
 {
+  "eink": {
+    "signOutConfirm": "Are you sure you want to sign out?",
+    "loadingShelf": "Loading library…",
+    "openingBook": "Opening book…",
+    "requestFailed": "Request failed ({{status}})",
+    "unknownError": "Unknown error",
+    "errorTitle": "Something went wrong",
+    "signingIn": "Signing in…",
+    "page": "Page {{page}}",
+    "unnamedChapter": "Untitled chapter",
+    "chapterCount": "{{count}} chapters",
+    "fixedLayoutUnsupported": "Fixed-layout books are not supported yet",
+    "tabFont": "Font",
+    "tabLayout": "Layout",
+    "tabOther": "Other",
+    "boldness": "Bold",
+    "fontSize": "Size",
+    "margins": "Margins",
+    "alignment": "Alignment",
+    "lineSpacing": "Line Spacing",
+    "paragraphSpacing": "Paragraph Spacing",
+    "letterSpacing": "Letter Spacing"
+  },
   "copied": "Copied",
   "common": {
     "retry": "Retry",

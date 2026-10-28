@@ -1,6 +1,6 @@
 {
   "plugins": ["react", "typescript", "oxc"],
-  "ignorePatterns": ["apps/web/public/foliate-js"],
+  "ignorePatterns": ["apps/web/public/foliate-js", "apps/web/public/eink"],
   "rules": {
     "no-console": "off",
     "react/rules-of-hooks": "error",

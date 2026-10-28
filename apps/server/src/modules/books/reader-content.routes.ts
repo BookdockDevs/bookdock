@@ -18,6 +18,7 @@ import { requestUserId } from '../../middleware/auth.guard'
 import { AppError } from '../../middleware/error'
 import { acquireReaderMedia } from './reader-media.service'
 import { parseMediaRange } from './reader-media.range'
+import { einkImage } from './reader-eink-image'
 import { createReaderSearchStream, reserveReaderSearch } from './reader-search.service'
 
 const readerContentRoutes = new Hono()
@@ -138,12 +139,16 @@ readerContentRoutes.on(['GET', 'HEAD'], '/:id/reader/media', async (c) => {
 readerContentRoutes.get('/:id/reader/entry', async (c) => {
   const book = await readerBook(c)
   const path = c.req.query('path') ?? ''
-  const query = readerMarkupEntryQuerySchema.safeParse({ includeResourceDimensions: c.req.query('includeResourceDimensions') })
+  const query = readerMarkupEntryQuerySchema.safeParse({ includeResourceDimensions: c.req.query('includeResourceDimensions'), imageVariant: c.req.query('imageVariant') })
   if (!query.success) throw new AppError('VALIDATION_ERROR', 'Invalid reader entry query', query.error.flatten())
   if (!path) throw new AppError('READER_ENTRY_NOT_FOUND', 'Reader entry path is required')
   try {
     const entry = await readReaderEntryForWeb(book, path, query.data.includeResourceDimensions)
     if (!entry) throw new AppError('READER_ENTRY_NOT_FOUND', 'Reader entry not found')
+    let data = entry.data
+    if (query.data.imageVariant === 'eink' && /^image\/(jpeg|png|webp|gif)$/i.test(entry.mediaType)) {
+      data = await einkImage(JSON.stringify([book.filePath, book.revisionId, entry.path]), data)
+    }
     const isText = entry.mediaType.startsWith('text/')
       || entry.mediaType === 'application/xhtml+xml'
       || entry.mediaType === 'application/xml'
@@ -155,7 +160,7 @@ readerContentRoutes.get('/:id/reader/entry', async (c) => {
         'Cache-Control': 'private, no-store',
       })
     }
-    return c.body(new Uint8Array(entry.data), 200, {
+    return c.body(new Uint8Array(data), 200, {
       'Content-Type': isText ? `${entry.mediaType.split(';', 1)[0]}; charset=utf-8` : entry.mediaType,
       'Content-Security-Policy': "sandbox; default-src 'none'",
       'X-Content-Type-Options': 'nosniff',

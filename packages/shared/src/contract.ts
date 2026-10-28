@@ -1465,6 +1465,8 @@ export interface RateSample {
 }
 
 export interface ReadingProgressUpdateReq {
+  /** Account that created a pending position, to reject writes after an account switch. */
+  expectedUserId?: string
   /** Revision that produced this visible reader position. */
   revisionId?: string
   cfi?: string
@@ -1497,6 +1499,8 @@ export interface ReadingProgressRes {
   /** Revision represented by the current read-coverage projection. */
   coverageRevisionId?: string | null
   cfi: string | null
+  /** Visible EPUB text location when the display position uses a layout coordinate. */
+  contentCfi?: string | null
   chapter: string | null
   /** Zero-based chapter position from the current book TOC. */
   chapterIndex?: number | null

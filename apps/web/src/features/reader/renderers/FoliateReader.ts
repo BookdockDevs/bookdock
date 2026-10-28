@@ -30,6 +30,10 @@ import type {
   SelectionInfo,
   TtsSegment,
 } from '../types'
+import { sanitizeCleanReadingMarkup, shouldSkipCleanReadingResource } from '../lib/clean-reading'
+import { markEpubChapterTitle } from '../lib/chapter-title'
+export { sanitizeCleanReadingMarkup, shouldSkipCleanReadingResource } from '../lib/clean-reading'
+export { markEpubChapterTitle } from '../lib/chapter-title'
 import { FONT_OPTIONS } from '../types'
 import { bookmarkContext, extractAnnotationText } from '../lib/annotation-text'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
@@ -725,20 +729,6 @@ export function keepEpubTextAlignment(doc: Document): void {
     const alignmentClass = alignmentClasses[index]
     if (alignmentClass) element.classList.add(alignmentClass)
   })
-}
-
-export function markEpubChapterTitle(doc: Document, label: string): void {
-  const expected = label.replace(/\s+/g, ' ').trim()
-  if (!expected) return
-  const headings = doc.body?.querySelectorAll('h1, h2, h3, h4, h5, h6, p')
-  for (const heading of Array.from(headings ?? []).slice(0, 6)) {
-    // Read visual line breaks without changing the source nodes used by CFIs.
-    const title = heading.cloneNode(true) as Element
-    for (const br of title.querySelectorAll('br')) br.replaceWith(' ')
-    if (title.textContent?.replace(/\s+/g, ' ').trim() !== expected) continue
-    heading.setAttribute('data-bd-chapter-title', '')
-    break
-  }
 }
 
 export function normalizeEpubDocumentImages(doc: Document, options?: NormalizeEpubDocumentOptions): void {
@@ -1521,38 +1511,8 @@ export function attachTextPrefetch(
   }
 }
 
-export function shouldSkipCleanReadingResource(type = '', href = ''): boolean {
-  const normalizedType = type.toLowerCase().split(';', 1)[0].trim()
-  if (normalizedType === 'text/css' || normalizedType === 'text/css;') return true
-  if (normalizedType.startsWith('font/') || normalizedType === 'application/font-woff'
-    || normalizedType === 'application/font-woff2' || normalizedType === 'application/vnd.ms-opentype') return true
-  if (normalizedType.startsWith('image/') || normalizedType.startsWith('audio/') || normalizedType.startsWith('video/')) return true
-  if (normalizedType === 'application/vnd.apple.mpegurl' || normalizedType === 'application/x-mpegurl') return true
-  return /\.(?:avif|bmp|gif|jpe?g|png|svg|webp|ico|mp3|m4a|ogg|wav|flac|aac|mp4|m4v|mov|webm|ogv|woff2?|ttf|otf|eot)(?:[?#].*)?$/i.test(href)
-}
-
 export function canUseCleanReading(bookFormat: BookFormat, layout?: string): boolean {
   return bookFormat === 'epub' && layout !== 'pre-paginated'
-}
-
-export function sanitizeCleanReadingMarkup(source: string, mediaType = 'application/xhtml+xml'): string {
-  const parserSource = source
-  const doc = new DOMParser().parseFromString(parserSource, mediaType as DOMParserSupportedType)
-  if (!doc.documentElement || doc.querySelector('parsererror')) return source
-
-  // Some books put presentation nodes in the body; retain their element
-  // positions so stripping presentation does not shift existing CFI paths.
-  for (const style of Array.from(doc.querySelectorAll('style'))) style.textContent = ''
-  for (const link of Array.from(doc.querySelectorAll('link'))) {
-    if (/\bstylesheet\b/i.test(link.getAttribute('rel') ?? '')) link.removeAttribute('href')
-  }
-  for (const element of Array.from(doc.querySelectorAll('[style]'))) element.removeAttribute('style')
-  for (const element of Array.from(doc.querySelectorAll('img, svg, video, audio, canvas, object, embed, iframe, source, track'))) {
-    for (const attribute of ['src', 'srcset', 'poster', 'data', 'href', 'xlink:href']) element.removeAttribute(attribute)
-    element.setAttribute('data-bd-clean-hidden', '')
-  }
-
-  return new XMLSerializer().serializeToString(doc)
 }
 
 function manifestSizeLookup(entries: ReaderManifestEntry[]): (name: string) => number {
