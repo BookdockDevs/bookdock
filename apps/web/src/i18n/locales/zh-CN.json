@@ -1,5 +1,9 @@
 {
   "eink": {
+    "turningNext": "正在翻到下一页…",
+    "turningPrevious": "正在翻到上一页…",
+    "atStart": "已经是第一页",
+    "atEnd": "已经是最后一页",
     "signOutConfirm": "确定要退出登录吗？",
     "loadingShelf": "正在加载书库…",
     "openingBook": "正在打开书籍…",

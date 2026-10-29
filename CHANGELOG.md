@@ -2,6 +2,12 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Improved e-ink page and chapter turns with adjacent-chapter preparation during reading pauses and reuse of recently loaded images. Longer page turns show a loading message, and repeated taps retain at most one subsequent page-turn request.
+
 ## [0.7.1] - 2026-10-29
 
 ### Added
@@ -942,6 +948,12 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [未发布]
+
+#### 变更
+
+- 优化墨水屏阅读版的章内翻页和跨章体验：在阅读停顿时提前准备相邻章节，并复用近期加载的图片。翻页等待较长时显示提示；连续点击时最多保留一次后续翻页请求。
 
 ### [0.7.1] - 2026-10-29
 

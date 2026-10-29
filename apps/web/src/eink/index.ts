@@ -8,6 +8,8 @@ import { markEpubChapterTitle } from '../features/reader/lib/chapter-title'
 import { sanitizeCleanReadingMarkup, shouldSkipCleanReadingResource } from '../features/reader/lib/clean-reading'
 import { createProgressSync, restoreProgress } from './progress-sync'
 import { createNextSectionPrefetch } from './next-section-prefetch'
+import { createImageCache } from './image-cache'
+import { prepareNextSection } from './prepared-section'
 import { getLanguage, setLanguage, t } from './i18n'
 import { filterEinkMedia, isEinkMedia } from './media-filter'
 import { getShelfLayout } from './shelf-layout'
@@ -31,6 +33,7 @@ let trackingPosition = false
 let ignoreRelocate = false
 let progressQueue: any = null
 let nextPrefetch: ReturnType<typeof createNextSectionPrefetch> | null = null
+let preparedSection: ReturnType<typeof prepareNextSection> | null = null
 let accountId = ''
 let saveTimer: any = null
 let closeReaderPanel: (() => void) | null = null
@@ -263,6 +266,8 @@ async function leaveReader(keepPanel = false) {
   }
   nextPrefetch?.dispose()
   nextPrefetch = null
+  preparedSection?.dispose()
+  preparedSection = null
   clearTimeout(saveTimer)
   const queue = progressQueue
   progressQueue = null
@@ -335,7 +340,10 @@ function hideLoading() {
   }
 }
 
+let titleErrorVersion = 0
 function showError(error: any, retryAction?: () => void) {
+  titleErrorVersion++
+  document.title = t('app.name')
   const overlay = ensureLoadingOverlay()
   overlay.replaceChildren()
   const box = element('div', '', 'loading-box')
@@ -355,6 +363,7 @@ function showError(error: any, retryAction?: () => void) {
 }
 
 function loginPage() {
+  document.title = t('auth.signIn')
   app.replaceChildren()
   const form = element('form', '', 'login')
   const user = element('input')
@@ -423,6 +432,7 @@ function scheduleShelfResize() {
 window.addEventListener('resize', scheduleShelfResize)
 
 async function shelf() {
+  document.title = t('app.name')
   shelfRendering = true
   showLoading(t('eink.loadingShelf'))
   await leaveReader()
@@ -586,6 +596,46 @@ function readerPage() {
   }
 
   const controls = element('nav', '', 'controls')
+  const turnStatus = element('div', '', 'turn-status')
+  turnStatus.hidden = true
+  turnStatus.setAttribute('role', 'status')
+  let queuedTurn: -1 | 1 | null = null
+  let turning = false
+  const turn = async (direction: -1 | 1) => {
+    if (turning) { queuedTurn = direction; return }
+    if (busy || !view) return
+    const readerView = view
+    turning = true
+    busy = true
+    try {
+      let next: -1 | 1 | null = direction
+      while (next !== null && view === readerView) {
+        const current: -1 | 1 = next
+        queuedTurn = null
+        if (current === 1 ? readerView.renderer?.atEnd : readerView.renderer?.atStart) {
+          turnStatus.hidden = false
+          turnStatus.textContent = t(current === 1 ? 'eink.atEnd' : 'eink.atStart')
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        } else {
+          trackingPosition = true
+          const timer = setTimeout(() => {
+            turnStatus.textContent = t(current === 1 ? 'eink.turningNext' : 'eink.turningPrevious')
+            turnStatus.hidden = false
+          }, 350)
+          try { await (current === 1 ? readerView.next() : readerView.prev()) }
+          finally { clearTimeout(timer); turnStatus.hidden = true }
+        }
+        next = queuedTurn
+      }
+    } catch (error) {
+      queuedTurn = null
+      if (view === readerView) showError(error, () => { void turn(direction) })
+    } finally {
+      turnStatus.hidden = true
+      turning = false
+      busy = false
+    }
+  }
   controls.append(
     button(t('library.title'), () => { closePanel(); navigateShelf() }),
     button(t('settings.title'), () => {
@@ -976,6 +1026,7 @@ function readerPage() {
             closePanel()
             void run(async () => {
               nextPrefetch?.cancel()
+              preparedSection?.cancel()
               trackingPosition = true
               await view.goTo(item.href)
             })
@@ -1010,10 +1061,10 @@ function readerPage() {
       }
       window.addEventListener('resize', tocResize)
     }),
-    button(t('library.previousPage'), () => void run(() => { nextPrefetch?.cancel(); trackingPosition = true; return view.prev() })),
-    button(t('library.nextPage'), () => void run(() => { nextPrefetch?.cancel(); trackingPosition = true; return view.next() })),
+    button(t('library.previousPage'), () => void turn(-1)),
+    button(t('library.nextPage'), () => void turn(1)),
   )
-  app.append(host, backdrop, panel, controls)
+  app.append(host, backdrop, panel, controls, turnStatus)
   replaceReaderView = () => {
     view = element('foliate-view') as any
     host.replaceChildren(view)
@@ -1038,13 +1089,14 @@ function readerPage() {
         })
       }
       nextPrefetch?.schedule(event.detail?.section?.current)
+      preparedSection?.schedule(event.detail?.section?.current)
     })
     view.addEventListener('click-view', (event: any) => {
-      if (!panel.hidden || busy) return
+      if (!panel.hidden || (busy && !turning)) return
       const bounds = view.getBoundingClientRect()
       const x = (event.detail.x - bounds.left) / bounds.width
-      if (x < 0.3) void run(() => { nextPrefetch?.cancel(); trackingPosition = true; return view.prev() })
-      else if (x > 0.7) void run(() => { nextPrefetch?.cancel(); trackingPosition = true; return view.next() })
+      if (x < 0.3) void turn(-1)
+      else if (x > 0.7) void turn(1)
     })
   }
   replaceReaderView()
@@ -1147,6 +1199,7 @@ function setStyles() {
 }
 
 async function openBook(id: string, previousPosition?: { cfi: string; revisionId?: string }, keepPanel = false) {
+  document.title = t('reader.loading')
   await leaveReader(keepPanel)
   currentBookId = id
   cleanReadingSupported = false
@@ -1175,9 +1228,16 @@ async function openBook(id: string, previousPosition?: { cfi: string; revisionId
     const entries = new Map(readerManifest.entries.map((entry: any) => [entry.path, entry]))
     const startup = new Map(readerManifest.startupFiles.map((file: any) => [file.path, file.text]))
     const textCache = createTextCache()
+    const imageCache = createImageCache()
     const loadText = async (name: string, signal?: AbortSignal) => {
       const cached = textCache.get(name)
       if (cached !== undefined) return cached
+      const prefetched = nextPrefetch?.waitFor(name, signal)
+      if (prefetched) {
+        const text = await prefetched
+        if (signal?.aborted) throw new DOMException('Navigation aborted', 'AbortError')
+        if (typeof text === 'string') return text
+      }
       const entry: any = entries.get(name)
       if (!entry) return null
       let text: string
@@ -1198,9 +1258,13 @@ async function openBook(id: string, previousPosition?: { cfi: string; revisionId
       if (isEinkMedia(entry.mediaType || _type || '', name)) return null
       if (clean && shouldSkipCleanReadingResource(entry.mediaType || _type || '', name)) return null
       const variant = /^image\/(jpeg|png|webp|gif)$/i.test(entry.mediaType) ? '&imageVariant=eink' : ''
+      const cachedImage = variant ? imageCache.get(name) : undefined
+      if (cachedImage) return cachedImage
       try {
         const response = await request(`/books/${id}/reader/entry?revisionId=${encodeURIComponent(readerManifest.revisionId)}&path=${encodeURIComponent(name)}${variant}`, { signal })
-        return await response.blob()
+        const blob = await response.blob()
+        if (variant && !signal?.aborted) imageCache.set(name, blob)
+        return blob
       } catch (error) {
         if (variant && !signal?.aborted && readerView === view) {
           imageFailed = true
@@ -1225,10 +1289,16 @@ async function openBook(id: string, previousPosition?: { cfi: string; revisionId
       if (!entry || !/^(application\/xhtml\+xml|text\/html)$/i.test(entry.mediaType)) return Promise.resolve(null)
       return loadText(name, signal)
     })
+    if (clean || readerManifest.generated) {
+      preparedSection = prepareNextSection(book.sections, name => {
+        const entry: any = entries.get(name)
+        return !!entry && typeof entry.size === 'number' && entry.size > 0 && entry.size <= 256 * 1024
+      })
+    }
     await view.open(book)
     view.renderer.setAttribute('flow', 'paginated')
+    view.renderer.setAttribute('eink', '')
     view.renderer.setAttribute('max-column-count', '1')
-    view.renderer.setAttribute('no-preload', '')
     view.renderer.setAttribute('max-inline-size', '100000')
     applyPaginatorMargin()
     setStyles()
@@ -1236,6 +1306,15 @@ async function openBook(id: string, previousPosition?: { cfi: string; revisionId
       ? { cfi: previousPosition.cfi, percent: 0 } : progress
     await restoreProgress(view, position, book.sections.length)
     if (!imageFailed && !keepPanel) hideLoading()
+    if (!imageFailed) {
+      const titleRouteVersion = routeVersion
+      const titleErrorAtRequest = titleErrorVersion
+      void request(`/books/${encodeURIComponent(id)}`).then(response => response.json()).then(result => {
+        if (titleRouteVersion === routeVersion && titleErrorAtRequest === titleErrorVersion && readerView === view) document.title = typeof result.data?.title === 'string' && result.data.title.trim() ? result.data.title : t('app.name')
+      }).catch(() => {
+        if (titleRouteVersion === routeVersion && titleErrorAtRequest === titleErrorVersion && readerView === view) document.title = t('app.name')
+      })
+    }
   } catch (error) {
     showError(error, () => openBook(id, previousPosition, keepPanel))
   }
@@ -1253,13 +1332,14 @@ async function start() {
 }
 
 function navigateBook(id: string) {
-  history.pushState(null, '', `#/book/${encodeURIComponent(id)}`)
-  void renderRoute()
+  const target = `#/book/${encodeURIComponent(id)}`
+  if (location.hash === target) void renderRoute()
+  else location.hash = target
 }
 
 function navigateShelf() {
-  if (location.hash) history.pushState(null, '', location.pathname + location.search)
-  void renderRoute()
+  if (location.hash) location.hash = ''
+  else void renderRoute()
 }
 
 let routeVersion = 0
@@ -1287,6 +1367,7 @@ window.addEventListener('hashchange', () => { void renderRoute() })
 
 window.addEventListener('beforeunload', () => {
   nextPrefetch?.dispose()
+  preparedSection?.dispose()
   if (progressQueue) void progressQueue.flush()
 })
 

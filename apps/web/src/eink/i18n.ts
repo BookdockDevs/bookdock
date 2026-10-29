@@ -1,8 +1,8 @@
-import { auth as enAuth, common as enCommon, errors as enErrors, eink as enEink, library as enLibrary, reader as enReader, settings as enSettings, theme as enTheme } from '../i18n/locales/en.json'
-import { auth as zhAuth, common as zhCommon, errors as zhErrors, eink as zhEink, library as zhLibrary, reader as zhReader, settings as zhSettings, theme as zhTheme } from '../i18n/locales/zh-CN.json'
+import { app as enApp, auth as enAuth, common as enCommon, errors as enErrors, eink as enEink, library as enLibrary, reader as enReader, settings as enSettings, theme as enTheme } from '../i18n/locales/en.json'
+import { app as zhApp, auth as zhAuth, common as zhCommon, errors as zhErrors, eink as zhEink, library as zhLibrary, reader as zhReader, settings as zhSettings, theme as zhTheme } from '../i18n/locales/zh-CN.json'
 
-const en = { auth: enAuth, common: enCommon, errors: enErrors, eink: enEink, library: enLibrary, reader: enReader, settings: enSettings, theme: enTheme }
-const zhCN = { auth: zhAuth, common: zhCommon, errors: zhErrors, eink: zhEink, library: zhLibrary, reader: zhReader, settings: zhSettings, theme: zhTheme }
+const en = { app: enApp, auth: enAuth, common: enCommon, errors: enErrors, eink: enEink, library: enLibrary, reader: enReader, settings: enSettings, theme: enTheme }
+const zhCN = { app: zhApp, auth: zhAuth, common: zhCommon, errors: zhErrors, eink: zhEink, library: zhLibrary, reader: zhReader, settings: zhSettings, theme: zhTheme }
 
 export function resolveLanguage(query: string | null, stored: string | null, languages: readonly string[]): 'en' | 'zh-CN' {
   const choices = [query, stored, ...languages]

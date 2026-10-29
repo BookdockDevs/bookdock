@@ -1418,6 +1418,7 @@ export class Paginator extends HTMLElement {
     #bgAnimContext = null
     #filling = false // true while #fillVisibleArea is running
     #fillPromise = null // tracks in-progress #fillVisibleArea for awaiting
+    #einkPreloadTimer = null
     // A post-navigation fill that found no layout yet (size 0) leaves this set
     // instead of silently doing nothing; the next expand/resize consumes it
     // once with a position-preserving fill so a short first section does not
@@ -1703,18 +1704,19 @@ export class Paginator extends HTMLElement {
             // top-up just moves off the active drag instead of being skipped.
             if (!this.noPreload && !this.noContinuousScroll && !this.#filling
                 && !this.#stabilizing && !this.#touchScrolled) {
-                const minPages = 5
+                const eink = this.hasAttribute('eink') && !this.scrolled
+                if (eink) this.#scheduleEinkPreload()
                 const pagesAhead = this.size > 0
                     ? Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size)
                     : 0
-                if (pagesAhead < minPages) {
+                if (!eink && pagesAhead < 5) {
                     const sorted = this.#sortedViews
                     const lastIndex = sorted[sorted.length - 1]?.[0]
                     if (lastIndex != null) {
                         const nextIdx = this.#adjacentIndex(1, lastIndex)
                         if (nextIdx != null && !this.#views.has(nextIdx) && this.#isSameDirection(nextIdx)) {
                             this.#filling = true
-                            this.#loadAdjacentSection(nextIdx)
+                            this.#fillPromise = this.#loadAdjacentSection(nextIdx)
                                 .finally(() => {
                                     this.#filling = false
                                     this.dispatchEvent(new Event('stabilized'))
@@ -3382,17 +3384,29 @@ export class Paginator extends HTMLElement {
         // A paginated spread may contain the end of one section and the start
         // of the next. Treat the later visible section as current so a TOC
         // jump to it does not revert to the preceding section on relocation.
-        const visibleStart = this.scrolled ? this.#renderedStart : this.#renderedEnd - 1
+        const visibleStart = this.scrolled ? this.#renderedStart
+            : this.hasAttribute('eink') ? this.#renderedStart + this.size / 2 : this.#renderedEnd - 1
         let offset = 0
         for (const [index, view] of this.#sortedViews) {
             const viewSize = view.element.getBoundingClientRect()[this.sideProp]
             if (visibleStart < offset + viewSize - (this.scrolled ? 1 : 0)) {
                 if (index !== this.#primaryIndex) {
                     this.#primaryIndex = index
+                    if (this.hasAttribute('eink') && !this.scrolled) {
+                        const position = this.containerPosition
+                        let removed = 0
+                        for (const [oldIndex, oldView] of this.#sortedViews) {
+                            if (oldIndex >= index) break
+                            removed += oldView.element.getBoundingClientRect()[this.sideProp]
+                            this.#destroyView(oldIndex)
+                        }
+                        if (removed) this.containerPosition = (position < 0 ? -1 : 1) * Math.max(0, Math.abs(position) - removed)
+                    }
                     this.#syncA11y()
                     this.#trimDistantViews()
                     this.#replaceBackground()
-                    this.#fillPromise = this.#preloadNext()
+                    if (this.hasAttribute('eink') && !this.scrolled) this.#scheduleEinkPreload()
+                    else if (!this.#filling) this.#fillPromise = this.#preloadNext()
                 }
                 return
             }
@@ -3403,13 +3417,41 @@ export class Paginator extends HTMLElement {
     // next/prev sections are ready when the user paginates.
     // Does NOT re-scroll to avoid fighting with the user's current
     // scroll position.
+    #scheduleEinkPreload() {
+        clearTimeout(this.#einkPreloadTimer)
+        this.#einkPreloadTimer = null
+        if (!this.hasAttribute('eink') || this.scrolled || this.noPreload || document.hidden
+            || this.#filling || !this.#primaryView || this.#views.size >= 2 || !this.size) return
+        const pagesAhead = Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size)
+        const sourceIndex = this.#primaryIndex
+        const next = this.#adjacentIndex(1, this.#primaryIndex)
+        if (pagesAhead >= 4 || next == null || !this.#canPreloadEink(next)
+            || this.#views.has(next) || !this.#isSameDirection(next)) return
+        this.#einkPreloadTimer = setTimeout(() => {
+            this.#einkPreloadTimer = null
+            if (this.#locked || this.#stabilizing || this.#touchScrolled) {
+                this.#scheduleEinkPreload()
+                return
+            }
+            if (document.hidden || this.noPreload || this.#filling || this.#views.size >= 2
+                || this.#adjacentIndex(1, this.#primaryIndex) !== next || !this.size
+                || Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size) >= 4) return
+            this.#filling = true
+            this.#fillPromise = this.#loadAdjacentSection(next).finally(() => {
+                this.#filling = false
+                this.dispatchEvent(new Event('stabilized'))
+                if (this.#primaryIndex !== sourceIndex) this.#scheduleEinkPreload()
+            })
+        }, 700)
+    }
     async #preloadNext() {
-        if (this.noPreload || this.noContinuousScroll) return
+        if (this.noPreload || this.noContinuousScroll || this.#filling) return
         this.#filling = true
         try {
             const { size } = this
-            const minPages = 5
-            const maxSections = 8
+            const eink = this.hasAttribute('eink') && !this.scrolled
+            const minPages = eink ? 2 : 5
+            const maxSections = eink ? 2 : 8
             // Load forward sections until we have enough pages ahead
             let iterations = 0
             while (this.#views.size < maxSections && iterations < maxSections) {
@@ -3423,6 +3465,7 @@ export class Paginator extends HTMLElement {
                 if (lastIndex == null) break
                 const nextIdx = this.#adjacentIndex(1, lastIndex)
                 if (nextIdx == null) break
+                if (eink && !this.#canPreloadEink(nextIdx)) break
                 // Stop preloading at writing-mode boundaries
                 if (!this.#isSameDirection(nextIdx)) break
                 await this.#loadAdjacentSection(nextIdx)
@@ -3772,7 +3815,7 @@ export class Paginator extends HTMLElement {
             // In scrolled mode, skip reanchor — browser scroll anchoring
             // preserves position when content is added above/below.
             this.#fillPromise = this.#fillVisibleArea(
-                { reanchor: !this.scrolled })
+                { reanchor: !this.scrolled && !this.hasAttribute('eink') })
             fillStarted = true
             this.#fillPromise.then(
                 () => { if (isCurrent()) this.#stabilizing = false },
@@ -3806,11 +3849,18 @@ export class Paginator extends HTMLElement {
         let previousSize = reservedSize
         let inserted = false
         let loaded = false
+        let loadingView = null
+        let sectionLoaded = false
         try {
             if (isPrepend) this.#container.style.overflowAnchor = 'none'
             const signal = this.#navigationController?.signal
             const src = await section.load(signal)
+            sectionLoaded = !!src
             const data = await section.loadContent?.(signal)
+            if (signal?.aborted) {
+                if (sectionLoaded) section.unload?.()
+                return
+            }
             const expandHandler = isPrepend
                 ? expandedView => {
                     if (!loaded || this.#views.get(index) !== expandedView
@@ -3826,6 +3876,7 @@ export class Paginator extends HTMLElement {
                 }
                 : undefined
             const view = this.#createView(index, expandHandler)
+            loadingView = view
             inserted = true
             view.element.style[this.sideProp] = `${reservedSize}px`
             view.element.style.contain = 'layout paint size'
@@ -3858,6 +3909,10 @@ export class Paginator extends HTMLElement {
             const beforeRender = () => cachedLayout
             await view.load(src, data, afterLoad, beforeRender,
                 section.observeDynamicResources)
+            if (signal?.aborted) {
+                if (this.#views.get(index) === view) this.#destroyView(index)
+                return
+            }
             // Cache direction for future preload boundary checks
             if (view.document) {
                 const dir = getDirection(view.document)
@@ -3896,7 +3951,8 @@ export class Paginator extends HTMLElement {
             console.warn(new Error(`Failed to load adjacent section ${index}`))
             if (inserted && isPrepend)
                 this.containerPosition = (this.#vertical ? -1 : 1) * startBefore
-            this.#destroyView(index)
+            if (this.#views.get(index) === loadingView) this.#destroyView(index)
+            else if (!inserted && sectionLoaded) section.unload?.()
         } finally {
             if (isPrepend) this.#container.style.overflowAnchor = previousOverflowAnchor
         }
@@ -3908,6 +3964,10 @@ export class Paginator extends HTMLElement {
     // to avoid fighting with the user's current scroll position.
     async #fillVisibleArea({ reanchor = true } = {}) {
         if (this.noPreload || this.noContinuousScroll || this.#filling) return
+        if (this.hasAttribute('eink') && !this.scrolled) {
+            this.#scheduleEinkPreload()
+            return
+        }
         this.#filling = true
         try {
             const { size } = this
@@ -3915,8 +3975,9 @@ export class Paginator extends HTMLElement {
                 this.#fillDeferred = true
                 return
             }
-            const minPages = 5
-            const maxSections = 8
+            const eink = this.hasAttribute('eink') && !this.scrolled
+            const minPages = eink ? 2 : 5
+            const maxSections = eink ? 2 : 8
 
             // If the primary section is shorter than one spread and
             // there's no section already loaded before it, load the
@@ -3946,6 +4007,7 @@ export class Paginator extends HTMLElement {
                 if (lastIndex == null) break
                 const nextIdx = this.#adjacentIndex(1, lastIndex)
                 if (nextIdx == null) break
+                if (eink && !this.#canPreloadEink(nextIdx)) break
                 // Stop at writing-mode boundaries
                 if (!this.#isSameDirection(nextIdx)) break
                 await this.#loadAdjacentSection(nextIdx)
@@ -4009,8 +4071,15 @@ export class Paginator extends HTMLElement {
     #canGoToIndex(index) {
         return index >= 0 && index <= this.sections.length - 1
     }
+    #canPreloadEink(index) {
+        const size = this.sections[index]?.size
+        return Number.isFinite(size) && size > 0 && size <= 256 * 1024
+    }
     async #goTo({ index, anchor, select }) {
         this.#selectionDrag.stop(true)
+        clearTimeout(this.#einkPreloadTimer)
+        this.#einkPreloadTimer = null
+        if (this.hasAttribute('eink') && typeof anchor === 'number') this.#anchor = anchor
         const generation = ++this.#displayGeneration
         const isCurrent = () => generation === this.#displayGeneration
         this.#navigationController?.abort(new DOMException('Reader navigation was replaced', 'AbortError'))
@@ -4094,7 +4163,7 @@ export class Paginator extends HTMLElement {
                 if (hasFocus) this.focusView()
                 // Load remaining adjacent sections progressively;
                 // keep #stabilizing true until fill completes
-                this.#fillPromise = this.#fillVisibleArea()
+                this.#fillPromise = this.#fillVisibleArea({ reanchor: !this.hasAttribute('eink') })
                 fillStarted = true
                 this.#fillPromise.then(
                     () => { if (isCurrent()) this.#stabilizing = false },
@@ -4299,9 +4368,17 @@ export class Paginator extends HTMLElement {
     async #turnPage(dir, distance) {
         this.#selectionDrag.stop(true)
         if (this.#locked) return
+        clearTimeout(this.#einkPreloadTimer)
+        this.#einkPreloadTimer = null
         this.#locked = true
         try {
             const prev = dir === -1
+            if (!prev && this.hasAttribute('eink') && !this.scrolled && this.page >= this.pages - 1) {
+                if (this.#filling && this.#fillPromise) await this.#fillPromise
+                const nextIndex = this.#adjacentIndex(1, this.#primaryIndex)
+                if (nextIndex != null) await this.#goTo({ index: nextIndex, anchor: 0 })
+                return
+            }
             const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance))
             if (shouldGo) {
                 // Wait for any in-progress background pre-loading to complete —
@@ -4317,9 +4394,10 @@ export class Paginator extends HTMLElement {
                     anchor: prev ? () => 1 : () => 0,
                 })
             }
-            if (shouldGo || !this.hasAttribute('animated')) await wait(100)
+            if (shouldGo || (!this.hasAttribute('animated') && !this.hasAttribute('eink'))) await wait(100)
         } finally {
             this.#locked = false
+            if (this.hasAttribute('eink') && !this.scrolled) this.#scheduleEinkPreload()
         }
     }
     async prev(distance) {
@@ -4405,6 +4483,8 @@ export class Paginator extends HTMLElement {
         this.#primaryView?.destroyLoupe()
     }
     destroy() {
+        clearTimeout(this.#einkPreloadTimer)
+        this.#einkPreloadTimer = null
         this.#navigationController?.abort(new DOMException('Reader view was destroyed', 'AbortError'))
         this.#navigationController = null
         this.#selectionDrag.destroy()

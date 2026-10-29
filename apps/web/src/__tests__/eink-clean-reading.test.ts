@@ -15,7 +15,7 @@ vi.mock('../../public/foliate-js/view.js', () => {
 })
 vi.mock('../../public/foliate-js/epub.js', () => ({ EPUB: class {
   toc = []
-  sections = [{ id: 'chapter.xhtml' }]
+  sections = [{ id: 'chapter.xhtml', load: vi.fn(async () => 'blob:chapter'), unload: vi.fn() }]
   rendition = {}
   transformTarget = new EventTarget()
   constructor(loader: unknown) { state.loaders.push(loader); state.books.push(this) }

@@ -58,7 +58,9 @@ it('filters startup and fetched chapters, blocks media fetches and keeps images 
   }
   expect(await loader.loadBlob('movie.mp4')).toBeNull()
   expect((await loader.loadBlob('picture.png'))?.size).toBe(5)
+  expect((await loader.loadBlob('picture.png'))?.size).toBe(5)
   const urls = vi.mocked(fetch).mock.calls.map(([url]) => String(url))
   expect(urls.some(url => url.includes('path=movie.mp4'))).toBe(false)
   expect(urls.some(url => url.includes('path=picture.png') && url.includes('imageVariant=eink'))).toBe(true)
+  expect(urls.filter(url => url.includes('path=picture.png'))).toHaveLength(1)
 })

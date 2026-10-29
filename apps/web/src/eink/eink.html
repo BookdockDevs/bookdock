@@ -2,9 +2,10 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=5">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Bookdock E-ink</title>
+<title>书坞</title>
 <style>
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -74,6 +75,18 @@
   .reader { height: calc(100% - 58px); background: var(--bg); }
   foliate-view { display: block; width: 100%; height: 100%; }
   .reader-status { display: none !important; }
+  .turn-status {
+    position: fixed;
+    z-index: 5;
+    right: 12px;
+    bottom: 66px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 15px;
+    pointer-events: none;
+  }
   .loading-overlay {
     position: fixed;
     z-index: 100;

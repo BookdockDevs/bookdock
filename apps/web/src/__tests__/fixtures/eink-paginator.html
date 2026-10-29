@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bookdock pagination test</title></head><body>
+<h1>Pagination test</h1><pre id="result">Running…</pre><div id="host" style="width:380px;height:500px"></div>
+<script type="module">
+import '/foliate-js/paginator.js'
+const result = document.querySelector('#result')
+try {
+ for (let run = 0; run < 30; run++) {
+  const loads = [0, 0, 0, 0]
+  const sections = loads.map((_, i) => {
+    const body = `<h1>Chapter ${i + 1}</h1>` + Array.from({ length: 20 }, (_, j) => `<p>Chapter ${i + 1}, paragraph ${j + 1}. ${'Reading content. '.repeat(10)}</p>`).join('')
+    const text = `<!doctype html><html><head><title>Chapter ${i + 1}</title></head><body>${body}</body></html>`
+    return { id: String(i), size: text.length, load: async () => { loads[i]++; if (i) await new Promise(resolve => setTimeout(resolve, (run % 6) * 40)); return URL.createObjectURL(new Blob([text], { type: 'text/html' })) }, loadContent: async () => text, unload() {} }
+  })
+  const renderer = document.createElement('foliate-paginator')
+  renderer.setAttribute('eink', '')
+  renderer.setAttribute('flow', 'paginated')
+  renderer.setAttribute('max-column-count', '1')
+  renderer.style.width = '100%'
+  renderer.style.height = '100%'
+  document.querySelector('#host').append(renderer)
+  const firstVisible = new Map()
+  renderer.addEventListener('relocate', event => {
+    const { index, range } = event.detail
+    if (!firstVisible.has(index) && range && !range.collapsed && range.toString().trim()) firstVisible.set(index, `${event.detail.reason}|page=${renderer.page}|${range.toString()}`)
+  })
+  renderer.open({ sections, dir: 'ltr' })
+  await renderer.goTo({ index: 0, anchor: 0 })
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  const visited = [renderer.primaryIndex]
+  if (run === 0) {
+    while (renderer.pages - 1 - renderer.page > 3) await renderer.next()
+    await new Promise(resolve => setTimeout(resolve, 200))
+    if (loads[1]) throw new Error('Preload started before the reader paused')
+    await renderer.next()
+    await new Promise(resolve => setTimeout(resolve, 400))
+    if (loads[1]) throw new Error('Page turn failed to defer preload')
+    await new Promise(resolve => setTimeout(resolve, 700))
+    if (loads[1] !== 1) throw new Error('Idle preload did not start')
+  }
+  for (let i = 0; i < 120 && !renderer.atEnd; i++) {
+    await renderer.next()
+    if (visited[visited.length - 1] !== renderer.primaryIndex) visited.push(renderer.primaryIndex)
+    if (renderer.shadowRoot.querySelectorAll('iframe').length > 2) throw new Error('More than two section views')
+  }
+  if (visited.join(',') !== '0,1,2,3') throw new Error('Unexpected forward sections: ' + visited)
+  for (let i = 0; i < 4; i++) {
+    if (!firstVisible.get(i)?.includes(`Chapter ${i + 1}`)) throw new Error('Missing first content of chapter ' + (i + 1) + ': ' + JSON.stringify(firstVisible.get(i)))
+  }
+  for (let i = 0; i < 120 && renderer.primaryIndex > 0; i++) await renderer.prev()
+  if (renderer.primaryIndex !== 0) throw new Error('Failed to return to first section')
+  renderer.destroy()
+  renderer.remove()
+ }
+  result.textContent = 'PASS: 30 runs, varied delays, forward and backward, first-page content and at most two views.'
+} catch (error) { result.textContent = 'FAIL: ' + error.stack }
+</script></body></html>
