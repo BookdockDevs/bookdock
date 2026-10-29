@@ -4,6 +4,10 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- The e-ink reader offers device-local page-turn zones: standard left/right navigation, one-handed forward navigation, or disabled tap navigation.
+
 ### Changed
 
 - Improved e-ink page and chapter turns with adjacent-chapter preparation during reading pauses and reuse of recently loaded images. Longer page turns show a loading message, and repeated taps retain at most one subsequent page-turn request.
@@ -950,6 +954,10 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### [未发布]
+
+#### 新增
+
+- 墨水屏阅读版新增设备本地的翻页区域设置，可选择左右分区翻页、单手向前翻页或禁用正文点击翻页。
 
 #### 变更
 

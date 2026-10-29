@@ -6,7 +6,7 @@ describe('Kindle entry routes', () => {
     const res = await app.request('/eink')
     expect(res.status).toBe(200)
     const text = await res.text()
-    expect(text).toContain('Bookdock E-ink')
+    expect(text).toContain('<div id="app"></div>')
     expect(text).toContain('/eink/eink.js')
   })
 

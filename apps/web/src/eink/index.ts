@@ -53,6 +53,13 @@ const PARAGRAPH_SPACING_KEY = 'bd-eink-para-spacing-step'
 const LETTER_SPACING_KEY = 'bd-eink-letter-spacing-step'
 const SETTINGS_TAB_KEY = 'bd-eink-settings-tab'
 const CLEAN_READING_KEY = 'bd-eink-clean-reading'
+const TURN_AREA_KEY = 'bd-eink-turn-area'
+
+let turnArea: 'standard' | 'single' | 'disabled' = 'standard'
+try {
+  const saved = localStorage.getItem(TURN_AREA_KEY)
+  if (saved === 'single' || saved === 'disabled') turnArea = saved
+} catch {}
 
 try { cleanReading = localStorage.getItem(CLEAN_READING_KEY) === 'true' } catch {}
 
@@ -640,15 +647,14 @@ function readerPage() {
     button(t('library.title'), () => { closePanel(); navigateShelf() }),
     button(t('settings.title'), () => {
       const panelEl = openSettingsPanel()
-      let currentTab: 'font' | 'layout' | 'other' = activeSettingsTab === 'other' && !cleanReadingSupported ? 'font' : activeSettingsTab
+      let currentTab: 'font' | 'layout' | 'other' = activeSettingsTab
 
       const header = element('div', '', 'settings-header')
       const tabsWrap = element('div', '', 'settings-tabs')
       const fontTabBtn = element('button', t('eink.tabFont'), currentTab === 'font' ? 'settings-tab-btn active' : 'settings-tab-btn')
       const layoutTabBtn = element('button', t('eink.tabLayout'), currentTab === 'layout' ? 'settings-tab-btn active' : 'settings-tab-btn')
       const otherTabBtn = element('button', t('eink.tabOther'), currentTab === 'other' ? 'settings-tab-btn active' : 'settings-tab-btn')
-      tabsWrap.append(fontTabBtn, layoutTabBtn)
-      if (cleanReadingSupported) tabsWrap.append(otherTabBtn)
+      tabsWrap.append(fontTabBtn, layoutTabBtn, otherTabBtn)
 
       const sunIconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`
       const moonIconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`
@@ -913,6 +919,34 @@ function readerPage() {
       const renderOtherTab = () => {
         body.className = 'panel-body other-settings'
         body.replaceChildren()
+        const group = element('div', '', 'turn-area-group')
+        group.append(element('div', t('eink.turnArea'), 'turn-area-title'))
+        const cards = element('div', '', 'turn-area-cards')
+        const modes = [
+          { id: 'standard', label: 'eink.turnStandard', left: '←', right: '→' },
+          { id: 'single', label: 'eink.turnSingle', left: '→', right: '→' },
+          { id: 'disabled', label: 'eink.turnDisabled', left: '–', right: '–' },
+        ] as const
+        for (const mode of modes) {
+          const option = element('div', '', 'turn-area-option')
+          const card = element('button', '', 'layout-card turn-area-card') as HTMLButtonElement
+          card.type = 'button'
+          card.setAttribute('aria-pressed', String(turnArea === mode.id))
+          card.setAttribute('aria-label', t(mode.label))
+          const diagram = element('span', '', 'turn-area-diagram')
+          diagram.setAttribute('aria-hidden', 'true')
+          diagram.append(element('span', mode.left), element('span', mode.right))
+          card.append(diagram)
+          option.append(card)
+          card.onclick = () => {
+            turnArea = mode.id
+            try { localStorage.setItem(TURN_AREA_KEY, turnArea) } catch {}
+            for (const child of Array.from(cards.querySelectorAll('button'))) child.setAttribute('aria-pressed', String(child === card))
+          }
+          cards.append(option)
+        }
+        group.append(cards)
+        body.append(group)
         if (!cleanReadingSupported) return
         const row = element('div', '', 'other-setting-row')
         const label = element('span', t('reader.cleanReading'))
@@ -1095,8 +1129,8 @@ function readerPage() {
       if (!panel.hidden || (busy && !turning)) return
       const bounds = view.getBoundingClientRect()
       const x = (event.detail.x - bounds.left) / bounds.width
-      if (x < 0.3) void turn(-1)
-      else if (x > 0.7) void turn(1)
+      if (turnArea === 'disabled' || x < 0 || x > 1) return
+      void turn(turnArea === 'single' || x >= 0.5 ? 1 : -1)
     })
   }
   replaceReaderView()

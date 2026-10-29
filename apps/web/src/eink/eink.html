@@ -332,6 +332,17 @@
     display: flex;
     align-items: center;
   }
+  .turn-area-group { width: 100%; }
+  .turn-area-title { font-size: 17px; margin-bottom: 10px; color: var(--fg); }
+  .turn-area-cards { display: flex; width: 100%; }
+  .turn-area-option { flex: 1; min-width: 0; text-align: center; }
+  .turn-area-option + .turn-area-option { margin-left: 14px; }
+  .turn-area-card { width: 100%; padding: 0; font-family: inherit; }
+  .turn-area-card[aria-pressed="true"] { border: 3px solid var(--fg); }
+  .turn-area-diagram { display: flex; width: 60px; height: 28px; }
+  .turn-area-diagram span { display: flex; flex: 1; align-items: center; justify-content: center; }
+  .turn-area-diagram span + span { border-left: 1px solid var(--fg); }
+  .turn-area-group + .other-setting-row { margin-top: 28px; }
   .other-setting-row { display: flex; align-items: center; justify-content: space-between; width: 100%; }
   .other-setting-toggle { position: relative; width: 58px; min-height: 32px; height: 32px; border: 2px solid var(--fg); border-radius: 16px; }
   .other-setting-toggle::after { content: ''; position: absolute; top: 4px; left: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--fg); }

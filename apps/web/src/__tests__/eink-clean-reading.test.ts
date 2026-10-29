@@ -1,10 +1,12 @@
 import { expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ loaders: [] as any[], books: [] as any[], close: vi.fn(), destroy: vi.fn(), styles: vi.fn((_css: string) => {}), init: vi.fn(async (_options: unknown) => {}) }))
+const state = vi.hoisted(() => ({ loaders: [] as any[], books: [] as any[], close: vi.fn(), destroy: vi.fn(), styles: vi.fn((_css: string) => {}), init: vi.fn(async (_options: unknown) => {}), next: vi.fn(async () => {}), prev: vi.fn(async () => {}) }))
 vi.mock('../../public/foliate-js/view.js', () => {
   if (!customElements.get('foliate-view')) customElements.define('foliate-view', class extends HTMLElement {
     renderer = Object.assign(document.createElement('div'), { setStyles: state.styles })
     constructor() { super(); this.renderer.attachShadow({ mode: 'open' }) }
+    next() { return state.next() }
+    prev() { return state.prev() }
     async open() {}
     async init(options: unknown) { await state.init(options) }
     resolveNavigation() { return { index: 0 } }
@@ -29,6 +31,7 @@ it('toggles clean reading, restores the position and blocks book presentation re
   localStorage.setItem('i18nextLng', 'en')
   localStorage.removeItem('bd-eink-clean-reading')
   localStorage.removeItem('bd-eink-settings-tab')
+  localStorage.removeItem('bd-eink-turn-area')
   const markup = '<html xmlns="http://www.w3.org/1999/xhtml"><head><style>p { color:red }</style><link rel="stylesheet" href="book.css"/></head><body><p style="color:red">Text <img src="image.png"/></p></body></html>'
   const json = (data: unknown) => new Response(JSON.stringify({ data }))
   vi.stubGlobal('fetch', vi.fn(async (input: string) => {
@@ -54,6 +57,40 @@ it('toggles clean reading, restores the position and blocks book presentation re
     const controls = [...document.querySelectorAll<HTMLButtonElement>('.controls button')]
     controls.find(button => button.textContent === 'Settings')!.click()
     ;[...document.querySelectorAll<HTMLButtonElement>('.settings-tab-btn')].find(button => button.textContent === 'Other')!.click()
+    const cards = [...document.querySelectorAll<HTMLButtonElement>('.turn-area-card')]
+    expect(cards.map(card => card.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false'])
+    cards[1].click()
+    expect(localStorage.getItem('bd-eink-turn-area')).toBe('single')
+    expect(cards[1].getAttribute('aria-pressed')).toBe('true')
+    cards[2].click()
+    expect(localStorage.getItem('bd-eink-turn-area')).toBe('disabled')
+    cards[0].click()
+    expect(localStorage.getItem('bd-eink-turn-area')).toBe('standard')
+    const reader = document.querySelector('foliate-view')!
+    vi.spyOn(reader, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 100 } as DOMRect)
+    const testPanel = document.querySelector<HTMLElement>('.panel')!
+    const clickReader = (x: number) => reader.dispatchEvent(new CustomEvent('click-view', { detail: { x } }))
+    clickReader(10)
+    expect(state.prev).not.toHaveBeenCalled()
+    testPanel.hidden = true
+    clickReader(10)
+    await vi.waitFor(() => expect(state.prev).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(document.querySelector<HTMLElement>('.loading-overlay')?.style.display).toBe('none'))
+    clickReader(60)
+    await vi.waitFor(() => expect(state.next).toHaveBeenCalledTimes(1))
+    testPanel.hidden = false
+    cards[1].click()
+    testPanel.hidden = true
+    await vi.waitFor(() => { clickReader(10); expect(state.next).toHaveBeenCalledTimes(2) })
+    testPanel.hidden = false
+    cards[2].click()
+    testPanel.hidden = true
+    clickReader(10)
+    clickReader(90)
+    expect(state.next).toHaveBeenCalledTimes(2)
+    expect(state.prev).toHaveBeenCalledTimes(1)
+    testPanel.hidden = false
+    cards[0].click()
     const toggle = document.querySelector<HTMLButtonElement>('[role=switch]')!
     const panel = document.querySelector<HTMLElement>('.panel')!
     const originalView = document.querySelector('foliate-view')
@@ -100,6 +137,7 @@ it('toggles clean reading, restores the position and blocks book presentation re
     localStorage.removeItem('i18nextLng')
     localStorage.removeItem('bd-eink-clean-reading')
     localStorage.removeItem('bd-eink-settings-tab')
+    localStorage.removeItem('bd-eink-turn-area')
     history.replaceState(null, '', '/')
     document.body.innerHTML = ''
   }
