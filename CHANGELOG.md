@@ -2,6 +2,12 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Improved e-ink page turns by reusing visible-text measurements and avoiding redundant style updates. The next chapter view is prepared on the current chapter's last page, and bottom controls show pressed feedback before their actions run.
+
 ## [0.7.2] - 2026-10-29
 
 ### Added
@@ -952,6 +958,12 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### 未发布
+
+#### 优化
+
+- 优化墨水屏阅读器翻页：复用可见文字测量结果，减少重复样式更新；进入章节最后一页时准备下一章视图，底部按钮在执行操作前显示点击反馈。
 
 ### [0.7.2] - 2026-10-29
 

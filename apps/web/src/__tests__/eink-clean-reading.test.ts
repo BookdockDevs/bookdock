@@ -56,6 +56,7 @@ it('toggles clean reading, restores the position and blocks book presentation re
     document.querySelector('foliate-view')!.dispatchEvent(new CustomEvent('relocate', { detail: { cfi: 'epubcfi(/6/2)' } }))
     const controls = [...document.querySelectorAll<HTMLButtonElement>('.controls button')]
     controls.find(button => button.textContent === 'Settings')!.click()
+    await vi.waitFor(() => expect(document.querySelectorAll('.settings-tab-btn').length).toBeGreaterThan(0))
     ;[...document.querySelectorAll<HTMLButtonElement>('.settings-tab-btn')].find(button => button.textContent === 'Other')!.click()
     const cards = [...document.querySelectorAll<HTMLButtonElement>('.turn-area-card')]
     expect(cards.map(card => card.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false'])

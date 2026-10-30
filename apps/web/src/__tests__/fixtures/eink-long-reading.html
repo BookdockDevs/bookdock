@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><title>E-ink long reading test</title></head><body>
+<pre id="result">Running…</pre><div id="host" style="width:380px;height:500px"></div>
+<script type="module">
+import '/foliate-js/paginator.js'
+const result = document.querySelector('#result')
+const live = new Map()
+try {
+  const sections = Array.from({ length: 80 }, (_, index) => {
+    const text = `<!doctype html><html><head><title>${index}</title></head><body><p>Chapter ${index}</p></body></html>`
+    return {
+      id: String(index), size: text.length,
+      load: async () => {
+        const url = URL.createObjectURL(new Blob([text], { type: 'text/html' }))
+        const urls = live.get(index) ?? []
+        urls.push(url)
+        live.set(index, urls)
+        return url
+      },
+      loadContent: async () => text,
+      unload: () => {
+        const urls = live.get(index)
+        if (!urls?.length) throw new Error('Unbalanced unload for chapter ' + index)
+        URL.revokeObjectURL(urls.pop())
+        if (!urls.length) live.delete(index)
+      },
+    }
+  })
+  const renderer = document.createElement('foliate-paginator')
+  renderer.setAttribute('eink', '')
+  renderer.setAttribute('flow', 'paginated')
+  renderer.setAttribute('max-column-count', '1')
+  renderer.style.width = '100%'
+  renderer.style.height = '100%'
+  document.querySelector('#host').append(renderer)
+  renderer.open({ sections, dir: 'ltr' })
+  await renderer.goTo({ index: 0, anchor: 0 })
+  for (let i = 1; i < sections.length; i++) {
+    await renderer.next()
+    if (renderer.primaryIndex !== i) throw new Error('Unexpected section at ' + i)
+    if (renderer.shadowRoot.querySelectorAll('iframe').length > 2 || live.size > 2)
+      throw new Error('Sections accumulated at ' + i + ': ' + live.size)
+  }
+  renderer.destroy()
+  renderer.remove()
+  if (live.size) throw new Error('Resources remained after closing: ' + live.size)
+  result.textContent = 'PASS: 80 forward sections; bounded live views and released section resources.'
+} catch (error) { result.textContent = 'FAIL: ' + error.stack }
+</script></body></html>

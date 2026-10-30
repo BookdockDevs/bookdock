@@ -603,6 +603,9 @@ function readerPage() {
   }
 
   const controls = element('nav', '', 'controls')
+  let pressedButton: HTMLButtonElement | null = null
+  let pressedTimer: ReturnType<typeof setTimeout> | null = null
+  let pressSequence = 0
   const turnStatus = element('div', '', 'turn-status')
   turnStatus.hidden = true
   turnStatus.setAttribute('role', 'status')
@@ -625,12 +628,27 @@ function readerPage() {
           await new Promise(resolve => setTimeout(resolve, 1000))
         } else {
           trackingPosition = true
+          let feedbackAt = 0
           const timer = setTimeout(() => {
+            feedbackAt = Date.now()
             turnStatus.textContent = t(current === 1 ? 'eink.turningNext' : 'eink.turningPrevious')
             turnStatus.hidden = false
-          }, 350)
+          }, 2000)
           try { await (current === 1 ? readerView.next() : readerView.prev()) }
-          finally { clearTimeout(timer); turnStatus.hidden = true }
+          finally {
+            clearTimeout(timer)
+            if (feedbackAt && view === readerView) {
+              // Keep feedback present until the browser has had a chance to paint it.
+              await new Promise<void>(resolve => {
+                let frame = 0
+                const fallback = setTimeout(() => { cancelAnimationFrame(frame); resolve() }, 1000)
+                frame = requestAnimationFrame(() => {
+                  frame = requestAnimationFrame(() => { clearTimeout(fallback); resolve() })
+                })
+              })
+            }
+            turnStatus.hidden = true
+          }
         }
         next = queuedTurn
       }
@@ -1098,6 +1116,34 @@ function readerPage() {
     button(t('library.previousPage'), () => void turn(-1)),
     button(t('library.nextPage'), () => void turn(1)),
   )
+  for (const control of controls.querySelectorAll('button')) {
+    const action = control.onclick
+    control.onclick = event => {
+      const readerView = view
+      const sequence = ++pressSequence
+      if (pressedTimer !== null) clearTimeout(pressedTimer)
+      pressedButton?.classList.remove('pressed')
+      pressedButton = control
+      control.classList.add('pressed')
+      // The page turn may block the main thread, so paint the button first.
+      void new Promise<void>(resolve => {
+        let frame = 0
+        const fallback = setTimeout(() => { cancelAnimationFrame(frame); resolve() }, 1000)
+        frame = requestAnimationFrame(() => {
+          frame = requestAnimationFrame(() => { clearTimeout(fallback); resolve() })
+        })
+      }).then(() => {
+        if (sequence === pressSequence) {
+          pressedTimer = setTimeout(() => {
+            control.classList.remove('pressed')
+            pressedButton = null
+            pressedTimer = null
+          }, 500)
+        }
+        if (controls.isConnected && view === readerView) action?.call(control, event)
+      })
+    }
+  }
   app.append(host, backdrop, panel, controls, turnStatus)
   replaceReaderView = () => {
     view = element('foliate-view') as any

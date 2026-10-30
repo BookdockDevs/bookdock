@@ -45,6 +45,7 @@ it('uses the requested defaults and preserves an explicitly saved zero', async (
       await vi.waitFor(() => expect(state.init).toHaveBeenCalled())
       await vi.waitFor(() => expect(document.querySelector<HTMLElement>('.loading-overlay')?.style.display).toBe('none'))
       ;[...document.querySelectorAll<HTMLButtonElement>('.controls button')].find(button => button.textContent === 'Settings')!.click()
+      await vi.waitFor(() => expect(document.querySelectorAll('.settings-tab-btn').length).toBeGreaterThan(0))
       ;[...document.querySelectorAll<HTMLButtonElement>('.settings-tab-btn')].find(button => button.textContent === 'Layout')!.click()
       const margins = document.querySelectorAll('.layout-opt-group:first-child .layout-card')
       expect([...margins].findIndex(card => card.classList.contains('active'))).toBe(expectedMargin)

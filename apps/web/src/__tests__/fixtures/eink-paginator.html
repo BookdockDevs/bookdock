@@ -28,14 +28,19 @@ try {
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   const visited = [renderer.primaryIndex]
   if (run === 0) {
-    while (renderer.pages - 1 - renderer.page > 3) await renderer.next()
-    await new Promise(resolve => setTimeout(resolve, 200))
-    if (loads[1]) throw new Error('Preload started before the reader paused')
+    let rangeMeasurements = 0
+    const doc = renderer.getContents()[0].doc
+    const createTreeWalker = doc.createTreeWalker.bind(doc)
+    doc.createTreeWalker = (...args) => { rangeMeasurements++; return createTreeWalker(...args) }
     await renderer.next()
-    await new Promise(resolve => setTimeout(resolve, 400))
-    if (loads[1]) throw new Error('Page turn failed to defer preload')
-    await new Promise(resolve => setTimeout(resolve, 700))
-    if (loads[1] !== 1) throw new Error('Idle preload did not start')
+    doc.createTreeWalker = createTreeWalker
+    if (rangeMeasurements !== 1) throw new Error('Same-section turn measured visible text ' + rangeMeasurements + ' times')
+    while (renderer.pages - 1 - renderer.page > 1) await renderer.next()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    if (loads[1]) throw new Error('Preload started before the last page')
+    await renderer.next()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    if (loads[1] !== 1) throw new Error('Last-page preload did not start')
   }
   for (let i = 0; i < 120 && !renderer.atEnd; i++) {
     await renderer.next()
@@ -51,6 +56,60 @@ try {
   renderer.destroy()
   renderer.remove()
  }
-  result.textContent = 'PASS: 30 runs, varied delays, forward and backward, first-page content and at most two views.'
+  let releasePreload
+  let preloadStarted = false
+  const pending = new Promise(resolve => { releasePreload = resolve })
+  const urls = []
+  const sections = [0, 1, 2].map(i => {
+    const markup = `<!doctype html><html><head><title>${i}</title></head><body><p>Chapter ${i}</p></body></html>`
+    return {
+      id: String(i), size: markup.length,
+      load: async () => {
+        if (i === 2) { preloadStarted = true; await pending }
+        const url = URL.createObjectURL(new Blob([markup], { type: 'text/html' }))
+        urls.push(url)
+        return url
+      },
+      loadContent: async () => markup,
+      unload() {},
+    }
+  })
+  const renderer = document.createElement('foliate-paginator')
+  renderer.setAttribute('eink', '')
+  renderer.setAttribute('flow', 'paginated')
+  renderer.setAttribute('max-column-count', '1')
+  renderer.style.width = '100%'
+  renderer.style.height = '100%'
+  document.querySelector('#host').append(renderer)
+  renderer.open({ sections, dir: 'ltr' })
+  renderer.setStyles('p { color: black }')
+  await renderer.goTo({ index: 1, anchor: 0 })
+  const doc = renderer.getContents()[0].doc
+  const style = [...doc.head.querySelectorAll('style')].find(el => el.textContent === 'p { color: black }')
+  if (!style) throw new Error('Reader style was not applied')
+  const changes = []
+  const observer = new MutationObserver(records => changes.push(...records))
+  observer.observe(style, { childList: true, characterData: true, subtree: true })
+  renderer.setStyles('p { color: black }')
+  await Promise.resolve()
+  if (changes.length) throw new Error('Unchanged reader styles were rewritten')
+  renderer.setStyles('p { color: blue }')
+  await Promise.resolve()
+  if (style.textContent !== 'p { color: blue }' || !changes.length) throw new Error('Updated reader styles were not applied')
+  observer.disconnect()
+  await new Promise(resolve => setTimeout(resolve, 300))
+  if (!preloadStarted) throw new Error('Blocked preload did not start')
+  await Promise.race([
+    renderer.prev(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Backward turn waited for unrelated preload')), 2000)),
+  ])
+  if (renderer.primaryIndex !== 0) throw new Error('Backward turn did not reach the previous section')
+  releasePreload()
+  await new Promise(resolve => setTimeout(resolve, 100))
+  if (renderer.primaryIndex !== 0) throw new Error('Cancelled preload replaced the current section')
+  renderer.destroy()
+  renderer.remove()
+  urls.forEach(url => URL.revokeObjectURL(url))
+  result.textContent = 'PASS: pagination, bounded views, and backward navigation during a blocked forward preload.'
 } catch (error) { result.textContent = 'FAIL: ' + error.stack }
 </script></body></html>

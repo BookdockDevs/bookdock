@@ -149,10 +149,13 @@
     outline: none !important;
     box-shadow: none !important;
   }
-  .controls button:focus, .controls button:active {
+  .controls button:focus {
     outline: none !important;
     border: 0 !important;
-    background: var(--bg) !important;
+  }
+  .controls button:active, .controls button.pressed {
+    background: var(--fg) !important;
+    color: var(--bg) !important;
   }
   .backdrop { position: fixed; z-index: 1; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.4); }
   .panel {

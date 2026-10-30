@@ -674,6 +674,7 @@ class View {
     #contentPages = 0
     #bgImageSize = null
     #disposeDynamicResources
+    #cancelLoad = null
     fontReady = Promise.resolve()
     constructor({ container, onExpand }) {
         this.container = container
@@ -727,11 +728,14 @@ class View {
             const timer = setTimeout(() => {
                 if (settled) return
                 settled = true
+                this.#cancelLoad = null
+                this.#iframe.removeEventListener('load', onLoad)
                 reject(new Error('iframe load timed out'))
             }, 10000)
-            this.#iframe.addEventListener('load', async () => {
+            const onLoad = async () => {
                 if (settled) return
                 settled = true
+                this.#cancelLoad = null
                 clearTimeout(timer)
                 const doc = this.document
                 // afterLoad reports whether the section is still current. A
@@ -817,7 +821,15 @@ class View {
                 this.fontReady = doc.fonts.ready.then(() => this.expand())
 
                 resolve()
-            }, { once: true })
+            }
+            this.#cancelLoad = () => {
+                if (settled) return
+                settled = true
+                clearTimeout(timer)
+                this.#iframe.removeEventListener('load', onLoad)
+                reject(new DOMException('Reader view was destroyed', 'AbortError'))
+            }
+            this.#iframe.addEventListener('load', onLoad, { once: true })
             if (data) {
                 this.#iframe.srcdoc = data
             } else {
@@ -1299,6 +1311,8 @@ class View {
             this.#overlayer.clearHole()
     }
     destroy() {
+        this.#cancelLoad?.()
+        this.#cancelLoad = null
         this.#disposeDynamicResources?.()
         this.#disposeDynamicResources = null
         if (this.document?.body) this.#observer.unobserve(this.document.body)
@@ -1419,6 +1433,7 @@ export class Paginator extends HTMLElement {
     #filling = false // true while #fillVisibleArea is running
     #fillPromise = null // tracks in-progress #fillVisibleArea for awaiting
     #einkPreloadTimer = null
+    #einkPreload = null
     // A post-navigation fill that found no layout yet (size 0) leaves this set
     // instead of silently doing nothing; the next expand/resize consumes it
     // once with a position-preserving fill so a short first section does not
@@ -3425,7 +3440,7 @@ export class Paginator extends HTMLElement {
         const pagesAhead = Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size)
         const sourceIndex = this.#primaryIndex
         const next = this.#adjacentIndex(1, this.#primaryIndex)
-        if (pagesAhead >= 4 || next == null || !this.#canPreloadEink(next)
+        if (pagesAhead >= 1 || next == null || !this.#canPreloadEink(next)
             || this.#views.has(next) || !this.#isSameDirection(next)) return
         this.#einkPreloadTimer = setTimeout(() => {
             this.#einkPreloadTimer = null
@@ -3435,14 +3450,18 @@ export class Paginator extends HTMLElement {
             }
             if (document.hidden || this.noPreload || this.#filling || this.#views.size >= 2
                 || this.#adjacentIndex(1, this.#primaryIndex) !== next || !this.size
-                || Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size) >= 4) return
+                || Math.floor((this.#renderedViewSize - this.#renderedEnd) / this.size) >= 1) return
             this.#filling = true
+            const preload = { index: next }
+            this.#einkPreload = preload
             this.#fillPromise = this.#loadAdjacentSection(next).finally(() => {
+                if (this.#einkPreload !== preload) return
+                this.#einkPreload = null
                 this.#filling = false
                 this.dispatchEvent(new Event('stabilized'))
                 if (this.#primaryIndex !== sourceIndex) this.#scheduleEinkPreload()
             })
-        }, 700)
+        }, 0)
     }
     async #preloadNext() {
         if (this.noPreload || this.noContinuousScroll || this.#filling) return
@@ -3503,7 +3522,10 @@ export class Paginator extends HTMLElement {
         }
 
         if (!this.scrolled && (reason === 'snap' || reason === 'page')) {
-            this.#flushVisibleState()
+            if (this.hasAttribute('eink')) {
+                this.#primaryIndex = visibleIndex ?? this.#primaryIndex
+                this.#anchor = range
+            } else this.#flushVisibleState()
             this.#justAnchored = true
             this.#justAnchoredPosition = this.containerPosition
         }
@@ -4381,6 +4403,14 @@ export class Paginator extends HTMLElement {
             }
             const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance))
             if (shouldGo) {
+                if (prev && this.hasAttribute('eink') && this.#einkPreload) {
+                    const { index } = this.#einkPreload
+                    this.#einkPreload = null
+                    this.#navigationController?.abort(new DOMException('Background preload was replaced', 'AbortError'))
+                    this.#destroyView(index)
+                    this.#filling = false
+                    this.#fillPromise = null
+                }
                 // Wait for any in-progress background pre-loading to complete —
                 // it may already be loading the section we need, so awaiting
                 // it lets #goTo reuse the view instead of loading from scratch
@@ -4456,9 +4486,14 @@ export class Paginator extends HTMLElement {
             const [$beforeStyle, $style] = $$styles
             if (Array.isArray(styles)) {
                 const [beforeStyle, style] = styles
+                if (this.hasAttribute('eink') && $beforeStyle.textContent === beforeStyle
+                    && $style.textContent === style) continue
                 $beforeStyle.textContent = beforeStyle
                 $style.textContent = style
-            } else $style.textContent = styles
+            } else {
+                if (this.hasAttribute('eink') && $style.textContent === styles) continue
+                $style.textContent = styles
+            }
 
             // needed because the resize observer doesn't work in Firefox
             view.document?.fonts?.ready?.then(() => view.expand())
