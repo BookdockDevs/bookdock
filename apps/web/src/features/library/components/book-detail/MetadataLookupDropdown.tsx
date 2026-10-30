@@ -1,7 +1,7 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { QueryClient, QueryClientContext, useQuery } from '@tanstack/react-query'
 
-import type { MetadataConfiguration, MetadataProvider } from '@bookdock/shared'
+import type { MetadataConfiguration, MetadataProvider, MetadataProviderId, PersonalMetadataSourceView } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
 import MetadataProviderIcon from '@/components/ui/MetadataProviderIcon'
@@ -10,10 +10,10 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 
 interface MetadataLookupDropdownProps {
-  onSelect: (provider: MetadataProvider) => void
+  onSelect: (provider: MetadataProviderId) => void
   disabled?: boolean
   className?: string
-  value?: MetadataProvider
+  value?: MetadataProviderId
 }
 
 const PROVIDERS: readonly MetadataProvider[] = ['douban', 'qidian', 'weread', 'bangumi', 'googlebooks', 'openlibrary'] as const
@@ -41,6 +41,16 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
     queryClient,
   )
   const config = configRes?.data
+  const { data: sourcesRes } = useQuery(
+    {
+      queryKey: ['personal-metadata-sources', userId],
+      queryFn: () => apiGet<{ data: PersonalMetadataSourceView[] }>('/integrations/personal-sources'),
+      staleTime: 30_000,
+      enabled: Boolean(contextClient),
+    },
+    queryClient,
+  )
+  const personalSources = Array.isArray(sourcesRes?.data) ? sourcesRes.data : []
 
   const availableProviders = useMemo(() => {
     return PROVIDERS.filter((item) => {
@@ -57,6 +67,14 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
     bangumi: 'Bangumi',
     googlebooks: 'Google Books',
     openlibrary: 'Open Library',
+  }
+
+  function resolveProviderName(id: MetadataProviderId): string {
+    if (id.startsWith('personal:')) {
+      const sourceId = id.slice('personal:'.length)
+      return personalSources?.find((source) => source.sourceId === sourceId)?.name ?? sourceId
+    }
+    return providerNames[id as MetadataProvider]
   }
 
   useEffect(() => {
@@ -82,6 +100,46 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
     }
   }, [open])
 
+  const renderMenuItem = (item: MetadataProviderId) => {
+    const isSelected = value === item
+    const name = resolveProviderName(item)
+    return (
+      <button
+        key={item}
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          setOpen(false)
+          onSelect(item)
+        }}
+        className={cn(
+          'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition-colors',
+          isSelected
+            ? 'bg-stone-100 font-semibold text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+            : 'text-stone-700 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100',
+        )}
+      >
+        <MetadataProviderIcon provider={item} label={item.startsWith('personal:') ? name : undefined} size={18} className="rounded shrink-0" />
+        <span className="flex-1 truncate">{name}</span>
+        {isSelected && (
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="shrink-0 text-stone-900 dark:text-stone-100"
+          >
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        )}
+      </button>
+    )
+  }
+
   return (
     <div ref={menuRef} className={cn('relative inline-flex', className)}>
       <button
@@ -90,14 +148,14 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={value ? providerNames[value] : _('metadataLookup.scrape')}
-        title={value ? providerNames[value] : _('metadataLookup.scrape')}
-        className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-stone-200/90 bg-white px-2 text-xs font-medium text-stone-600 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-750 dark:hover:text-stone-100"
+        aria-label={value ? resolveProviderName(value) : _('metadataLookup.scrape')}
+        title={value ? resolveProviderName(value) : _('metadataLookup.scrape')}
+        className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-stone-200/90 bg-white px-2 text-xs font-medium text-stone-600 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-stone-100"
       >
         {value ? (
           <>
-            <MetadataProviderIcon provider={value} size={15} className="rounded shrink-0" />
-            <span className="truncate">{providerNames[value]}</span>
+            <MetadataProviderIcon provider={value} label={value.startsWith('personal:') ? resolveProviderName(value) : undefined} size={15} className="rounded shrink-0" />
+            <span className="truncate">{resolveProviderName(value)}</span>
           </>
         ) : (
           <>
@@ -120,47 +178,12 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
         <div
           role="menu"
           aria-label={_('metadataLookup.sourceLabel')}
-          className="absolute right-0 top-full z-50 mt-1.5 w-[136px] overflow-hidden rounded-xl border border-stone-200 bg-white p-1 shadow-lg animate-in fade-in zoom-in-95 duration-100 dark:border-stone-700 dark:bg-stone-850"
+          className="absolute right-0 top-full z-50 mt-1.5 w-[136px] overflow-hidden rounded-xl border border-stone-200 bg-white p-1 shadow-lg animate-in fade-in zoom-in-95 duration-100 dark:border-stone-700 dark:bg-stone-900"
         >
-          {availableProviders.map((item) => {
-            const isSelected = value === item
-            const name = providerNames[item]
-            return (
-              <button
-                key={item}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false)
-                  onSelect(item)
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition-colors',
-                  isSelected
-                    ? 'bg-stone-100 font-semibold text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                    : 'text-stone-700 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100',
-                )}
-              >
-                <MetadataProviderIcon provider={item} size={18} className="rounded shrink-0" />
-                <span className="flex-1 truncate">{name}</span>
-                {isSelected && (
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="shrink-0 text-stone-900 dark:text-stone-100"
-                  >
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                )}
-              </button>
-            )
-          })}
+          {availableProviders.map((item) => renderMenuItem(item))}
+          {personalSources && personalSources.length > 0 && (
+            personalSources.map((source) => renderMenuItem(`personal:${source.sourceId}` as MetadataProviderId))
+          )}
         </div>
       )}
     </div>

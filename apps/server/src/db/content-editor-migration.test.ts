@@ -37,7 +37,7 @@ function beforeEditor() {
 it.each([0, 1, 2, 3, 4, 5, 6])('preserves data and repeats safely after %i historical development migrations', (steps) => {
   const { sqlite, db } = beforeEditor()
   try {
-    const migration = readMigrationFiles({ migrationsFolder }).at(-1)!
+    const migration = readMigrationFiles({ migrationsFolder }).find((entry) => entry.folderMillis === 1793500000000)!
     const statements = migration.sql.filter((statement) => statement.trim())
     let offset = 0
     for (let index = 0; index < steps; index++) {
@@ -69,7 +69,7 @@ it.each([0, 1, 2, 3, 4, 5, 6])('preserves data and repeats safely after %i histo
       .toEqual({ percent: 25, coverage_revision_id: 'rev-old' })
     if (steps >= 1) expect(sqlite.prepare('SELECT target_sections, source_sections, structural_ranges FROM content_revision_maps').get())
       .toEqual({ target_sections: '[]', source_sections: '[]', structural_ranges: '[]' })
-    expect(sqlite.prepare('SELECT hash FROM __drizzle_migrations WHERE created_at >= 1793500000000').all())
+    expect(sqlite.prepare('SELECT hash FROM __drizzle_migrations WHERE created_at = 1793500000000').all())
       .toEqual([{ hash: migration.hash }])
     for (const table of ['bookmarks', 'ideas', 'text_replacements']) {
       const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; dflt_value: string }>
@@ -96,7 +96,7 @@ it('rejects unknown history without changing schema or ledger', () => {
 it('rolls back schema additions and preserves the ledger when completion fails', () => {
   const { sqlite, db } = beforeEditor()
   try {
-    const migration = readMigrationFiles({ migrationsFolder }).at(-1)!
+    const migration = readMigrationFiles({ migrationsFolder }).find((entry) => entry.folderMillis === 1793500000000)!
     for (const statement of migration.sql.filter((statement) => statement.trim()).slice(0, 4)) sqlite.exec(statement)
     sqlite.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)').run(oldHashes[0], 1793500000000)
     sqlite.exec('DROP TABLE ideas')
@@ -118,7 +118,7 @@ it('accepts a consolidated ledger recorded with different checkout line endings'
     const hash = createHash('sha256').update(source).digest('hex')
     sqlite.prepare('UPDATE __drizzle_migrations SET hash = ? WHERE created_at = 1793500000000').run(hash)
     expect(() => reconcileContentEditorMigration(db, migrationsFolder)).not.toThrow()
-    expect(sqlite.prepare('SELECT hash FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1').get()).toEqual({ hash })
+    expect(sqlite.prepare('SELECT hash FROM __drizzle_migrations WHERE created_at = 1793500000000').get()).toEqual({ hash })
   } finally {
     sqlite.close()
   }

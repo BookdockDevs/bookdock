@@ -1,14 +1,17 @@
 import { and, eq } from 'drizzle-orm'
 
-import type { MetadataCandidate, MetadataConfiguration, MetadataProvider } from '@bookdock/shared'
+import type { MetadataCandidate, MetadataConfiguration, MetadataProviderId } from '@bookdock/shared'
+import { parsePersonalProvider } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { settings } from '../../db/schema'
 import { createId } from '../../lib/id'
+import { detectImageExtension } from '../../lib/cover'
 import { decryptPassword, encryptPassword } from '../../lib/secrets'
 import { AppError } from '../../middleware/error'
 import { parseDoubanDetail, parseDoubanSearch } from './douban-metadata'
 import { request } from './metadata-http'
+import { assertPublicHttpsUrl } from './personal-source-fetch'
 import { getWeReadKey, isWeReadCover, searchWeRead, updateWeReadKey } from './weread.service'
 
 const SETTINGS_KEY = 'metadata-lookup'
@@ -62,7 +65,7 @@ function parseResponse<T>(raw: string): T {
   } catch { throw new AppError('VALIDATION_ERROR', 'Invalid metadata source response') }
 }
 
-export async function searchMetadata(provider: MetadataProvider, query: string, testKey?: string, userId?: string): Promise<MetadataCandidate[]> {
+export async function searchMetadata(provider: MetadataProviderId, query: string, testKey?: string, userId?: string): Promise<MetadataCandidate[]> {
   if (provider === 'weread') {
     const key = testKey ?? (userId ? getWeReadKey(userId) : null)
     if (!key) throw new AppError('VALIDATION_ERROR', 'WeRead API key is not configured')
@@ -159,18 +162,25 @@ export async function getDoubanMetadata(id: string): Promise<MetadataCandidate> 
   return parseDoubanDetail(html, id)
 }
 
-export async function fetchMetadataCover(provider: MetadataProvider, source: string): Promise<{ bytes: Buffer; contentType: string }> {
+export async function fetchMetadataCover(provider: MetadataProviderId, source: string): Promise<{ bytes: Buffer; contentType: string }> {
+  const personal = Boolean(parsePersonalProvider(provider))
   let url: URL
   try { url = new URL(source) } catch { throw new AppError('VALIDATION_ERROR', 'Invalid cover URL') }
-  const allowed = url.protocol === 'https:' && !url.username && !url.password && !url.port && (
-    (provider === 'openlibrary' && url.hostname === 'covers.openlibrary.org' && /^\/b\/id\/\d+-[SML]\.jpg$/.test(url.pathname)) ||
-    (provider === 'googlebooks' && url.hostname === 'books.google.com' && url.pathname === '/books/content') ||
-    (provider === 'weread' && isWeReadCover(url)) ||
-    (provider === 'douban' && /^img\d+\.doubanio\.com$/.test(url.hostname) && /^\/view\/subject\/[a-z]+\/public\/[\w-]+\.(jpg|jpeg|png|webp)$/.test(url.pathname) && !url.search && !url.hash) ||
-    (provider === 'qidian' && url.hostname === 'bookcover.yuewen.com' && /^\/qdbimg\/349573\/\d+\/300$/.test(url.pathname)) ||
-    (provider === 'bangumi' && url.hostname === 'lain.bgm.tv' && /^\/r\/800\/pic\/cover\/[a-zA-Z0-9_./-]+\.(jpg|jpeg|png|webp)$/.test(url.pathname))
-  )
-  if (!allowed) throw new AppError('VALIDATION_ERROR', 'Unsupported cover URL')
+  // Personal sources have no fixed cover hosts; any public https address is
+  // accepted after resolving it and rejecting private network targets.
+  if (personal) {
+    url = await assertPublicHttpsUrl(source)
+  } else {
+    const allowed = url.protocol === 'https:' && !url.username && !url.password && !url.port && (
+      (provider === 'openlibrary' && url.hostname === 'covers.openlibrary.org' && /^\/b\/id\/\d+-[SML]\.jpg$/.test(url.pathname)) ||
+      (provider === 'googlebooks' && url.hostname === 'books.google.com' && url.pathname === '/books/content') ||
+      (provider === 'weread' && isWeReadCover(url)) ||
+      (provider === 'douban' && /^img\d+\.doubanio\.com$/.test(url.hostname) && /^\/view\/subject\/[a-z]+\/public\/[\w-]+\.(jpg|jpeg|png|webp)$/.test(url.pathname) && !url.search && !url.hash) ||
+      (provider === 'qidian' && url.hostname === 'bookcover.yuewen.com' && /^\/qdbimg\/349573\/\d+\/300$/.test(url.pathname)) ||
+      (provider === 'bangumi' && url.hostname === 'lain.bgm.tv' && /^\/r\/800\/pic\/cover\/[a-zA-Z0-9_./-]+\.(jpg|jpeg|png|webp)$/.test(url.pathname))
+    )
+    if (!allowed) throw new AppError('VALIDATION_ERROR', 'Unsupported cover URL')
+  }
   let response: Response
   try {
     response = await fetch(url, {
@@ -180,8 +190,10 @@ export async function fetchMetadataCover(provider: MetadataProvider, source: str
     })
   } catch { throw new AppError('VALIDATION_ERROR', 'Cover source unavailable') }
   if (!response.ok || !response.body) throw new AppError('VALIDATION_ERROR', 'Cover source unavailable')
-  const contentType = response.headers.get('content-type')?.split(';')[0] ?? ''
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) throw new AppError('VALIDATION_ERROR', 'Unsupported cover format')
+  // For personal sources the format check happens on the downloaded bytes
+  // below; fixed providers keep the header precheck before reading.
+  const contentType = personal ? 'image/jpeg' : response.headers.get('content-type')?.split(';')[0] ?? ''
+  if (!personal && !['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) throw new AppError('VALIDATION_ERROR', 'Unsupported cover format')
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
   let size = 0
@@ -194,5 +206,12 @@ export async function fetchMetadataCover(provider: MetadataProvider, source: str
       chunks.push(value)
     }
   } finally { await reader.cancel().catch(() => {}) }
-  return { bytes: Buffer.concat(chunks), contentType }
+  const bytes = Buffer.concat(chunks)
+  // Personal-source CDNs often mislabel content types (observed
+  // application/octet-stream), so trust the magic bytes for those.
+  const detectedType = personal
+    ? { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' }[detectImageExtension(bytes) ?? ''] ?? ''
+    : contentType
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(detectedType)) throw new AppError('VALIDATION_ERROR', 'Unsupported cover format')
+  return { bytes, contentType: detectedType }
 }

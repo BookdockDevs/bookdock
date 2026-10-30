@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { CatalogBook, CatalogBookUpdateReq, CatalogVersion, CatalogVersionUpdateReq, MetadataProvider } from '@bookdock/shared'
+import type { CatalogBook, CatalogBookUpdateReq, CatalogVersion, CatalogVersionUpdateReq, MetadataProviderId } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -217,7 +217,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
     () => (version && work.versions.some((v) => v.id === version.id) ? version.id : 'work'),
   )
   const [confirmResetVersion, setConfirmResetVersion] = useState<CatalogVersion | null>(null)
-  const [metadataLookup, setMetadataLookup] = useState<{ open: boolean; provider?: MetadataProvider; autoSearch?: boolean }>({ open: false })
+  const [metadataLookup, setMetadataLookup] = useState<{ open: boolean; provider?: MetadataProviderId; autoSearch?: boolean }>({ open: false })
   const versionSource = useCatalogVersionMetadataSource(
     libraryId,
     work.id,

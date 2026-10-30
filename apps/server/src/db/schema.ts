@@ -1070,3 +1070,29 @@ export const storageConnections = sqliteTable('storage_connections', {
   userIdx: index('storage_connections_user_idx').on(table.userId),
 }))
 
+
+export const personalMetadataSources = sqliteTable('personal_metadata_sources', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  sourceId: text('source_id').notNull(),
+  name: text('name').notNull(),
+  version: text('version').notNull(),
+  apiVersion: integer('api_version').notNull(),
+  description: text('description'),
+  author: text('author'),
+  repository: text('repository'),
+  originType: text('origin_type', { enum: ['github', 'zip'] }).notNull(),
+  originRef: text('origin_ref'),
+  gitRef: text('git_ref'),
+  gitCommit: text('git_commit'),
+  entryPath: text('entry_path').notNull(),
+  iconType: text('icon_type'),
+  // Probed at install time. Sources installed before probing existed keep the
+  // default of true, which preserves the old attempt-detail-then-fall-back
+  // behavior until they are reinstalled.
+  hasDetail: integer('has_detail', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userSourceUnique: uniqueIndex('personal_metadata_sources_user_source_unique').on(table.userId, table.sourceId),
+}))

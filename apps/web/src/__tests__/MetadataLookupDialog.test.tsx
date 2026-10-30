@@ -209,4 +209,75 @@ describe('metadata lookup draft', () => {
     fireEvent.click(item)
     expect(screen.getByRole('button', { name: '应用' })).toBeDisabled()
   })
+
+  it('searches a personal source and selects instantly when it has no detail', async () => {
+    api.apiGet.mockImplementation((path: string) => {
+      if (path === '/integrations/personal-sources') {
+        return Promise.resolve({ data: [{ sourceId: 'my-source', name: 'My Source', version: '1.0.0', originType: 'zip', hasIcon: false, hasDetail: false, createdAt: 1 }] })
+      }
+      return Promise.resolve({ data: { googlebooks: false, weread: false } })
+    })
+    api.apiPost.mockImplementation((path: string) => {
+      if (path === '/integrations/metadata-lookup/search') {
+        return Promise.resolve({ data: [{ id: 'src-1', provider: 'personal:my-source', title: 'Personal hit', authors: ['Author A'], description: 'Personal brief', sourceUrl: '' }] })
+      }
+      return Promise.resolve({ data: null })
+    })
+    const apply = vi.fn()
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover onApply={apply} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '豆瓣' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'My Source' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Personal hit/ }))
+    expect(api.apiPost).toHaveBeenCalledTimes(1)
+    expect(api.apiPost).toHaveBeenCalledWith('/integrations/metadata-lookup/search', { provider: 'personal:my-source', query: 'My title' }, expect.anything())
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.objectContaining({ authors: 'Author A' }), undefined))
+  })
+
+  it('searches a personal source with a prefixed provider and merges its detail fields', async () => {
+    api.apiGet.mockImplementation((path: string) => {
+      if (path === '/integrations/personal-sources') {
+        return Promise.resolve({ data: [{ sourceId: 'my-source', name: 'My Source', version: '1.0.0', originType: 'zip', hasIcon: false, hasDetail: true, createdAt: 1 }] })
+      }
+      return Promise.resolve({ data: { googlebooks: false, weread: false } })
+    })
+    api.apiPost.mockImplementation((path: string) => {
+      if (path === '/integrations/metadata-lookup/search') {
+        return Promise.resolve({ data: [{ id: 'src-1', provider: 'personal:my-source', title: 'Personal hit', authors: [], sourceUrl: '' }] })
+      }
+      return Promise.resolve({ data: { title: 'Detail title', description: 'Personal detail', authors: ['Author A'] } })
+    })
+    const apply = vi.fn()
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover onApply={apply} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '豆瓣' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'My Source' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Personal hit/ }))
+    expect(api.apiPost).toHaveBeenCalledWith('/integrations/metadata-lookup/search', { provider: 'personal:my-source', query: 'My title' }, expect.anything())
+    expect(api.apiPost).toHaveBeenCalledWith('/integrations/metadata-lookup/detail', { provider: 'personal:my-source', id: 'src-1' }, expect.anything())
+    await screen.findByText('Detail title')
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.objectContaining({ authors: 'Author A', description: 'My description' }), undefined))
+  })
+
+  it('fetches personal covers client-side before falling back to the server proxy', async () => {
+    api.apiGet.mockImplementation((path: string) => {
+      if (path === '/integrations/personal-sources') {
+        return Promise.resolve({ data: [{ sourceId: 'my-source', name: 'My Source', version: '1.0.0', originType: 'zip', hasIcon: false, hasDetail: false, createdAt: 1 }] })
+      }
+      return Promise.resolve({ data: { googlebooks: false, weread: false } })
+    })
+    api.apiPost.mockResolvedValue({ data: [{ id: 'src-1', provider: 'personal:my-source', title: 'Personal hit', authors: [], coverUrl: 'https://cdn.example.com/cover.webp', sourceUrl: '' }] })
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1, 2, 3])
+    const fetchMock = vi.fn().mockResolvedValue(new Response(webp, { status: 200, headers: { 'content-type': 'application/octet-stream' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const apply = vi.fn()
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover={false} onApply={apply} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '豆瓣' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'My Source' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Personal hit/ }))
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.anything(), expect.any(File)))
+    expect(fetchMock).toHaveBeenCalledWith('https://cdn.example.com/cover.webp', expect.objectContaining({ mode: 'cors' }))
+    expect(api.apiPostBlob).not.toHaveBeenCalled()
+  })
 })

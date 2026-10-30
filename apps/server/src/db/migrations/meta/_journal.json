@@ -400,6 +400,13 @@
       "when": 1793500000000,
       "tag": "0057_content_editor",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1793600000000,
+      "tag": "0058_personal_metadata_sources",
+      "breakpoints": true
     }
   ]
 }

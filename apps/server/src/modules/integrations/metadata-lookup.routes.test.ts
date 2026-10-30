@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { errorHandler } from '../../middleware/error'
 import routes from './metadata-lookup.routes'
+import { getPersonalSourceDetail, searchPersonalSource } from './personal-source.service'
 import { searchWeRead } from './weread.service'
 
 vi.mock('./metadata-lookup.service', () => ({
@@ -16,6 +17,10 @@ vi.mock('./weread.service', () => ({
   getWeReadKey: vi.fn(() => 'test-key'),
   getWeReadMetadata: vi.fn(),
   searchWeRead: vi.fn(async () => []),
+}))
+vi.mock('./personal-source.service', () => ({
+  searchPersonalSource: vi.fn(async () => [{ id: '1', provider: 'personal:my-source', title: 'T', authors: [], sourceUrl: '' }]),
+  getPersonalSourceDetail: vi.fn(async () => null),
 }))
 
 function appFor(role: 'owner' | 'member' | null) {
@@ -59,5 +64,16 @@ describe('metadata lookup permissions', () => {
     expect(await response.json()).toEqual({ data: [] })
     expect(searchWeRead).toHaveBeenCalledWith('test-key', 'Book', 'ebooks')
     expect((await appFor('member').request('/metadata/search', options('invalid'))).status).toBe(400)
+  })
+
+  it('dispatches personal providers to the personal source service', async () => {
+    const app = appFor('member')
+    const search = await app.request('/metadata/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: 'personal:my-source', query: 'Book' }) })
+    expect(await search.json()).toEqual({ data: [{ id: '1', provider: 'personal:my-source', title: 'T', authors: [], sourceUrl: '' }] })
+    expect(searchPersonalSource).toHaveBeenCalledWith('member', 'my-source', 'Book')
+    expect((await app.request('/metadata/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: 'personal:BAD', query: 'Book' }) })).status).toBe(400)
+    const detail = await app.request('/metadata/detail', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: 'personal:my-source', id: '1' }) })
+    expect(await detail.json()).toEqual({ data: null })
+    expect(getPersonalSourceDetail).toHaveBeenCalledWith('member', 'my-source', '1')
   })
 })

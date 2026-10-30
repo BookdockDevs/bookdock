@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 
-import type { MetadataCandidate, MetadataConfiguration, MetadataProvider, MetadataSearchResponse, WeReadSearchScope } from '@bookdock/shared'
+import type { MetadataCandidate, MetadataProviderId, MetadataSearchResponse, PersonalMetadataFields, PersonalMetadataSourceView, WeReadSearchScope } from '@bookdock/shared'
 
 import { apiGet, apiPost, apiPostBlob } from '@/api/client'
 import { Button } from '@/components/ui/Button'
@@ -9,14 +10,38 @@ import Modal from '@/components/ui/Modal'
 import MetadataLookupDropdown from './MetadataLookupDropdown'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
+import { useAuthStore } from '@/stores/auth.store'
 
 import type { MetaDraft } from './types'
+
+function sniffImageType(bytes: Uint8Array): string | null {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return 'image/png'
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return 'image/webp'
+  return null
+}
+
+// Personal sources often serve covers from CORS-enabled CDNs, so fetching in
+// the browser reuses the cache the results list already warmed. Any failure
+// falls back to the server proxy, which can also add provider headers.
+async function fetchPersonalCoverClientSide(url: string, signal: AbortSignal): Promise<File | null> {
+  try {
+    const response = await fetch(url, { signal, redirect: 'error', mode: 'cors' })
+    if (!response.ok) return null
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    const type = sniffImageType(bytes)
+    if (!type) return null
+    return new File([bytes], 'cover', { type })
+  } catch {
+    return null
+  }
+}
 
 interface MetadataLookupDialogProps {
   draft: MetaDraft
   limited: boolean
   hasCover: boolean
-  initialProvider?: MetadataProvider
+  initialProvider?: MetadataProviderId
   autoSearch?: boolean
   onApply: (draft: MetaDraft, cover?: File) => void
   onClose: () => void
@@ -61,7 +86,15 @@ export default function MetadataLookupDialog({
   const STORAGE_KEY_REPLACE = 'bd-metadata-replace'
   const STORAGE_KEY_UPDATE_COVER = 'bd-metadata-update-cover'
 
-  const [provider, setProvider] = useState<MetadataProvider>(initialProvider ?? 'douban')
+  const userId = useAuthStore((state) => state.user?.id)
+  const { data: sourcesData } = useQuery({
+    queryKey: ['personal-metadata-sources', userId],
+    queryFn: () => apiGet<{ data: PersonalMetadataSourceView[] }>('/integrations/personal-sources'),
+    staleTime: 30_000,
+  })
+  const personalSources = Array.isArray(sourcesData?.data) ? sourcesData.data : []
+
+  const [provider, setProvider] = useState<MetadataProviderId>(initialProvider ?? 'douban')
   const [results, setResults] = useState<MetadataCandidate[]>([])
   const [selected, setSelected] = useState<MetadataCandidate | null>(null)
   const [weReadScope, setWeReadScope] = useState<WeReadSearchScope>(() => {
@@ -129,7 +162,7 @@ export default function MetadataLookupDialog({
     onClose()
   }
 
-  async function search(targetProvider: MetadataProvider = provider, targetScope: WeReadSearchScope = weReadScope) {
+  async function search(targetProvider: MetadataProviderId = provider, targetScope: WeReadSearchScope = weReadScope) {
     if (!query.trim() || loading) return
     setLoading(true)
     setError('')
@@ -140,14 +173,6 @@ export default function MetadataLookupDialog({
     const controller = new AbortController()
     request.current = controller
     try {
-      if (targetProvider === 'googlebooks' || targetProvider === 'weread') {
-        const config = await apiGet<{ data: MetadataConfiguration }>('/integrations/metadata-lookup/config', controller.signal)
-        if (request.current !== controller || !active.current) return
-        if (!config.data[targetProvider]) {
-          setError(_(targetProvider === 'weread' ? 'metadataLookup.needWeReadKey' : 'metadataLookup.needKey'))
-          return
-        }
-      }
       const response = await apiPost<MetadataSearchResponse>('/integrations/metadata-lookup/search', { provider: targetProvider, query, ...(targetProvider === 'weread' ? { weReadScope: targetScope } : {}) }, controller.signal)
       if (request.current !== controller || !active.current) return
       setError('')
@@ -170,7 +195,13 @@ export default function MetadataLookupDialog({
       setSelected(null)
       return
     }
-    if (result.provider !== 'douban' && result.provider !== 'weread') {
+    // Douban and WeRead detail pages supplement the search result; personal
+    // sources only get a detail round trip when they implement getDetail.
+    // Sources installed before the has-detail probe existed default to the
+    // old attempt-detail behavior.
+    const needsDetail = result.provider === 'douban' || result.provider === 'weread'
+      || (result.provider.startsWith('personal:') && (personalSources.find((item) => item.sourceId === result.provider.slice('personal:'.length))?.hasDetail ?? true))
+    if (!needsDetail) {
       setSelected(result)
       return
     }
@@ -181,7 +212,7 @@ export default function MetadataLookupDialog({
     const controller = new AbortController()
     request.current = controller
     try {
-      const response = await apiPost<{ data: MetadataCandidate }>(
+      const response = await apiPost<{ data: MetadataCandidate | PersonalMetadataFields | null }>(
         '/integrations/metadata-lookup/detail',
         { provider: result.provider, id: result.id },
         controller.signal,
@@ -189,11 +220,14 @@ export default function MetadataLookupDialog({
       if (request.current !== controller || !active.current) return
       setError('')
       const detail = response.data
-      setSelected({ ...result, ...detail, authors: detail.authors.length ? detail.authors : result.authors,
+      const detailTitle = detail?.title?.trim()
+      setSelected(detail ? { ...result,
+        title: detailTitle ? detailTitle : result.title,
+        authors: detail.authors?.length ? detail.authors : result.authors,
         description: detail.description || result.description, publisher: detail.publisher || result.publisher,
         published: detail.published || result.published, isbn: detail.isbn || result.isbn,
         language: detail.language || result.language, coverUrl: detail.coverUrl || result.coverUrl,
-        sourceUrl: detail.sourceUrl === 'https://weread.qq.com/' ? result.sourceUrl : detail.sourceUrl })
+        sourceUrl: detail.sourceUrl === 'https://weread.qq.com/' ? result.sourceUrl : (detail.sourceUrl || result.sourceUrl) } : result)
     } catch (err: unknown) {
       if (request.current !== controller || !active.current) return
       if (err instanceof DOMException && err.name === 'AbortError') return
@@ -237,12 +271,17 @@ export default function MetadataLookupDialog({
     try {
       let cover: File | undefined
       if (updateCover && selected.coverUrl) {
-        const image = await apiPostBlob(
-          '/integrations/metadata-lookup/cover',
-          { provider, url: selected.coverUrl },
-          controller.signal,
-        )
-        cover = new File([image], 'cover', { type: image.type })
+        if (selected.provider.startsWith('personal:')) {
+          cover = (await fetchPersonalCoverClientSide(selected.coverUrl, controller.signal)) ?? undefined
+        }
+        if (!cover) {
+          const image = await apiPostBlob(
+            '/integrations/metadata-lookup/cover',
+            { provider, url: selected.coverUrl },
+            controller.signal,
+          )
+          cover = new File([image], 'cover', { type: image.type })
+        }
       }
       if (active.current) onApply({ ...draft, ...Object.fromEntries(changes) }, cover)
     } catch {
@@ -324,7 +363,7 @@ export default function MetadataLookupDialog({
     >
       <div className="flex flex-col flex-1 min-h-0 space-y-3">
         {/* Search input bar - unified card with inline clear & search buttons */}
-        <div className="relative flex items-center w-full rounded-xl border border-stone-200 bg-white transition-colors focus-within:border-stone-400 focus-within:ring-2 focus-within:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-850 dark:focus-within:border-stone-500 dark:focus-within:ring-stone-500/20">
+        <div className="relative flex items-center w-full rounded-xl border border-stone-200 bg-white transition-colors focus-within:border-stone-400 focus-within:ring-2 focus-within:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-800 dark:focus-within:border-stone-500 dark:focus-within:ring-stone-500/20">
           <input
             ref={inputRef}
             aria-label={_('metadataLookup.query')}
@@ -443,6 +482,7 @@ export default function MetadataLookupDialog({
               {results.map((result) => {
                 const isChosen = selected?.id === result.id
                 const isItemLoading = loadingDetailId === result.id
+                const title = isChosen && selected?.title ? selected.title : result.title
                 const description = isChosen ? selected.description : result.description
                 return (
                   <button
@@ -453,7 +493,7 @@ export default function MetadataLookupDialog({
                     className={`group flex w-full gap-3 rounded-xl border p-2.5 text-left transition-all ${
                       isChosen || isItemLoading
                         ? 'border-stone-900 bg-stone-50 shadow-xs ring-1 ring-stone-900/10 dark:border-stone-100 dark:bg-stone-800/80 dark:ring-stone-100/20'
-                        : 'border-stone-200/90 bg-white hover:border-stone-300 hover:bg-stone-50/70 dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-700 dark:hover:bg-stone-850'
+                        : 'border-stone-200/90 bg-white hover:border-stone-300 hover:bg-stone-50/70 dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-700 dark:hover:bg-stone-800'
                     }`}
                   >
                     <ResultCover src={result.coverUrl} />
@@ -461,7 +501,7 @@ export default function MetadataLookupDialog({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
                         <div className="font-medium text-sm text-stone-900 dark:text-stone-100 line-clamp-1 leading-snug">
-                          {result.title}
+                          {title}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {isItemLoading && (

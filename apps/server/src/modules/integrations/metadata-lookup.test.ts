@@ -26,6 +26,16 @@ describe('metadata lookup', () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error' })
   })
 
+  it('sniffs personal cover bytes instead of trusting mislabeled content types', async () => {
+    const webp = Buffer.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1, 2, 3])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(webp, { status: 200, headers: { 'content-type': 'application/octet-stream' } })))
+    const cover = await fetchMetadataCover('personal:test-source', 'https://93.184.216.34/cover.webp')
+    expect(cover.contentType).toBe('image/webp')
+    const junk = Buffer.from('<html>not an image</html>')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(junk, { status: 200, headers: { 'content-type': 'application/octet-stream' } })))
+    await expect(fetchMetadataCover('personal:test-source', 'https://93.184.216.34/cover.webp')).rejects.toThrow('Unsupported cover format')
+  })
+
   it('maps Google volumes and uses the supplied test key without persisting it', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [{ id: 'abc', volumeInfo: { title: 'A Book', authors: ['A Writer'], description: '<p>Some <b>text</b></p>', industryIdentifiers: [{ type: 'ISBN_13', identifier: '9781234567890' }] } }] }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)

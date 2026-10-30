@@ -4,7 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 
 import { useAuthStore } from '@/stores/auth.store'
 
-import type { BookListItem, CatalogBook, Library, MetadataProvider, Review, UndoReceipt } from '@bookdock/shared'
+import type { BookListItem, CatalogBook, Library, MetadataProviderId, Review, UndoReceipt } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
@@ -82,7 +82,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const [confirmReset, setConfirmReset] = useState(false)
   const [draft, setDraft] = useState<MetaDraft | null>(null)
   const [draftEpoch, setDraftEpoch] = useState(0)
-  const [metadataLookup, setMetadataLookup] = useState<{ open: boolean; provider?: MetadataProvider; autoSearch?: boolean }>({ open: false })
+  const [metadataLookup, setMetadataLookup] = useState<{ open: boolean; provider?: MetadataProviderId; autoSearch?: boolean }>({ open: false })
 
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null)
   const [coverRemovalPending, setCoverRemovalPending] = useState(false)

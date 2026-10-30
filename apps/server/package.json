@@ -37,6 +37,7 @@
     "pako": "~1.0.2",
     "parse5": "8.0.1",
     "process-nextick-args": "~2.0.0",
+    "quickjs-emscripten": "^0.32.0",
     "readable-stream": "~2.3.6",
     "safe-buffer": "~5.1.1",
     "safer-buffer": "^2.1.2",

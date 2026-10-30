@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
-import { metadataConfigUpdateSchema, metadataConnectionTestSchema, metadataCoverSchema, metadataDetailSchema, metadataSearchSchema } from '@bookdock/shared'
+import { metadataConfigUpdateSchema, metadataConnectionTestSchema, metadataCoverSchema, metadataDetailSchema, metadataSearchSchema, parsePersonalProvider } from '@bookdock/shared'
+import type { MetadataProviderId } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
 import { fetchMetadataCover, getDoubanMetadata, metadataConfiguration, searchMetadata, updateMetadataSecret } from './metadata-lookup.service'
+import { getPersonalSourceDetail, searchPersonalSource } from './personal-source.service'
 import { getWeReadKey, getWeReadMetadata, searchWeRead } from './weread.service'
 
 const routes = new Hono()
@@ -41,18 +43,26 @@ routes.post('/search', async (c) => {
   const parsed = metadataSearchSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid metadata search')
   limitRequests(c.get('user')!.id)
+  const personalSourceId = parsePersonalProvider(parsed.data.provider)
+  if (personalSourceId) {
+    return c.json({ data: await searchPersonalSource(c.get('user')!.id, personalSourceId, parsed.data.query) })
+  }
   if (parsed.data.provider === 'weread') {
     const key = getWeReadKey(c.get('user')!.id)
     if (!key) throw new AppError('VALIDATION_ERROR', 'WeRead API key is not configured')
     return c.json({ data: await searchWeRead(key, parsed.data.query, parsed.data.weReadScope) })
   }
-  return c.json({ data: await searchMetadata(parsed.data.provider, parsed.data.query, undefined, c.get('user')!.id) })
+  return c.json({ data: await searchMetadata(parsed.data.provider as MetadataProviderId, parsed.data.query, undefined, c.get('user')!.id) })
 })
 
 routes.post('/detail', async (c) => {
   const parsed = metadataDetailSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid metadata detail request')
   limitRequests(c.get('user')!.id)
+  const personalSourceId = parsePersonalProvider(parsed.data.provider)
+  if (personalSourceId) {
+    return c.json({ data: await getPersonalSourceDetail(c.get('user')!.id, personalSourceId, parsed.data.id) })
+  }
   if (parsed.data.provider === 'douban') return c.json({ data: await getDoubanMetadata(parsed.data.id) })
   const key = getWeReadKey(c.get('user')!.id)
   if (!key) throw new AppError('VALIDATION_ERROR', 'WeRead API key is not configured')
@@ -63,7 +73,7 @@ routes.post('/cover', async (c) => {
   const parsed = metadataCoverSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid cover request')
   limitRequests(c.get('user')!.id)
-  const cover = await fetchMetadataCover(parsed.data.provider, parsed.data.url)
+  const cover = await fetchMetadataCover(parsed.data.provider as MetadataProviderId, parsed.data.url)
   return c.body(Uint8Array.from(cover.bytes), 200, { 'Content-Type': cover.contentType, 'Cache-Control': 'no-store' })
 })
 

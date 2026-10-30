@@ -39,7 +39,9 @@ export class TieredStorageDriver implements StorageDriver {
   }
 
   private isLocalAsset(key: string): boolean {
-    return key.startsWith('covers/') || key.startsWith('cover/') || key.startsWith('content/')
+    // Personal source packages are tiny local-only code artifacts; they have
+    // no cold-data value and should never round-trip to the remote tier.
+    return key.startsWith('covers/') || key.startsWith('cover/') || key.startsWith('content/') || key.startsWith('sources/')
   }
 
   private getRemoteFilePath(key: string): string {

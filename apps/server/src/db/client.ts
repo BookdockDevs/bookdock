@@ -10,6 +10,7 @@ import { config } from '../config'
 import { migrateBeforeBookRetirement } from './migration-stage'
 import { repairReadingLedgerSchema } from './reading-ledger-repair'
 import { reconcileContentEditorMigration } from './content-editor-migration'
+import { reconcilePersonalSourceMigration } from './personal-source-migration'
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
@@ -307,6 +308,7 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
   }
 
   reconcileContentEditorMigration(db, migrationsFolder)
+  reconcilePersonalSourceMigration(db, migrationsFolder)
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
   migrate(db, { migrationsFolder })
   repairReadingLedgerSchema(db)

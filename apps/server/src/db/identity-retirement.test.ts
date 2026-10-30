@@ -101,6 +101,7 @@ function makeLegacyIdentity() {
     DROP TABLE IF EXISTS storage_transfer_tasks;
     DROP TABLE IF EXISTS activity_events;
     DROP TABLE IF EXISTS content_revision_maps;
+    DROP TABLE IF EXISTS personal_metadata_sources;
     ALTER TABLE book_states DROP COLUMN progress_revision_id;
     ALTER TABLE book_states DROP COLUMN coverage_revision_id;
     ALTER TABLE bookmarks DROP COLUMN relocation;
