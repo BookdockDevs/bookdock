@@ -71,6 +71,7 @@ describe('activity migration', () => {
       ALTER TABLE bookmarks DROP COLUMN relocation;
       ALTER TABLE ideas DROP COLUMN relocation;
       ALTER TABLE text_replacements DROP COLUMN relocation;
+      DROP TABLE IF EXISTS personal_metadata_sources;
       DELETE FROM __drizzle_migrations WHERE created_at >= 1793300000000;
     `)
     sqlite.exec(`

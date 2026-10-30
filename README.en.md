@@ -23,6 +23,7 @@ Organize EPUB and TXT books, read them online, and keep your highlights, notes, 
 | Feature | Description |
 | :--- | :--- |
 | **Library management** | Upload EPUB and TXT books, organize them with shelves, categories, and tags, search your collection, and manage books in batches. |
+| **Book metadata** | Search built-in or personally installed sources to update book information and covers. |
 | **Reading** | Customize fonts, themes, layout, and page turns; use reading presets, navigate with the table of contents and bookmarks, search the full book, and convert between Simplified and Traditional Chinese. |
 | **Fonts and media** | Use built-in fonts or upload your own, and play audio and video embedded in EPUB books. |
 | **E-ink reading** | Use a lightweight bookshelf and paginated reader, adjust display and tap zones, and synchronize reading progress. |

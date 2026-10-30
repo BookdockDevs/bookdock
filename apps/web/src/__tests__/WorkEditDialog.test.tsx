@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import i18n from '../i18n/i18n'
 import { notify } from '@/lib/notifications'
@@ -83,15 +84,28 @@ describe('WorkEditDialog', () => {
 
   function renderDialog(target = work(), targetVersionIndex = 0) {
     const selectedVersion = target.versions[targetVersionIndex] ?? target.versions[0]!
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
-      <WorkEditDialog
-        work={target}
-        libraryId="lib_city"
-        version={selectedVersion}
-        versionIndex={targetVersionIndex}
-        onClose={vi.fn()}
-      />,
+      <QueryClientProvider client={queryClient}>
+        <WorkEditDialog
+          work={target}
+          libraryId="lib_city"
+          version={selectedVersion}
+          versionIndex={targetVersionIndex}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
     )
+  }
+
+  function mockLookupFetch(candidates: unknown[]) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input instanceof Request ? input.url : String(input)
+      const body = url.includes('/integrations/personal-sources')
+        ? { data: [] }
+        : { data: candidates }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
   }
 
   it('edits the work and the visible version in one save', async () => {
@@ -113,7 +127,7 @@ describe('WorkEditDialog', () => {
   })
 
   it('applies a lookup to the selected version without changing work defaults', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: [{ id: '/works/OL1W', provider: 'openlibrary', title: 'Matched title', authors: ['Matched author'], sourceUrl: 'https://openlibrary.org/works/OL1W' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const fetchMock = mockLookupFetch([{ id: '/works/OL1W', provider: 'openlibrary', title: 'Matched title', authors: ['Matched author'], sourceUrl: 'https://openlibrary.org/works/OL1W' }])
     try {
       renderDialog()
       fireEvent.click(screen.getByRole('button', { name: '刮削' }))
@@ -129,7 +143,7 @@ describe('WorkEditDialog', () => {
 
   it('retains an oversized imported description and blocks all saves until it is shortened', async () => {
     const longDescription = 'a'.repeat(4001)
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: [{ id: '/works/OL1W', provider: 'openlibrary', title: 'Matched title', authors: [], description: longDescription, sourceUrl: 'https://openlibrary.org/works/OL1W' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const fetchMock = mockLookupFetch([{ id: '/works/OL1W', provider: 'openlibrary', title: 'Matched title', authors: [], description: longDescription, sourceUrl: 'https://openlibrary.org/works/OL1W' }])
     try {
       renderDialog()
       fireEvent.click(screen.getByRole('button', { name: '作品信息' }))

@@ -2,7 +2,7 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.7.3] - 2026-10-31
 
 ### Added
 
@@ -11,7 +11,7 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
-- Improved e-ink page turns by reusing visible-text measurements and avoiding redundant style updates. The next chapter view is prepared on the current chapter's last page, and bottom controls show pressed feedback before their actions run.
+- Improved e-ink page turns and chapter transitions, with faster button feedback and advance preparation of the next chapter.
 
 ### Fixed
 
@@ -22,7 +22,7 @@ All notable changes to Bookdock are documented here.
 
 ### Upgrade notes
 
-- Back up the complete `DATA_DIR` before upgrading. Migration 0058 adds personal metadata source records, including detail-lookup capability flags; installed source files are stored in the data volume. Downgrading requires the pre-upgrade data with the matching previous release.
+- Back up the complete `DATA_DIR` before upgrading. Migration 0058 adds personal metadata source records, and installed source files are stored in the data volume. Downgrading requires the pre-upgrade data with the matching previous release.
 
 ## [0.7.2] - 2026-10-29
 
@@ -975,7 +975,7 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### 未发布
+### [0.7.3] - 2026-10-31
 
 #### 新增
 
@@ -984,7 +984,7 @@ All notable changes to Bookdock are documented here.
 
 #### 优化
 
-- 优化墨水屏阅读器翻页：复用可见文字测量结果，减少重复样式更新；进入章节最后一页时准备下一章视图，底部按钮在执行操作前显示点击反馈。
+- 优化墨水屏阅读器的翻页和跨章体验，提前准备下一章，并加快按钮的点击反馈。
 
 #### 修复
 
@@ -995,7 +995,7 @@ All notable changes to Bookdock are documented here.
 
 #### 升级说明
 
-- 升级前请备份完整的 `DATA_DIR`。迁移 0058 新增个人书籍信息源记录，包含详情查询能力标记；安装的来源文件保存在数据卷中。降级需要使用升级前的数据及对应的旧版本。
+- 升级前请备份完整的 `DATA_DIR`。迁移 0058 新增个人书籍信息源记录，安装的来源文件保存在数据卷中。降级需要使用升级前的数据及对应的旧版本。
 
 ### [0.7.2] - 2026-10-29
 
