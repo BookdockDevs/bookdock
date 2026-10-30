@@ -4,7 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 
 import { useAuthStore } from '@/stores/auth.store'
 
-import type { BookListItem, CatalogBook, Library, Review, UndoReceipt } from '@bookdock/shared'
+import type { BookListItem, CatalogBook, Library, MetadataProvider, Review, UndoReceipt } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
@@ -25,6 +25,8 @@ import { categoryPath } from '../taxonomy'
 import BookCoverEditor from './book-detail/BookCoverEditor'
 import BookDetailView from './book-detail/BookDetailView'
 import BookMetaForm from './book-detail/BookMetaForm'
+import MetadataLookupDialog from './book-detail/MetadataLookupDialog'
+import MetadataLookupDropdown from './book-detail/MetadataLookupDropdown'
 import type { DraftTextField } from './book-detail/metadata-source'
 import { applySourceAllToDraft, applySourceFieldToDraft, PRIVATE_ALL_TEXT_FIELDS, PRIVATE_B_TEXT_FIELDS } from './book-detail/metadata-source'
 import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
@@ -80,6 +82,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const [confirmReset, setConfirmReset] = useState(false)
   const [draft, setDraft] = useState<MetaDraft | null>(null)
   const [draftEpoch, setDraftEpoch] = useState(0)
+  const [metadataLookup, setMetadataLookup] = useState<{ open: boolean; provider?: MetadataProvider; autoSearch?: boolean }>({ open: false })
 
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null)
   const [coverRemovalPending, setCoverRemovalPending] = useState(false)
@@ -211,6 +214,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setEditing(false)
     setConfirmReset(false)
     setDraft(null)
+    setMetadataLookup({ open: false })
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
   }, [])
@@ -560,20 +564,27 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
         closeLabel={_('library.close')}
         hideClose={!editing && reviewSubView !== 'detail'}
         size="xl"
-        actions={reviewSubView === 'review-detail' && activeBookReview ? (
-          <ReviewDetailHeaderActions
-            review={activeBookReview}
-            onEdit={(r) => {
-              setDialogEditingReview(r)
-              setDialogReviewEditorOpen(true)
-            }}
-            onDeleted={() => {
-              void reviewBookQuery.refetch()
-              setReviewSubView(reviewDetailReturn)
-              setActiveReviewId(null)
-            }}
-          />
-        ) : undefined}
+        actions={
+          reviewSubView === 'review-detail' && activeBookReview ? (
+            <ReviewDetailHeaderActions
+              review={activeBookReview}
+              onEdit={(r) => {
+                setDialogEditingReview(r)
+                setDialogReviewEditorOpen(true)
+              }}
+              onDeleted={() => {
+                void reviewBookQuery.refetch()
+                setReviewSubView(reviewDetailReturn)
+                setActiveReviewId(null)
+              }}
+            />
+          ) : editing && draft ? (
+            <MetadataLookupDropdown
+              disabled={saving}
+              onSelect={(provider) => setMetadataLookup({ open: true, provider, autoSearch: true })}
+            />
+          ) : undefined
+        }
         footer={
           editing ? (
             <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
@@ -658,6 +669,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
                   />
                 }
               />
+
+              {metadataLookup.open && draft && <MetadataLookupDialog draft={draft} limited={isEditLibraryOwned} hasCover={Boolean(pendingCoverFile || displayBook.coverKey || displayBook.format === 'epub')} initialProvider={metadataLookup.provider} autoSearch={metadataLookup.autoSearch} onClose={() => setMetadataLookup({ open: false })} onApply={(next, cover) => { setDraft(next); if (cover) handleCoverFile(cover); setMetadataLookup({ open: false }) }} />}
               <BookClassificationEditor
                 libraryId={privateLibraryId ?? ''}
                 categoryId={categorySel.categoryId ?? null}

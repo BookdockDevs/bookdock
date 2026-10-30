@@ -112,6 +112,46 @@ describe('WorkEditDialog', () => {
     })
   })
 
+  it('applies a lookup to the selected version without changing work defaults', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: [{ id: '/works/OL1W', provider: 'openlibrary', title: 'Matched title', authors: ['Matched author'], sourceUrl: 'https://openlibrary.org/works/OL1W' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    try {
+      renderDialog()
+      fireEvent.click(screen.getByRole('button', { name: '刮削' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /Open Library/ }))
+      fireEvent.click(await screen.findByRole('button', { name: /Matched title/ }))
+      fireEvent.click(screen.getByLabelText('替换已有信息'))
+      fireEvent.click(screen.getByRole('button', { name: '应用' }))
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ versionLinkId: 'lbv1', patch: expect.objectContaining({ title: 'Matched title', authors: ['Matched author'] }) })))
+      expect(updateBook).not.toHaveBeenCalled()
+    } finally { fetchMock.mockRestore() }
+  })
+
+  it('retains an oversized imported description and blocks all saves until it is shortened', async () => {
+    const longDescription = 'a'.repeat(4001)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: [{ id: '/works/OL1W', provider: 'openlibrary', title: 'Matched title', authors: [], description: longDescription, sourceUrl: 'https://openlibrary.org/works/OL1W' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    try {
+      renderDialog()
+      fireEvent.click(screen.getByRole('button', { name: '作品信息' }))
+      fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: 'Changed work' } })
+      fireEvent.click(screen.getByRole('button', { name: /版本 1/ }))
+      fireEvent.click(screen.getByRole('button', { name: '刮削' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /Open Library/ }))
+      fireEvent.click(await screen.findByRole('button', { name: /Matched title/ }))
+      if (!(screen.getByLabelText('替换已有信息') as HTMLInputElement).checked) fireEvent.click(screen.getByLabelText('替换已有信息'))
+      fireEvent.click(screen.getByRole('button', { name: '应用' }))
+      await waitFor(() => expect(screen.getByRole('textbox', { name: '简介' })).toHaveValue(longDescription))
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+      expect(notify.warning).toHaveBeenCalledWith({ key: 'library.catalogDescriptionTooLong' })
+      expect(updateBook).not.toHaveBeenCalled()
+      expect(updateVersion).not.toHaveBeenCalled()
+      fireEvent.change(screen.getByRole('textbox', { name: '简介' }), { target: { value: longDescription.slice(0, 4000) } })
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ patch: expect.objectContaining({ description: longDescription.slice(0, 4000) }) })))
+      expect(updateBook).toHaveBeenCalled()
+    } finally { fetchMock.mockRestore() }
+  })
+
   it('reports partially saved work and version changes without closing', async () => {
     updateBook.mockResolvedValueOnce({ data: {} })
     updateVersion.mockRejectedValueOnce(new Error('Offline'))

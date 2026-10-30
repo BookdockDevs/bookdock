@@ -7,7 +7,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 
 import MetadataFieldAction from './MetadataFieldAction'
 import { canRestoreField, sourceProvenanceLabel, sourceTextForField, type DraftTextField } from './metadata-source'
-import { autoGrow, copyValueOnClick, middleTruncate, type MetaDraft } from './types'
+import { copyValueOnClick, middleTruncate, type MetaDraft } from './types'
 import { GroupLabel, inputClass, textareaClass } from './ui'
 
 interface BookMetaFormProps {
@@ -23,7 +23,7 @@ interface BookMetaFormProps {
   onRestoreField?: (field: DraftTextField) => void
 }
 
-export default function BookMetaForm({ draft, onChange, identifier, coverSlot, limited = false, source = null, sourceLoading = false, sourceError = null, onRetrySource, onRestoreField }: BookMetaFormProps) {
+export default function BookMetaForm({ draft, onChange, identifier, coverSlot, limited = false, source = null, sourceLoading: _sourceLoading = false, sourceError = null, onRetrySource, onRestoreField }: BookMetaFormProps) {
   const _ = useTranslation()
 
   const restoreLabel = (source?.kind === 'shared' ? _('library.restoreFieldShared') : _('library.restoreFieldFile')) as string
@@ -67,7 +67,9 @@ export default function BookMetaForm({ draft, onChange, identifier, coverSlot, l
   return (
     <div>
       <section>
-        <GroupLabel>{_('library.editGroupBasic')}</GroupLabel>
+        <div className="mb-2">
+          <GroupLabel className="mb-0">{_('library.editGroupBasic')}</GroupLabel>
+        </div>
         {Boolean(sourceError) && (
           <p role="alert" className="mb-2 flex items-center gap-2 text-xs text-red-600 dark:text-red-400">
             <span>{_('library.sourceLoadFailed')} {getUserErrorMessage(sourceError, _)}</span>
@@ -112,15 +114,11 @@ export default function BookMetaForm({ draft, onChange, identifier, coverSlot, l
             <div>
               {fieldHead(_('library.descriptionSection') as string)}
               <div className="relative"><textarea
-                ref={autoGrow}
                 rows={3}
                 aria-label={_('library.descriptionSection') as string}
                 value={draft.description}
-                onChange={(e) => {
-                  update('description', e.target.value)
-                  autoGrow(e.target)
-                }}
-                className={`${textareaClass} w-full pr-12`}
+                onChange={(e) => update('description', e.target.value)}
+                className={`${textareaClass} w-full resize-y! overflow-y-auto! overscroll-contain pr-12`}
               />{restoreFor('description')}</div>
             </div>
           </div>
@@ -252,9 +250,6 @@ export default function BookMetaForm({ draft, onChange, identifier, coverSlot, l
             </div>
           )}
         </>
-      )}
-      {sourceLoading && (
-        <p className="mt-2 text-xs text-stone-400">{_('library.sourceRetry')}…</p>
       )}
     </div>
   )

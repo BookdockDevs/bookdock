@@ -27,6 +27,7 @@ import TocRulesSettingsSection from './components/TocRulesSettingsSection'
 import TtsSettingsSection from './components/TtsSettingsSection'
 import AiSettingsSection from './components/AiSettingsSection'
 import LegadoSettingsSection from './components/LegadoSettingsSection'
+import MetadataSourcesSection from './components/MetadataSourcesSection'
 import StorageConnectionsSection from './components/StorageConnectionsSection'
 import AccessTokensSection from './components/AccessTokensSection'
 import AboutSettingsSection from './components/AboutSettingsSection'
@@ -311,6 +312,7 @@ export default function Settings() {
                 <>
                   <AccessTokensSection />
                   <LegadoSettingsSection />
+                  <MetadataSourcesSection />
                   {showWebDav && <StorageConnectionsSection />}
                 </>
               )}

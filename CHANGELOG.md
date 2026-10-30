@@ -4,6 +4,10 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Added book metadata scraping from Qidian, Douban, Bangumi, Open Library, Google Books, and WeRead. Choose a result to update book information and cover; Google Books and WeRead keys are configured in personal settings.
+
 ### Changed
 
 - Improved e-ink page turns by reusing visible-text measurements and avoiding redundant style updates. The next chapter view is prepared on the current chapter's last page, and bottom controls show pressed feedback before their actions run.
@@ -960,6 +964,10 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### 未发布
+
+#### 新增
+
+- 新增书籍信息刮削，支持起点、豆瓣、Bangumi、Open Library、Google Books 和微信读书。可选择搜索结果更新书籍信息和封面；Google Books 和微信读书密钥可在个人设置中配置。
 
 #### 优化
 

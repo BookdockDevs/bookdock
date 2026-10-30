@@ -7,9 +7,9 @@ export const inputClass =
 export const textareaClass =
   'w-full min-h-[88px] resize-none overflow-hidden rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm leading-relaxed text-stone-700 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:ring-2 focus:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500 dark:focus:ring-stone-500/20'
 
-export function GroupLabel({ children }: { children: ReactNode }) {
+export function GroupLabel({ children, className = "mb-2" }: { children: ReactNode; className?: string }) {
   return (
-    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">
+    <p className={`text-xs font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500 ${className}`}>
       {children}
     </p>
   )

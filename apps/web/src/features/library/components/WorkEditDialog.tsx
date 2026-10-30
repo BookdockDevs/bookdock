@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { CatalogBook, CatalogBookUpdateReq, CatalogVersion, CatalogVersionUpdateReq } from '@bookdock/shared'
+import type { CatalogBook, CatalogBookUpdateReq, CatalogVersion, CatalogVersionUpdateReq, MetadataProvider } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -28,6 +28,8 @@ import { categoryChoices } from '../taxonomy'
 import BookCover from './BookCover'
 import { autoGrow, copyText, middleTruncate, parseAuthorList } from './book-detail/types'
 import MetadataFieldAction from './book-detail/MetadataFieldAction'
+import MetadataLookupDialog from './book-detail/MetadataLookupDialog'
+import MetadataLookupDropdown from './book-detail/MetadataLookupDropdown'
 import { sourceTextForField, sourceProvenanceLabel, CATALOG_VERSION_TEXT_FIELDS, type DraftTextField } from './book-detail/metadata-source'
 import { Chip } from './book-detail/ui'
 
@@ -215,6 +217,7 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
     () => (version && work.versions.some((v) => v.id === version.id) ? version.id : 'work'),
   )
   const [confirmResetVersion, setConfirmResetVersion] = useState<CatalogVersion | null>(null)
+  const [metadataLookup, setMetadataLookup] = useState<{ open: boolean; provider?: MetadataProvider; autoSearch?: boolean }>({ open: false })
   const versionSource = useCatalogVersionMetadataSource(
     libraryId,
     work.id,
@@ -466,6 +469,21 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
     const name = title.trim()
     if (!name || invalidRestoredTitle) return
 
+    if (description !== work.description && description.length > 4000) {
+      setActiveTab('work')
+      notify.warning({ key: 'library.catalogDescriptionTooLong' })
+      return
+    }
+    const oversizedVersion = work.versions.find((v) => {
+      const d = drafts[v.id]
+      return d && d.overrideDescription !== (v.description ?? '') && d.overrideDescription.length > 4000
+    })
+    if (oversizedVersion) {
+      setActiveTab(oversizedVersion.id)
+      notify.warning({ key: 'library.catalogDescriptionTooLong' })
+      return
+    }
+
     // 1. Work patch
     const bookPatch: CatalogBookUpdateReq = {}
     if (name !== work.title) bookPatch.title = name
@@ -587,6 +605,14 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
         onClose={onClose}
         closeLabel={_('library.close')}
         size="xl"
+        actions={
+          activeTab !== 'work' ? (
+            <MetadataLookupDropdown
+              disabled={saving}
+              onSelect={(provider) => setMetadataLookup({ open: true, provider, autoSearch: true })}
+            />
+          ) : null
+        }
         footer={(
           <div className="flex w-full items-center justify-between gap-2">
             <div>
@@ -917,6 +943,9 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
 
           {/* Tab 2: Version settings & Publication metadata */}
           <section hidden={activeTab === 'work'} className={cn('flex flex-col gap-4', activeTab === 'work' && 'hidden')}>
+            <div className="border-b border-stone-100 pb-2 dark:border-stone-800">
+              <span className="text-xs font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">{_('library.editGroupBasic')}</span>
+            </div>
             {versionSource.isError && (
               <p role="alert" className="flex items-center gap-2 text-xs text-red-600 dark:text-red-400">
                 <span>{_('library.sourceLoadFailed')} {getUserErrorMessage(versionSource.error, _)}</span>
@@ -1201,6 +1230,36 @@ export default function WorkEditDialog({ work, libraryId, version, versionIndex:
           </section>
         </div>
       </Modal>
+
+      {metadataLookup.open && activeTab !== 'work' && (() => {
+        const lookupDraft = {
+          title: effectiveDraftValue('title', activeDraft.overrideTitle),
+          authors: effectiveDraftValue('authors', activeDraft.overrideAuthorsText),
+          description: effectiveDraftValue('description', activeDraft.overrideDescription),
+          publisher: effectiveDraftValue('publisher', activeDraft.publisher),
+          published: effectiveDraftValue('published', activeDraft.published),
+          isbn: effectiveDraftValue('isbn', activeDraft.isbn),
+          language: effectiveDraftValue('language', activeDraft.language),
+          subjects: effectiveDraftValue('subjects', activeDraft.subjects),
+          series: effectiveDraftValue('series', activeDraft.series),
+          seriesIndex: effectiveDraftValue('seriesIndex', activeDraft.seriesIndex),
+          coverPaletteId: null,
+        }
+        return <MetadataLookupDialog draft={lookupDraft} limited={false} hasCover={activeMayHaveArtwork} initialProvider={metadataLookup.provider} autoSearch={metadataLookup.autoSearch} onClose={() => setMetadataLookup({ open: false })} onApply={(next, cover) => {
+          const fields: DraftTextField[] = ['title', 'authors', 'description', 'publisher', 'published', 'isbn', 'language']
+          const changed = fields.filter((field) => next[field] !== lookupDraft[field])
+          const patch: Partial<VersionDraft> = { explicitFields: [...new Set([...activeDraft.explicitFields, ...changed])] }
+          for (const field of changed) {
+            if (field === 'title') patch.overrideTitle = next.title
+            else if (field === 'authors') patch.overrideAuthorsText = next.authors
+            else if (field === 'description') patch.overrideDescription = next.description
+            else if (field === 'publisher' || field === 'published' || field === 'isbn' || field === 'language') patch[field] = next[field]
+          }
+          updateDraft(activeVersion.id, patch)
+          if (cover) handleCoverFilePicked(cover)
+          setMetadataLookup({ open: false })
+        }} />
+      })()}
 
       {confirmResetVersion && (
         <ConfirmDialog
