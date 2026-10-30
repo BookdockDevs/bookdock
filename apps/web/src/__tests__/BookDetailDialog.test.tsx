@@ -22,9 +22,10 @@ const apiUpload = vi.fn()
 let downloadRules: { enabled: boolean; effectiveEnabled: boolean }[] = []
 /** Review context for the book/work under test; the review endpoints answer with it. */
 let reviewContext: unknown = { composer: null, own: null, summary: null, reviews: [] }
+let pendingReview: Promise<{ data: unknown }> | null = null
 const apiGet = vi.fn((url: string) =>
   url.startsWith('/reviews/')
-    ? Promise.resolve({ data: reviewContext })
+    ? pendingReview ?? Promise.resolve({ data: reviewContext })
     : url.startsWith('/replacements?bookId=')
       ? Promise.resolve({ data: downloadRules })
     : Promise.resolve({ data: [] }),
@@ -178,6 +179,7 @@ beforeEach(async () => {
   categoriesError = false
   queriedWork = undefined
   reviewContext = { composer: null, own: null, summary: null, reviews: [] }
+  pendingReview = null
   downloadRules = []
   await i18n.changeLanguage('zh-CN')
 })
@@ -1340,12 +1342,29 @@ describe('BookDetailDialog review action', () => {
     }
   }
 
+  it('shows the review action before its data arrives and opens it after loading', async () => {
+    let resolveReview!: (value: { data: unknown }) => void
+    pendingReview = new Promise((resolve) => { resolveReview = resolve })
+    renderDialog()
+    const button = screen.getByRole('button', { name: '书评' })
+    fireEvent.click(button)
+    expect(button).toBeDisabled()
+    await act(async () => { resolveReview({ data: { composer, own: null, summary: null, reviews: [] } }) })
+    expect(await screen.findByText('发表书评')).toBeInTheDocument()
+  })
+
+  it('does not show the review action to guests', () => {
+    useAuthStore.setState({ user: null })
+    renderDialog()
+    expect(screen.queryByRole('button', { name: '书评' })).not.toBeInTheDocument()
+  })
+
   it('opens the composer when the caller has no review yet', async () => {
     reviewContext = { composer, own: null, summary: null, reviews: [] }
     renderDialog()
 
     fireEvent.click(await screen.findByRole('button', { name: '书评' }))
-    expect(screen.getByText('发表书评')).toBeInTheDocument()
+    expect(await screen.findByText('发表书评')).toBeInTheDocument()
   })
 
   it('opens the caller own review instead of the composer', async () => {
@@ -1355,7 +1374,7 @@ describe('BookDetailDialog review action', () => {
     renderDialog()
 
     fireEvent.click(await screen.findByRole('button', { name: '书评' }))
-    expect(screen.getByText('书评详情')).toBeInTheDocument()
+    expect(await screen.findByText('书评详情')).toBeInTheDocument()
     expect(screen.getAllByText('我的书评正文').length).toBeGreaterThan(0)
   })
 })

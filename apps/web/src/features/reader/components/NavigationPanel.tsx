@@ -189,6 +189,7 @@ function isTocRowPlaced(rowTop: number, viewportTop: number, viewportBottom: num
 
 interface NavigationPanelProps {  bookId: string
   open: boolean
+  tocPositionReady?: boolean
   locked?: boolean
   sidebarWidth?: number
   statsDisabled?: boolean
@@ -200,7 +201,7 @@ interface NavigationPanelProps {  bookId: string
 }
 
 export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPanelProps>(function NavigationPanel(
-  { bookId, open, locked, sidebarWidth, statsDisabled, guestReadOnly = false, footerVisible: _footerVisible = true, mobileDockVisible = false, onFooterSummon: _onFooterSummon, onClose },
+  { bookId, open, tocPositionReady = true, locked, sidebarWidth, statsDisabled, guestReadOnly = false, footerVisible: _footerVisible = true, mobileDockVisible = false, onFooterSummon: _onFooterSummon, onClose },
   ref,
 ) {
   const _ = useTranslation()
@@ -772,7 +773,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       return
     }
     if (tab === 'ai' || restoredPanel.current === tab) return
-    if (tab === 'toc' && (!tocItems.length || (tocBookId !== null && tocBookId !== bookId))) return
+    if (tab === 'toc' && (!tocPositionReady || !tocItems.length || (tocBookId !== null && tocBookId !== bookId))) return
     const saved = savedScrollTop.current[tab]
     if (tab === 'toc') {
       if (saved !== undefined && currentIndex === lastScrolledIndex.current) {
@@ -790,11 +791,11 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     }
     container.scrollTop = saved ?? 0
     restoredPanel.current = tab
-  }, [bookId, currentIndex, open, searchExpanded, tab, tocBookId, tocItems.length, tree])
+  }, [bookId, currentIndex, open, searchExpanded, tab, tocBookId, tocItems.length, tocPositionReady, tree])
 
   // The parsed TOC is authoritative; a synthesized tree must not consume startup positioning.
   useEffect(() => {
-    if (tab !== 'toc' || !open || currentIndex < 0 || searchExpanded) return
+    if (tab !== 'toc' || !open || currentIndex < 0 || searchExpanded || (!tocPositionReady && !pendingNavigationHref)) return
     if (!tocItems.length || (tocBookId !== null && tocBookId !== bookId)) return
     if (currentIndex === lastScrolledIndex.current) return
     const item = itemRefs.current.get(currentIndex)
@@ -815,7 +816,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       if (locateFrame.current !== null) cancelAnimationFrame(locateFrame.current)
       locateFrame.current = null
     }
-  }, [bookId, tab, open, currentIndex, collapsed, searchExpanded, scrollToCurrentChapter, rememberSidebarScroll, tocBookId, tocItems.length, tree])
+  }, [bookId, tab, open, currentIndex, collapsed, searchExpanded, scrollToCurrentChapter, rememberSidebarScroll, tocBookId, tocItems.length, tocPositionReady, pendingNavigationHref, tree])
 
   useEffect(() => {
     if (locateRequest === handledLocateRequest.current) return

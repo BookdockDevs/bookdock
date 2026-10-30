@@ -1164,6 +1164,9 @@ function readerPage() {
           revisionId: manifest.revisionId,
           cfi: currentCfi,
           contentCfi: currentCfi,
+          ...(currentTocLabel ? { chapter: currentTocLabel } : {}),
+          ...(Number.isInteger(event.detail.section?.current) && event.detail.section.current >= 0
+            ? { chapterIndex: event.detail.section.current } : {}),
           percent: fraction * 100,
           fraction,
         })

@@ -122,6 +122,18 @@ describe('progress service', () => {
     }).run()
   })
 
+  it('clears old chapter hints when a position update omits them', async () => {
+    const revisionId = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, bookId)).get()!.id
+    await upsertProgress(ownerId, bookId, { revisionId, cfi: 'old', chapter: 'Chapter 52', chapterIndex: 53, percent: 98 })
+    const moved = await upsertProgress(ownerId, bookId, { revisionId, cfi: 'new', percent: 4 })
+    expect(moved).toMatchObject({ cfi: 'new', chapter: null, chapterIndex: null })
+    expect(await getProgress(ownerId, bookId)).toMatchObject({ cfi: 'new', chapter: null, chapterIndex: null })
+    await upsertProgress(ownerId, bookId, { revisionId, cfi: 'new', chapter: 'Chapter 3', chapterIndex: 4, percent: 4 })
+    expect(await upsertProgress(ownerId, bookId, { revisionId, cfi: 'new', percent: 4 }))
+      .toMatchObject({ chapter: 'Chapter 3', chapterIndex: 4 })
+  })
+
   it('reads and writes progress for a library version nobody collected', async () => {
     // A public library publishing a version, read by a user who has no private
     // card for it. Reading is dimensioned by BookVersion, so the position is

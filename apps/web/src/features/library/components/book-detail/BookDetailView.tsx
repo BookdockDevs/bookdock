@@ -9,6 +9,7 @@ import { apiPatch } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useAuthStore } from '@/stores/auth.store'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
@@ -86,17 +87,32 @@ export default function BookDetailView({
   const [coverEditing, setCoverEditing] = useState(false)
   const canEditBookmeta = !readOnly && !displayBook.source && Boolean(detail)
   const [reviewEditorOpen, setReviewEditorOpen] = useState(false)
+  const [openingReview, setOpeningReview] = useState(false)
+  const signedIn = useAuthStore((state) => Boolean(state.user))
   const reviewQuery = useReviewBookContext(reviewContextProp !== undefined ? null : (book?.id ?? null))
   const reviewContext = reviewContextProp !== undefined ? reviewContextProp : reviewQuery.data?.data
   const reviewComposer = reviewContext?.composer
-  const canReview = Boolean(!readOnly && reviewComposer?.eligible && reviewComposer.bookVersionId)
+  const canReview = Boolean(signedIn && reviewComposer?.eligible && reviewComposer.bookVersionId)
   const ownReview = reviewContext?.own
 
   // The review glyph carries no state: it opens the caller's own review when
   // there is one and the composer when there is not.
-  function openReviewAction() {
-    if (ownReview) onOpenReviewDetail?.(ownReview)
-    else setReviewEditorOpen(true)
+  async function openReviewAction() {
+    setOpeningReview(true)
+    try {
+      const context = reviewContext ?? (await reviewQuery.refetch()).data?.data
+      if (!context?.composer?.eligible || !context.composer.bookVersionId) {
+        notify.error(_('errors.loadFailed'))
+      } else if (context.own) {
+        onOpenReviewDetail?.(context.own)
+      } else {
+        setReviewEditorOpen(true)
+      }
+    } catch (error) {
+      notify.error(getUserErrorNotification(error, 'errors.loadFailed'))
+    } finally {
+      setOpeningReview(false)
+    }
   }
 
   // Publishing and forking happen once per book, so they wait in the overflow
@@ -357,11 +373,14 @@ export default function BookDetailView({
               {!readOnly && (
                 <DownloadMenu bookId={book.id} title={displayBook.title} format={displayBook.format} />
               )}
-              {canReview && (
+              {signedIn && (
                 <ActionIcon
                   secondary
+                  disabled={openingReview}
+                  className={openingReview ? 'animate-pulse' : undefined}
+                  title={openingReview ? _('reader.loading') : undefined}
                   label={_('review.reviewsTitle')}
-                  onClick={openReviewAction}
+                  onClick={() => void openReviewAction()}
                 >
                   {reviewIconPaths}
                 </ActionIcon>

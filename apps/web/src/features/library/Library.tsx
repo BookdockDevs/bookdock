@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Link, useLocation, useNavigate, useRouter, useSearch } from '@tanstack/react-router'
+import { Link, useElementScrollRestoration, useLocation, useNavigate, useRouter, useSearch } from '@tanstack/react-router'
 
 import {
   DndContext,
@@ -94,6 +94,11 @@ export default function Library() {
   const navigate = useNavigate()
   const location = useLocation()
   const router = useRouter()
+  const windowScroll = useElementScrollRestoration({ getElement: () => window })
+  const initialScroll = useRef({ key: location.state.__TSR_key, top: windowScroll?.scrollY, restored: false })
+  if (initialScroll.current.key !== location.state.__TSR_key) {
+    initialScroll.current = { key: location.state.__TSR_key, top: windowScroll?.scrollY, restored: false }
+  }
   const queryClient = useQueryClient()
 
   const viewPref = useUiStore((s) => s.view)
@@ -886,6 +891,13 @@ export default function Library() {
   }
 
   const searchScrollRestore = useRef<{ search: LibrarySearch; top: number } | undefined>(undefined)
+  useLayoutEffect(() => {
+    const initial = initialScroll.current
+    if (initial.restored || initial.key !== location.state.__TSR_key || initial.top === undefined) return
+    if (libraryContextUnresolved || listLoading || (activeLibrary ? catalogQuery.isPlaceholderData : booksPlaceholder)) return
+    initial.restored = true
+    window.scrollTo({ top: initial.top, behavior: 'instant' })
+  }, [location.state.__TSR_key, libraryContextUnresolved, listLoading, activeLibrary, catalogQuery.isPlaceholderData, booksPlaceholder])
   // An archive exit lands here with a scroll request in history state. Adopt
   // it once per entry into the existing gated restore below, so the position
   // applies only after the matching list is actually rendered — a blind

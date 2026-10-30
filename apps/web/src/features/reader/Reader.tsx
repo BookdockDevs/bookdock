@@ -2021,6 +2021,7 @@ export default function Reader() {
         <div className="flex h-full w-full">
             <ReaderSidebar
               bookId={id}
+              tocPositionReady={readerReady}
               onStatsTabOpen={flushReadingTimer}
               chromePinned={chromePinned}
               footerVisible={footerVisible}

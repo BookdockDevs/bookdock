@@ -13,6 +13,13 @@ All notable changes to Bookdock are documented here.
 
 - Improved e-ink page turns by reusing visible-text measurements and avoiding redundant style updates. The next chapter view is prepared on the current chapter's last page, and bottom controls show pressed feedback before their actions run.
 
+### Fixed
+
+- Reviewing a readable shared book no longer requires restoring a collected copy from the trash. The review action is available while its information is loading.
+- E-ink reading progress now includes the current chapter when available, and position updates no longer retain chapter details from a different location.
+- The reader's table of contents waits for the saved reading position before scrolling to the current chapter.
+- The library restores its scroll position after the book list loads when returning through browser history.
+
 ### Upgrade notes
 
 - Back up the complete `DATA_DIR` before upgrading. Migration 0058 adds personal metadata source records, including detail-lookup capability flags; installed source files are stored in the data volume. Downgrading requires the pre-upgrade data with the matching previous release.
@@ -978,6 +985,13 @@ All notable changes to Bookdock are documented here.
 #### 优化
 
 - 优化墨水屏阅读器翻页：复用可见文字测量结果，减少重复样式更新；进入章节最后一页时准备下一章视图，底部按钮在执行操作前显示点击反馈。
+
+#### 修复
+
+- 书籍仍可从共享书库阅读时，无需先从回收站恢复收藏即可发表书评；书评信息加载期间也可点击书评入口。
+- 墨水屏阅读进度在可获取时同步当前章节；更新阅读位置时，不再沿用其他位置的章节信息。
+- 阅读器目录等待阅读位置恢复后再滚动到当前章节。
+- 通过浏览器历史记录返回书库时，等待书籍列表加载后恢复滚动位置。
 
 #### 升级说明
 

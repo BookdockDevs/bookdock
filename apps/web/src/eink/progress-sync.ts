@@ -4,6 +4,8 @@ export interface PositionPayload {
   revisionId: string
   cfi: string
   contentCfi: string
+  chapter?: string
+  chapterIndex?: number
   percent: number
   fraction: number
 }

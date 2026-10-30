@@ -146,6 +146,19 @@ describe('NavigationPanel', () => {
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
   })
 
+  it('waits for restored reader position before positioning the TOC', () => {
+    useReaderState.setState({
+      tocItems: [{ label: 'Chapter 3', href: 'chapter:4' }, { label: 'Chapter 52', href: 'chapter:53' }],
+      currentChapter: 'Chapter 52',
+    })
+    const view = render(<NavigationPanel bookId="book-1" open tocPositionReady={false} />)
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+    act(() => useReaderState.setState({ currentChapter: 'Chapter 3', currentChapterHref: 'chapter:4' }))
+    view.rerender(<NavigationPanel bookId="book-1" open tocPositionReady />)
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Chapter 3' })).toHaveClass('font-medium')
+  })
+
   it('scrolls to current chapter on reopen even when the remembered index matches', async () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
 

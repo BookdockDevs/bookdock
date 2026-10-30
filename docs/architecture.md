@@ -351,10 +351,7 @@ of that work (published, effectively visible; managers bypass hidden and
 unlisted; guests additionally need the instance switch plus a guest-readable
 listing of that work). Provenance names and metadata resolve through the same
 per-listing read verdict and degrade to an unavailable state without leaking
-hidden, unlisted or otherwise unreadable versions. Creation requires holding
-the work (ownership for private works; a collected B for source works), and
-the shared choice additionally requires the collector's own source listing to
-still read. Guests read only where the guest conditions above hold and never
+hidden, unlisted or otherwise unreadable versions. Creation requires ownership for private works or a currently readable source version for shared works; collection is not required. A trashed private collection does not prevent reviewing a readable source work. When using an active collection, the shared choice additionally requires that collection's source listing to remain readable. Guests read only where the guest conditions above hold and never
 write; authors edit their own content; current source managers delete shared
 reviews, comments and replies through the same UI (never private content, never
 editing another author's content). Statistics, lists and
@@ -1060,7 +1057,7 @@ the final document and font stylesheet are rechecked after startup navigation.
 
 ### E-ink progress account binding
 
-An e-ink progress request may include `expectedUserId`; a mismatch with the authenticated account is rejected. Position updates otherwise use the existing progress behavior and do not provide cross-device conflict resolution.
+An e-ink progress request may include `expectedUserId`; a mismatch with the authenticated account is rejected. A changed position must not inherit chapter metadata omitted by the writer; chapter labels and indices are optional hints associated with that position. Reader TOC positioning waits for the initial renderer navigation to settle, while an explicit pending TOC selection remains usable during loading. Position updates do not provide cross-device conflict resolution.
 
 ### E-ink reader image delivery
 

@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   searchAuthors: vi.fn(),
   navigate: vi.fn(),
   listTotal: null as number | null,
+  entryKey: 'test-entry',
+  scrollY: undefined as number | undefined,
+  listLoading: false,
 }))
 
 vi.mock('@tanstack/react-router', async (importOriginal) => {
@@ -18,7 +21,8 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
     ...actual,
     useSearch: () => mocks.search,
     useNavigate: () => mocks.navigate,
-    useLocation: () => ({ pathname: '/', href: '/', state: { __TSR_key: 'test-entry' } }),
+    useLocation: () => ({ pathname: '/', href: '/', state: { __TSR_key: mocks.entryKey } }),
+    useElementScrollRestoration: () => mocks.scrollY === undefined ? undefined : { scrollX: 0, scrollY: mocks.scrollY },
     useRouter: () => ({ history: { canGoBack: () => false } }),
   }
 })
@@ -30,7 +34,7 @@ vi.mock('@/features/library/hooks', async (importOriginal) => {
   return {
     ...actual,
     useLibraries: mocks.libraries,
-    useBooks: (...args: unknown[]) => { mocks.books(...args); return query({ data: [], total: mocks.listTotal ?? 0 }) },
+    useBooks: (...args: unknown[]) => { mocks.books(...args); return { ...query({ data: [], total: mocks.listTotal ?? 0 }), isLoading: mocks.listLoading } },
     useLibraryCatalog: (...args: unknown[]) => { mocks.catalog(...args); return query(mocks.listTotal === null ? undefined : { data: { items: [], total: mocks.listTotal } }) },
     useLibraryRelation: () => query(),
     useLibraryCategories: () => query({ data: [] }),
@@ -91,12 +95,40 @@ describe('Library requested context resolution', () => {
     mocks.searchAuthors.mockClear()
     mocks.navigate.mockClear()
     mocks.listTotal = null
+    mocks.entryKey = 'test-entry'
+    mocks.scrollY = undefined
+    mocks.listLoading = false
     useAuthStore.setState({ user: { id: 'user-1', username: 'reader', role: 'member' } })
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     useAuthStore.setState({ user: null })
     localStorage.clear()
+  })
+
+  it('restores each history entry after its book list is ready', () => {
+    mocks.search = { libraryId: undefined, shelf: undefined, tag: undefined, trash: false, page: 1 }
+    mocks.libraries.mockReturnValue({ data: { data: [{ id: 'private-1', type: 'private', name: 'Library' }] }, isPending: false, isError: false, isFetching: false, refetch: vi.fn() })
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    const view = renderLibrary()
+
+    mocks.entryKey = 'other-entry'
+    mocks.scrollY = 640
+    mocks.listLoading = true
+    view.rerender(<QueryClientProvider client={view.client}><Library /></QueryClientProvider>)
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    // The router can update its cache while the list is still loading.
+    mocks.scrollY = 0
+    mocks.listLoading = false
+    view.rerender(<QueryClientProvider client={view.client}><Library /></QueryClientProvider>)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 640, behavior: 'instant' })
+
+    mocks.entryKey = 'test-entry'
+    mocks.scrollY = 320
+    view.rerender(<QueryClientProvider client={view.client}><Library /></QueryClientProvider>)
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 320, behavior: 'instant' })
   })
 
   it('keeps a requested shared URL pending without running private queries or correcting the URL', () => {

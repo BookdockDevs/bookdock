@@ -95,13 +95,14 @@ export async function upsertProgress(userId: string, bookId: string, data: { rev
       if (rateSamples.length > RATE_SAMPLE_MAX) rateSamples.splice(0, rateSamples.length - RATE_SAMPLE_MAX)
     }
 
+    const positionChanged = data.cfi !== undefined && data.cfi !== (existing?.cfi ?? row?.cfi ?? null)
     payload = {
       progressRevisionId: activeBook.revisionId ?? null,
       coverageRevisionId: activeBook.revisionId ?? null,
       cfi: data.cfi ?? existing?.cfi ?? null,
       contentCfi: data.contentCfi ?? (data.cfi === undefined ? existing?.contentCfi : null) ?? null,
-      chapter: data.chapter ?? existing?.chapter ?? null,
-      chapterIndex: data.chapterIndex ?? existing?.chapterIndex ?? null,
+      chapter: data.chapter ?? (positionChanged ? null : existing?.chapter ?? row?.chapter ?? null),
+      chapterIndex: data.chapterIndex ?? (positionChanged ? null : existing?.chapterIndex ?? null),
       percent: data.percent,
       fraction: data.fraction ?? existing?.fraction ?? null,
       intervals,
@@ -118,7 +119,7 @@ export async function upsertProgress(userId: string, bookId: string, data: { rev
       tx.update(bookStates).set({
         percent: data.percent,
         ...(data.cfi !== undefined ? { cfi: data.cfi } : {}),
-        ...(data.chapter !== undefined ? { chapter: data.chapter } : {}),
+        ...(data.chapter !== undefined || positionChanged ? { chapter: payload.chapter ?? null } : {}),
         lastReadAt: now,
         progressData: payload,
         progressRevisionId: payload.progressRevisionId,

@@ -12,6 +12,7 @@ import type { NavTab } from '../types'
 
 interface ReaderSidebarProps {
   bookId: string
+  tocPositionReady?: boolean
   onStatsTabOpen: () => void
   /** Whether the mobile reading controls were summoned by the reader chrome toggle. */
   chromePinned: boolean
@@ -21,7 +22,7 @@ interface ReaderSidebarProps {
   guestReadOnly: boolean
 }
 
-export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpen, chromePinned, footerVisible, mobileDockVisible, onFooterSummon, guestReadOnly }: ReaderSidebarProps) {
+export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionReady, onStatsTabOpen, chromePinned, footerVisible, mobileDockVisible, onFooterSummon, guestReadOnly }: ReaderSidebarProps) {
   const _ = useTranslation()
   const isTouch = useIsTouch()
   const activeNavTab = useReaderState((s) => s.activeNavTab)
@@ -371,6 +372,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, onStatsTabOpe
           key={bookId}
           ref={panelRef}
           bookId={bookId}
+          tocPositionReady={tocPositionReady}
           open={sidebarOpen}
           locked={panelLocked}
           sidebarWidth={panelWidth}

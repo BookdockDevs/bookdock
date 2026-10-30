@@ -172,10 +172,9 @@ export async function authorHoldingReadable(
       .all()
       .map((row) => row.id),
   )
-  const workHoldings = holdings.filter((row) => row.link.sourceLibraryBookVersionId && targets.has(row.link.sourceLibraryBookVersionId))
+  const workHoldings = holdings.filter((row) => !row.deletedAt && row.link.sourceLibraryBookVersionId && targets.has(row.link.sourceLibraryBookVersionId))
   if (workHoldings.length === 0) return true
   for (const row of workHoldings) {
-    if (row.deletedAt) continue
     try {
       await assertOwnListingReadable(userId, row.link)
       return true

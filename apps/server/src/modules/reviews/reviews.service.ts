@@ -287,13 +287,10 @@ export async function getReviewWorkContext(
       .filter((row) => !!row.link.sourceLibraryBookVersionId && targets.has(row.link.sourceLibraryBookVersionId))
 
     const activeHolding = privateHoldings.find((row) => !row.deletedAt)?.link
-    const hasTrashedHolding = privateHoldings.some((row) => !!row.deletedAt)
 
     if (activeHolding) {
       composer = await reviewComposerContext(userId, activeHolding.bookVersionId)
       own = composer.existing
-    } else if (hasTrashedHolding) {
-      composer = GUEST_COMPOSER
     } else {
       const firstReadable = getDb()
         .select()

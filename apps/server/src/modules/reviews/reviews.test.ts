@@ -18,7 +18,7 @@ import * as schema from '../../db/schema'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { migrateBeforeBookRetirement } from '../../db/migration-stage'
-import { deleteBook, restoreBook, trashBook } from '../books/books.service'
+import { deleteBook, trashBook } from '../books/books.service'
 import { deleteCatalogBook, deleteCatalogVersion, permanentDeleteCatalogBook, restoreCatalogBook } from '../libraries/catalog.service'
 import { forkLocalBook } from '../libraries/fork.service'
 import { deleteLibrary } from '../libraries/libraries.service'
@@ -560,19 +560,20 @@ describe('book reviews', () => {
     expect(JSON.stringify(events)).not.toContain('reply text')
   })
 
-  it('refuses re-sharing from trashed holdings while keeping shared reads', async () => {
+  it('creates a shared review without restoring a trashed collection', async () => {
+    await trashBook('member', 'v1')
+    const ctx = await getReviewWorkContext('member', 'source', 'w1')
+    expect(ctx.composer).toMatchObject({ eligible: true, canPublishShared: true, bookVersionId: 'v1' })
+    const review = await createReview('member', { bookVersionId: 'v1', rating: 4, visibility: 'shared' })
+    expect(review.visibility).toBe('shared')
+  })
+
+  it('allows reviewing a readable shared work despite a trashed collection', async () => {
     const priv = await createReview('member', { bookVersionId: 'v1', rating: 4, visibility: 'private' })
     await trashBook('member', 'v1')
-    // The only holding sits in the private trash: re-sharing is refused even
-    // though the source work still reads for everyone else.
-    await expect(updateReview('member', priv.id, { visibility: 'shared' })).rejects.toMatchObject({
-      code: 'REVIEW_NOT_FOUND',
-    })
     const ctx = await getReviewWorkContext('member', 'source', 'w1')
-    expect(ctx.summary).toMatchObject({ count: 0 })
-    expect(ctx.composer.eligible).toBe(false)
-    // Restoring the holding restores eligibility.
-    await restoreBook('member', 'v1')
+    expect(ctx.composer).toMatchObject({ eligible: true, canPublishShared: true, bookVersionId: 'v1' })
+    expect(ctx.own?.id).toBe(priv.id)
     await updateReview('member', priv.id, { visibility: 'shared' })
     expect((await getReviewWorkContext('outsider', 'source', 'w1')).summary).toMatchObject({ count: 1 })
   })

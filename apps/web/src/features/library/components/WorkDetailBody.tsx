@@ -13,6 +13,7 @@ import ReviewPreviewSection from '@/features/reviews/components/ReviewPreviewSec
 import { useReviewWorkContext } from '@/features/reviews/hooks/useReviews'
 import { reviewIconPaths } from '@/features/reviews/lib/review-icon'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useAuthStore } from '@/stores/auth.store'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
@@ -96,6 +97,8 @@ export default function WorkDetailBody({
   const [coverEditingId, setCoverEditingId] = useState<string | null>(null)
   const coverEditing = coverEditingId === selected?.id
   const [reviewEditorOpen, setReviewEditorOpen] = useState(false)
+  const [openingReview, setOpeningReview] = useState(false)
+  const signedIn = useAuthStore((state) => Boolean(state.user))
   const reviewQuery = useReviewWorkContext(library.id, work.id)
   const reviewContext = reviewQuery.data?.data
   const reviewComposer = reviewContext?.composer
@@ -104,9 +107,22 @@ export default function WorkDetailBody({
 
   // The review glyph carries no state: it opens the caller's own review when
   // there is one and the composer when there is not.
-  function openReviewAction() {
-    if (ownReview) onOpenReviewDetail?.(ownReview)
-    else setReviewEditorOpen(true)
+  async function openReviewAction() {
+    setOpeningReview(true)
+    try {
+      const context = reviewContext ?? (await reviewQuery.refetch()).data?.data
+      if (!context?.composer?.eligible || !context.composer.bookVersionId) {
+        notify.error(_('errors.loadFailed'))
+      } else if (context.own) {
+        onOpenReviewDetail?.(context.own)
+      } else {
+        setReviewEditorOpen(true)
+      }
+    } catch (error) {
+      notify.error(getUserErrorNotification(error, 'errors.loadFailed'))
+    } finally {
+      setOpeningReview(false)
+    }
   }
   function metadataEdit(field: EditableMetadataField, label: string) {
     if (!canManage || !selected) return undefined
@@ -421,11 +437,14 @@ export default function WorkDetailBody({
                   versionLabel={versionTabLabel(selected.name, _('library.versionFallback', { n: versionOrdinal(work.versions, selected.id) }))}
                 />
               )}
-              {canReview && (
+              {signedIn && (
                 <ActionIcon
                   secondary
+                  disabled={openingReview}
+                  className={openingReview ? 'animate-pulse' : undefined}
+                  title={openingReview ? _('reader.loading') : undefined}
                   label={_('review.reviewsTitle')}
-                  onClick={openReviewAction}
+                  onClick={() => void openReviewAction()}
                 >
                   {reviewIconPaths}
                 </ActionIcon>
