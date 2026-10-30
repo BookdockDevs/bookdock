@@ -2,7 +2,7 @@
 
 All notable changes to Bookdock are documented here.
 
-## [0.7.3] - 2026-10-31
+## [0.7.4] - 2026-10-31
 
 ### Added
 
@@ -15,6 +15,7 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Fixed missing dependencies in the in-app update package that prevented release validation.
 - Reviewing a readable shared book no longer requires restoring a collected copy from the trash. The review action is available while its information is loading.
 - E-ink reading progress now includes the current chapter when available, and position updates no longer retain chapter details from a different location.
 - The reader's table of contents waits for the saved reading position before scrolling to the current chapter.
@@ -975,7 +976,7 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [0.7.3] - 2026-10-31
+### [0.7.4] - 2026-10-31
 
 #### 新增
 
@@ -988,6 +989,7 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 修复应用内更新包缺少依赖、导致发布检查失败的问题。
 - 书籍仍可从共享书库阅读时，无需先从回收站恢复收藏即可发表书评；书评信息加载期间也可点击书评入口。
 - 墨水屏阅读进度在可获取时同步当前章节；更新阅读位置时，不再沿用其他位置的章节信息。
 - 阅读器目录等待阅读位置恢复后再滚动到当前章节。

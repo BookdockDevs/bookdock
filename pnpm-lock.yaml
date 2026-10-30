@@ -26,6 +26,21 @@ importers:
       '@img/colour':
         specifier: ^1.1.0
         version: 1.1.0
+      '@jitl/quickjs-ffi-types':
+        specifier: 0.32.0
+        version: 0.32.0
+      '@jitl/quickjs-wasmfile-debug-asyncify':
+        specifier: 0.32.0
+        version: 0.32.0
+      '@jitl/quickjs-wasmfile-debug-sync':
+        specifier: 0.32.0
+        version: 0.32.0
+      '@jitl/quickjs-wasmfile-release-asyncify':
+        specifier: 0.32.0
+        version: 0.32.0
+      '@jitl/quickjs-wasmfile-release-sync':
+        specifier: 0.32.0
+        version: 0.32.0
       '@xmldom/xmldom':
         specifier: ^0.9.10
         version: 0.9.10
@@ -50,6 +65,9 @@ importers:
       drizzle-orm:
         specifier: 0.39.3
         version: 0.39.3(@types/better-sqlite3@7.6.13)(better-sqlite3@11.10.0)
+      entities:
+        specifier: 8.1.0
+        version: 8.1.0
       file-uri-to-path:
         specifier: 1.0.0
         version: 1.0.0
@@ -93,7 +111,10 @@ importers:
         specifier: ~2.0.0
         version: 2.0.1
       quickjs-emscripten:
-        specifier: ^0.32.0
+        specifier: 0.32.0
+        version: 0.32.0
+      quickjs-emscripten-core:
+        specifier: 0.32.0
         version: 0.32.0
       readable-stream:
         specifier: ~2.3.6

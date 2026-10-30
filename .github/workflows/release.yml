@@ -150,14 +150,6 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
             type=raw,value=latest,enable=${{ !contains(inputs.tag || github.ref_name, '-') }}
 
-      - name: Build and push image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
       # Second artifact line: the same app root as a zip the panel can download
       # and stage into DATA_DIR/releases (ADR-25). Built from the `bundle`
       # stage, so image and artifact cannot drift apart.
@@ -213,6 +205,14 @@ jobs:
           # anything is published when a dependency only resolves through
           # pnpm's symlinked store layout.
           node scripts/verify-bundle-imports.mjs "$ARTIFACT_DIR/bookdock-${version}-linux-x64-musl.zip"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
       - name: Create or update GitHub Release
         env:
