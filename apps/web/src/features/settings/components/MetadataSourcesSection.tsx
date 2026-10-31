@@ -11,6 +11,7 @@ import MetadataProviderIcon from '@/components/ui/MetadataProviderIcon'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { extractZipPreview, type ZipPackagePreview } from '@/lib/personal-source-zip'
 import { cn, formatBytes } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -95,6 +96,8 @@ export default function MetadataSourcesSection() {
   const [mode, setMode] = useState<'github' | 'zip'>('github')
   const [url, setUrl] = useState('')
   const [zipFile, setZipFile] = useState<File | null>(null)
+  const [zipPreview, setZipPreview] = useState<ZipPackagePreview | null>(null)
+  const zipFileRef = useRef<File | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [installing, setInstalling] = useState(false)
@@ -127,9 +130,18 @@ export default function MetadataSourcesSection() {
     }
   }, [viewMenuOpen])
 
+  function releaseZipPreview() {
+    zipFileRef.current = null
+    setZipPreview((current) => {
+      if (current?.iconUrl) URL.revokeObjectURL(current.iconUrl)
+      return null
+    })
+  }
+
   function openAddDialog() {
     setMode('github')
     setUrl('')
+    releaseZipPreview()
     setZipFile(null)
     setDragOver(false)
     setAddOpen(true)
@@ -141,7 +153,20 @@ export default function MetadataSourcesSection() {
       notify.error({ key: 'metadataLookup.sourceZipOnly' })
       return
     }
+    releaseZipPreview()
+    zipFileRef.current = file
     setZipFile(file)
+    // Preview the packaged icon and name; failures fall back to the plain badge.
+    void extractZipPreview(file).then((preview) => {
+      if (zipFileRef.current !== file) {
+        if (preview.iconUrl) URL.revokeObjectURL(preview.iconUrl)
+        return
+      }
+      setZipPreview((current) => {
+        if (current?.iconUrl) URL.revokeObjectURL(current.iconUrl)
+        return preview
+      })
+    })
   }
 
   const deleteSource = useMutation({
@@ -164,6 +189,7 @@ export default function MetadataSourcesSection() {
       notify.success({ key: 'metadataLookup.installSuccess' })
       setAddOpen(false)
       setUrl('')
+      releaseZipPreview()
       setZipFile(null)
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'metadataLookup.installError'))
@@ -561,12 +587,20 @@ export default function MetadataSourcesSection() {
                 </label>
                 {zipFile ? (
                   <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs dark:border-stone-700 dark:bg-stone-800/80">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 font-mono text-xs font-bold text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
-                      ZIP
-                    </div>
+                    {zipPreview?.iconUrl ? (
+                      <img
+                        src={zipPreview.iconUrl}
+                        alt=""
+                        className="size-10 shrink-0 rounded-xl bg-white object-contain p-0.5 dark:bg-stone-700/60"
+                      />
+                    ) : (
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 font-mono text-xs font-bold text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                        ZIP
+                      </div>
+                    )}
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-stone-900 dark:text-stone-100" title={zipFile.name}>
-                        {zipFile.name}
+                      <p className="truncate text-sm font-medium text-stone-900 dark:text-stone-100" title={zipPreview?.name ?? zipFile.name}>
+                        {zipPreview?.name ?? zipFile.name}
                       </p>
                       <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
                         {formatBytes(zipFile.size)}
@@ -575,7 +609,10 @@ export default function MetadataSourcesSection() {
                     <button
                       type="button"
                       disabled={installing}
-                      onClick={() => setZipFile(null)}
+                      onClick={() => {
+                        releaseZipPreview()
+                        setZipFile(null)
+                      }}
                       className="shrink-0 rounded-lg p-1.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 disabled:opacity-40 dark:hover:bg-stone-700 dark:hover:text-stone-200"
                       title={_('metadataLookup.removeFile')}
                       aria-label={_('metadataLookup.removeFile')}

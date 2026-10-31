@@ -16,6 +16,11 @@ describe('personal metadata source runtime', () => {
     await expect(runPersonalSource('export default { search() { return [{}] } }', 'search', '')).rejects.toThrow('Invalid metadata source result')
   })
 
+  it('propagates the source rejection reason in the failure message', async () => {
+    const source = "export default { async search() { throw new Error('刺猬猫 blocked the request with a captcha redirect') } }"
+    await expect(runPersonalSource(source, 'search', '')).rejects.toThrow('Metadata source failed: 刺猬猫 blocked the request with a captcha redirect')
+  })
+
   it('interrupts an infinite loop', async () => {
     await expect(runPersonalSource('export default { search() { while (true) {} } }', 'search', '')).rejects.toThrow()
   }, 5000)

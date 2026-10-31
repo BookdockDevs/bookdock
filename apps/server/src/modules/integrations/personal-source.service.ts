@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 
 import type { MetadataCandidate, PersonalMetadataCandidate, PersonalMetadataFields, PersonalMetadataSourceView } from '@bookdock/shared'
 
@@ -21,10 +21,13 @@ function loadRow(userId: string, sourceId: string) {
 }
 
 export function listPersonalSources(userId: string): PersonalMetadataSourceView[] {
+  // Without an explicit order the unique (user_id, source_id) index drives the
+  // scan, which lists sources alphabetically instead of by install time.
   return getDb()
     .select()
     .from(personalMetadataSources)
     .where(eq(personalMetadataSources.userId, userId))
+    .orderBy(asc(personalMetadataSources.createdAt), asc(personalMetadataSources.sourceId))
     .all()
     .map(toPersonalSourceView)
 }

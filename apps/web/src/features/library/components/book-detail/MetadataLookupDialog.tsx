@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import type { MetadataCandidate, MetadataProviderId, MetadataSearchResponse, PersonalMetadataFields, PersonalMetadataSourceView, WeReadSearchScope } from '@bookdock/shared'
 
-import { apiGet, apiPost, apiPostBlob } from '@/api/client'
+import { ApiError, apiGet, apiPost, apiPostBlob } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import Checkbox from '@/components/ui/Checkbox'
 import Modal from '@/components/ui/Modal'
@@ -110,7 +110,6 @@ export default function MetadataLookupDialog({
   })
   const [loading, setLoading] = useState(false)
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
-  const [error, setError] = useState('')
   const [searched, setSearched] = useState(false)
   const [isFocused, setIsFocused] = useState(false)
   const [updateCover, setUpdateCoverState] = useState(() => {
@@ -163,26 +162,32 @@ export default function MetadataLookupDialog({
   }
 
   async function search(targetProvider: MetadataProviderId = provider, targetScope: WeReadSearchScope = weReadScope) {
-    if (!query.trim() || loading) return
+    if (!query.trim()) return
     setLoading(true)
-    setError('')
     setSelected(null)
     setResults([])
     setSearched(false)
+    setLoadingDetailId(null)
+    // A provider switch mid-search lands here too: the stale request's guards
+    // ignore its own settlement, so aborting and replacing it is enough.
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
     try {
       const response = await apiPost<MetadataSearchResponse>('/integrations/metadata-lookup/search', { provider: targetProvider, query, ...(targetProvider === 'weread' ? { weReadScope: targetScope } : {}) }, controller.signal)
       if (request.current !== controller || !active.current) return
-      setError('')
       setResults(response.data)
       setSearched(true)
     } catch (err: unknown) {
       if (request.current !== controller || !active.current) return
       if (err instanceof DOMException && err.name === 'AbortError') return
       if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') return
-      setError(_('metadataLookup.searchError'))
+      // Errors go through the standard toast; the results area reuses the
+      // no-results empty state. The server detail (timeout, HTTP status,
+      // source rejection reason) is appended for diagnosis.
+      const detail = err instanceof ApiError && err.message ? `（${err.message}）` : ''
+      notify.error(_('metadataLookup.searchError') + detail)
+      setSearched(true)
     } finally {
       if (request.current === controller && active.current) setLoading(false)
     }
@@ -190,7 +195,6 @@ export default function MetadataLookupDialog({
 
   async function select(result: MetadataCandidate) {
     if (loading) return
-    setError('')
     if (selected?.id === result.id) {
       setSelected(null)
       return
@@ -218,7 +222,6 @@ export default function MetadataLookupDialog({
         controller.signal,
       )
       if (request.current !== controller || !active.current) return
-      setError('')
       const detail = response.data
       const detailTitle = detail?.title?.trim()
       setSelected(detail ? { ...result,
@@ -265,7 +268,6 @@ export default function MetadataLookupDialog({
   async function apply() {
     if (!selected) return
     setLoading(true)
-    setError('')
     const controller = new AbortController()
     request.current = controller
     try {
@@ -285,7 +287,7 @@ export default function MetadataLookupDialog({
       }
       if (active.current) onApply({ ...draft, ...Object.fromEntries(changes) }, cover)
     } catch {
-      if (active.current) setError(_('metadataLookup.coverError'))
+      if (active.current) notify.error(_('metadataLookup.coverError'))
     } finally {
       if (active.current) setLoading(false)
     }
@@ -306,7 +308,6 @@ export default function MetadataLookupDialog({
                 setSelected(null)
                 setResults([])
                 setSearched(false)
-                setError('')
                 if (query.trim()) void search('weread', scope)
               }} className={`h-full rounded-md px-2 text-xs transition-colors disabled:opacity-50 ${weReadScope === scope ? 'bg-white font-medium text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100' : 'text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100'}`}>
                 {_(scope === 'all' ? 'metadataLookup.weReadAll' : 'metadataLookup.weReadEbooks')}
@@ -316,14 +317,12 @@ export default function MetadataLookupDialog({
         )}
         <MetadataLookupDropdown
           value={provider}
-          disabled={loading}
           onSelect={(next) => {
             if (next === provider) return
             setProvider(next)
             setSelected(null)
             setResults([])
             setSearched(false)
-            setError('')
             if (query.trim()) {
               void search(next)
             }
@@ -333,7 +332,7 @@ export default function MetadataLookupDialog({
       }
       onClose={close}
       size="xl"
-      panelClassName="h-[80vh] max-h-[760px] min-h-[520px] flex flex-col"
+      panelClassName="h-[85vh] min-h-[520px] flex flex-col"
       contentClassName="flex flex-col flex-1 min-h-0 overflow-hidden no-scrollbar [scrollbar-gutter:auto] pb-0 sm:pb-0"
       footer={
         <div className="flex items-center justify-between gap-3 w-full">
@@ -418,23 +417,6 @@ export default function MetadataLookupDialog({
             </button>
           </div>
         </div>
-
-        {provider === 'googlebooks' && (
-          <div className="flex items-center gap-2">
-            <img
-              src="https://books.google.com/googlebooks/images/poweredby.png"
-              alt="Powered by Google"
-              className="h-4 object-contain opacity-70"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-        )}
-
-        {error && (
-          <div role="alert" className="rounded-xl border border-red-200 bg-red-50/60 p-3 text-xs text-red-600 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-400">
-            {error}
-          </div>
-        )}
 
         {/* Results / Status middle section: ALWAYS takes flex-1 min-h-0 */}
         <div className="flex-1 min-h-0 flex flex-col">

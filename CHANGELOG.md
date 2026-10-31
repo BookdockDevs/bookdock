@@ -2,6 +2,25 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Added
+
+- The ZIP install dialog for personal metadata sources previews the packaged icon and display name before installing.
+
+### Changed
+
+- Reinstalling a personal metadata source with the same ID now overwrites the installed package in place, replacing its metadata, entry, icon and origin while keeping its position in the list.
+- The metadata lookup dialog allows switching the source while a search is running; failed searches and covers report the concrete cause through the standard toast notifications, and the results area reuses the no-results state. The dialog now covers the editing dialog at the same height.
+- The source dropdown menu sizes itself to its longest entry.
+- Google Books metadata search matches the query against book titles instead of the full text.
+- Installed personal metadata sources are listed by install time instead of alphabetically.
+
+### Fixed
+
+- Fixed failed metadata searches showing an unrelated privacy hint in the results area.
+- Fixed metadata request errors hiding their concrete cause (timeouts, connection resets, HTTP status codes, personal-source rejection reasons).
+
 ## [0.7.4] - 2026-10-31
 
 ### Added
@@ -975,6 +994,24 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [Unreleased]
+
+#### 新增
+
+- 个人元数据来源的 ZIP 安装对话框在安装前预览包内图标与来源名称。
+
+#### 优化
+
+- 重新安装同 ID 的个人元数据来源时改为就地覆盖已安装包（元数据、入口、图标与安装来源同步替换），列表位置保持不变。
+- 刮削信息弹窗支持在搜索进行中切换来源；搜索与封面失败改用统一的 toast 通知并附上具体原因，结果区复用暂无结果样式；弹窗高度与编辑弹窗对齐。来源下拉菜单宽度自适应最长项。
+- Google Books 刮削改为按书名匹配，不再进行全文匹配。
+- 个人元数据来源列表按安装时间排序。
+
+#### 修复
+
+- 修复搜索失败时结果区显示无关隐私提示的问题。
+- 修复元数据请求失败时不显示具体原因（超时、连接被重置、HTTP 状态码、来源脚本报错）的问题。
 
 ### [0.7.4] - 2026-10-31
 

@@ -2,6 +2,7 @@ import dns from 'node:dns'
 import net from 'node:net'
 
 import { AppError } from '../../middleware/error'
+import { describeNetworkCause } from './metadata-http'
 
 export interface PersonalSourceFetchInit {
   method?: string
@@ -83,8 +84,8 @@ export async function fetchThroughHost(url: string, init: PersonalSourceFetchIni
       redirect: 'error',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
-  } catch {
-    throw new AppError('VALIDATION_ERROR', 'Metadata source request failed')
+  } catch (err) {
+    throw new AppError('VALIDATION_ERROR', `Metadata source request failed (${describeNetworkCause(err)})`)
   }
   const reader = response.body?.getReader()
   if (!reader) return { status: response.status, body: '' }

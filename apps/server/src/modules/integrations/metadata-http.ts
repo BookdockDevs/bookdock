@@ -1,5 +1,17 @@
 import { AppError } from '../../middleware/error'
 
+// Bounded, code-only description of why the outbound fetch failed (timeout,
+// connection reset, DNS...). Never includes remote content.
+export function describeNetworkCause(err: unknown): string {
+  if (!(err instanceof Error)) return 'unknown'
+  const cause = err.cause as { code?: unknown; message?: unknown } | undefined
+  if (typeof cause?.code === 'string' && cause.code) return cause.code.replace(/\s+/g, ' ').slice(0, 60)
+  // undici failures without a code still carry a concrete message
+  // (e.g. "getaddrinfo ENOTFOUND example.com").
+  if (typeof cause?.message === 'string' && cause.message.trim()) return cause.message.replace(/\s+/g, ' ').slice(0, 60)
+  return err.name
+}
+
 export async function request(url: string, init: RequestInit = {}): Promise<string> {
   let response: Response
   try {
@@ -9,8 +21,8 @@ export async function request(url: string, init: RequestInit = {}): Promise<stri
       signal: AbortSignal.timeout(12_000),
       headers: { 'User-Agent': 'Bookdock/0.7 (https://github.com/BookdockDevs/bookdock)', ...init.headers },
     })
-  } catch {
-    throw new AppError('VALIDATION_ERROR', 'Metadata source unavailable')
+  } catch (err) {
+    throw new AppError('VALIDATION_ERROR', `Metadata source unavailable (${describeNetworkCause(err)})`)
   }
   if (!response.ok) throw new AppError('VALIDATION_ERROR', `Metadata source returned HTTP ${response.status}`)
   const reader = response.body?.getReader()

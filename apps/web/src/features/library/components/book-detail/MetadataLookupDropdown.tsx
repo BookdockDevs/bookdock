@@ -178,7 +178,7 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
         <div
           role="menu"
           aria-label={_('metadataLookup.sourceLabel')}
-          className="absolute right-0 top-full z-50 mt-1.5 w-[136px] overflow-hidden rounded-xl border border-stone-200 bg-white p-1 shadow-lg animate-in fade-in zoom-in-95 duration-100 dark:border-stone-700 dark:bg-stone-900"
+          className="absolute right-0 top-full z-50 mt-1.5 w-max min-w-[136px] max-w-64 overflow-hidden rounded-xl border border-stone-200 bg-white p-1 shadow-lg animate-in fade-in zoom-in-95 duration-100 dark:border-stone-700 dark:bg-stone-900"
         >
           {availableProviders.map((item) => renderMenuItem(item))}
           {personalSources && personalSources.length > 0 && (

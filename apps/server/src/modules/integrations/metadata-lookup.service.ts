@@ -131,7 +131,9 @@ export async function searchMetadata(provider: MetadataProviderId, query: string
   if (provider === 'googlebooks') {
     const key = testKey ?? (userId ? decryptPassword(storedSecrets(userId).googlebooks) : null)
     if (!key) throw new AppError('VALIDATION_ERROR', 'Google Books API key is not configured')
-    const params = new URLSearchParams({ q: query, maxResults: '20', key })
+    // Full-text search matches words anywhere in the book (e.g. 温床 hits
+    // Japanese gardening books); restrict to titles like readest does.
+    const params = new URLSearchParams({ q: `intitle:${query}`, maxResults: '20', key })
     const data = parseResponse<{ items?: Array<Record<string, unknown>> }>(await request(`https://www.googleapis.com/books/v1/volumes?${params}`))
     if (data.items !== undefined && !Array.isArray(data.items)) throw new AppError('VALIDATION_ERROR', 'Invalid Google Books search response')
     return (data.items ?? []).flatMap((item) => {

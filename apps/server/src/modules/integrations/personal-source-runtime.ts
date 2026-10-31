@@ -1,5 +1,5 @@
 import { getQuickJS, shouldInterruptAfterDeadline } from 'quickjs-emscripten'
-import type { QuickJSDeferredPromise } from 'quickjs-emscripten'
+import type { QuickJSContext, QuickJSDeferredPromise, QuickJSHandle } from 'quickjs-emscripten'
 
 import { personalMetadataCandidateSchema, personalMetadataFieldsSchema } from '@bookdock/shared'
 
@@ -12,6 +12,23 @@ import type { PersonalSourceFetchInit, PersonalSourceFetchResult } from './perso
 // is rejected in the sandbox before disposal, so JS_FreeRuntime never sees a
 // pending promise and late host callbacks are guarded by `disposed`.
 const CPU_LIMIT_MS = 2_000
+
+// Extract a bounded text description from the sandbox's rejection value.
+// Sources may reject with strings, Error objects or arbitrary values; the
+// dump is host-controlled and never reaches the DB or storage.
+function describeSourceRejection(context: QuickJSContext, errorHandle: QuickJSHandle | undefined): string {
+  if (!errorHandle) return 'unknown reason'
+  let dumped: unknown
+  try { dumped = context.dump(errorHandle) } catch { return 'unknown reason' }
+  let text: string
+  if (typeof dumped === 'string') text = dumped
+  else if (dumped && typeof dumped === 'object') {
+    const message = (dumped as { message?: unknown }).message
+    text = typeof message === 'string' && message.trim() ? message : JSON.stringify(dumped)
+  } else text = String(dumped)
+  text = text.replace(/\s+/g, ' ').trim()
+  return text ? text.slice(0, 300) : 'unknown reason'
+}
 const WALL_LIMIT_MS = 15_000
 const MAX_FETCHES = 20
 
@@ -181,8 +198,12 @@ export async function runPersonalSource(source: string, operation: 'search' | 'g
           state = context.getPromiseState(result.value)
         }
         if (state.type === 'rejected') {
+          // The source's own error text is the only diagnosis a user can act
+          // on (captcha redirects, parse failures...); keep it bounded and
+          // text-only since it comes from user-installed code.
+          const message = describeSourceRejection(context, state.error)
           state.error.dispose()
-          throw new AppError('VALIDATION_ERROR', 'Metadata source failed')
+          throw new AppError('VALIDATION_ERROR', `Metadata source failed: ${message}`)
         }
         try {
           const value: unknown = context.dump(state.value)

@@ -282,25 +282,22 @@ export function toPersonalSourceView(row: typeof personalMetadataSources.$inferS
 async function persistSource(userId: string, pkg: ExtractedPackage, origin: InstallOrigin): Promise<PersonalMetadataSourceView> {
   const db = getDb()
   const existing = db
-    .select({ id: personalMetadataSources.id })
+    .select()
     .from(personalMetadataSources)
     .where(and(eq(personalMetadataSources.userId, userId), eq(personalMetadataSources.sourceId, pkg.manifest.id)))
     .get()
-  if (existing) {
-    throw new AppError('PERSONAL_SOURCE_ALREADY_INSTALLED', 'A source with this ID is already installed; remove it first')
-  }
   const count = db
     .select({ count: sql<number>`count(*)` })
     .from(personalMetadataSources)
     .where(eq(personalMetadataSources.userId, userId))
     .get()
-  if ((count?.count ?? 0) >= PERSONAL_SOURCE_LIMIT) {
+  if (!existing && (count?.count ?? 0) >= PERSONAL_SOURCE_LIMIT) {
     throw new AppError('PERSONAL_SOURCE_LIMIT_REACHED', `At most ${PERSONAL_SOURCE_LIMIT} sources can be installed`)
   }
   const now = Date.now()
   const hasDetail = await personalSourceHasDetail(pkg.entry.toString('utf8'))
   const row: typeof personalMetadataSources.$inferInsert = {
-    id: createId('pms'),
+    id: existing?.id ?? createId('pms'),
     userId,
     sourceId: pkg.manifest.id,
     name: pkg.manifest.name,
@@ -316,13 +313,39 @@ async function persistSource(userId: string, pkg: ExtractedPackage, origin: Inst
     entryPath: pkg.manifest.entry,
     iconType: pkg.icon?.contentType ?? null,
     hasDetail,
-    createdAt: now,
+    createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   }
   const storage = getStorage()
   const prefix = sourceStoragePrefix(userId, pkg.manifest.id)
   await storage.put(`${prefix}/entry.js`, pkg.entry)
+  // An overwrite must also clear a stale icon when the new package ships none.
   if (pkg.icon) await storage.put(`${prefix}/icon`, pkg.icon.data)
+  else if (existing?.iconType) await storage.delete(`${prefix}/icon`).catch(() => {})
+  if (existing) {
+    // Reinstalling the same source ID overwrites in place; a real update flow
+    // may build on this later.
+    db.update(personalMetadataSources)
+      .set({
+        name: row.name,
+        version: row.version,
+        apiVersion: row.apiVersion,
+        description: row.description,
+        author: row.author,
+        repository: row.repository,
+        originType: row.originType,
+        originRef: row.originRef,
+        gitRef: row.gitRef,
+        gitCommit: row.gitCommit,
+        entryPath: row.entryPath,
+        iconType: row.iconType,
+        hasDetail: row.hasDetail,
+        updatedAt: row.updatedAt,
+      })
+      .where(eq(personalMetadataSources.id, existing.id))
+      .run()
+    return toPersonalSourceView(db.select().from(personalMetadataSources).where(eq(personalMetadataSources.id, existing.id)).get()!)
+  }
   try {
     db.insert(personalMetadataSources).values(row).run()
   } catch (error) {

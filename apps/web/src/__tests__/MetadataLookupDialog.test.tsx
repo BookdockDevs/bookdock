@@ -5,8 +5,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import MetadataLookupDialog from '../features/library/components/book-detail/MetadataLookupDialog'
 import i18n from '../i18n/i18n'
 
-const api = vi.hoisted(() => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPostBlob: vi.fn() }))
-const notifications = vi.hoisted(() => ({ warning: vi.fn() }))
+const api = vi.hoisted(() => ({
+  apiGet: vi.fn(),
+  apiPost: vi.fn(),
+  apiPostBlob: vi.fn(),
+  ApiError: class ApiError extends Error {
+    constructor(public code: string, message: string) { super(message) }
+  },
+}))
+const notifications = vi.hoisted(() => ({ warning: vi.fn(), error: vi.fn() }))
 vi.mock('../api/client', () => api)
 vi.mock('@/lib/notifications', () => ({ notify: notifications }))
 
@@ -280,4 +287,38 @@ describe('metadata lookup draft', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://cdn.example.com/cover.webp', expect.objectContaining({ mode: 'cors' }))
     expect(api.apiPostBlob).not.toHaveBeenCalled()
   })
+  it('reports a failed search through a toast and reuses the no-results state', async () => {
+    api.apiPost.mockRejectedValueOnce(new Error('blocked'))
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover initialProvider="openlibrary" onApply={vi.fn()} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    await vi.waitFor(() => expect(notifications.error).toHaveBeenCalledWith('搜索失败，来源可能暂不可用或限制了访问，请稍后重试。'))
+    expect(await screen.findByText('没有找到结果，请尝试其他关键词。')).toBeInTheDocument()
+    expect(screen.queryByText('搜索词会发送给选择的信息来源。')).not.toBeInTheDocument()
+  })
+
+  it('includes the server error detail in the search failure toast', async () => {
+    api.apiPost.mockRejectedValueOnce(new api.ApiError('VALIDATION_ERROR', 'Metadata source unavailable (TimeoutError)'))
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover initialProvider="openlibrary" onApply={vi.fn()} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    await vi.waitFor(() => expect(notifications.error).toHaveBeenCalledWith(expect.stringContaining('Metadata source unavailable (TimeoutError)')))
+    expect(await screen.findByText('没有找到结果，请尝试其他关键词。')).toBeInTheDocument()
+  })
+
+  it('switches providers while a search is still running', async () => {
+    let finishStale!: (value: { data: Array<Record<string, unknown>> }) => void
+    api.apiPost.mockImplementationOnce(() => new Promise((resolve) => { finishStale = resolve }))
+    api.apiPost.mockResolvedValueOnce({ data: [{ id: 'q1', provider: 'qidian', title: 'Qidian title', authors: [], sourceUrl: '' }] })
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover initialProvider="openlibrary" onApply={vi.fn()} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    expect(await screen.findByRole('status', { name: '搜索中…' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Library' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '起点' }))
+    await vi.waitFor(() => expect(api.apiPost).toHaveBeenCalledTimes(2))
+    expect(api.apiPost).toHaveBeenLastCalledWith('/integrations/metadata-lookup/search', expect.objectContaining({ provider: 'qidian' }), expect.anything())
+    // The stale response must not overwrite the newer search's results.
+    finishStale({ data: [{ id: 'stale', provider: 'openlibrary', title: 'Stale title', authors: [], sourceUrl: '' }] })
+    expect(await screen.findByRole('button', { name: /Qidian title/ })).toBeInTheDocument()
+    expect(screen.queryByText('Stale title')).not.toBeInTheDocument()
+  })
 })
+
