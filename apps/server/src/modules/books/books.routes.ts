@@ -42,7 +42,7 @@ import {
   movePrivateBatchToShelf,
 } from './books.service'
 import { updateReaderBookSettings } from './reader-settings.service'
-import { executeUndoReceipt, getUndoReceiptInfo } from '../../lib/undo'
+import { undoReceiptPayload as undoReceipt } from '../../lib/undo'
 import { forkLocalBook } from '../libraries/fork.service'
 import { getPrivateBookMetadataSource } from '../libraries/metadata-source.service'
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
@@ -58,11 +58,6 @@ import { getEditorAccess, getEditorEpubContent, saveEditorEpubContent, saveEdito
 
 const booksRoutes = new Hono()
 const appendOptionsSchema = appendContentSchema.pick({ startOffset: true })
-
-function undoReceipt(token: string, label = 'undo.action') {
-  const info = getUndoReceiptInfo(token)
-  return { token, label, ...(info ?? {}) }
-}
 
 booksRoutes.post('/batch/selection', async (c) => {
   const user = c.get('user')
@@ -417,13 +412,6 @@ booksRoutes.patch('/:id', async (c) => {
   const undo: { token?: string } = {}
   const book = await updateBook(user.id, id, parsed.data, undo)
   return c.json({ data: book, ...(undo.token ? { undo: undoReceipt(undo.token) } : {}) })
-})
-
-booksRoutes.post('/undo/:token', async (c) => {
-  const user = c.get('user')
-  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
-  await executeUndoReceipt(user.id, c.req.param('token'))
-  return c.json({ data: null })
 })
 
 booksRoutes.post('/:id/toc-preview', async (c) => {

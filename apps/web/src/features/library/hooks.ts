@@ -717,8 +717,8 @@ function useCatalogVersionMutation<TVars extends { libraryId: string; libraryBoo
     mutationFn: (vars: TVars) => {
       const { url, method, body } = build(vars)
       return method === 'delete'
-        ? apiDelete<{ data: unknown }>(url)
-        : apiPatch<{ data: unknown }>(url, body)
+        ? apiDelete<{ data: unknown; undo?: UndoReceipt }>(url)
+        : apiPatch<{ data: unknown; undo?: UndoReceipt }>(url, body)
     },
     onSuccess: (_res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })

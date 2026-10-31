@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 
-import type { CatalogBook, CatalogVersion } from '@bookdock/shared'
+import type { CatalogBook, CatalogVersion, UndoReceipt } from '@bookdock/shared'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -71,14 +71,16 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
     deleteLock.current = true
     setDeleting(true)
     const deletedIds = new Set<string>()
+    let undo: UndoReceipt | undefined
     try {
       for (const version of checkedVersions) {
-        await deleteVersion.mutateAsync({ libraryId, libraryBookId: work.id, versionLinkId: version.id })
+        const result = await deleteVersion.mutateAsync({ libraryId, libraryBookId: work.id, versionLinkId: version.id })
+        if (result.undo) undo = result.undo
         deletedIds.add(version.id)
       }
       notify.success(removesWork
         ? { key: trashEnabled ? 'library.catalogWorkTrashed' : 'library.catalogWorkDeleted', params: { title: work.title } }
-        : { key: 'library.catalogVersionsDeleted', params: { count: deletedIds.size } })
+        : { key: 'library.catalogVersionsDeleted', params: { count: deletedIds.size } }, { undo })
       onDeleted(checkedVersions.length === versions.length)
     } catch (err) {
       setChecked((current) => current.filter((id) => !deletedIds.has(id)))

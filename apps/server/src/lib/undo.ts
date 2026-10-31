@@ -8,7 +8,7 @@ interface UndoReceipt {
   userId: string
   expiresAt: number
   generation: number
-  restore: () => void
+  restore: () => void | Promise<void>
   running: boolean
 }
 
@@ -17,7 +17,7 @@ const latestByUser = new Map<string, string>()
 const completed = new Map<string, { userId: string; expiresAt: number }>()
 const generationByUser = new Map<string, number>()
 
-export function issueUndoReceipt(userId: string, restore: () => void): string {
+export function issueUndoReceipt(userId: string, restore: () => void | Promise<void>): string {
   const now = Date.now()
   for (const [key, receipt] of receipts) if (receipt.expiresAt <= now) receipts.delete(key)
   for (const [key, receipt] of completed) if (receipt.expiresAt <= now) completed.delete(key)
@@ -37,6 +37,12 @@ export function getUndoReceiptInfo(token: string): { expiresAt: number; generati
   return receipt ? { expiresAt: receipt.expiresAt, generation: receipt.generation } : undefined
 }
 
+/** Response payload describing a freshly issued receipt beside `{ data }`. */
+export function undoReceiptPayload(token: string, label = 'undo.action') {
+  const info = getUndoReceiptInfo(token)
+  return { token, label, ...(info ?? {}) }
+}
+
 export async function executeUndoReceipt(userId: string, token: string): Promise<void> {
   const completedReceipt = completed.get(token)
   if (completedReceipt?.userId === userId && completedReceipt.expiresAt > Date.now()) return
@@ -48,7 +54,7 @@ export async function executeUndoReceipt(userId: string, token: string): Promise
   if (receipt.running) throw new AppError('UNDO_UNAVAILABLE', 'This undo action is already running')
   receipt.running = true
   try {
-    receipt.restore()
+    await receipt.restore()
     receipts.delete(token)
     latestByUser.delete(userId)
     completed.set(token, { userId, expiresAt: Date.now() + UNDO_RECEIPT_TTL_MS })

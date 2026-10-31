@@ -282,6 +282,7 @@ export {
   aiProfileCreateSchema,
   aiProfileUpdateSchema,
   annotationCreateSchema,
+  annotationBatchDeleteSchema,
   annotationUpdateSchema,
   replacementCreateSchema,
   replacementUpdateSchema,

@@ -323,12 +323,14 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     batchDeleteLock.current = true
     try {
       const result = await batchDeleteMutation.mutateAsync(Array.from(selectedNoteIds))
-      setSelectedNoteIds(new Set(result.failedIds))
+      // The batch endpoint reports only counts; keep the selection on a
+      // partial failure so the surviving items stay visible and retryable.
+      if (result.failed === 0) setSelectedNoteIds(new Set())
       setBatchDeleteConfirmOpen(false)
-      if (result.failedIds.length) {
+      if (result.failed > 0) {
         const showResult = result.succeeded > 0 ? notify.warning : notify.error
-        showResult({ key: 'annotation.batchDeletePartial', params: { succeeded: result.succeeded, failed: result.failedIds.length } })
-      } else notify.success({ key: 'annotation.batchDeleted', params: { count: result.succeeded } })
+        showResult({ key: 'annotation.batchDeletePartial', params: { succeeded: result.succeeded, failed: result.failed } }, { undo: result.undo })
+      } else notify.success({ key: 'annotation.batchDeleted', params: { count: result.succeeded } }, { undo: result.undo })
     } catch (error) {
       notify.error(getUserErrorNotification(error, 'annotation.deleteFailed'))
     } finally {

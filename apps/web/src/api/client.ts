@@ -15,6 +15,12 @@ function undoQueryKeys(path: string, method = 'GET'): readonly (readonly unknown
     const bookId = decodeURIComponent(singleBook[1]!)
     return [['books'], ['books', 'detail', bookId], ['book', bookId]]
   }
+  if (path === '/annotations/batch-delete' || (method === 'DELETE' && /^\/annotations\//.test(path))) {
+    return [['annotations'], ['note-archive'], ['idea-discussion'], ['notifications'], ['activity']]
+  }
+  if (method === 'DELETE' && /^\/libraries\//.test(path)) {
+    return [['libraries'], ['library']]
+  }
   return DEFAULT_UNDO_QUERY_KEYS
 }
 

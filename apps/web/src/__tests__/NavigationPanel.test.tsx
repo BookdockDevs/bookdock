@@ -968,19 +968,20 @@ describe('NavigationPanel', () => {
       expect(screen.getByText('直线划线甲')).toBeInTheDocument()
     })
 
-    it('reports partial deletion and retains failed items for a second attempt', async () => {
-      batchDeleteMutateAsync.mockResolvedValueOnce({ succeeded: 2, failedIds: ['h1'] })
+    it('reports partial deletion and keeps the selection for a second attempt', async () => {
+      batchDeleteMutateAsync.mockResolvedValueOnce({ succeeded: 2, failed: 1 })
       render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('annotation.batchManage'))
       fireEvent.click(screen.getByTitle('annotation.batchDelete'))
       fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'annotation.batchDelete' }))
-      await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'annotation.batchDeletePartial', params: { succeeded: 2, failed: 1 } }))
+      await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'annotation.batchDeletePartial', params: { succeeded: 2, failed: 1 } }, { undo: undefined }))
       expect(screen.queryByRole('alertdialog')).toBeNull()
-      batchDeleteMutateAsync.mockResolvedValueOnce({ succeeded: 1, failedIds: [] })
+      // The batch endpoint reports counts only, so the original selection is kept.
+      const firstAttemptArgs = batchDeleteMutateAsync.mock.calls[0]
+      batchDeleteMutateAsync.mockResolvedValueOnce({ succeeded: firstAttemptArgs![0].length, failed: 0 })
       fireEvent.click(screen.getByTitle('annotation.batchDelete'))
       fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'annotation.batchDelete' }))
-      await waitFor(() => expect(batchDeleteMutateAsync).toHaveBeenLastCalledWith(['h1']))
-      await waitFor(() => expect(notify.success).toHaveBeenCalledWith({ key: 'annotation.batchDeleted', params: { count: 1 } }))
+      await waitFor(() => expect(notify.success).toHaveBeenCalledWith({ key: 'annotation.batchDeleted', params: { count: firstAttemptArgs![0].length } }, { undo: undefined }))
     })
 
     it('enters batch selection mode, shows selection actions and opens confirm dialog on delete', async () => {

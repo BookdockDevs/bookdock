@@ -495,6 +495,10 @@ export const annotationCreateSchema = z.object({
   chapterHref: z.string().max(2000).optional(),
 })
 
+export const annotationBatchDeleteSchema = z.object({
+  ids: z.array(z.string().min(1).max(128)).min(1).max(2000),
+})
+
 export const annotationUpdateSchema = z.object({
   ...contentFileAssociationSchema.shape,
   visibility: z.enum(['private', 'shared']).optional(),

@@ -282,9 +282,12 @@ export const NotesPanel = memo(function NotesPanel({
   function deleteItem(item: AnnotationRes, confirmed = false) {
     if (item.type === 'note' && !confirmed) { setNoteDeleteTarget(item); return }
     deleteAnnotation.mutate(item.id, {
-      onSuccess: () => {
+      onSuccess: (result) => {
         setNoteDeleteTarget(null)
-        notify.success({ key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : 'annotation.deleted' })
+        notify.success(
+          { key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : 'annotation.deleted' },
+          { undo: result?.undo },
+        )
       },
       onError: (error) => notify.error(getUserErrorNotification(error, 'annotation.deleteFailed')),
     })
@@ -773,7 +776,7 @@ export const NotesPanel = memo(function NotesPanel({
           onClose={() => setExportOpen(false)}
         />
       )}
-      {noteDeleteTarget && <ConfirmDialog title="删除想法" message="删除后，评论、回复和点赞也会删除。" confirmLabel="删除" confirmDisabled={deleteAnnotation.isPending} onClose={() => { if (!deleteAnnotation.isPending) setNoteDeleteTarget(null) }} onConfirm={() => deleteItem(noteDeleteTarget, true)} />}
+      {noteDeleteTarget && <ConfirmDialog title={_('archive.deleteIdeaTitle')} message={_('archive.deleteIdeaMessage')} confirmLabel={_('reader.delete')} confirmDisabled={deleteAnnotation.isPending} onClose={() => { if (!deleteAnnotation.isPending) setNoteDeleteTarget(null) }} onConfirm={() => deleteItem(noteDeleteTarget, true)} />}
     </div>
   )
 })

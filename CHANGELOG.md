@@ -7,6 +7,8 @@ All notable changes to Bookdock are documented here.
 ### Added
 
 - The ZIP install dialog for personal metadata sources previews the packaged icon and display name before installing.
+- Deleting a bookmark or highlight now shows an Undo button in the confirmation message, so an accidental deletion can be reversed on the spot. Batch note deletion in the reader can be undone in one step. Undo stays available for 2 minutes and is lost after a server restart.
+- Deleting a shared library book (or removing its last version) now shows the same Undo button to the manager or owner who deleted it. The undo no longer works after the owner has restored or permanently deleted the book, or if the person no longer manages the library. Restoring from the trash page itself remains owner-only.
 
 ### Changed
 
@@ -17,6 +19,7 @@ All notable changes to Bookdock are documented here.
 - The source dropdown menu sizes itself to its longest entry.
 - Google Books metadata search matches the query against book titles instead of the full text.
 - Installed personal metadata sources are listed by install time instead of alphabetically.
+- Undo actions across features now share a single undo endpoint. The 2-minute window is unchanged, and each account keeps only its latest undo opportunity, so a newer undoable action replaces an older one.
 
 ### Fixed
 
@@ -1003,6 +1006,8 @@ All notable changes to Bookdock are documented here.
 #### 新增
 
 - 个人元数据来源的 ZIP 安装对话框在安装前预览包内图标与来源名称。
+- 删除书签和划线后，确认消息中会出现"撤销"按钮，误删可当场恢复；阅读器批量删除笔记也支持一键整批撤销。撤销机会保留 2 分钟，服务端重启后失效。
+- 删除共享书库书籍（或删除其最后一个版本）后，执行删除的管理者或拥有者也会看到同样的"撤销"按钮。若拥有者已手动恢复或彻底删除该书，或操作者已不再拥有管理权限，则无法撤销；回收站页面的恢复仍仅拥有者可用。
 
 #### 优化
 
@@ -1012,6 +1017,7 @@ All notable changes to Bookdock are documented here.
 - 刮削信息弹窗支持在搜索进行中切换来源；搜索与封面失败改用统一的 toast 通知并附上具体原因，结果区复用暂无结果样式；弹窗高度与编辑弹窗对齐。来源下拉菜单宽度自适应最长项。
 - Google Books 刮削改为按书名匹配，不再进行全文匹配。
 - 个人元数据来源列表按安装时间排序。
+- 各功能的撤销现在共用同一个撤销接口。撤销窗口仍为 2 分钟，且每个账号同时只保留最新一条撤销机会，新的可撤销操作会替换先前的一条。
 
 #### 修复
 

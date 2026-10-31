@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { AppError } from '../middleware/error'
-import { executeUndoReceipt, issueUndoReceipt } from './undo'
+import { executeUndoReceipt, issueUndoReceipt, undoReceiptPayload } from './undo'
 
 describe('undo receipts', () => {
   it('binds a single latest receipt to its user and acknowledges retries without rerunning it', async () => {
@@ -49,5 +49,25 @@ describe('undo receipts', () => {
     await expect(executeUndoReceipt('alice', token)).rejects.toMatchObject({ code: 'UNDO_UNAVAILABLE' })
     expect(restore).not.toHaveBeenCalled()
     vi.useRealTimers()
+  })
+
+  it('awaits async restore closures before acknowledging the undo', async () => {
+    let restored = false
+    const token = issueUndoReceipt('alice', async () => {
+      await Promise.resolve()
+      restored = true
+    })
+
+    await executeUndoReceipt('alice', token)
+
+    expect(restored).toBe(true)
+  })
+
+  it('describes a fresh receipt beside the response data', () => {
+    const token = issueUndoReceipt('alice', vi.fn())
+    const payload = undoReceiptPayload(token, 'Moved to trash')
+
+    expect(payload).toMatchObject({ token, label: 'Moved to trash', generation: expect.any(Number) })
+    expect((payload as { expiresAt: number }).expiresAt).toBeGreaterThan(Date.now())
   })
 })

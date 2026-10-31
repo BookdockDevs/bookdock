@@ -130,7 +130,7 @@ export async function runUndo(): Promise<void> {
     duration: 'persistent',
   })
   try {
-    const response = await fetch(`/api/v1/books/undo/${encodeURIComponent(currentToken)}`, { method: 'POST' })
+    const response = await fetch(`/api/v1/undo/${encodeURIComponent(currentToken)}`, { method: 'POST' })
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { error?: { code?: string } } | null
       const retryable = response.status >= 500 || response.status === 408 || response.status === 429

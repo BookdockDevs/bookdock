@@ -6,6 +6,7 @@ import { bookmarks, contentFiles, highlights, ideas, ideaComments, ideaLikes, li
 import { AppError } from '../../middleware/error'
 import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
+import { issueUndoReceipt } from '../../lib/undo'
 import { savePersonalBookSnapshot } from '../../lib/personal-book-archive'
 import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { assertReadableBook, getBook } from '../books/books.service'
@@ -432,7 +433,9 @@ export async function updateAnnotation(userId: string, annotationId: string, dat
   return toRes('idea', { ...owned.row, ...patch })
 }
 
-export async function deleteAnnotation(userId: string, annotationId: string) {
+type DeletedAnnotation = { response: AnnotationRes; restore?: () => void }
+
+async function deleteAnnotationInternal(userId: string, annotationId: string): Promise<DeletedAnnotation> {
   const db = getDb()
   let owned: OwnedAnnotation
   try {
@@ -445,12 +448,32 @@ export async function deleteAnnotation(userId: string, annotationId: string) {
   }
   const now = Date.now()
   if (owned.kind === 'highlight') {
-    db.update(highlights).set({ deletedAt: now, updatedAt: now }).where(eq(highlights.id, owned.row.id)).run()
-    return toRes('highlight', { ...owned.row, deletedAt: now, updatedAt: now })
+    const row = owned.row
+    const previousUpdatedAt = row.updatedAt
+    db.update(highlights).set({ deletedAt: now, updatedAt: now }).where(eq(highlights.id, row.id)).run()
+    return {
+      response: toRes('highlight', { ...row, deletedAt: now, updatedAt: now }),
+      restore: () => db.transaction((tx) => {
+        const current = tx.select().from(highlights).where(eq(highlights.id, row.id)).get()
+        if (!current || current.userId !== userId) throw new AppError('UNDO_CONFLICT', 'The highlight changed after deletion')
+        if (current.deletedAt === null) return
+        tx.update(highlights).set({ deletedAt: null, updatedAt: previousUpdatedAt }).where(eq(highlights.id, row.id)).run()
+      }),
+    }
   }
   if (owned.kind === 'bookmark') {
-    db.update(bookmarks).set({ deletedAt: now, updatedAt: now }).where(eq(bookmarks.id, owned.row.id)).run()
-    return toRes('bookmark', { ...owned.row, deletedAt: now, updatedAt: now })
+    const row = owned.row
+    const previousUpdatedAt = row.updatedAt
+    db.update(bookmarks).set({ deletedAt: now, updatedAt: now }).where(eq(bookmarks.id, row.id)).run()
+    return {
+      response: toRes('bookmark', { ...row, deletedAt: now, updatedAt: now }),
+      restore: () => db.transaction((tx) => {
+        const current = tx.select().from(bookmarks).where(eq(bookmarks.id, row.id)).get()
+        if (!current || current.userId !== userId) throw new AppError('UNDO_CONFLICT', 'The bookmark changed after deletion')
+        if (current.deletedAt === null) return
+        tx.update(bookmarks).set({ deletedAt: null, updatedAt: previousUpdatedAt }).where(eq(bookmarks.id, row.id)).run()
+      }),
+    }
   }
   if (owned.row.visibility === 'shared') await assertIdeaSource(userId, owned.row)
   db.transaction((tx) => {
@@ -486,5 +509,34 @@ export async function deleteAnnotation(userId: string, annotationId: string) {
     tx.update(ideas).set({ deletedAt: now, updatedAt: now }).where(eq(ideas.id, owned.row.id)).run()
   })
   await cleanContentBlobs()
-  return toRes('idea', { ...owned.row, deletedAt: now, updatedAt: now })
+  // Ideas cascade hard (comments, likes, files), so they keep the confirm
+  // dialog and stay outside the undo receipts.
+  return { response: toRes('idea', { ...owned.row, deletedAt: now, updatedAt: now }) }
+}
+
+export async function deleteAnnotation(userId: string, annotationId: string, undo?: { token?: string }) {
+  const { response, restore } = await deleteAnnotationInternal(userId, annotationId)
+  if (restore && undo) undo.token = issueUndoReceipt(userId, restore)
+  return response
+}
+
+export async function batchDeleteAnnotations(userId: string, ids: string[], undo?: { token?: string }) {
+  let succeeded = 0
+  let failed = 0
+  const restorers: Array<() => void> = []
+  for (const id of [...new Set(ids)]) {
+    try {
+      const { restore } = await deleteAnnotationInternal(userId, id)
+      if (restore) restorers.push(restore)
+      succeeded += 1
+    } catch {
+      failed += 1
+    }
+  }
+  if (restorers.length > 0 && undo) {
+    undo.token = issueUndoReceipt(userId, () => {
+      for (const restore of restorers) restore()
+    })
+  }
+  return { succeeded, failed }
 }

@@ -77,6 +77,7 @@ import { publishPrivateBook } from './publish.service'
 import { appendCityVersionContent, getVersionTocState, previewCityAppend, previewCityToc, pushPrivateToVersion, reTocCityVersion, uploadCatalogBook } from '../books/books.service'
 import { listSearchAuthors } from './search-expression'
 import { AppError } from '../../middleware/error'
+import { undoReceiptPayload } from '../../lib/undo'
 import { decodeTextBuffer } from '../../formats/txt'
 import { getEditorAccess, getEditorEpubContent, saveManagedEditorEpubContent, saveManagedEditorTxtContent } from '../books/content-editor.service'
 
@@ -389,7 +390,9 @@ librariesRoutes.patch('/:id/books/batch/organize', async (c) => {
 librariesRoutes.delete('/:id/books/:bookId', async (c) => {
   const user = c.get('user')
   if (!user) throw new AppError('FORBIDDEN')
-  return c.json({ data: await deleteCatalogBook(user.id, c.req.param('id'), c.req.param('bookId')) })
+  const undo: { token?: string } = {}
+  const result = await deleteCatalogBook(user.id, c.req.param('id'), c.req.param('bookId'), undo)
+  return c.json({ data: result, ...(undo.token ? { undo: undoReceiptPayload(undo.token) } : {}) })
 })
 
 librariesRoutes.post('/:id/books/:bookId/restore', async (c) => {
@@ -521,8 +524,9 @@ librariesRoutes.patch('/:id/books/:bookId/versions/:versionLinkId/move', async (
 librariesRoutes.delete('/:id/books/:bookId/versions/:versionLinkId', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const result = await deleteCatalogVersion(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'))
-  return c.json({ data: result })
+  const undo: { token?: string } = {}
+  const result = await deleteCatalogVersion(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'), undo)
+  return c.json({ data: result, ...(undo.token ? { undo: undoReceiptPayload(undo.token) } : {}) })
 })
 
 librariesRoutes.put('/:id/books/:bookId/versions/:versionLinkId/cover', async (c) => {

@@ -3,7 +3,7 @@ import { useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { ANNOTATION_MAX_TEXT_LENGTH, ErrorCode } from '@bookdock/shared'
-import type { AnnotationRes, AnnotationCreateReq, AnnotationUpdateReq } from '@bookdock/shared'
+import type { AnnotationRes, AnnotationCreateReq, AnnotationUpdateReq, UndoReceipt } from '@bookdock/shared'
 
 import { ApiError, apiGet, apiPost, apiPut, apiDelete } from '@/api/client'
 import { invalidateActivityQueries } from '@/features/activity/hooks'
@@ -148,7 +148,7 @@ export function useDeleteAnnotation(bookId: string) {
   const queryClient = useQueryClient()
   const key = ['annotations', bookId] as const
   return useMutation({
-    mutationFn: (id: string) => apiDelete(`/annotations/${id}`),
+    mutationFn: (id: string) => apiDelete<{ undo?: UndoReceipt }>(`/annotations/${id}`),
     onMutate: async (id) => {
       await queryClient.cancelQueries({ queryKey: key })
       const previous = queryClient.getQueryData<AnnotationsCache>(key)
@@ -177,9 +177,8 @@ export function useBatchDeleteAnnotations(bookId: string) {
   const key = ['annotations', bookId] as const
   return useMutation({
     mutationFn: async (ids: string[]) => {
-      const results = await Promise.allSettled(ids.map((id) => apiDelete(`/annotations/${id}`)))
-      const failedIds = ids.filter((_id, index) => results[index].status === 'rejected')
-      return { succeeded: ids.length - failedIds.length, failedIds }
+      const result = await apiPost<{ data: { succeeded: number; failed: number }; undo?: UndoReceipt }>('/annotations/batch-delete', { ids })
+      return { ...result.data, undo: result.undo }
     },
     onMutate: async (ids) => {
       await queryClient.cancelQueries({ queryKey: key })
@@ -193,14 +192,7 @@ export function useBatchDeleteAnnotations(bookId: string) {
     onError: (_err, _ids, context) => {
       if (context?.previous) queryClient.setQueryData(key, context.previous)
     },
-    onSuccess: (result, _ids, context) => {
-      if (context?.previous && result.failedIds.length) {
-        const failed = new Set(result.failedIds)
-        const restored = context.previous.data.filter((item) => failed.has(item.id))
-        queryClient.setQueryData<AnnotationsCache>(key, (old) => ({
-          data: [...(old?.data ?? []).filter((item) => !failed.has(item.id)), ...restored],
-        }))
-      }
+    onSuccess: (result) => {
       if (result.succeeded > 0) void invalidateActivityQueries(queryClient)
     },
     onSettled: () => {

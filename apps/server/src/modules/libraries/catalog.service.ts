@@ -19,6 +19,7 @@ import {
 import { AppError } from '../../middleware/error'
 import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
+import { issueUndoReceipt } from '../../lib/undo'
 import { readingCompatibleRevisions } from '../../lib/reading-coverage'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
@@ -1336,7 +1337,37 @@ export async function moveCatalogVersion(
  * point at the source by plain text, so a deleted source keeps its provenance
  * and simply becomes unreadable.
  */
-export async function deleteCatalogBook(actorId: string, libraryId: string, libraryBookId: string) {
+/**
+ * Undo receipt for a shared-library work trash. Restore replays the owner
+ * restore for the actor's own trash event within the receipt TTL: the actor
+ * must still be owner/admin (a narrow exception to owner-only restore, scoped
+ * to the exact recorded trash), and the work must still carry exactly that
+ * trash timestamp. Anything else (hard-deleted, owner restored or re-trashed,
+ * actor demoted) is a conflict or a permission failure.
+ */
+function issueSharedTrashUndo(libraryId: string, libraryBookId: string, actorId: string, trashedAt: number): string {
+  return issueUndoReceipt(actorId, async () => {
+    await requireLibraryManager(actorId, libraryId)
+    const db = getDb()
+    const current = db.select().from(libraryBooks)
+      .where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
+    if (!current || current.deletedAt !== trashedAt) {
+      throw new AppError('UNDO_CONFLICT', 'The work changed after it was moved to trash')
+    }
+    const now = Date.now()
+    db.transaction((tx) => {
+      recordActivityEvent(tx, {
+        idempotencyKey: `work.restored:${libraryBookId}:${trashedAt}`,
+        eventType: 'work.restored', audience: 'manager', libraryId, actorUserId: actorId,
+        targetKind: 'work', targetId: libraryBookId, workId: libraryBookId,
+        occurredAt: now, snapshotWorkTitle: current.title,
+      })
+      tx.update(libraryBooks).set({ deletedAt: null, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+    })
+  })
+}
+
+export async function deleteCatalogBook(actorId: string, libraryId: string, libraryBookId: string, undo?: { token?: string }) {
   const { library } = await requireLibraryManager(actorId, libraryId)
   // While the trash switch is on, manager deletes only move the work into the
   // owner trash; while off, they hard-delete directly.
@@ -1356,6 +1387,7 @@ export async function deleteCatalogBook(actorId: string, libraryId: string, libr
       })
       tx.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
     })
+    if (undo) undo.token = issueSharedTrashUndo(libraryId, libraryBookId, actorId, now)
     return { id: libraryBookId, versionCount: links.length, trashed: true as const }
   }
   const orphanedVersionIds: string[] = []
@@ -1512,6 +1544,7 @@ export async function deleteCatalogVersion(
   libraryId: string,
   libraryBookId: string,
   versionLinkId: string,
+  undo?: { token?: string },
 ) {
   const db = getDb()
   // Managers, or the uploading member when the library opened uploads.
@@ -1535,6 +1568,7 @@ export async function deleteCatalogVersion(
       })
       tx.update(libraryBooks).set({ deletedAt: now, updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
     })
+    if (undo) undo.token = issueSharedTrashUndo(libraryId, libraryBookId, actorId, now)
     return { id: link.id, libraryBookId, workDeleted: false, trashed: true as const }
   }
   const orphanedVersionIds: string[] = []

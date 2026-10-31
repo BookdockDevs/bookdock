@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url'
 import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
-import { createAnnotation, deleteAnnotation, listAnnotations, searchAnnotations, updateAnnotation } from './annotations.service'
+import { createAnnotation, batchDeleteAnnotations, deleteAnnotation, listAnnotations, searchAnnotations, updateAnnotation } from './annotations.service'
+import { executeUndoReceipt } from '../../lib/undo'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -362,6 +363,62 @@ describe('annotations service', () => {
     expect((await searchAnnotations(ownerId, bookId, 'context-only phrase')).map((item) => item.id)).toContain(saved.id)
     expect((await listAnnotations(ownerId, bookId)).find((item) => item.id === saved.id)?.contextText).toBe(saved.contextText)
     await expect(updateAnnotation(otherId, saved.id, { text: 'Unauthorized' })).rejects.toThrow()
+  })
+
+  it('restores a soft-deleted highlight through its undo receipt', async () => {
+    const saved = await createAnnotation(ownerId, bookId, { type: 'highlight', cfiRange: 'undo-cfi', text: 'undo me' })
+    const undo: { token?: string } = {}
+    await deleteAnnotation(ownerId, saved.id, undo)
+    expect(undo.token).toBeTruthy()
+    expect((await listAnnotations(ownerId, bookId)).find((item) => item.id === saved.id)).toBeUndefined()
+
+    await executeUndoReceipt(ownerId, undo.token!)
+
+    const restored = (await listAnnotations(ownerId, bookId)).find((item) => item.id === saved.id)
+    expect(restored).toMatchObject({ text: 'undo me', deletedAt: null })
+    // Retried undo is an idempotent success.
+    await executeUndoReceipt(ownerId, undo.token!)
+  })
+
+  it('treats undo after a same-spot re-create as an idempotent success', async () => {
+    const saved = await createAnnotation(ownerId, bookId, { type: 'highlight', cfiRange: 'reuse-cfi', text: 'first' })
+    const undo: { token?: string } = {}
+    await deleteAnnotation(ownerId, saved.id, undo)
+    await createAnnotation(ownerId, bookId, { type: 'highlight', cfiRange: 'reuse-cfi', text: 'second' })
+
+    await executeUndoReceipt(ownerId, undo.token!)
+
+    const current = (await listAnnotations(ownerId, bookId)).find((item) => item.id === saved.id)
+    expect(current).toMatchObject({ text: 'second', deletedAt: null })
+  })
+
+  it('reports a conflict when the deleted row is gone before undo', async () => {
+    const saved = await createAnnotation(ownerId, bookId, { type: 'bookmark', cfiRange: 'gone-cfi', text: 'gone' })
+    const undo: { token?: string } = {}
+    await deleteAnnotation(ownerId, saved.id, undo)
+    db.delete(schema.bookmarks).where(eq(schema.bookmarks.id, saved.id)).run()
+
+    await expect(executeUndoReceipt(ownerId, undo.token!)).rejects.toMatchObject({ code: 'UNDO_CONFLICT' })
+  })
+
+  it('batch-deletes with one receipt that restores only the undoable rows', async () => {
+    const highlight = await createAnnotation(ownerId, bookId, { type: 'highlight', cfiRange: 'batch-hl', text: 'keep me' })
+    const bookmark = await createAnnotation(ownerId, bookId, { type: 'bookmark', cfiRange: 'batch-bm', text: 'keep me too' })
+    const idea = await createAnnotation(ownerId, bookId, { type: 'note', cfiRange: 'batch-idea', text: 'idea body', note: 'idea note' })
+    const undo: { token?: string } = {}
+    const result = await batchDeleteAnnotations(ownerId, [highlight.id, bookmark.id, idea.id, 'missing-id'], undo)
+
+    expect(result).toEqual({ succeeded: 3, failed: 1 })
+    expect(undo.token).toBeTruthy()
+    expect((await listAnnotations(ownerId, bookId)).map((item) => item.id)).not.toContain(highlight.id)
+
+    await executeUndoReceipt(ownerId, undo.token!)
+
+    const listed = (await listAnnotations(ownerId, bookId)).map((item) => item.id)
+    expect(listed).toContain(highlight.id)
+    expect(listed).toContain(bookmark.id)
+    // Ideas cascade hard and stay outside the receipt.
+    expect(listed).not.toContain(idea.id)
   })
 
 })

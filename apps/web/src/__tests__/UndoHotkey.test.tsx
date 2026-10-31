@@ -50,7 +50,7 @@ describe('application undo shortcut', () => {
     const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
     document.body.dispatchEvent(event)
     expect(event.defaultPrevented).toBe(true)
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/v1/books/undo/receipt', { method: 'POST' }))
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/v1/undo/receipt', { method: 'POST' }))
   })
 
   it('invalidates only the query prefixes affected by a completed undo', () => {

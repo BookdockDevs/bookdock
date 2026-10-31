@@ -10,6 +10,7 @@ import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
+import { executeUndoReceipt } from '../../lib/undo'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
 import { uploadCatalogBook } from '../books/books.service'
@@ -129,6 +130,55 @@ describe('shared library trash', () => {
       eventType: 'version.deleted', audience: 'manager', actorUserId: ownerId,
       targetKind: 'version', workId: first.libraryBookId, versionId: first.bookVersionId,
     })
+  })
+
+  it('lets the trashing actor undo a shared trash, but not after demotion or hard deletion', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '甲'), { title: 'A' })
+    const undo: { token?: string } = {}
+    await deleteCatalogBook(adminId, libraryId, created.libraryBookId, undo)
+    expect(undo.token).toBeTruthy()
+
+    // Narrow exception: the admin who trashed replays the restore.
+    await executeUndoReceipt(adminId, undo.token!)
+    expect((await listCatalogBooks(adminId, libraryId, {})).items).toHaveLength(1)
+    expect(db.select().from(schema.activityEvents)
+      .where(eq(schema.activityEvents.targetId, created.libraryBookId)).all())
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        eventType: 'work.restored', audience: 'manager', actorUserId: adminId,
+      })]))
+
+    // A demoted actor loses the narrow exception and gets a permission failure.
+    await deleteCatalogBook(adminId, libraryId, created.libraryBookId)
+    const demoted: { token?: string } = {}
+    await restoreCatalogBook(ownerId, libraryId, created.libraryBookId)
+    await deleteCatalogBook(adminId, libraryId, created.libraryBookId, demoted)
+    db.update(schema.libraryMemberships).set({ role: 'member' })
+      .where(eq(schema.libraryMemberships.userId, adminId)).run()
+    await expect(executeUndoReceipt(adminId, demoted.token!)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    db.update(schema.libraryMemberships).set({ role: 'admin' })
+      .where(eq(schema.libraryMemberships.userId, adminId)).run()
+
+    // An owner restore between trash and undo is a conflict, not a double restore.
+    await restoreCatalogBook(ownerId, libraryId, created.libraryBookId)
+    await expect(executeUndoReceipt(adminId, demoted.token!)).rejects.toMatchObject({ code: 'UNDO_CONFLICT' })
+
+    // Hard deletion after trash makes the undo a conflict.
+    const retrashed: { token?: string } = {}
+    await deleteCatalogBook(adminId, libraryId, created.libraryBookId, retrashed)
+    await emptyLibraryTrash(ownerId, libraryId)
+    await expect(executeUndoReceipt(adminId, retrashed.token!)).rejects.toMatchObject({ code: 'UNDO_CONFLICT' })
+  })
+
+  it('issues an undo receipt when the last version trashes its work', async () => {
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '甲'), { title: 'A' })
+    const undo: { token?: string } = {}
+    await deleteCatalogVersion(ownerId, libraryId, first.libraryBookId, first.versionLinkId!, undo)
+    expect(undo.token).toBeTruthy()
+    expect((await listCatalogBooks(ownerId, libraryId, {})).items).toHaveLength(0)
+
+    await executeUndoReceipt(ownerId, undo.token!)
+
+    expect((await listCatalogBooks(ownerId, libraryId, {})).items).toHaveLength(1)
   })
 
   it('records automatic trash purge as a system manager event', async () => {

@@ -71,24 +71,22 @@ describe('operation feedback', () => {
 })
 
 describe('annotation batch deletion', () => {
-  it.each([0, 1, 2])('counts %i rejected requests and restores only their cache entries', async (failedCount) => {
+  it.each([0, 1, 2])('reports %i failed items from the batch endpoint and clears them from the cache', async (failedCount) => {
     const { client, wrapper } = setup()
     const annotations: AnnotationRes[] = ['a', 'b', 'untouched'].map((id) => ({
       id, bookId: 'book', cfiRange: `cfi:${id}`, cfiAnchor: null, type: 'note',
       color: 'yellow', style: 'underline', text: id, note: null, chapter: null, createdAt: 0, updatedAt: 0,
     }))
     client.setQueryData(['annotations', 'book'], { data: annotations })
-    const failedIds = ['a', 'b'].slice(0, failedCount)
-    vi.mocked(apiDelete).mockImplementation(async (path) => {
-      if (failedIds.some((id) => path.endsWith(`/${id}`))) throw new Error('Rejected')
-      return { data: null }
-    })
+    vi.mocked(apiPost).mockResolvedValue({ data: { succeeded: 2 - failedCount, failed: failedCount } })
     const { result } = renderHook(() => useBatchDeleteAnnotations('book'), { wrapper })
     await act(async () => {
-      await expect(result.current.mutateAsync(['a', 'b'])).resolves.toEqual({ succeeded: 2 - failedCount, failedIds })
+      await expect(result.current.mutateAsync(['a', 'b'])).resolves.toEqual({ succeeded: 2 - failedCount, failed: failedCount, undo: undefined })
     })
+    // The batch endpoint reports counts only; failed items reappear through
+    // the refetch that the mutation's onSettled triggers.
     expect(client.getQueryData<{ data: AnnotationRes[] }>(['annotations', 'book'])?.data.map((item) => item.id).sort())
-      .toEqual([...failedIds, 'untouched'].sort())
+      .toEqual(['untouched'])
     client.clear()
   })
 })
