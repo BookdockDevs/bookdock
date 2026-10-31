@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { apiGet } from '@/api/client'
@@ -178,52 +178,31 @@ describe('ShareCardDialog', () => {
     expect(container.contains(overlay)).toBe(false)
     expect(document.body.contains(overlay)).toBe(true)
   })
-  it('hides the card until ready and uses the preview blob for copy and save', async () => {
-    let finish!: (css: string) => void
-    vi.mocked(embedCardFonts).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+  it('renders live card preview immediately and embeds fonts on save and copy', async () => {
+    renderDialog()
+    expect(await screen.findByText('白君确实有招蜂引蝶的资本')).toBeInTheDocument()
+    const save = screen.getByRole('button', { name: '保存图片' })
+    const copy = screen.getByRole('button', { name: '复制图片' })
+    expect(save).toBeEnabled()
+    expect(copy).toBeEnabled()
+
+    fireEvent.click(save)
+    await waitFor(() => expect(embedCardFonts).toHaveBeenCalled())
+    await waitFor(() => expect(getCardBlob).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(downloadCardBlob).toHaveBeenCalled())
+
+    fireEvent.click(copy)
+    await waitFor(() => expect(copyCardBlob).toHaveBeenCalled())
+    expect(getCardBlob).toHaveBeenCalledTimes(2)
+  })
+
+  it('notifies error and recovers button state when export fails', async () => {
+    vi.mocked(embedCardFonts).mockRejectedValueOnce(new Error('font unavailable'))
     renderDialog()
     const save = await screen.findByRole('button', { name: '保存图片' })
-    expect(save).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent('正在准备分享图片')
-    expect(screen.queryByRole('img', { name: '分享书摘' })).not.toBeInTheDocument()
-    await waitFor(() => expect(embedCardFonts).toHaveBeenCalled())
-    await act(async () => finish('@font-face {}'))
-    await waitFor(() => expect(save).toBeEnabled())
-    expect(document.querySelector('img[src="blob:prepared-card"]')).toBeInTheDocument()
     fireEvent.click(save)
-    await waitFor(() => expect(downloadCardBlob).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole('button', { name: '复制图片' }))
-    await waitFor(() => expect(copyCardBlob).toHaveBeenCalled())
-    expect(copyCardBlob).toHaveBeenCalledWith(vi.mocked(downloadCardBlob).mock.calls[0][0])
-    expect(getCardBlob).toHaveBeenCalledTimes(1)
-  })
-
-  it('discards an old preparation after changing the card and supports retry', async () => {
-    let finishOld!: (css: string) => void
-    vi.mocked(embedCardFonts).mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve }))
-    renderDialog()
-    await waitFor(() => expect(embedCardFonts).toHaveBeenCalledTimes(1))
-    vi.mocked(embedCardFonts).mockRejectedValueOnce(new Error('font unavailable'))
-    fireEvent.click(screen.getByRole('button', { name: '书坞' }))
-    await screen.findByText('导出图片失败')
-    await act(async () => finishOld('old fonts'))
-    expect(getCardBlob).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: '保存图片' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '保存图片' })).toBeEnabled())
-    expect(getCardBlob).toHaveBeenCalledTimes(1)
-  })
-
-  it('revokes the prepared preview and prepares again after reopening', async () => {
-    renderDialog()
-    await waitFor(() => expect(screen.getByRole('button', { name: '保存图片' })).toBeEnabled())
-    const target = useReaderState.getState().shareTarget!
-    act(() => useReaderState.setState({ shareTarget: null }))
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:prepared-card')
-    act(() => useReaderState.setState({ shareTarget: { ...target } }))
-    expect(screen.getByRole('button', { name: '保存图片' })).toBeDisabled()
-    await waitFor(() => expect(getCardBlob).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(screen.getByRole('button', { name: '保存图片' })).toBeEnabled())
+    await waitFor(() => expect(save).toBeEnabled())
+    expect(downloadCardBlob).not.toHaveBeenCalled()
   })
 
 })

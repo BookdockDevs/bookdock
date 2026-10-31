@@ -269,13 +269,17 @@ function TitleChapterAttribution({
 }) {
   const alignClass = align === 'center' ? 'text-center' : 'text-left'
   return (
-    <div className={`mt-8 ${alignClass}`}>
-      <p className="tracking-wide" style={{ color: colors.text }}>
-        <span className="text-base font-semibold">{title}</span>
-        {chapter && <span className="ml-1.5 text-xs font-normal opacity-60">· {chapter}</span>}
+    <div className={`mt-8 w-full ${alignClass}`}>
+      <p className="text-base font-semibold leading-normal tracking-wide [text-wrap:pretty]" style={{ color: colors.text }}>
+        <span>{title}</span>
+        {chapter && (
+          <span className="ml-1.5 inline-block text-xs font-normal opacity-60">
+            · {chapter}
+          </span>
+        )}
       </p>
       {author && (
-        <p className="mt-1 text-xs tracking-wider opacity-80" style={{ color: colors.sub }}>
+        <p className="mt-2 text-xs leading-normal tracking-wider opacity-80" style={{ color: colors.sub }}>
           {author}
         </p>
       )}
@@ -329,7 +333,7 @@ export default function ShareCard({
     >
       {template === 'classic' && (
         <>
-          <div>
+          <div className="my-auto">
             {isIdea && (
               <div className="mb-10">
                 <IdentityHeader authorName={authorName} avatarUrl={avatarUrl} writtenAt={writtenAt} colors={colors} stacked />
@@ -337,18 +341,20 @@ export default function ShareCard({
             )}
             <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
             {quote && <QuoteBlock quote={quote} colors={colors} />}
-          </div>
-          <div>
             <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} />
-            {isIdea && <Divider colors={colors} className="mt-6" />}
-            <BrandMark brand={brand} colors={colors} className={isIdea ? 'mt-4' : 'mt-2.5'} />
           </div>
+          {(isIdea || brand !== 'off') && (
+            <div className="mt-6 shrink-0">
+              {isIdea && <Divider colors={colors} className="mb-4" />}
+              <BrandMark brand={brand} colors={colors} className="" />
+            </div>
+          )}
         </>
       )}
 
       {template === 'calendar' && (
         <>
-          <div className="flex flex-col items-center">
+          <div className="my-auto flex flex-col items-center">
             <div
               aria-hidden
               className="-mt-8 mb-8 w-full border-b border-dashed opacity-35"
@@ -367,48 +373,50 @@ export default function ShareCard({
             })()}
             <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} center />
             {quote && <QuoteBlock quote={quote} colors={colors} center />}
-          </div>
-          <div>
             <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} align="center" />
-            <BrandMark brand={brand} colors={colors} align="center" />
           </div>
+          {brand !== 'off' && (
+            <div className="mt-6 shrink-0">
+              <BrandMark brand={brand} colors={colors} align="center" className="" />
+            </div>
+          )}
         </>
       )}
 
       {template === 'ink' && !isIdea && (
         <div className="flex min-h-[380px] flex-col justify-between">
-          <div>
+          <div className="my-auto">
             <InkBar colors={colors} />
             <div className="mt-8"><VerticalTitle title={title} author={author} colors={colors} seal /></div>
             <div className="mt-12">
               <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
             </div>
-          </div>
-          <div>
             {chapter && (
-              <p className="mt-6 text-sm tracking-wide opacity-75" style={{ color: colors.sub }}>
+              <p className="mt-6 text-sm leading-normal tracking-wide opacity-75" style={{ color: colors.sub }}>
                 {chapter}
               </p>
             )}
-            <InkBar colors={colors} className="mt-8" />
-            <BrandMark brand={brand} colors={colors} />
+          </div>
+          <div className="mt-6 shrink-0">
+            <InkBar colors={colors} />
+            <BrandMark brand={brand} colors={colors} className="mt-2.5" />
           </div>
         </div>
       )}
 
       {template === 'ink' && isIdea && (
         <div className="flex min-h-[380px] flex-col justify-between">
-          <div>
+          <div className="my-auto">
             <InkBar colors={colors} />
             <div className="mt-8"><IdentityHeader authorName={authorName} writtenAt={writtenAtCn ?? writtenAt} colors={colors} avatar={false} /></div>
             <Divider colors={colors} className="my-8" />
             <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
             {quote && <QuoteBlock quote={quote} colors={colors} />}
-          </div>
-          <div>
             <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} />
-            <Divider colors={colors} className="mt-6" />
-            <BrandMark brand={brand} colors={colors} align="left" />
+          </div>
+          <div className="mt-6 shrink-0">
+            <Divider colors={colors} className="mb-4" />
+            <BrandMark brand={brand} colors={colors} align="left" className="" />
             <InkBar colors={colors} className="mt-4" />
           </div>
         </div>
@@ -417,24 +425,26 @@ export default function ShareCard({
       {template === 'letter' && (
         <div className="rounded-xs border-2 p-2" style={{ borderColor: colors.accent }}>
           <div className="flex min-h-[340px] flex-col justify-between border px-7 py-10" style={{ borderColor: `${colors.accent}80` }}>
-            <div>
+            <div className="my-auto">
               {isIdea && <IdentityHeader authorName={authorName} avatarUrl={avatarUrl} writtenAt={writtenAt} colors={colors} />}
               {isIdea && <Divider colors={colors} className="my-8" />}
               <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
               {quote && <QuoteBlock quote={quote} colors={colors} />}
-            </div>
-            <div>
               <TitleChapterAttribution title={title} chapter={chapter} author={author} colors={colors} />
-              {isIdea && <Divider colors={colors} className="mt-6" />}
-              <BrandMark brand={brand} colors={colors} align="left" />
             </div>
+            {(isIdea || brand !== 'off') && (
+              <div className="mt-6 shrink-0">
+                {isIdea && <Divider colors={colors} className="mb-4" />}
+                <BrandMark brand={brand} colors={colors} align="left" className="" />
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {template === 'brocade' && (
         <div className="flex min-h-[380px] flex-col justify-between">
-          <div>
+          <div className="my-auto">
             <div className="border-l-2 pl-5" style={{ borderColor: `${colors.accent}40` }}>
               <VerticalTitle title={title} author={author} colors={colors} />
             </div>
@@ -447,16 +457,18 @@ export default function ShareCard({
               <Body paragraphs={paragraphs} fontSize={fontSize} lineHeight={lineHeight} letterSpacing={letterSpacing} />
             </div>
             {quote && <QuoteBlock quote={quote} colors={colors} />}
-          </div>
-          <div>
             {chapter && (
-              <p className={`${isIdea ? 'mt-4' : 'mt-6'} text-sm tracking-wide opacity-75`} style={{ color: colors.sub }}>
+              <p className={`${isIdea ? 'mt-4' : 'mt-6'} text-sm leading-normal tracking-wide opacity-75`} style={{ color: colors.sub }}>
                 {chapter}
               </p>
             )}
-            {isIdea && <Divider colors={colors} className="mt-8" />}
-            <BrandMark brand={brand} colors={colors} align={isIdea ? 'left' : 'right'} />
           </div>
+          {(isIdea || brand !== 'off') && (
+            <div className="mt-6 shrink-0">
+              {isIdea && <Divider colors={colors} className="mb-4" />}
+              <BrandMark brand={brand} colors={colors} align={isIdea ? 'left' : 'right'} className="" />
+            </div>
+          )}
         </div>
       )}
     </div>

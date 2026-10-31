@@ -31,8 +31,9 @@ interface ShareCardDialogProps {
   bookId: string
 }
 
-/** Prepare a fixed-width card offscreen and preview the exact PNG used by
- * copy/save, so font loading cannot make the exported image diverge. */
+/** Centered modal with a live card preview and image export actions. The card
+ * DOM stays at SHARE_CARD_WIDTH; the preview scales down via transform on
+ * smaller screens while the card node is exported with embedded fonts on save/copy. */
 export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const _ = useTranslation()
   const dialogLayout = useDialogLayout()
@@ -47,7 +48,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     queryKey: ['book', bookId],
     queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
   })
-  const { data: fontsData, isPending: fontsPending, isError: fontsError, refetch: refetchFonts } = useFonts()
+  const { data: fontsData, isPending: fontsPending, isError: fontsError } = useFonts()
   const uploadedFonts = useMemo(() => fontsData?.data ?? [], [fontsData])
   const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
   const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
@@ -60,7 +61,9 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const enabledFontOptions = useMemo(() => fontOptions.filter((option) => option.enabled), [fontOptions])
   const enabledCjkOptions = useMemo(() => enabledFontOptions.filter((option) => !option.latin), [enabledFontOptions])
 
+  const previewRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
+  const [{ scale, height }, setMetrics] = useState({ scale: 1, height: 0 })
   const [copying, setCopying] = useState(false)
   const [saving, setSaving] = useState(false)
   const exporting = copying || saving
@@ -76,9 +79,6 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     if (Object.keys(patch).length > 0) setPrefs((current) => ({ ...current, ...patch }))
   }, [enabledFontOptions, enabledCjkOptions, prefs.font, prefs.cjkFont, shareTarget, fontsPending, fontsError])
 
-  const [prepared, setPrepared] = useState<{ generation: object; blob: Blob; url: string } | null>(null)
-  const [failedGeneration, setFailedGeneration] = useState<object | null>(null)
-  const [retry, setRetry] = useState(0)
   const resolvedFont = useMemo(
     () => resolveDualFont(prefs.font, prefs.cjkFont, uploadedFonts, fontPreferences, fontOrder),
     // The resolver reads the session glyph classification from the font store.
@@ -87,31 +87,6 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   )
   const book = bookQuery.data?.data
   const bookAuthor = useMemo(() => formatAuthorList(book?.authors, book?.author ?? ''), [book?.authors, book?.author])
-
-  /** Snapshot of everything the exported image depends on — any change
-   *  invalidates the cached render */
-  const renderKey = useMemo(
-    () =>
-      JSON.stringify({
-        template: prefs.template,
-        fontStack: resolvedFont.stack,
-        fontCss: resolvedFont.css,
-        language: _('share.writtenAt', { date: '' }),
-        font: prefs.font,
-        cjkFont: prefs.cjkFont,
-        background: prefs.background,
-        brand: prefs.brand,
-        note: shareTarget?.note ?? null,
-        text: shareTarget?.text ?? '',
-        title: book?.title ?? '',
-        author: bookAuthor,
-        chapter: shareTarget?.chapter ?? null,
-        user: authorName,
-        avatar: avatarKey ?? null,
-        writtenAt: shareTarget?.createdAt ?? null,
-      }),
-    [prefs, shareTarget, book?.title, bookAuthor, authorName, avatarKey, resolvedFont, _],
-  )
 
   useLayoutEffect(() => {
     if (!shareTarget) return
@@ -128,47 +103,21 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     }
   }, [shareTarget, setShareTarget])
 
-  const generation = useMemo(() => ({ renderKey, shareTarget, book, resolvedFont, fontsPending, fontsError, retry }), [renderKey, shareTarget, book, resolvedFont, fontsPending, fontsError, retry])
-
-  useEffect(() => {
-    if (!shareTarget || !book || fontsPending || fontsError) return
-    let cancelled = false
-    let url: string | undefined
-    const controller = new AbortController()
-    const node = cardRef.current
-    if (!node) return
-    const timer = setTimeout(() => {
-      void withCardExportTimeout((async () => {
-        // Include every rendered label and weight, including identity and dates.
-        const text = node.textContent || '汉'
-        const faces = resolvedFont.primary.latin
-          ? [resolvedFont.primary, resolvedFont.companion]
-          : [resolvedFont.primary]
-        await Promise.all(faces.map((face) => waitForCardFont(face, text)))
-        if (cancelled) return
-        const css = await embedCardFonts(faces, text, controller.signal)
-        if (cancelled) return
-        const blob = await getCardBlob(node, css)
-        if (cancelled) return
-        url = URL.createObjectURL(blob)
-        setPrepared({ generation, blob, url })
-      })()).catch((error) => {
-        if (!cancelled) console.error('[share] image preparation failed', error)
-        if (!cancelled) setFailedGeneration(generation)
-        cancelled = true
-        controller.abort()
-      })
-    }, 150)
-    return () => {
-      cancelled = true
-      controller.abort()
-      clearTimeout(timer)
-      if (url) URL.revokeObjectURL(url)
+  useLayoutEffect(() => {
+    const el = previewRef.current
+    const card = cardRef.current
+    if (!el || !card) return
+    const update = () => {
+      const available = el.clientWidth
+      const s = Math.min(1, available / SHARE_CARD_WIDTH)
+      setMetrics({ scale: s, height: card.offsetHeight * s })
     }
-  }, [shareTarget, book, fontsPending, fontsError, renderKey, resolvedFont, retry, generation])
-
-  const previewReady = prepared?.generation === generation && !fontsPending && !fontsError
-  const previewFailed = failedGeneration === generation || fontsError
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    ro.observe(card)
+    return () => ro.disconnect()
+  }, [prefs, shareTarget, book, resolvedFont])
 
   if (!shareTarget) return null
 
@@ -224,13 +173,26 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
   }
 
+  async function exportBlob(): Promise<Blob> {
+    const node = cardRef.current
+    if (!node) throw new Error('Card node missing')
+    const text = node.textContent || '汉'
+    const faces = resolvedFont.primary.latin
+      ? [resolvedFont.primary, resolvedFont.companion]
+      : [resolvedFont.primary]
+    await Promise.all(faces.map((face) => waitForCardFont(face, text)))
+    const css = await embedCardFonts(faces, text)
+    return await getCardBlob(node, css)
+  }
+
   async function saveImage() {
-    if (!previewReady || !prepared) return
+    if (exporting) return
     setSaving(true)
     try {
-      const blob = prepared.blob
+      const blob = await withCardExportTimeout(exportBlob())
       downloadCardBlob(blob, fileName)
-    } catch {
+    } catch (err) {
+      console.error('[share] save image failed', err)
       notify.error({ key: 'share.exportFailed' })
     } finally {
       setSaving(false)
@@ -238,16 +200,17 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   }
 
   async function copyImage() {
-    if (!previewReady || !prepared) return
+    if (exporting) return
     setCopying(true)
     try {
-      const blob = prepared.blob
+      const blob = await withCardExportTimeout(exportBlob())
       if (await copyCardBlob(blob)) {
         notify.success({ key: 'share.copied' })
         return
       }
       notify.error({ key: 'share.copyFailed' })
-    } catch {
+    } catch (err) {
+      console.error('[share] copy image failed', err)
       notify.error({ key: 'share.exportFailed' })
     } finally {
       setCopying(false)
@@ -278,24 +241,10 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
             <CloseIcon size={16} />
           </button>
         </div>
-        <div aria-busy={!previewReady} className="relative flex min-h-[240px] flex-1 justify-center overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] px-4 py-3 sm:px-6">
-          {!previewReady && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-stone-500" role="status">
-              {previewFailed ? <>
-                <span>{_('share.exportFailed')}</span>
-                <button type="button" className="rounded-lg border border-stone-300 px-4 py-2" onClick={() => {
-                  setFailedGeneration(null)
-                  setRetry((value) => value + 1)
-                  if (fontsError) void refetchFonts()
-                }}>{_('common.retry')}</button>
-              </> : <><SpinnerIcon size={24} /><span>{_('share.preparing')}</span></>}
-            </div>
-          )}
-          {previewReady && <img src={prepared.url} alt={_('annotation.shareExcerpt')} className="relative z-10 h-auto w-full max-w-[500px] self-start" />}
-          <div aria-hidden="true" className="pointer-events-none absolute opacity-0">
-            <div style={{ width: SHARE_CARD_WIDTH }}>
+        <div ref={previewRef} className="flex min-h-[380px] flex-1 justify-center overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] px-4 py-3 sm:px-6">
+          <div style={{ width: SHARE_CARD_WIDTH * scale, height: height || undefined }} className="shrink-0 flex justify-center self-start">
+            <div style={{ transform: scale < 1 ? `scale(${scale})` : undefined, transformOrigin: 'top center', width: SHARE_CARD_WIDTH }}>
               <ShareCard
-                key={renderKey}
                 ref={cardRef}
                 text={shareTarget.text}
                 title={book?.title ?? ''}
@@ -478,7 +427,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
             <button
               type="button"
               onClick={() => void copyImage()}
-              disabled={exporting || !previewReady}
+              disabled={exporting}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-stone-300/80 bg-white py-2.5 px-4 text-xs sm:text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 hover:text-stone-900 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-800/80 dark:text-stone-200 dark:hover:bg-stone-700 dark:hover:text-stone-100"
             >
               {copying ? <SpinnerIcon size={16} /> : <CopyIcon size={16} />}
@@ -487,7 +436,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
             <button
               type="button"
               onClick={() => void saveImage()}
-              disabled={exporting || !previewReady}
+              disabled={exporting}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-stone-900 py-2.5 px-4 text-xs sm:text-sm font-medium text-white shadow-xs transition-colors hover:bg-stone-800 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
             >
               {saving ? <SpinnerIcon size={16} /> : <DownloadIcon size={16} />}
