@@ -285,7 +285,7 @@ export const NotesPanel = memo(function NotesPanel({
       onSuccess: (result) => {
         setNoteDeleteTarget(null)
         notify.success(
-          { key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : 'annotation.deleted' },
+          { key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : item.type === 'note' ? 'annotation.ideaDeleted' : 'annotation.deleted' },
           { undo: result?.undo },
         )
       },
@@ -776,7 +776,7 @@ export const NotesPanel = memo(function NotesPanel({
           onClose={() => setExportOpen(false)}
         />
       )}
-      {noteDeleteTarget && <ConfirmDialog title={_('archive.deleteIdeaTitle')} message={_('archive.deleteIdeaMessage')} confirmLabel={_('reader.delete')} confirmDisabled={deleteAnnotation.isPending} onClose={() => { if (!deleteAnnotation.isPending) setNoteDeleteTarget(null) }} onConfirm={() => deleteItem(noteDeleteTarget, true)} />}
+      {noteDeleteTarget && <ConfirmDialog title={_('archive.deleteIdeaTitle')} message={_('archive.deleteIdeaMessage')} confirmLabel={_('reader.delete')} confirmVariant="danger" confirmDisabled={deleteAnnotation.isPending} onClose={() => { if (!deleteAnnotation.isPending) setNoteDeleteTarget(null) }} onConfirm={() => deleteItem(noteDeleteTarget, true)} />}
     </div>
   )
 })

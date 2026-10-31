@@ -38,7 +38,6 @@ export default function ReaderFooterControls({
       )}
     >
       <div
-        data-toast-obstacle={footerVisible ? 'contents' : undefined}
         className="pointer-events-auto mb-3 mr-3 flex items-center gap-2 sm:mr-4"
         onPointerEnter={isTouch ? undefined : onPointerEnter}
         onPointerLeave={isTouch ? undefined : onPointerLeave}

@@ -219,7 +219,8 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
     if (!annotationId || highlightPendingRef.current || annotationId.startsWith('temp-')) return
     try {
       const result = await del.mutateAsync(annotationId)
-      notify.success({ key: 'annotation.deleted' }, { undo: result?.undo })
+      const isIdea = Boolean(id || target?.type === 'note')
+      notify.success({ key: isIdea ? 'annotation.ideaDeleted' : 'annotation.deleted' }, { undo: result?.undo })
       if (createdLocal?.id === annotationId) setCreatedLocal(null)
       // Deleting one of several ideas at the same range drops back to the
       // overlay's list level; only the last remaining idea closes it
@@ -495,7 +496,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
         onJump={(entry) => { if (entry.locationAvailable !== false) { void renderer?.display(entry.annotation.cfiRange); close() } }}
         onClose={close}
       />
-      {deleteTarget && <ConfirmDialog title={_('archive.deleteIdeaTitle')} message={_('archive.deleteIdeaMessage')} confirmLabel={_('reader.delete')} confirmDisabled={del.isPending} onClose={() => { if (!del.isPending) setDeleteTarget(null) }} onConfirm={async () => {
+      {deleteTarget && <ConfirmDialog title={_('archive.deleteIdeaTitle')} message={_('archive.deleteIdeaMessage')} confirmLabel={_('reader.delete')} confirmVariant="danger" confirmDisabled={del.isPending} onClose={() => { if (!del.isPending) setDeleteTarget(null) }} onConfirm={async () => {
         if (await removeAnnotation(deleteTarget.annotation.id)) setDeleteTarget(null)
       }} />}</>
     )

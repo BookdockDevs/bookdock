@@ -20,6 +20,10 @@ All notable changes to Bookdock are documented here.
 - Google Books metadata search matches the query against book titles instead of the full text.
 - Installed personal metadata sources are listed by install time instead of alphabetically.
 - Undo actions across features now share a single undo endpoint. The 2-minute window is unchanged, and each account keeps only its latest undo opportunity, so a newer undoable action replaces an older one.
+- Standardized delete copywriting and terminology across the reader and archive: pure highlights consistently use "highlight" (e.g., "Highlight removed"), mixed collections and batch exports use "notes", and idea deletion uses dedicated "Idea deleted" notifications.
+- Decoupled reader toast notifications from bottom bar obstacle displacement, keeping toasts steady at the topmost z-index without jumping or causing bottom bar summon jitter when interacting with undo buttons.
+- Standardized idea deletion confirmation dialogs to use the danger variant across the reader and archive, eliminating redundant nested confirmation dialogs.
+- Fixed Chinese punctuation conventions by reserving title marks (`《》`) exclusively for books and using quotes (`「」`) for shelves, categories, and tags, correcting the shelf move notification that improperly wrapped shelf names in book title marks.
 
 ### Fixed
 
@@ -1018,6 +1022,10 @@ All notable changes to Bookdock are documented here.
 - Google Books 刮削改为按书名匹配，不再进行全文匹配。
 - 个人元数据来源列表按安装时间排序。
 - 各功能的撤销现在共用同一个撤销接口。撤销窗口仍为 2 分钟，且每个账号同时只保留最新一条撤销机会，新的可撤销操作会替换先前的一条。
+- 规范全站删除反馈文案与术语：纯划线操作统一使用“划线”（如“划线已删除”），导出及混合集合统一使用“笔记”，想法删除使用独立的“想法已删除”通知。
+- 解除阅读器底栏对 Toast 通知的避障推挤，使 Toast 作为最高层级元素稳定显示，彻底消除底栏唤起时 Toast 上下跳动以及底栏抽搐抖动的竞争问题；光标悬停 Toast 时静默抑制底栏召唤，提升点击“撤销”的稳定性。
+- 统一全站想法删除确认弹窗为危险警示样式（danger），并消除想法详情卡片内多余的二次确认弹窗。
+- 严格规范标点符号用法，书名号《》仅用于书籍作品，书架、分类、标签等统一使用直角引号「」，修正移动到书架时错误使用书名号《书架名》的问题。
 
 #### 修复
 

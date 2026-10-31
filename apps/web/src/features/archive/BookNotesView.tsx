@@ -250,7 +250,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
       onSuccess: () => {
         setNoteDeleteTarget(null)
         refreshArchive()
-        notify.success({ key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : 'annotation.deleted' })
+        notify.success({ key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : item.type === 'note' ? 'annotation.ideaDeleted' : 'annotation.deleted' })
       },
       onError: (error) => notify.error(getUserErrorNotification(error, 'annotation.deleteFailed')),
     })

@@ -28,6 +28,7 @@ export interface InteractionHeaderActionsProps {
   deleteConfirmTitle?: string
   deleteConfirmMessage?: string
   deleteConfirmLabel?: string
+  skipConfirm?: boolean
 
   theme?: InteractionTheme
   className?: string
@@ -59,6 +60,7 @@ export default function InteractionHeaderActions({
   deleteConfirmTitle,
   deleteConfirmMessage,
   deleteConfirmLabel,
+  skipConfirm = false,
   theme = 'app',
   className,
 }: InteractionHeaderActionsProps) {
@@ -133,7 +135,13 @@ export default function InteractionHeaderActions({
       {canDelete && onDelete && (
         <button
           type="button"
-          onClick={() => setConfirmDelete(true)}
+          onClick={() => {
+            if (skipConfirm) {
+              onDelete()
+            } else {
+              setConfirmDelete(true)
+            }
+          }}
           title={deleteTitle ?? _('comment.delete')}
           className={cn(
             btnStyle,

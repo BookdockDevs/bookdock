@@ -100,10 +100,8 @@ export default function IdeaDetailCard({
         onDelete={(detail.own || detail.canDelete) && onDelete ? () => onDelete(detail) : undefined}
         theme={theme}
         editTitle={_('annotation.editNote')}
-        deleteTitle={_('annotation.deleteAnnotation')}
-        deleteConfirmTitle={_('annotation.deleteConfirmTitle')}
-        deleteConfirmMessage={_('annotation.deleteConfirmMessage')}
-        deleteConfirmLabel={_('common.delete')}
+        deleteTitle={_('reader.delete')}
+        skipConfirm
       />
     </div>
   )

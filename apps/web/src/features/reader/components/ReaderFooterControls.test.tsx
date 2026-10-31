@@ -32,5 +32,5 @@ it.each(['auto', 'manual', 'both', 'off'])('keeps background save failures out o
   const wrapper = container.querySelector('[data-reader-corner-control]') as HTMLElement
   expect(wrapper).toHaveClass('pointer-events-none')
   expect(wrapper.firstElementChild).toHaveClass('pointer-events-auto')
-  expect(wrapper.firstElementChild).toHaveAttribute('data-toast-obstacle', 'contents')
+  expect(wrapper.firstElementChild).not.toHaveAttribute('data-toast-obstacle')
 })

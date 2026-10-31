@@ -251,10 +251,11 @@ export default function Reader() {
       const rect = canvas?.getBoundingClientRect()
       const insideCanvas = rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
       const overDialog = target instanceof Element && Boolean(target.closest('[role="dialog"]'))
+      const overToast = target instanceof Element && Boolean(target.closest('[data-toast-id]'))
       const currentReadingMode = useUiStore.getState().readingMode
-      const inHeader = Boolean(insideCanvas && !overDialog && rect && clientY <= rect.top + 48
+      const inHeader = Boolean(insideCanvas && !overDialog && !overToast && rect && clientY <= rect.top + 48
         && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
-      const inFooter = Boolean(insideCanvas && !overDialog && rect && clientY >= rect.bottom - 48
+      const inFooter = Boolean(insideCanvas && !overDialog && !overToast && rect && clientY >= rect.bottom - 48
         && clientX >= rect.left
         && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
       if (inHeader !== headerHotRef.current) {
@@ -2227,7 +2228,6 @@ export default function Reader() {
                 mobile tool dock occupies the row below this progress strip. */}
             <div className="absolute inset-x-0 bottom-0 z-40 pointer-events-none">
               <div
-                data-toast-obstacle={footerVisible && !isSelectingText ? '' : undefined}
                 className={cn('absolute inset-x-0 bottom-0', footerVisible && !isSelectingText ? 'pointer-events-auto' : 'pointer-events-none')}
                 onPointerEnter={isTouch || isSelectingText ? undefined : onFooterEnter}
                 onPointerLeave={isTouch ? undefined : onFooterLeave}
