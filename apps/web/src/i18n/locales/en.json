@@ -2858,7 +2858,7 @@
     "importJsonTitle": "Restore Reading Archive",
     "importJsonDesc": "Restore and merge reading history from an exported JSON backup file",
     "exportAction": "Export",
-    "importAction": "Choose File",
+    "importAction": "Import",
     "importPreview": "Restore {{archives}} archives and {{sessions}} records; {{duplicates}} records already exist. Restores only to your account without moving the reader position.",
     "importConfirm": "Restore",
     "periodSummary": "Selected scope",

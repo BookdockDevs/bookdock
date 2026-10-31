@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
@@ -74,21 +75,23 @@ export default function JoinLibraryDialog({ open, libraryId, needsPassword, onCl
       </div>
 
       <div className="mt-6 flex gap-3">
-        <button
+        <Button
           type="button"
+          variant="secondary"
           onClick={onClose}
-          className="h-11 flex-1 rounded-xl bg-stone-100 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+          className="flex-1"
         >
           {_('library.cancel')}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="primary"
           disabled={join.isPending || (needsPassword && !password.trim())}
           onClick={submit}
-          className="h-11 flex-1 rounded-xl bg-stone-900 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300"
+          className="flex-1"
         >
           {join.isPending ? _('library.joining') : _('library.joinLibrary')}
-        </button>
+        </Button>
       </div>
     </Modal>
   )

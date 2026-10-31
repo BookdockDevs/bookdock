@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -38,6 +38,7 @@ export default function ReadingTransferControls({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [transfer, setTransfer] = useState<{ body: ReadingTransfer; preview: ReadingTransferPreview } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [deleteConfirmBusy, setDeleteConfirmBusy] = useState(false)
 
@@ -198,26 +199,27 @@ export default function ReadingTransferControls({
             </p>
           </div>
         </div>
-        <label
-          className={cn(
-            'relative inline-flex h-8 shrink-0 items-center justify-center rounded-xl px-3 text-xs font-medium transition-colors cursor-pointer self-end sm:self-center',
-            'bg-stone-100 text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700',
-            (busy || deleteConfirmBusy) && 'opacity-40 cursor-not-allowed',
-          )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          disabled={busy || deleteConfirmBusy}
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void previewImport(file)
+            e.target.value = ''
+          }}
+        />
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy || deleteConfirmBusy}
+          onClick={() => fileInputRef.current?.click()}
+          className="self-end sm:self-center shrink-0 cursor-pointer"
         >
-          <span>{_('readingData.importAction')}</span>
-          <input
-            type="file"
-            accept="application/json,.json"
-            disabled={busy || deleteConfirmBusy}
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) void previewImport(file)
-              e.target.value = ''
-            }}
-          />
-        </label>
+          {_('readingData.importAction')}
+        </Button>
       </div>
 
       {/* 4. 删除本书个人阅读档案 (仅单书时展示) */}

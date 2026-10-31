@@ -75,8 +75,8 @@ export default function Modal({
   const placement = centered ? 'items-center p-4' : 'items-end p-0 sm:items-center sm:p-4'
   const panelShape = centered ? 'max-h-[calc(100dvh-2rem)] rounded-2xl' : 'max-h-[calc(100dvh-1rem)] rounded-t-2xl sm:max-h-[85vh] sm:rounded-2xl'
   const btn = reader
-    ? 'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-[var(--bd-read-text)]'
-    : 'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
+    ? 'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-all duration-150 active:scale-90 hover:bg-[var(--bd-read-page-bg)] hover:text-[var(--bd-read-text)]'
+    : 'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-all duration-150 active:scale-90 hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
 
   useEffect(() => {
     if (activeModalCount === 0) {

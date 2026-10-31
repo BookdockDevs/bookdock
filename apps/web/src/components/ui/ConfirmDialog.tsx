@@ -190,7 +190,7 @@ export default function ConfirmDialog({
             disabled={submitting}
             aria-label={_('library.close')}
             title={_('library.close')}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:opacity-30 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-all duration-150 hover:bg-stone-100 hover:text-stone-700 active:scale-90 disabled:opacity-30 dark:hover:bg-stone-800 dark:hover:text-stone-200"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6L6 18M6 6l12 12" />

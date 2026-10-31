@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 
@@ -54,22 +55,24 @@ export default function TagDialog({ open, libraryId, tagId, initialName = '', on
       size="sm"
       footer={
         <div className="flex w-full gap-3">
-          <button
+          <Button
             type="button"
             onClick={onClose}
             disabled={isPending}
-            className="h-10 flex-1 rounded-xl bg-stone-100 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700 cursor-pointer"
+            variant="secondary"
+            className="flex-1"
           >
             {_('library.cancel')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={submit}
             disabled={!name.trim() || isPending}
-            className="h-10 flex-1 rounded-xl bg-stone-900 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300 cursor-pointer"
+            variant="primary"
+            className="flex-1"
           >
             {isRename ? _('library.save') : _('library.create')}
-          </button>
+          </Button>
         </div>
       }
     >

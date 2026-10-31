@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -97,22 +98,24 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
       size="sm"
       footer={
         <div className="flex w-full gap-3">
-          <button
+          <Button
             type="button"
             onClick={onClose}
             disabled={isPending}
-            className="h-10 flex-1 rounded-xl bg-stone-100 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700 cursor-pointer"
+            variant="secondary"
+            className="flex-1"
           >
             {_('library.cancel')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={submit}
             disabled={!name.trim() || isPending || Boolean(libraryId && (taxonomyLoading || taxonomyFailed))}
-            className="h-10 flex-1 rounded-xl bg-stone-900 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-stone-900 dark:hover:bg-stone-300 cursor-pointer"
+            variant="primary"
+            className="flex-1"
           >
             {isRename ? _('library.save') : _('library.create')}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -140,7 +143,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
               {_('library.parentCategory')}
             </label>
             <div className="relative">
-              <button
+              <Button
                 ref={dropdown.btnRef}
                 type="button"
                 disabled={isPending || taxonomyLoading || taxonomyFailed}
@@ -175,13 +178,13 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
                 >
                   <path d="m6 9 6 6 6-6" />
                 </svg>
-              </button>
+              </Button>
 
               {dropdownOpen && (
                 <SmartMenu triggerRef={dropdown.btnRef} innerRef={dropdown.menuRef} position={dropdownPosition} onClose={dropdown.close} width={dropdownWidth}>
                 <div className="max-h-[min(12rem,calc(100dvh-2rem))] overflow-y-auto overscroll-contain custom-scrollbar">
                   {/* Root / Top-level option */}
-                  <button
+                  <Button
                     type="button"
                     onClick={() => {
                       setParentId('')
@@ -203,7 +206,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     )}
-                  </button>
+                  </Button>
 
                   {parentChoices.length > 0 && (
                     <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
@@ -212,7 +215,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
                   {parentChoices.map((category) => {
                     const isSelected = parentId === category.id
                     return (
-                      <button
+                      <Button
                         key={category.id}
                         type="button"
                         onClick={() => {
@@ -236,7 +239,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
                             <polyline points="20 6 9 17 4 12" />
                           </svg>
                         )}
-                      </button>
+                      </Button>
                     )
                   })}
                 </div>

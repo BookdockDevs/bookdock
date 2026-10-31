@@ -24,6 +24,9 @@ All notable changes to Bookdock are documented here.
 - Decoupled reader toast notifications from bottom bar obstacle displacement, keeping toasts steady at the topmost z-index without jumping or causing bottom bar summon jitter when interacting with undo buttons.
 - Standardized idea deletion confirmation dialogs to use the danger variant across the reader and archive, eliminating redundant nested confirmation dialogs.
 - Fixed Chinese punctuation conventions by reserving title marks (`《》`) exclusively for books and using quotes (`「」`) for shelves, categories, and tags, correcting the shelf move notification that improperly wrapped shelf names in book title marks.
+- Refined the visual design and tactile feel of buttons and dialog actions across the app, with clearer borders, subtle depth, and more responsive click feedback.
+- Unified the action buttons across library, shelf, tag, and rename dialogs into a consistent layout.
+- In reading data management, aligned the archive restore action to "Import" with styling matching the companion export buttons.
 
 ### Fixed
 
@@ -1026,6 +1029,9 @@ All notable changes to Bookdock are documented here.
 - 解除阅读器底栏对 Toast 通知的避障推挤，使 Toast 作为最高层级元素稳定显示，彻底消除底栏唤起时 Toast 上下跳动以及底栏抽搐抖动的竞争问题；光标悬停 Toast 时静默抑制底栏召唤，提升点击“撤销”的稳定性。
 - 统一全站想法删除确认弹窗为危险警示样式（danger），并消除想法详情卡片内多余的二次确认弹窗。
 - 严格规范标点符号用法，书名号《》仅用于书籍作品，书架、分类、标签等统一使用直角引号「」，修正移动到书架时错误使用书名号《书架名》的问题。
+- 优化全站按键与弹窗操作的视觉层次与交互反馈，增强轮廓与微光影质感，并增加按压回弹效果。
+- 统一加入书库、书库重命名、书架与标签编辑等各类弹窗的底部按钮风格与排版。
+- 优化阅读数据管理页面的归档恢复按钮，将操作文案调整为“导入”，与导出的按钮外观与视觉节奏保持一致。
 
 #### 修复
 
