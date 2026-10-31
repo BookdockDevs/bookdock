@@ -36,11 +36,15 @@ beforeEach(async () => {
 describe('version deletion feedback', () => {
   it.each([true, false])('reports the whole-work consequence with trash enabled=%s', async (enabled) => {
     hooks.trashEnabled = enabled
+    hooks.remove.mockResolvedValue({ data: null, undo: { token: 'undo-token', label: 'undo.action' } })
     const onDeleted = vi.fn()
     render(<DeleteVersionsDialog work={work} libraryId="lib" preselectedIds={work.versions.map((v) => v.id)} onClose={vi.fn()} onDeleted={onDeleted} />)
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(true))
-    expect(notify.success).toHaveBeenCalledWith({ key: enabled ? 'library.catalogWorkTrashed' : 'library.catalogWorkDeleted', params: { title: 'Book' } })
+    expect(notify.success).toHaveBeenCalledWith(
+      { key: enabled ? 'library.catalogWorkTrashed' : 'library.catalogWorkDeleted', params: { title: 'Book' } },
+      { undo: { token: 'undo-token', label: 'undo.action' } },
+    )
   })
 
   it('reports partial deletion, stops after rejection and retries only remaining versions', async () => {

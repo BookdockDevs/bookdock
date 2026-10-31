@@ -894,7 +894,8 @@ synchronized; successful duplicate requests are acknowledged without restoring
 twice, and server restart invalidates receipts.
 
 The supported operations are private-library shelf/category assignment, tag
-membership changes, pinning, card hiding and moving a card to trash. A single detail save
+membership changes, pinning, card hiding, moving a card to trash, and deleting
+reader notes. A single detail save
 that changes both classification and tags uses one `/books/:id/organization`
 request and one receipt, so both changes undo together. Shelf moves from the
 library hook use `/books/batch/move-shelf`, which captures successful changed
@@ -903,14 +904,27 @@ batch operations also use one
 receipt containing only successful changed rows; the notification reports
 success/failure counts. Retrying only failed rows is a new operation: if it
 changes state, it replaces the prior receipt and its notification, and its
-receipt covers only the retry's changed rows. Recovery patches only affected
+receipt covers only the retry's changed rows. Card-trash recovery uses the
+existing restore path and is available only when user-data cleanup was not
+requested; that deletion variant suspends personal reading data and is
+intentionally not undoable. Reader note deletion is a soft delete: restoring a
+deleted highlight or bookmark clears its deletion while restoring the record's
+previous update time, and re-creating a note at the same spot before undoing
+is an idempotent no-op. Batch note deletion (`POST /annotations/batch-delete`)
+issues one combined receipt over the deleted records and reports
+succeeded/failed counts; a partial failure keeps the selection for retry.
+Idea deletion is not undoable because it cascades comments, likes and image
+files as a hard delete. Deleting a shared-library work (or its last version)
+issues a receipt to the manager or owner who performed the deletion: the undo
+replays the owner restore with a narrow exception — the original actor must
+still satisfy the manager check, and the work must still carry exactly the
+recorded deletion state; an owner restore or permanent deletion in between,
+or a demotion, reports a conflict. The trash page's restore action itself
+stays owner-only. Recovery patches only affected
 fields/relations. Tag receipts record per-book membership deltas rather than
-replacing the full tag set. Trash recovery uses the existing owner-only
-restore path and is available only when user-data cleanup was not requested;
-that deletion variant suspends personal reading data and is intentionally not
-undoable. Any later write to a receipt's affected state makes that item
-conflict instead of overwriting it. Permanent deletion, empty trash, reading
-state, shared-library actions, content changes and redo are not supported.
+replacing the full tag set. Any later write to a receipt's affected state
+makes that item conflict instead of overwriting it. Permanent deletion, empty
+trash, reading state, content changes and redo are not supported.
 
 A private B with a readable source can be forked into a local C:
 the same card keeps its work, shelf and tags, but its version link swaps to a
@@ -1312,6 +1326,7 @@ apps/server/src/
     tokens.routes.ts        # operation-scoped access tokens: create/edit/enable/disable/delete (ADR-24)
     annotations.routes.ts   # personal highlight/bookmark/idea CRUD
     idea-discussion.routes.ts # source-scoped reader ideas, comments and likes
+    undo.routes.ts          # POST /:token — application-undo receipt replay (receipts are issued by the owning domain services)
     avatars/                # user avatar upload/delete + immutable content-hash file serving (256px WebP thumbnail by default, ?size=original for the source)
     fonts/                  # custom font upload/list/delete/scope + immutable file serving; web merges these rows with the stable system/builtin catalog and user font preferences
     reading-records.routes.ts # duration upsert + aggregation
@@ -1642,7 +1657,8 @@ A private work may carry `meta.pendingUserDataDeletion`, set when the owner move
 | `/api/v1/replacements` | replacements | pattern and point-replacement CRUD plus per-book enablement; `POST /import` batch-creates global pattern rules only |
 | `/api/v1/toc-rules` | toc-rules | `GET /` `POST /` `PUT /:id` `DELETE /:id` `PUT /reorder` `POST /seed` `POST /import` (batch create, transactional append) |
 | `/api/v1/ideas` | annotations | Composer context, exact-source reader idea projection, idea detail, comments/replies, likes and liker identities; current source ACL on every request; guests read-only |
-| `/api/v1/annotations` | annotations | `GET /`(?bookId=) `POST /` `PUT /:id` `DELETE /:id` |
+| `/api/v1/annotations` | annotations | `GET /`(?bookId=) `POST /` `PUT /:id` `DELETE /:id` `POST /batch-delete` (batch soft-delete, one combined undo receipt) |
+| `/api/v1/undo` | undo | `POST /:token` (replays one application-undo receipt issued beside an earlier action's success response; receipts are volatile, single-opportunity per user, and re-checked against post-operation state) |
 | `/api/v1/progress` | reading | `GET /:bookId` `PUT /:bookId` |
 
 **Progress storage**: SQLite (`book_states.progress_data` + `read_fraction`) is authoritative for signed-in users. Legacy per-book JSON files (`progress/{bookId}.json`, shape `{ cfi?, chapter?, chapterIndex?, percent, fraction, intervals, updatedAt }`) are imported once at startup by `importProgressFiles` (ledger batch `phase1-progress-database-migration-v2`, skips books that already have DB progress); after the batch completes there is zero file I/O. `chapterIndex` is the zero-based chapter position from the current book TOC and is persisted for server-side consumers such as AI spoiler bounds; AI applies this boundary at chapter granularity, so the whole current chapter is available and later chapters are not. `fraction` is the foliate book-wide position (0–1); `intervals` is the merged union of `[start, end]` fraction ranges the user has actually read — the web reader closes the current segment when a relocate jump exceeds `JUMP_THRESHOLD` (0.02) and reports `segmentStartFraction` on PUT. GET additionally returns `readFraction` (total union length, computed server-side). Guests never read or write this server progress; their reader position uses the browser-local `bd-guest-reading-progress` namespace instead.

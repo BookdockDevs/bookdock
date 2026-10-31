@@ -2,35 +2,34 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.7.5] - 2026-11-01
 
 ### Added
 
 - The ZIP install dialog for personal metadata sources previews the packaged icon and display name before installing.
-- Deleting a bookmark or highlight now shows an Undo button in the confirmation message, so an accidental deletion can be reversed on the spot. Batch note deletion in the reader can be undone in one step. Undo stays available for 2 minutes and is lost after a server restart.
+- Deleting a bookmark or highlight now shows an Undo button in the deletion notice, so an accidental deletion can be reversed on the spot; batch note deletion in the reader can be undone in one step. Undo stays available for 2 minutes and is lost after a server restart.
 - Deleting a shared library book (or removing its last version) now shows the same Undo button to the manager or owner who deleted it. The undo no longer works after the owner has restored or permanently deleted the book, or if the person no longer manages the library. Restoring from the trash page itself remains owner-only.
 
 ### Changed
 
-- Excerpt share cards now render a live DOM preview with instant feedback on template, font, background color, and watermark changes, eliminating layout shifts, dialog height collapse, and full-screen loading spinners during customization.
-- Short excerpt layouts in share cards now group book titles and authors with the quote and vertically balance the content block, preventing excessive gaps from pushing attribution down to the card footer.
-- Reinstalling a personal metadata source with the same ID now overwrites the installed package in place, replacing its metadata, entry, icon and origin while keeping its position in the list.
-- The metadata lookup dialog allows switching the source while a search is running; failed searches and covers report the concrete cause through the standard toast notifications, and the results area reuses the no-results state. The dialog now covers the editing dialog at the same height.
-- The source dropdown menu sizes itself to its longest entry.
+- Excerpt share cards now render a live preview that updates instantly when the template, font, background color, or watermark changes, without image reloads, dialog height jumps, or full-screen loading spinners.
+- Short excerpt layouts in share cards group the book title and author with the quote and balance the content block vertically, so short quotes no longer push the attribution down to the card footer.
+- The metadata lookup dialog allows switching the source while a search is running, sizes its source dropdown to the longest entry, and matches the height of the book editing dialog.
 - Google Books metadata search matches the query against book titles instead of the full text.
 - Installed personal metadata sources are listed by install time instead of alphabetically.
+- Reinstalling a personal metadata source with the same ID now overwrites the installed package in place, replacing its metadata, entry, icon, and origin while keeping its position in the list.
 - Undo actions across features now share a single undo endpoint. The 2-minute window is unchanged, and each account keeps only its latest undo opportunity, so a newer undoable action replaces an older one.
 - Standardized delete copywriting and terminology across the reader and archive: pure highlights consistently use "highlight" (e.g., "Highlight removed"), mixed collections and batch exports use "notes", and idea deletion uses dedicated "Idea deleted" notifications.
-- Decoupled reader toast notifications from bottom bar obstacle displacement, keeping toasts steady at the topmost z-index without jumping or causing bottom bar summon jitter when interacting with undo buttons.
-- Standardized idea deletion confirmation dialogs to use the danger variant across the reader and archive, eliminating redundant nested confirmation dialogs.
-- Fixed Chinese punctuation conventions by reserving title marks (`《》`) exclusively for books and using quotes (`「」`) for shelves, categories, and tags, correcting the shelf move notification that improperly wrapped shelf names in book title marks.
+- Reader toast notifications no longer make way for the bottom bar: toasts stay steady at the top layer without jumping, and hovering a toast quietly suppresses the bottom bar summon, keeping the Undo button steady to click.
+- Idea deletion confirmation dialogs use the danger variant across the reader and archive, removing redundant nested confirmations.
 - Refined the visual design and tactile feel of buttons and dialog actions across the app, with clearer borders, subtle depth, and more responsive click feedback.
 - Unified the action buttons across library, shelf, tag, and rename dialogs into a consistent layout.
-- In reading data management, aligned the archive restore action to "Import" with styling matching the companion export buttons.
+- In reading data management, the archive restore action is now labeled "Import" and styled to match the companion export buttons.
 
 ### Fixed
 
-- Fixed chapter titles wrapping onto and overlapping with the author line in share cards, adding intact unit wrapping (`inline-block`) and explicit line heights to prevent orphan character breaks.
+- Fixed chapter titles wrapping onto and overlapping with the author line in share cards; long titles now wrap as whole units with explicit line heights instead of breaking mid-word.
+- Fixed the shelf-move notification wrapping shelf names in book title marks. Title marks (`《》`) are now reserved for books; shelves, categories, and tags use corner quotes (`「」`).
 - Fixed failed metadata searches showing an unrelated privacy hint in the results area.
 - Fixed metadata request errors hiding their concrete cause (timeouts, connection resets, HTTP status codes, personal-source rejection reasons).
 
@@ -1008,34 +1007,34 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [Unreleased]
+### [0.7.5] - 2026-11-01
 
 #### 新增
 
 - 个人元数据来源的 ZIP 安装对话框在安装前预览包内图标与来源名称。
-- 删除书签和划线后，确认消息中会出现"撤销"按钮，误删可当场恢复；阅读器批量删除笔记也支持一键整批撤销。撤销机会保留 2 分钟，服务端重启后失效。
-- 删除共享书库书籍（或删除其最后一个版本）后，执行删除的管理者或拥有者也会看到同样的"撤销"按钮。若拥有者已手动恢复或彻底删除该书，或操作者已不再拥有管理权限，则无法撤销；回收站页面的恢复仍仅拥有者可用。
+- 删除书签和划线后，删除通知中会出现「撤销」按钮，误删可当场恢复；阅读器批量删除笔记也支持一键整批撤销。撤销机会保留 2 分钟，服务端重启后失效。
+- 删除共享书库书籍（或删除其最后一个版本）后，执行删除的管理者或拥有者也会看到同样的「撤销」按钮。若拥有者已手动恢复或彻底删除该书，或操作者已不再拥有管理权限，则无法撤销；回收站页面的恢复仍仅拥有者可用。
 
 #### 优化
 
-- 书摘分享弹窗改为真实 DOM 实时渲染预览，切换主题模版、字体、背景色和署名微标时即时响应，消除了定制过程中的图片闪白重载、弹窗高度坍塌跳动与全屏加载遮罩。
+- 书摘分享弹窗改为实时预览，切换主题模版、字体、背景色和署名微标时即时响应，消除了定制过程中的图片闪白重载、弹窗高度坍塌跳动与全屏加载遮罩。
 - 优化短书摘排版与空间分布，将书名与作者出处收归正文区块紧凑排布，并通过垂直自适应居中平衡卡片上下留白，避免引文较短时出处被过度推挤到底部。
-- 重新安装同 ID 的个人元数据来源时改为就地覆盖已安装包（元数据、入口、图标与安装来源同步替换），列表位置保持不变。
-- 刮削信息弹窗支持在搜索进行中切换来源；搜索与封面失败改用统一的 toast 通知并附上具体原因，结果区复用暂无结果样式；弹窗高度与编辑弹窗对齐。来源下拉菜单宽度自适应最长项。
+- 刮削信息弹窗支持在搜索进行中切换来源，来源下拉菜单宽度自适应最长项，弹窗高度与编辑弹窗对齐。
 - Google Books 刮削改为按书名匹配，不再进行全文匹配。
 - 个人元数据来源列表按安装时间排序。
+- 重新安装同 ID 的个人元数据来源时改为就地覆盖已安装包（元数据、入口、图标与安装来源同步替换），列表位置保持不变。
 - 各功能的撤销现在共用同一个撤销接口。撤销窗口仍为 2 分钟，且每个账号同时只保留最新一条撤销机会，新的可撤销操作会替换先前的一条。
-- 规范全站删除反馈文案与术语：纯划线操作统一使用“划线”（如“划线已删除”），导出及混合集合统一使用“笔记”，想法删除使用独立的“想法已删除”通知。
-- 解除阅读器底栏对 Toast 通知的避障推挤，使 Toast 作为最高层级元素稳定显示，彻底消除底栏唤起时 Toast 上下跳动以及底栏抽搐抖动的竞争问题；光标悬停 Toast 时静默抑制底栏召唤，提升点击“撤销”的稳定性。
-- 统一全站想法删除确认弹窗为危险警示样式（danger），并消除想法详情卡片内多余的二次确认弹窗。
-- 严格规范标点符号用法，书名号《》仅用于书籍作品，书架、分类、标签等统一使用直角引号「」，修正移动到书架时错误使用书名号《书架名》的问题。
+- 规范全站删除反馈文案与术语：纯划线操作统一使用「划线」（如「划线已删除」），导出及混合集合统一使用「笔记」，想法删除使用独立的「想法已删除」通知。
+- 解除阅读器底栏对 Toast 通知的避障推挤：Toast 作为最高层级元素稳定显示，不再随底栏唤起上下跳动；光标悬停 Toast 时静默抑制底栏召唤，提升点击「撤销」的稳定性。
+- 统一全站想法删除确认弹窗为危险警示样式，并消除想法详情卡片内多余的二次确认弹窗。
 - 优化全站按键与弹窗操作的视觉层次与交互反馈，增强轮廓与微光影质感，并增加按压回弹效果。
 - 统一加入书库、书库重命名、书架与标签编辑等各类弹窗的底部按钮风格与排版。
-- 优化阅读数据管理页面的归档恢复按钮，将操作文案调整为“导入”，与导出的按钮外观与视觉节奏保持一致。
+- 优化阅读数据管理页面的归档恢复按钮，将操作文案调整为「导入」，与导出的按钮外观与视觉节奏保持一致。
 
 #### 修复
 
-- 修复书摘卡片中章节名过长换行时与作者名重叠的问题，通过完整词块换行保护（inline-block）和显式行高设定防止中途孤字断行与文字重叠。
+- 修复书摘卡片中章节名过长换行时与作者名重叠的问题，长章节名现在按完整词块换行并保持稳定行高，不再中途孤字断行。
+- 修复移动到书架时书架名被书名号《》包裹的问题；现在书名号《》仅用于书籍作品，书架、分类、标签等统一使用直角引号「」。
 - 修复搜索失败时结果区显示无关隐私提示的问题。
 - 修复元数据请求失败时不显示具体原因（超时、连接被重置、HTTP 状态码、来源脚本报错）的问题。
 
