@@ -219,7 +219,7 @@ export const NotesPanel = memo(function NotesPanel({
   }, [contextMenu, renderer])
 
   function goTo(item: AnnotationRes) {
-    if (item.locationAvailable === false || orphanedKeys.includes(`${item.cfiRange}|${item.type}`)) {
+    if (item.locationAvailable === false || item.cfiRange === null || orphanedKeys.includes(`${item.cfiRange}|${item.type}`)) {
       notify.info({ key: 'annotation.orphanedNotice' })
       return
     }
@@ -228,6 +228,7 @@ export const NotesPanel = memo(function NotesPanel({
   }
 
   function openIdeaDetail(item: AnnotationRes) {
+    if (item.cfiRange === null) return
     const current = useReaderState.getState().selection
     if (current?.cfiRange === item.cfiRange) {
       setSelection(null)

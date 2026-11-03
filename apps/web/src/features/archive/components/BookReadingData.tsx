@@ -90,10 +90,15 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
   }, [distribution.hours, distribution.hourDays])
   const dailyTrendPoints = useMemo(() => {
     return (stats?.daily ?? []).filter((day) => day.durationSeconds >= 60).map((day) => ({
-      date: day.date, seconds: day.durationSeconds, progressPercent: Number((day.progressDelta * 100).toFixed(1)),
+      date: day.date,
+      seconds: day.durationSeconds,
+      progressPercent: day.cumulativeCoverage === null ? null : Number((day.progressDelta * 100).toFixed(1)),
     }))
   }, [stats?.daily])
   const totalSeconds = stats?.totalSeconds ?? 0
+  const referenceDurationSeconds = stats?.referenceDurationSeconds ?? 0
+  const undatedDurationSeconds = stats?.undatedDurationSeconds ?? 0
+  const datedTotalSeconds = (stats?.daily ?? []).reduce((sum, day) => sum + day.durationSeconds, 0)
   const coverage = stats?.daily.at(-1)?.cumulativeCoverage ?? ledger?.coverage ?? 0
   const bookQuery = useBook(bookId)
   const book = bookQuery.data?.data
@@ -101,11 +106,11 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
     if (book?.progress != null) {
       return Number(book.progress.toFixed(2))
     }
-    return Number((coverage * 100).toFixed(2))
+    return coverage > 0 ? Number((coverage * 100).toFixed(2)) : null
   }, [book?.progress, coverage])
   const estimates = useMemo(() => ({ remainingSeconds: stats?.remainingSeconds ?? null }), [stats?.remainingSeconds])
   const readingDays = [...distribution.days.values()].filter((seconds) => seconds >= 60).length
-  const averageSeconds = readingDays > 0 ? totalSeconds / readingDays : null
+  const averageSeconds = readingDays > 0 ? datedTotalSeconds / readingDays : null
   const groups = useMemo(() => {
     const result = new Map<string, ReadingLedgerSession[]>()
     for (const session of sessions) {
@@ -139,14 +144,14 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
   }, [readingDays, coverage])
 
   const secondsPerPercent = useMemo(() => {
-    if (totalSeconds <= 0 || coverage <= 0) return null
-    return totalSeconds / (coverage * 100)
-  }, [totalSeconds, coverage])
+    if (datedTotalSeconds <= 0 || coverage <= 0) return null
+    return datedTotalSeconds / (coverage * 100)
+  }, [datedTotalSeconds, coverage])
 
   const secondsPerThousandWords = useMemo(() => {
-    if (totalSeconds <= 0 || totalWords === null || totalWords <= 0) return null
-    return (totalSeconds / totalWords) * 1000
-  }, [totalSeconds, totalWords])
+    if (datedTotalSeconds <= 0 || totalWords === null || totalWords <= 0) return null
+    return (datedTotalSeconds / totalWords) * 1000
+  }, [datedTotalSeconds, totalWords])
 
   const remainingDays = useMemo(() => {
     if (estimates.remainingSeconds === null || !averageSeconds || averageSeconds <= 0) return null
@@ -309,13 +314,15 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
                   <span className="text-xl font-bold tabular-nums tracking-tight text-stone-900 dark:text-stone-50">
-                    {formatPercent(latestProgress)}
+                    {latestProgress === null ? '—' : formatPercent(latestProgress)}
                   </span>
                 </div>
               </div>
-              <span className="inline-flex items-center rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-                {currentRound?.status === 'finished' ? _('readingData.status.finished') : _('readingData.roundOrdinal', { n: currentRound?.ordinal ?? 1 })}
-              </span>
+              {currentRound && (
+                <span className="inline-flex items-center rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                  {currentRound.status === 'finished' ? _('readingData.status.finished') : _('readingData.roundOrdinal', { n: currentRound.ordinal })}
+                </span>
+              )}
             </div>
 
             {/* Right: Key Stats Matrix */}
@@ -325,6 +332,8 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
                 <div className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-stone-900 dark:text-stone-50">
                   {formatDuration(totalSeconds, _)}
                 </div>
+                {referenceDurationSeconds > 0 && <p className="mt-1 text-[10px] text-stone-500 dark:text-stone-400">{_('stats.referenceDuration', { defaultValue: '累计参考' })} · {formatDuration(referenceDurationSeconds, _)}</p>}
+                {undatedDurationSeconds > 0 && <p className="mt-1 text-[10px] text-stone-500 dark:text-stone-400">{_('readingData.undatedDuration', { defaultValue: '其中无日期' })} · {formatDuration(undatedDurationSeconds, _)}</p>}
               </div>
               <div>
                 <div className="text-xs text-stone-500 dark:text-stone-400">{_('readingData.days')}</div>
@@ -406,6 +415,8 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
               <div className="mt-1 text-xl font-bold tabular-nums text-stone-900 dark:text-stone-50">
                 {formatDuration(totalSeconds, _)}
               </div>
+              {referenceDurationSeconds > 0 && <p className="mt-1 text-[10px] text-stone-500 dark:text-stone-400">{_('stats.referenceDuration', { defaultValue: '累计参考' })} · {formatDuration(referenceDurationSeconds, _)}</p>}
+              {undatedDurationSeconds > 0 && <p className="mt-1 text-[10px] text-stone-500 dark:text-stone-400">{_('readingData.undatedDuration', { defaultValue: '其中无日期' })} · {formatDuration(undatedDurationSeconds, _)}</p>}
             </div>
             <div>
               <div className="text-xs text-stone-500 dark:text-stone-400">{_('readingData.days')}</div>
@@ -617,19 +628,21 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
     <section className={card}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-base font-semibold text-stone-900 dark:text-stone-100">{_('reader.detailRecords')}</h3>
-        <button
-          type="button"
-          onClick={() => setAddRecordOpen(true)}
-          className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-stone-200/90 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 dark:border-stone-700/80 dark:bg-stone-900/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-100 cursor-pointer"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          {_('reader.detailAdd')}
-        </button>
+        {ledger?.sourceAvailable && (
+          <button
+            type="button"
+            onClick={() => setAddRecordOpen(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-stone-200/90 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 dark:border-stone-700/80 dark:bg-stone-900/80 dark:text-stone-300 dark:hover:border-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-100 cursor-pointer"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            {_('reader.detailAdd')}
+          </button>
+        )}
       </div>
 
-      {!groups.length && <p className="py-5 text-center text-sm text-stone-500">{_('readingData.noRecords')}</p>}
+      {!groups.length && <p className="py-5 text-center text-sm text-stone-500">{distribution.days.size > 0 ? _('readingData.durationFactsOnly', { defaultValue: '此档案只包含日期时长，没有可编辑的阅读流水。' }) : _('readingData.noRecords')}</p>}
 
       <div className="flex flex-col gap-3">
         {visibleGroups.map(([date, records]) => {
@@ -673,7 +686,7 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
       )}
     </section>
 
-    {addRecordOpen && (
+    {addRecordOpen && ledger?.sourceAvailable && (
       <AddRecordDialog
         bookId={bookId}
         variant="default"

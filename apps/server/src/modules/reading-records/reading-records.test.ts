@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { readingRecordCreateSchema } from '@bookdock/shared'
 
 import * as schema from '../../db/legacy-test-schema'
+import * as fullSchema from '../../db/schema'
 import * as client from '../../db/client'
 import * as progressFile from '../../lib/progress-file'
 import { importProgressFiles } from '../progress/progress-migration'
@@ -196,6 +197,8 @@ describe('reading-records service', () => {
       totalBooks: 2,
       totalDays: 2,
       todaySeconds: 50,
+      undatedDurationSeconds: 0,
+      referenceDurationSeconds: 0,
       currentStreak: 2,
       longestStreak: 2,
       // All records fall inside the current week (Mon 2026-07-27) and month
@@ -204,7 +207,7 @@ describe('reading-records service', () => {
       monthSeconds: 650,
       prevMonthSeconds: 0,
       totalWordsRead: 0,
-      scope: { longestStreak: 2, totalSeconds: 650, totalBooks: 2, totalDays: 2, totalWordsRead: 0, wordsPartial: false, finishedBooks: 0, finishedRounds: 0 },
+      scope: { longestStreak: 2, totalSeconds: 650, undatedDurationSeconds: 0, referenceDurationSeconds: 0, totalBooks: 2, totalDays: 2, totalWordsRead: 0, wordsPartial: false, finishedBooks: 0, finishedRounds: 0 },
       monthlyComparison: {
         currentPeriodSeconds: 650,
         previousPeriodSeconds: 0,
@@ -368,6 +371,24 @@ describe('reading-records service', () => {
     expect(byBook[0]).toMatchObject({ days: 1, durationSeconds: 180, readStatus: 'reading' })
     await addReadingTime(ownerId, { bookId, date: '2026-07-31', durationSeconds: 30 })
     expect((await getByBook(ownerId, {}))[0]).toMatchObject({ days: 2, durationSeconds: 210 })
+  })
+
+  it('merges native and imported seconds per date before the sixty-second threshold', async () => {
+    // 30s native + 30s imported on the same day is one reading day, not zero
+    // (or two) — every page must merge per date before counting.
+    await addReadingTime(ownerId, { bookId, date: '2026-07-30', durationSeconds: 30 })
+    db.insert(fullSchema.readingDurationFacts).values({
+      id: createId('rdf'), userId: ownerId, bookVersionId: bookId, granularity: 'book_day',
+      durationSeconds: 30, date: '2026-07-30', aggregationRole: 'additive', overlapGroup: null,
+      source: 'weread', sourceNamespace: 'ns', sourceRecordKey: 'd1', observedAt: Date.now(),
+    }).run()
+
+    const byBook = await getByBook(ownerId, {})
+    expect(byBook[0]).toMatchObject({ days: 1, durationSeconds: 60 })
+
+    const summary = await getSummary(ownerId, '2026-07-30')
+    expect(summary.totalDays).toBe(1)
+    expect(summary.totalSeconds).toBe(60)
   })
 
   it('returns per-book totals and descending daily records', async () => {

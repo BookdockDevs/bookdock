@@ -13,6 +13,7 @@ import sharp from 'sharp'
 import iconv from 'iconv-lite'
 
 import * as schema from '../../db/legacy-test-schema'
+import * as fullSchema from '../../db/schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
@@ -1359,6 +1360,32 @@ describe('deleteBook blob reference protection', () => {
     await deleteBook(userB, bookB.id)
     expect(mem.files.has(sharedFile)).toBe(false)
     expect(mem.files.has(sharedCover)).toBe(false)
+  })
+
+  it('should remove imported duration facts only when personal data is deleted', async () => {
+    // Duration facts carry no book FK (0060): nothing cascades, so the delete
+    // branch must clear them itself or they leak into stats and exports.
+    const kept = seedBook(db, userA, { filePath: sharedFile })
+    db.insert(fullSchema.readingDurationFacts).values({
+      id: createId('rdf'), userId: userA, bookVersionId: kept.id, granularity: 'book_day',
+      durationSeconds: 120, date: '2026-01-01', aggregationRole: 'additive', overlapGroup: null,
+      source: 'weread', sourceNamespace: 'ns', sourceRecordKey: 'kept', observedAt: Date.now(),
+    }).run()
+
+    await deleteBook(userA, kept.id)
+    expect(db.select().from(fullSchema.readingDurationFacts).all()).toHaveLength(1)
+
+    const purged = seedBook(db, userA, { filePath: sharedFile })
+    db.insert(fullSchema.readingDurationFacts).values({
+      id: createId('rdf'), userId: userA, bookVersionId: purged.id, granularity: 'book_day',
+      durationSeconds: 120, date: '2026-01-02', aggregationRole: 'additive', overlapGroup: null,
+      source: 'weread', sourceNamespace: 'ns', sourceRecordKey: 'purged', observedAt: Date.now(),
+    }).run()
+
+    await deleteBook(userA, purged.id, { deleteUserData: true })
+    const remaining = db.select().from(fullSchema.readingDurationFacts).all()
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0]?.sourceRecordKey).toBe('kept')
   })
 
   it('should keep blobs referenced by a trashed book row', async () => {

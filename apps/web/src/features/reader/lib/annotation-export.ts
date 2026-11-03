@@ -150,7 +150,7 @@ export function buildAnnotationText(
   return lines.join('\n').trim() + '\n'
 }
 
-function csvCell(value: string | number): string {
+export function csvCell(value: string | number): string {
   const text = String(value)
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }

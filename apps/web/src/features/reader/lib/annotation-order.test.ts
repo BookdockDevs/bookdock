@@ -37,6 +37,17 @@ describe('compareAnnotations', () => {
     const sameTimeB = annotation({ id: 'b', createdAt: 100 })
     expect([sameTimeB, sameTimeA].sort(compareAnnotations)).toEqual([sameTimeA, sameTimeB])
   })
+
+  it('orders imported notes by source offset when no CFI exists', () => {
+    // Same chapter, no CFI: the source offset restores document order even
+    // though the later-offset note was created first.
+    const early = annotation({ id: 'early', cfiRange: null, importLocator: '12', createdAt: 900 })
+    const late = annotation({ id: 'late', cfiRange: null, importLocator: '3627', createdAt: 100 })
+    expect([late, early].sort(compareAnnotations)).toEqual([early, late])
+    // Without an offset the creation time still decides.
+    const unknown = annotation({ id: 'unknown', cfiRange: null, createdAt: 500 })
+    expect([unknown, early].sort(compareAnnotations)).toEqual([unknown, early])
+  })
 })
 
 describe('groupAnnotationsByChapter', () => {

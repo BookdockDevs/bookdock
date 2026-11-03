@@ -419,7 +419,7 @@ export default function UploadSheet({
       </div>
 
       {items.length > 0 && (
-        <ul data-toast-obstacle="" className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
+        <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
           {items.map((item) => {
             const key = statusLabel(item)
             const note = item.messageKey ? _(item.messageKey) : null

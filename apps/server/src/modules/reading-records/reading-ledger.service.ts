@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto'
 
 import { and, desc, eq, inArray, lte, or, sql } from 'drizzle-orm'
 
-import type { ReadingCoverageInterval, ReadingLedgerOverview, ReadingLedgerRes, ReadingLedgerSession, ReadingLedgerSessionPage, ReadingLedgerStatsRes, ReadingRecordConflictDetails, ReadingRecordCreateReq, ReadingSessionUpdateReq, ReadingTimerClaim, ReadingTransfer, ReadingTransferPreview, ReadingWordState } from '@bookdock/shared'
+import type { ReadingCoverageInterval, ReadingLedgerOverview, ReadingLedgerRes, ReadingLedgerSession, ReadingLedgerSessionPage, ReadingLedgerStatsRes, ReadingRecordConflictDetails, ReadingRecordCreateReq, ReadingSessionUpdateReq, ReadingTimerClaim, ReadingWordState } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookStates, bookVersions, contentRevisionMaps, contentRevisions, readingArchives, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingTimerClaims, readingWriteReceipts } from '../../db/schema'
+import { bookStates, bookVersions, contentRevisionMaps, contentRevisions, readingArchives, readingImportBindings, readingBookStats, readingContributions, readingDurationFacts, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingTimerClaims, readingWriteReceipts } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { mergeInterval, unionLength } from '../../lib/intervals'
 import { AppError } from '../../middleware/error'
@@ -15,6 +15,7 @@ import { getBook } from '../books/books.service'
 import { pendingBookDataDeletionVersionIds } from '../libraries/library-query'
 import { mergeTimeFragments, splitReadingTime } from './time-fragments'
 import { excludedReadingBookVersionIds } from './reading-visibility'
+import { aggregateDurationFacts, countReadingDays, getDurationFacts } from './duration-facts'
 
 type Db = ReturnType<typeof getDb>
 type Session = typeof readingSessions.$inferSelect
@@ -664,6 +665,7 @@ export async function getReadingLedger(userId: string, bookId: string, showHidde
   }
   const roundRows = db.select().from(readingRounds).where(roundWhere(userId, bookId)).orderBy(desc(readingRounds.ordinal)).all()
   const rows = db.select().from(readingSessions).where(sessionWhere(userId, bookId)).orderBy(desc(readingSessions.date), desc(readingSessions.startedAt), desc(readingSessions.id)).all()
+  const duration = aggregateDurationFacts(getDurationFacts(userId, bookId))
   const basis = readingCoverageBasis(db, bookId, rows, archive, sourceAvailable)
   const projectedLegacy = projectReadingCoverage(archive.legacyIntervals, { revisionId: archive.legacyRevisionId, wordCount: archive.legacyWordCount }, basis)
   const projected = new Map(rows.map((row) => [row.id, projectReadingCoverage(row.coverage, row, basis)]))
@@ -673,7 +675,8 @@ export async function getReadingLedger(userId: string, bookId: string, showHidde
     const coverage = unionLength(normalizeCoverage([...legacy, ...entries.flatMap((entry) => projected.get(entry.id)!.intervals)]))
     return {
       id: round.id, ordinal: round.ordinal, status: round.status, startedAt: round.startedAt, endedAt: round.endedAt,
-      coverage, totalSeconds: entries.reduce((sum, row) => sum + row.durationSeconds, 0) + (round.ordinal === 1 ? archive.legacyDaily.reduce((sum, row) => sum + row.durationSeconds, 0) : 0),
+      coverage, totalSeconds: entries.reduce((sum, row) => sum + row.durationSeconds, 0)
+        + (round.ordinal === 1 ? archive.legacyDaily.reduce((sum, row) => sum + row.durationSeconds, 0) : 0),
       wordCount: basis.wordCount,
       legacyCoverage: round.ordinal === 1 && archive.legacyIntervals.length > 0,
       unalignedCoverage: entries.some((entry) => projected.get(entry.id)!.unaligned) || (round.ordinal === 1 && projectedLegacy.unaligned),
@@ -682,13 +685,14 @@ export async function getReadingLedger(userId: string, bookId: string, showHidde
     }
   })
   return {
-    bookId, title: archive.title, author: archive.author, format: archive.format, coverKey: archive.coverKey, sourceAvailable,
+    bookId, title: archive.title, author: archive.author, format: archive.format, coverKey: archive.coverKey, coverUrl: archive.coverUrl, importSource: archive.importSource, sourceAvailable,
     currentRoundId: rounds[0]?.id ?? null, legacyCoverage: archive.legacyIntervals.length > 0,
     rounds, coverage: rounds[0]?.coverage ?? unionLength(projectedLegacy.intervals),
     legacyRevisionId: archive.legacyRevisionId, projectedLegacyIntervals: projectedLegacy.intervals, unalignedCoverage: rounds.some((round) => round.unalignedCoverage) || projectedLegacy.unaligned,
     coverageEstimated: rounds.some((round) => round.coverageEstimated),
     legacyDaily: archive.legacyDaily, legacyIntervals: archive.legacyIntervals, legacyWordCount: archive.legacyWordCount,
-    totalSeconds: rows.reduce((sum, row) => sum + row.durationSeconds, 0) + archive.legacyDaily.reduce((sum, row) => sum + row.durationSeconds, 0),
+    totalSeconds: rows.reduce((sum, row) => sum + row.durationSeconds, 0)
+      + archive.legacyDaily.reduce((sum, row) => sum + row.durationSeconds, 0) + duration.additiveSeconds,
     sessions: rows.map((row) => {
       const positionBasis = projectReadingCoverage([[0, 1]], row, basis)
       return {
@@ -792,22 +796,34 @@ export async function getReadingLedgerOverview(userId: string, bookId: string, s
     eq(readingRoundStats.userId, userId), eq(readingRoundStats.bookVersionId, bookId), eq(readingRoundStats.factVersion, state.factVersion),
   )).all()
   const roundStatMap = new Map(roundStats.map((row) => [row.roundId, row]))
+  const duration = aggregateDurationFacts(getDurationFacts(userId, bookId))
+  const factDates = [...(duration.archiveDaily.get(bookId)?.keys() ?? [])].sort()
   const rounds = roundRows.map((round) => {
     const summary = roundStatMap.get(round.id)
     return {
       id: round.id, ordinal: round.ordinal, status: round.status, startedAt: round.startedAt, endedAt: round.endedAt,
-      coverage: summary ? unionLength(summary.coverage) : 0, totalSeconds: summary?.totalSeconds ?? 0,
+      coverage: summary ? unionLength(summary.coverage) : 0,
+      totalSeconds: summary?.totalSeconds ?? 0,
       wordCount: summary?.wordCount ?? state.contentWordCount, legacyCoverage: round.ordinal === 1 && archive.legacyIntervals.length > 0,
       unalignedCoverage: round.ordinal === 1 && projectedLegacy.unaligned,
       coverageEstimated: round.ordinal === 1 && !projectedLegacy.unaligned && JSON.stringify(projectedLegacy.intervals) !== JSON.stringify(normalizeCoverage(archive.legacyIntervals)),
     }
   })
   return {
-    bookId, title: archive.title, author: archive.author, format: archive.format, coverKey: archive.coverKey, sourceAvailable,
+    bookId, title: archive.title, author: archive.author, format: archive.format, coverKey: archive.coverKey, coverUrl: archive.coverUrl, importSource: archive.importSource, sourceAvailable,
     currentRoundId: rounds[0]?.id ?? null, legacyCoverage: archive.legacyIntervals.length > 0, rounds,
-    coverage: unionLength(stats.coverage), coverageIntervals: stats.coverage, totalSeconds: stats.totalSeconds,
+    coverage: unionLength(stats.coverage), coverageIntervals: stats.coverage, totalSeconds: stats.totalSeconds + duration.additiveSeconds,
+    referenceDurationSeconds: duration.referenceSeconds, undatedDurationSeconds: duration.undatedAdditiveSeconds,
     totalWordsRead: stats.totalWordUnits === null ? null : Math.round(stats.totalWordUnits / READING_WORD_UNITS_SCALE), wordState: stats.wordState,
-    readingDays: stats.readingDays, earliestDate: stats.earliestDate, legacyIntervals: archive.legacyIntervals,
+    // Native rows are one per date; the shared rule merges imported facts into
+    // the same per-date seconds before the 60s threshold.
+    readingDays: countReadingDays(
+      new Map(db.select({ date: readingRecords.date, seconds: readingRecords.durationSeconds })
+        .from(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId)))
+        .all().map((row) => [row.date, row.seconds])),
+      duration.archiveDaily.get(bookId),
+    ),
+    earliestDate: stats.earliestDate ?? factDates[0] ?? null, legacyIntervals: archive.legacyIntervals,
     legacyWordCount: archive.legacyWordCount, legacyRevisionId: archive.legacyRevisionId, projectedLegacyIntervals: projectedLegacy.intervals,
     unalignedCoverage: projectedLegacy.unaligned, coverageEstimated: rounds.some((round) => round.coverageEstimated), dataVersion: state.factVersion,
   }
@@ -821,6 +837,7 @@ export async function getReadingLedgerStats(userId: string, bookId: string, rang
     range.from ? sql`${readingRecords.date} >= ${range.from}` : undefined,
     range.to ? sql`${readingRecords.date} <= ${range.to}` : undefined,
   )).orderBy(readingRecords.date).all()
+  const duration = aggregateDurationFacts(getDurationFacts(userId, bookId), range)
   const cumulativeRows = db.select().from(readingRecords).where(and(
     eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId), eq(readingRecords.factVersion, state.factVersion),
     range.to ? sql`${readingRecords.date} <= ${range.to}` : undefined,
@@ -837,12 +854,16 @@ export async function getReadingLedgerStats(userId: string, bookId: string, rang
     cumulative = normalizeCoverage([...cumulative, ...row.coverage])
     cumulativeByDate.set(row.date, unionLength(cumulative))
   }
-  const daily = dailyRows.map((row) => {
+  const durationByDate = new Map(dailyRows.map((row) => [row.date, row.durationSeconds]))
+  for (const [date, seconds] of duration.daily) durationByDate.set(date, (durationByDate.get(date) ?? 0) + seconds)
+  const daily = [...durationByDate].sort(([a], [b]) => a.localeCompare(b)).map(([date, durationSeconds]) => {
+    const row = dailyRows.find((item) => item.date === date)
     return {
-      date: row.date, durationSeconds: row.durationSeconds,
-      totalWordsRead: row.wordUnits === null ? null : Math.round(row.wordUnits / READING_WORD_UNITS_SCALE), wordState: row.wordState,
-      cumulativeCoverage: cumulativeByDate.get(row.date) ?? unionLength(cumulative),
-      progressDelta: row.progressDelta,
+      date, durationSeconds,
+      totalWordsRead: row ? row.wordUnits === null ? null : Math.round(row.wordUnits / READING_WORD_UNITS_SCALE) : null,
+      wordState: row?.wordState ?? 'unknown',
+      cumulativeCoverage: row ? cumulativeByDate.get(date) ?? unionLength(cumulative) : null,
+      progressDelta: row?.progressDelta ?? 0,
     }
   })
   const hourlyMap = new Map<number, { durationSeconds: number; dates: Set<string> }>()
@@ -862,13 +883,16 @@ export async function getReadingLedgerStats(userId: string, bookId: string, rang
   const rangeWordState = combineWordStates(dailyRows.map((row) => row.wordState))
   const totalWordUnits = bounded ? rangeWordUnits : stats.totalWordUnits
   const totalWordState = bounded ? rangeWordState : stats.wordState
-  const hasFacts = bounded ? dailyRows.length > 0 : stats.totalSeconds > 0 || stats.sessionCount > 0 || archive.legacyIntervals.length > 0 || archive.legacyDaily.length > 0
+  const hasFacts = bounded ? dailyRows.length > 0 || duration.daily.size > 0 : stats.totalSeconds > 0 || stats.sessionCount > 0 || archive.legacyIntervals.length > 0 || archive.legacyDaily.length > 0 || duration.additiveSeconds > 0 || duration.referenceSeconds > 0
+  const hasNativeWordFacts = dailyRows.some((row) => row.wordUnits !== null)
   return {
     dataVersion: state.factVersion, from: range.from, to: range.to,
-    totalSeconds: dailyRows.reduce((sum, row) => sum + row.durationSeconds, 0),
-    totalWordsRead: hasFacts && totalWordUnits !== null ? Math.round(totalWordUnits / READING_WORD_UNITS_SCALE) : hasFacts ? null : 0,
-    wordState: hasFacts ? totalWordState : 'known',
-    readingDays: dailyRows.filter((row) => row.durationSeconds >= 60).length, daily,
+    totalSeconds: dailyRows.reduce((sum, row) => sum + row.durationSeconds, 0) + duration.additiveSeconds,
+    undatedDurationSeconds: duration.undatedAdditiveSeconds,
+    referenceDurationSeconds: duration.referenceSeconds,
+    totalWordsRead: hasFacts && hasNativeWordFacts && totalWordUnits !== null ? Math.round(totalWordUnits / READING_WORD_UNITS_SCALE) : hasFacts ? null : 0,
+    wordState: hasFacts && hasNativeWordFacts ? totalWordState : hasFacts ? 'unknown' : 'known',
+    readingDays: [...durationByDate.values()].filter((seconds) => seconds >= 60).length, daily,
     hourly: [...hourlyMap.entries()].sort(([a], [b]) => a - b).map(([hour, item]) => ({ hour, durationSeconds: item.durationSeconds, days: item.dates.size })),
     legacyDaily: archive.legacyDaily.filter((row) => (!range.from || row.date >= range.from) && (!range.to || row.date <= range.to)),
     remainingSeconds,
@@ -1043,173 +1067,28 @@ export function deleteReadingArchive(userId: string, bookId: string) {
     tx.delete(readingBookStats).where(and(eq(readingBookStats.userId, userId), eq(readingBookStats.bookVersionId, bookId))).run()
     tx.delete(readingProjectionStates).where(and(eq(readingProjectionStates.userId, userId), eq(readingProjectionStates.bookVersionId, bookId))).run()
     tx.delete(readingRounds).where(roundWhere(userId, bookId)).run()
+    tx.delete(readingDurationFacts).where(and(eq(readingDurationFacts.userId, userId), eq(readingDurationFacts.bookVersionId, bookId))).run()
     const hasNotes = tx.get(sql`SELECT 1 FROM highlights WHERE user_id = ${userId} AND book_version_id = ${bookId} AND deleted_at IS NULL
       UNION ALL SELECT 1 FROM bookmarks WHERE user_id = ${userId} AND book_version_id = ${bookId} AND deleted_at IS NULL
       UNION ALL SELECT 1 FROM ideas WHERE user_id = ${userId} AND book_version_id = ${bookId} AND deleted_at IS NULL
       UNION ALL SELECT 1 FROM book_reviews WHERE user_id = ${userId} AND read_book_version_id = ${bookId} LIMIT 1`)
     if (hasNotes) {
-      tx.update(readingArchives).set({ legacyIntervals: [], legacyDaily: [], legacyWordCount: null, legacyRevisionId: null })
+      tx.update(readingArchives).set({
+        legacyIntervals: [], legacyDaily: [], legacyWordCount: null, legacyRevisionId: null,
+      })
         .where(archiveWhere(userId, bookId)).run()
       rebuildReadingProjection(tx as unknown as Db, userId, bookId)
-    } else tx.delete(readingArchives).where(archiveWhere(userId, bookId)).run()
+    } else {
+      tx.delete(readingArchives).where(archiveWhere(userId, bookId)).run()
+      // The archive identity is gone, so its binding must go too; a dangling
+      // binding would make the next import resolve to nothing.
+      tx.delete(readingImportBindings).where(and(
+        eq(readingImportBindings.userId, userId),
+        eq(readingImportBindings.targetBookVersionId, bookId),
+      )).run()
+    }
     const state = tx.select().from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
     if (state) tx.update(bookStates).set({ readFraction: 0, ...(state.progressData ? { progressData: { ...state.progressData, intervals: [] } } : {}) })
       .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
   })
-}
-
-export async function exportReadingTransfer(userId: string, bookId?: string): Promise<ReadingTransfer> {
-  const archives = getDb().select().from(readingArchives).where(bookId ? archiveWhere(userId, bookId) : eq(readingArchives.userId, userId)).all()
-  const allArchiveIds = new Set(getDb().select({ id: readingArchives.bookVersionId }).from(readingArchives).where(eq(readingArchives.userId, userId)).all().map((row) => row.id))
-  const detachedReceipts = getDb().select().from(readingWriteReceipts).where(eq(readingWriteReceipts.userId, userId)).all()
-    .filter((row) => !allArchiveIds.has(row.bookVersionId) && (!bookId || row.bookVersionId === bookId))
-    .map((row) => ({ bookId: row.bookVersionId, requestId: row.requestId, bodyHash: row.bodyHash, status: row.status === 'accepted' && row.sessionId === null ? 'deleted' as const : row.status, sessionId: row.sessionId }))
-  return { version: 1, detachedReceipts, archives: await Promise.all(archives.map(async (archive) => {
-    const ledger = await getReadingLedger(userId, archive.bookVersionId, true, true)
-    return { bookId: archive.bookVersionId, title: archive.title, author: archive.author, legacyIntervals: archive.legacyIntervals, legacyDaily: archive.legacyDaily, legacyWordCount: archive.legacyWordCount, legacyRevisionId: archive.legacyRevisionId, rounds: ledger.rounds, sessions: ledger.sessions.map(({ progressScale: _progressScale, ...session }) => session),
-      receipts: getDb().select({ requestId: readingWriteReceipts.requestId, bodyHash: readingWriteReceipts.bodyHash, sessionId: readingWriteReceipts.sessionId, status: readingWriteReceipts.status })
-        .from(readingWriteReceipts).where(and(eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.bookVersionId, archive.bookVersionId))).all().map((row) => ({ ...row, status: row.status === 'accepted' && row.sessionId === null ? 'deleted' as const : row.status })),
-    }
-  })) }
-}
-
-function importedId(userId: string, kind: string, id: string) {
-  return `${kind}_${createHash('sha256').update(`${userId}:${id}`).digest('hex').slice(0, 30)}`
-}
-
-export function importReadingTransfer(userId: string, transfer: ReadingTransfer, preview: boolean): ReadingTransferPreview {
-  const db = getDb()
-  const result = { archives: transfer.archives.length, sessions: 0, duplicates: 0 }
-  const archiveIds = new Set<string>()
-  const roundIds = new Map<string, string>()
-  const sessionIds = new Map<string, string>()
-  const receiptIds = new Set<string>()
-  const pendingTime: Session['fragments'] = []
-  const existingSessions = db.select().from(readingSessions).where(eq(readingSessions.userId, userId)).all()
-  const existingById = new Map(existingSessions.map((entry) => [entry.id, entry]))
-  const existingRequests = new Set(existingSessions.map((entry) => entry.requestId))
-  const existingRounds = db.select().from(readingRounds).where(eq(readingRounds.userId, userId)).all()
-  const roundsById = new Map(existingRounds.map((entry) => [entry.id, entry]))
-  const occupied = mergeTimeFragments(existingSessions.flatMap((entry) => entry.fragments))
-  for (const archive of transfer.archives) {
-    if (archiveIds.has(archive.bookId)) throw new AppError('VALIDATION_ERROR', 'Duplicate archive identity')
-    archiveIds.add(archive.bookId)
-    const incomingRounds = new Set(archive.rounds.map((round) => round.id))
-    const ordinals = new Set(archive.rounds.map((round) => round.ordinal))
-    const newestOrdinal = Math.max(0, ...archive.rounds.map((round) => round.ordinal))
-    if (incomingRounds.size !== archive.rounds.length || ordinals.size !== archive.rounds.length
-      || archive.rounds.filter((round) => round.status === 'reading').length > 1
-      || archive.rounds.some((round) => round.status === 'reading' && round.ordinal !== newestOrdinal)) {
-      throw new AppError('VALIDATION_ERROR', 'Invalid round identities')
-    }
-    const existingArchive = db.select().from(readingArchives).where(archiveWhere(userId, archive.bookId)).get()
-    if (existingArchive && (JSON.stringify(existingArchive.legacyIntervals) !== JSON.stringify(archive.legacyIntervals)
-      || JSON.stringify(existingArchive.legacyDaily) !== JSON.stringify(archive.legacyDaily ?? [])
-      || existingArchive.legacyWordCount !== (archive.legacyWordCount ?? null)
-      || existingArchive.legacyRevisionId !== (archive.legacyRevisionId ?? null))) {
-      throw new AppError('VALIDATION_ERROR', 'Import conflicts with the existing historical baseline')
-    }
-    for (const round of archive.rounds) {
-      if (roundIds.has(round.id) || (round.endedAt != null && round.endedAt < round.startedAt)
-        || (round.status === 'reading' && round.endedAt !== null)) throw new AppError('VALIDATION_ERROR', 'Invalid round lifecycle')
-      const candidates = [roundsById.get(round.id), roundsById.get(importedId(userId, 'rrd', round.id))].filter((entry) => entry !== undefined)
-      if (candidates.length > 1 || candidates.some((entry) => entry.bookVersionId !== archive.bookId)) {
-        throw new AppError('VALIDATION_ERROR', 'Imported round identity belongs to another archive')
-      }
-      const local = candidates[0]
-      const localOrdinal = db.select().from(readingRounds).where(and(eq(readingRounds.userId, userId), eq(readingRounds.bookVersionId, archive.bookId), eq(readingRounds.ordinal, round.ordinal))).get()
-      if (localOrdinal && localOrdinal.id !== local?.id) throw new AppError('VALIDATION_ERROR', 'Import conflicts with existing reading rounds')
-      if (local && (local.ordinal !== round.ordinal || local.status !== round.status || local.startedAt !== round.startedAt || local.endedAt !== round.endedAt)) {
-        throw new AppError('VALIDATION_ERROR', 'Imported round has changed facts')
-      }
-      // An imported ongoing round must not collide with an ongoing local round
-      // omitted from the backup, including during the read-only preview.
-      if (round.status === 'reading') {
-        const active = db.select().from(readingRounds).where(and(roundWhere(userId, archive.bookId), eq(readingRounds.status, 'reading'))).get()
-        if (active && active.id !== local?.id) throw new AppError('VALIDATION_ERROR', 'Import conflicts with the ongoing reading round')
-      }
-      roundIds.set(round.id, local?.id ?? importedId(userId, 'rrd', round.id))
-    }
-    for (const session of archive.sessions) {
-      if (!incomingRounds.has(session.roundId) || sessionIds.has(session.id)) throw new AppError('VALIDATION_ERROR', 'Invalid session identity or round')
-      const candidates = [existingById.get(session.id), existingById.get(importedId(userId, 'rs', session.id))].filter((entry) => entry !== undefined)
-      if (candidates.length > 1) throw new AppError('VALIDATION_ERROR', 'Ambiguous imported record identity')
-      const existing = candidates[0]
-      const normalized = mergeTimeFragments(session.fragments)
-      const effectiveSeconds = normalized.reduce((sum, part) => sum + (part.endedAt - part.startedAt) / 1000, 0)
-      if ((session.startedAt != null && session.endedAt != null && session.endedAt < session.startedAt)
-        || (session.fragments.length && (!session.timezone || Math.abs(effectiveSeconds - session.durationSeconds) > 0.001))) {
-        throw new AppError('VALIDATION_ERROR', 'Imported effective time does not match its fragments')
-      }
-      if (existing) {
-        const matches = existing.bookId === archive.bookId && existing.roundId === roundIds.get(session.roundId)
-          && existing.source === session.source && existing.date === session.date
-          && existing.startedAt === session.startedAt && existing.endedAt === session.endedAt && existing.durationSeconds === session.durationSeconds
-          && existing.startFraction === session.startFraction && existing.endFraction === session.endFraction
-          && existing.wordCount === session.wordCount && (existing.timezone ?? '') === session.timezone
-          && existing.revisionId === (session.revisionId ?? null)
-          && existing.startCfi === (session.startCfi ?? null) && existing.endCfi === (session.endCfi ?? null)
-          && existing.startChapterIndex === (session.startChapterIndex ?? null) && existing.endChapterIndex === (session.endChapterIndex ?? null)
-          && JSON.stringify(existing.coverage) === JSON.stringify(session.coverage) && JSON.stringify(existing.fragments) === JSON.stringify(session.fragments)
-        if (!matches) throw new AppError('VALIDATION_ERROR', 'Imported record identity has different facts')
-        result.duplicates++
-      } else {
-        if (existingRequests.has(importedId(userId, 'imp', session.id))) {
-          throw new AppError('VALIDATION_ERROR', 'Imported record request identity conflicts with an existing record')
-        }
-        pendingTime.push(...normalized)
-        result.sessions++
-      }
-      sessionIds.set(session.id, existing?.id ?? importedId(userId, 'rs', session.id))
-    }
-    const incomingSessionIds = new Set(archive.sessions.map((session) => session.id))
-    for (const receipt of archive.receipts ?? []) {
-      if (receiptIds.has(receipt.requestId) || (receipt.status === 'accepted'
-        ? receipt.sessionId === null || !incomingSessionIds.has(receipt.sessionId)
-        : receipt.sessionId !== null)) throw new AppError('VALIDATION_ERROR', 'Invalid reading write receipt')
-      receiptIds.add(receipt.requestId)
-      const local = db.select().from(readingWriteReceipts).where(and(eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.requestId, receipt.requestId))).get()
-      if (local && (local.bookVersionId !== archive.bookId || local.bodyHash !== receipt.bodyHash || (local.status === 'accepted' && local.sessionId === null ? 'deleted' : local.status) !== receipt.status
-        || local.sessionId !== (receipt.sessionId === null ? null : sessionIds.get(receipt.sessionId)))) {
-        throw new AppError('VALIDATION_ERROR', 'Imported write receipt has different facts')
-      }
-    }
-  }
-  const allTime = [...occupied, ...pendingTime].sort((a, b) => a.startedAt - b.startedAt)
-  for (let index = 1; index < allTime.length; index++) {
-    if (allTime[index].startedAt < allTime[index - 1].endedAt) throw new AppError('VALIDATION_ERROR', 'Imported reading time overlaps existing records')
-  }
-  for (const receipt of transfer.detachedReceipts ?? []) {
-    if (receiptIds.has(receipt.requestId) || archiveIds.has(receipt.bookId) || receipt.status === 'accepted' || receipt.sessionId !== null) {
-      throw new AppError('VALIDATION_ERROR', 'Invalid detached reading write receipt')
-    }
-    receiptIds.add(receipt.requestId)
-    const local = db.select().from(readingWriteReceipts).where(and(eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.requestId, receipt.requestId))).get()
-    if (local && (local.bookVersionId !== receipt.bookId || local.bodyHash !== receipt.bodyHash || (local.status === 'accepted' && local.sessionId === null ? 'deleted' : local.status) !== receipt.status || local.sessionId !== null)) {
-      throw new AppError('VALIDATION_ERROR', 'Imported write receipt has different facts')
-    }
-  }
-  if (preview) return result
-  db.transaction((rawTx) => {
-    const tx = rawTx as unknown as Db
-    for (const archive of transfer.archives) {
-      tx.insert(readingArchives).values({ userId, bookVersionId: archive.bookId, title: archive.title, author: archive.author, legacyIntervals: archive.legacyIntervals, legacyDaily: archive.legacyDaily ?? [], legacyWordCount: archive.legacyWordCount ?? null, legacyRevisionId: archive.legacyRevisionId ?? null, createdAt: Date.now(), updatedAt: Date.now() }).onConflictDoNothing().run()
-      for (const round of archive.rounds) {
-        tx.insert(readingRounds).values({ id: roundIds.get(round.id)!, userId, bookVersionId: archive.bookId, ordinal: round.ordinal, status: round.status, startedAt: round.startedAt, endedAt: round.endedAt }).onConflictDoNothing().run()
-      }
-      for (const session of archive.sessions) {
-        tx.insert(readingSessions).values({ ...session, id: sessionIds.get(session.id)!, roundId: roundIds.get(session.roundId)!, userId, bookId: archive.bookId, bookVersionId: archive.bookId, requestId: importedId(userId, 'imp', session.id) }).onConflictDoNothing().run()
-      }
-      for (const receipt of archive.receipts ?? []) {
-        tx.insert(readingWriteReceipts).values({ ...receipt, userId, bookVersionId: archive.bookId, sessionId: receipt.sessionId === null ? null : sessionIds.get(receipt.sessionId)! }).onConflictDoNothing().run()
-      }
-      refreshReadingProjectionIncrementally(tx, userId, archive.bookId,
-        archive.sessions.map((session) => sessionIds.get(session.id)!),
-        archive.rounds.map((round) => roundIds.get(round.id)!))
-    }
-    for (const receipt of transfer.detachedReceipts ?? []) {
-      tx.insert(readingWriteReceipts).values({ userId, requestId: receipt.requestId, bookVersionId: receipt.bookId, bodyHash: receipt.bodyHash, status: receipt.status, sessionId: null }).onConflictDoNothing().run()
-    }
-  })
-  return result
 }

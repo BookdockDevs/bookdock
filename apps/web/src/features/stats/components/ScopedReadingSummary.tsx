@@ -16,6 +16,8 @@ export default function ScopedReadingSummary({ range, period, date }: ScopedRead
   const scope = summary.data?.data.scope
   const cards = [
     [_('readingData.duration'), formatDuration(scope?.totalSeconds ?? 0, _)],
+    ...(scope?.undatedDurationSeconds ? [[_('readingData.undatedDuration', { defaultValue: '其中无日期' }), formatDuration(scope.undatedDurationSeconds, _)]] : []),
+    ...(scope?.referenceDurationSeconds ? [[_('stats.referenceDuration', { defaultValue: '累计参考' }), formatDuration(scope.referenceDurationSeconds, _)]] : []),
     [_('readingData.booksRead'), String(scope?.totalBooks ?? 0)],
     [_('readingData.days'), String(scope?.totalDays ?? 0)],
     [_('readingData.finishedBooks'), String(scope?.finishedBooks ?? 0)],

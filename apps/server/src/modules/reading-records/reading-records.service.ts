@@ -26,6 +26,7 @@ import { isProgressMigrationCompleted } from '../progress/progress-migration'
 import { AppError } from '../../middleware/error'
 import { addLedgerReading, deleteLedgerSession, ensureReadingArchive, ensureReadingProjections, READING_WORD_UNITS_SCALE, updateLedgerSession } from './reading-ledger.service'
 import { readingTimestampBounds } from '../../lib/reading-range'
+import { aggregateDurationFacts, countReadingDays, getDurationFacts } from './duration-facts'
 
 export async function addReadingTime(userId: string, body: ReadingRecordCreateReq, showHidden = false) {
   const session = await addLedgerReading(userId, body, showHidden)
@@ -145,18 +146,32 @@ export async function getSummary(userId: string, today: string, showHidden = fal
   const db = getDb()
   const hiddenIds = excludedReadingBookVersionIds(db, userId, showHidden)
   const visibleRecords = hiddenIds.length > 0 ? notInArray(readingRecords.bookId, hiddenIds) : undefined
+  const facts = getDurationFacts(userId).filter((fact) => !fact.bookVersionId || !hiddenIds.includes(fact.bookVersionId))
+  const duration = aggregateDurationFacts(facts)
   const totals = db.select({
     totalSeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
     totalBooks: sql<number>`count(distinct ${readingRecords.bookId})`,
     totalDays: sql<number>`count(distinct ${readingRecords.date})`,
   }).from(readingRecords).where(and(eq(readingRecords.userId, userId), visibleRecords)).get()!
+  totals.totalSeconds += duration.additiveSeconds
+  const recordedBookIds = new Set(db.selectDistinct({ bookId: readingRecords.bookId }).from(readingRecords)
+    .where(eq(readingRecords.userId, userId)).all().map((row) => row.bookId))
+  for (const archiveId of new Set([...duration.bookAdditive.keys(), ...duration.bookReference.keys()])) {
+    if (!recordedBookIds.has(archiveId)) {
+      totals.totalBooks++
+      recordedBookIds.add(archiveId)
+    }
+  }
   const todayRow = db.select({
     todaySeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
   }).from(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.date, today), visibleRecords)).get()!
-  const dates = db.select({ date: readingRecords.date }).from(readingRecords)
-    .where(and(eq(readingRecords.userId, userId), visibleRecords)).groupBy(readingRecords.date)
-    .having(sql`sum(${readingRecords.durationSeconds}) >= 60`).orderBy(readingRecords.date).all()
-    .map((r) => r.date)
+  todayRow.todaySeconds += duration.daily.get(today) ?? 0
+  const mergedDays = new Map(db.select({ date: readingRecords.date, seconds: sql<number>`sum(${readingRecords.durationSeconds})` })
+    .from(readingRecords).where(and(eq(readingRecords.userId, userId), visibleRecords)).groupBy(readingRecords.date)
+    .all().map((row) => [row.date, row.seconds]))
+  for (const [date, seconds] of duration.daily) mergedDays.set(date, (mergedDays.get(date) ?? 0) + seconds)
+  totals.totalDays = mergedDays.size
+  const dates = [...mergedDays].filter(([, seconds]) => seconds >= 60).map(([date]) => date).sort()
   const streak = computeStreak(dates, today)
 
   // Week-over-week / month-over-month comparison, bucketed from one grouped
@@ -172,15 +187,22 @@ export async function getSummary(userId: string, today: string, showHidden = fal
     .where(and(eq(readingRecords.userId, userId), gte(readingRecords.date, prevMonthStart), visibleRecords))
     .groupBy(readingRecords.date)
     .all()
+  const dayRowsByDate = new Map(dayRows.map((row) => [row.date, row.durationSeconds]))
+  // Imported facts carry every historical date; anything before the compared
+  // window would land in "last month" and skew the month-over-month trend.
+  for (const [date, seconds] of duration.daily) {
+    if (date < prevMonthStart) continue
+    dayRowsByDate.set(date, (dayRowsByDate.get(date) ?? 0) + seconds)
+  }
   let weekSeconds = 0
   let prevWeekSeconds = 0
   let monthSeconds = 0
   let prevMonthSeconds = 0
-  for (const row of dayRows) {
-    if (row.date >= thisMonthStart) monthSeconds += row.durationSeconds
-    else prevMonthSeconds += row.durationSeconds
-    if (row.date >= thisWeekStart) weekSeconds += row.durationSeconds
-    else if (row.date >= prevWeekStart) prevWeekSeconds += row.durationSeconds
+  for (const [date, seconds] of dayRowsByDate) {
+    if (date >= thisMonthStart) monthSeconds += seconds
+    else prevMonthSeconds += seconds
+    if (date >= thisWeekStart) weekSeconds += seconds
+    else if (date >= prevWeekStart) prevWeekSeconds += seconds
   }
 
   // Same-period month-to-date comparison
@@ -227,6 +249,14 @@ export async function getSummary(userId: string, today: string, showHidden = fal
       previousDays.add(r.date)
     }
   }
+  for (const [date, seconds] of duration.daily) {
+    if (date < prevMonthFrom || date > thisMonthTo) continue
+    comparisonDays.set(date, (comparisonDays.get(date) ?? 0) + seconds)
+    if (date >= thisMonthFrom) currentPeriodSeconds += seconds
+    if (date <= prevMonthTo) previousPeriodSeconds += seconds
+    if (date >= thisMonthFrom && date <= thisMonthTo) currentDays.add(date)
+    if (date >= prevMonthFrom && date <= prevMonthTo) previousDays.add(date)
+  }
   for (const date of currentDays) if ((comparisonDays.get(date) ?? 0) < 60) currentDays.delete(date)
   for (const date of previousDays) if ((comparisonDays.get(date) ?? 0) < 60) previousDays.delete(date)
 
@@ -241,8 +271,12 @@ export async function getSummary(userId: string, today: string, showHidden = fal
 
   const totalWordsRead = await computeTotalWordsRead(userId, showHidden)
   const scopedDays = await getDaily(userId, range, showHidden)
-  const scopedBooks = db.select({ count: sql<number>`count(distinct ${readingRecords.bookId})` }).from(readingRecords)
-    .where(rangeConditions(userId, range, hiddenIds)).get()!.count
+  const scopedDuration = aggregateDurationFacts(facts, range)
+  const scopedBooks = new Set([
+    ...db.selectDistinct({ bookId: readingRecords.bookId }).from(readingRecords).where(rangeConditions(userId, range, hiddenIds)).all().map((row) => row.bookId),
+    ...scopedDuration.bookAdditive.keys(),
+    ...scopedDuration.bookReference.keys(),
+  ]).size
   const finishBounds = readingTimestampBounds(range)
   const finished = db.select().from(readingRounds).where(and(
     eq(readingRounds.userId, userId), eq(readingRounds.status, 'finished'),
@@ -260,11 +294,15 @@ export async function getSummary(userId: string, today: string, showHidden = fal
   const scopedWordUnits = scopedContributions.reduce((sum, row) => sum + (row.wordUnits ?? 0), 0)
   return {
     ...totals,
+    undatedDurationSeconds: duration.undatedAdditiveSeconds,
+    referenceDurationSeconds: duration.referenceSeconds,
     firstRecordedDate: dates[0],
     totalDays: dates.length,
     scope: {
       longestStreak: computeStreak(scopedDays.filter((day) => day.durationSeconds >= 60).map((day) => day.date), today).longest,
-      totalSeconds: scopedDays.reduce((sum, day) => sum + day.durationSeconds, 0),
+      totalSeconds: scopedDays.reduce((sum, day) => sum + day.durationSeconds, 0) + scopedDuration.undatedAdditiveSeconds,
+      undatedDurationSeconds: scopedDuration.undatedAdditiveSeconds,
+      referenceDurationSeconds: scopedDuration.referenceSeconds,
       totalBooks: scopedBooks,
       totalDays: scopedDays.filter((day) => day.durationSeconds >= 60).length,
       finishedBooks: new Set(finished.map((round) => round.bookVersionId)).size,
@@ -295,7 +333,7 @@ function rangeConditions(userId: string, range: { from?: string; to?: string }, 
 
 export async function getDaily(userId: string, range: { from?: string; to?: string }, showHidden = false): Promise<ReadingRecordDailyItem[]> {
   const db = getDb()
-  return db.select({
+  const rows = db.select({
     date: readingRecords.date,
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
   }).from(readingRecords)
@@ -303,6 +341,13 @@ export async function getDaily(userId: string, range: { from?: string; to?: stri
     .groupBy(readingRecords.date)
     .orderBy(readingRecords.date)
     .all()
+  const daily = new Map(rows.map((row) => [row.date, row.durationSeconds]))
+  const hiddenIds = excludedReadingBookVersionIds(db, userId, showHidden)
+  const duration = aggregateDurationFacts(getDurationFacts(userId).filter((fact) => !fact.bookVersionId || !hiddenIds.includes(fact.bookVersionId)), range)
+  for (const [date, seconds] of duration.daily) {
+    daily.set(date, (daily.get(date) ?? 0) + seconds)
+  }
+  return [...daily].sort(([a], [b]) => a.localeCompare(b)).map(([date, durationSeconds]) => ({ date, durationSeconds }))
 }
 
 /** Hour-of-day distribution from persisted contributions in each record's timezone. */
@@ -329,6 +374,7 @@ export async function getHourly(userId: string, range: { from?: string; to?: str
 }
 export async function getByBook(userId: string, range: { from?: string; to?: string }, showHidden = false): Promise<ReadingRecordBookItem[]> {
   const db = getDb()
+  const hiddenIds = excludedReadingBookVersionIds(db, userId, showHidden)
   const totals = db.select({
     bookId: readingRecords.bookId,
     progress: sql<number>`coalesce(${bookStates.percent}, 0)`,
@@ -337,10 +383,39 @@ export async function getByBook(userId: string, range: { from?: string; to?: str
     days: sql<number>`count(distinct CASE WHEN ${readingRecords.durationSeconds} >= 60 THEN ${readingRecords.date} END)`,
   }).from(readingRecords)
     .leftJoin(bookStates, and(eq(bookStates.bookVersionId, readingRecords.bookId), eq(bookStates.userId, userId)))
-    .where(rangeConditions(userId, range, excludedReadingBookVersionIds(db, userId, showHidden)))
+    .where(rangeConditions(userId, range, hiddenIds))
     .groupBy(readingRecords.bookId)
     .orderBy(desc(sql`sum(${readingRecords.durationSeconds})`))
-    .all()
+    .all() as unknown as ReadingRecordBookItem[]
+  for (const row of totals) row.referenceDurationSeconds = 0
+
+  const durationByBook = aggregateDurationFacts(getDurationFacts(userId).filter((fact) => !fact.bookVersionId || !hiddenIds.includes(fact.bookVersionId)), range)
+  const byBook = new Map(totals.map((row) => [row.bookId, row]))
+  for (const bookId of new Set([...durationByBook.bookAdditive.keys(), ...durationByBook.bookReference.keys()])) {
+    const row = byBook.get(bookId) ?? {
+      bookId, title: '', author: '', coverKey: null, progress: null, durationSeconds: 0,
+      referenceDurationSeconds: 0, days: null, readStatus: null,
+    }
+    row.durationSeconds += durationByBook.bookAdditive.get(bookId) ?? 0
+    row.referenceDurationSeconds += durationByBook.bookReference.get(bookId) ?? 0
+    if (!byBook.has(bookId)) totals.push(row)
+    byBook.set(bookId, row)
+  }
+  // Native and imported days merge per date before the 60s threshold, the same
+  // rule as the archive tallies and the ledger overview.
+  const dailyByBook = new Map<string, Map<string, number>>()
+  for (const row of db.select({ bookId: readingRecords.bookId, date: readingRecords.date, seconds: readingRecords.durationSeconds })
+    .from(readingRecords).where(rangeConditions(userId, range, hiddenIds)).all()) {
+    const dates = dailyByBook.get(row.bookId) ?? new Map<string, number>()
+    dates.set(row.date, (dates.get(row.date) ?? 0) + row.seconds)
+    dailyByBook.set(row.bookId, dates)
+  }
+  const dayBooks = new Set([...dailyByBook.keys(), ...durationByBook.bookDaily.keys()])
+  for (const bookId of dayBooks) {
+    const row = byBook.get(bookId)
+    if (row) row.days = countReadingDays(dailyByBook.get(bookId), durationByBook.bookDaily.get(bookId))
+  }
+  totals.sort((a, b) => b.durationSeconds + b.referenceDurationSeconds - a.durationSeconds - a.referenceDurationSeconds)
 
   if (totals.length === 0) return []
 
@@ -434,7 +509,21 @@ function readingTaxonomyFacts(userId: string, range: ReadingRange, showHidden: b
     durationSeconds: sql<number>`sum(${readingRecords.durationSeconds})`,
   }).from(readingRecords).where(rangeConditions(userId, range, excluded))
     .groupBy(readingRecords.bookId).all()
-  return { db, facts, holdings: new Map(holdings.filter((row) => !row.excluded).map((row) => [row.bookVersionId, row])) }
+  // Mounted imports land in duration facts, not readingRecords; without this
+  // merge their seconds appear in the overview but vanish from tag/category
+  // stats for the same book.
+  const durationByBook = aggregateDurationFacts(
+    getDurationFacts(userId).filter((fact) => !fact.bookVersionId || !excluded.includes(fact.bookVersionId)), range,
+  )
+  const secondsByBook = new Map(durationByBook.bookAdditive)
+  for (const fact of facts) {
+    secondsByBook.set(fact.bookVersionId, (secondsByBook.get(fact.bookVersionId) ?? 0) + fact.durationSeconds)
+  }
+  return {
+    db,
+    facts: [...secondsByBook].map(([bookVersionId, durationSeconds]) => ({ bookVersionId, durationSeconds })),
+    holdings: new Map(holdings.filter((row) => !row.excluded).map((row) => [row.bookVersionId, row])),
+  }
 }
 
 /** Every distinct version/tag receives the full duration, without multiplying facts. */

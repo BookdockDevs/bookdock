@@ -1601,6 +1601,8 @@ export interface ReadingRecordSummaryRes {
   scope?: {
     longestStreak: number
     totalSeconds: number
+    undatedDurationSeconds: number
+    referenceDurationSeconds: number
     totalBooks: number
     totalDays: number
     finishedBooks: number
@@ -1609,6 +1611,8 @@ export interface ReadingRecordSummaryRes {
     wordsPartial?: boolean
   }
   totalSeconds: number
+  undatedDurationSeconds: number
+  referenceDurationSeconds: number
   totalBooks: number
   totalDays: number
   todaySeconds: number
@@ -1644,11 +1648,12 @@ export interface ReadingRecordBookItem {
   title: string
   author: string
   coverKey: string | null
-  progress: number
+  progress: number | null
   durationSeconds: number
+  referenceDurationSeconds: number
   /** Distinct days with at least sixty seconds of reading for this book in the range. */
-  days: number
-  readStatus: ReadStatus
+  days: number | null
+  readStatus: ReadStatus | null
 }
 
 export interface ReadingRecordBookDetailRes {
@@ -1932,8 +1937,17 @@ export interface AnnotationRes {
   editedAt?: number | null
   id: string
   bookId: string
-  cfiRange: string
+  /** Null = position unknown (imported notes without a source-derivable CFI);
+   * such rows never offer content jumps. */
+  cfiRange: string | null
   cfiAnchor: string | null
+  /** Source-native offset inside the chapter for imported rows. Opaque and
+   * ordering-only: it never enables a content jump and is not a CFI. */
+  importLocator?: string | null
+  /** Source-native chapter ordinal for imported rows (WeRead chapterUid /
+   * legado chapterIndex). Ordering-only fallback when the book's own TOC is
+   * unavailable (import archives, retained archives of deleted books). */
+  importChapterIndex?: number | null
   type: AnnotationType
   color: string
   style: AnnotationStyle

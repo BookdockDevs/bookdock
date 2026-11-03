@@ -407,6 +407,13 @@
       "when": 1793600000000,
       "tag": "0058_personal_metadata_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793800000000,
+      "tag": "0060_reading_imports",
+      "breakpoints": true
     }
   ]
 }

@@ -10,11 +10,10 @@ import {
   readingRoundActionSchema,
   readingTimerClaimSchema,
   readingTimerReleaseSchema,
-  readingTransferSchema,
 } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
-import { changeReadingRound, claimReadingTimer, deleteReadingArchive, exportReadingTransfer, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, importReadingTransfer, releaseReadingTimer } from './reading-ledger.service'
+import { changeReadingRound, claimReadingTimer, deleteReadingArchive, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, releaseReadingTimer } from './reading-ledger.service'
 
 import {
   addReadingTime,
@@ -81,18 +80,6 @@ readingRecordsRoutes.post('/release', async (c) => {
   releaseReadingTimer(c.get('user')!.id, parsed.data.deviceId, parsed.data.activityAt)
   return c.json({ data: { ok: true } })
 })
-
-readingRecordsRoutes.get('/transfer', async (c) => {
-  return c.json({ data: await exportReadingTransfer(c.get('user')!.id, c.req.query('bookId')) })
-})
-
-for (const operation of ['preview', 'import'] as const) {
-  readingRecordsRoutes.post(`/transfer/${operation}`, async (c) => {
-    const parsed = readingTransferSchema.safeParse(await c.req.json())
-    if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid reading backup', parsed.error.flatten())
-    return c.json({ data: importReadingTransfer(c.get('user')!.id, parsed.data, operation === 'preview') })
-  })
-}
 
 readingRecordsRoutes.post('/', async (c) => {
   const user = c.get('user')

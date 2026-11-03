@@ -53,6 +53,7 @@ interface CardItem {
   key: string
   label: string
   value: string
+  details?: string[]
   delta?: DeltaInfo
   icon: ReactNode
   iconBgClass: string
@@ -117,6 +118,8 @@ export default function SummaryCards({
     ? displayDays > 0 ? Math.round(displaySeconds / displayDays) : 0
     : undefined
   const streak = isAll ? s?.currentStreak : scope?.longestStreak
+  const undatedSeconds = isAll ? s?.undatedDurationSeconds : scope?.undatedDurationSeconds
+  const referenceSeconds = isAll ? s?.referenceDurationSeconds : scope?.referenceDurationSeconds
 
   function calcDelta(current: number | undefined, previous: number | undefined, format: (v: number) => string): DeltaInfo | undefined {
     if (!isScoped || current === undefined || previous === undefined) return undefined
@@ -129,6 +132,10 @@ export default function SummaryCards({
       key: 'totalTime',
       label: _('stats.totalTime'),
       value: displaySeconds !== undefined ? formatDuration(displaySeconds, _) : '—',
+      details: [
+        ...(undatedSeconds ? [`${_('readingData.undatedDuration', { defaultValue: '其中无日期' })} · ${formatDuration(undatedSeconds, _)}`] : []),
+        ...(referenceSeconds ? [`${_('stats.referenceDuration', { defaultValue: '累计参考' })} · ${formatDuration(referenceSeconds, _)}`] : []),
+      ],
       delta: calcDelta(displaySeconds, prevScopeData?.totalSeconds, (v) => formatDuration(v, _)),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -292,6 +299,7 @@ export default function SummaryCards({
                   <p className="text-xl tabular-nums text-stone-900 sm:text-2xl dark:text-stone-100">
                     <FormattedStatValue text={c.value} />
                   </p>
+                  {c.details?.map((detail) => <p key={detail} className="mt-0.5 text-[10px] leading-snug text-stone-500 dark:text-stone-400">{detail}</p>)}
                   <DeltaDisplay delta={c.delta} isScoped={isScoped} />
                 </>
               )}

@@ -493,7 +493,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
         onToggleLike={(entry) => {
           toggleIdeaLike.mutate({ ideaId: entry.annotation.id, liked: !entry.liked })
         }}
-        onJump={(entry) => { if (entry.locationAvailable !== false) { void renderer?.display(entry.annotation.cfiRange); close() } }}
+        onJump={(entry) => { if (entry.locationAvailable !== false && entry.annotation.cfiRange) { void renderer?.display(entry.annotation.cfiRange); close() } }}
         onClose={close}
       />
       {deleteTarget && <ConfirmDialog title={_('archive.deleteIdeaTitle')} message={_('archive.deleteIdeaMessage')} confirmLabel={_('reader.delete')} confirmVariant="danger" confirmDisabled={del.isPending} onClose={() => { if (!del.isPending) setDeleteTarget(null) }} onConfirm={async () => {

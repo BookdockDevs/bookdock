@@ -68,12 +68,14 @@ export default function BookTimeList({ date, period, range }: BookTimeListProps)
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5 text-sm font-medium">
                   <Link to="/archive" search={{ bookId: item.bookId, bookView: 'data' }} state={(previous) => ({ ...previous })} className="truncate hover:underline">{item.title}</Link>
-                  <span className="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-normal text-stone-500 dark:bg-stone-800 dark:text-stone-400">
-                    {_(`library.readStatus${item.readStatus[0].toUpperCase()}${item.readStatus.slice(1)}`)}
-                  </span>
+                  {item.readStatus && (
+                    <span className="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-normal text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                      {_(`library.readStatus${item.readStatus[0].toUpperCase()}${item.readStatus.slice(1)}`)}
+                    </span>
+                  )}
                 </p>
                 <p className="truncate text-xs text-stone-500 dark:text-stone-400">{item.author}</p>
-                {item.progress > 0 && (
+                {item.progress !== null && item.progress > 0 && (
                   <div className="mt-1.5 flex items-center gap-2">
                     <div className="h-1 w-24 overflow-hidden rounded-full bg-stone-200/80 dark:bg-stone-700">
                       <div
@@ -86,12 +88,13 @@ export default function BookTimeList({ date, period, range }: BookTimeListProps)
                 )}
               </div>
               <span className="flex shrink-0 flex-col items-end gap-0.5">
-                <span className="text-sm tabular-nums text-stone-600 dark:text-stone-300">
-                  {formatDuration(item.durationSeconds, _)}
-                </span>
-                <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">
-                  {_('stats.bookDays', { n: item.days })}
-                </span>
+                {item.durationSeconds > 0 && <span className="text-sm tabular-nums text-stone-600 dark:text-stone-300">{formatDuration(item.durationSeconds, _)}</span>}
+                {item.referenceDurationSeconds > 0 && (
+                  <span className="text-[10px] tabular-nums text-stone-500 dark:text-stone-400">
+                    {_('stats.referenceDuration', { defaultValue: '累计参考' })} · {formatDuration(item.referenceDurationSeconds, _)}
+                  </span>
+                )}
+                {item.days !== null && <span className="text-[10px] tabular-nums text-stone-400 dark:text-stone-500">{_('stats.bookDays', { n: item.days })}</span>}
               </span>
             </li>
           ))}

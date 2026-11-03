@@ -27,7 +27,7 @@ import { useBook } from '@/features/library/hooks'
 import { useDeleteAnnotation, useBatchDeleteAnnotations, useUpdateAnnotation } from '@/features/reader/hooks/useAnnotations'
 import { useIdeaComposer } from '@/features/reader/hooks/useIdeas'
 import { isCustomBookmarkTitle } from '@/features/reader/lib/annotation-text'
-import { compareAnnotations, groupAnnotationsByChapter } from '@/features/reader/lib/annotation-order'
+import { chapterGroupOrdinal, compareAnnotations, groupAnnotationsByChapter } from '@/features/reader/lib/annotation-order'
 import { buildChapterOrderLookup, type ChapterOrderItem } from '@/features/reader/lib/chapter-order'
 import { useReaderState } from '@/features/reader/state/reader-state'
 import { reviewExcerpt } from '@/features/reviews/lib/markdown'
@@ -47,6 +47,7 @@ import { useArchiveBookDetail } from './hooks'
 import { hasReadableText, readStatusLabel } from './components/archive-helpers'
 import BookReadingData from './components/BookReadingData'
 import HighlightFilterMenu from './components/HighlightFilterMenu'
+import ImportLocatorDialog from './components/ImportLocatorDialog'
 import SortMenu from './components/SortMenu'
 
 type BookTab = ArchiveRecordType | 'all'
@@ -81,17 +82,23 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   const [selectExportOpen, setSelectExportOpen] = useState(false)
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
   const [bookDetailOpen, setBookDetailOpen] = useState(false)
+  const [locatorOpen, setLocatorOpen] = useState(false)
   const [colorFilter, setColorFilter] = useState<Set<string>>(new Set())
   const [styleFilter, setStyleFilter] = useState<Set<AnnotationStyle>>(new Set())
 
   const ledger = useReadingLedger(bookVersionId)
   const book = useBook(bookVersionId)
   const sourceUnavailable = book.isError && book.error instanceof ApiError && (book.error.status === 404 || book.error.status === 403)
-  const archivedBook = sourceUnavailable && ledger.data?.data ? {
+  const importedSource = ledger.data?.data?.importSource ?? null
+  const archivedBook = ledger.data?.data ? {
     id: bookVersionId, title: ledger.data.data.title, author: ledger.data.data.author,
-    format: ledger.data.data.format ?? 'txt', coverKey: ledger.data.data.coverKey ?? null,
+    format: ledger.data.data.format ?? undefined, coverKey: ledger.data.data.coverKey ?? null,
   } : null
-  const displayedBook = sourceUnavailable ? archivedBook : book.data?.data
+  // The library detail request 404s for archive-only books, so the header
+  // must not wait on it: ledger metadata (staleTime Infinity, always cached)
+  // renders the header immediately and book.data overrides it once available.
+  const displayedBook = book.data?.data ?? ((book.isPending || sourceUnavailable) ? archivedBook : null)
+  const currentBookTitle = displayedBook?.title ?? ledger.data?.data?.title ?? ''
   const hasProgress = (book.data?.data.progress ?? 0) > 0
   const chapters = useBookChapters(bookVersionId, bookView === 'notes' && !sourceUnavailable)
   const detail = useArchiveBookDetail(bookVersionId, bookView === 'notes', range)
@@ -136,6 +143,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   const annotations = useMemo(() => {
     if (!isChapterSort) return []
     const reverse = normalizedSort === 'chapter-desc'
+    const hasToc = chapterOrder.length > 0
     const orderIndex = (g: { chapter: string; chapterHref: string | null }) => {
       const i = lookup(g.chapter, g.chapterHref)
       return i < 0 ? chapterOrder.length : i
@@ -146,12 +154,22 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
         list: [...g.list].sort((a, b) => (reverse ? -1 : 1) * compareAnnotations(a, b)),
       }))
       .sort((g1, g2) => {
-        const a = orderIndex(g1)
-        const b = orderIndex(g2)
-        const aUnknown = a === chapterOrder.length
-        const bUnknown = b === chapterOrder.length
-        if (aUnknown !== bUnknown) return aUnknown ? 1 : -1
-        return (reverse ? -1 : 1) * (a - b)
+        // TOC position wins; without a usable TOC (import archives, retained
+        // archives of deleted books) the source-native chapter ordinal keeps
+        // cross-chapter order meaningful. Matched groups stay ahead of
+        // unmatched ones and the two scales never interleave.
+        const a = hasToc ? orderIndex(g1) : -1
+        const b = hasToc ? orderIndex(g2) : -1
+        const aMatched = a >= 0 && a < chapterOrder.length
+        const bMatched = b >= 0 && b < chapterOrder.length
+        if (aMatched !== bMatched) return aMatched ? -1 : 1
+        if (aMatched && bMatched) return (reverse ? -1 : 1) * (a - b)
+        const aOrdinal = chapterGroupOrdinal(g1)
+        const bOrdinal = chapterGroupOrdinal(g2)
+        if (aOrdinal === null && bOrdinal === null) return 0
+        if (aOrdinal === null) return 1
+        if (bOrdinal === null) return -1
+        return (reverse ? -1 : 1) * (aOrdinal - bOrdinal)
       })
   }, [filteredAnnotations, lookup, chapterOrder.length, isChapterSort, normalizedSort, _])
 
@@ -710,16 +728,18 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
             </span>
           </div>
         )}
-        {book.isPending ? (
-          <div role="status" className="flex gap-4">
-            <div className="h-24 w-[4.5rem] animate-pulse rounded-xl bg-stone-500/10" />
-            <div className="flex-1 space-y-2 py-1">
-              <div className="h-6 w-48 animate-pulse rounded bg-stone-500/10" />
-              <div className="h-4 w-32 animate-pulse rounded bg-stone-500/10" />
+        {!displayedBook ? (
+          book.isError && !book.data ? (
+            <QueryErrorState isRetrying={book.isFetching} onRetry={() => void book.refetch()} />
+          ) : (
+            <div role="status" className="flex gap-4">
+              <div className="h-24 w-[4.5rem] animate-pulse rounded-xl bg-stone-500/10" />
+              <div className="flex-1 space-y-2 py-1">
+                <div className="h-6 w-48 animate-pulse rounded bg-stone-500/10" />
+                <div className="h-4 w-32 animate-pulse rounded bg-stone-500/10" />
+              </div>
             </div>
-          </div>
-        ) : book.isError && !archivedBook && !book.data ? (
-          <QueryErrorState isRetrying={book.isFetching} onRetry={() => void book.refetch()} />
+          )
         ) : (
           <div className="flex items-center justify-between gap-4">
             {/* 左侧：封面 + 书名 + 作者状态（为未来分类标签预留良好延展空间） */}
@@ -729,7 +749,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
                 className={cn('group/cover shrink-0', !sourceUnavailable && 'cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.99]')}
                 title={sourceUnavailable ? undefined : _('library.bookDetails')}
               >
-                <BookCover book={displayedBook!} size="card" coverSrc={sourceUnavailable ? (displayedBook?.coverKey ? `/api/v1/archive/books/${encodeURIComponent(bookVersionId)}/cover?v=${encodeURIComponent(displayedBook.coverKey)}` : null) : undefined} />
+                <BookCover book={displayedBook!} size="card" coverSrc={importedSource ? ledger.data?.data.coverUrl ?? null : sourceUnavailable ? (displayedBook?.coverKey ? `/api/v1/archive/books/${encodeURIComponent(bookVersionId)}/cover?v=${encodeURIComponent(displayedBook.coverKey)}` : null) : undefined} />
               </div>
               <div className="min-w-0">
                 <h2
@@ -740,14 +760,19 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
                   {displayedBook?.title}
                 </h2>
                 <p className="mt-1 truncate text-sm text-stone-500 dark:text-stone-400">
-                  {[displayedBook?.author, sourceUnavailable ? _('archive.sourceUnavailable') : readStatusLabel(book.data!.data.readStatus, _)].filter(Boolean).join(' · ')}
+                  {[displayedBook?.author,
+                    book.data ? readStatusLabel(book.data.data.readStatus, _) : null]
+                    .filter(Boolean).join(' · ')}
                 </p>
               </div>
             </div>
 
             {/* 右侧：同列分层（上层继续阅读主操作，下层视图切换滑块） */}
-            <div className="flex flex-col items-end gap-2.5 shrink-0">
-              {!sourceUnavailable && (
+            <div className="flex h-20 shrink-0 flex-col items-end justify-end gap-2">
+              {/* Gate on book.data rather than !sourceUnavailable: while the
+                  detail request is still pending an archive-only book would
+                  otherwise flash the button before its 404 lands. */}
+              {book.data && (
                 <Button
                   size="sm"
                   className="gap-1.5 rounded-full px-3.5 h-8 text-xs font-medium cursor-pointer shadow-2xs"
@@ -760,6 +785,23 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
                     <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
                   </svg>
                   <span>{hasProgress ? _('library.continueReading') : _('library.startReading')}</span>
+                </Button>
+              )}
+              {/* Imported archives have no readable copy of their own; this
+                  checks whether their notes could carry a position in one of
+                  the reader's own books. Read-only. */}
+              {importedSource && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="gap-1.5 rounded-full px-3.5 h-8 text-xs font-medium cursor-pointer shadow-2xs"
+                  onClick={() => setLocatorOpen(true)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                  </svg>
+                  <span>{_('readingImport.locatorOpen', { defaultValue: '关联书籍' })}</span>
                 </Button>
               )}
 
@@ -1112,7 +1154,19 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
           onDelete={(entry) => { setOpenIdeaId(null); deleteItem(entry.annotation) }}
         />
       )}
-      <ShareCardDialog bookId={bookVersionId} />
+      <ShareCardDialog
+        bookId={bookVersionId}
+        fallbackTitle={archivedBook?.title}
+        fallbackAuthor={archivedBook?.author}
+      />
+      {locatorOpen && (importedSource || sourceUnavailable) && (
+        <ImportLocatorDialog
+          archiveId={bookVersionId}
+          archiveTitle={currentBookTitle}
+          onClose={() => setLocatorOpen(false)}
+          onMounted={() => { setLocatorOpen(false); onBack() }}
+        />
+      )}
       {bookDetailOpen && book.data?.data && (
         <BookDetailDialog
           book={book.data.data}

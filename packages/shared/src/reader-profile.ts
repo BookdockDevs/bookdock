@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { isOrderedReadingRange, readingRangeShape } from './reading-range'
 
 import type { AnnotationRes } from './contract'
+import type { AnnotationStyle } from './domain'
 import type { BookFormat, ReadStatus } from './constants'
 import type { MyReviewEntry, Review } from './review'
 
@@ -42,6 +43,92 @@ export interface NoteArchiveEntry {
   annotation: AnnotationRes
   bookTitle: string | null
   locationStatus: 'available' | 'source-unavailable' | 'position-unavailable'
+}
+
+/** Structured notes export (结构化笔记导出): the archive notes surface as a
+ * user-owned standalone file. Live rows only — no tombstones, no images or
+ * attachments, no discussion threads or likes, and never another user's
+ * content. Grouping/visibility mirror the archive notes view, including the
+ * archive-snapshot title/author fallback for lost sources. */
+export interface NotesExportHighlight {
+  id: string
+  /** Null = position unknown (imported notes without a source-derivable CFI). */
+  cfiRange: string | null
+  cfiAnchor: string | null
+  color: string
+  style: AnnotationStyle
+  text: string
+  chapter: string | null
+  chapterHref: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface NotesExportBookmark {
+  id: string
+  cfi: string | null
+  title: string | null
+  contextText: string | null
+  chapter: string | null
+  chapterHref: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface NotesExportIdea {
+  id: string
+  cfiRange: string | null
+  cfiAnchor: string | null
+  color: string
+  style: AnnotationStyle
+  text: string
+  note: string | null
+  visibility: 'private' | 'shared'
+  chapter: string | null
+  chapterHref: string | null
+  createdAt: number
+  updatedAt: number
+  editedAt: number | null
+}
+
+export interface NotesExportBook {
+  /** Anchored book version; null for an idea detached from any version. */
+  bookId: string | null
+  title: string | null
+  author: string | null
+  highlights: NotesExportHighlight[]
+  bookmarks: NotesExportBookmark[]
+  ideas: NotesExportIdea[]
+}
+
+export interface NotesExportReview {
+  id: string
+  /** 0.5–5 half-star steps; null = unrated. */
+  rating: number | null
+  title: string | null
+  body: string | null
+  bodyFormat: 'plain' | 'markdown'
+  visibility: 'private' | 'shared'
+  /** Work anchor provenance, exactly one side populated. */
+  privateLibraryBookId: string | null
+  sourceLibraryId: string | null
+  sourceLibraryBookId: string | null
+  /** The read-time version this review was written from, if recorded. */
+  bookVersionId: string | null
+  /** Work attribution; a source the caller can no longer read contributes
+   * nothing — the retained reading-archive snapshot is the fallback. */
+  workTitle: string | null
+  workAuthor: string | null
+  createdAt: number
+  updatedAt: number
+  editedAt: number | null
+}
+
+export interface NotesExport {
+  version: 1
+  exportedAt: number
+  books: NotesExportBook[]
+  reviews: NotesExportReview[]
 }
 
 export interface ReaderProfile {
@@ -113,16 +200,22 @@ export interface ArchiveBookItem {
   title: string | null
   author: string | null
   coverKey: string | null
-  format: BookFormat
-  readStatus: ReadStatus
+  /** Remote cover URL for imported archive rows (coverKey is null there). */
+  coverUrl?: string | null
+  /** True for imported reading history rows (no bookdock work/version behind the id). */
+  imported?: boolean
+  importSource?: 'weread' | 'legado' | null
+  format: BookFormat | null
+  readStatus: ReadStatus | null
   highlights: number
   bookmarks: number
   ideas: number
   reviews: number
   total: number
   durationSeconds?: number
-  readingDays?: number
-  progress?: number
+  referenceDurationSeconds?: number
+  readingDays?: number | null
+  progress?: number | null
   /** Max created_at across live annotations/reviews, scoped to the requested type. */
   lastRecordAt: number | null
   /** Min created_at across live annotations/reviews, scoped to the requested type. */

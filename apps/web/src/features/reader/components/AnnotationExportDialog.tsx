@@ -112,8 +112,8 @@ export default function AnnotationExportDialog({
       if (aUnknown !== bUnknown) return aUnknown ? 1 : -1
       if (aIndex !== bIndex) return (reverse ? -1 : 1) * (aIndex - bIndex)
       return (reverse ? -1 : 1) * (
-        compareCfiPosition(a.cfiRange, b.cfiRange)
-        || compareCfiPosition(a.cfiRange, b.cfiRange, true)
+        compareCfiPosition(a.cfiRange ?? '', b.cfiRange ?? '')
+        || compareCfiPosition(a.cfiRange ?? '', b.cfiRange ?? '', true)
         || a.createdAt - b.createdAt
         || a.id.localeCompare(b.id)
       )

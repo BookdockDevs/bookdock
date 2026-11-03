@@ -27,6 +27,7 @@ import tokensRoutes from './modules/tokens/tokens.routes'
 import annotationRoutes from './modules/annotations/annotations.routes'
 import activityRoutes from './modules/activity/activity.routes'
 import archiveRoutes from './modules/archive/archive.routes'
+import readingImportsRoutes from './modules/reading-imports/reading-imports.routes'
 import ideaRoutes from './modules/annotations/idea-discussion.routes'
 import reviewRoutes from './modules/reviews/reviews.routes'
 import notificationRoutes from './modules/notifications/notifications.routes'
@@ -86,6 +87,7 @@ app.route('/api/v1/tokens', tokensRoutes)
 app.route('/api/v1/annotations', annotationRoutes)
 app.route('/api/v1/activity', activityRoutes)
 app.route('/api/v1/archive', archiveRoutes)
+app.route('/api/v1/reading-imports', readingImportsRoutes)
 app.route('/api/v1/ideas', ideaRoutes)
 app.route('/api/v1/reviews', reviewRoutes)
 app.route('/api/v1/notifications', notificationRoutes)

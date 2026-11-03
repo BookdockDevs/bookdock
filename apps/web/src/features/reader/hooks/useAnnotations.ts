@@ -66,7 +66,7 @@ export function useCreateAnnotation(bookId: string) {
         try {
           const cfi = await loadCfiModule()
           replacedIds = previous.data
-            .filter((a) => a.type === 'highlight' && !a.id.startsWith('temp-') && cfiRangesOverlap(cfi, a.cfiRange, body.cfiRange))
+            .filter((a) => a.type === 'highlight' && a.cfiRange !== null && !a.id.startsWith('temp-') && cfiRangesOverlap(cfi, a.cfiRange, body.cfiRange))
             .map((a) => a.id)
         } catch { /* CFI module unavailable — skip replacement */ }
       }

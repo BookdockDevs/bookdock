@@ -514,7 +514,7 @@ export default function MetadataLookupDialog({
 
                       <div className="mt-0.5 flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400">
                         <span className="line-clamp-1">
-                          {result.authors.join('、') || _('metadataLookup.unknownAuthor')}
+                          {result.authors.join('、') || _('common.unknownAuthor')}
                         </span>
                         {result.published && (
                           <>

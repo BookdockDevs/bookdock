@@ -13,6 +13,7 @@ import { useAuthStore } from '@/stores/auth.store'
 import HourDistribution from './components/HourDistribution'
 import PeriodBarChart from './components/PeriodBarChart'
 import SummaryCards from './components/SummaryCards'
+import ReadingDataManagerButton from '@/features/archive/components/ReadingDataManagerButton'
 import StatsSettingsButton from './components/StatsSettingsButton'
 import TagDistribution from './components/TagDistribution'
 import YearHeatmap from './components/YearHeatmap'
@@ -132,6 +133,7 @@ export default function Stats({
             </svg>
           </Link>
           <h1 className="text-2xl font-bold">{_('stats.title')}</h1>
+          <ReadingDataManagerButton />
           <StatsSettingsButton />
         </div>
       )}

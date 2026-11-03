@@ -8,6 +8,7 @@ import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { expect, it } from 'vitest'
 
 import { runDatabaseMigrations } from './client'
+import { revertReadingImportsSchema } from './migration-stage'
 import { reconcilePersonalSourceMigration } from './personal-source-migration'
 import * as schema from './schema'
 
@@ -40,6 +41,7 @@ it.each([0, 1, 2, 3])('preserves installed sources from historical state %i', as
     await runDatabaseMigrations(db)
     const hasDetail = state >= 2
     if (!hasDetail) sqlite.exec('ALTER TABLE personal_metadata_sources DROP COLUMN has_detail')
+    revertReadingImportsSchema(sqlite)
     sqlite.prepare('DELETE FROM __drizzle_migrations WHERE created_at >= ?').run(sourceWhen)
     sqlite.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)').run(sourceHashes[state % 2], sourceWhen)
     if (hasDetail) sqlite.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)').run(detailHashes[state % 2], detailWhen)
@@ -53,7 +55,7 @@ it.each([0, 1, 2, 3])('preserves installed sources from historical state %i', as
     expect(sqlite.prepare('SELECT id, user_id, source_id, name, version, origin_type, entry_path, created_at FROM personal_metadata_sources').all()).toEqual(before)
     expect(sqlite.prepare('SELECT has_detail FROM personal_metadata_sources').get()).toEqual({ has_detail: hasDetail ? 0 : 1 })
     const migration = readMigrationFiles({ migrationsFolder }).find((entry) => entry.folderMillis === sourceWhen)!
-    expect(sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations WHERE created_at >= ?').all(sourceWhen))
+    expect(sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations WHERE created_at >= ? AND created_at <= ?').all(sourceWhen, detailWhen))
       .toEqual([{ hash: migration.hash, created_at: sourceWhen }])
     expect(sqlite.pragma('foreign_key_check')).toEqual([])
   } finally { sqlite.close() }

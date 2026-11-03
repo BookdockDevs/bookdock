@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 export interface TrendPoint {
   date: string // YYYY-MM-DD
   seconds: number
-  progressPercent: number // e.g. 27.6
+  progressPercent: number | null // e.g. 27.6
 }
 
 export interface BookReadingTrendChartProps {
@@ -125,11 +125,11 @@ function formatFullDate(dateStr: string): string {
   return `${y} 年 ${m} 月 ${d} 日`
 }
 
-function formatCardValue(seconds: number, mode: 'time' | 'progress', progressPercent: number): string {
+function formatCardValue(seconds: number, mode: 'time' | 'progress', progressPercent: number | null): string {
   if (mode === 'progress') {
-    return `${progressPercent}%`
+    return progressPercent === null ? '—' : `${progressPercent}%`
   }
-  const totalMin = Math.round(seconds / 60)
+  const totalMin = Math.floor(seconds / 60)
   if (totalMin < 60) {
     return `${totalMin} 分`
   }
@@ -243,15 +243,19 @@ export default function BookReadingTrendChart({
       durText,
     }
   }, [peakDay])
+  const chartPoints = useMemo(
+    () => mode === 'time' ? points : points.filter((point) => point.progressPercent !== null),
+    [points, mode],
+  )
 
   // 计算数值与坐标轴刻度
   const maxVal = useMemo(() => {
-    if (!points.length) return 1
+    if (!chartPoints.length) return 1
     if (mode === 'time') {
-      return Math.max(1, ...points.map((p) => Math.round(p.seconds / 60)))
+      return Math.max(1, ...chartPoints.map((p) => Math.round(p.seconds / 60)))
     }
-    return Math.max(1, ...points.map((p) => p.progressPercent))
-  }, [points, mode])
+    return Math.max(1, ...chartPoints.map((p) => p.progressPercent ?? 0))
+  }, [chartPoints, mode])
 
   const scale = useMemo(() => {
     return mode === 'time' ? getTimeScale(maxVal) : getProgressScale(maxVal)
@@ -264,7 +268,7 @@ export default function BookReadingTrendChart({
   const svgHeight = bottomY + 54 // 留出下方 -45 度旋转的日期空间
   const pointSpacing = 68
   const chartMargin = 36 // 紧凑边距，不浪费任何横向空间
-  const neededWidth = points.length > 1 ? (points.length - 1) * pointSpacing + chartMargin * 2 : containerWidth
+  const neededWidth = chartPoints.length > 1 ? (chartPoints.length - 1) * pointSpacing + chartMargin * 2 : containerWidth
   const contentWidth = Math.max(containerWidth, neededWidth)
   const canScroll = neededWidth > containerWidth
 
@@ -273,7 +277,7 @@ export default function BookReadingTrendChart({
     if (scrollRef.current && canScroll) {
       scrollRef.current.scrollLeft = scrollRef.current.scrollWidth
     }
-  }, [points.length, mode, canScroll])
+  }, [chartPoints.length, mode, canScroll])
 
   // 鼠标拖拽横向滚动
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -320,15 +324,15 @@ export default function BookReadingTrendChart({
   }
 
   const coords = useMemo(() => {
-    if (points.length === 0) return []
+    if (chartPoints.length === 0) return []
     const usableWidth = contentWidth - chartMargin * 2
-    return points.map((p, i) => {
-      const x = points.length === 1 ? contentWidth / 2 : chartMargin + (i / (points.length - 1)) * usableWidth
-      const val = mode === 'time' ? Math.round(p.seconds / 60) : p.progressPercent
+    return chartPoints.map((p, i) => {
+      const x = chartPoints.length === 1 ? contentWidth / 2 : chartMargin + (i / (chartPoints.length - 1)) * usableWidth
+      const val = mode === 'time' ? Math.round(p.seconds / 60) : p.progressPercent ?? 0
       const y = bottomY - (val / scale.yMax) * plotHeight
       return { x, y, val, point: p, index: i }
     })
-  }, [points, contentWidth, chartMargin, mode, scale.yMax, bottomY, plotHeight])
+  }, [chartPoints, contentWidth, chartMargin, mode, scale.yMax, bottomY, plotHeight])
 
   const activePoint = activeIdx !== null ? coords[activeIdx] : null
 
@@ -458,7 +462,7 @@ export default function BookReadingTrendChart({
             </div>
           )}
 
-          {points.length === 0 ? (
+          {chartPoints.length === 0 ? (
             <div className="flex h-72 items-center justify-center text-sm text-stone-400">
               本书暂无阅读趋势数据
             </div>

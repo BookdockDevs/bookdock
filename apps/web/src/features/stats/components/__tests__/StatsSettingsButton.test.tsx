@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useUiStore } from '@/stores/ui.store'
 import StatsSettingsButton from '../StatsSettingsButton'
@@ -16,24 +16,10 @@ const translations: Record<string, string> = {
   'settings.readingTimerGrace5': '5 分钟',
   'settings.readingTimerGrace10': '10 分钟',
   'settings.readingTimerGrace30': '30 分钟',
-  'readingData.dataManagement': '阅读数据管理',
-  'readingData.dataManagementHint': '备份您的完整阅读数据，或从备份文件还原历史记录',
 }
 
 vi.mock('@/hooks/useTranslation', () => ({
   useTranslation: () => (key: string) => translations[key] ?? key,
-}))
-
-vi.mock('@/features/archive/components/ReadingTransferControls', () => ({
-  default: ({ bookId, onDeleteArchive }: { bookId?: string; onDeleteArchive?: () => void }) => (
-    <div data-testid="mock-transfer-controls" data-bookid={bookId}>
-      {onDeleteArchive && (
-        <button type="button" onClick={onDeleteArchive} data-testid="mock-delete-archive-btn">
-          Delete Archive
-        </button>
-      )}
-    </div>
-  ),
 }))
 
 describe('StatsSettingsButton', () => {
@@ -77,9 +63,6 @@ describe('StatsSettingsButton', () => {
     fireEvent.click(manualSwitch)
     expect(useUiStore.getState().readingTimerMode).toBe('off')
     expect(screen.queryByRole('group', { name: '暂存宽限' })).not.toBeInTheDocument()
-
-    // Data management section is present
-    expect(screen.getByTestId('mock-transfer-controls')).toBeInTheDocument()
   })
 
   it('updates the shared grace when automatic capture is enabled', () => {
@@ -95,23 +78,5 @@ describe('StatsSettingsButton', () => {
     fireEvent.click(tenMinBtn)
 
     expect(useUiStore.getState().manualTimerGraceMinutes).toBe(10)
-  })
-
-  it('renders book-specific section and forwards onBookDeleted when bookId is provided', () => {
-    const onBookDeleted = vi.fn()
-    render(<StatsSettingsButton bookId="book-123" onBookDeleted={onBookDeleted} />)
-    fireEvent.click(screen.getByRole('button', { name: '统计设置' }))
-
-    expect(screen.getByText('readingData.bookDataManagement')).toBeInTheDocument()
-    expect(screen.getByText('readingData.bookDataManagementHint')).toBeInTheDocument()
-
-    const controls = screen.getByTestId('mock-transfer-controls')
-    expect(controls).toHaveAttribute('data-bookid', 'book-123')
-
-    // Trigger delete archive callback
-    fireEvent.click(screen.getByTestId('mock-delete-archive-btn'))
-    expect(onBookDeleted).toHaveBeenCalled()
-    // Modal should close
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

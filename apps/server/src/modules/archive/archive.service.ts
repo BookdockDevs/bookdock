@@ -1,15 +1,23 @@
-import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNull, lt, lte, notInArray, or, sql } from 'drizzle-orm'
+import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 import {
   parseArchiveRecordTypes,
   parseArchiveReadStatuses,
+  reviewHalvesToRating,
   type AnnotationRes,
   type ArchiveBookDetail,
   type ArchiveBookItem,
   type ArchiveBooksQuery,
   type ArchiveCounts,
+  type ArchiveDataExport,
   type ArchiveOverview,
+  type NotesExport,
+  type NotesExportBook,
+  type NotesExportHighlight,
+  type NotesExportIdea,
   type ReadStatus,
+  type ReadingImportScope,
   type ReadingRange,
 } from '@bookdock/shared'
 
@@ -28,16 +36,18 @@ import {
   libraryTags,
   readingArchives,
   readingRecords,
+  readingSessions,
 } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { readingTimestampBounds } from '../../lib/reading-range'
+import { aggregateDurationFacts, countReadingDays, getDurationFacts } from '../reading-records/duration-facts'
 import { coverThumbnailKey } from '../../lib/cover'
 import { getStorage } from '../../storage'
 import { toRes } from '../annotations/annotations.service'
 import { ideaRevision } from '../annotations/idea-access'
 import { assertReadableBook, bufferFromStream, getBook, getBookCoverContent } from '../books/books.service'
 import { pendingBookDataDeletionVersionIds } from '../libraries/library-query'
-import { projectReview, sourceWorkOf } from '../reviews/review-access'
+import { assertSourceWorkReadable, projectReview, sourceWorkOf } from '../reviews/review-access'
 
 type ReviewRow = typeof bookReviews.$inferSelect
 
@@ -111,13 +121,14 @@ interface VersionTally {
   ideas: number
   reviews: number
   durationSeconds: number
+  referenceDurationSeconds: number
   readingDays: number
   lastRecordAt: number | null
   firstRecordAt: number | null
 }
 
 function emptyTally(): VersionTally {
-  return { highlights: 0, bookmarks: 0, ideas: 0, reviews: 0, durationSeconds: 0, readingDays: 0, lastRecordAt: null, firstRecordAt: null }
+  return { highlights: 0, bookmarks: 0, ideas: 0, reviews: 0, durationSeconds: 0, referenceDurationSeconds: 0, readingDays: 0, lastRecordAt: null, firstRecordAt: null }
 }
 
 function touch(tally: VersionTally, at: number) {
@@ -198,29 +209,45 @@ function rawTallies(userId: string, type?: ArchiveBooksQuery['type'], range: Rea
     tallies.set(versionId, entry)
     return entry
   }
+  if (!range.from && !range.to) {
+    for (const archive of db.select({ id: readingArchives.bookVersionId }).from(readingArchives).where(
+      eq(readingArchives.userId, userId),
+    ).all()) tally(archive.id)
+  }
   const bounds = readingTimestampBounds(range)
   const timestampFilter = sql`${bounds.from !== undefined ? sql`AND created_at >= ${bounds.from}` : sql``} ${bounds.until !== undefined ? sql`AND created_at < ${bounds.until}` : sql``}`
+  // Native and imported durations merge per book and date before the 60s
+  // threshold: a day that only reaches it across sources counts once, never
+  // twice, and never differently between pages (same rule as the
+  // reading-records overview).
+  const dailyByBook = new Map<string, Map<string, number>>()
   {
     const activity = db.select({
       bookVersionId: readingRecords.bookId,
+      date: readingRecords.date,
       durationSeconds: sql<number>`coalesce(sum(${readingRecords.durationSeconds}), 0)`,
-      days: sql<number>`count(distinct CASE WHEN ${readingRecords.durationSeconds} >= 60 THEN ${readingRecords.date} END)`,
     }).from(readingRecords).where(and(
       eq(readingRecords.userId, userId),
       range.from ? gte(readingRecords.date, range.from) : undefined,
       range.to ? lte(readingRecords.date, range.to) : undefined,
       sql`${readingRecords.durationSeconds} > 0`,
     ))
-      .groupBy(readingRecords.bookId)
+      .groupBy(readingRecords.bookId, readingRecords.date)
       .all()
     for (const row of activity) {
       const entry = tally(row.bookVersionId)
-      entry.durationSeconds = row.durationSeconds
-      entry.readingDays = row.days
+      entry.durationSeconds += row.durationSeconds
+      const dates = dailyByBook.get(row.bookVersionId) ?? new Map<string, number>()
+      dates.set(row.date, (dates.get(row.date) ?? 0) + row.durationSeconds)
+      dailyByBook.set(row.bookVersionId, dates)
     }
   }
-  if (!range.from && !range.to) {
-    for (const archive of db.select().from(readingArchives).where(eq(readingArchives.userId, userId)).all()) tally(archive.bookVersionId)
+  const durationFacts = aggregateDurationFacts(getDurationFacts(userId), range)
+  for (const [archiveId, seconds] of durationFacts.archiveAdditive) tally(archiveId).durationSeconds += seconds
+  for (const [archiveId, seconds] of durationFacts.archiveReference) tally(archiveId).referenceDurationSeconds += seconds
+  const dayBooks = new Set([...dailyByBook.keys(), ...durationFacts.archiveDaily.keys()])
+  for (const bookId of dayBooks) {
+    tally(bookId).readingDays = countReadingDays(dailyByBook.get(bookId), durationFacts.archiveDaily.get(bookId))
   }
   const selectedTypes = parseArchiveRecordTypes(type)
   const annotationKinds = selectedTypes.filter((t) => t !== 'review')
@@ -331,11 +358,33 @@ async function enrichBooks(userId: string, tallies: Map<string, VersionTally>): 
   return Promise.all(
     versionIds.map(async (versionId) => {
       const tally = tallies.get(versionId)!
-      const format = formats.get(versionId) ?? snapshots.get(versionId)?.format ?? 'txt'
+      const snapshot = snapshots.get(versionId)
+      // Imported archives (导入阅读历史) have no bookdock work behind the id:
+      // the archive row itself carries title/author and the remote cover.
+      if (snapshot?.importSource) {
+        // Imported archives carry their own source facts: `format` is the
+        // source's ebook format (normalised on import) and `finished` lives in
+        // `meta`, since these rows have no book_states row to hold a status.
+        const finished = snapshot.meta?.finished
+        return {
+          bookVersionId: versionId, title: snapshot.title, author: snapshot.author || null,
+          coverKey: null, coverUrl: snapshot.coverUrl, format: snapshot.format,
+          readStatus: finished === true ? 'finished' : null,
+          imported: true, importSource: snapshot.importSource,
+          highlights: tally.highlights, bookmarks: tally.bookmarks, ideas: tally.ideas, reviews: tally.reviews,
+          total: tally.highlights + tally.bookmarks + tally.ideas + tally.reviews,
+          durationSeconds: tally.durationSeconds,
+          referenceDurationSeconds: tally.referenceDurationSeconds,
+          readingDays: tally.readingDays > 0 ? tally.readingDays : null,
+          progress: null,
+          lastRecordAt: tally.lastRecordAt, firstRecordAt: tally.firstRecordAt,
+        }
+      }
+      const format = formats.get(versionId) ?? snapshot?.format ?? null
       const privateCard = privateCards.get(versionId)
       let title: string | null = privateCard?.title ?? null
       let author: string | null = privateCard?.author ?? null
-      let coverKey: string | null = privateCard?.coverKey ?? snapshots.get(versionId)?.coverKey ?? null
+      let coverKey: string | null = privateCard?.coverKey ?? snapshot?.coverKey ?? null
 
       if (!privateCard) {
         try {
@@ -345,20 +394,21 @@ async function enrichBooks(userId: string, tallies: Map<string, VersionTally>): 
           coverKey = book.coverKey
         } catch (error) {
           if (!(error instanceof AppError) || !['BOOK_NOT_FOUND', 'BOOK_FILE_MISSING', 'FORBIDDEN'].includes(error.code)) throw error
-          title = snapshots.get(versionId)?.title ?? 'Unavailable book'
-          author = snapshots.get(versionId)?.author ?? ''
+          title = snapshot?.title ?? 'Unavailable book'
+          author = snapshot?.author ?? ''
         }
       }
 
       const state = states.get(versionId)
-      const readStatus: ReadStatus = state?.readStatus ?? 'reading'
-      const progress = state?.progress ?? 0
+      const readStatus: ReadStatus | null = state?.readStatus ?? null
+      const progress = state?.progress ?? null
       const total = tally.highlights + tally.bookmarks + tally.ideas + tally.reviews
       return {
         bookVersionId: versionId, title, author, coverKey, format, readStatus,
         highlights: tally.highlights, bookmarks: tally.bookmarks,
         ideas: tally.ideas, reviews: tally.reviews, total,
         durationSeconds: tally.durationSeconds,
+        referenceDurationSeconds: tally.referenceDurationSeconds,
         readingDays: tally.readingDays,
         progress,
         lastRecordAt: tally.lastRecordAt, firstRecordAt: tally.firstRecordAt,
@@ -409,7 +459,13 @@ async function loadCandidateTitles(userId: string, versionIds: string[]): Promis
 }
 
 export async function getOverview(userId: string, range: ReadingRange = {}): Promise<ArchiveOverview> {
-  return { counts: await countOwned(userId, range), totalBooks: rawTallies(userId, undefined, range).size }
+  const db = getDb()
+  const pending = new Set(pendingBookDataDeletionVersionIds(db, userId))
+  const bookIds = new Set([...rawTallies(userId, undefined, range).keys()].filter((id) => !pending.has(id)))
+  for (const archive of db.select({ id: readingArchives.bookVersionId }).from(readingArchives).where(
+    eq(readingArchives.userId, userId),
+  ).all()) if (!pending.has(archive.id)) bookIds.add(archive.id)
+  return { counts: await countOwned(userId, range), totalBooks: bookIds.size }
 }
 
 export async function listBooks(userId: string, query: ArchiveBooksQuery) {
@@ -491,8 +547,8 @@ export async function listBooks(userId: string, query: ArchiveBooksQuery) {
     const idB = { bookVersionId: b[0] }
     if (query.sort === 'most') return totalB - totalA || byTitle(idA, idB)
     if (query.sort === 'fewest') return totalA - totalB || byTitle(idA, idB)
-    if (query.sort === 'reading-time') return (b[1].durationSeconds - a[1].durationSeconds) || totalB - totalA || byTitle(idA, idB)
-    if (query.sort === 'reading-time-asc') return (a[1].durationSeconds - b[1].durationSeconds) || totalA - totalB || byTitle(idA, idB)
+    if (query.sort === 'reading-time') return ((b[1].durationSeconds + b[1].referenceDurationSeconds) - (a[1].durationSeconds + a[1].referenceDurationSeconds)) || totalB - totalA || byTitle(idA, idB)
+    if (query.sort === 'reading-time-asc') return ((a[1].durationSeconds + a[1].referenceDurationSeconds) - (b[1].durationSeconds + b[1].referenceDurationSeconds)) || totalA - totalB || byTitle(idA, idB)
     if (query.sort === 'earliest') return (a[1].firstRecordAt ?? Number.POSITIVE_INFINITY) - (b[1].firstRecordAt ?? Number.POSITIVE_INFINITY) || byTitle(idA, idB)
     if (isTitleSort) {
       const titleA = candidateTitles?.get(a[0]) ?? null
@@ -512,6 +568,41 @@ export async function listBooks(userId: string, query: ArchiveBooksQuery) {
   const pageTallies = new Map(pageSlice)
   const entries = await enrichBooks(userId, pageTallies)
   return { entries, page: query.page, hasMore: sorted.length > query.page * query.pageSize }
+}
+
+// Targeted review matching for one specific bookVersionId instead of scanning
+// all user reviews: reviews reached through the read provenance, the private
+// works holding the version, or the source work of a shared holding.
+function reviewRowsForVersion(userId: string, bookVersionId: string, bounds: { from?: number; until?: number } = {}) {
+  const db = getDb()
+  const userPrivateBookIds = db.select({ id: libraryBooks.id })
+    .from(libraryBookVersions)
+    .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
+    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'), eq(libraryBookVersions.bookVersionId, bookVersionId)))
+    .all().map((r) => r.id)
+
+  const userSharedHolding = db.select({ link: libraryBookVersions })
+    .from(libraryBookVersions)
+    .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'), eq(libraryBookVersions.bookVersionId, bookVersionId), eq(libraryBookVersions.kind, 'shared')))
+    .get()
+  const sourceWork = userSharedHolding?.link ? sourceWorkOf(userSharedHolding.link) : null
+
+  const conditions = [eq(bookReviews.readBookVersionId, bookVersionId)]
+  if (userPrivateBookIds.length > 0) {
+    conditions.push(inArray(bookReviews.privateLibraryBookId, userPrivateBookIds))
+  }
+  if (sourceWork) {
+    conditions.push(and(eq(bookReviews.sourceLibraryId, sourceWork.libraryId), eq(bookReviews.sourceLibraryBookId, sourceWork.libraryBookId))!)
+  }
+
+  const targetFilter = conditions.length === 1 ? conditions[0] : or(...conditions)!
+  return db.select().from(bookReviews).where(and(
+    eq(bookReviews.userId, userId), targetFilter,
+    bounds.from !== undefined ? gte(bookReviews.createdAt, bounds.from) : undefined,
+    bounds.until !== undefined ? lt(bookReviews.createdAt, bounds.until) : undefined,
+  )).all()
 }
 
 export async function getBookDetail(userId: string, bookVersionId: string, range: ReadingRange = {}): Promise<ArchiveBookDetail> {
@@ -559,34 +650,7 @@ export async function getBookDetail(userId: string, bookVersionId: string, range
   ]
 
   // Targeted review matching for this specific bookVersionId instead of scanning all user reviews
-  const userPrivateBookIds = db.select({ id: libraryBooks.id })
-    .from(libraryBookVersions)
-    .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
-    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
-    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'), eq(libraryBookVersions.bookVersionId, bookVersionId)))
-    .all().map((r) => r.id)
-
-  const userSharedHolding = db.select({ link: libraryBookVersions })
-    .from(libraryBookVersions)
-    .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
-    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'), eq(libraryBookVersions.bookVersionId, bookVersionId), eq(libraryBookVersions.kind, 'shared')))
-    .get()
-  const sourceWork = userSharedHolding?.link ? sourceWorkOf(userSharedHolding.link) : null
-
-  const conditions = [eq(bookReviews.readBookVersionId, bookVersionId)]
-  if (userPrivateBookIds.length > 0) {
-    conditions.push(inArray(bookReviews.privateLibraryBookId, userPrivateBookIds))
-  }
-  if (sourceWork) {
-    conditions.push(and(eq(bookReviews.sourceLibraryId, sourceWork.libraryId), eq(bookReviews.sourceLibraryBookId, sourceWork.libraryBookId))!)
-  }
-
-  const targetFilter = conditions.length === 1 ? conditions[0] : or(...conditions)!
-  const reviewRows = db.select().from(bookReviews).where(and(
-    eq(bookReviews.userId, userId), targetFilter,
-    bounds.from !== undefined ? gte(bookReviews.createdAt, bounds.from) : undefined,
-    bounds.until !== undefined ? lt(bookReviews.createdAt, bounds.until) : undefined,
-  )).all()
+  const reviewRows = reviewRowsForVersion(userId, bookVersionId, bounds)
   const attributed = reviewVersions(userId, reviewRows).get(bookVersionId) ?? []
   const reviews = await Promise.all(
     [...attributed]
@@ -594,4 +658,291 @@ export async function getBookDetail(userId: string, bookVersionId: string, range
       .map((row) => projectReview(userId, row, false)),
   )
   return { annotations, reviews }
+}
+
+/** Structured notes export (结构化笔记导出): the archive notes surface — the
+ * caller's live highlights, bookmarks, ideas and own reviews grouped per book
+ * — as a standalone user-owned file. Visibility mirrors the archive notes
+ * view: pending-data-deletion versions are excluded, lost sources fall back
+ * to the archive snapshot title/author. Never includes images/attachments,
+ * discussion threads, likes or another user's content. */
+export async function exportNotes(userId: string, bookId?: string): Promise<NotesExport> {
+  const db = getDb()
+  const excludedVersions = pendingBookDataDeletionVersionIds(db, userId)
+  if (bookId && excludedVersions.includes(bookId)) {
+    return { version: 1, exportedAt: Date.now(), books: [], reviews: [] }
+  }
+  // NULL version ids (unanchored ideas) must survive the pending filter like
+  // they do in the archive notes query.
+  const notPending = (column: AnySQLiteColumn) =>
+    excludedVersions.length ? or(isNull(column), notInArray(column, excludedVersions)) : undefined
+
+  const [hl, bm, ideaRows] = await Promise.all([
+    db.select().from(highlights).where(and(
+      eq(highlights.userId, userId), isNull(highlights.deletedAt),
+      bookId ? eq(highlights.bookVersionId, bookId) : undefined,
+      notPending(highlights.bookVersionId)))
+      .orderBy(highlights.createdAt, highlights.id).all(),
+    db.select().from(bookmarks).where(and(
+      eq(bookmarks.userId, userId), isNull(bookmarks.deletedAt),
+      bookId ? eq(bookmarks.bookVersionId, bookId) : undefined,
+      notPending(bookmarks.bookVersionId)))
+      .orderBy(bookmarks.createdAt, bookmarks.id).all(),
+    db.select().from(ideas).where(and(
+      eq(ideas.userId, userId), isNull(ideas.deletedAt),
+      bookId ? eq(ideas.bookVersionId, bookId) : undefined,
+      notPending(ideas.bookVersionId)))
+      .orderBy(ideas.createdAt, ideas.id).all(),
+  ])
+
+  const versionIds = [...new Set([hl, bm, ideaRows].flat().map((row) => row.bookVersionId).filter((id): id is string => id !== null))]
+  // Title/author precedence mirrors note-archive: a readable holding wins,
+  // otherwise the reading-archive snapshot taken before the source was lost.
+  const heldByVersion = new Map(versionIds.length ? db.select({ bookVersionId: libraryBookVersions.bookVersionId, work: libraryBooks })
+    .from(libraryBookVersions)
+    .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
+    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'), inArray(libraryBookVersions.bookVersionId, versionIds)))
+    .all().map((row) => [row.bookVersionId, row.work]) : [])
+  const archiveByVersion = new Map(db.select().from(readingArchives)
+    .where(eq(readingArchives.userId, userId))
+    .all().map((row) => [row.bookVersionId, row]))
+  const readableByVersion = new Map<string, boolean>()
+  for (const versionId of versionIds) {
+    try {
+      await assertReadableBook(userId, versionId)
+      readableByVersion.set(versionId, true)
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error
+      readableByVersion.set(versionId, false)
+    }
+  }
+
+  const groups = new Map<string | null, NotesExportBook>()
+  const groupFor = (versionId: string | null) => {
+    let group = groups.get(versionId)
+    if (!group) {
+      const held = versionId && readableByVersion.get(versionId) ? heldByVersion.get(versionId) : undefined
+      const archive = versionId ? archiveByVersion.get(versionId) : undefined
+      group = {
+        bookId: versionId,
+        title: held?.title ?? archive?.title ?? null,
+        author: held?.author ?? archive?.author ?? null,
+        highlights: [], bookmarks: [], ideas: [],
+      }
+      groups.set(versionId, group)
+    }
+    return group
+  }
+  for (const row of hl) {
+    groupFor(row.bookVersionId).highlights.push({
+      id: row.id, cfiRange: row.cfiRange, cfiAnchor: row.cfiAnchor,
+      color: row.color, style: row.style as NotesExportHighlight['style'],
+      text: row.text, chapter: row.chapter, chapterHref: row.chapterHref,
+      createdAt: row.createdAt, updatedAt: row.updatedAt,
+    })
+  }
+  for (const row of bm) {
+    groupFor(row.bookVersionId).bookmarks.push({
+      id: row.id, cfi: row.cfi, title: row.title, contextText: row.contextText,
+      chapter: row.chapter, chapterHref: row.chapterHref,
+      createdAt: row.createdAt, updatedAt: row.updatedAt,
+    })
+  }
+  for (const row of ideaRows) {
+    groupFor(row.bookVersionId).ideas.push({
+      id: row.id, cfiRange: row.cfiRange, cfiAnchor: row.cfiAnchor,
+      color: row.color, style: row.style as NotesExportIdea['style'],
+      text: row.text, note: row.note, visibility: row.visibility,
+      chapter: row.chapter, chapterHref: row.chapterHref,
+      createdAt: row.createdAt, updatedAt: row.updatedAt, editedAt: row.editedAt,
+    })
+  }
+  const books = [...groups.values()].sort((a, b) => {
+    if (a.title === null) return b.title === null ? 0 : 1
+    if (b.title === null) return -1
+    return a.title.localeCompare(b.title) || (a.bookId ?? '').localeCompare(b.bookId ?? '')
+  })
+
+  const reviewRows = bookId
+    // Single book mirrors the archive detail view: the version's attributed reviews.
+    ? (reviewVersions(userId, reviewRowsForVersion(userId, bookId)).get(bookId) ?? [])
+    : (() => {
+        const rows = db.select().from(bookReviews).where(eq(bookReviews.userId, userId)).all()
+        if (!excludedVersions.length) return rows
+        // Full export mirrors the archive overview attribution rule: a row is
+        // hidden only when every version it is attributed to is pending data
+        // deletion. Rows with no version attribution (e.g. their work and
+        // versions are gone) are not attributable to a pending cleanup and
+        // always stay.
+        const pending = new Set(excludedVersions)
+        const liveAttribution = new Set<ReviewRow>()
+        const pendingAttribution = new Set<ReviewRow>()
+        for (const [versionId, list] of reviewVersions(userId, rows)) {
+          const target = pending.has(versionId) ? pendingAttribution : liveAttribution
+          for (const row of list) target.add(row)
+        }
+        return rows.filter((row) => liveAttribution.has(row) || !pendingAttribution.has(row))
+      })()
+  const privateWorkIds = [...new Set(reviewRows.flatMap((row) => row.privateLibraryBookId ? [row.privateLibraryBookId] : []))]
+  const privateWorksById = new Map(privateWorkIds.length ? db.select().from(libraryBooks)
+    .where(inArray(libraryBooks.id, privateWorkIds)).all().map((row) => [row.id, row]) : [])
+  // A lost source must not leak its live title/author: only a source the
+  // caller can still read contributes metadata, otherwise the caller's own
+  // reading-archive snapshot (if any) is the retained attribution fallback.
+  const readableSourceByKey = new Map<string, typeof libraryBooks.$inferSelect | null>()
+  const readableSourceWork = async (row: ReviewRow) => {
+    if (!row.sourceLibraryId || !row.sourceLibraryBookId) return null
+    const key = `${row.sourceLibraryId}:${row.sourceLibraryBookId}`
+    if (!readableSourceByKey.has(key)) {
+      try {
+        const read = await assertSourceWorkReadable(userId, row.sourceLibraryId, row.sourceLibraryBookId)
+        readableSourceByKey.set(key, read.work)
+      } catch (error) {
+        if (!(error instanceof AppError)) throw error
+        readableSourceByKey.set(key, null)
+      }
+    }
+    return readableSourceByKey.get(key) ?? null
+  }
+
+  const reviews = []
+  for (const row of [...reviewRows].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))) {
+    let workTitle: string | null = null
+    let workAuthor: string | null = null
+    if (row.privateLibraryBookId) {
+      const work = privateWorksById.get(row.privateLibraryBookId)
+      if (work) {
+        workTitle = work.title
+        workAuthor = work.author
+      }
+    } else if (row.sourceLibraryId && row.sourceLibraryBookId) {
+      const work = await readableSourceWork(row)
+      if (work) {
+        workTitle = work.title
+        workAuthor = work.author
+      }
+    }
+    if (workTitle === null && row.readBookVersionId) {
+      const snapshot = archiveByVersion.get(row.readBookVersionId)
+      if (snapshot) {
+        workTitle = snapshot.title
+        workAuthor = snapshot.author
+      }
+    }
+    reviews.push({
+      id: row.id,
+      rating: row.ratingHalves === null ? null : reviewHalvesToRating(row.ratingHalves),
+      title: row.title,
+      body: row.body,
+      bodyFormat: row.bodyFormat,
+      visibility: row.visibility,
+      privateLibraryBookId: row.privateLibraryBookId,
+      sourceLibraryId: row.sourceLibraryId,
+      sourceLibraryBookId: row.sourceLibraryBookId,
+      bookVersionId: row.readBookVersionId,
+      workTitle,
+      workAuthor,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      editedAt: row.editedAt,
+    })
+  }
+
+  return { version: 1, exportedAt: Date.now(), books, reviews }
+}
+
+/** Read-only data export (用户数据导出). Sessions are queried directly instead
+ * of through the ledger's detail entry point: that one creates a missing
+ * archive as a side effect and computes rounds, coverage projections and
+ * progress scales the export drops anyway. A full export flattens every book's
+ * sessions, so each row carries its own book attribution. */
+export async function exportArchiveData(userId: string, scope: ReadingImportScope, bookId?: string): Promise<ArchiveDataExport> {
+  const db = getDb()
+  const result: ArchiveDataExport = { version: 1, kind: 'bookdock-data-export', scope, exportedAt: Date.now() }
+  if (scope !== 'time') {
+    const notes = await exportNotes(userId, bookId)
+    result.books = notes.books
+    result.reviews = notes.reviews
+  }
+  if (scope !== 'notes') {
+    const archives = db.select().from(readingArchives).where(bookId
+      ? and(eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, bookId))
+      : eq(readingArchives.userId, userId)).all()
+    const archiveById = new Map(archives.map((archive) => [archive.bookVersionId, archive]))
+    const sessionBookIds = bookId
+      ? [bookId]
+      : db.selectDistinct({ bookId: readingSessions.bookId }).from(readingSessions).where(eq(readingSessions.userId, userId)).all()
+        .flatMap((row) => row.bookId ? [row.bookId] : [])
+    const bookIds = new Set([...archives.map((archive) => archive.bookVersionId), ...sessionBookIds])
+    if (bookId) bookIds.add(bookId)
+
+    const titles = new Map<string, { title: string | null; author: string | null }>()
+    for (const archive of archives) titles.set(archive.bookVersionId, { title: archive.title, author: archive.author })
+    const ids = [...bookIds]
+    if (ids.length > 0) {
+      // Books whose duration predates any archive snapshot still need a usable
+      // title in the file: fall back to the private library card.
+      const cards = db.select({
+        bookVersionId: libraryBookVersions.bookVersionId,
+        title: sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title})`,
+        author: sql<string>`coalesce(${libraryBookVersions.author}, ${libraryBooks.author})`,
+      }).from(libraryBookVersions)
+        .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
+        .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+        .where(and(
+          inArray(libraryBookVersions.bookVersionId, ids),
+          eq(libraries.userId, userId),
+          eq(libraries.type, 'private'),
+        )).all()
+      for (const card of cards) {
+        if (!titles.has(card.bookVersionId)) titles.set(card.bookVersionId, { title: card.title, author: card.author })
+      }
+    }
+
+    result.sessions = (ids.length === 0 ? [] : db.select().from(readingSessions).where(and(
+      eq(readingSessions.userId, userId),
+      inArray(readingSessions.bookId, ids),
+    )).all()).map((row) => ({
+      bookId: row.bookId,
+      title: titles.get(row.bookId)?.title ?? null,
+      author: titles.get(row.bookId)?.author ?? null,
+      id: row.id,
+      roundId: row.roundId,
+      source: row.source,
+      date: row.date,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+      durationSeconds: row.durationSeconds,
+      startFraction: row.startFraction,
+      endFraction: row.endFraction,
+      startCfi: row.startCfi,
+      endCfi: row.endCfi,
+      startChapterIndex: row.startChapterIndex,
+      endChapterIndex: row.endChapterIndex,
+      coverage: row.coverage,
+      fragments: row.fragments,
+      timezone: row.timezone ?? '',
+      revisionId: row.revisionId,
+      wordCount: row.wordCount,
+    }))
+
+    result.durationFacts = getDurationFacts(userId, bookId).map((fact) => {
+      const archive = fact.bookVersionId ? archiveById.get(fact.bookVersionId) : undefined
+      return { archiveId: fact.bookVersionId, title: archive?.title ?? null, author: archive?.author ?? null, granularity: fact.granularity,
+        date: fact.date, durationSeconds: fact.durationSeconds, aggregationRole: fact.aggregationRole,
+        overlapGroup: fact.overlapGroup, source: fact.source }
+    })
+    if (!bookId) {
+      for (const archive of archives) {
+        for (const day of archive.legacyDaily) result.durationFacts.push({ archiveId: archive.bookVersionId, title: archive.title, author: archive.author,
+          granularity: 'book_day', date: day.date, durationSeconds: day.durationSeconds, aggregationRole: 'additive', overlapGroup: null, source: 'native' })
+      }
+    } else {
+      const archive = archiveById.get(bookId)
+      for (const day of archive?.legacyDaily ?? []) result.durationFacts.push({ archiveId: bookId, title: archive?.title ?? null, author: archive?.author ?? null,
+        granularity: 'book_day', date: day.date, durationSeconds: day.durationSeconds, aggregationRole: 'additive', overlapGroup: null, source: 'native' })
+    }
+  }
+  return result
 }

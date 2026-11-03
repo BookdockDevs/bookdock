@@ -271,14 +271,34 @@ export const readingArchives = sqliteTable('reading_archives', {
   author: text('author').notNull().default(''),
   format: text('format').$type<'epub' | 'txt' | null>(),
   coverKey: text('cover_key'),
+  // Legacy discriminator. Only 'book' is ever written now: imported
+  // account-scoped archives are no longer produced (see
+  // docs/local/dev/reading-data-import.md 0.10), and no read path branches on
+  // this column. The enum keeps 'account' because narrowing it would mean
+  // rebuilding the table for no behavioural gain.
+  archiveKind: text('archive_kind', { enum: ['book', 'account'] }).notNull().default('book'),
+  // Imported reading history (导入阅读历史): archive identity without a
+  // library work/version behind it. See architecture.md "Imported reading
+  // history".
+  importSource: text('import_source', { enum: ['weread', 'legado'] }),
+  // Dataset key: 'vid:<vid>' when a gateway response revealed it, else
+  // 'key:<fingerprint>'; '' for legado. Null on native archives.
+  importAccountKey: text('import_account_key'),
+  importBookKey: text('import_book_key'),
+  // Remote cover URL for imported books (coverKey is null there).
+  coverUrl: text('cover_url'),
   legacyIntervals: text('legacy_intervals', { mode: 'json' }).$type<ReadingCoverageInterval[]>().notNull().default([]),
   legacyDaily: text('legacy_daily', { mode: 'json' }).$type<{ date: string; durationSeconds: number }[]>().notNull().default([]),
   legacyWordCount: integer('legacy_word_count'),
   legacyRevisionId: text('legacy_revision_id'),
+  meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>(),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.bookVersionId] }),
+  importIdentityUnique: uniqueIndex('reading_archives_import_identity_unique').on(
+    table.userId, table.importSource, table.importAccountKey, table.importBookKey,
+  ).where(sql`${table.importSource} IS NOT NULL`),
 }))
 
 export const readingRounds = sqliteTable('reading_rounds', {
@@ -535,6 +555,51 @@ export const libraryBooks = sqliteTable('library_books', {
   libraryIdx: index('library_books_library_idx').on(table.libraryId, table.updatedAt),
   categoryIdx: index('library_books_category_idx').on(table.categoryId),
   shelfIdx: index('library_books_shelf_idx').on(table.shelfId),
+}))
+
+export const readingDurationFacts = sqliteTable('reading_duration_facts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // The version the reading belongs to: an import archive before mounting, the
+  // real book version afterwards. No foreign key on purpose (0060 / 0.11).
+  bookVersionId: text('book_version_id'),
+  granularity: text('granularity', { enum: ['book_total', 'book_day', 'account_total', 'account_day'] }).notNull(),
+  durationSeconds: integer('duration_seconds').notNull(),
+  date: text('date'),
+  aggregationRole: text('aggregation_role', { enum: ['additive', 'reference'] }).notNull(),
+  overlapGroup: text('overlap_group'),
+  source: text('source', { enum: ['weread', 'legado'] }).notNull(),
+  sourceNamespace: text('source_namespace').notNull(),
+  sourceRecordKey: text('source_record_key').notNull(),
+  observedAt: integer('observed_at').notNull(),
+}, (table) => ({
+  sourceRecordUnique: uniqueIndex('reading_duration_facts_source_record_unique').on(table.userId, table.source, table.sourceNamespace, table.sourceRecordKey),
+  userDateIdx: index('reading_duration_facts_user_date_idx').on(table.userId, table.date),
+  userBookIdx: index('reading_duration_facts_user_book_idx').on(table.userId, table.bookVersionId),
+}))
+
+/** Source book -> target resolution, the only identity source for imports
+ * (docs/local/dev/reading-data-import.md 0.11 #2). Before mounting the target
+ * is the import archive; after mounting it is the real book version and the
+ * archive row is gone, so this row is what keeps a re-import pointed at the
+ * mounted book instead of rebuilding an archive. */
+export const readingImportBindings = sqliteTable('reading_import_bindings', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  source: text('source', { enum: ['weread', 'legado'] }).notNull(),
+  accountKey: text('account_key').notNull(),
+  bookKey: text('book_key').notNull(),
+  targetBookVersionId: text('target_book_version_id').notNull(),
+  mode: text('mode', { enum: ['archive', 'mounted'] }).notNull(),
+  // Reserved for a later sync: this release only ever writes mode/mountedAt.
+  autoSync: integer('auto_sync', { mode: 'boolean' }).notNull().default(false),
+  lastSyncedAt: integer('last_synced_at'),
+  mountedAt: integer('mounted_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  identityUnique: uniqueIndex('reading_import_bindings_identity_unique').on(table.userId, table.source, table.accountKey, table.bookKey),
+  targetIdx: index('reading_import_bindings_target_idx').on(table.userId, table.targetBookVersionId),
 }))
 
 export const bookVersions = sqliteTable('book_versions', {
@@ -819,7 +884,9 @@ export const highlights = sqliteTable('highlights', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   bookVersionId: text('book_version_id').notNull(),
   revisionId: text('revision_id'),
-  cfiRange: text('cfi_range').notNull(),
+  // Null = position unknown (imported highlights without a derivable CFI);
+  // SQLite treats NULLs as distinct so the unique index still applies.
+  cfiRange: text('cfi_range'),
   cfiAnchor: text('cfi_anchor'),
   color: text('color').notNull().default('yellow'),
   style: text('style').notNull().default('highlight'),
@@ -827,12 +894,23 @@ export const highlights = sqliteTable('highlights', {
   chapter: text('chapter'),
   chapterHref: text('chapter_href'),
   relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
+  // Imported highlight re-import identity: '<datasetKey>|<sourceRecordId>'.
+  importKey: text('import_key'),
+  importHash: text('import_hash'),
+  // Source-native locator inside the chapter (opaque, NOT a CFI): a decimal
+  // start offset for imported rows, used only to keep document order within a
+  // chapter. Never used for content jumps.
+  importLocator: text('import_locator'),
+  // Source-native chapter ordinal (WeRead chapterUid / legado chapterIndex):
+  // ordering-only fallback when the book's TOC is unavailable.
+  importChapterIndex: integer('import_chapter_index'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   deletedAt: integer('deleted_at'),
 }, (table) => ({
   userVersionIdx: index('highlights_user_version_idx').on(table.userId, table.bookVersionId, table.deletedAt),
   userVersionCfiUnique: uniqueIndex('highlights_user_version_cfi_unique').on(table.userId, table.bookVersionId, table.cfiRange),
+  importKeyUnique: uniqueIndex('highlights_import_key_unique').on(table.userId, table.importKey).where(sql`${table.importKey} IS NOT NULL`),
 }))
 
 export const bookmarks = sqliteTable('bookmarks', {
@@ -846,12 +924,16 @@ export const bookmarks = sqliteTable('bookmarks', {
   title: text('title'),
   contextText: text('context_text'),
   relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
+  // Imported bookmark re-import identity: '<datasetKey>|<sourceRecordId>'.
+  importKey: text('import_key'),
+  importHash: text('import_hash'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   deletedAt: integer('deleted_at'),
 }, (table) => ({
   userVersionIdx: index('bookmarks_user_version_idx').on(table.userId, table.bookVersionId, table.deletedAt),
   userVersionCfiUnique: uniqueIndex('bookmarks_user_version_cfi_unique').on(table.userId, table.bookVersionId, table.cfi),
+  importKeyUnique: uniqueIndex('bookmarks_import_key_unique').on(table.userId, table.importKey).where(sql`${table.importKey} IS NOT NULL`),
 }))
 
 export const ideas = sqliteTable('ideas', {
@@ -869,6 +951,14 @@ export const ideas = sqliteTable('ideas', {
   sourceLibraryBookVersionId: text('source_library_book_version_id'),
   revisionId: text('revision_id'),
   relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
+  // Imported idea re-import identity: '<datasetKey>|<sourceRecordId>'.
+  importKey: text('import_key'),
+  importHash: text('import_hash'),
+  // Same semantics as highlights.import_locator: source-native chapter offset,
+  // opaque, ordering only.
+  importLocator: text('import_locator'),
+  // Same semantics as highlights.import_chapter_index.
+  importChapterIndex: integer('import_chapter_index'),
   editedAt: integer('edited_at'),
   chapter: text('chapter'),
   chapterHref: text('chapter_href'),
@@ -878,6 +968,7 @@ export const ideas = sqliteTable('ideas', {
 }, (table) => ({
   userVersionIdx: index('ideas_user_version_idx').on(table.userId, table.bookVersionId, table.deletedAt),
   sharedIdx: index('ideas_shared_idx').on(table.sharedLibraryId, table.visibility),
+  importKeyUnique: uniqueIndex('ideas_import_key_unique').on(table.userId, table.importKey).where(sql`${table.importKey} IS NOT NULL`),
 }))
 
 export const ideaComments = sqliteTable('idea_comments', {
@@ -925,6 +1016,9 @@ export const bookReviews = sqliteTable('book_reviews', {
   readListingId: text('read_listing_id'),
   readBookVersionId: text('read_book_version_id'),
   readRevisionId: text('read_revision_id'),
+  // Imported review re-import identity: '<datasetKey>|<sourceRecordId>'.
+  importKey: text('import_key'),
+  importHash: text('import_hash'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   editedAt: integer('edited_at'),
@@ -937,6 +1031,7 @@ export const bookReviews = sqliteTable('book_reviews', {
   privateUnique: uniqueIndex('book_reviews_private_unique')
     .on(table.privateLibraryBookId)
     .where(sql`${table.privateLibraryBookId} IS NOT NULL`),
+  importKeyUnique: uniqueIndex('book_reviews_import_key_unique').on(table.userId, table.importKey).where(sql`${table.importKey} IS NOT NULL`),
 }))
 
 export const activityEvents = sqliteTable('activity_events', {

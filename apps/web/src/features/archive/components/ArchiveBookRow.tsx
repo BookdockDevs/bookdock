@@ -137,9 +137,11 @@ export default function ArchiveBookRow({
     >
       <div className="shrink-0" aria-hidden="true">
         <BookCover
-          book={{ id: book.bookVersionId, title: book.title ?? '', format: book.format, coverKey: book.coverKey }}
+          book={{ id: book.bookVersionId, title: book.title ?? '', format: book.format ?? undefined, coverKey: book.coverKey }}
           size="sm"
-          coverSrc={book.coverKey ? `/api/v1/archive/books/${encodeURIComponent(book.bookVersionId)}/cover?v=${encodeURIComponent(book.coverKey)}` : undefined}
+          coverSrc={book.coverKey
+            ? `/api/v1/archive/books/${encodeURIComponent(book.bookVersionId)}/cover?v=${encodeURIComponent(book.coverKey)}`
+            : book.coverUrl ?? undefined}
         />
       </div>
       <div className="min-w-0 flex-1 flex flex-col justify-center gap-1">
@@ -150,7 +152,7 @@ export default function ArchiveBookRow({
 
         {/* Row 2: 作者 */}
         <p className="truncate text-xs text-stone-500 dark:text-stone-400">
-          {book.author || _('archive.unknownAuthor', { defaultValue: '未知作者' })}
+          {book.author || _('common.unknownAuthor')}
         </p>
 
         {/* Row 3: 核心阅读数据流 (如: 阅读 4 分钟 · 47% · 笔记 3) */}

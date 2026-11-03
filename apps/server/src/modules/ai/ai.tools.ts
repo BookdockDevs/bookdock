@@ -302,7 +302,7 @@ export async function executeAiTool(userId: string, bookId: string, call: AiTool
           endOffset: excerpt.length,
           excerpt,
           sourceType: 'annotation' as const,
-          sourceCfi: annotation.cfiRange ?? annotation.cfiAnchor,
+          sourceCfi: annotation.cfiRange ?? annotation.cfiAnchor ?? undefined,
         }
       })
       const results = boundedAnnotations.map(({ annotation, chapter }) => ({

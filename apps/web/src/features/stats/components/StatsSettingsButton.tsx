@@ -2,7 +2,6 @@ import { useState } from 'react'
 
 import Modal from '@/components/ui/Modal'
 import Toggle from '@/components/ui/Toggle'
-import ReadingTransferControls from '@/features/archive/components/ReadingTransferControls'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
@@ -21,7 +20,7 @@ interface StatsSettingsButtonProps {
   onBookDeleted?: () => void
 }
 
-export default function StatsSettingsButton({ bookId, onBookDeleted }: StatsSettingsButtonProps = {}) {
+export default function StatsSettingsButton({ bookId: _bookId, onBookDeleted: _onBookDeleted }: StatsSettingsButtonProps = {}) {
   const _ = useTranslation()
   const [open, setOpen] = useState(false)
   const readingTimerMode = useUiStore((s) => s.readingTimerMode)
@@ -55,7 +54,7 @@ export default function StatsSettingsButton({ bookId, onBookDeleted }: StatsSett
         aria-label={_('stats.settings')}
         title={_('stats.settings')}
         onClick={() => setOpen(true)}
-        className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-300"
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-300 cursor-pointer"
       >
         <svg
           width="17"
@@ -74,8 +73,8 @@ export default function StatsSettingsButton({ bookId, onBookDeleted }: StatsSett
       </button>
 
       {open && (
-        <Modal title={_('stats.settings')} onClose={() => setOpen(false)} size="default">
-          <div className="divide-y divide-stone-100 py-1 dark:divide-stone-800">
+        <Modal title={_('stats.settings')} onClose={() => setOpen(false)} size="default" contentClassName="!pt-1 pb-4">
+          <div className="divide-y divide-stone-100 dark:divide-stone-800">
             {/* 1. 自动记录阅读时长 */}
             <div className="flex items-center justify-between gap-4 py-3.5">
               <div className="min-w-0 pr-4">
@@ -110,10 +109,9 @@ export default function StatsSettingsButton({ bookId, onBookDeleted }: StatsSett
                   ariaLabel={_('settings.readingTimerManual')}
                 />
               </div>
-
             </div>
 
-            {/* Automatic and manual timers share the same suspension grace. */}
+            {/* 3. 共享暂停宽限 */}
             {(isAuto || isManual) && (
               <div className="mt-3 flex flex-col gap-2 rounded-xl bg-stone-50/80 p-3 sm:flex-row sm:items-center sm:justify-between dark:bg-stone-800/60">
                 <div className="min-w-0 pr-2">
@@ -148,25 +146,6 @@ export default function StatsSettingsButton({ bookId, onBookDeleted }: StatsSett
                 </div>
               </div>
             )}
-
-            {/* 3. 阅读数据管理 */}
-            <div className="py-3.5">
-              <div className="mb-3">
-                <p className="text-sm font-medium text-stone-800 dark:text-stone-200">
-                  {bookId ? _('readingData.bookDataManagement') : _('readingData.dataManagement')}
-                </p>
-                <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
-                  {bookId ? _('readingData.bookDataManagementHint') : _('readingData.dataManagementHint')}
-                </p>
-              </div>
-              <ReadingTransferControls
-                bookId={bookId}
-                onDeleteArchive={() => {
-                  setOpen(false)
-                  onBookDeleted?.()
-                }}
-              />
-            </div>
           </div>
         </Modal>
       )}

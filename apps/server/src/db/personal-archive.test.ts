@@ -56,8 +56,8 @@ describe('personal archive upgrade', () => {
     const tables = ['highlights', 'bookmarks', 'ideas', 'idea_comments', 'idea_likes', 'idea_comment_likes', 'book_review_comments', 'book_review_likes', 'book_review_comment_likes', 'content_files']
     const snapshot = () => tables.map((table) => (sqlite.prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>)
       .map((row) => {
-        if (table === 'bookmarks' || table === 'ideas') {
-          const { relocation: _relocation, ...retained } = row
+        if (table === 'bookmarks' || table === 'ideas' || table === 'highlights') {
+          const { relocation: _relocation, import_key: _importKey, import_hash: _importHash, import_locator: _importLocator, import_chapter_index: _importChapterIndex, ...retained } = row
           return retained
         }
         return row

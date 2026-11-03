@@ -34,29 +34,33 @@ export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   visibility?: 'private' | 'shared'
   revisionId?: string | null
   editedAt?: number | null
+  importLocator?: string | null
+  importChapterIndex?: number | null
 }, options?: { images?: ContentFile[] }): AnnotationRes {
   if (kind === 'highlight') {
     return {
-      id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? '', cfiAnchor: row.cfiAnchor ?? null,
+      id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? null, cfiAnchor: row.cfiAnchor ?? null,
       type: 'highlight', color: row.color ?? 'yellow', style: (row.style ?? 'highlight') as AnnotationRes['style'],
       text: row.text ?? '', note: null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
+      importLocator: row.importLocator ?? null, importChapterIndex: row.importChapterIndex ?? null,
       createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
     }
   }
   if (kind === 'bookmark') {
     return {
-      id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfi ?? '', cfiAnchor: null,
+      id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfi ?? null, cfiAnchor: null,
       type: 'bookmark', color: 'yellow', style: 'underline',
       text: row.title ?? '', contextText: row.contextText ?? null, note: null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
       revisionId: row.revisionId ?? null, createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
     }
   }
   return {
-    id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? '', cfiAnchor: row.cfiAnchor ?? null,
+    id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? null, cfiAnchor: row.cfiAnchor ?? null,
     type: 'note', color: row.color ?? 'yellow', style: (row.style ?? 'underline') as AnnotationRes['style'],
     images: options?.images ?? publishedContentFiles(getDb(), 'idea', row.id),
     visibility: row.visibility ?? 'private', revisionId: row.revisionId ?? null, editedAt: row.editedAt ?? null,
     text: row.text ?? '', note: row.note ?? null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
+    importLocator: row.importLocator ?? null, importChapterIndex: row.importChapterIndex ?? null,
     createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
   }
 }

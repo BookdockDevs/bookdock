@@ -101,7 +101,7 @@ function isSelectionIdea(
   currentSelection: SelectionInfo | null,
   activeNoteEditor: string | null,
   annotationsList?: AnnotationRes[],
-  markersList?: { annotation: { cfiRange: string } }[],
+  markersList?: { annotation: { cfiRange: string | null } }[],
 ): boolean {
   if (activeNoteEditor) return true
   if (!currentSelection) return false
@@ -356,7 +356,7 @@ export default function Reader() {
 
   const bookmarks = useMemo(
     () => displayedRevisionId
-      ? (annotations?.data ?? []).filter((annotation) => annotation.type === 'bookmark' && annotation.locationAvailable !== false && (annotation.revisionId == null || annotation.revisionId === displayedRevisionId))
+      ? (annotations?.data ?? []).filter((annotation): annotation is typeof annotation & { cfiRange: string } => annotation.type === 'bookmark' && annotation.cfiRange !== null && annotation.locationAvailable !== false && (annotation.revisionId == null || annotation.revisionId === displayedRevisionId))
       : [],
     [annotations?.data, displayedRevisionId],
   )
@@ -1392,11 +1392,24 @@ export default function Reader() {
     if (deepLinkAnnotation && !annotation) {
       if (annotations?.data) {
         deepLinkHandled.current = true
-        notify.warning(_('profileArchive.positionUnavailable'))
+        // A different failure from "the position is stale": this id is not in
+        // the book at all. Sharing one message made a cache miss (the note was
+        // mounted here after this list was cached) indistinguishable from a
+        // genuinely broken position.
+        notify.warning(_('profileArchive.annotationMissing'))
       }
       return
     }
-    if (annotation && (annotation.locationAvailable === false || (annotation.revisionId != null && annotation.revisionId !== displayedRevisionId))) {
+    // `displayedRevisionId` is the renderer's own state and is null until the
+    // content URL has been parsed. Unknown is not a mismatch: the server has
+    // already decided `locationAvailable` against the book's current revision,
+    // so only a *known* different revision may veto the jump. Vetoing here on
+    // "not yet known" hides every imported note behind a toast even though the
+    // CFI is valid.
+    const revisionMismatch = annotation?.revisionId != null
+      && displayedRevisionId != null
+      && annotation.revisionId !== displayedRevisionId
+    if (annotation && (annotation.locationAvailable === false || revisionMismatch)) {
       deepLinkHandled.current = true
       notify.warning(_('profileArchive.positionUnavailable'))
       return
@@ -1465,8 +1478,10 @@ export default function Reader() {
     const list: ReaderAnnotation[] = (annotations?.data ?? [])
       .filter((a) => a.revisionId == null || a.revisionId === displayedRevisionId)
       .filter((a) => a.type === 'highlight' || (a.type === 'note' && a.locationAvailable !== false))
+      // Imported annotations without a derivable CFI never render in the reader.
+      .filter((a): a is typeof a & { cfiRange: string } => a.cfiRange !== null)
       .map((a) => ({ cfiRange: a.cfiRange, type: a.type as 'highlight' | 'note', color: a.color, style: a.style, note: a.note }))
-    list.push(...publicMarkers.map((idea) => ({ cfiRange: idea.annotation.cfiRange, type: 'note' as const, color: DEFAULT_IDEA_COLOR, style: 'underline' as const, note: idea.annotation.note })))
+    list.push(...publicMarkers.filter((idea): idea is typeof idea & { annotation: { cfiRange: string } } => idea.annotation.cfiRange !== null).map((idea) => ({ cfiRange: idea.annotation.cfiRange, type: 'note' as const, color: DEFAULT_IDEA_COLOR, style: 'underline' as const, note: idea.annotation.note })))
     // An idea being composed has no row yet; a pseudo note keeps the dashed
     // underline on its range while the editor is open
     if (noteEditorRange) {

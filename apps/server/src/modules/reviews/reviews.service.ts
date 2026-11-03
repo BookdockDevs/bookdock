@@ -373,6 +373,8 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
       createdAt: now,
       updatedAt: now,
       editedAt: null,
+      importKey: null,
+      importHash: null,
     }
     try {
       db.transaction((tx) => {
@@ -409,6 +411,8 @@ export async function createReview(userId: string, input: ReviewCreateReq): Prom
     createdAt: now,
     updatedAt: now,
     editedAt: null,
+    importKey: null,
+    importHash: null,
   }
   const snapshot = held ? null : await getBook(userId, input.bookVersionId)
   try {

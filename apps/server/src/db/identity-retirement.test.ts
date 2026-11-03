@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as client from './client'
 import * as schema from './schema'
-import { LEGACY_IDENTITY_RETIREMENT_TAG, migrationTagWhen } from './migration-stage'
+import { LEGACY_IDENTITY_RETIREMENT_TAG, migrationTagWhen, revertReadingImportsSchema } from './migration-stage'
 import { authGuard, requireOwner, resetAuthCaches } from '../middleware/auth.guard'
 import { errorHandler } from '../middleware/error'
 import authRoutes from '../modules/auth/auth.routes'
@@ -102,6 +102,9 @@ function makeLegacyIdentity() {
     DROP TABLE IF EXISTS activity_events;
     DROP TABLE IF EXISTS content_revision_maps;
     DROP TABLE IF EXISTS personal_metadata_sources;
+    `);
+    revertReadingImportsSchema(db.$client);
+    db.$client.exec(`
     ALTER TABLE book_states DROP COLUMN progress_revision_id;
     ALTER TABLE book_states DROP COLUMN coverage_revision_id;
     ALTER TABLE bookmarks DROP COLUMN relocation;

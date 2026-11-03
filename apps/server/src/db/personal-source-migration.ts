@@ -32,14 +32,18 @@ export function reconcilePersonalSourceMigration(
     WHERE created_at >= ${SOURCE_MIGRATION_WHEN} ORDER BY created_at
   `)
   if (!records.length) return
+  // Rows above the reserved band are ordinary later migrations (0060+): they
+  // are never this reconciler's business and survive its rewrite untouched.
+  const ownRows = records.filter((record) => Number(record.createdAt) <= DETAIL_MIGRATION_WHEN)
+  if (!ownRows.length) return
   const source = readFileSync(path.join(migrationsFolder, '0058_personal_metadata_sources.sql'), 'utf8').replace(/\r\n/g, '\n')
   const consolidatedHashes = new Set([source, source.replace(/\n/g, '\r\n')]
     .map((text) => createHash('sha256').update(text).digest('hex')))
-  if (Number(records[0].createdAt) === SOURCE_MIGRATION_WHEN && consolidatedHashes.has(records[0].hash)) return
-  if (records.length > 2
-    || Number(records[0].createdAt) !== SOURCE_MIGRATION_WHEN
-    || !sourceHashes.has(records[0].hash)
-    || (records[1] && (Number(records[1].createdAt) !== DETAIL_MIGRATION_WHEN || !detailHashes.has(records[1].hash)))) {
+  if (Number(ownRows[0].createdAt) === SOURCE_MIGRATION_WHEN && consolidatedHashes.has(ownRows[0].hash)) return
+  if (ownRows.length > 2
+    || Number(ownRows[0].createdAt) !== SOURCE_MIGRATION_WHEN
+    || !sourceHashes.has(ownRows[0].hash)
+    || (ownRows[1] && (Number(ownRows[1].createdAt) !== DETAIL_MIGRATION_WHEN || !detailHashes.has(ownRows[1].hash)))) {
     throw new Error('Unrecognized personal source migration history; refusing to rewrite the ledger')
   }
 
@@ -47,10 +51,10 @@ export function reconcilePersonalSourceMigration(
     const columns = tx.all<{ name: string }>(sql`PRAGMA table_info(personal_metadata_sources)`)
     if (!columns.length) throw new Error('Personal source migration is recorded but its table is missing')
     if (!columns.some((column) => column.name === 'has_detail')) {
-      if (records.length === 2) throw new Error('Personal source detail migration is recorded but its column is missing')
+      if (ownRows.length === 2) throw new Error('Personal source detail migration is recorded but its column is missing')
       tx.run(sql`ALTER TABLE personal_metadata_sources ADD COLUMN has_detail INTEGER NOT NULL DEFAULT 1`)
     }
-    for (const record of records) {
+    for (const record of ownRows) {
       tx.run(sql`DELETE FROM __drizzle_migrations WHERE hash = ${record.hash} AND created_at = ${record.createdAt}`)
     }
     tx.run(sql`INSERT INTO __drizzle_migrations (hash, created_at) VALUES (${migration.hash}, ${migration.folderMillis})`)

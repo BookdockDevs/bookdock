@@ -41,7 +41,8 @@ const WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']
 /** 格式化为直观易读的阅读时长：如 “4 小时 51 分钟”、“37 分钟” */
 function formatTrendDuration(seconds: number): string {
   if (seconds <= 0) return ''
-  const totalMinutes = Math.max(1, Math.round(seconds / 60))
+  const totalMinutes = Math.floor(seconds / 60)
+  if (totalMinutes === 0) return `${Math.floor(seconds)} 秒`
   const h = Math.floor(totalMinutes / 60)
   const m = totalMinutes % 60
   if (h > 0) {

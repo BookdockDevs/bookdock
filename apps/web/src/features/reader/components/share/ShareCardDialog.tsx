@@ -29,12 +29,16 @@ import { formatChineseDate, formatShareDate, shareFileName } from './share-text'
 
 interface ShareCardDialogProps {
   bookId: string
+  /** Archive metadata used when the book detail request fails (e.g. sharing
+   * an excerpt from an imported or deleted-book archive entry). */
+  fallbackTitle?: string
+  fallbackAuthor?: string
 }
 
 /** Centered modal with a live card preview and image export actions. The card
  * DOM stays at SHARE_CARD_WIDTH; the preview scales down via transform on
  * smaller screens while the card node is exported with embedded fonts on save/copy. */
-export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
+export default function ShareCardDialog({ bookId, fallbackTitle, fallbackAuthor }: ShareCardDialogProps) {
   const _ = useTranslation()
   const dialogLayout = useDialogLayout()
   const shareTarget = useReaderState((s) => s.shareTarget)
@@ -47,6 +51,9 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
   const bookQuery = useQuery({
     queryKey: ['book', bookId],
     queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
+    // Only fetched for the open dialog: a pre-mounted dialog would otherwise
+    // fire a doomed request for archive-only ids on every page load.
+    enabled: !!shareTarget,
   })
   const { data: fontsData, isPending: fontsPending, isError: fontsError } = useFonts()
   const uploadedFonts = useMemo(() => fontsData?.data ?? [], [fontsData])
@@ -86,7 +93,11 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     [prefs.font, prefs.cjkFont, uploadedFonts, fontPreferences, fontOrder, fontLatinIds],
   )
   const book = bookQuery.data?.data
-  const bookAuthor = useMemo(() => formatAuthorList(book?.authors, book?.author ?? ''), [book?.authors, book?.author])
+  const title = book?.title ?? fallbackTitle ?? ''
+  const bookAuthor = useMemo(
+    () => (book ? formatAuthorList(book.authors, book.author ?? '') : fallbackAuthor ?? ''),
+    [book, fallbackAuthor],
+  )
 
   useLayoutEffect(() => {
     if (!shareTarget) return
@@ -121,7 +132,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
 
   if (!shareTarget) return null
 
-  if (bookQuery.isError) {
+  if (bookQuery.isError && fallbackTitle === undefined) {
     return createPortal(
       <div
         data-reader-modal=""
@@ -150,7 +161,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
     )
   }
 
-  const fileName = shareFileName(book?.title ?? '')
+  const fileName = shareFileName(title)
   const fontStack = resolvedFont.stack
   const selectedPrimaryFont = enabledFontOptions.find((opt) => opt.id === prefs.font)
   const showCjkFontPicker = selectedPrimaryFont?.latin ?? false
@@ -247,7 +258,7 @@ export default function ShareCardDialog({ bookId }: ShareCardDialogProps) {
               <ShareCard
                 ref={cardRef}
                 text={shareTarget.text}
-                title={book?.title ?? ''}
+                title={title}
                 author={bookAuthor}
                 chapter={shareTarget.chapter}
                 template={prefs.template}

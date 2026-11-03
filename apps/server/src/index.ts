@@ -12,6 +12,7 @@ import { pruneOldContentRevisions, purgeAllExpiredTrash } from './modules/books/
 import { purgeAllLibraryTrash } from './modules/libraries/catalog.service'
 import { interruptStaleAiGenerationRuns } from './modules/ai/ai.runs.service'
 import { recoverZombieTransferTasks } from './storage/tiered'
+import { startWereadWebSessionKeepAlive } from './modules/reading-imports/weread-durations'
 
 const TRASH_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000
 
@@ -54,6 +55,8 @@ async function start() {
   // Long-running containers never hit the boot sweep or open the trash, so
   // expired rows would hold storage indefinitely without this.
   setInterval(() => void runTrashSweep(), TRASH_SWEEP_INTERVAL_MS).unref()
+
+  startWereadWebSessionKeepAlive()
 
   try {
     serve(

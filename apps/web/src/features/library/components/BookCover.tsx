@@ -19,7 +19,7 @@ const loadedCoverCache = new Set<string>()
 export interface CoverSource {
   id: string
   title: string
-  format: string
+  format?: string
   coverKey?: string | null
   /** Stable content identity used for the automatic placeholder palette. */
   coverPaletteKey?: string | null
@@ -109,7 +109,7 @@ export default function BookCover({ book, size = 'md', showFormat = true, classN
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-0.5 px-1.5 pl-2.5">
             {showPlaceholderText && <span className="line-clamp-3 text-center font-serif text-[10px] font-medium leading-tight tracking-wide">{title}</span>}
           </div>
-          {showPlaceholderText && showFormat && <span className="pb-1 text-center font-mono text-[8px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
+          {showPlaceholderText && showFormat && book.format && <span className="pb-1 text-center font-mono text-[8px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
         </>
       ) : (
         <>
@@ -126,7 +126,7 @@ export default function BookCover({ book, size = 'md', showFormat = true, classN
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 pl-5">
             {showPlaceholderText && <span className="line-clamp-4 text-center font-serif text-[13px] font-medium leading-snug tracking-wide">{title}</span>}
           </div>
-          {showPlaceholderText && showFormat && <span className="pb-2 text-center font-mono text-[9px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
+          {showPlaceholderText && showFormat && book.format && <span className="pb-2 text-center font-mono text-[9px] font-medium uppercase tracking-widest opacity-40">{book.format}</span>}
         </>
       )}
 

@@ -52,10 +52,11 @@ const uploadedFont = {
   createdAt: 0,
 }
 
-function renderDialog() {
+function renderDialog(props: { fallbackTitle?: string; fallbackAuthor?: string } = {}) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <ShareCardDialog bookId="b1" />
+    <QueryClientProvider client={queryClient}>
+      <ShareCardDialog bookId="b1" {...props} />
     </QueryClientProvider>,
   )
 }
@@ -203,6 +204,24 @@ describe('ShareCardDialog', () => {
     fireEvent.click(save)
     await waitFor(() => expect(save).toBeEnabled())
     expect(downloadCardBlob).not.toHaveBeenCalled()
+  })
+
+  it('renders the card with archive metadata when the book detail request fails and a fallback is given', async () => {
+    vi.mocked(apiGet).mockRejectedValue(new Error('404'))
+    renderDialog({ fallbackTitle: '已归档的书', fallbackAuthor: '佚名' })
+
+    expect(await screen.findByText('已归档的书')).toBeInTheDocument()
+    expect(await screen.findByText('佚名')).toBeInTheDocument()
+    expect(screen.queryByText('加载失败，请重试')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存图片' })).toBeEnabled()
+  })
+
+  it('still shows the error state when the book detail request fails without a fallback', async () => {
+    vi.mocked(apiGet).mockRejectedValue(new Error('404'))
+    renderDialog()
+
+    expect(await screen.findByText('加载失败，请重试')).toBeInTheDocument()
+    expect(screen.queryByText('保存图片')).not.toBeInTheDocument()
   })
 
 })

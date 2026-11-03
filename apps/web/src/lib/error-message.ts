@@ -43,6 +43,7 @@ const ERROR_KEYS: Record<string, string> = {
   UPDATE_NOT_LAUNCHED: 'errors.updateNotLaunched',
   UPDATE_FAILED: 'errors.updateFailed',
   INTERNAL_ERROR: 'errors.operationFailed',
+  WEREAD_WEB_AUTH_EXPIRED: 'readingImport.webAuthExpired',
 }
 
 export function getErrorKeyByCode(code: string | null | undefined): string | null {

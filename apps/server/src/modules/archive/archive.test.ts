@@ -6,7 +6,7 @@ import { and, eq } from 'drizzle-orm'
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
-import { getBookDetail, getOverview, listBooks } from './archive.service'
+import { exportNotes, getBookDetail, getOverview, listBooks } from './archive.service'
 
 type TestDb = ReturnType<typeof drizzle<typeof schema>>
 
@@ -350,7 +350,7 @@ describe('archive service', () => {
 
     const byTime = await listBooks(ownerId, { sort: 'reading-time', page: 1, pageSize: 20 })
     expect(byTime.entries.map((b) => b.bookVersionId)).toEqual([bookTwo, bookOne])
-    expect(byTime.entries[0]).toMatchObject({ durationSeconds: 600, readingDays: 1, progress: 0 })
+    expect(byTime.entries[0]).toMatchObject({ durationSeconds: 600, readingDays: 1, progress: null })
     expect(byTime.entries[1]).toMatchObject({ durationSeconds: 300, readingDays: 1, progress: 45 })
   })
 
@@ -388,5 +388,189 @@ describe('archive service', () => {
     seedBookmark(db, ownerId, bookTwo, 200)
     const multiType = await listBooks(ownerId, { type: 'highlight,bookmark', sort: 'recent', page: 1, pageSize: 20 })
     expect(multiType.entries.map((b) => b.bookVersionId)).toEqual([bookTwo, bookOne])
+  })
+
+  it('exports live notes and own reviews per book with user isolation', async () => {
+    seedHighlight(db, ownerId, bookOne, 100)
+    seedHighlight(db, ownerId, bookOne, 105, true)
+    seedBookmark(db, ownerId, bookOne, 110)
+    seedIdea(db, ownerId, bookTwo, 120)
+    seedHighlight(db, otherId, bookOne, 130)
+    const workOne = db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+      .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookOne)).get()!
+    seedPrivateReview(db, ownerId, workOne.id, 400)
+
+    const result = await exportNotes(ownerId)
+    expect(result.version).toBe(1)
+    expect(result.books).toHaveLength(2)
+    const one = result.books.find((book) => book.bookId === bookOne)!
+    expect(one).toMatchObject({ title: 'Book One', author: 'Author A' })
+    expect(one.highlights.map((row) => row.cfiRange)).toEqual(['cfi-100'])
+    expect(one.highlights[0]).toMatchObject({ text: 'quote 100', chapter: 'chapter one' })
+    expect(one.bookmarks).toHaveLength(1)
+    expect(one.ideas).toHaveLength(0)
+    const two = result.books.find((book) => book.bookId === bookTwo)!
+    expect(two.ideas).toHaveLength(1)
+    expect(two.ideas[0]).toMatchObject({ note: 'thought 120', visibility: 'private' })
+    expect(result.reviews).toHaveLength(1)
+    expect(result.reviews[0]).toMatchObject({ rating: 4, workTitle: 'Book One', visibility: 'private' })
+
+    const other = await exportNotes(otherId)
+    expect(other.books.find((book) => book.bookId === bookOne)!.highlights).toHaveLength(1)
+    expect(other.reviews).toHaveLength(0)
+  })
+
+  it('scopes single-book export to that version and its work review', async () => {
+    seedHighlight(db, ownerId, bookOne, 100)
+    seedIdea(db, ownerId, bookTwo, 120)
+    const workOne = db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+      .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookOne)).get()!
+    const workTwo = db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+      .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookTwo)).get()!
+    seedPrivateReview(db, ownerId, workOne.id, 400)
+    seedPrivateReview(db, ownerId, workTwo.id, 410)
+
+    const result = await exportNotes(ownerId, bookOne)
+    expect(result.books).toHaveLength(1)
+    expect(result.books[0]).toMatchObject({ bookId: bookOne, title: 'Book One' })
+    expect(result.books[0].highlights).toHaveLength(1)
+    expect(result.books[0].ideas).toHaveLength(0)
+    expect(result.reviews.map((row) => row.workTitle)).toEqual(['Book One'])
+  })
+
+  it('falls back to the archive snapshot for lost sources and keeps read-provenance reviews', async () => {
+    const gone = createId('book')
+    seedHighlight(db, ownerId, gone, 100)
+    db.insert(schema.readingArchives).values({
+      userId: ownerId, bookVersionId: gone, title: 'Archived book', author: 'Gone author',
+      createdAt: 1, updatedAt: 1,
+    }).run()
+    seedSourceReview(db, ownerId, gone, 500)
+
+    const result = await exportNotes(ownerId, gone)
+    expect(result.books).toHaveLength(1)
+    expect(result.books[0]).toMatchObject({ bookId: gone, title: 'Archived book', author: 'Gone author' })
+    expect(result.books[0].highlights).toHaveLength(1)
+    expect(result.reviews).toHaveLength(1)
+    // The source is unreadable, so attribution falls back to the retained snapshot.
+    expect(result.reviews[0]).toMatchObject({
+      workTitle: 'Archived book', workAuthor: 'Gone author',
+      bookVersionId: gone, sourceLibraryId: 'lib-gone', visibility: 'shared',
+    })
+  })
+
+  it('hides unreadable source work metadata without a retained snapshot', async () => {
+    seedSourceReview(db, ownerId, createId('book'), 500)
+    const result = await exportNotes(ownerId)
+    expect(result.reviews).toHaveLength(1)
+    expect(result.reviews[0]).toMatchObject({ workTitle: null, workAuthor: null })
+  })
+
+  it('hides source metadata when the source work exists but the caller lost access', async () => {
+    const sharedLibraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: sharedLibraryId, userId: otherId, type: 'shared', name: 'closed library',
+      visibility: 'private', createdAt: 1, updatedAt: 1,
+    }).run()
+    const workId = createId('lb')
+    db.insert(schema.libraryBooks).values({
+      id: workId, libraryId: sharedLibraryId, userId: otherId,
+      title: 'Shared work', author: 'Shared author', createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.bookReviews).values({
+      id: createId('review'), userId: ownerId,
+      sourceLibraryId: sharedLibraryId, sourceLibraryBookId: workId,
+      ratingHalves: 8, body: 'a collected review', visibility: 'private',
+      readBookVersionId: createId('book'), createdAt: 600, updatedAt: 600,
+    }).run()
+
+    const result = await exportNotes(ownerId)
+    expect(result.reviews).toHaveLength(1)
+    expect(result.reviews[0]).toMatchObject({ workTitle: null, workAuthor: null, sourceLibraryBookId: workId })
+  })
+
+  it('keeps reviews whose work and versions no longer exist', async () => {
+    const workOne = db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+      .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookOne)).get()!
+    seedPrivateReview(db, ownerId, workOne.id, 400)
+    db.delete(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.libraryBookId, workOne.id)).run()
+
+    const result = await exportNotes(ownerId)
+    expect(result.reviews).toHaveLength(1)
+    expect(result.reviews[0]).toMatchObject({ workTitle: 'Book One', workAuthor: 'Author A' })
+  })
+
+  it('keeps unattributed reviews while excluding pending-attributed ones', async () => {
+    const workOne = db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+      .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookOne)).get()!
+    seedPrivateReview(db, ownerId, workOne.id, 400)
+    db.delete(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.libraryBookId, workOne.id)).run()
+
+    const workTwo = db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+      .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookTwo)).get()!
+    seedPrivateReview(db, ownerId, workTwo.id, 410)
+    db.update(schema.libraryBooks)
+      .set({ deletedAt: 1, meta: { pendingUserDataDeletion: 1 } })
+      .where(eq(schema.libraryBooks.id, workTwo.id))
+      .run()
+
+    const result = await exportNotes(ownerId)
+    expect(result.reviews).toHaveLength(1)
+    expect(result.reviews[0].createdAt).toBe(400)
+  })
+
+  it('keeps unanchored ideas when pending deletions exist', async () => {
+    seedIdea(db, ownerId, bookOne, 120)
+    db.insert(schema.ideas).values({
+      id: createId('idea'), userId: ownerId, bookVersionId: null, cfiRange: null,
+      text: 'loose idea', note: null, createdAt: 130, updatedAt: 130, deletedAt: null,
+    }).run()
+    db.update(schema.libraryBooks)
+      .set({ deletedAt: 1, meta: { pendingUserDataDeletion: 1 } })
+      .where(eq(schema.libraryBooks.id,
+        db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+          .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+          .where(eq(schema.libraryBookVersions.bookVersionId, bookOne)).get()!.id))
+      .run()
+
+    const result = await exportNotes(ownerId)
+    const unanchored = result.books.find((book) => book.bookId === null)
+    expect(unanchored?.ideas.map((row) => row.text)).toEqual(['loose idea'])
+  })
+
+  it('excludes reviews attributed to pending-deletion versions from the full export', async () => {
+    const workOne = db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+      .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+      .where(eq(schema.libraryBookVersions.bookVersionId, bookOne)).get()!
+    seedPrivateReview(db, ownerId, workOne.id, 400)
+    db.update(schema.libraryBooks)
+      .set({ deletedAt: 1, meta: { pendingUserDataDeletion: 1 } })
+      .where(eq(schema.libraryBooks.id, workOne.id))
+      .run()
+
+    const result = await exportNotes(ownerId)
+    expect(result.reviews).toHaveLength(0)
+  })
+
+  it('excludes notes on versions pending data deletion', async () => {
+    seedHighlight(db, ownerId, bookOne, 100)
+    db.update(schema.libraryBooks)
+      .set({ deletedAt: 1, meta: { pendingUserDataDeletion: 1 } })
+      .where(eq(schema.libraryBooks.id,
+        db.select({ id: schema.libraryBooks.id }).from(schema.libraryBooks)
+          .innerJoin(schema.libraryBookVersions, eq(schema.libraryBookVersions.libraryBookId, schema.libraryBooks.id))
+          .where(eq(schema.libraryBookVersions.bookVersionId, bookOne)).get()!.id))
+      .run()
+
+    const all = await exportNotes(ownerId)
+    expect(all.books).toHaveLength(0)
+    const single = await exportNotes(ownerId, bookOne)
+    expect(single.books).toHaveLength(0)
   })
 })

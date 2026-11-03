@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { BookFormat } from '@bookdock/shared'
 
 import type { getDb } from '../db/client'
-import { bookReviews, bookVersions, libraryBooks, libraryBookVersions, readingArchives } from '../db/schema'
+import { bookReviews, bookVersions, libraryBooks, libraryBookVersions, readingArchives, readingImportBindings } from '../db/schema'
 
 type Db = ReturnType<typeof getDb>
 
@@ -24,18 +24,42 @@ function hasTable(db: Db, table: string): boolean {
 
 export function savePersonalBookSnapshot(db: Db, userId: string, bookVersionId: string, book: PersonalBookSnapshot) {
   if (!hasTable(db, 'reading_archives')) return
+  // A mounted import whose book is deleted keeps its records on the snapshot
+  // (same bookVersionId). Stamping the import identity here lets a later mount
+  // of the snapshot re-point the binding at the next target — without it,
+  // mountArchive sees a native archive and silently strands the binding on the
+  // deleted book. Guarded: pre-0060 databases have no bindings table.
+  const identity = hasTable(db, 'reading_import_bindings')
+    ? db.select({
+      source: readingImportBindings.source,
+      accountKey: readingImportBindings.accountKey,
+      bookKey: readingImportBindings.bookKey,
+    }).from(readingImportBindings).where(and(
+      eq(readingImportBindings.userId, userId),
+      eq(readingImportBindings.mode, 'mounted'),
+      eq(readingImportBindings.targetBookVersionId, bookVersionId),
+    )).get()
+    : undefined
+  const importIdentity = identity
+    ? { importSource: identity.source, importAccountKey: identity.accountKey, importBookKey: identity.bookKey }
+    : {}
   const now = Date.now()
   db.insert(readingArchives).values({
     userId, bookVersionId, title: book.title, author: book.author, format: book.format, coverKey: book.coverKey,
+    ...importIdentity,
     createdAt: now, updatedAt: now,
   }).onConflictDoUpdate({ target: [readingArchives.userId, readingArchives.bookVersionId], set: {
     title: book.title, author: book.author, format: book.format, coverKey: book.coverKey,
+    ...importIdentity,
   } }).run()
 }
 
 export function capturePrivateArchiveSnapshots(db: Db, versionIds: string[]) {
   if (versionIds.length === 0 || !hasTable(db, 'reading_archives')) return
   const hasReviews = hasTable(db, 'book_reviews')
+  // Duration facts have no book FK (0060): mounting an import moves them onto
+  // the real book, so they alone must keep the title snapshot alive.
+  const hasDurationFacts = hasTable(db, 'reading_duration_facts')
   const personalData = [
     sql`SELECT 1 FROM reading_archives WHERE user_id = ${libraryBooks.userId} AND book_version_id = ${bookVersions.id}`,
     sql`SELECT 1 FROM highlights WHERE user_id = ${libraryBooks.userId} AND book_version_id = ${bookVersions.id}`,
@@ -44,6 +68,9 @@ export function capturePrivateArchiveSnapshots(db: Db, versionIds: string[]) {
   ]
   if (hasReviews) {
     personalData.push(sql`SELECT 1 FROM book_reviews WHERE user_id = ${libraryBooks.userId} AND (read_book_version_id = ${bookVersions.id} OR private_library_book_id = ${libraryBooks.id})`)
+  }
+  if (hasDurationFacts) {
+    personalData.push(sql`SELECT 1 FROM reading_duration_facts WHERE user_id = ${libraryBooks.userId} AND book_version_id = ${bookVersions.id}`)
   }
   const cards = db.select({ userId: libraryBooks.userId, workId: libraryBooks.id, versionId: libraryBookVersions.bookVersionId,
     title: sql<string>`coalesce(${libraryBookVersions.title}, ${libraryBooks.title})`,

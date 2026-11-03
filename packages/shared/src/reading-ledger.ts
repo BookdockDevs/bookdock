@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 import type { BookFormat } from './constants'
 
-import { calendarDateSchema, readingTimezoneSchema } from './reading-range'
+import { calendarDateSchema } from './reading-range'
 
 export { readingTimezoneSchema } from './reading-range'
 
@@ -23,13 +23,6 @@ export interface ReadingLedgerRound {
   legacyCoverage: boolean
   unalignedCoverage?: boolean
   coverageEstimated?: boolean
-}
-
-export interface ReadingWriteReceipt {
-  requestId: string
-  bodyHash: string
-  sessionId: string | null
-  status: 'accepted' | 'skipped' | 'deleted'
 }
 
 export interface ReadingLedgerSession {
@@ -60,6 +53,10 @@ export interface ReadingLedgerSession {
 export interface ReadingLedgerRes {
   format?: BookFormat | null
   coverKey?: string | null
+  /** Remote cover for imported archives (coverKey is null there). */
+  coverUrl?: string | null
+  /** Import provenance; null/undefined for native archives. */
+  importSource?: 'weread' | 'legado' | null
   bookId: string
   title: string
   author: string
@@ -82,6 +79,10 @@ export interface ReadingLedgerRes {
 export interface ReadingLedgerOverview {
   format?: BookFormat | null
   coverKey?: string | null
+  /** Remote cover for imported archives (coverKey is null there). */
+  coverUrl?: string | null
+  /** Import provenance; null/undefined for native archives. */
+  importSource?: 'weread' | 'legado' | null
   bookId: string
   title: string
   author: string
@@ -92,6 +93,8 @@ export interface ReadingLedgerOverview {
   coverage: number
   coverageIntervals: ReadingCoverageInterval[]
   totalSeconds: number
+  undatedDurationSeconds: number
+  referenceDurationSeconds: number
   totalWordsRead: number | null
   wordState: ReadingWordState
   readingDays: number
@@ -125,6 +128,8 @@ export interface ReadingLedgerStatsRes {
   from?: string
   to?: string
   totalSeconds: number
+  undatedDurationSeconds: number
+  referenceDurationSeconds: number
   totalWordsRead: number | null
   wordState: ReadingWordState
   readingDays: number
@@ -141,24 +146,6 @@ export interface ReadingLedgerSessionPage {
   hasMore: boolean
 }
 
-export interface ReadingTransfer {
-  version: 1
-  detachedReceipts?: Array<ReadingWriteReceipt & { bookId: string }>
-  archives: Array<{
-    bookId: string
-    title: string
-    author: string
-    legacyIntervals: ReadingCoverageInterval[]
-    legacyDaily?: Array<{ date: string; durationSeconds: number }>
-    legacyWordCount?: number | null
-    legacyRevisionId?: string | null
-    rounds: ReadingLedgerRound[]
-    sessions: ReadingLedgerSession[]
-    receipts?: ReadingWriteReceipt[]
-  }>
-}
-
-export interface ReadingTransferPreview { archives: number; sessions: number; duplicates: number }
 export interface ReadingTimerClaim {
   granted: boolean
   ownerDeviceId: string
@@ -187,42 +174,3 @@ export const readingLedgerSessionsQuerySchema = z.object({
   from: readingDateSchema.optional(), to: readingDateSchema.optional(),
   cursor: z.string().max(500).optional(), limit: z.coerce.number().int().min(1).max(100).default(50),
 }).refine((value) => !value.from || !value.to || value.from <= value.to, { message: 'Range ends before it starts', path: ['to'] })
-
-const roundSchema = z.object({
-  id: z.string().min(1).max(100), ordinal: z.number().int().positive(),
-  status: z.enum(['reading', 'finished', 'abandoned']),
-  startedAt: z.number().int().positive(), endedAt: z.number().int().positive().nullable(),
-  coverage: z.number().min(0).max(1), totalSeconds: z.number().nonnegative(),
-  wordCount: z.number().int().nonnegative().nullable(), legacyCoverage: z.boolean(), unalignedCoverage: z.boolean().optional(),
-})
-const transferSessionSchema = z.object({
-  id: z.string().min(1).max(100), roundId: z.string().min(1).max(100),
-  source: z.enum(['auto', 'manual', 'retroactive', 'legacy']),
-  date: readingDateSchema,
-  startedAt: z.number().int().positive().nullable(), endedAt: z.number().int().positive().nullable(),
-  durationSeconds: z.number().nonnegative().max(24 * 3600),
-  startFraction: z.number().min(0).max(1).nullable(), endFraction: z.number().min(0).max(1).nullable(),
-  wordCount: z.number().int().nonnegative().nullable(), revisionId: z.string().max(100).nullish(),
-  startCfi: z.string().max(10000).nullish(), endCfi: z.string().max(10000).nullish(),
-  startChapterIndex: z.number().int().nonnegative().nullish(), endChapterIndex: z.number().int().nonnegative().nullish(),
-  projectedCoverage: z.array(readingCoverageSchema).max(10000).optional(), unalignedCoverage: z.boolean().optional(),
-  coverage: z.array(readingCoverageSchema).max(10000), fragments: z.array(readingTimeFragmentSchema).max(10000),
-  timezone: z.union([readingTimezoneSchema, z.literal('')]),
-})
-const transferReceiptSchema = z.object({
-  requestId: z.string().min(1).max(100), bodyHash: z.string().regex(/^[a-f0-9]{64}$/),
-  sessionId: z.string().min(1).max(100).nullable(), status: z.enum(['accepted', 'skipped', 'deleted']),
-})
-export const readingTransferSchema = z.object({
-  version: z.literal(1),
-  detachedReceipts: z.array(transferReceiptSchema.extend({ bookId: z.string().min(1).max(100) })).max(100000).optional(),
-  archives: z.array(z.object({
-    bookId: z.string().min(1).max(100), title: z.string().max(2000), author: z.string().max(2000),
-    legacyIntervals: z.array(readingCoverageSchema).max(10000),
-    legacyDaily: z.array(z.object({ date: readingDateSchema, durationSeconds: z.number().nonnegative() })).max(100000).optional(),
-    legacyWordCount: z.number().int().nonnegative().nullable().optional(),
-    legacyRevisionId: z.string().max(100).nullable().optional(),
-    rounds: z.array(roundSchema).max(1000), sessions: z.array(transferSessionSchema).max(100000),
-    receipts: z.array(transferReceiptSchema).max(100000).optional(),
-  })).max(10000),
-})

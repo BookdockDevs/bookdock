@@ -17,7 +17,7 @@ import * as client from '../../db/client'
 import * as schema from '../../db/schema'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
-import { migrateBeforeBookRetirement } from '../../db/migration-stage'
+import { migrateBeforeBookRetirement, revertReadingImportsSchema } from '../../db/migration-stage'
 import { deleteBook, trashBook } from '../books/books.service'
 import { deleteCatalogBook, deleteCatalogVersion, permanentDeleteCatalogBook, restoreCatalogBook } from '../libraries/catalog.service'
 import { forkLocalBook } from '../libraries/fork.service'
@@ -1073,7 +1073,8 @@ describe('book reviews', () => {
     await createReviewComment('member', review.id, { body: 'before files', requestId: 'before_files_123456789' })
     removeReadingProjectionSchema()
     removeContentRevisionSchema()
-    sqlite.exec('DROP TABLE activity_events; DROP TABLE IF EXISTS personal_metadata_sources; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000')
+    sqlite.exec(`DROP TABLE activity_events; DROP TABLE IF EXISTS personal_metadata_sources; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792600000000`)
+    revertReadingImportsSchema(sqlite)
     await client.runDatabaseMigrations(db)
     expect((await getReviewDiscussion('author', review.id)).review).toMatchObject({ body: '  **literal**\n', bodyFormat: 'plain', files: [] })
     expect((await unreadNotificationCount('author')).count).toBe(1)
@@ -1113,7 +1114,8 @@ describe('book reviews', () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: 'baseline', visibility: 'shared' })
     removeReadingProjectionSchema()
     removeContentRevisionSchema()
-    sqlite.exec("DROP TABLE activity_events; DROP TABLE IF EXISTS personal_metadata_sources; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000")
+    sqlite.exec(`DROP TABLE activity_events; DROP TABLE IF EXISTS personal_metadata_sources; DROP INDEX library_books_shelf_idx; ALTER TABLE library_books DROP COLUMN shelf_id; DROP TABLE shelves; DROP TABLE reading_write_receipts; DROP INDEX reading_sessions_round_idx; ALTER TABLE reading_sessions DROP COLUMN round_id; DROP TABLE reading_rounds; DROP TABLE reading_archives; DROP TABLE reading_timer_claims; DROP TABLE content_files; DROP TABLE content_upload_drafts; DROP TABLE interaction_notifications; DROP TABLE interaction_receipts; ALTER TABLE book_reviews DROP COLUMN title; ALTER TABLE book_states DROP COLUMN progress_data; ALTER TABLE book_states DROP COLUMN read_fraction; DELETE FROM __drizzle_migrations WHERE created_at >= 1792500000000`)
+    revertReadingImportsSchema(sqlite)
     await client.runDatabaseMigrations(db)
     expect(db.select().from(schema.bookReviews).get()?.id).toBe(review.id)
     await createReviewComment('member', review.id, { body: 'upgrade event', requestId: 'upgrade_12345678901' })

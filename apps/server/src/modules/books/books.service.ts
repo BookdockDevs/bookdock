@@ -10,7 +10,7 @@ import {
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
   libraryMemberships, users as usersTable, tocRules, shelves,
   highlights, ideas, bookmarks, aiThreads, textReplacements,
-  readingArchives, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingWriteReceipts, bookReviews,
+  readingArchives, readingDurationFacts, readingImportBindings, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingWriteReceipts, bookReviews,
 } from '../../db/schema'
 import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
@@ -3889,6 +3889,15 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
         tx.delete(readingProjectionStates).where(and(eq(readingProjectionStates.userId, userId), eq(readingProjectionStates.bookVersionId, versionId))).run()
         tx.delete(readingRounds).where(and(eq(readingRounds.userId, userId), eq(readingRounds.bookVersionId, versionId))).run()
         tx.delete(readingArchives).where(and(eq(readingArchives.userId, userId), eq(readingArchives.bookVersionId, versionId))).run()
+        // A source binding points at this version after mounting; without the
+        // rows it targeted, the binding would resolve to nothing. Keeping the
+        // book but keeping its personal data deliberately keeps the binding
+        // (reading-data-import 0.11 delete matrix).
+        tx.delete(readingImportBindings).where(and(eq(readingImportBindings.userId, userId), eq(readingImportBindings.targetBookVersionId, versionId))).run()
+        // Duration facts carry no book FK on purpose (0060), so nothing
+        // cascades: without this they survive into stats and exports and
+        // re-importing the same book double-counts them.
+        tx.delete(readingDurationFacts).where(and(eq(readingDurationFacts.userId, userId), eq(readingDurationFacts.bookVersionId, versionId))).run()
         tx.delete(highlights).where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, versionId))).run()
         tx.delete(ideas).where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, versionId), isNull(ideas.sharedLibraryId), isNull(ideas.sourceLibraryBookVersionId))).run()
         tx.delete(bookmarks).where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, versionId))).run()

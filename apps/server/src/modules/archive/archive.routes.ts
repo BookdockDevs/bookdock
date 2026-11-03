@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 
-import { archiveBooksQuerySchema, readingRangeSchema } from '@bookdock/shared'
+import { archiveBooksQuerySchema, readingImportScopeSchema, readingRangeSchema } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
-import { getArchiveCover, getBookDetail, getOverview, listBooks } from './archive.service'
+import { exportArchiveData, getArchiveCover, getBookDetail, getOverview, listBooks } from './archive.service'
 
 const archiveRoutes = new Hono()
 
@@ -41,6 +41,14 @@ archiveRoutes.get('/books/:bookVersionId/cover', async (c) => {
   const user = c.get('user')!
   const cover = await getArchiveCover(user.id, c.req.param('bookVersionId'))
   return c.body(new Uint8Array(cover.data), 200, { 'Content-Type': cover.contentType, 'Cache-Control': 'private, no-store' })
+})
+
+archiveRoutes.get('/data-export', async (c) => {
+  const user = c.get('user')!
+  const scope = readingImportScopeSchema.safeParse(c.req.query('scope') ?? 'all')
+  if (!scope.success) throw new AppError('VALIDATION_ERROR', 'Invalid scope')
+  const bookId = c.req.query('bookId') || undefined
+  return c.json({ data: await exportArchiveData(user.id, scope.data, bookId) })
 })
 
 export default archiveRoutes

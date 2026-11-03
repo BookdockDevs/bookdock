@@ -1231,7 +1231,13 @@ export default function Library() {
 
         {!isGuest && <NotificationDrawer anchorRef={notificationButtonRef} open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />}
 
-        <div hidden={isLibraryActivity}>
+        {/* Flex column that grows to viewport height so the single-page
+            "all books shown" footer lands at the bottom instead of trailing
+            the grid mid-page; plain classes would defeat the hidden attribute. */}
+        <div
+          hidden={isLibraryActivity}
+          className={isLibraryActivity ? undefined : 'flex min-h-0 flex-1 flex-col'}
+        >
         {!trash && <LibraryContextBar search={search} navSearch={navSearch} onClear={clearActiveFilters} />}
 
         {(privateLibrariesFailed || visibleTaxonomyError || (prefsError && !prefsReady)) && !catalogGone && (

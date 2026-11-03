@@ -120,7 +120,7 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
   after[libraryBooksIndex] = (after[libraryBooksIndex] as Array<Record<string, unknown>>).map(({ shelf_id: _shelfId, ...row }) => row)
   for (const table of ['bookmarks', 'ideas']) {
     const index = retainedTables.indexOf(table)
-    after[index] = (after[index] as Array<Record<string, unknown>>).map(({ relocation: _relocation, ...row }) => row)
+    after[index] = (after[index] as Array<Record<string, unknown>>).map(({ relocation: _relocation, import_key: _importKey, import_hash: _importHash, import_locator: _importLocator, import_chapter_index: _importChapterIndex, ...row }) => row)
     expect(sqlite.prepare(`SELECT relocation FROM ${table}`).all()).toEqual([{ relocation: 'ok' }])
   }
   expect(after).toEqual(before)

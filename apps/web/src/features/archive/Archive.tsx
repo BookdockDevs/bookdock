@@ -11,6 +11,7 @@ import { shiftPeriod, type StatsPeriod } from '@/features/stats/date-utils'
 import { localDateString, useReadingLedger, useReadingSummary } from '@/api/hooks/reading-records'
 import { useBook } from '@/features/library/hooks'
 
+import ReadingDataManagerButton from './components/ReadingDataManagerButton'
 import ArchiveOverviewDashboard from './components/ArchiveOverviewDashboard'
 import ArchiveSidebar, { type ArchiveSidebarParams } from './components/ArchiveSidebar'
 import BookNotesView from './BookNotesView'
@@ -215,10 +216,12 @@ export default function Archive() {
               firstRecordedDate={firstRecordedDate}
             />
             {selectedDate && <button type="button" onClick={() => handleSelectDate(null)} className="text-xs text-blue-600">{selectedDate} · {_('readingData.backPeriod')}</button>}
-            <StatsSettingsButton
+            <ReadingDataManagerButton
               bookId={search.bookId}
+              bookTitle={selectedBookTitle}
               onBookDeleted={() => patch({ bookId: undefined, bookView: undefined })}
             />
+            <StatsSettingsButton />
           </div>
         </header>
       </div>

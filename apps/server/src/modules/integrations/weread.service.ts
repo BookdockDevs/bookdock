@@ -26,7 +26,7 @@ export function updateWeReadKey(userId: string, key: string | null): void {
   else db.insert(settings).values({ id: createId('setting'), userId, key: SETTINGS_KEY, value: { key: encryptPassword(key) } }).run()
 }
 
-async function gateway(key: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function wereadGateway(key: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
   const raw = await request('https://i.weread.qq.com/api/agent/gateway', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({ ...payload, skill_version: VERSION }),
@@ -86,7 +86,7 @@ function candidate(book: Record<string, unknown>): MetadataCandidate | null {
 }
 
 export async function searchWeRead(key: string, query: string, scope: WeReadSearchScope = 'all'): Promise<MetadataCandidate[]> {
-  const data = await gateway(key, { api_name: '/store/search', keyword: query, scope: scope === 'ebooks' ? 10 : 0, count: 20 })
+  const data = await wereadGateway(key, { api_name: '/store/search', keyword: query, scope: scope === 'ebooks' ? 10 : 0, count: 20 })
   if (!Array.isArray(data.results)) throw new AppError('VALIDATION_ERROR', 'Invalid WeRead search response')
   const found = new Map<string, MetadataCandidate>()
   for (const group of data.results) {
@@ -102,7 +102,7 @@ export async function searchWeRead(key: string, query: string, scope: WeReadSear
 
 export async function getWeReadMetadata(key: string, id: string): Promise<MetadataCandidate> {
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new AppError('VALIDATION_ERROR', 'Invalid WeRead book ID')
-  const book = candidate(await gateway(key, { api_name: '/book/info', bookId: id }))
+  const book = candidate(await wereadGateway(key, { api_name: '/book/info', bookId: id }))
   if (!book || book.id !== id) throw new AppError('VALIDATION_ERROR', 'Invalid WeRead detail response')
   return book
 }

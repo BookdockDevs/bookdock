@@ -367,12 +367,12 @@ export async function migrateAnnotations(): Promise<AnnotationsMigrationReport> 
           report.skipped += 1
           continue
         }
-        db.insert(highlights).values({
-          id: row.id, userId: row.userId, bookVersionId: row.bookId, revisionId: null,
-          cfiRange: row.cfiRange, cfiAnchor: row.cfiAnchor, color: row.color, style: row.style,
-          text: row.text, chapter: row.chapter, chapterHref: row.chapterHref, relocation: 'ok',
-          createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt,
-        }).run()
+        db.run(sql`INSERT INTO highlights (id, user_id, book_version_id, revision_id,
+          cfi_range, cfi_anchor, color, style, text, chapter, chapter_href, relocation,
+          created_at, updated_at, deleted_at)
+          VALUES (${row.id}, ${row.userId}, ${row.bookId}, NULL, ${row.cfiRange},
+          ${row.cfiAnchor}, ${row.color}, ${row.style}, ${row.text}, ${row.chapter},
+          ${row.chapterHref}, 'ok', ${row.createdAt}, ${row.updatedAt}, ${row.deletedAt})`)
         report.highlights += 1
       } else if (row.type === 'bookmark') {
         const existing = db.select({ id: bookmarks.id }).from(bookmarks).where(eq(bookmarks.id, row.id)).get()

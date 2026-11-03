@@ -2,6 +2,28 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Added
+
+- The archive gains reading history import: WeRead history (via the existing WeRead API key, or the new web channel with a one-time QR sign-in) and Legado backups can be imported as personal reading archives. Imported books, highlights, bookmarks, ideas, reviews and reading time show up in the same archive list, detail, statistics, export and deletion flows as native data — highlights keep their WeRead colors, notes appear in reading order, and associated books lend their own chapter titles. Re-importing the same source is safe: unchanged records are skipped, changed records update, and records deleted at the source stay gone.
+- The archive gains structured data export: highlights, bookmarks, ideas, reviews and reading duration can be downloaded as machine-readable files, for the whole archive or a single book. JSON is always available, and Markdown, TXT, CSV or a Markdown report are offered where the format fits the chosen scope. The export is for personal keeping and analysis — it contains no images, attachments, comments or likes, and cannot be imported back yet.
+
+### Changed
+
+- Reading data management moves out of the statistics settings dialog into its own button on the statistics page and the archive reading data view.
+
+### Removed
+
+- The old reading data JSON backup/restore and its UI are removed. Regular reading records and projections are unaffected.
+
+### Fixed
+
+- Fixed sharing an excerpt from an archive entry whose book is gone (imported or deleted); the share card now falls back to the archived title and author.
+- Fixed a deep link to a note that is not in the current book reporting a stale position; it now says the note is missing.
+- Fixed the "all books shown" footer landing in the middle of single-screen library pages; it now stays at the bottom.
+- Fixed trend tooltips rounding sub-minute reading time up to a whole minute; seconds are shown now.
+
 ## [0.7.5] - 2026-11-01
 
 ### Added
@@ -1006,6 +1028,28 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [Unreleased]
+
+#### 新增
+
+- 归档新增阅读历史导入：微信读书历史（使用既有 API Key，或新的网页通道扫码登录一次）和 Legado 备份可以导入为个人阅读档案。导入的书、划线、书签、想法、书评和时长与原生数据共用同一套归档列表、详情、统计、导出和删除流程——划线保留微信读书的颜色，笔记按阅读顺序展示，已关联书籍会使用自己的章节标题。重复导入同一来源是安全的：未变化的记录跳过，有变化的更新，来源中已删除的记录不会回来。
+- 归档新增结构化数据导出：划线、书签、想法、书评和阅读时长可以下载为机器可读文件，支持全量或单书。JSON 始终可选，并按范围提供 Markdown、TXT、CSV 或 Markdown 报告。导出用于个人留存与分析，不包含图片、附件、评论和点赞，也暂不支持导回。
+
+#### 优化
+
+- 阅读数据管理从统计设置弹窗移出，改为统计页和归档阅读数据视图的独立按钮。
+
+#### 移除
+
+- 移除旧的阅读数据 JSON 备份/还原及其界面。普通阅读记录与投影维护不受影响。
+
+#### 修复
+
+- 修复从原书已丢失（导入或已删书）的归档条目分享摘录失败的问题；分享卡片现在回退使用归档留档的书名与作者。
+- 修复深链打开不属于当前书的笔记时误报位置失效的问题；现在提示笔记不存在。
+- 修复书库单屏页面「已展示全部书籍」页脚悬在页面中间的问题；现在固定在页面底部。
+- 修复趋势图把不足一分钟的阅读时长向上取整为 1 分钟的问题；现在按秒显示。
 
 ### [0.7.5] - 2026-11-01
 

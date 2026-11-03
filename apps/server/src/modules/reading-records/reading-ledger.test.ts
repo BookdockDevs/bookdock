@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { readingRecordCreateSchema, readingTransferSchema } from '@bookdock/shared'
+import { readingRecordCreateSchema } from '@bookdock/shared'
 
 import * as client from '../../db/client'
 import { migrateBeforeBookRetirement } from '../../db/migration-stage'
@@ -19,7 +19,7 @@ import * as storage from '../../storage'
 import { getOverview, listBooks } from '../archive/archive.service'
 import { getDaily, getSummary } from './reading-records.service'
 import { noteArchive } from '../annotations/note-archive.service'
-import { addLedgerReading, changeReadingRound, claimReadingTimer, deleteLedgerSession, deleteReadingArchive, exportReadingTransfer, getReadingLedger, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, importReadingTransfer, rebuildAllReadingProjections, releaseReadingTimer, updateLedgerSession } from './reading-ledger.service'
+import { addLedgerReading, changeReadingRound, claimReadingTimer, deleteLedgerSession, deleteReadingArchive, getReadingLedger, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, rebuildAllReadingProjections, releaseReadingTimer, updateLedgerSession } from './reading-ledger.service'
 
 const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../db/migrations')
 
@@ -77,7 +77,6 @@ describe('reading ledger service', () => {
     expect((await noteArchive('u1', { page: 1, pageSize: 20 })).entries).toHaveLength(deleteUserData ? 0 : 1)
     if (deleteUserData) await expect(getReadingLedger('u1', 'v1', true)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
     else expect((await getReadingLedger('u1', 'v1')).totalSeconds).toBe(111)
-    expect((await exportReadingTransfer('u1')).archives).toHaveLength(1)
     await books.restoreBook('u1', 'v1')
     expect((await getReadingLedger('u1', 'v1')).totalSeconds).toBe(111)
     expect((await getOverview('u1')).totalBooks).toBe(1)
@@ -262,13 +261,8 @@ describe('reading ledger service', () => {
     expect(receipt.status).toBe('deleted')
     expect(receipt.sessionId).toBeNull()
     deleteReadingArchive('u1', 'v1')
-    const backup = readingTransferSchema.parse(JSON.parse(JSON.stringify(await exportReadingTransfer('u1'))))
-    expect(backup.archives).toHaveLength(0)
-    expect(backup.detachedReceipts).toHaveLength(1)
-    expect(importReadingTransfer('u2', backup, true).sessions).toBe(0)
-    importReadingTransfer('u2', backup, false)
     expect(db.select().from(schema.readingArchives).all()).toHaveLength(0)
-    await expect(addLedgerReading('u2', body)).resolves.toMatchObject({ deleted: true, durationSeconds: 0 })
+    await expect(addLedgerReading('u1', body)).resolves.toMatchObject({ deleted: true, durationSeconds: 0 })
   })
 
   it('keeps fully deduplicated writes as replayable skipped receipts without empty rounds', async () => {
@@ -280,68 +274,6 @@ describe('reading ledger service', () => {
     expect(await addLedgerReading('u1', body)).toMatchObject({ skipped: true, durationSeconds: 0 })
     expect(await addLedgerReading('u1', body)).toMatchObject({ skipped: true, durationSeconds: 0 })
     expect(db.select().from(schema.readingRounds).where(eq(schema.readingRounds.bookVersionId, 'v2')).all()).toHaveLength(0)
-    expect(db.select().from(schema.readingSessions).all()).toHaveLength(1)
-    expect(readingTransferSchema.safeParse(await exportReadingTransfer('u1')).success).toBe(true)
-  })
-
-  it('roundtrips JSON facts, legacy residuals and original receipts privately and idempotently', async () => {
-    db.update(schema.readingArchives).set({ legacyRevisionId: 'historical-revision' }).run()
-    const body = { bookId: 'v1', date: '2026-10-02', durationSeconds: 120, requestId: 'roundtrip-request', source: 'manual' as const,
-      startFraction: 0.2, endFraction: 0.4, startCfi: 'start-anchor', endCfi: 'end-anchor', startChapterIndex: 1, endChapterIndex: 2, revisionId: 'historical-revision', wordCount: 1000 }
-    await addLedgerReading('u1', body)
-    const backup = readingTransferSchema.parse(JSON.parse(JSON.stringify(await exportReadingTransfer('u1'))))
-    expect(backup.archives[0].legacyDaily).toEqual([{ date: '2026-10-01', durationSeconds: 40 }])
-    expect(backup.archives[0].legacyWordCount).toBe(1000)
-    expect(importReadingTransfer('u2', backup, true)).toEqual({ archives: 1, sessions: 1, duplicates: 0 })
-    expect(db.select().from(schema.readingArchives).all()).toHaveLength(1)
-    importReadingTransfer('u2', backup, false)
-    const recovered = await getReadingLedger('u2', 'v1')
-    expect(recovered.totalSeconds).toBe(160)
-    expect(recovered.coverage).toBeCloseTo(0.4)
-    expect(recovered.sessions[0]).toMatchObject({ startCfi: 'start-anchor', endCfi: 'end-anchor', startChapterIndex: 1, endChapterIndex: 2, revisionId: 'historical-revision' })
-    expect(recovered.sessions[0].id).not.toBe(backup.archives[0].sessions[0].id)
-    expect(importReadingTransfer('u2', backup, true)).toEqual({ archives: 1, sessions: 0, duplicates: 1 })
-    importReadingTransfer('u2', backup, false)
-    const replay = await addLedgerReading('u2', body)
-    expect(replay.id).toBe(recovered.sessions[0].id)
-    const ownBackup = readingTransferSchema.parse(await exportReadingTransfer('u2'))
-    expect(importReadingTransfer('u2', ownBackup, true).duplicates).toBe(1)
-    expect(db.select().from(schema.readingSessions).all()).toHaveLength(2)
-    expect(sqlite.pragma('foreign_key_check')).toEqual([])
-  })
-
-  it('rejects conflicting backup facts in preview before any writes', async () => {
-    await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-02', durationSeconds: 60, source: 'manual', requestId: 'preview-request', startFraction: 0.2, endFraction: 0.4 })
-    const backup = await exportReadingTransfer('u1')
-    for (const mutate of [
-      (copy: typeof backup) => { copy.archives[0].legacyWordCount = 2000 },
-      (copy: typeof backup) => { copy.archives[0].sessions[0].revisionId = 'different-revision' },
-      (copy: typeof backup) => { copy.archives[0].sessions[0].durationSeconds = 61 },
-      (copy: typeof backup) => { copy.archives[0].receipts![0].bodyHash = '0'.repeat(64) },
-      (copy: typeof backup) => { copy.archives[0].rounds[0].startedAt += 1 },
-    ]) {
-      const copy = structuredClone(backup)
-      mutate(copy)
-      expect(() => importReadingTransfer('u1', copy, true)).toThrowError(AppError)
-    }
-    expect(db.select().from(schema.readingSessions).all()).toHaveLength(1)
-    expect((await getReadingLedger('u1', 'v1')).totalSeconds).toBe(100)
-  })
-
-  it('rejects reusing another archive round identity and overlapping imported records', async () => {
-    await addLedgerReading('u1', { bookId: 'v1', date: '2026-10-02', durationSeconds: 60, source: 'manual', startFraction: 0.2, endFraction: 0.4 })
-    const backup = await exportReadingTransfer('u1')
-    const wrongArchive = structuredClone(backup)
-    wrongArchive.archives[0].bookId = 'another-version'
-    expect(() => importReadingTransfer('u1', wrongArchive, true)).toThrowError(AppError)
-    const start = Date.parse('2026-10-17T10:00:00Z')
-    const overlapping = structuredClone(backup)
-    const template = overlapping.archives[0].sessions[0]
-    template.fragments = [{ startedAt: start, endedAt: start + 60_000 }]
-    template.durationSeconds = 60
-    template.timezone = 'UTC'
-    overlapping.archives[0].sessions.push({ ...template, id: 'different-session' })
-    expect(() => importReadingTransfer('u2', overlapping, true)).toThrowError(AppError)
     expect(db.select().from(schema.readingSessions).all()).toHaveLength(1)
   })
 
@@ -404,10 +336,6 @@ describe('reading ledger service', () => {
     expect(ledger.coverage).toBeCloseTo(0.3)
     expect(ledger.unalignedCoverage).toBe(false)
     expect(ledger.sessions.every((entry) => entry.wordCount === 1000)).toBe(true)
-    const backup = readingTransferSchema.parse(await exportReadingTransfer('u1'))
-    expect(backup.archives[0].legacyRevisionId).toBe('old-revision')
-    expect(backup.archives[0].sessions.every((session) => !('progressScale' in session))).toBe(true)
-    expect(importReadingTransfer('u1', backup, true).duplicates).toBe(2)
   })
 
   it('projects ledger coverage through a persisted revision map before using legacy scaling', async () => {
