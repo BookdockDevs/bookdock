@@ -119,12 +119,12 @@ export function Toast() {
   if (toasts.length === 0) return null
 
   return (
-    <div ref={hostRef} className="pointer-events-none fixed inset-x-4 bottom-[max(calc(1rem+env(safe-area-inset-bottom)),var(--bd-toast-clearance,0px))] z-[200] flex max-h-[min(50dvh,calc(100dvh-var(--bd-toast-clearance,0px)-2rem))] flex-col gap-2 overflow-y-auto overscroll-contain p-1 sm:left-auto sm:right-5 sm:w-[368px]">
+    <div ref={hostRef} className="pointer-events-none fixed inset-x-4 bottom-[max(calc(1rem+env(safe-area-inset-bottom)),var(--bd-toast-clearance,0px))] z-[200] flex max-h-[min(50dvh,calc(100dvh-var(--bd-toast-clearance,0px)-2rem))] flex-col items-center gap-2 overflow-y-auto overscroll-contain p-1 sm:left-auto sm:right-5 sm:w-auto sm:max-w-[420px] sm:items-end">
       {toasts.map((toast) => (
         <div
           key={toast.id}
           data-toast-id={toast.id}
-          className="pointer-events-auto flex shrink-0 items-start gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700 shadow-md shadow-stone-900/10 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:shadow-black/20 animate-toast-in"
+          className="pointer-events-auto flex w-fit min-w-[200px] max-w-full shrink-0 items-start gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700 shadow-md shadow-stone-900/10 animate-toast-in sm:max-w-[368px] dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:shadow-black/20"
           onPointerEnter={(event) => { if (event.pointerType !== 'touch') pauseToast(toast.id, 'pointer') }}
           onPointerLeave={() => resumeToast(toast.id, 'pointer')}
           onFocus={() => pauseToast(toast.id, 'focus')}

@@ -21,7 +21,7 @@ export interface ArchiveSearch extends ArchiveScopeSearch {
   tag?: string
 }
 
-const RECORD_TYPES: Array<ArchiveRecordType | 'all'> = ['all', 'highlight', 'bookmark', 'idea', 'review']
+const RECORD_TYPES: Array<ArchiveRecordType | 'all'> = ['all', 'highlight', 'idea', 'bookmark', 'review']
 const BOOK_SORTS = ['chapter', 'chapter-desc', 'time-desc', 'time-asc', 'recent'] as const
 
 export const archiveRoute = createRoute({

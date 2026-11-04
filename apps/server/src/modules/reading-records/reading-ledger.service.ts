@@ -823,7 +823,10 @@ export async function getReadingLedgerOverview(userId: string, bookId: string, s
         .all().map((row) => [row.date, row.seconds])),
       duration.archiveDaily.get(bookId),
     ),
-    earliestDate: stats.earliestDate ?? factDates[0] ?? null, legacyIntervals: archive.legacyIntervals,
+    earliestDate: [stats.earliestDate, factDates[0], archive.legacyDaily[0]?.date]
+      .filter((d): d is string => typeof d === 'string' && d.length > 0)
+      .sort()[0] ?? null,
+    legacyIntervals: archive.legacyIntervals,
     legacyWordCount: archive.legacyWordCount, legacyRevisionId: archive.legacyRevisionId, projectedLegacyIntervals: projectedLegacy.intervals,
     unalignedCoverage: projectedLegacy.unaligned, coverageEstimated: rounds.some((round) => round.coverageEstimated), dataVersion: state.factVersion,
   }

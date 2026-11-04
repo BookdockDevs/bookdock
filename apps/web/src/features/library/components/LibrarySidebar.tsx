@@ -92,10 +92,45 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   const _ = useTranslation()
   const navigate = useNavigate()
   const router = useRouter({ warn: false })
-  const [session, setSession] = useState(() => (sessionKey ? navigationSessions.get(sessionKey) : undefined) ?? { panel: (directory || (activeLibraryId ? 'categories' : 'shelves')) as 'shelves' | 'categories' | 'tags', expanded: [] as string[], scroll: {} as Record<string, number> })
+  const libraryPrefs = useLibraryPrefs()
+  const inLibrary = activeLibraryId !== null
+  const availableModules: readonly ('shelves' | 'categories' | 'tags')[] = useMemo(() => {
+    const canonicalOrder = inLibrary
+      ? (['categories', 'tags'] as const)
+      : (['shelves', 'categories', 'tags'] as const)
+    const configured = libraryPrefs?.sidebarModules
+    if (!configured || configured.length === 0) return canonicalOrder
+    const set = new Set<string>(configured)
+    const filtered = canonicalOrder.filter((m) => set.has(m))
+    return filtered.length > 0 ? filtered : canonicalOrder
+  }, [inLibrary, libraryPrefs?.sidebarModules])
+
+  const [session, setSession] = useState(() => {
+    const cached = sessionKey ? navigationSessions.get(sessionKey) : undefined
+    let stored: 'shelves' | 'categories' | 'tags' | null = null
+    if (typeof window !== 'undefined' && sessionKey) {
+      try {
+        const val = localStorage.getItem(`bd:sidebar-panel:${sessionKey}`)
+        if (val === 'shelves' || val === 'categories' || val === 'tags') stored = val
+      } catch {
+        // fallback
+      }
+    }
+    const initialPanel = directory || cached?.panel || stored || (activeLibraryId ? 'categories' : (availableModules[0] ?? 'shelves'))
+    return cached ? { ...cached, panel: initialPanel } : {
+      panel: initialPanel as 'shelves' | 'categories' | 'tags',
+      expanded: [] as string[],
+      scroll: {} as Record<string, number>,
+    }
+  })
   const panel = session.panel
   const remember = useCallback((patch: Partial<typeof session>) => setSession((previous) => {
-    const next = { ...previous, ...patch }; navigationSessions.set(sessionKey, next); return next
+    const next = { ...previous, ...patch }
+    navigationSessions.set(sessionKey, next)
+    if (patch.panel && typeof window !== 'undefined' && sessionKey) {
+      try { localStorage.setItem(`bd:sidebar-panel:${sessionKey}`, patch.panel) } catch { /* ignore */ }
+    }
+    return next
   }), [sessionKey])
 
   useEffect(() => {
@@ -106,11 +141,15 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
       remember({ panel: directory })
     }
   }, [directory, panel, activeLibraryId, remember])
+  useEffect(() => {
+    if (!availableModules.includes(panel as never)) {
+      remember({ panel: availableModules[0] ?? (activeLibraryId ? 'categories' : 'shelves') })
+    }
+  }, [availableModules, panel, activeLibraryId, remember])
   const { data: shelvesData, isLoading: shelvesLoading, isError: shelvesError, refetch: refetchShelves } = useShelves()
   const { data: tagsData, isLoading: tagsLoading, isError: tagsError, refetch: refetchTags } = useTags()
   // Shared libraries expose their categories here; private shelves and private
   // categories stay independent and load from their respective endpoints.
-  const inLibrary = activeLibraryId !== null
   const isLibraryActivity = Boolean(inLibrary && librarySearch?.section === 'activity' && !trash)
   const taxonomyLibraryId = activeLibraryId ?? privateLibraryId
   const categoriesQuery = useLibraryCategories(taxonomyLibraryId)
@@ -118,14 +157,14 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   const relationQuery = useLibraryRelation(activeLibraryId)
   const canCurate = inLibrary
     && (relationQuery.data?.data.relation === 'owner' || relationQuery.data?.data.relation === 'admin')
-  const libraryPrefs = useLibraryPrefs()
 
   // Auto modes re-sort the full list client-side over the server (manual)
   // order; the same memo exists in Library for the drag materialization. Both
   // taxonomies satisfy SidebarSortableItem, so the preference applies to either.
   const shelfRows = useMemo(() => sortSidebarItems(applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort), [shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort])
   const categories = categoriesQuery.data?.data ?? EMPTY_CATEGORIES
-  const categoryRows = useMemo(() => sortCategories(applyShelfOrder(categories, shelfOrderOverride), libraryPrefs?.shelfSort), [categories, shelfOrderOverride, libraryPrefs?.shelfSort])
+  const categorySort = libraryPrefs?.categorySort ?? libraryPrefs?.shelfSort
+  const categoryRows = useMemo(() => sortCategories(applyShelfOrder(categories, shelfOrderOverride), categorySort), [categories, shelfOrderOverride, categorySort])
   const shelves = panel === 'categories' ? categoryRows : shelfRows
   const autoExpandedSelection = useRef('')
   useEffect(() => {
@@ -369,30 +408,38 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
       <div className="my-2.5 border-t border-stone-200/60 dark:border-stone-800/60" />
 
       <div className="mb-1 flex min-w-0 items-center gap-2 px-0.5">
-        <div className="inline-flex h-7 min-w-0 flex-1 items-center rounded-lg border border-stone-200/60 bg-stone-200/50 p-0.5 dark:border-stone-700/50 dark:bg-stone-800/60">
-          {(inLibrary ? ['categories', 'tags'] as const : ['shelves', 'categories', 'tags'] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={panel === value}
-              onClick={() => {
-                const scroll = { ...(navigationSessions.get(sessionKey)?.scroll ?? session.scroll), [panel]: localNavRef.current?.scrollTop ?? 0 }
-                remember({ panel: value, scroll })
-                if (directory) {
-                  navSearch({ directory: value })
-                }
-              }}
-              className={cn(
-                'flex h-full min-w-0 flex-auto items-center justify-center rounded-[6px] px-1 text-xs whitespace-nowrap transition-colors select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 cursor-pointer',
-                panel === value
-                  ? 'bg-white font-semibold text-stone-900 shadow-xs ring-1 ring-stone-200/70 dark:bg-stone-700 dark:text-stone-100 dark:ring-white/10'
-                  : 'font-medium text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200',
-              )}
-            >
-              {_(value === 'tags' ? 'library.tags' : value === 'categories' ? 'library.categories' : 'library.shelves')}
-            </button>
-          ))}
-        </div>
+        {availableModules.length > 1 ? (
+          <div className="inline-flex h-7 min-w-0 flex-1 items-center rounded-lg border border-stone-200/60 bg-stone-200/50 p-0.5 dark:border-stone-700/50 dark:bg-stone-800/60">
+            {availableModules.map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={panel === value}
+                onClick={() => {
+                  const scroll = { ...(navigationSessions.get(sessionKey)?.scroll ?? session.scroll), [panel]: localNavRef.current?.scrollTop ?? 0 }
+                  remember({ panel: value, scroll })
+                  if (directory) {
+                    navSearch({ directory: value })
+                  }
+                }}
+                className={cn(
+                  'flex h-full min-w-0 flex-auto items-center justify-center rounded-[6px] px-1 text-xs whitespace-nowrap transition-colors select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-400 cursor-pointer',
+                  panel === value
+                    ? 'bg-white font-semibold text-stone-900 shadow-xs ring-1 ring-stone-200/70 dark:bg-stone-700 dark:text-stone-100 dark:ring-white/10'
+                    : 'font-medium text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200',
+                )}
+              >
+                {_(value === 'tags' ? 'library.tags' : value === 'categories' ? 'library.categories' : 'library.shelves')}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex h-7 min-w-0 flex-1 items-center px-1">
+            <span className="text-xs font-semibold text-stone-600 dark:text-stone-300">
+              {_(availableModules[0] === 'tags' ? 'library.tags' : availableModules[0] === 'categories' ? 'library.categories' : 'library.shelves')}
+            </span>
+          </div>
+        )}
 
         <div className="flex shrink-0 items-center gap-0.5">
           {inLibrary && (

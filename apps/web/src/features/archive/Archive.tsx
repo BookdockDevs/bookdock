@@ -207,15 +207,16 @@ export default function Archive() {
             </h1>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            <PeriodSelector
-              period={period}
-              range={range}
-              onPeriodChange={handlePeriodChange}
-              onShift={handleShift}
-              onSelectAnchor={handleSelectAnchor}
-              firstRecordedDate={firstRecordedDate}
-            />
-            {selectedDate && <button type="button" onClick={() => handleSelectDate(null)} className="text-xs text-blue-600">{selectedDate} · {_('readingData.backPeriod')}</button>}
+            {!hasSelectedBook && (
+              <PeriodSelector
+                period={period}
+                range={range}
+                onPeriodChange={handlePeriodChange}
+                onShift={handleShift}
+                onSelectAnchor={handleSelectAnchor}
+                firstRecordedDate={firstRecordedDate}
+              />
+            )}
             <ReadingDataManagerButton
               bookId={search.bookId}
               bookTitle={selectedBookTitle}
@@ -247,7 +248,6 @@ export default function Archive() {
             selectedBookId={search.bookId}
             params={listParams}
             baseSearch={scopedSearch}
-            range={query}
             onChange={(next) => patch(next)}
             onSelectOverview={() => patch({ bookId: undefined, view: 'overview' })}
             onSelectBook={(bookId) => patch({ bookId, view: undefined })}
@@ -287,6 +287,7 @@ export default function Archive() {
                 showBack={isMobileOverviewView}
                 onBack={() => patch({ view: undefined })}
                 onSelectType={(type) => patch({ type, view: undefined })}
+                onSelectBook={(bookId) => patch({ bookId, view: undefined })}
                 period={period}
                 range={range}
                 selectedDate={selectedDate}

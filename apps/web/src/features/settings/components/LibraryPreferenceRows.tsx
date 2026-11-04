@@ -1,6 +1,8 @@
-import { LIBRARY_SORT_MODES, type LibrarySortMode, type RecentlyReadStyle } from '@bookdock/shared'
+import { LIBRARY_SORT_MODES, type LibrarySortMode, type RecentlyReadStyle, type SidebarModule } from '@bookdock/shared'
 
+import TaxonomyIcon from '@/features/library/components/TaxonomyIcon'
 import { useTranslation } from '@/hooks/useTranslation'
+import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { nextSidebarSort, sidebarSortDir, type SortDir } from '@/features/library/sort-modes'
 import { useLibraryPrefs, useUpdateLibraryPrefs } from '@/features/library/hooks'
@@ -102,6 +104,59 @@ function ToggleRow({ label, hint, checked, onChange }: ToggleRowProps) {
   )
 }
 
+interface ModuleOption {
+  key: SidebarModule
+  label: string
+  iconKind: 'shelf' | 'category' | 'tag'
+  active: boolean
+}
+
+interface MultiPillRowProps {
+  label: string
+  hint: string
+  options: ModuleOption[]
+  onToggle: (key: SidebarModule) => void
+}
+
+function MultiPillRow({ label, hint, options, onToggle }: MultiPillRowProps) {
+  return (
+    <div className="flex items-center justify-between gap-x-4 py-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
+        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
+      </div>
+      <div
+        className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800"
+        role="group"
+        aria-label={label}
+      >
+        {options.map((opt) => (
+          <button
+            key={opt.key}
+            type="button"
+            role="checkbox"
+            aria-checked={opt.active}
+            onClick={() => onToggle(opt.key)}
+            className={cn(
+              'flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-all select-none',
+              opt.active
+                ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                : 'text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300',
+            )}
+          >
+            <TaxonomyIcon
+              kind={opt.iconKind}
+              size={13}
+              className={cn('shrink-0 transition-opacity', opt.active ? 'opacity-80' : 'opacity-40')}
+            />
+            <span>{opt.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function Divider() {
   return <div className="border-t border-stone-100 dark:border-stone-800" />
 }
@@ -114,7 +169,24 @@ export default function LibraryPreferenceRows() {
   const readingStatsEnabled = prefs?.readingStatsEnabled !== false
   const recentlyReadStyle = prefs?.recentlyReadStyle ?? 'off'
   const shelfSort = prefs?.shelfSort
+  const categorySort = prefs?.categorySort
   const tagSort = prefs?.tagSort
+  const enabledModules: SidebarModule[] = prefs?.sidebarModules ?? ['shelves', 'categories', 'tags']
+
+  function handleToggleModule(key: SidebarModule) {
+    let next: SidebarModule[]
+    if (enabledModules.includes(key)) {
+      if (enabledModules.length <= 1) {
+        notify.warning(_('settings.sidebarModuleAtLeastOne'))
+        return
+      }
+      next = enabledModules.filter((m) => m !== key)
+    } else {
+      next = [...enabledModules, key]
+    }
+    const canonical: SidebarModule[] = ['shelves', 'categories', 'tags']
+    update.mutate({ sidebarModules: canonical.filter((m) => next.includes(m)) })
+  }
 
   function sidebarOptions(pref: typeof shelfSort): SegOption[] {
     const dir = sidebarSortDir(pref)
@@ -149,19 +221,49 @@ export default function LibraryPreferenceRows() {
         onSelect={(value) => update.mutate({ recentlyReadStyle: value as RecentlyReadStyle })}
       />
       <Divider />
-      <SegRow
-        label={_('settings.prefShelfSort')}
-        hint={_('settings.prefShelfSortHint')}
-        options={sidebarOptions(shelfSort)}
-        onSelect={(value) => update.mutate({ shelfSort: nextSidebarSort(shelfSort, value as LibrarySortMode) })}
+      <MultiPillRow
+        label={_('settings.prefSidebarModules')}
+        hint={_('settings.prefSidebarModulesHint')}
+        options={[
+          { key: 'shelves', label: _('settings.sidebarModuleShelves'), iconKind: 'shelf', active: enabledModules.includes('shelves') },
+          { key: 'categories', label: _('settings.sidebarModuleCategories'), iconKind: 'category', active: enabledModules.includes('categories') },
+          { key: 'tags', label: _('settings.sidebarModuleTags'), iconKind: 'tag', active: enabledModules.includes('tags') },
+        ]}
+        onToggle={handleToggleModule}
       />
-      <Divider />
-      <SegRow
-        label={_('settings.prefTagSort')}
-        hint={_('settings.prefTagSortHint')}
-        options={sidebarOptions(tagSort)}
-        onSelect={(value) => update.mutate({ tagSort: nextSidebarSort(tagSort, value as LibrarySortMode) })}
-      />
+      {enabledModules.includes('shelves') && (
+        <>
+          <Divider />
+          <SegRow
+            label={_('settings.prefShelfSort')}
+            hint={_('settings.prefShelfSortHint')}
+            options={sidebarOptions(shelfSort)}
+            onSelect={(value) => update.mutate({ shelfSort: nextSidebarSort(shelfSort, value as LibrarySortMode) })}
+          />
+        </>
+      )}
+      {enabledModules.includes('categories') && (
+        <>
+          <Divider />
+          <SegRow
+            label={_('settings.prefCategorySort')}
+            hint={_('settings.prefCategorySortHint')}
+            options={sidebarOptions(categorySort)}
+            onSelect={(value) => update.mutate({ categorySort: nextSidebarSort(categorySort, value as LibrarySortMode) })}
+          />
+        </>
+      )}
+      {enabledModules.includes('tags') && (
+        <>
+          <Divider />
+          <SegRow
+            label={_('settings.prefTagSort')}
+            hint={_('settings.prefTagSortHint')}
+            options={sidebarOptions(tagSort)}
+            onSelect={(value) => update.mutate({ tagSort: nextSidebarSort(tagSort, value as LibrarySortMode) })}
+          />
+        </>
+      )}
     </>
   )
 }

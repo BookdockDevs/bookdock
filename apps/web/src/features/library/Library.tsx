@@ -73,7 +73,7 @@ import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-r
 import { libraryUrlCorrection, pageRangeCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
 import { categoryPath, sortCategories } from './taxonomy'
-import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, catalogQueryParts, useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useUpdateBookMembership, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useSetWorkCategory, useTrashEnabled, useTrashCapBytes, useLibraryPrefsState, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useCatalogBookDetail, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
+import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, catalogQueryParts, useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useMoveBooksToCategory, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useTrashEnabled, useTrashCapBytes, useLibraryPrefsState, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useCatalogBookDetail, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
 
 function estimateDynColumns(): number {  if (typeof window === 'undefined') return 4
@@ -381,8 +381,7 @@ export default function Library() {
   const [dragBookIds, setDragBookIds] = useState<string[] | null>(null)
   const dragJustEndedRef = useRef(false)
   const moveBooksToShelf = useMoveBooksToShelf()
-  const updateBookMembership = useUpdateBookMembership()
-  const setWorkCategory = useSetWorkCategory()
+  const moveBooksToCategory = useMoveBooksToCategory()
   const reorderShelves = useReorderShelves()
   const reorderTags = useReorderTags()
   const reorderLibraryCategories = useReorderLibraryCategories()
@@ -447,15 +446,21 @@ export default function Library() {
           return work ? work.categoryId !== targetCategoryId : false
         })
         if (moved.length === 0) return
-        for (const workId of moved) {
-          setWorkCategory.mutate({ libraryId: activeLibrary.id, libraryBookId: workId, categoryId: targetCategoryId })
+        moveBooksToCategory.mutate({ libraryId: activeLibrary.id, bookIds: moved, categoryId: targetCategoryId })
+        if (selectionActive && payload.bookIds.some((id) => selection.has(id))) {
+          completeBatchAction()
         }
         return
       }
       if (targetType === 'category') {
-        for (const bookId of payload.bookIds) {
+        const moved = payload.bookIds.filter((bookId) => {
           const book = allBooks.find((item) => item.id === bookId)
-          if (book && book.categoryId !== targetCategoryId) updateBookMembership.mutate({ bookId, categoryId: targetCategoryId })
+          return book ? book.categoryId !== targetCategoryId : false
+        })
+        if (moved.length === 0) return
+        moveBooksToCategory.mutate({ bookIds: moved, categoryId: targetCategoryId })
+        if (selectionActive && payload.bookIds.some((id) => selection.has(id))) {
+          completeBatchAction()
         }
         return
       }
@@ -466,6 +471,9 @@ export default function Library() {
       })
       if (moved.length === 0) return
       moveBooksToShelf.mutate({ bookIds: moved, shelfId: targetCategoryId })
+      if (selectionActive && payload.bookIds.some((id) => selection.has(id))) {
+        completeBatchAction()
+      }
       return
     }
     const dragType = (payload as { type?: unknown } | null)?.type
@@ -529,9 +537,13 @@ export default function Library() {
       settleTimerRef.current = null
       setSettleShelfId(null)
     }, 160)
-    if (isCategoryDrag) reorderLibraryCategories.mutate({ libraryId: taxonomyLibraryId!, categoryIds: next })
-    else reorderShelves.mutate(next)
-    updateLibraryPrefs.mutate({ shelfSort: { mode: 'manual' } })
+    if (isCategoryDrag) {
+      reorderLibraryCategories.mutate({ libraryId: taxonomyLibraryId!, categoryIds: next })
+      updateLibraryPrefs.mutate({ categorySort: { mode: 'manual' } })
+    } else {
+      reorderShelves.mutate(next)
+      updateLibraryPrefs.mutate({ shelfSort: { mode: 'manual' } })
+    }
   }
 
   function handleDragCancel() {
@@ -710,7 +722,8 @@ export default function Library() {
   const [tagOrderOverride, setTagOrderOverride] = useState<string[] | null>(null)
   // Must mirror LibrarySidebar's memo: handleDragEnd materializes this exact
   // visual order when a category/tag row is dropped, in either library.
-  const categories = useMemo(() => sortCategories(applyShelfOrder(libraryCategoriesQuery.data?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort), [libraryCategoriesQuery.data, shelfOrderOverride, libraryPrefs?.shelfSort])
+  const categorySort = libraryPrefs?.categorySort ?? libraryPrefs?.shelfSort
+  const categories = useMemo(() => sortCategories(applyShelfOrder(libraryCategoriesQuery.data?.data ?? [], shelfOrderOverride), categorySort), [libraryCategoriesQuery.data, shelfOrderOverride, categorySort])
   const privateShelves = useMemo(() => sortSidebarItems(applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort), [shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort])
   const shelves = activeLibrary ? categories : privateShelves
   const tags = useMemo(

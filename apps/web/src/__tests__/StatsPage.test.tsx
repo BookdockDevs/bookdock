@@ -329,5 +329,7 @@ vi.mock('@/features/notifications/components/NotificationBell', () => ({ default
 
 function render(ui: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return baseRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return baseRender(ui, {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  })
 }

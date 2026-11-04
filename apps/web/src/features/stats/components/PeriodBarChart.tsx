@@ -326,6 +326,7 @@ export default function PeriodBarChart({
             className={cn(
               'relative flex h-full w-full items-end gap-1',
               period === 'month' ? 'pr-12 sm:pr-14' : 'pr-0',
+              period === 'all' && bars.length <= 4 && 'justify-center gap-10 sm:gap-14',
             )}
           >
             {bars.map((b) => {
@@ -364,7 +365,8 @@ export default function PeriodBarChart({
                     setHoveredKey((k) => (k === b.key ? null : k))
                   }}
                   className={cn(
-                    'group relative z-10 flex h-full min-w-0 flex-1 flex-col items-center justify-end p-0.5',
+                    'group relative z-10 flex h-full min-w-0 flex-col items-center justify-end p-0.5',
+                    period === 'all' && bars.length <= 4 ? 'w-14 shrink-0' : 'flex-1',
                     b.seconds > 0 ? 'cursor-pointer' : 'cursor-default',
                   )}
                 >
@@ -413,13 +415,15 @@ export default function PeriodBarChart({
         className={cn(
           'mt-2.5 flex gap-1',
           period === 'month' ? 'pr-12 sm:pr-14' : 'pr-0',
+          period === 'all' && bars.length <= 4 && 'justify-center gap-10 sm:gap-14',
         )}
       >
         {bars.map((b) => (
           <span
             key={b.key}
             className={cn(
-              'min-w-0 flex-1 truncate text-center text-xs tabular-nums transition-colors',
+              'min-w-0 truncate text-center text-xs tabular-nums transition-colors',
+              period === 'all' && bars.length <= 4 ? 'w-14 shrink-0' : 'flex-1',
               b.selected || hoveredKey === b.key
                 ? 'font-bold text-[#2f73f6] dark:text-[#4d8eff]'
                 : 'text-stone-400 dark:text-stone-500',

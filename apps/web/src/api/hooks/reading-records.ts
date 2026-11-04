@@ -9,6 +9,7 @@ import type {
   ReadingRange,
   ReadingRecordBookDetailRes,
   ReadingRecordBookItem,
+  ReadingRecordCategoryItem,
   ReadingRecordCreateReq,
   ReadingRecordDailyItem,
   ReadingRecordHourlyItem,
@@ -76,6 +77,13 @@ export function useReadingByBook(from?: string, to?: string) {
   return useQuery({
     queryKey: [...READING_RECORDS_KEY, 'by-book', from, to],
     queryFn: () => apiGet<{ data: ReadingRecordBookItem[] }>(withReveal(`/reading-records/by-book${rangeQuery(from, to)}`)),
+  })
+}
+
+export function useReadingByCategory(from?: string, to?: string) {
+  return useQuery({
+    queryKey: [...READING_RECORDS_KEY, 'by-category', from, to],
+    queryFn: () => apiGet<{ data: ReadingRecordCategoryItem[] }>(withReveal(`/reading-records/by-category${rangeQuery(from, to)}`)),
   })
 }
 

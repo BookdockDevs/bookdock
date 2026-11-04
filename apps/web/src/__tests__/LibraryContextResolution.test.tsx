@@ -55,6 +55,7 @@ vi.mock('@/features/library/hooks', async (importOriginal) => {
     usePermanentDeleteLibraryBook: mutation,
     useEmptyLibraryTrash: mutation,
     useMoveBooksToShelf: mutation,
+    useMoveBooksToCategory: mutation,
     useSetWorkCategory: mutation,
     useReorderShelves: mutation,
     useReorderTags: mutation,

@@ -81,7 +81,7 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
   const reorderLibraryTags = useReorderLibraryTags()
   const reorderShelves = useReorderShelves()
   const reorderTags = useReorderTags()
-  const categories = useMemo(() => sortCategories(panel === 'categories' ? categoriesQuery.data?.data ?? [] : [], prefs?.shelfSort), [categoriesQuery.data, prefs?.shelfSort, panel])
+  const categories = useMemo(() => sortCategories(panel === 'categories' ? categoriesQuery.data?.data ?? [] : [], prefs?.categorySort ?? prefs?.shelfSort), [categoriesQuery.data, prefs?.categorySort, prefs?.shelfSort, panel])
   const shelves = useMemo(() => sortSidebarItems(shelvesQuery.data?.data ?? [], prefs?.shelfSort), [shelvesQuery.data, prefs?.shelfSort])
   const tags = useMemo(() => sortSidebarItems(libraryId ? libraryTagsQuery.data?.data ?? [] : tagsQuery.data?.data ?? [], prefs?.tagSort), [libraryId, libraryTagsQuery.data, tagsQuery.data, prefs?.tagSort])
   const term = (lookup[panel] ?? '').trim().toLocaleLowerCase()

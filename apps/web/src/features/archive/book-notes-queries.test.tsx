@@ -121,4 +121,25 @@ describe('chapter sort without a book TOC', () => {
     const labels = Array.from(container.querySelectorAll('section[aria-label]')).map((s) => s.getAttribute('aria-label'))
     expect(labels).toEqual(['第二章', '第十章', '未知章节'])
   })
+
+  it('renders tab-specific empty state messages', () => {
+    chapters.mockReturnValue({ data: { data: [] } })
+    detail.mockReturnValue({ data: { data: { annotations: [], reviews: [] } }, isPending: false, isError: false })
+    const tabs = [
+      { tab: 'all' as const, expectedKey: 'archive.noBookNotes' },
+      { tab: 'highlight' as const, expectedKey: 'archive.noBookHighlights' },
+      { tab: 'bookmark' as const, expectedKey: 'archive.noBookBookmarks' },
+      { tab: 'idea' as const, expectedKey: 'archive.noBookIdeas' },
+      { tab: 'review' as const, expectedKey: 'archive.noBookReviews' },
+    ]
+    for (const { tab, expectedKey } of tabs) {
+      const { unmount } = render(
+        <QueryClientProvider client={new QueryClient()}>
+          <BookNotesView bookVersionId="v1" bookView="notes" bookType={tab} bookSort="chapter" onChange={vi.fn()} onBack={vi.fn()} />
+        </QueryClientProvider>
+      )
+      expect(screen.getByText(expectedKey)).toBeInTheDocument()
+      unmount()
+    }
+  })
 })

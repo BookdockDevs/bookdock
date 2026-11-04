@@ -363,10 +363,16 @@ export type GridCardField = (typeof GRID_CARD_FIELDS)[number]
 export const RECENTLY_READ_STYLES = ['off', 'covers', 'cards'] as const
 export type RecentlyReadStyle = (typeof RECENTLY_READ_STYLES)[number]
 
+/** Taxonomy modules rendered in the library sidebar tabs. */
+export const SIDEBAR_MODULES = ['shelves', 'categories', 'tags'] as const
+export type SidebarModule = (typeof SIDEBAR_MODULES)[number]
+
 export interface LibrarySettings {
   normalizeTitle?: boolean
   shelfSort?: LibrarySortPreference
+  categorySort?: LibrarySortPreference
   tagSort?: LibrarySortPreference
+  sidebarModules?: SidebarModule[]
   bookSort?: { field: BookSortPrefField; dir?: 'asc' | 'desc' }
   view?: 'grid' | 'list'
   /**

@@ -10,11 +10,11 @@ interface MetadataProviderIconProps {
 }
 
 const ICON_ASSETS: Record<string, string> = {
-  qidian: '/metadata-icons/qidian.png',
-  douban: '/metadata-icons/douban.png',
-  weread: '/metadata-icons/weread.png',
-  bangumi: '/metadata-icons/bangumi.png',
-  openlibrary: '/metadata-icons/openlibrary.png',
+  qidian: '/metadata-icons/qidian.svg',
+  douban: '/metadata-icons/douban.svg',
+  weread: '/metadata-icons/weread.svg',
+  bangumi: '/metadata-icons/bangumi.svg',
+  openlibrary: '/metadata-icons/openlibrary.svg',
 }
 
 const OPTICAL_SCALES: Record<string, string> = {

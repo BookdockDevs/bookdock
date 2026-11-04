@@ -338,6 +338,20 @@ describe('reading ledger service', () => {
     expect(ledger.sessions.every((entry) => entry.wordCount === 1000)).toBe(true)
   })
 
+  it('determines earliestDate across imported duration facts, legacy daily, and native reading records', async () => {
+    vi.mocked(books.getBook).mockResolvedValue({} as Awaited<ReturnType<typeof books.getBook>>)
+    db.update(schema.readingArchives).set({ legacyDaily: [] }).where(eq(schema.readingArchives.bookVersionId, 'v1')).run()
+    db.insert(schema.readingDurationFacts).values({
+      id: createId('rdf'), userId: 'u1', bookVersionId: 'v1', granularity: 'book_day',
+      date: '2026-10-31', durationSeconds: 3600, aggregationRole: 'additive',
+      overlapGroup: 'wr-1', source: 'weread', sourceNamespace: 'ns', sourceRecordKey: 'k1',
+      observedAt: 1,
+    }).run()
+    await addLedgerReading('u1', { bookId: 'v1', date: '2026-11-03', source: 'auto', durationSeconds: 120, startFraction: 0, endFraction: 0.1 })
+    const ledger = await getReadingLedgerOverview('u1', 'v1')
+    expect(ledger.earliestDate).toBe('2026-10-31')
+  })
+
   it('projects ledger coverage through a persisted revision map before using legacy scaling', async () => {
     vi.mocked(books.getBook).mockResolvedValue({} as Awaited<ReturnType<typeof books.getBook>>)
     db.update(schema.readingArchives).set({ legacyIntervals: [], legacyRevisionId: 'old-map-source', legacyWordCount: 100 }).run()

@@ -12,7 +12,7 @@ describe('BookReadingTrendChart', () => {
     ]} />)
 
     expect(container.querySelector('svg')).toBeInTheDocument()
-    expect(screen.queryByText('本书暂无阅读趋势数据')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无阅读趋势数据')).not.toBeInTheDocument()
   })
 
   it('does not invent progress points when coverage is unavailable', () => {
@@ -22,6 +22,6 @@ describe('BookReadingTrendChart', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '进度' }))
 
-    expect(screen.getByText('本书暂无阅读趋势数据')).toBeInTheDocument()
+    expect(screen.getByText('暂无阅读趋势数据')).toBeInTheDocument()
   })
 })

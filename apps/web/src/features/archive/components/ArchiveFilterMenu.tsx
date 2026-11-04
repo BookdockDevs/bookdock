@@ -31,8 +31,8 @@ const SORT_DIMENSIONS: SortDimension[] = [
 
 const TYPE_ITEMS: Array<{ key: ArchiveRecordType; labelKey: string }> = [
   { key: 'highlight', labelKey: 'archive.typeHighlight' },
-  { key: 'bookmark', labelKey: 'archive.typeBookmark' },
   { key: 'idea', labelKey: 'archive.typeIdea' },
+  { key: 'bookmark', labelKey: 'archive.typeBookmark' },
   { key: 'review', labelKey: 'archive.typeReview' },
 ]
 

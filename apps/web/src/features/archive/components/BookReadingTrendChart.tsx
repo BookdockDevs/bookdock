@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 
 export interface TrendPoint {
@@ -198,6 +199,7 @@ export default function BookReadingTrendChart({
   points,
   className,
 }: BookReadingTrendChartProps) {
+  const _ = useTranslation()
   const [mode, setMode] = useState<'time' | 'progress'>('time')
   const [activeIdx, setActiveIdx] = useState<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -463,8 +465,8 @@ export default function BookReadingTrendChart({
           )}
 
           {chartPoints.length === 0 ? (
-            <div className="flex h-72 items-center justify-center text-sm text-stone-400">
-              本书暂无阅读趋势数据
+            <div className="flex h-48 items-center justify-center text-sm text-stone-400 dark:text-stone-500">
+              {_('readingData.noTrendData', { defaultValue: '暂无阅读趋势数据' })}
             </div>
           ) : (
             <svg

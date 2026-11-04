@@ -143,7 +143,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
               {_('library.parentCategory')}
             </label>
             <div className="relative">
-              <Button
+              <button
                 ref={dropdown.btnRef}
                 type="button"
                 disabled={isPending || taxonomyLoading || taxonomyFailed}
@@ -178,13 +178,13 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
                 >
                   <path d="m6 9 6 6 6-6" />
                 </svg>
-              </Button>
+              </button>
 
               {dropdownOpen && (
                 <SmartMenu triggerRef={dropdown.btnRef} innerRef={dropdown.menuRef} position={dropdownPosition} onClose={dropdown.close} width={dropdownWidth}>
                 <div className="max-h-[min(12rem,calc(100dvh-2rem))] overflow-y-auto overscroll-contain custom-scrollbar">
                   {/* Root / Top-level option */}
-                  <Button
+                  <button
                     type="button"
                     onClick={() => {
                       setParentId('')
@@ -206,7 +206,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     )}
-                  </Button>
+                  </button>
 
                   {parentChoices.length > 0 && (
                     <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
@@ -215,7 +215,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
                   {parentChoices.map((category) => {
                     const isSelected = parentId === category.id
                     return (
-                      <Button
+                      <button
                         key={category.id}
                         type="button"
                         onClick={() => {
@@ -239,7 +239,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
                             <polyline points="20 6 9 17 4 12" />
                           </svg>
                         )}
-                      </Button>
+                      </button>
                     )
                   })}
                 </div>

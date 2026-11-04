@@ -138,20 +138,61 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
     return ledger?.earliestDate ?? null
   }, [ledger?.earliestDate])
 
+  const progressiveSessions = useMemo(() => {
+    return sessions.filter((s) => (s.coverage && s.coverage.length > 0) || (s.endFraction != null && s.startFraction != null && s.endFraction > s.startFraction))
+  }, [sessions])
+
+  const progressiveReadingDays = useMemo(() => {
+    const dates = new Set<string>()
+    for (const s of progressiveSessions) dates.add(s.date)
+    for (const d of stats?.daily ?? []) {
+      if ((d.progressDelta ?? 0) > 0) dates.add(d.date)
+    }
+    return dates.size
+  }, [progressiveSessions, stats?.daily])
+
   const dailyCoveragePercent = useMemo(() => {
-    if (!readingDays || coverage <= 0) return null
-    return (coverage * 100) / readingDays
-  }, [readingDays, coverage])
+    const days = progressiveReadingDays > 0 ? progressiveReadingDays : readingDays
+    if (!days || coverage <= 0) return null
+    return (coverage * 100) / days
+  }, [progressiveReadingDays, readingDays, coverage])
+
+  const progressiveDurationSeconds = useMemo(() => {
+    if (progressiveSessions.length > 0) {
+      return progressiveSessions.reduce((sum, s) => sum + s.durationSeconds, 0)
+    }
+    const dailyProgressive = (stats?.daily ?? []).filter((d) => (d.progressDelta ?? 0) > 0)
+    if (dailyProgressive.length > 0) {
+      return dailyProgressive.reduce((sum, d) => sum + d.durationSeconds, 0)
+    }
+    const hasExternalDuration = (stats?.referenceDurationSeconds ?? 0) > 0 || (stats?.undatedDurationSeconds ?? 0) > 0 || ledger?.importSource != null
+    if (!hasExternalDuration && coverage > 0) {
+      return datedTotalSeconds
+    }
+    return 0
+  }, [progressiveSessions, stats?.daily, stats?.referenceDurationSeconds, stats?.undatedDurationSeconds, ledger?.importSource, coverage, datedTotalSeconds])
 
   const secondsPerPercent = useMemo(() => {
-    if (datedTotalSeconds <= 0 || coverage <= 0) return null
-    return datedTotalSeconds / (coverage * 100)
-  }, [datedTotalSeconds, coverage])
+    if (progressiveDurationSeconds <= 0 || coverage <= 0) return null
+    return progressiveDurationSeconds / (coverage * 100)
+  }, [progressiveDurationSeconds, coverage])
+
+  const wordsDurationSeconds = useMemo(() => {
+    const wordSessions = sessions.filter((s) => s.wordCount !== null && (s.coverage && s.coverage.length > 0))
+    if (wordSessions.length > 0) {
+      return wordSessions.reduce((sum, s) => sum + s.durationSeconds, 0)
+    }
+    const dailyWithWords = (stats?.daily ?? []).filter((d) => d.totalWordsRead !== null && d.totalWordsRead > 0)
+    if (dailyWithWords.length > 0) {
+      return dailyWithWords.reduce((sum, d) => sum + d.durationSeconds, 0)
+    }
+    return progressiveDurationSeconds
+  }, [sessions, stats?.daily, progressiveDurationSeconds])
 
   const secondsPerThousandWords = useMemo(() => {
-    if (datedTotalSeconds <= 0 || totalWords === null || totalWords <= 0) return null
-    return (datedTotalSeconds / totalWords) * 1000
-  }, [datedTotalSeconds, totalWords])
+    if (wordsDurationSeconds <= 0 || totalWords === null || totalWords <= 0) return null
+    return (wordsDurationSeconds / totalWords) * 1000
+  }, [wordsDurationSeconds, totalWords])
 
   const remainingDays = useMemo(() => {
     if (estimates.remainingSeconds === null || !averageSeconds || averageSeconds <= 0) return null
@@ -182,12 +223,6 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
     if (currentRound.endedAt) return localDateString(new Date(currentRound.endedAt))
     return stats?.daily.at(-1)?.date ?? null
   }, [currentRound, stats?.daily])
-
-  const crossDayDates = useMemo(() => {
-    const dates = new Set<string>()
-    for (const s of sessions) for (const date of s.contributionDates ?? []) dates.add(date)
-    return dates
-  }, [sessions])
 
   const calendarItems = useMemo(() => {
     const dates = [...distribution.days.keys()].sort()
@@ -542,7 +577,6 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
                         const isReadingDay = seconds >= 60
                         const isStart = date === earliestDate
                         const isEnd = Boolean(endDate && date === endDate)
-                        const isCrossDay = crossDayDates.has(date)
 
                         let cellClass = 'text-stone-400 dark:text-stone-600 font-normal'
                         if (isStart) {
@@ -573,17 +607,6 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
                             } ${cellClass}`}
                           >
                             {isStart ? 'S' : isEnd ? 'E' : dayNum}
-                            {isCrossDay && !isStart && !isEnd && (
-                              <span
-                                className={`absolute text-amber-300 ${
-                                  isSingleMonth
-                                    ? '-top-0.5 -right-0.5 text-[9px] sm:text-[10px]'
-                                    : '-top-0.5 -right-0.5 text-[8px]'
-                                }`}
-                              >
-                                ✦
-                              </span>
-                            )}
                           </div>
                         )
                       })}
@@ -606,9 +629,6 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
                   E
                 </span>
                 {_('readingData.legendEnd')}
-              </span>
-              <span className="flex items-center gap-1 text-amber-500 dark:text-amber-400">
-                ✦ {_('readingData.legendCrossDay')}
               </span>
             </div>
           </>
@@ -642,7 +662,7 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
         )}
       </div>
 
-      {!groups.length && <p className="py-5 text-center text-sm text-stone-500">{distribution.days.size > 0 ? _('readingData.durationFactsOnly', { defaultValue: '此档案只包含日期时长，没有可编辑的阅读流水。' }) : _('readingData.noRecords')}</p>}
+      {!groups.length && <p className="py-8 text-center text-sm text-stone-400 dark:text-stone-500">{distribution.days.size > 0 ? _('readingData.durationFactsOnly', { defaultValue: '此档案仅包含汇总时长，暂无细分阅读流水' }) : _('readingData.noRecords')}</p>}
 
       <div className="flex flex-col gap-3">
         {visibleGroups.map(([date, records]) => {

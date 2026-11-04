@@ -109,7 +109,7 @@ describe('ArchiveSidebar', () => {
       />,
     )
 
-    expect(screen.getByText('全部档案')).toBeInTheDocument()
+    expect(screen.getByText('总览')).toBeInTheDocument()
     expect(screen.getByText('12 本书 · 8 条笔记')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Test Book One' })).toBeInTheDocument()
     expect(screen.getByText(/1\s*小时/)).toBeInTheDocument()

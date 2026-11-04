@@ -14,6 +14,7 @@ import { localDateString } from '@/api/hooks/reading-records'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 
 import { resolveArchiveScope } from '../archive-scope'
+import PeriodBooksSection from './PeriodBooksSection'
 import { useArchiveOverview, usePreviousArchiveOverview } from '../hooks'
 
 interface ArchiveOverviewDashboardProps {
@@ -34,6 +35,7 @@ interface ArchiveOverviewDashboardProps {
   onDrillMonth?: (d: Date) => void
   onSelectDate?: (date: string) => void
   hideControls?: boolean
+  onSelectBook?: (bookId: string) => void
 }
 
 export default function ArchiveOverviewDashboard({
@@ -54,6 +56,7 @@ export default function ArchiveOverviewDashboard({
   onDrillMonth,
   onSelectDate,
   hideControls = false,
+  onSelectBook,
 }: ArchiveOverviewDashboardProps) {
   const _ = useTranslation()
   const resolved = resolveArchiveScope({
@@ -94,20 +97,20 @@ export default function ArchiveOverviewDashboard({
       iconBgClass: 'bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400',
     },
     {
-      type: 'bookmark',
-      label: _('archive.bookmarks'),
-      value: counts?.bookmarks,
-      delta: calcNoteDelta(counts?.bookmarks, prevCounts?.bookmarks, '个'),
-      icon: <BookmarkOutlineIcon size={16} />,
-      iconBgClass: 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400',
-    },
-    {
       type: 'idea',
       label: _('archive.ideas'),
       value: counts?.ideas,
       delta: calcNoteDelta(counts?.ideas, prevCounts?.ideas, _('archive.notesUnit') || '条'),
       icon: <BulbIcon size={16} />,
       iconBgClass: 'bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400',
+    },
+    {
+      type: 'bookmark',
+      label: _('archive.bookmarks'),
+      value: counts?.bookmarks,
+      delta: calcNoteDelta(counts?.bookmarks, prevCounts?.bookmarks, '个'),
+      icon: <BookmarkOutlineIcon size={16} />,
+      iconBgClass: 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400',
     },
     {
       type: 'review',
@@ -192,6 +195,16 @@ export default function ArchiveOverviewDashboard({
       <Stats
         hideHeader
         query={query}
+        booksSection={
+          <PeriodBooksSection
+            query={query}
+            period={period}
+            range={range}
+            selectedDate={selectedDate}
+            baseSearch={baseSearch}
+            onSelectBook={onSelectBook}
+          />
+        }
         notesSection={notesSection}
         period={period}
         range={range}

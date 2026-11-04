@@ -2107,6 +2107,39 @@ export function useMoveBooksToShelf() {
   })
 }
 
+export function useMoveBooksToCategory() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ libraryId, bookIds, categoryId }: { libraryId?: string | null; bookIds: string[]; categoryId: string | null }) =>
+      apiPatch<{ data?: { count: number }; undo?: UndoReceipt }>(
+        libraryId ? `/libraries/${libraryId}/books/batch/organize` : '/books/batch/organize',
+        { ids: bookIds, categoryId },
+      ),
+    onSuccess: (result, variables) => {
+      const count = result.data?.count ?? variables.bookIds.length
+      queryClient.invalidateQueries({ queryKey: ['books'] })
+      queryClient.invalidateQueries({ queryKey: ['book'] })
+      queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
+      queryClient.invalidateQueries({ queryKey: ['shelves'] })
+      if (variables.libraryId) {
+        queryClient.invalidateQueries({ queryKey: ['libraries', variables.libraryId, 'catalog'] })
+        queryClient.invalidateQueries({ queryKey: ['libraries', variables.libraryId, 'categories'] })
+        queryClient.invalidateQueries({ queryKey: ['libraries', variables.libraryId, 'tags'] })
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      }
+      notify.success(
+        count > 1
+          ? { key: 'library.batchClassifySucceeded', params: { count } }
+          : { key: 'toast.membershipUpdated' },
+        { undo: result.undo },
+      )
+    },
+    onError: (error) => notify.error(getUserErrorNotification(error, 'toast.updateMembershipFailed')),
+  })
+}
+
 export function useLibrarySearchAuthors(libraryId: string | null, trash: boolean, showHidden: boolean, options?: { enabled?: boolean }) {
   const user = useAuthStore((state) => state.user)
   return useQuery({

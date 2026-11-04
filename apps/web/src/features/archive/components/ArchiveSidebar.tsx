@@ -119,10 +119,10 @@ export default function ArchiveSidebar({
   const durationText = isSummaryPending
     ? '--'
     : summary.isError && totalTimeSeconds === undefined
-      ? '--'
+      ? null
       : totalTimeSeconds !== undefined && totalTimeSeconds > 0
         ? formatDuration(totalTimeSeconds, _)
-        : _('stats.durationSeconds', { s: 0 })
+        : null
 
   const isOverviewPending = overview.isLoading && !overview.data
   const counts = overview.data?.data.counts
@@ -186,23 +186,25 @@ export default function ArchiveSidebar({
           </div>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-sm font-semibold tracking-tight">
-              {isAll ? _('archive.allArchives') : _('archive.allOverview')}
+              {_('archive.allOverview')}
             </h2>
             <p className="truncate text-[11px] text-stone-500 dark:text-stone-400">
               {overviewCountsText}
             </p>
           </div>
         </div>
-        <span
-          className={cn(
-            'shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold tabular-nums',
-            isOverviewActive
-              ? 'bg-stone-900/10 text-stone-900 dark:bg-white/10 dark:text-stone-100'
-              : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400',
-          )}
-        >
-          {durationText}
-        </span>
+        {durationText && (
+          <span
+            className={cn(
+              'shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold tabular-nums',
+              isOverviewActive
+                ? 'bg-stone-900/10 text-stone-900 dark:bg-white/10 dark:text-stone-100'
+                : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400',
+            )}
+          >
+            {durationText}
+          </span>
+        )}
       </Link>
 
       {/* 搜索框与筛选排序合流 */}

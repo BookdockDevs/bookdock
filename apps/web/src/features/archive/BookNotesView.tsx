@@ -53,7 +53,7 @@ import SortMenu from './components/SortMenu'
 type BookTab = ArchiveRecordType | 'all'
 type BookSort = NonNullable<ArchiveSearch['bookSort']>
 
-const TABS: BookTab[] = ['all', 'highlight', 'bookmark', 'idea', 'review']
+const TABS: BookTab[] = ['all', 'highlight', 'idea', 'bookmark', 'review']
 
 export default function BookNotesView({ bookVersionId, bookView = 'notes', bookType, bookSort, onChange, onBack, hideBack = false, range }: {
   bookVersionId: string
@@ -205,6 +205,25 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
       .filter((r): r is { kind: 'annotation'; item: AnnotationRes } => r.kind === 'annotation')
       .map((r) => r.item.id)
   }, [annotations, timeRecords, isChapterSort])
+  const emptyMessage = useMemo(() => {
+    if (tab === 'highlight') {
+      if (colorFilter.size > 0 || styleFilter.size > 0) {
+        return _('archive.noFilteredHighlights', { defaultValue: '没有符合当前筛选的划线' })
+      }
+      return _('archive.noBookHighlights', { defaultValue: '暂无划线' })
+    }
+    if (tab === 'bookmark') {
+      return _('archive.noBookBookmarks', { defaultValue: '暂无书签' })
+    }
+    if (tab === 'idea') {
+      return _('archive.noBookIdeas', { defaultValue: '暂无想法' })
+    }
+    if (tab === 'review') {
+      return _('archive.noBookReviews', { defaultValue: '暂无书评，读完后来写篇评价吧' })
+    }
+    return _('archive.noBookNotes', { defaultValue: '本书暂无笔记，开始阅读并留下第一条划线或想法吧' })
+  }, [tab, colorFilter.size, styleFilter.size, _])
+
   const tabCounts: Record<BookTab, number> = {
     all: allAnnotations.length + (detail.data?.data.reviews.length ?? 0),
     highlight: allAnnotations.filter((a) => a.type === 'highlight').length,
@@ -1055,12 +1074,12 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
               )}
 
               {reviews.length === 0 && annotations.length === 0 && (
-                <p className="py-10 text-center text-sm text-stone-500 dark:text-stone-400">{_('archive.noRecords')}</p>
+                <p className="py-10 text-center text-sm text-stone-500 dark:text-stone-400">{emptyMessage}</p>
               )}
             </>
           ) : (
             timeRecords.length === 0 ? (
-              <p className="py-10 text-center text-sm text-stone-500 dark:text-stone-400">{_('archive.noRecords')}</p>
+              <p className="py-10 text-center text-sm text-stone-500 dark:text-stone-400">{emptyMessage}</p>
             ) : (
               <section aria-label={_('archive.recentRecords')}>
                 <ul className="flex w-full flex-col gap-3">

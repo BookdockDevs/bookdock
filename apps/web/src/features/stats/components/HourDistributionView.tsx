@@ -103,7 +103,7 @@ export default function HourDistributionView({
   bars,
   title,
   prefix,
-  emptyText,
+  emptyText: _emptyText,
   isLoading = false,
   className,
   errorNode,
@@ -205,10 +205,16 @@ export default function HourDistributionView({
                       const isFilled = row <= filledBlocks
 
                       let cellColor = 'bg-stone-100/90 dark:bg-stone-800/40'
+                      let cellStyle: React.CSSProperties | undefined = undefined
                       if (isFilled) {
-                        cellColor = isActive
-                          ? 'bg-blue-600 shadow-2xs dark:bg-blue-400'
-                          : 'bg-blue-500/85 hover:bg-blue-500 dark:bg-blue-500/70'
+                        if (isActive) {
+                          cellColor = 'bg-blue-600 shadow-2xs dark:bg-blue-400'
+                        } else {
+                          // 参考规范：越往下越浅，越往上越深
+                          const depthRatio = 0.2 + 0.8 * (row / TOTAL_ROWS)
+                          cellStyle = { opacity: depthRatio }
+                          cellColor = 'bg-[#2f73f6] hover:opacity-100 dark:bg-[#38bdf8]'
+                        }
                       } else if (isActive) {
                         cellColor = 'bg-stone-200/70 dark:bg-stone-700/60'
                       }
@@ -216,8 +222,9 @@ export default function HourDistributionView({
                       return (
                         <span
                           key={row}
+                          style={cellStyle}
                           className={cn(
-                            'h-[10px] w-full rounded-[2px] transition-colors',
+                            'h-[10px] w-full rounded-[2px] transition-all',
                             cellColor,
                             isLoading && 'animate-pulse bg-stone-200/60 dark:bg-stone-800',
                           )}
@@ -246,15 +253,9 @@ export default function HourDistributionView({
         </div>
       </div>
 
-      {/* 底部洞察卡片：锁定显示当前周期/书籍最常阅读时段 */}
-      <div className="mt-3.5 rounded-xl bg-stone-50/80 px-3.5 py-2 text-xs leading-relaxed text-stone-600 transition-all sm:px-4 sm:py-2.5 sm:text-[13px] dark:bg-stone-800/40 dark:text-stone-300">
-        {isLoading ? (
-          <div className="h-4 w-48 animate-pulse rounded bg-stone-200/70 dark:bg-stone-700" />
-        ) : maxSeconds === 0 ? (
-          <p className="text-stone-400 dark:text-stone-500">
-            {emptyText ?? _('stats.emptyHourly', { defaultValue: '所选周期内暂无阅读时段记录' })}
-          </p>
-        ) : peak ? (
+      {/* 底部洞察卡片：仅在有阅读记录时显示当前周期/书籍最常阅读时段，无记录时不展示 */}
+      {peak && maxSeconds > 0 ? (
+        <div className="mt-3.5 rounded-xl bg-stone-50/80 px-3.5 py-2 text-xs leading-relaxed text-stone-600 transition-all sm:px-4 sm:py-2.5 sm:text-[13px] dark:bg-stone-800/40 dark:text-stone-300">
           <p>
             <span>{prefix ? `${prefix}最常阅读时段为 ` : '最常阅读时段为 '}</span>
             <span className="font-semibold text-stone-900 dark:text-stone-100">
@@ -263,8 +264,8 @@ export default function HourDistributionView({
             {peak.days && peak.days > 0 ? <span>，共 {peak.days} 天</span> : null}
             <span>，累计 {formatDuration(peak.seconds, _)}。</span>
           </p>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </section>
   )
 }

@@ -15,7 +15,10 @@ import PeriodBarChart from './components/PeriodBarChart'
 import SummaryCards from './components/SummaryCards'
 import ReadingDataManagerButton from '@/features/archive/components/ReadingDataManagerButton'
 import StatsSettingsButton from './components/StatsSettingsButton'
+import CategoryDistribution from './components/CategoryDistribution'
 import TagDistribution from './components/TagDistribution'
+import type { StatsModuleKey } from './stats-modules'
+import { useUiStore } from '@/stores/ui.store'
 import YearHeatmap from './components/YearHeatmap'
 import { shiftPeriod } from './date-utils'
 import type { DayRange, StatsPeriod } from './date-utils'
@@ -24,6 +27,7 @@ interface StatsProps {
   query?: ReadingRange
   hideHeader?: boolean
   notesSection?: React.ReactNode
+  booksSection?: React.ReactNode
   period?: StatsPeriod
   range?: DayRange
   selectedDate?: string | null
@@ -42,6 +46,7 @@ export default function Stats({
   query: externalQuery,
   hideHeader = false,
   notesSection,
+  booksSection,
   period: externalPeriod,
   range: externalRange,
   selectedDate: externalSelectedDate,
@@ -65,6 +70,8 @@ export default function Stats({
   const [internalPeriod, setInternalPeriod] = useState<StatsPeriod>('week')
   const [internalAnchor, setInternalAnchor] = useState(() => new Date())
   const [internalSelectedDate, setInternalSelectedDate] = useState<string | null>(null)
+  const statsModuleOrder = useUiStore((s) => s.statsModuleOrder)
+  const statsHiddenModules = useUiStore((s) => s.statsHiddenModules)
 
   const isControlled = externalPeriod !== undefined
   const period = isControlled ? externalPeriod : internalPeriod
@@ -116,6 +123,80 @@ export default function Stats({
     }
   }
 
+  const renderModule = (key: StatsModuleKey) => {
+    switch (key) {
+      case 'summary':
+        return (
+          <section
+            key="summary"
+            className="flex flex-col gap-3 rounded-2xl border border-stone-200/80 bg-white p-4 shadow-2xs sm:gap-4 sm:p-5 dark:border-stone-800 dark:bg-stone-900/60"
+          >
+            <SummaryCards
+              period={period}
+              range={range}
+              selectedDate={selectedDate}
+              query={query}
+              selectedReadStatus={selectedReadStatus}
+              onSelectReadStatus={onSelectReadStatus}
+            />
+            {notesSection}
+          </section>
+        )
+      case 'trend':
+        return (
+          <div key="trend" className="flex flex-col gap-6 sm:gap-7">
+            <PeriodBarChart
+              period={period}
+              range={range}
+              selectedDate={selectedDate}
+              onPeriodChange={handlePeriodChange}
+              onShift={handleShift}
+              onDrillMonth={handleDrillMonth}
+              onSelectDate={handleSelectDate}
+              hideControls={hideControls}
+            />
+            {selectedDate && !hideControls && (
+              <button
+                type="button"
+                onClick={() => handleSelectDate('')}
+                className="self-start text-sm text-stone-600 hover:text-stone-900 hover:underline cursor-pointer dark:text-stone-400 dark:hover:text-stone-200"
+              >
+                {_('readingData.backPeriod')}
+              </button>
+            )}
+          </div>
+        )
+      case 'heatmap':
+        return (
+          <YearHeatmap
+            key="heatmap"
+            year={range.to.getFullYear()}
+            selectedDate={selectedDate}
+            onSelectDate={handleSelectDate}
+          />
+        )
+      case 'hours':
+        return <HourDistribution key="hours" date={selectedDate} period={period} range={range} />
+      case 'categories':
+        return <CategoryDistribution key="categories" date={selectedDate} period={period} range={range} />
+      case 'tags':
+        return (
+          <TagDistribution
+            key="tags"
+            date={selectedDate}
+            period={period}
+            range={range}
+            selectedTag={selectedTag}
+            onSelectTag={onSelectTag}
+          />
+        )
+      case 'books':
+        return booksSection ? <div key="books">{booksSection}</div> : null
+      default:
+        return null
+    }
+  }
+
   return (
     <div className={hideHeader ? 'flex flex-col gap-6 sm:gap-7' : 'mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:gap-7 sm:p-6'}>
       {!hideHeader && (
@@ -138,49 +219,7 @@ export default function Stats({
         </div>
       )}
 
-      {/* 1. 核心数据看板 (行为投入与笔记沉淀一体化大面板) */}
-      <section className="flex flex-col gap-3 rounded-2xl border border-stone-200/80 bg-white p-4 shadow-2xs sm:gap-4 sm:p-5 dark:border-stone-800 dark:bg-stone-900/60">
-        <SummaryCards
-          period={period}
-          range={range}
-          selectedDate={selectedDate}
-          query={query}
-          selectedReadStatus={selectedReadStatus}
-          onSelectReadStatus={onSelectReadStatus}
-        />
-        {notesSection}
-      </section>
-
-      {/* 2. 阅读趋势走势图 */}
-      <PeriodBarChart
-        period={period}
-        range={range}
-        selectedDate={selectedDate}
-        onPeriodChange={handlePeriodChange}
-        onShift={handleShift}
-        onDrillMonth={handleDrillMonth}
-        onSelectDate={handleSelectDate}
-        hideControls={hideControls}
-      />
-
-      {selectedDate && !hideControls && <button type="button" onClick={() => handleSelectDate('')} className="self-start text-sm text-blue-600">{_('readingData.backPeriod')}</button>}
-
-      {/* 3. 年度阅读足迹 (全年热力打卡：仅在“年”或“全部”周期展示，避免周/月视图割裂) */}
-      {(period === 'year' || period === 'all') && !selectedDate && (
-        <YearHeatmap year={range.to.getFullYear()} selectedDate={selectedDate} onSelectDate={handleSelectDate} />
-      )}
-
-      {/* 4. 深度分析区 (桌面端双栏栅格：左侧时段分布，右侧标签分布) */}
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-        <HourDistribution date={selectedDate} period={period} range={range} />
-        <TagDistribution
-          date={selectedDate}
-          period={period}
-          range={range}
-          selectedTag={selectedTag}
-          onSelectTag={onSelectTag}
-        />
-      </div>
+      {statsModuleOrder.filter((k) => !statsHiddenModules.includes(k)).map(renderModule)}
     </div>
   )
 }

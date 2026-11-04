@@ -25,6 +25,14 @@ import {
   type ReadingSnapshot,
 } from '../features/reader/lib/reading-profiles'
 import { useProfilePrefs } from '@/features/profile/profile-prefs'
+import type { StatsModuleKey } from '../features/stats/stats-modules'
+import {
+  STATS_MODULE_DEFAULTS,
+  getInitialStatsHiddenModules,
+  getInitialStatsModuleOrder,
+  persistStatsHiddenModules,
+  persistStatsModuleOrder,
+} from '../features/stats/stats-modules'
 
 export type UiSection = 'font' | 'layout' | 'display' | 'theme'
 
@@ -180,6 +188,11 @@ interface UiState {
   setAutoReadingMode: (v: AutoReadingMode) => void
   setAutoReadingSpeed: (v: number) => void
   setAutoReadingProgressBar: (v: boolean) => void
+  statsModuleOrder: StatsModuleKey[]
+  statsHiddenModules: StatsModuleKey[]
+  setStatsModuleOrder: (order: StatsModuleKey[]) => void
+  toggleStatsModuleVisible: (key: StatsModuleKey) => void
+  resetStatsModules: () => void
 
   // Named reading-setting profiles (阅读设置预设): serialized JSON of the
   // multi-config blob (`{ global, presets[] }`). The blob syncs across
@@ -487,6 +500,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   footerRight: getInitial<MarginalField>('bd-footer-right', 'bookProgress'),
   marginalFontSize: getInitialNumber('bd-marginal-font-size', 0, 0, 24),
   readingTimerMode: getInitialTimerMode(),
+  statsModuleOrder: getInitialStatsModuleOrder(),
+  statsHiddenModules: getInitialStatsHiddenModules(),
   manualTimerGraceMinutes: getInitialGraceMinutes(),
   ttsEngine: getInitial<string>('bd-tts-engine', 'system') === 'edge' ? 'edge' : getInitial<string>('bd-tts-engine', 'system') === 'service' ? 'service' : 'system',
   ttsServiceId: getInitial<string>('bd-tts-service', '') || null,
@@ -644,6 +659,23 @@ export const useUiStore = create<UiState>((set, get) => ({
   setAutoReadingProgressBar: (autoReadingProgressBar) => {
     setStorage('bd-auto-reading-progress-bar', String(autoReadingProgressBar))
     set({ autoReadingProgressBar })
+  },
+  setStatsModuleOrder: (statsModuleOrder) => {
+    persistStatsModuleOrder(statsModuleOrder)
+    set({ statsModuleOrder })
+  },
+  toggleStatsModuleVisible: (key) => {
+    const current = get().statsHiddenModules
+    const next = current.includes(key)
+      ? current.filter((k) => k !== key)
+      : [...current, key]
+    persistStatsHiddenModules(next)
+    set({ statsHiddenModules: next })
+  },
+  resetStatsModules: () => {
+    persistStatsModuleOrder(STATS_MODULE_DEFAULTS)
+    persistStatsHiddenModules([])
+    set({ statsModuleOrder: [...STATS_MODULE_DEFAULTS], statsHiddenModules: [] })
   },
 
   setSystemTheme: (systemTheme) => {
