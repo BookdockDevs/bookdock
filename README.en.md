@@ -29,11 +29,11 @@ Organize EPUB and TXT books, read them online, and keep your highlights, notes, 
 | **E-ink reading** | Use a lightweight bookshelf and paginated reader, adjust display and tap zones, and synchronize reading progress. |
 | **Content editing** | Edit TXT and EPUB text and navigation, review changes before saving, and recover local drafts. |
 | **Text and table-of-contents rules** | Apply global or per-book text replacements, make individual corrections, and use TXT table-of-contents rules; import and export rules. |
-| **Reading records** | Save progress, highlights, notes, and ideas; track reading time and explore statistics and your archive. |
+| **Reading records** | Save progress, highlights, bookmarks, thoughts, and reviews; track reading time with customizable modules, multi-mode visualization charts, and an archive overview dashboard. |
 | **Excerpt sharing** | Create share cards for excerpts or ideas, customize templates and fonts, and copy or save the images. |
 | **Sharing and discussion** | Create shared libraries, manage membership and access, share books, write reviews, and join discussions. |
 | **External storage** | Connect WebDAV or S3-compatible storage to browse and import books; store book files remotely with a local cache. |
-| **Import and export** | Import books from external storage, download books individually or in batches, and back up or export reading data. |
+| **Import and export** | Import books from external storage, download books individually or in batches; import reading history from WeChat Read and Legado, and export reading archives to structured JSON, Markdown, and CSV. |
 | **Reading tools** | Use text-to-speech, automatic reading, and an AI reading assistant, with related services configurable in Settings. |
 | **Legado book source** | Generate a book source to browse, search, and read your library in readers that support it. |
 | **Deployment and administration** | Self-host with Docker, manage accounts, registration, and guest access, and update from within the app. |

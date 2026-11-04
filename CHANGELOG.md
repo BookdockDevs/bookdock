@@ -2,16 +2,16 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.7.6] - 2026-11-05
 
 ### Added
 
 - The archive gains reading history import: WeRead history (via the existing WeRead API key, or the new web channel with a one-time QR sign-in) and Legado backups can be imported as personal reading archives. Imported books, highlights, bookmarks, ideas, reviews and reading time show up in the same archive list, detail, statistics, export and deletion flows as native data — highlights keep their WeRead colors, notes appear in reading order, and associated books lend their own chapter titles. Re-importing the same source is safe: unchanged records are skipped, changed records update, and records deleted at the source stay gone.
 - The archive gains structured data export: highlights, bookmarks, ideas, reviews and reading duration can be downloaded as machine-readable files, for the whole archive or a single book. JSON is always available, and Markdown, TXT, CSV or a Markdown report are offered where the format fits the chosen scope. The export is for personal keeping and analysis — it contains no images, attachments, comments or likes, and cannot be imported back yet.
-- Statistics modules can be customized and reordered: data overview, reading trends, year heatmap, time distribution, categories, tags, and read books can be reordered or toggled on/off in the statistics settings.
-- Category and tag distributions offer multi-mode visualization charts, switching between bar charts, donut charts, word clouds, treemaps, and radar charts.
-- The archive overview dashboard adds a "Books read" section showing the books read during the active period with cover, duration, and annotation counts, linking directly to individual book archives.
-- Library preferences support customizing sidebar modules, enabling or hiding the shelves, categories, and tags tabs; categories gain an independent sort preference (custom order, title, or book count).
+- Statistics modules can be customized and reordered: data overview, reading trends, year heatmap, time distribution, categories, tags, and read books can be reordered or toggled on/off in the statistics settings, with one-click restore when modified.
+- Category and tag distributions offer multi-mode visualization charts, switching between bar charts, donut charts, word clouds, treemaps, and radar charts while independently remembering display preferences.
+- The archive overview dashboard adds a "Books read" section aggregating books read during the active period (week, month, year, or specific date) with covers, authors, duration, and days read, with pageable expansion and direct navigation to individual book archives.
+- Library preferences support customizing sidebar navigation tabs, allowing shelves, categories, and tags to be toggled individually (keeping at least one active); categories gain an independent sort preference (custom order, title, or book count in ascending or descending order).
 
 ### Changed
 
@@ -20,6 +20,7 @@ All notable changes to Bookdock are documented here.
 - The year heatmap fits a full year on standard desktop displays without horizontal scrolling, pins weekday labels while scrolling on narrow screens, and adopts an amber color palette matching the reading archive.
 - Standardized the presentation order of archive annotations and records to highlights → ideas → bookmarks → reviews across the sidebar, overview dashboard, and filter menus.
 - Differentiated empty states and filter hints for each annotation tab, and standardized phrase hints without trailing periods.
+- Cleaned up visual clutter on the book reading calendar by removing redundant cross-day markers and legends, letting detailed session cards clearly convey multi-day reading ranges.
 - Built-in metadata provider icons (Qidian, Douban, Bangumi, Open Library, WeRead) are upgraded to vector SVGs for crisp display on high-DPI screens.
 - Mobile toast notifications center horizontally with content-adaptive width, avoiding overstretched bubbles on narrow screens.
 
@@ -1041,16 +1042,16 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [Unreleased]
+### [0.7.6] - 2026-11-05
 
 #### 新增
 
 - 归档新增阅读历史导入：微信读书历史（使用既有 API Key，或新的网页通道扫码登录一次）和 Legado 备份可以导入为个人阅读档案。导入的书、划线、书签、想法、书评和时长与原生数据共用同一套归档列表、详情、统计、导出和删除流程——划线保留微信读书的颜色，笔记按阅读顺序展示，已关联书籍会使用自己的章节标题。重复导入同一来源是安全的：未变化的记录跳过，有变化的更新，来源中已删除的记录不会回来。
 - 归档新增结构化数据导出：划线、书签、想法、书评和阅读时长可以下载为机器可读文件，支持全量或单书。JSON 始终可选，并按范围提供 Markdown、TXT、CSV 或 Markdown 报告。导出用于个人留存与分析，不包含图片、附件、评论和点赞，也暂不支持导回。
-- 统计页面支持自定义数据模块的展示顺序与显隐，可在设置中拖拽排序或隐藏不需要的统计图表。
-- 统计中心书籍分类与标签新增多维图表展示，支持在条形图、环形图、词云、矩形树图和雷达图之间自由切换。
-- 归档总览新增「阅读的书籍」模块，展示所选周期内实际阅读过的书籍列表、阅读时长与笔记计数，点击可直接进入单书归档。
-- 书库偏好支持自定义侧边栏模块，可自由启用或隐藏书架、分类、标签标签页；分类新增独立的排序设置，支持按自定义顺序、名称或书籍数量排序。
+- 统计中心支持自定义模块顺序与显隐：数据总览、阅读趋势、全年热力图、时间分布、书籍分类、书籍标签与阅读书籍等模块可在设置中自由拖拽排序或按需关闭，非默认配置下支持一键恢复初始布局。
+- 统计中心书籍分类与标签新增多维图表展示，支持在柱状图、环形图、词云、矩形树图和雷达图之间自由切换，并记住各维度的独立展示偏好。
+- 归档总览新增「阅读的书籍」模块，按所选周期（周、月、年或特定日期）聚合展示当期读过的书籍封面、作者、阅读时长与阅读天数，支持分页查看更多并直达单书阅读档案。
+- 书库偏好支持自定义侧栏导航项，可按需开启或隐藏「书架」、「分类」、「标签」分类维度（至少保留一项）；分类列表新增独立的排序偏好，支持按自定义顺序、名称或书籍数量升降序排列。
 
 #### 优化
 
@@ -1059,6 +1060,7 @@ All notable changes to Bookdock are documented here.
 - 全年热力图在桌面端适配为整年一屏通览，无需横向滚动；左侧星期坐标在小屏滚动时吸顶保持可见，配色升级为与阅读档案一致的暖珀色系。
 - 规范归档笔记与记录类型展示顺序，侧栏、总览看板与筛选菜单中统一使用「划线 → 想法 → 书签 → 书评」。
 - 单书笔记按划线、书签、想法、书评细化差异化的空状态与筛选提示。
+- 精简单书阅读日历界面，移除冗余的跨天标记与图例干扰，阅读流水由详细记录卡片清晰呈现起止时间。
 - 内置元数据提供商图标（起点、豆瓣、Bangumi、Open Library、微信读书）升级为矢量 SVG，消除高分屏下的模糊问题。
 - 移动端 Toast 通知改为居中自适应宽度，避免短文本在窄屏下被过度拉伸。
 
