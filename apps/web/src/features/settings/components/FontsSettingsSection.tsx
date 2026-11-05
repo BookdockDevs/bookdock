@@ -39,6 +39,11 @@ export default function FontsSettingsSection() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [pendingDelete, setPendingDelete] = useState<FontOption | null>(null)
   const [editingFont, setEditingFont] = useState<FontOption | null>(null)
+  const [uploadState, setUploadState] = useState<{
+    fileName: string
+    progress: number
+    phase: 'uploading' | 'processing'
+  } | null>(null)
   const fontLoadedIds = useFontLoaderStore((state) => state.loadedIds)
   const fontLoadingIds = useFontLoaderStore((state) => state.loadingIds)
   const fonts = useMemo(
@@ -66,9 +71,29 @@ export default function FontsSettingsSection() {
     let succeeded = 0
     let duplicated = 0
     const failures: unknown[] = []
-    for (const file of Array.from(fileList)) {
+    const files = Array.from(fileList)
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]!
+      setUploadState({
+        fileName: file.name,
+        progress: 0,
+        phase: 'uploading',
+      })
       try {
-        const result = await uploadFont.mutateAsync(file)
+        const result = await uploadFont.mutateAsync({
+          file,
+          onProgress: (percent) => {
+            setUploadState((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    progress: percent,
+                    phase: percent >= 100 ? 'processing' : 'uploading',
+                  }
+                : null,
+            )
+          },
+        })
         if (knownIds.has(result.data.id)) duplicated++
         else {
           knownIds.add(result.data.id)
@@ -78,6 +103,7 @@ export default function FontsSettingsSection() {
         failures.push(error)
       }
     }
+    setUploadState(null)
     if (failures.length) {
       const showResult = succeeded + duplicated > 0 ? notify.warning : notify.error
       showResult({ key: 'settings.fontUploadPartial', params: { succeeded, duplicated, failed: failures.length } })
@@ -174,6 +200,29 @@ export default function FontsSettingsSection() {
         }
         bodyClassName="pt-3"
       >
+        {uploadState && (
+          <div className="mb-3 flex items-center gap-3 rounded-xl bg-stone-50 px-3 py-2 text-xs dark:bg-stone-800/60">
+            <span className="shrink-0 text-stone-500 dark:text-stone-400">
+              <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            </span>
+            <span className="min-w-0 flex-1 truncate text-stone-700 dark:text-stone-300">
+              {uploadState.fileName}
+            </span>
+            <span className="shrink-0 tabular-nums text-stone-400 dark:text-stone-500">
+              {uploadState.phase === 'processing' ? _('library.processing') : `${uploadState.progress}%`}
+            </span>
+            <span className="w-24 shrink-0">
+              <span className="block h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
+                <span
+                  className="block h-full rounded-full bg-stone-800 transition-all duration-200 dark:bg-stone-200"
+                  style={{ width: `${uploadState.phase === 'processing' ? 100 : uploadState.progress}%` }}
+                />
+              </span>
+            </span>
+          </div>
+        )}
 
       {fontsQuery.isError ? (
         <QueryErrorState className="py-4" isRetrying={fontsQuery.isFetching} onRetry={fontsQuery.refetch} />

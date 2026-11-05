@@ -19,6 +19,7 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Fixed local storage usage calculations omitting SQLite `-shm` shared memory files and auxiliary data directories (`dictionaries`, `reader-content-index`, `reader-media-cache`, `releases`, `avatars`, `sources`), and switched subfolder size scans to recursive directory traversal.
 - Fixed a momentary flash of the "No categories yet" empty state in the sidebar when opening the homepage with the category panel active. Category queries now initiate concurrently on mount alongside shelves and tags, and the sidebar guards against rendering empty states before taxonomy queries have resolved.
 - User avatars show a neutral circle while loading and a display-name initial when absent or unavailable, preventing flashes of image alternative text. Signing in now preserves avatar information immediately instead of briefly showing an initial before the profile refreshes.
 - Failed administrator account creation and password resets now keep the dialog and entered values for retry instead of closing immediately; reopening a closed dialog clears its password draft and resets visibility.
@@ -1081,6 +1082,7 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 修复本地存储统计计算遗漏 SQLite `-shm` 共享内存索引文件及辅助数据目录（词典、阅读器排版索引、媒体缓存、版本包、头像与导入来源缓存）的问题；子目录体积统计改为递归遍历计算，确保宿主机实际磁盘占用统计真实准确。
 - 修复首页侧栏停留在「分类」面板时在页面加载过程中短暂闪现「暂无分类」空状态的问题；分类请求现已在挂载时与书架、标签完全并发发起，侧栏同时增加加载守卫，杜绝在分类查询完成前误判为空状态。
 - 用户头像加载中统一显示中性圆形占位，未设置头像或加载失败时显示名称首字，避免闪出图片替代文字；登录后立即保留头像信息，避免资料刷新前短暂显示首字。
 - 管理员创建账号或重置密码失败时保留弹窗和已输入内容，方便修改重试；关闭后重新打开会清空密码草稿并恢复隐藏状态。

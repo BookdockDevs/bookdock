@@ -17,9 +17,14 @@ export function useFonts() {
 export function useUploadFont() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (file: File) => apiUpload<{ data: FontListItem }>('/fonts', file),
+    mutationFn: (arg: File | { file: File; onProgress?: (percent: number) => void }) => {
+      const file = arg instanceof File ? arg : arg.file
+      const onProgress = arg instanceof File ? undefined : arg.onProgress
+      return apiUpload<{ data: FontListItem }>('/fonts', file, 'POST', { onProgress })
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: FONTS_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['storage-backend'] })
     },
   })
 }
@@ -30,6 +35,7 @@ export function useDeleteFont() {
     mutationFn: (id: string) => apiDelete(`/fonts/${id}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: FONTS_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['storage-backend'] })
     },
   })
 }

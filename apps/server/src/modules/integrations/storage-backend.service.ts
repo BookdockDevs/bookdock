@@ -166,23 +166,50 @@ export async function getStorageBackendConfig(): Promise<StorageBackendConfigRes
     if (fsSync.existsSync(`${config.dbPath}-wal`)) {
       dbBytes += fsSync.statSync(`${config.dbPath}-wal`).size
     }
+    if (fsSync.existsSync(`${config.dbPath}-shm`)) {
+      dbBytes += fsSync.statSync(`${config.dbPath}-shm`).size
+    }
   } catch {
     // Ignore in-memory db or missing files
   }
 
-  let snapshotsBytes = 0
-  try {
-    const snapDir = path.join(config.dataDir, 'snapshots')
-    if (fsSync.existsSync(snapDir)) {
-      for (const entry of fsSync.readdirSync(snapDir)) {
-        snapshotsBytes += fsSync.statSync(path.join(snapDir, entry)).size
+  const getDirSize = (dir: string): number => {
+    let total = 0
+    try {
+      if (!fsSync.existsSync(dir)) return 0
+      for (const entry of fsSync.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+          total += getDirSize(fullPath)
+        } else if (entry.isFile()) {
+          total += fsSync.statSync(fullPath).size
+        }
       }
+    } catch {
+      // Ignore missing directory
     }
-  } catch {
-    // Ignore missing directory
+    return total
   }
 
-  const localTotalBytes = (localBlobsStats?.bytes ?? 0) + (fontStats?.bytes ?? 0) + dbBytes + snapshotsBytes
+  const snapshotsBytes = getDirSize(path.join(config.dataDir, 'snapshots'))
+  const dictionaryBytes = getDirSize(path.join(config.dataDir, 'dictionaries'))
+  const readerIndexBytes = getDirSize(path.join(config.dataDir, 'reader-content-index'))
+  const readerMediaBytes = getDirSize(path.join(config.dataDir, 'reader-media-cache'))
+  const releasesBytes = getDirSize(path.join(config.dataDir, 'releases'))
+  const avatarsBytes = getDirSize(path.join(config.dataDir, 'files', 'avatars'))
+  const sourcesBytes = getDirSize(path.join(config.dataDir, 'files', 'sources'))
+
+  const localTotalBytes =
+    (localBlobsStats?.bytes ?? 0) +
+    (fontStats?.bytes ?? 0) +
+    dictionaryBytes +
+    dbBytes +
+    snapshotsBytes +
+    readerIndexBytes +
+    readerMediaBytes +
+    releasesBytes +
+    avatarsBytes +
+    sourcesBytes
 
   return {
     enabled: inst.storageBackendEnabled,
