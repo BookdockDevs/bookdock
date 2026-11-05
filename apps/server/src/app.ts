@@ -40,6 +40,7 @@ import replacementRoutes from './modules/replacements/replacements.routes'
 import tocRuleRoutes from './modules/toc-rules/toc-rules.routes'
 import ttsRoutes from './modules/tts/tts.routes'
 import aiRoutes from './modules/ai/ai.routes'
+import translationRoutes from './modules/ai/translation.routes'
 import storageConnectionRoutes from './modules/integrations/storage-connection.routes'
 import metadataLookupRoutes from './modules/integrations/metadata-lookup.routes'
 import personalSourceRoutes from './modules/integrations/personal-source.routes'
@@ -100,6 +101,7 @@ app.route('/api/v1/replacements', replacementRoutes)
 app.route('/api/v1/toc-rules', tocRuleRoutes)
 app.route('/api/v1/tts', ttsRoutes)
 app.route('/api/v1/ai', aiRoutes)
+app.route('/api/v1/translation', translationRoutes)
 app.route('/api/v1/integrations/storage-connections', storageConnectionRoutes)
 app.route('/api/v1/integrations/metadata-lookup', metadataLookupRoutes)
 app.route('/api/v1/integrations/personal-sources', personalSourceRoutes)

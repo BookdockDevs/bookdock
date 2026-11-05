@@ -6,6 +6,7 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
+- Added AI translation for selected text in the reader, with service and target language selection.
 - Reading import book lists can be sorted by recent reading activity, recent note activity, note count, or title in ascending or descending order. Sort preferences are remembered separately for WeRead Skill, WeRead Web, and Legado; books with unknown activity dates stay last in either direction.
 
 ### Changed
@@ -1063,6 +1064,7 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
+- 阅读器支持选中文字进行 AI 翻译，可切换服务和目标语言。
 - 阅读导入书籍列表支持按最近阅读、最近笔记、笔记数量或书名升降序排序，并分别记住微信读书 Skill、微信读书 Web 与 Legado 的排序偏好；缺少活动时间的书籍在两个方向下均排在末尾。
 
 #### 优化

@@ -5,6 +5,48 @@ import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 
 export const BASE_URL = '/api/v1'
 
+export async function streamTranslation(input: import('@bookdock/shared').TranslationRequest, signal: AbortSignal, onText: (text: string) => void) {
+  const response = await fetch(`${BASE_URL}/translation/translate`, {
+    method: 'POST', credentials: 'same-origin', signal,
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  })
+  if (response.status === 401) handleUnauthorized('/translation/translate')
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => null)
+    throw new ApiError(body?.error?.code ?? 'AI_PROVIDER_ERROR', body?.error?.message ?? 'Translation failed')
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let completed = false
+  const consume = (line: string) => {
+    if (!line.trim()) return
+    const event = JSON.parse(line) as import('@bookdock/shared').TranslationEvent
+    if (event.type === 'delta') onText(event.text)
+    else if (event.type === 'done') completed = true
+    else if (event.type === 'error') throw new ApiError(event.code, event.message)
+    else throw new ApiError('AI_PROVIDER_ERROR', 'Invalid translation response')
+  }
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      let end = buffer.indexOf('\n')
+      while (end >= 0) {
+        consume(buffer.slice(0, end))
+        buffer = buffer.slice(end + 1)
+        end = buffer.indexOf('\n')
+      }
+      if (done) break
+    }
+    consume(buffer)
+    if (!completed) throw new ApiError('AI_PROVIDER_ERROR', 'Translation was interrupted')
+  } finally {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
+  }
+}
+
 // Dispatched when a non-public request comes back 401; RootComponent listens
 // and redirects to /login. An event keeps this module free of router imports.
 export const UNAUTHORIZED_EVENT = 'bd:unauthorized'

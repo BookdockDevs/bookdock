@@ -103,6 +103,7 @@ interface ReaderState {
    *  toolbar, so the dialog state must live outside SelectionToolbar (which
    *  unmounts when the selection clears). Rendered by Reader. */
   replaceTarget: SelectionInfo | null
+  translationTarget: SelectionInfo | null
   setActiveNavTab: (tab: NavTab) => void
   setTocItems: (items: { label: string; href: string }[], bookId?: string) => void
   setCurrentChapter: (chapter: string | null) => void
@@ -121,6 +122,7 @@ interface ReaderState {
   addInvalidReplacementIds: (ids: string[]) => void
   addOrphanedAnnotationKeys: (keys: string[]) => void
   setReplaceTarget: (target: SelectionInfo | null) => void
+  setTranslationTarget: (target: SelectionInfo | null) => void
   resetForBook: (initialSidebarOpen?: boolean, initialNavTab?: NavTab) => void
 }
 
@@ -144,6 +146,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   invalidReplacementIds: [],
   orphanedAnnotationKeys: [],
   replaceTarget: null,
+  translationTarget: null,
   setActiveNavTab: (activeNavTab) => set({ activeNavTab }),
   setTocItems: (tocItems, tocBookId: string | null = null) => set({ tocItems, tocBookId }),
   setCurrentChapter: (currentChapter) => set({ currentChapter }),
@@ -180,6 +183,7 @@ export const useReaderState = create<ReaderState>((set) => ({
   addOrphanedAnnotationKeys: (keys) =>
     set((s) => ({ orphanedAnnotationKeys: Array.from(new Set([...s.orphanedAnnotationKeys, ...keys])) })),
   setReplaceTarget: (replaceTarget) => set({ replaceTarget }),
+  setTranslationTarget: (translationTarget) => set({ translationTarget }),
   resetForBook: (initialSidebarOpen = false, initialNavTab: NavTab = 'toc') => set({
     activeNavTab: initialNavTab,
     tocItems: [],
@@ -199,5 +203,6 @@ export const useReaderState = create<ReaderState>((set) => ({
     invalidReplacementIds: [],
     orphanedAnnotationKeys: [],
     replaceTarget: null,
+    translationTarget: null,
   }),
 }))

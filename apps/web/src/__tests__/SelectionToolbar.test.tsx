@@ -74,10 +74,18 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  useReaderState.setState({ selection: null, aiContext: null, aiPendingCommand: null, noteEditorRange: null })
+  useReaderState.setState({ selection: null, aiContext: null, aiPendingCommand: null, noteEditorRange: null, translationTarget: null })
 })
 
 describe('SelectionToolbar', () => {
+  it('hands the selected passage to the translation card before dismissing the toolbar', () => {
+    setSelection()
+    const snapshot = useReaderState.getState().selection
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('translation.title'))
+    expect(useReaderState.getState().translationTarget).toBe(snapshot)
+    expect(useReaderState.getState().selection).toBeNull()
+  })
   it('stores the raw selection text with paragraph breaks when creating a highlight', async () => {
     act(() => useReaderState.setState({
       selection: { cfiRange: 'epubcfi(/6/4!/2)', text: '第一段 第二段', rawText: '第一段\n\n第二段', rect: RECT },

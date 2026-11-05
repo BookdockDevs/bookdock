@@ -50,6 +50,9 @@ import { ReaderLoadingBadge } from './components/ReaderPending'
 import ReaderKeyboardShortcuts from './components/ReaderKeyboardShortcuts'
 import { Ribbon } from './components/Ribbon'
 import { SelectionToolbar } from './components/SelectionToolbar'
+import { useAiConfig } from '@/api/hooks/useAi'
+import { useTranslationConfig } from '@/api/hooks/useTranslationConfig'
+import TranslationPopup from './components/TranslationPopup'
 import { clearReaderSelection } from './lib/reader-selection'
 import { ImageContextMenu } from './components/ImageContextMenu'
 import ShareCardDialog from './components/share/ShareCardDialog'
@@ -316,6 +319,7 @@ export default function Reader() {
   const selection = useReaderState((s) => s.selection)
   const resetForBook = useReaderState((s) => s.resetForBook)
   const replaceTarget = useReaderState((s) => s.replaceTarget)
+  const translationTarget = useReaderState((s) => s.translationTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const setTocItems = useReaderState((s) => s.setTocItems)
   const sidebarOpen = useReaderState((s) => s.sidebarOpen)
@@ -339,6 +343,8 @@ export default function Reader() {
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
   const { data: annotations } = useAnnotations(id, { enabled: !isGuest && !revisionQuarantined })
+  useTranslationConfig({ enabled: !isGuest })
+  useAiConfig({ enabled: !isGuest })
   const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
   const publicIdeas = useReaderIdeas(id, showFriendIdeas && !revisionQuarantined, displayedRevisionId)
   const publicMarkers = useMemo(() => publicIdeas.isError || !showFriendIdeas ? [] : (publicIdeas.data?.data ?? []).filter((idea) => !idea.own && idea.locationAvailable), [publicIdeas.isError, publicIdeas.data, showFriendIdeas])
@@ -1487,8 +1493,11 @@ export default function Reader() {
     if (noteEditorRange) {
       list.push({ cfiRange: noteEditorRange, type: 'note', color: DEFAULT_IDEA_COLOR, style: 'underline' })
     }
+    if (translationTarget?.cfiRange) {
+      list.push({ cfiRange: translationTarget.cfiRange, type: 'highlight', color: 'blue', style: 'highlight' })
+    }
     renderer.setAnnotations(list)
-  }, [renderer, annotations?.data, publicMarkers, displayedRevisionId, noteEditorRange])
+  }, [renderer, annotations?.data, publicMarkers, displayedRevisionId, noteEditorRange, translationTarget])
 
   useEffect(() => {
     // A locked desktop toolbar is persistent by intent — reopen the sidebar
@@ -1554,6 +1563,10 @@ export default function Reader() {
   useEffect(() => {
     if (!containerEl) return
     const handler = () => {
+      if (useReaderState.getState().translationTarget) {
+        useReaderState.getState().setTranslationTarget(null)
+        return
+      }
       if (annotationClickHandledRef.current) return
       setSettingsOpen(false)
       setTtsOpen(false)
@@ -1576,7 +1589,7 @@ export default function Reader() {
   // popover), the click that dismisses it must not also turn a page or toggle
   // chrome — the renderer swallows click-to-turn while the guard is held
   const isFloatingSelection = Boolean(selection && (!isIdeaSidebarOpen || !selection.isIdea))
-  const popupOpen = isFloatingSelection || settingsOpen || ttsOpen || autoReadingOpen || !!footnoteEntry
+  const popupOpen = isFloatingSelection || settingsOpen || ttsOpen || autoReadingOpen || !!footnoteEntry || !!translationTarget
   useEffect(() => {
     if (!popupOpen || !renderer) return
     renderer.pushPopupGuard()
@@ -2310,6 +2323,7 @@ export default function Reader() {
           />
         )}
         <ShareCardDialog bookId={id} />
+        {!isGuest && !revisionQuarantined && translationTarget && <TranslationPopup bookId={id} target={translationTarget} />}
         {replaceTarget && (
           <Modal
             title={_('annotation.replaceSelection')}

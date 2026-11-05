@@ -30,9 +30,9 @@ import {
   popupPosition,
   setLastHighlightStyle,
 } from './annotation-colors'
-import { AiSparkleIcon, BulbIcon, CopyIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TrashIcon, TtsIcon } from './annotation-icons'
+import { AiSparkleIcon, BulbIcon, CopyIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TranslateIcon, TrashIcon, TtsIcon } from './annotation-icons'
 
-const BAR_WIDTH = 356
+const BAR_WIDTH = 392
 const BAR_HEIGHT = 44
 const STYLE_WIDTH = 236
 const STYLE_HEIGHT = 40
@@ -59,6 +59,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
   const setNoteEditorRange = useReaderState((s) => s.setNoteEditorRange)
   const setShareTarget = useReaderState((s) => s.setShareTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
+  const setTranslationTarget = useReaderState((s) => s.setTranslationTarget)
   const { renderer } = useReaderApi()
   const { controller: ttsController } = useTtsSession()
   const user = useAuthStore((s) => s.user)
@@ -510,6 +511,11 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
       ? { key: 'delete', label: _('annotation.deleteHighlight'), icon: <TrashIcon />, danger: true, onClick: () => removeAnnotation() }
       : { key: 'highlight', label: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, danger: false, onClick: highlight },
     { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
+    { key: 'translate', label: _('translation.title'), icon: <TranslateIcon size={18} />, danger: false, onClick: () => {
+      if (!selection) return
+      setTranslationTarget(selection)
+      close()
+    } },
     { key: 'ai-chat', label: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={20} />, danger: false, onClick: openAiChat },
     { key: 'ai-commands', label: _('reader.aiQuickCommands'), icon: (
       <span className="flex items-center justify-center gap-0.5">
