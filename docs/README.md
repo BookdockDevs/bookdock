@@ -8,6 +8,9 @@ A self-hosted web e-book library. pnpm monorepo — `@bookdock/shared` (contract
 |---|---|
 | [`../CHANGELOG.md`](../CHANGELOG.md) | User-facing release history and version-specific upgrade notes |
 | [`architecture.md`](./architecture.md) | Authoritative architecture blueprint (design principles, module layout, schema, API, ADRs) |
+| [Dictionaries](./architecture.md#personal-dictionaries) | MDict imports, personal and instance scope, resource isolation and file ownership |
+| [Selection toolbar](./architecture.md#selection-toolbar-preferences) | Action ordering, visibility and account preference synchronization |
+| [Selection translation](./architecture.md#selection-translation) | AI service selection, streamed results and preference ownership |
 | [Reading data](./architecture.md#reading-ledger-maturity-2026-10-18) | Current reading-history ownership, timing, correction, statistics, transfer, and personal-archive retention boundaries |
 
 ## Quick start

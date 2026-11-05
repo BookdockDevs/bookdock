@@ -55,7 +55,7 @@ export default function IdeaCard({
   const authorName = entry.authorName ?? _('annotation.myNote')
   const authorIdentity = (
     <>
-      <Avatar src={avatar} name={authorName} className={cn('text-xs', variant === 'flat' ? 'h-7 w-7' : 'h-8 w-8')} />
+      <Avatar decorative src={avatar} name={authorName} className={cn('text-xs', variant === 'flat' ? 'h-7 w-7' : 'h-8 w-8')} />
       <span className="truncate text-sm font-medium">{authorName}</span>
     </>
   )

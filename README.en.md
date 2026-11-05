@@ -34,7 +34,7 @@ Organize EPUB and TXT books, read them online, and keep your highlights, notes, 
 | **Sharing and discussion** | Create shared libraries, manage membership and access, share books, write reviews, and join discussions. |
 | **External storage** | Connect WebDAV or S3-compatible storage to browse and import books; store book files remotely with a local cache. |
 | **Import and export** | Import books from external storage, download books individually or in batches; import reading history from WeChat Read and Legado, and export reading archives to structured JSON, Markdown, and CSV. |
-| **Reading tools** | Use text-to-speech, automatic reading, and an AI reading assistant, with related services configurable in Settings. |
+| **Reading tools** | Look up words with custom MDict dictionaries, translate selections with AI, and use text-to-speech, automatic reading, and an AI reading assistant; configure services and customize the selection toolbar. |
 | **Legado book source** | Generate a book source to browse, search, and read your library in readers that support it. |
 | **Deployment and administration** | Self-host with Docker, manage accounts, registration, and guest access, and update from within the app. |
 

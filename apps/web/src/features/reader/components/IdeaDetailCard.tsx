@@ -63,7 +63,7 @@ export default function IdeaDetailCard({
   const authorName = detail.authorName ?? _('annotation.myNote')
   const authorIdentity = (
     <>
-      <Avatar src={detailAvatarUrl} name={authorName} className="h-7 w-7 text-xs" />
+      <Avatar decorative src={detailAvatarUrl} name={authorName} className="h-7 w-7 text-xs" />
       <span className="truncate text-sm font-medium">{authorName}</span>
     </>
   )

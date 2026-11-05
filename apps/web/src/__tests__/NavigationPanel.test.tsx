@@ -627,10 +627,10 @@ describe('NavigationPanel', () => {
       render(<NavigationPanel bookId="book-1" open onClose={onClose} />)
       fireEvent.click(screen.getByTitle('reader.search'))
       fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
-      await new Promise((r) => setTimeout(r, 500))
+      const matches = await screen.findAllByText('高中')
 
       // click the highlighted match — the click bubbles up to the result button
-      fireEvent.click(screen.getAllByText('高中')[1])
+      fireEvent.click(matches[1])
       expect(display).toHaveBeenCalledWith('cfi:2')
       expect(onClose).toHaveBeenCalled()
     })
@@ -654,9 +654,8 @@ describe('NavigationPanel', () => {
       fireEvent.click(screen.getByTitle('reader.search'))
       const input = screen.getByPlaceholderText('reader.searchPlaceholder')
       fireEvent.change(input, { target: { value: '高中' } })
-      await new Promise((r) => setTimeout(r, 500))
+      expect(await screen.findAllByText('高中')).toHaveLength(3)
       expect(search).toHaveBeenCalledTimes(1)
-      expect(screen.getAllByText('高中')).toHaveLength(3)
 
       // return to TOC via back button: the search panel hides and the TOC returns, but nothing is discarded
       fireEvent.click(screen.getByTitle('reader.backToToc'))

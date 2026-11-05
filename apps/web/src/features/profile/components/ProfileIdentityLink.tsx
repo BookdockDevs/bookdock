@@ -30,7 +30,7 @@ export default function ProfileIdentityLink({
       className={cn('inline-flex items-center gap-2 min-w-0 max-w-full', className)}
     >
       {avatarClassName !== 'hidden' && (
-        <Avatar src={avatar} name={name} className={cn('text-[11px] font-semibold uppercase', avatarClassName)} />
+        <Avatar decorative src={avatar} name={name} className={cn('text-[11px] font-semibold uppercase', avatarClassName)} />
       )}
       <span className="truncate">{name}</span>
     </Link>

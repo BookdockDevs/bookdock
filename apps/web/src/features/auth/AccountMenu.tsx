@@ -104,7 +104,7 @@ export default function AccountMenu() {
         }}
         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
       >
-        <Avatar src={avatarUrl(user?.avatarKey)} name={username} className="-ml-1 h-6 w-6 text-[11px] font-semibold uppercase" />
+        <Avatar decorative src={avatarUrl(user?.avatarKey)} name={username} className="-ml-1 h-6 w-6 text-[11px] font-semibold uppercase" />
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-stone-700 dark:text-stone-200">
           {username}
         </span>

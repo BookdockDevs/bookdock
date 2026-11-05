@@ -5,10 +5,11 @@ import { cn } from '@/lib/utils'
 interface AvatarProps {
   src?: string
   name: string
+  decorative?: boolean
   className?: string
 }
 
-export default function Avatar({ src, name, className }: AvatarProps) {
+export default function Avatar({ src, name, decorative = false, className }: AvatarProps) {
   const [imageState, setImageState] = useState<{ src?: string; status: 'loading' | 'loaded' | 'failed' }>({ src, status: 'loading' })
   // Reset before committing so revisiting an earlier URL cannot reuse its stale loaded state.
   if (imageState.src !== src) setImageState({ src, status: 'loading' })
@@ -16,7 +17,7 @@ export default function Avatar({ src, name, className }: AvatarProps) {
   const showFallback = !src || status === 'failed'
 
   return (
-    <span className={cn('relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-200', className)}>
+    <span aria-hidden={decorative || undefined} className={cn('relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-200', className)}>
       {showFallback ? (
         <span>
           {Array.from(name.trim())[0] || (

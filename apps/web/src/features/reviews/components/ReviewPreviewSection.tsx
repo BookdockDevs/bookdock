@@ -123,7 +123,7 @@ export default function ReviewPreviewSection({ context, canReview = false, onCom
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <Avatar src={authorAvatar} name={previewReview.author.name} className="h-7 w-7 text-xs" />
+            <Avatar decorative src={authorAvatar} name={previewReview.author.name} className="h-7 w-7 text-xs" />
             <span className="text-sm font-medium text-stone-800 dark:text-stone-200">
               {previewReview.author.name}
             </span>

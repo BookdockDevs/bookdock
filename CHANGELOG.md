@@ -2,31 +2,30 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.7.7] - 2026-11-06
 
 ### Added
 
-- The reader text selection toolbar can now be customized: users can reorder action icons via horizontal drag-and-drop and toggle visibility for individual tools in Interface settings, with account-level cloud synchronization across devices and one-click restore to defaults. The floating toolbar dynamically compacts its width when fewer actions are enabled.
-- Added custom MDict dictionary support (`.mdx`, `.mdd`, `.css`). Users can upload offline dictionaries in personal settings, customize dictionary order, and toggle per-dictionary automatic lookup. The reader selection toolbar features a dedicated dictionary popup supporting multi-dictionary switching, companion CSS rendering, and `.mdd` audio/image resource playback.
-- Added AI translation for selected text in the reader, with service and target language selection.
-- Reading import book lists can be sorted by recent reading activity, recent note activity, note count, or title in ascending or descending order. Sort preferences are remembered separately for WeRead Skill, WeRead Web, and Legado; books with unknown activity dates stay last in either direction.
+- Look up selected words and phrases with custom MDict dictionaries. Import an MDX file with optional MDD resources and CSS, switch dictionaries in the reader, and view definitions with bundled images and audio. Dictionaries support renaming, ordering and enable/disable controls; the instance owner can make dictionaries available to all signed-in users.
+- Translate selected text with your configured AI services, with service, model and target-language selection. The reader remembers your choices and streams the translation in a floating card.
+- Customize the reader selection toolbar in Settings → Interface: drag actions into order, show or hide individual tools while keeping at least one visible, and restore defaults. Preferences sync across devices for your account.
+- Sort reading import lists by recent reading, recent notes, note count or title, in either direction. WeRead Skill, WeRead Web and Legado remember their sort preferences separately; books without activity dates stay last.
 
 ### Changed
 
-- Reorganized the Interface settings card with concise section headers (General, Library, Reading) and locked title heights to prevent layout shifts when action toggles update.
-- Standardized the reader selection toolbar action order to Highlight → Note → Copy → Dictionary → Translate → Search → AI Chat → AI Actions → Speak → Excerpt → Replace, with unified vector icons.
-- User authentication and profile responses (`/auth/me`, login, setup, register, account update) now include `privateLibraryId`, allowing client applications to resolve personal library taxonomy immediately on mount without waiting for the full libraries list.
-- Password and secret inputs across account forms, library dialogs, and integration settings now default to hidden, with independent, keyboard-accessible show/hide controls and consistent validation and submission feedback. Password length errors appear after leaving the field or submitting, without a persistent length hint.
-- WeRead Web sign-in shows a clear signed-out status and changes the sign-in button to "Generate a new QR code" once a QR challenge exists, including after it expires.
+- Refined selection toolbar icons and default action order, with a compact layout that adapts to the visible tools.
+- Grouped Interface settings into General, Library and Reading sections, with steadier row heights when controls change.
+- Password and secret fields now share hidden-by-default inputs with independent show/hide controls and keyboard support. Password length errors appear after leaving the field or submitting.
+- WeRead Web sign-in clearly shows when signed out and offers a new QR code after one has been generated, including after expiry.
 
 ### Fixed
 
-- Fixed reading aloud from a selection at the start of a sentence incorrectly starting from the previous sentence.
-- Fixed local storage usage calculations omitting SQLite `-shm` shared memory files and auxiliary data directories (`dictionaries`, `reader-content-index`, `reader-media-cache`, `releases`, `avatars`, `sources`), and switched subfolder size scans to recursive directory traversal.
-- Fixed a momentary flash of the "No categories yet" empty state in the sidebar when opening the homepage with the category panel active. Category queries now initiate concurrently on mount alongside shelves and tags, and the sidebar guards against rendering empty states before taxonomy queries have resolved.
-- User avatars show a neutral circle while loading and a display-name initial when absent or unavailable, preventing flashes of image alternative text. Signing in now preserves avatar information immediately instead of briefly showing an initial before the profile refreshes.
-- Failed administrator account creation and password resets now keep the dialog and entered values for retry instead of closing immediately; reopening a closed dialog clears its password draft and resets visibility.
-- Reading import covers display correctly when already cached and retry failed images after sorting while staying paired with their books.
+- Reading aloud from a selection at the start of a sentence no longer starts from the previous sentence.
+- Local storage usage now includes SQLite shared-memory files and previously omitted data directories, and counts nested files recursively.
+- Opening the homepage with the category sidebar active no longer briefly shows an empty category list while it loads. Personal taxonomy queries can start without waiting for the libraries list.
+- Avatars use a placeholder while loading and a name initial when unavailable, preventing flashes of alternative text. Signing in preserves the avatar immediately, and avatars beside names no longer duplicate author link names for screen readers.
+- Failed administrator account creation and password resets keep the dialog and entered values for retry; reopening a closed dialog clears its password draft.
+- Reading import covers display correctly when cached and stay paired with their books after sorting; failed images can retry after sorting.
 
 ## [0.7.6] - 2026-11-05
 
@@ -1068,31 +1067,30 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [未发布]
+### [0.7.7] - 2026-11-06
 
 #### 新增
 
-- 支持自定义阅读器选中文本工具栏：可在「设置 → 界面」中通过横向拖拽调整操作图标顺序并点击切换显隐（至少保留一项开启），配置自动跨设备云端同步；非默认状态下支持一键恢复默认。阅读器浮动气泡根据开启项自适应收缩，移动端体验更紧凑。
-- 个人设置新增自定义 MDict 词典支持（`.mdx`、`.mdd`、`.css`）：支持上传本地离线词典文件、调整词典排序与单本词典自动查词开关；阅读器划词工具栏新增「词典」查询浮窗，支持多词典快速切换、同目录伴生 CSS 样式渲染与 `.mdd` 离线词典图片／发音音频资源回放。
-- 阅读器支持选中文字进行 AI 翻译，可切换服务和目标语言。
-- 阅读导入书籍列表支持按最近阅读、最近笔记、笔记数量或书名升降序排序，并分别记住微信读书 Skill、微信读书 Web 与 Legado 的排序偏好；缺少活动时间的书籍在两个方向下均排在末尾。
+- 支持使用自定义 MDict 词典查询选中的单词或短语：导入 MDX 文件及可选的 MDD 资源、CSS 样式，在阅读器中切换词典，查看释义、图片并播放发音。词典支持重命名、排序和启停；实例所有者可将词典设为所有已登录用户可用。
+- 支持使用已配置的 AI 服务翻译选中文字，可切换服务、模型和目标语言；阅读器会记住选择，并在浮窗中逐步显示译文。
+- 支持在「设置 → 界面」中自定义划词工具栏：拖拽调整操作顺序、切换各项显隐（至少保留一项），并可恢复默认；配置随账号跨设备同步。
+- 阅读导入列表支持按最近阅读、最近笔记、笔记数量或书名升降序排序，分别记住微信读书 Skill、微信读书 Web 和 Legado 的排序偏好；缺少活动时间的书籍始终排在末尾。
 
 #### 优化
 
-- 优化「界面」设置卡片的结构层次，采用精炼双字分段（常规、书库、阅读），规整排布并锁定行高以杜绝动态按钮显隐引起的卡片高度抖动。
-- 规范阅读器划词浮动工具栏操作项排序，按用户操作频次统一调整为「划线 → 想法 → 复制 → 词典 → 翻译 → 全文搜索 → AI 对话 → AI 快捷指令 → 朗读 → 书摘卡片 → 文本替换」，并统一采用标准描边矢量图标。
-- 用户认证与账号会话信息（`/auth/me`、登录、初始化、注册、资料更新）新增携带 `privateLibraryId`（私人书库 ID），前端页面在挂载第 1 帧即可同步就绪，消除了以往必须等待书库列表返回才能发起分类请求的网络瀑布流。
-- 统一账号表单、书库弹窗与集成设置中的密码及密钥输入交互：默认隐藏，支持独立显示／隐藏与键盘操作，并统一校验及提交反馈。密码长度错误仅在失焦或提交校验不通过时提示，不再显示常驻长度说明。
-- 微信读书 Web 登录区域明确显示未登录状态；生成二维码后，登录按钮改为「重新生成二维码」，二维码过期后仍可直接重新生成。
+- 调整划词工具栏的图标和默认操作顺序，并根据可见操作数量自适应收紧布局。
+- 「界面」设置按常规、书库和阅读分组，减少控件变化时的行高抖动。
+- 统一密码与密钥输入交互：默认隐藏，支持独立显示／隐藏和键盘操作；密码长度错误在失焦或提交时提示。
+- 微信读书 Web 登录明确显示未登录状态，生成过二维码后可直接重新生成，过期后也可操作。
 
 #### 修复
 
-- 修复选中文字从句首开始时，朗读错误地从上一句开始的问题。
-- 修复本地存储统计计算遗漏 SQLite `-shm` 共享内存索引文件及辅助数据目录（词典、阅读器排版索引、媒体缓存、版本包、头像与导入来源缓存）的问题；子目录体积统计改为递归遍历计算，确保宿主机实际磁盘占用统计真实准确。
-- 修复首页侧栏停留在「分类」面板时在页面加载过程中短暂闪现「暂无分类」空状态的问题；分类请求现已在挂载时与书架、标签完全并发发起，侧栏同时增加加载守卫，杜绝在分类查询完成前误判为空状态。
-- 用户头像加载中统一显示中性圆形占位，未设置头像或加载失败时显示名称首字，避免闪出图片替代文字；登录后立即保留头像信息，避免资料刷新前短暂显示首字。
-- 管理员创建账号或重置密码失败时保留弹窗和已输入内容，方便修改重试；关闭后重新打开会清空密码草稿并恢复隐藏状态。
-- 修复阅读导入列表中已缓存封面的显示，并在排序后重试加载失败的封面，保持封面与书籍正确对应。
+- 修复从句首选中文字后，朗读错误地从上一句开始的问题。
+- 修复本地存储用量遗漏 SQLite 共享内存文件和部分数据目录的问题，并递归统计子目录文件。
+- 修复首页分类侧栏在加载时短暂显示「暂无分类」的问题，私人分类等查询不再需要等待书库列表返回。
+- 修复头像加载时闪出替代文字的问题：加载中显示占位，未设置或加载失败时显示名称首字；登录后立即保留头像信息，并避免头像使屏幕阅读器重复朗读作者链接名称。
+- 修复管理员创建账号或重置密码失败后弹窗直接关闭的问题，失败时保留输入以便重试；关闭后重新打开会清空密码草稿。
+- 修复阅读导入列表中缓存封面的显示，排序后保持封面与书籍对应，并允许加载失败的图片重试。
 
 ### [0.7.6] - 2026-11-05
 

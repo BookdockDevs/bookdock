@@ -4,6 +4,19 @@ import { describe, expect, it } from 'vitest'
 import Avatar from '@/components/ui/Avatar'
 
 describe('Avatar', () => {
+  it('keeps decorative avatars out of identity link names in every image state', () => {
+    const { rerender, container } = render(<a href="/profile"><Avatar decorative name="Reader" />Reader</a>)
+    expect(screen.getByRole('link')).toHaveAccessibleName('Reader')
+
+    rerender(<a href="/profile"><Avatar decorative src="/avatar.png" name="Reader" />Reader</a>)
+    expect(screen.getByRole('link')).toHaveAccessibleName('Reader')
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    fireEvent.load(container.querySelector('img')!)
+    expect(screen.getByRole('link')).toHaveAccessibleName('Reader')
+    fireEvent.error(container.querySelector('img')!)
+    expect(screen.getByRole('link')).toHaveAccessibleName('Reader')
+  })
+
   it('keeps the initial and image text invisible until the image loads', () => {
     render(<Avatar src="/avatar.png" name="Alice" className="h-8 w-8" />)
     const image = screen.getByRole('img', { name: 'Alice' })
