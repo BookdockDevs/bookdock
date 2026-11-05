@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router'
 
 import type { IdeaEntry } from './IdeaOverlay'
 
+import Avatar from '@/components/ui/Avatar'
 import SmartMenu from '@/components/ui/SmartMenu'
 import ContentImages from '@/features/content-files/components/ContentImages'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
@@ -10,7 +11,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 import { cn } from '@/lib/utils'
 
-import { BulbIcon, ChatBubbleIcon, CopyIcon, DotsHorizontalIcon, HeartIcon, LockIcon, PencilIcon, ShareIcon, TrashIcon } from './annotation-icons'
+import { ChatBubbleIcon, CopyIcon, DotsHorizontalIcon, HeartIcon, LockIcon, PencilIcon, ShareIcon, TrashIcon } from './annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from './format-relative-time'
 
 interface IdeaCardProps {
@@ -54,13 +55,7 @@ export default function IdeaCard({
   const authorName = entry.authorName ?? _('annotation.myNote')
   const authorIdentity = (
     <>
-      {avatar ? (
-        <img src={avatar} alt="" decoding="async" className={cn('rounded-full object-cover shrink-0', variant === 'flat' ? 'h-7 w-7' : 'h-8 w-8')} />
-      ) : (
-        <span className={cn('flex shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]', variant === 'flat' ? 'h-7 w-7' : 'h-8 w-8')}>
-          <BulbIcon size={variant === 'flat' ? 14 : 16} />
-        </span>
-      )}
+      <Avatar src={avatar} name={authorName} className={cn('text-xs', variant === 'flat' ? 'h-7 w-7' : 'h-8 w-8')} />
       <span className="truncate text-sm font-medium">{authorName}</span>
     </>
   )

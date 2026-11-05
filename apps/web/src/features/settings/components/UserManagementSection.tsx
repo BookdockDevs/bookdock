@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, sanitizeUsername } from '@bookdock/shared'
 import type { AdminUserRes, LibraryListItem, LibraryMemberEntry, MembershipRole, UpdateUserReq } from '@bookdock/shared'
 
+import Avatar from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import PasswordInput from '@/components/ui/PasswordInput'
@@ -49,31 +50,12 @@ function MemberAvatar({
   avatarKey?: string | null
   isOwner?: boolean
 }) {
-  const [loadFailed, setLoadFailed] = useState(false)
-  const url = avatarUrl(avatarKey)
-
-  if (url && !loadFailed) {
-    return (
-      <img
-        src={url}
-        alt={username}
-        onError={() => setLoadFailed(true)}
-        className="h-7 w-7 shrink-0 rounded-full object-cover"
-      />
-    )
-  }
-
   return (
-    <span
-      className={cn(
-        'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
-        isOwner
-          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 font-bold'
-          : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300',
-      )}
-    >
-      {username.slice(0, 1).toUpperCase()}
-    </span>
+    <Avatar
+      src={avatarUrl(avatarKey)}
+      name={username}
+      className={cn('h-7 w-7 text-xs font-semibold uppercase', isOwner && 'font-bold')}
+    />
   )
 }
 

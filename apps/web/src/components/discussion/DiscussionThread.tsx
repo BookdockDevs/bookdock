@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 
+import Avatar from '@/components/ui/Avatar'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import SmartMenu, { readerMenuDangerItemClass, readerMenuItemClass } from '@/components/ui/SmartMenu'
 import { CloseIcon, CopyIcon, HeartIcon, PencilIcon, ReplyIcon, TrashIcon } from '@/features/reader/components/annotation-icons'
@@ -233,13 +234,7 @@ export default function DiscussionThread({
       >
         <div className="flex items-start gap-2.5">
           <Link to="/profile" search={{ userId: comment.author.id }} onClick={(event) => event.stopPropagation()} className="shrink-0">
-            {authorAvatar ? (
-              <img src={authorAvatar} alt="" className={cn('rounded-full object-cover', isReply ? 'h-6 w-6' : 'h-7 w-7')} />
-            ) : (
-              <span className={cn('flex items-center justify-center rounded-full bg-stone-500/10 font-medium', tSub, isReply ? 'h-6 w-6 text-[10px]' : 'h-7 w-7 text-xs')}>
-                {comment.author.name.slice(0, 1)}
-              </span>
-            )}
+            <Avatar src={authorAvatar} name={comment.author.name} className={isReply ? 'h-6 w-6 text-[10px]' : 'h-7 w-7 text-xs'} />
           </Link>
 
           <div
@@ -389,13 +384,7 @@ export default function DiscussionThread({
                     )}
                   >
                     <Link to="/profile" search={{ userId: liker.id }} onClick={(event) => event.stopPropagation()} aria-label={liker.name}>
-                      {avatar ? (
-                        <img src={avatar} alt="" decoding="async" className="h-4 w-4 rounded-full object-cover" />
-                      ) : (
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-stone-400/20 text-[9px] font-medium">
-                          {liker.name.slice(0, 1)}
-                        </span>
-                      )}
+                      <Avatar src={avatar} name={liker.name} className="h-4 w-4 text-[9px]" />
                     </Link>
                     <Link to="/profile" search={{ userId: liker.id }} onClick={(event) => event.stopPropagation()}>{liker.name}</Link>
                   </div>
@@ -471,23 +460,7 @@ export default function DiscussionThread({
           )}
 
           <div className={cn('flex gap-2.5', isExpanded ? 'items-start' : 'items-center')}>
-            {userAvatar ? (
-              <img
-                src={userAvatar}
-                alt=""
-                decoding="async"
-                className={cn('shrink-0 rounded-full object-cover', isExpanded ? 'mt-0.5 h-6 w-6' : 'h-5 w-5')}
-              />
-            ) : (
-              <span
-                className={cn(
-                  'flex shrink-0 items-center justify-center rounded-full bg-stone-400/20 text-[10px] font-medium text-stone-500 dark:text-stone-400',
-                  isExpanded ? 'mt-0.5 h-6 w-6' : 'h-5 w-5',
-                )}
-              >
-                {user.username.slice(0, 1)}
-              </span>
-            )}
+            <Avatar src={userAvatar} name={user.username} className={cn('text-[10px]', isExpanded ? 'mt-0.5 h-6 w-6' : 'h-5 w-5')} />
 
             <textarea
               ref={inputRef}

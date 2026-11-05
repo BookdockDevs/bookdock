@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, 
 import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 
+import Avatar from '@/components/ui/Avatar'
+import { avatarUrl } from '@/lib/avatar'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -172,7 +174,7 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
                       <div role="button" tabIndex={0} onClick={() => openNotification(entry.id, entry.readAt)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openNotification(entry.id, entry.readAt) } }} className="block w-full pr-8 text-left focus:outline-hidden focus-visible:ring-2 focus-visible:ring-stone-400">
                         <div className="flex items-start gap-2.5">
                           <Link to="/profile" search={{ userId: entry.actor.id }} onClick={(event) => event.stopPropagation()} className="shrink-0" aria-label={entry.actor.name}>
-                            {entry.actor.avatarKey ? <img src={`/api/v1/avatars/${entry.actor.avatarKey}`} alt="" className="h-8 w-8 rounded-full object-cover" /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-100 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300">{entry.actor.name.slice(0, 1).toUpperCase()}</span>}
+                            <Avatar src={avatarUrl(entry.actor.avatarKey)} name={entry.actor.name} className="h-8 w-8 text-xs" />
                           </Link>
                           <div className="min-w-0 flex-1">
                             <p className="text-sm text-stone-900 dark:text-stone-100"><Link to="/profile" search={{ userId: entry.actor.id }} onClick={(event) => event.stopPropagation()} className="font-semibold hover:underline">{entry.actor.name}</Link> {_(notificationActionKey(entry))}</p>

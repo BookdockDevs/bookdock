@@ -223,6 +223,7 @@ export interface LoginRes {
     id: string
     username: string
     role: string
+    avatarKey: string | null
   }
 }
 
@@ -236,6 +237,7 @@ export interface SetupRes {
     id: string
     username: string
     role: string
+    avatarKey: string | null
   }
 }
 
@@ -303,6 +305,7 @@ export interface RegisterRes {
     id: string
     username: string
     role: string
+    avatarKey: string | null
   }
 }
 

@@ -334,7 +334,8 @@ describe('auth module', () => {
   describe('login route', () => {
     it('sets the session cookie and returns the user without a token', async () => {
       await seedInstance(db, {})
-      await insertUser(db, { username: 'carol', password: 'password123', role: 'owner' })
+      const userId = await insertUser(db, { username: 'carol', password: 'password123', role: 'owner' })
+      db.update(schema.users).set({ avatarKey: 'ab/avatar.png' }).where(eq(schema.users.id, userId)).run()
       const app = createAuthApp(null)
       const res = await app.request('/api/v1/auth/login', {
         method: 'POST',
@@ -347,6 +348,7 @@ describe('auth module', () => {
       expect(cookie).toContain('HttpOnly')
       const body = await res.json()
       expect(body.data.user.username).toBe('carol')
+      expect(body.data.user.avatarKey).toBe('ab/avatar.png')
       expect(body.data.token).toBeUndefined()
     })
 

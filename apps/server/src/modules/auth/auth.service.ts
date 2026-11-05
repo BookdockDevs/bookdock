@@ -216,8 +216,8 @@ export function revokeUserSessions(userId: string): void {
   invalidateUserCache(userId)
 }
 
-function toAuthPayload(user: { id: string; username: string }) {
-  return { id: user.id, username: user.username, role: isInstanceOwner(user.id) ? 'owner' : 'member' }
+function toAuthPayload(user: { id: string; username: string; avatarKey: string | null }) {
+  return { id: user.id, username: user.username, role: isInstanceOwner(user.id) ? 'owner' : 'member', avatarKey: user.avatarKey }
 }
 
 function createPrivateLibrary(tx: Pick<ReturnType<typeof getDb>, 'insert'>, userId: string) {

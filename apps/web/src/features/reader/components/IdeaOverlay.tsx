@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 
 import type { AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
 
+import Avatar from '@/components/ui/Avatar'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useDialogLayout } from '@/components/ui/dialog-layout-context'
 import { avatarUrl } from '@/lib/avatar'
@@ -437,13 +438,7 @@ export function IdeaOverlay({
               {isSidebarFocused || sidebarDraft.trim() ? (
                 <div className="space-y-2.5 rounded-xl border border-stone-300/80 bg-stone-500/[0.04] p-3 transition-colors dark:border-stone-700/80 dark:bg-stone-500/[0.06]">
                   <div className="flex items-start gap-2.5">
-                    {userAvatar ? (
-                      <img src={userAvatar} alt="" className="mt-0.5 h-6 w-6 shrink-0 rounded-full object-cover" />
-                    ) : (
-                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-400/20 text-[10px] font-medium text-[var(--bd-read-sub)]">
-                        {user?.username ? user.username.slice(0, 1) : <BulbIcon size={12} />}
-                      </span>
-                    )}
+                    <Avatar src={userAvatar} name={user?.username ?? ''} className="mt-0.5 h-6 w-6 text-[10px]" />
                     <textarea
                       ref={sidebarInputRef}
                       autoFocus

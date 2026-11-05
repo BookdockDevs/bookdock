@@ -1,3 +1,4 @@
+import { useAuthStore } from '@/stores/auth.store'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -44,12 +45,12 @@ describe('useLogin', () => {
   })
 
   it('refreshes the session query after a login follows an unauthenticated probe', async () => {
-    const me = { id: 'user-1', username: 'admin', role: 'owner', avatarKey: null }
+    const me = { id: 'user-1', username: 'admin', role: 'owner', avatarKey: 'ab/avatar.png' }
     vi.mocked(apiGet)
       .mockRejectedValueOnce(new ApiError('UNAUTHORIZED', 'Not authenticated'))
       .mockResolvedValueOnce({ data: me })
     vi.mocked(apiPost).mockResolvedValue({
-      data: { token: 'token', user: { id: me.id, username: me.username, role: me.role } },
+      data: { token: 'token', user: me },
     })
 
     const { result } = renderHook(() => useLogin(), { wrapper: wrapper(queryClient) })
@@ -62,6 +63,7 @@ describe('useLogin', () => {
 
     await waitFor(() => expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual({ data: me }))
     expect(apiGet).toHaveBeenCalledTimes(2)
+    expect(useAuthStore.getState().user?.avatarKey).toBe(me.avatarKey)
   })
 
   it('refreshes the session query after registration', async () => {
@@ -70,7 +72,7 @@ describe('useLogin', () => {
       .mockRejectedValueOnce(new ApiError('UNAUTHORIZED', 'Not authenticated'))
       .mockResolvedValueOnce({ data: me })
     vi.mocked(apiPost).mockResolvedValue({
-      data: { token: 'token', user: { id: me.id, username: me.username, role: me.role } },
+      data: { token: 'token', user: me },
     })
 
     const { result } = renderHook(() => useRegister(), { wrapper: wrapper(queryClient) })
@@ -83,6 +85,7 @@ describe('useLogin', () => {
 
     await waitFor(() => expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual({ data: me }))
     expect(apiGet).toHaveBeenCalledTimes(2)
+    expect(useAuthStore.getState().user?.avatarKey).toBe(me.avatarKey)
   })
 })
 

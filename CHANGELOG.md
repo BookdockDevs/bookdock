@@ -15,6 +15,7 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- User avatars show a neutral circle while loading and a display-name initial when absent or unavailable, preventing flashes of image alternative text. Signing in now preserves avatar information immediately instead of briefly showing an initial before the profile refreshes.
 - Failed administrator account creation and password resets now keep the dialog and entered values for retry instead of closing immediately; reopening a closed dialog clears its password draft and resets visibility.
 - Reading import covers display correctly when already cached and retry failed images after sorting while staying paired with their books.
 
@@ -1071,6 +1072,7 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 用户头像加载中统一显示中性圆形占位，未设置头像或加载失败时显示名称首字，避免闪出图片替代文字；登录后立即保留头像信息，避免资料刷新前短暂显示首字。
 - 管理员创建账号或重置密码失败时保留弹窗和已输入内容，方便修改重试；关闭后重新打开会清空密码草稿并恢复隐藏状态。
 - 修复阅读导入列表中已缓存封面的显示，并在排序后重试加载失败的封面，保持封面与书籍正确对应。
 

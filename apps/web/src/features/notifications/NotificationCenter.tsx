@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
+import Avatar from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import ArchivePager from '@/features/profile/components/ArchivePager'
@@ -51,7 +52,7 @@ export default function NotificationCenter() {
         )}
         <ul className="space-y-2">{list.data.data.entries.map((entry) => <li key={entry.id} className="rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-800 dark:bg-stone-900">
           <div className="flex items-start gap-3">
-            <Link to="/profile" search={{ userId: entry.actor.id }} className="shrink-0" aria-label={entry.actor.name}>{avatarUrl(entry.actor.avatarKey) ? <img src={avatarUrl(entry.actor.avatarKey)} alt="" className="h-8 w-8 rounded-full object-cover" /> : <span className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-100 text-xs text-stone-600 dark:bg-stone-800 dark:text-stone-300">{entry.actor.name.slice(0, 1)}</span>}</Link>
+            <Link to="/profile" search={{ userId: entry.actor.id }} className="shrink-0" aria-label={entry.actor.name}><Avatar src={avatarUrl(entry.actor.avatarKey)} name={entry.actor.name} className="h-8 w-8 text-xs" /></Link>
             <div className="min-w-0 flex-1">
               <p className="text-sm text-stone-900 dark:text-stone-100"><Link to="/profile" search={{ userId: entry.actor.id }} className="font-medium hover:underline">{entry.actor.name}</Link> {_(notificationActionKey(entry))}{!entry.readAt && <span data-testid="notification-unread-dot" className="ml-2 inline-block h-2 w-2 rounded-full bg-red-500" aria-label={_('notificationCenter.unread')} />}</p>
               <Link to="/notifications" search={{ ...search, id: entry.id }}>

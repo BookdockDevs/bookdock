@@ -1,5 +1,9 @@
 # Bookdock Architecture
 
+## Avatar presentation
+
+Authentication responses for login, registration and setup include the current nullable `avatarKey`, matching the account profile. Interactive user avatars share a fixed-size circular presentation: an available image URL starts with a neutral placeholder, the image becomes visible after loading, and absent or failed images show the first Unicode character of the display name (or a person icon). Changing the URL resets the image state. Share-card export keeps its self-contained image rendering so image embedding can resolve assets during export.
+
 ## Reading ledger maturity (2026-10-18)
 
 Private-library removal and deletion confirmations offer explicit personal-data cleanup for both owned and collected books. When an owned book moves to trash with cleanup selected, its private work metadata records `pendingUserDataDeletion`; personal archive lists, notes and reading statistics exclude those versions, while stored facts remain intact. Restoring the work removes the flag and restores visibility. Permanent deletion, emptying trash and automatic purges honor the saved choice and clear only the acting user's data across the work's versions. Without cleanup selected, reading archives remain visible and survive content deletion. Collected-card removal and deletion with trash disabled apply cleanup immediately. Manual timer completion reports success only after the server accepts its queued records; short session durations are displayed in seconds rather than rounded up to a minute.

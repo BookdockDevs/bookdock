@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 
+import Avatar from '@/components/ui/Avatar'
 import InteractionHeaderActions from '@/components/discussion/InteractionHeaderActions'
 import ContentImages from '@/features/content-files/components/ContentImages'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -8,7 +9,7 @@ import { avatarUrl } from '@/lib/avatar'
 import { cn } from '@/lib/utils'
 
 import type { IdeaEntry } from './IdeaOverlay'
-import { BulbIcon, ChevronLeftIcon, QuoteLeftIcon } from './annotation-icons'
+import { ChevronLeftIcon, QuoteLeftIcon } from './annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from './format-relative-time'
 
 export type IdeaDetailTheme = 'reader' | 'app'
@@ -62,13 +63,7 @@ export default function IdeaDetailCard({
   const authorName = detail.authorName ?? _('annotation.myNote')
   const authorIdentity = (
     <>
-      {detailAvatarUrl ? (
-        <img src={detailAvatarUrl} alt="" decoding="async" className="h-7 w-7 shrink-0 rounded-full object-cover" />
-      ) : (
-        <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-500/10', subText)}>
-          <BulbIcon size={15} />
-        </span>
-      )}
+      <Avatar src={detailAvatarUrl} name={authorName} className="h-7 w-7 text-xs" />
       <span className="truncate text-sm font-medium">{authorName}</span>
     </>
   )

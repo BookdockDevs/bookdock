@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 
+import Avatar from '@/components/ui/Avatar'
 import { avatarUrl } from '@/lib/avatar'
 import { cn } from '@/lib/utils'
 
@@ -29,22 +30,7 @@ export default function ProfileIdentityLink({
       className={cn('inline-flex items-center gap-2 min-w-0 max-w-full', className)}
     >
       {avatarClassName !== 'hidden' && (
-        avatar ? (
-          <img
-            src={avatar}
-            alt=""
-            className={cn('shrink-0 rounded-full object-cover', avatarClassName)}
-          />
-        ) : (
-          <span
-            className={cn(
-              'flex shrink-0 items-center justify-center rounded-full bg-stone-200/80 text-[11px] font-semibold uppercase text-stone-700 dark:bg-stone-700 dark:text-stone-200',
-              avatarClassName,
-            )}
-          >
-            {name.slice(0, 1)}
-          </span>
-        )
+        <Avatar src={avatar} name={name} className={cn('text-[11px] font-semibold uppercase', avatarClassName)} />
       )}
       <span className="truncate">{name}</span>
     </Link>

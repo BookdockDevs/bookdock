@@ -1,5 +1,6 @@
 import type { Review, ReviewBookContext } from '@bookdock/shared'
 
+import Avatar from '@/components/ui/Avatar'
 import { ChatBubbleIcon, HeartIcon, LockIcon } from '@/features/reader/components/annotation-icons'
 import { formatFullDateTime, formatRelativeTime } from '@/features/reader/components/format-relative-time'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -122,13 +123,7 @@ export default function ReviewPreviewSection({ context, canReview = false, onCom
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            {authorAvatar ? (
-              <img src={authorAvatar} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />
-            ) : (
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-500/10 text-xs font-medium text-stone-600 dark:text-stone-400">
-                {previewReview.author.name.slice(0, 1)}
-              </span>
-            )}
+            <Avatar src={authorAvatar} name={previewReview.author.name} className="h-7 w-7 text-xs" />
             <span className="text-sm font-medium text-stone-800 dark:text-stone-200">
               {previewReview.author.name}
             </span>

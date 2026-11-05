@@ -107,7 +107,7 @@ describe('UserManagementSection', () => {
     for (const user of USERS) {
       const link = screen.getByRole('link', { name: user.username })
       expect(link).toHaveAttribute('href', `/profile?userId=${user.id}`)
-      expect(within(link).getByText(user.username.slice(0, 1).toUpperCase())).toBeInTheDocument()
+      expect(within(link).getByText(user.username.slice(0, 1))).toBeInTheDocument()
       const row = link.closest('tr')!
       const action = within(row).queryByRole('button', { name: '更多操作' })
       if (action) expect(link).not.toContainElement(action)

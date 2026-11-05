@@ -1,5 +1,6 @@
 import { useNavigate, useRouter } from '@tanstack/react-router'
 
+import Avatar from '@/components/ui/Avatar'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -103,13 +104,7 @@ export default function AccountMenu() {
         }}
         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
       >
-        {avatarUrl(user?.avatarKey) ? (
-          <img src={avatarUrl(user?.avatarKey)} alt={username} className="-ml-1 h-6 w-6 shrink-0 rounded-full object-cover" />
-        ) : (
-          <span className="-ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-300/80 text-[11px] font-semibold uppercase text-stone-700 dark:bg-stone-700 dark:text-stone-200">
-            {username.slice(0, 1)}
-          </span>
-        )}
+        <Avatar src={avatarUrl(user?.avatarKey)} name={username} className="-ml-1 h-6 w-6 text-[11px] font-semibold uppercase" />
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-stone-700 dark:text-stone-200">
           {username}
         </span>

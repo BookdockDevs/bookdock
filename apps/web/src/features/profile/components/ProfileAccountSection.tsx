@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { ReaderProfile } from '@bookdock/shared'
 
+import Avatar from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useDeleteAvatar, useUploadAvatar } from '@/features/auth/hooks'
@@ -125,15 +126,11 @@ export default function ProfileAccountSection({ profile, editable = true }: Prof
             {/* Large Avatar with hover reveal controls */}
             <div className="group relative -mt-12 h-20 w-20 shrink-0 sm:-mt-14 sm:h-24 sm:w-24">
               <div className="h-full w-full overflow-hidden rounded-full ring-4 ring-white shadow-md transition-shadow group-hover:shadow-lg dark:ring-stone-900">
-                {preview ? (
-                  <img src={preview.url} alt={_('settings.avatar')} className="h-full w-full object-cover" />
-                ) : url ? (
-                  <img src={url} alt={_('settings.avatar')} className="h-full w-full object-cover" />
-                ) : (
-                  <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-stone-200 to-stone-300 text-2xl font-bold uppercase text-stone-700 dark:from-stone-700 dark:to-stone-800 dark:text-stone-200">
-                    {displayName.slice(0, 1)}
-                  </span>
-                )}
+                <Avatar
+                  src={preview?.url ?? url}
+                  name={displayName}
+                  className="h-full w-full text-2xl font-bold uppercase"
+                />
               </div>
 
               {editable && <input
