@@ -5,6 +5,7 @@ import type { Library, LibraryVisibility } from '@bookdock/shared'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import PasswordInput from '@/components/ui/PasswordInput'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -194,7 +195,7 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
                 disabled={!canSave}
                 onClick={handleSave}
               >
-                {_('library.save')}
+                {_(updateLibrary.isPending ? 'passwordInput.saving' : 'library.save')}
               </Button>
             )}
           </div>
@@ -288,17 +289,16 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
 
               {visibility === 'password' && (
                 <div className="rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
-                  <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
+                  <div className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-xs text-stone-600 dark:text-stone-300">{_('library.libraryAccessPassword')}</span>
-                      {password.trim().length > 0 && password.trim().length < 4 && (
-                        <span className="text-xs font-medium text-red-500">
-                          {_('library.libraryAccessPasswordMinHint')}
-                        </span>
-                      )}
                     </div>
-                    <input
-                      type="text"
+                    <PasswordInput key={library.id}
+                      required
+                      minLength={4}
+                      validationValue={password.trim()}
+                      disabled={updateLibrary.isPending}
+                      hint={_('library.libraryAccessPasswordMinHint')}
                       aria-label={_('library.libraryAccessPassword')}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
@@ -306,7 +306,7 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
                       autoComplete="off"
                       className="font-mono tracking-wider rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200"
                     />
-                  </label>
+                  </div>
                 </div>
               )}
 

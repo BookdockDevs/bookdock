@@ -1,4 +1,17 @@
 {
+  "passwordInput": {
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "showSecret": "Show secret",
+    "hideSecret": "Hide secret",
+    "secretRequired": "Enter a secret",
+    "tooShort": "Enter at least {{min}} characters",
+    "tooLong": "Use no more than {{max}} characters",
+    "keepSaved": "Configured; leave blank to keep",
+    "signingIn": "Signing in…",
+    "creating": "Creating…",
+    "saving": "Saving…"
+  },
   "metadataLookup": {
     "qidian": "Qidian",
     "douban": "Douban",

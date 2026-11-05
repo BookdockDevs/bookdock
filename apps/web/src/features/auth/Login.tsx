@@ -4,6 +4,8 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
+import PasswordInput from '@/components/ui/PasswordInput'
+import { validatePasswordInputs } from '@/components/ui/password-input-validation'
 import { libraryInviteParam, PENDING_INVITE_KEY } from '@/features/library/invite-link'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -21,10 +23,11 @@ export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [errorField, setErrorField] = useState<'username' | 'password' | null>(null)
+  const [errorField, setErrorField] = useState<'username' | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (login.isPending) return
     setError(null)
     setErrorField(null)
     const normalizedUsername = username.trim()
@@ -38,16 +41,8 @@ export default function Login() {
       setErrorField('username')
       return
     }
-    if (!password) {
-      setError(_('auth.errors.passwordRequired'))
-      setErrorField('password')
-      return
-    }
-    if (password.length > AUTH_PASSWORD_MAX_LENGTH) {
-      setError(_('auth.errors.passwordTooLong'))
-      setErrorField('password')
-      return
-    }
+    if (!validatePasswordInputs(e)) return
+
     try {
       await login.mutateAsync({ username: normalizedUsername, password })
       if (isLegadoLogin) {
@@ -92,9 +87,9 @@ export default function Login() {
         </div>
         <div className="mb-6">
           <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">{_('auth.password')}</label>
-          <input
+          <PasswordInput
+            disabled={login.isPending}
             id="password"
-            type="password"
             value={password}
             onChange={(e) => {
               setPassword(e.target.value)
@@ -104,13 +99,12 @@ export default function Login() {
             required
             maxLength={AUTH_PASSWORD_MAX_LENGTH}
             autoComplete="current-password"
-            aria-invalid={errorField === 'password'}
             aria-describedby={error ? 'login-error' : undefined}
             className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
           />
         </div>
         {error && <p id="login-error" role="alert" aria-live="polite" className="mb-4 text-sm text-red-600">{error}</p>}
-        <Button type="submit" className="w-full" disabled={login.isPending}>{_('auth.signIn')}</Button>
+        <Button type="submit" className="w-full" disabled={login.isPending}>{_(login.isPending ? 'passwordInput.signingIn' : 'auth.signIn')}</Button>
         {allowRegistration && (
           <p className="mt-4 text-center text-sm text-stone-500">
             <Link to="/register" className="text-stone-700 underline underline-offset-2 hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100">

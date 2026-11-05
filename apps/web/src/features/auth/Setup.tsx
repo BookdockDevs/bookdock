@@ -4,6 +4,8 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { apiPost, ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
+import PasswordInput from '@/components/ui/PasswordInput'
+import { validatePasswordInputs } from '@/components/ui/password-input-validation'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
@@ -24,7 +26,7 @@ export default function Setup() {
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     // Provisioning the first owner is not idempotent: a second concurrent
     // request races the first and comes back FORBIDDEN. Lock the submit for
@@ -41,22 +43,7 @@ export default function Setup() {
       setError(_('auth.errors.usernameTooLong'))
       return
     }
-    if (!password) {
-      setError(_('auth.errors.passwordRequired'))
-      return
-    }
-    if (password.length < AUTH_PASSWORD_MIN_LENGTH) {
-      setError(_('auth.passwordTooShort', { min: AUTH_PASSWORD_MIN_LENGTH }))
-      return
-    }
-    if (password.length > AUTH_PASSWORD_MAX_LENGTH) {
-      setError(_('auth.errors.passwordTooLong'))
-      return
-    }
-    if (password !== confirmPassword) {
-      setError(_('auth.passwordMismatch'))
-      return
-    }
+    if (!validatePasswordInputs(e)) return
 
     setPending(true)
     try {
@@ -103,9 +90,10 @@ export default function Setup() {
           <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">
             {_('auth.password')}
           </label>
-          <input
+          <PasswordInput
+            disabled={pending}
             id="password"
-            type="password"
+            minLength={AUTH_PASSWORD_MIN_LENGTH}
             value={password}
             onChange={(e) => {
               setPassword(e.target.value)
@@ -121,9 +109,10 @@ export default function Setup() {
           <label htmlFor="confirmPassword" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">
             {_('auth.confirmPassword')}
           </label>
-          <input
+          <PasswordInput
+            disabled={pending}
             id="confirmPassword"
-            type="password"
+            matches={password}
             value={confirmPassword}
             onChange={(e) => {
               setConfirmPassword(e.target.value)
@@ -136,7 +125,7 @@ export default function Setup() {
           />
         </div>
         {error && <p role="alert" aria-live="polite" className="mb-4 text-sm text-red-600">{error}</p>}
-        <Button type="submit" className="w-full" disabled={pending}>{_('auth.completeSetup')}</Button>
+        <Button type="submit" className="w-full" disabled={pending}>{_(pending ? 'passwordInput.creating' : 'auth.completeSetup')}</Button>
       </form>
     </div>
   )

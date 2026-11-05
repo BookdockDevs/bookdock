@@ -11,6 +11,7 @@ import { useActivateAiProfile, useAiConfig, useAiProviders, useCreateAiProfile, 
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import PasswordInput from '@/components/ui/PasswordInput'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
@@ -530,17 +531,16 @@ export default function AiSettingsSection({ id }: { id?: string }) {
               })}
             </div>}
           </div>
-          <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+          <div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
             <span>{_('settings.aiApiKey')} {requiresApiKey ? _('settings.aiRequired') : _('settings.aiOptional')}</span>
             <div className="relative">
-              <input required={Boolean(requiresApiKey && !savedKeyAvailable)} type="password" value={form.apiKey} onChange={(event) => setForm({ ...form, apiKey: event.target.value })} placeholder={savedKeyAvailable ? _('settings.aiKeyKeep') : _('settings.aiApiKeyPlaceholder')} autoComplete="new-password" className="h-9 w-full rounded-lg border border-stone-200 bg-transparent px-3 pr-10 text-sm outline-none focus:border-blue-500 dark:border-stone-700" />
-              {savedKeyAvailable && <button type="button" disabled={saving} onClick={clearApiKey} aria-label={_('settings.aiKeyClear')} title={_('settings.aiKeyClear')} className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-red-400"><TrashIcon /></button>}
+              <PasswordInput key={form.id ?? form.provider} aria-label={`${_('settings.aiApiKey')} ${requiresApiKey ? _('settings.aiRequired') : _('settings.aiOptional')}`} secret disabled={saving} required={Boolean(requiresApiKey && !savedKeyAvailable)} value={form.apiKey} onChange={(event) => setForm({ ...form, apiKey: event.target.value })} placeholder={savedKeyAvailable ? _('settings.aiKeyKeep') : _('settings.aiApiKeyPlaceholder')} autoComplete="new-password" className="h-9 w-full rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 dark:border-stone-700" action={savedKeyAvailable ? <button type="button" disabled={saving} onClick={clearApiKey} aria-label={_('settings.aiKeyClear')} title={_('settings.aiKeyClear')} className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-red-400"><TrashIcon /></button> : undefined} />
             </div>
             {savedKeyAvailable && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{_('settings.aiKeyConfigured')}</span>}
-          </label>
+          </div>
           <p className="text-xs leading-5 text-stone-400">{_('settings.aiSecretHint')}</p>
           <div className="flex flex-wrap justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
-            <button type="submit" disabled={saving || !form.name.trim()} className="rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900">{_('settings.aiSave')}</button>
+            <button type="submit" disabled={saving || !form.name.trim()} className="rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900">{_(saving ? 'passwordInput.saving' : 'settings.aiSave')}</button>
           </div>
         </form>
       </Modal>}

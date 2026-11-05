@@ -13,6 +13,7 @@ import { useStorageBackendConfig } from '@/api/hooks/useStorageBackend'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import PasswordInput from '@/components/ui/PasswordInput'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -621,13 +622,13 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
             />
           </SettingsFormField>
 
-          <SettingsFormField label={isS3 ? (_('settings.storageConnectionsSecretKey') || 'Secret Key') : (_('settings.webdavPassword') || '密码')}>
-            <input
-              type="password"
+          <SettingsFormField as="div" label={isS3 ? (_('settings.storageConnectionsSecretKey') || 'Secret Key') : (_('settings.webdavPassword') || '密码')}>
+            <PasswordInput key={connection?.id ?? 'new'} secret={isS3}
+              aria-label={isS3 ? _('settings.storageConnectionsSecretKey') : _('settings.webdavPassword')}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={connection?.hasSecrets ? '•••••••• (留空不修改)' : undefined}
-              autoComplete="current-password"
+              placeholder={connection?.hasSecrets ? _('passwordInput.keepSaved') : undefined}
+              autoComplete="new-password"
               className={settingsInputClass}
               disabled={isSaving}
             />

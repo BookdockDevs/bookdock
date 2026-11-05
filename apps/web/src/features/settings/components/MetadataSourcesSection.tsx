@@ -7,6 +7,7 @@ import { apiDelete, apiGet, apiPost, apiPut, apiUpload } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import PasswordInput from '@/components/ui/PasswordInput'
 import MetadataProviderIcon from '@/components/ui/MetadataProviderIcon'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -84,7 +85,6 @@ export default function MetadataSourcesSection() {
   const activeService = open ? INTEGRATION_SERVICES.find((s) => s.id === open) : null
 
   const [key, setKey] = useState('')
-  const [showKey, setShowKey] = useState(false)
   const [busy, setBusy] = useState(false)
   const [testing, setTesting] = useState(false)
 
@@ -201,7 +201,7 @@ export default function MetadataSourcesSection() {
   function handleOpen(providerId: 'googlebooks' | 'weread') {
     const savedKey = configuration.data?.data?.keys?.[providerId] ?? ''
     setKey(savedKey)
-    setShowKey(false)
+
     setOpen(providerId)
   }
 
@@ -209,7 +209,7 @@ export default function MetadataSourcesSection() {
     if (!busy && !testing) {
       setOpen(null)
       setKey('')
-      setShowKey(false)
+
     }
   }
 
@@ -222,7 +222,7 @@ export default function MetadataSourcesSection() {
       })
       queryClient.setQueryData(queryKey, result)
       setKey('')
-      setShowKey(false)
+
       setOpen(null)
       notify.success({ key: value ? 'metadataLookup.saveSuccess' : 'metadataLookup.keyDeleted' })
     } catch (err) {
@@ -452,34 +452,13 @@ export default function MetadataSourcesSection() {
                 )}
               </div>
               <div className="relative mt-1.5">
-                <input
-                  type={showKey ? 'text' : 'password'}
+                <PasswordInput key={open} secret disabled={busy}
+                  aria-label="API Key"
                   autoComplete="off"
                   value={key}
                   onChange={(event) => setKey(event.target.value)}
-                  className="w-full rounded-xl border border-stone-200 bg-stone-50/60 px-3 py-2 pr-16 text-sm text-stone-900 focus:border-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-800/60 dark:text-stone-100 dark:focus:border-stone-500 dark:focus:bg-stone-900 dark:focus:ring-stone-500/20"
-                />
-                <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setShowKey(!showKey)}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                    tabIndex={-1}
-                    title={showKey ? '隐藏密钥' : '显示密钥'}
-                  >
-                    {showKey ? (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                      </svg>
-                    ) : (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    )}
-                  </button>
-                  <button
+                  className="w-full rounded-xl border border-stone-200 bg-stone-50/60 px-3 py-2 text-sm text-stone-900 focus:border-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-800/60 dark:text-stone-100 dark:focus:border-stone-500 dark:focus:bg-stone-900 dark:focus:ring-stone-500/20"
+                  action={<button
                     type="button"
                     onClick={() => void test()}
                     disabled={busy || testing || !key.trim()}
@@ -491,8 +470,8 @@ export default function MetadataSourcesSection() {
                       kind="test"
                       className={testing ? 'h-4 w-4 animate-pulse text-stone-700 dark:text-stone-200' : 'h-4 w-4'}
                     />
-                  </button>
-                </div>
+                  </button>}
+                />
               </div>
             </div>
           </div>

@@ -1,11 +1,13 @@
 import { Link } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, sanitizeUsername } from '@bookdock/shared'
+import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, sanitizeUsername } from '@bookdock/shared'
 import type { AdminUserRes, LibraryListItem, LibraryMemberEntry, MembershipRole, UpdateUserReq } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import PasswordInput from '@/components/ui/PasswordInput'
+import { validatePasswordInputs } from '@/components/ui/password-input-validation'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useAdminUsers, useCreateUser, useDeleteUser, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
@@ -19,7 +21,7 @@ import {
 } from '@/features/library/hooks'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
-import { getUserErrorNotification } from '@/lib/error-message'
+import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { formatDate } from '@/lib/format-date'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
@@ -34,25 +36,6 @@ function UsersIcon({ className }: { className?: string }) {
       <circle cx="9" cy="7" r="4" />
       <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  )
-}
-
-function EyeToggleIcon({ show }: { show: boolean }) {
-  if (show) {
-    return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-        <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-        <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-        <line x1="2" y1="2" x2="22" y2="22" />
-      </svg>
-    )
-  }
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-      <circle cx="12" cy="12" r="3" />
     </svg>
   )
 }
@@ -459,26 +442,31 @@ function InstanceUsersView({
         />
       )}
 
-      <ResetPasswordDialog
+      {resetTarget && <ResetPasswordDialog
+        key={resetTarget.id}
         user={resetTarget}
         onClose={() => setResetTarget(null)}
-        onSubmit={(password) => {
-          const target = resetTarget
-          setResetTarget(null)
-          if (target) runUpdate(target.id, { newPassword: password })
-        }}
-      />
+        onSubmit={(password) => new Promise<void>((resolve, reject) => {
+          updateUser.mutate({ id: resetTarget.id, newPassword: password }, {
+            onSuccess: () => { setResetTarget(null); resolve() },
+            onError: reject,
+          })
+        })}
+      />}
 
       {createOpen && (
         <CreateUserDialog
           onClose={() => setCreateOpen(false)}
-          onSubmit={(username, password) => {
-            setCreateOpen(false)
+          onSubmit={(username, password) => new Promise<void>((resolve, reject) => {
             createUser.mutate({ username, password }, {
-              onSuccess: (res) => notify.success(_('admin.createUserSuccess', { name: res.data.username })),
-              onError: (err) => notify.error(getUserErrorNotification(err, 'admin.createUserFailed')),
+              onSuccess: (res) => {
+                notify.success(_('admin.createUserSuccess', { name: res.data.username }))
+                setCreateOpen(false)
+                resolve()
+              },
+              onError: reject,
             })
-          }}
+          })}
         />
       )}
 
@@ -662,28 +650,33 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete
 function ResetPasswordDialog({ user, onClose, onSubmit }: {
   user: AdminUserRes | null
   onClose: () => void
-  onSubmit: (password: string) => void
+  onSubmit: (password: string) => Promise<void>
 }) {
   const _ = useTranslation()
   const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
 
   if (!user) return null
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
+      onClick={() => { if (!submittingRef.current) onClose() }}
     >
       <form
-        onSubmit={(e) => {
+        noValidate
+        onSubmit={async (e) => {
           e.preventDefault()
-          if (password.length < AUTH_PASSWORD_MIN_LENGTH) {
-            setError(_('auth.passwordTooShort', { min: AUTH_PASSWORD_MIN_LENGTH }))
-            return
-          }
-          onSubmit(password)
+          if (!validatePasswordInputs(e)) return
+          if (submittingRef.current) return
+          submittingRef.current = true
+          setSubmitting(true)
+          setError(null)
+          try { await onSubmit(password) }
+          catch (err) { setError(getUserErrorMessage(err, _, 'auth.errors.userUpdateFailed')) }
+          finally { submittingRef.current = false; setSubmitting(false) }
         }}
         onClick={(e) => e.stopPropagation()}
         className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 shadow-xl sm:max-h-none sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-900"
@@ -694,7 +687,7 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
           </h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { if (!submittingRef.current) onClose() }}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
             aria-label={_('library.cancel')}
           >
@@ -709,34 +702,28 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
             {_('auth.newPassword')}
           </label>
           <div className="relative">
-            <input
+            <PasswordInput
               id="reset-user-password"
-              type={showPassword ? 'text' : 'password'}
+              autoComplete="new-password"
+              minLength={AUTH_PASSWORD_MIN_LENGTH}
+              maxLength={AUTH_PASSWORD_MAX_LENGTH}
+              disabled={submitting}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => { setPassword(e.target.value); setError(null) }}
               required
               aria-label={_('auth.newPassword')}
               placeholder={_('auth.newPassword')}
-              className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 pr-10 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+              className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
             />
-            <button
-              type="button"
-              tabIndex={-1}
-              onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300"
-              aria-label={showPassword ? '隐藏密码' : '显示密码'}
-            >
-              <EyeToggleIcon show={showPassword} />
-            </button>
           </div>
         </div>
-        {error && <p className="mb-3 text-xs text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p role="alert" className="mb-3 text-xs text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={() => { if (!submittingRef.current) onClose() }}>
             {_('library.cancel')}
           </Button>
-          <Button type="submit">
-            {_('library.save')}
+          <Button type="submit" disabled={submitting}>
+            {_(submitting ? 'passwordInput.saving' : 'library.save')}
           </Button>
         </div>
       </form>
@@ -746,41 +733,40 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
 
 function CreateUserDialog({ onClose, onSubmit }: {
   onClose: () => void
-  onSubmit: (username: string, password: string) => void
+  onSubmit: (username: string, password: string) => Promise<void>
 }) {
   const _ = useTranslation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirm, setShowConfirm] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const name = sanitizeUsername(username)
     if (!name) {
       setError(_('auth.errors.usernameRequired'))
       return
     }
-    if (password.length < AUTH_PASSWORD_MIN_LENGTH) {
-      setError(_('auth.passwordTooShort', { min: AUTH_PASSWORD_MIN_LENGTH }))
-      return
-    }
-    if (password !== confirm) {
-      setError(_('auth.passwordMismatch'))
-      return
-    }
-    onSubmit(name, password)
+    if (!validatePasswordInputs(e)) return
+    if (submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
+    setError(null)
+    try { await onSubmit(name, password) }
+    catch (err) { setError(getUserErrorMessage(err, _, 'admin.createUserFailed')) }
+    finally { submittingRef.current = false; setSubmitting(false) }
   }
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
+      onClick={() => { if (!submittingRef.current) onClose() }}
     >
       <form
-        onSubmit={submit}
+        noValidate onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
         className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 shadow-xl sm:max-h-none sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-900"
       >
@@ -790,7 +776,7 @@ function CreateUserDialog({ onClose, onSubmit }: {
           </h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { if (!submittingRef.current) onClose() }}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
             aria-label={_('library.cancel')}
           >
@@ -809,7 +795,8 @@ function CreateUserDialog({ onClose, onSubmit }: {
               id="new-user-username"
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => { setUsername(e.target.value); setError(null) }}
+              disabled={submitting}
               required
               maxLength={AUTH_REGISTER_USERNAME_MAX_LENGTH}
               aria-label={_('auth.username')}
@@ -824,26 +811,19 @@ function CreateUserDialog({ onClose, onSubmit }: {
               {_('auth.newPassword')}
             </label>
             <div className="relative">
-              <input
+              <PasswordInput
                 id="new-user-password"
-                type={showPassword ? 'text' : 'password'}
+                minLength={AUTH_PASSWORD_MIN_LENGTH}
+                maxLength={AUTH_PASSWORD_MAX_LENGTH}
+                disabled={submitting}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); setError(null) }}
                 required
                 aria-label={_('auth.newPassword')}
                 placeholder={_('auth.newPassword')}
                 autoComplete="new-password"
-                className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 pr-10 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+                className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
               />
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300"
-                aria-label={showPassword ? _('admin.hidePassword') : _('admin.showPassword')}
-              >
-                <EyeToggleIcon show={showPassword} />
-              </button>
             </div>
           </div>
 
@@ -852,38 +832,31 @@ function CreateUserDialog({ onClose, onSubmit }: {
               {_('auth.confirmPassword')}
             </label>
             <div className="relative">
-              <input
+              <PasswordInput
                 id="new-user-confirm"
-                type={showConfirm ? 'text' : 'password'}
+                matches={password}
+                maxLength={AUTH_PASSWORD_MAX_LENGTH}
+                disabled={submitting}
                 value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
+                onChange={(e) => { setConfirm(e.target.value); setError(null) }}
                 required
                 aria-label={_('auth.confirmPassword')}
                 placeholder={_('auth.confirmPassword')}
                 autoComplete="new-password"
-                className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 pr-10 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+                className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
               />
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={() => setShowConfirm((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300"
-                aria-label={showConfirm ? _('admin.hidePassword') : _('admin.showPassword')}
-              >
-                <EyeToggleIcon show={showConfirm} />
-              </button>
             </div>
           </div>
         </div>
 
-        {error && <p className="mb-4 text-xs text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p role="alert" className="mb-4 text-xs text-red-600 dark:text-red-400">{error}</p>}
 
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={() => { if (!submittingRef.current) onClose() }}>
             {_('library.cancel')}
           </Button>
-          <Button type="submit">
-            {_('library.create')}
+          <Button type="submit" disabled={submitting}>
+            {_(submitting ? 'passwordInput.creating' : 'library.create')}
           </Button>
         </div>
       </form>

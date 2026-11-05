@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import { useState } from 'react'
 import UserManagementSectionView from '../features/settings/components/UserManagementSection'
@@ -237,6 +237,47 @@ describe('UserManagementSection', () => {
         { username: 'dave', password: 'password123' },
         expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
       )
+    })
+
+
+    it('keeps failed account creation open and prevents duplicate submissions while saving', async () => {
+      const { container } = render(<UserManagementSection />)
+      fireEvent.click(screen.getByRole('button', { name: '新建用户' }))
+      fireEvent.change(screen.getByPlaceholderText('用户名'), { target: { value: 'dave' } })
+      fireEvent.change(screen.getByPlaceholderText('新密码'), { target: { value: 'password123' } })
+      fireEvent.change(screen.getByPlaceholderText('确认密码'), { target: { value: 'password123' } })
+      const form = container.querySelector('form')!
+      fireEvent.submit(form)
+      fireEvent.submit(form)
+      expect(createUser).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('button', { name: '创建中…' })).toBeDisabled()
+      const options = createUser.mock.calls[0][1]
+      await act(async () => { options.onError(new TypeError('Offline')) })
+      expect(screen.getByPlaceholderText('新密码')).toHaveValue('password123')
+      expect(screen.getByRole('alert')).toBeInTheDocument()
+      fireEvent.submit(form)
+      expect(createUser).toHaveBeenCalledTimes(2)
+    })
+
+    it('retains failed password resets and clears them after closing', async () => {
+      render(<UserManagementSection />)
+      fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
+      fireEvent.click(screen.getByRole('button', { name: '重置密码' }))
+      fireEvent.change(screen.getByPlaceholderText('新密码'), { target: { value: 'password123' } })
+      fireEvent.click(screen.getByRole('button', { name: '显示密码' }))
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+      const options = mutateUser.mock.calls[0][1]
+      await act(async () => { options.onError(new TypeError('Offline')) })
+      expect(screen.getByPlaceholderText('新密码')).toHaveValue('password123')
+      expect(screen.getByRole('alert')).toBeInTheDocument()
+      fireEvent.click(screen.getAllByRole('button', { name: '取消' })[0])
+      // Advance beyond the context menu's click-gesture suppression window.
+      const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 200)
+      fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
+      now.mockRestore()
+      fireEvent.click(screen.getByRole('button', { name: '重置密码' }))
+      expect(screen.getByPlaceholderText('新密码')).toHaveValue('')
+      expect(screen.getByPlaceholderText('新密码')).toHaveAttribute('type', 'password')
     })
 
     it('confirms and deletes a plain member', () => {

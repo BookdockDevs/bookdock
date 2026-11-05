@@ -1,4 +1,17 @@
 {
+  "passwordInput": {
+    "showPassword": "显示密码",
+    "hidePassword": "隐藏密码",
+    "showSecret": "显示密钥",
+    "hideSecret": "隐藏密钥",
+    "secretRequired": "请输入密钥",
+    "tooShort": "至少输入 {{min}} 个字符",
+    "tooLong": "不能超过 {{max}} 个字符",
+    "keepSaved": "已配置，留空保留",
+    "signingIn": "登录中…",
+    "creating": "创建中…",
+    "saving": "保存中…"
+  },
   "metadataLookup": {
     "qidian": "起点",
     "douban": "豆瓣",

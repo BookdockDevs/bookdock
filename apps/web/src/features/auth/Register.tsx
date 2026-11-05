@@ -4,6 +4,8 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
+import PasswordInput from '@/components/ui/PasswordInput'
+import { validatePasswordInputs } from '@/components/ui/password-input-validation'
 import { libraryInviteParam, PENDING_INVITE_KEY } from '@/features/library/invite-link'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -20,8 +22,9 @@ export default function Register() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (register.isPending) return
     setError(null)
 
     const normalizedUsername = username.trim()
@@ -33,22 +36,7 @@ export default function Register() {
       setError(_('auth.errors.registerUsernameTooLong'))
       return
     }
-    if (!password) {
-      setError(_('auth.errors.passwordRequired'))
-      return
-    }
-    if (password.length < AUTH_PASSWORD_MIN_LENGTH) {
-      setError(_('auth.passwordTooShort', { min: AUTH_PASSWORD_MIN_LENGTH }))
-      return
-    }
-    if (password.length > AUTH_PASSWORD_MAX_LENGTH) {
-      setError(_('auth.errors.passwordTooLong'))
-      return
-    }
-    if (password !== confirmPassword) {
-      setError(_('auth.passwordMismatch'))
-      return
-    }
+    if (!validatePasswordInputs(e)) return
 
     try {
       await register.mutateAsync({ username: normalizedUsername, password })
@@ -87,9 +75,10 @@ export default function Register() {
         </div>
         <div className="mb-4">
           <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">{_('auth.password')}</label>
-          <input
+          <PasswordInput
+            disabled={register.isPending}
             id="password"
-            type="password"
+            minLength={AUTH_PASSWORD_MIN_LENGTH}
             value={password}
             onChange={(e) => {
               setPassword(e.target.value)
@@ -103,9 +92,10 @@ export default function Register() {
         </div>
         <div className="mb-6">
           <label htmlFor="confirmPassword" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">{_('auth.confirmPassword')}</label>
-          <input
+          <PasswordInput
+            disabled={register.isPending}
             id="confirmPassword"
-            type="password"
+            matches={password}
             value={confirmPassword}
             onChange={(e) => {
               setConfirmPassword(e.target.value)
@@ -118,7 +108,7 @@ export default function Register() {
           />
         </div>
         {error && <p role="alert" aria-live="polite" className="mb-4 text-sm text-red-600">{error}</p>}
-        <Button type="submit" className="w-full" disabled={register.isPending}>{_('auth.register')}</Button>
+        <Button type="submit" className="w-full" disabled={register.isPending}>{_(register.isPending ? 'passwordInput.creating' : 'auth.register')}</Button>
         <p className="mt-4 text-center text-sm text-stone-500">
           <Link to="/login" className="text-stone-700 underline underline-offset-2 hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100">
             {_('auth.backToSignIn')}

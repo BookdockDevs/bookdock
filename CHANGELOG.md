@@ -2,6 +2,16 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Password and secret inputs across account forms, library dialogs, and integration settings now default to hidden, with independent, keyboard-accessible show/hide controls and consistent validation and submission feedback. Password length errors appear after leaving the field or submitting, without a persistent length hint.
+
+### Fixed
+
+- Failed administrator account creation and password resets now keep the dialog and entered values for retry instead of closing immediately; reopening a closed dialog clears its password draft and resets visibility.
+
 ## [0.7.6] - 2026-11-05
 
 ### Added
@@ -1041,6 +1051,16 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [未发布]
+
+#### 优化
+
+- 统一账号表单、书库弹窗与集成设置中的密码及密钥输入交互：默认隐藏，支持独立显示／隐藏与键盘操作，并统一校验及提交反馈。密码长度错误仅在失焦或提交校验不通过时提示，不再显示常驻长度说明。
+
+#### 修复
+
+- 管理员创建账号或重置密码失败时保留弹窗和已输入内容，方便修改重试；关闭后重新打开会清空密码草稿并恢复隐藏状态。
 
 ### [0.7.6] - 2026-11-05
 

@@ -4,6 +4,8 @@ import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH } from '@bookdock/sh
 
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
+import PasswordInput from '@/components/ui/PasswordInput'
+import { validatePasswordInputs } from '@/components/ui/password-input-validation'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
@@ -16,48 +18,35 @@ interface ChangePasswordDialogProps {
 }
 
 export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDialogProps) {
+  return open ? <ChangePasswordForm onClose={onClose} /> : null
+}
+
+function ChangePasswordForm({ onClose }: Pick<ChangePasswordDialogProps, 'onClose'>) {
   const _ = useTranslation()
   const changePassword = useChangePassword()
   const [oldPassword, setOldPassword] = useState('')
+  const [oldPasswordError, setOldPasswordError] = useState<string | null>(null)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  if (!open) return null
-
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (changePassword.isPending) return
     setError(null)
-    if (!oldPassword) {
-      setError(_('auth.errors.passwordRequired'))
-      return
-    }
-    if (oldPassword.length > AUTH_PASSWORD_MAX_LENGTH) {
-      setError(_('auth.errors.passwordTooLong'))
-      return
-    }
-    if (!newPassword) {
-      setError(_('auth.errors.passwordRequired'))
-      return
-    }
-    if (newPassword.length < AUTH_PASSWORD_MIN_LENGTH) {
-      setError(_('auth.passwordTooShort', { min: AUTH_PASSWORD_MIN_LENGTH }))
-      return
-    }
-    if (newPassword.length > AUTH_PASSWORD_MAX_LENGTH) {
-      setError(_('auth.errors.passwordTooLong'))
-      return
-    }
-    if (newPassword !== confirmPassword) {
-      setError(_('auth.passwordMismatch'))
-      return
-    }
+    if (!validatePasswordInputs(e)) return
+
     try {
       await changePassword.mutateAsync({ oldPassword, newPassword })
       notify.success({ key: 'auth.passwordChanged' })
       onClose()
     } catch (err) {
-      setError(err instanceof ApiError && err.code === 'UNAUTHORIZED' ? _('auth.errors.wrongOldPassword') : _(authErrorKey(err)))
+      if (err instanceof ApiError && err.code === 'UNAUTHORIZED') {
+        setOldPasswordError(_('auth.errors.wrongOldPassword'))
+        document.getElementById('oldPassword')?.focus()
+      } else {
+        setError(_(authErrorKey(err)))
+      }
     }
   }
 
@@ -68,12 +57,14 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
           <label htmlFor="oldPassword" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">
             {_('auth.oldPassword')}
           </label>
-          <input
+          <PasswordInput
+            disabled={changePassword.isPending}
             id="oldPassword"
-            type="password"
+            error={oldPasswordError}
             value={oldPassword}
             onChange={(e) => {
               setOldPassword(e.target.value)
+              setOldPasswordError(null)
               setError(null)
             }}
             required
@@ -87,9 +78,10 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
           <label htmlFor="newPassword" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">
             {_('auth.newPassword')}
           </label>
-          <input
+          <PasswordInput
+            disabled={changePassword.isPending}
             id="newPassword"
-            type="password"
+            minLength={AUTH_PASSWORD_MIN_LENGTH}
             value={newPassword}
             onChange={(e) => {
               setNewPassword(e.target.value)
@@ -105,9 +97,10 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
           <label htmlFor="confirmNewPassword" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">
             {_('auth.confirmPassword')}
           </label>
-          <input
+          <PasswordInput
+            disabled={changePassword.isPending}
             id="confirmNewPassword"
-            type="password"
+            matches={newPassword}
             value={confirmPassword}
             onChange={(e) => {
               setConfirmPassword(e.target.value)
@@ -129,7 +122,7 @@ export default function ChangePasswordDialog({ open, onClose }: ChangePasswordDi
             {_('library.cancel')}
           </Button>
           <Button type="submit" disabled={changePassword.isPending}>
-            {_('library.save')}
+            {_(changePassword.isPending ? 'passwordInput.saving' : 'library.save')}
           </Button>
         </div>
       </form>

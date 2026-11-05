@@ -61,4 +61,16 @@ describe('ChangePasswordDialog', () => {
       expect(mutateAsync).toHaveBeenCalledWith({ oldPassword: 'oldpass', newPassword: 'newpass12' })
     })
   })
+  it('clears entered passwords and visibility when reopened', () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<ChangePasswordDialog open onClose={onClose} />)
+    fireEvent.change(screen.getByLabelText('auth.oldPassword'), { target: { value: 'sample123' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'passwordInput.showPassword' })[0])
+    expect(screen.getByLabelText('auth.oldPassword')).toHaveAttribute('type', 'text')
+    rerender(<ChangePasswordDialog open={false} onClose={onClose} />)
+    rerender(<ChangePasswordDialog open onClose={onClose} />)
+    expect(screen.getByLabelText('auth.oldPassword')).toHaveValue('')
+    expect(screen.getByLabelText('auth.oldPassword')).toHaveAttribute('type', 'password')
+  })
+
 })

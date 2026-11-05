@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 import { ApiError } from '@/api/client'
 import i18n from '../i18n/i18n'
@@ -38,12 +38,12 @@ describe('JoinLibraryDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '加入书库' }))
 
     const [, options] = MUTATE.mock.calls[0] as [unknown, { onError: (err: unknown) => void }]
-    options.onError(new ApiError('INVALID_LIBRARY_PASSWORD', 'Wrong access password', 403))
+    act(() => options.onError(new ApiError('INVALID_LIBRARY_PASSWORD', 'Wrong access password', 403)))
 
-    // Both where the reader is typing and as a toast, and neither says "join failed".
+    // Expected form errors stay beside the input without a duplicate toast.
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('访问密码不正确')
-    expect(notify.error).toHaveBeenCalledWith({ key: 'errors.wrongLibraryPassword' })
+    expect(notify.error).not.toHaveBeenCalled()
   })
 
   it('clears the error as soon as the reader types again', async () => {
@@ -52,11 +52,25 @@ describe('JoinLibraryDialog', () => {
     fireEvent.change(input, { target: { value: 'wrong' } })
     fireEvent.click(screen.getByRole('button', { name: '加入书库' }))
     const [, options] = MUTATE.mock.calls[0] as [unknown, { onError: (err: unknown) => void }]
-    options.onError(new ApiError('INVALID_LIBRARY_PASSWORD', 'Wrong access password', 403))
+    act(() => options.onError(new ApiError('INVALID_LIBRARY_PASSWORD', 'Wrong access password', 403)))
     await screen.findByRole('alert')
 
     fireEvent.change(input, { target: { value: 'w' } })
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     expect(input).toHaveAttribute('aria-invalid', 'false')
   })
+  it('resets a closed dialog and does not carry passwords to another library', () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<JoinLibraryDialog open libraryId="lib_1" needsPassword onClose={onClose} />)
+    fireEvent.change(screen.getByLabelText('访问密码'), { target: { value: 'sample123' } })
+    fireEvent.click(screen.getByRole('button', { name: '显示密码' }))
+    rerender(<JoinLibraryDialog open libraryId="lib_2" needsPassword onClose={onClose} />)
+    expect(screen.getByLabelText('访问密码')).toHaveValue('')
+    expect(screen.getByLabelText('访问密码')).toHaveAttribute('type', 'password')
+    fireEvent.change(screen.getByLabelText('访问密码'), { target: { value: 'sample123' } })
+    rerender(<JoinLibraryDialog open={false} libraryId="lib_2" needsPassword onClose={onClose} />)
+    rerender(<JoinLibraryDialog open libraryId="lib_2" needsPassword onClose={onClose} />)
+    expect(screen.getByLabelText('访问密码')).toHaveValue('')
+  })
+
 })
