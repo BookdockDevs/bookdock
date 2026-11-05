@@ -1887,10 +1887,10 @@ export async function translateAiSelection(
     if (!profile) throw new AppError('AI_NOT_CONFIGURED', 'Translation profile is unavailable')
     ai = profileEffectiveConfig(profile)
     if (input.channel.model && !profileModels(profile).some((item) => item.id === input.channel.model && !isAiEmbeddingModel(item))) {
-      throw new AppError('VALIDATION_ERROR', 'Translation model is unavailable')
+      throw new AppError('AI_NOT_CONFIGURED', 'Translation model is unavailable')
     }
   } else if (input.channel.model && !getAiConfig(userId).models.some((item) => item.id === input.channel.model && !isAiEmbeddingModel(item))) {
-    throw new AppError('VALIDATION_ERROR', 'Translation model is unavailable')
+    throw new AppError('AI_NOT_CONFIGURED', 'Translation model is unavailable')
   }
   if (input.channel.model) ai = { ...ai, model: input.channel.model }
   if (ai.model && isAiEmbeddingModel({ id: ai.model, name: ai.model })) throw new AppError('VALIDATION_ERROR', 'Translation requires a chat model')

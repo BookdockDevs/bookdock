@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { TRANSLATION_LANGUAGES, TRANSLATION_MAX_CHARS, type AiConfigRes, type TranslationPreferences } from '@bookdock/shared'
+import { TRANSLATION_LANGUAGES, TRANSLATION_MAX_CHARS, isAiEmbeddingModel, type AiConfigRes, type AiProfileRes, type TranslationChannel, type TranslationPreferences } from '@bookdock/shared'
 
 import { ApiError, streamTranslation } from '@/api/client'
 import { useSaveTranslationConfig } from '@/api/hooks/useTranslationConfig'
@@ -19,6 +19,50 @@ interface TranslationContentProps {
   preferences: TranslationPreferences
   config: AiConfigRes
   onClose: () => void
+}
+
+const isModelChatCapable = (model: { id: string; name?: string | null }) =>
+  !isAiEmbeddingModel({ id: model.id, name: model.name ?? model.id })
+
+const getProfileChatModels = (profile: { models: { id: string; name: string }[] }) =>
+  (profile.models ?? []).filter(isModelChatCapable)
+
+const isProfileUsable = (profile: { model?: string | null; models: { id: string; name: string }[] }) => {
+  const chatModels = getProfileChatModels(profile)
+  if (chatModels.length > 0) return true
+  if (profile.model && isModelChatCapable({ id: profile.model, name: profile.model })) return true
+  return false
+}
+
+function resolveValidChannel(
+  current: TranslationChannel,
+  profiles: AiProfileRes[] | undefined,
+): { channel: TranslationChannel; available: boolean } {
+  const usableProfiles = (profiles ?? []).filter(isProfileUsable)
+  if (usableProfiles.length === 0) {
+    return { channel: { kind: 'ai', profileId: null, model: null }, available: false }
+  }
+
+  let profile = current.profileId ? usableProfiles.find((p) => p.id === current.profileId) : null
+  if (!profile) {
+    profile = usableProfiles[0]!
+  }
+
+  const chatModels = getProfileChatModels(profile)
+  let resolvedModel: string | null = null
+
+  if (current.profileId === profile.id && current.model && chatModels.some((m) => m.id === current.model)) {
+    resolvedModel = current.model
+  } else if (profile.model && isModelChatCapable({ id: profile.model, name: profile.model })) {
+    resolvedModel = null
+  } else if (chatModels.length > 0) {
+    resolvedModel = chatModels[0]!.id
+  }
+
+  return {
+    channel: { kind: 'ai', profileId: profile.id, model: resolvedModel },
+    available: true,
+  }
 }
 
 function RetryIcon() {
@@ -52,9 +96,10 @@ export default function TranslationContent({ bookId, text, preferences, config, 
   const id = useId()
   const client = useQueryClient()
   const save = useSaveTranslationConfig()
+  const initialResolved = resolveValidChannel(preferences.channel, config.profiles)
   const [draft, setDraft] = useState<TranslationPreferences>(() => ({
     ...preferences,
-    channel: preferences.channel.profileId ? preferences.channel : { kind: 'ai', profileId: config.profiles[0]?.id ?? null, model: null },
+    channel: initialResolved.channel,
   }))
   const [request, setRequest] = useState(draft)
   const [attempt, setAttempt] = useState(0)
@@ -78,8 +123,26 @@ export default function TranslationContent({ bookId, text, preferences, config, 
     }
   }, [isTruncated])
 
-  const profile = request.channel.profileId ? config.profiles.find((item) => item.id === request.channel.profileId) : null
-  const available = Boolean(profile && (request.channel.model ?? profile.model))
+  useEffect(() => {
+    setDraft((prev) => {
+      const check = resolveValidChannel(prev.channel, config.profiles)
+      if (!check.available && (prev.channel.profileId !== null || prev.channel.model !== null)) {
+        const updated: TranslationPreferences = { ...prev, channel: check.channel }
+        setRequest(updated)
+        return updated
+      }
+      if (check.available && (prev.channel.profileId !== check.channel.profileId || prev.channel.model !== check.channel.model)) {
+        const updated: TranslationPreferences = { ...prev, channel: check.channel }
+        setRequest(updated)
+        return updated
+      }
+      return prev
+    })
+  }, [config.profiles])
+
+  const channelCheck = resolveValidChannel(request.channel, config.profiles)
+  const available = channelCheck.available && Boolean(request.channel.profileId)
+  const hasAnyServices = (config.profiles ?? []).some(isProfileUsable)
   const key = ['translation', 'result', id, attempt, bookId, request] as const
 
   const result = useQuery({
@@ -115,14 +178,14 @@ export default function TranslationContent({ bookId, text, preferences, config, 
 
   const busy = result.isFetching
   const failure = result.error instanceof ApiError ? result.error.code : null
-  const status = config.profiles.length === 0
+  const status = !hasAnyServices
     ? _('translation.notConfigured')
     : !available
-      ? _('translation.notConfigured')
+      ? _('translation.unavailable')
       : stopped
         ? _('translation.stopped')
         : result.isError
-          ? _(`translation.${failure === 'AI_BUSY' ? 'busy' : failure === 'AI_RATE_LIMITED' ? 'rateLimited' : failure === 'AI_NOT_CONFIGURED' ? 'notConfigured' : failure === 'AI_NOT_ALLOWED' ? 'notAllowed' : failure === 'AI_TIMEOUT' ? 'timeout' : 'failed'}`)
+          ? _(`translation.${failure === 'AI_BUSY' ? 'busy' : failure === 'AI_RATE_LIMITED' ? 'rateLimited' : failure === 'AI_NOT_CONFIGURED' ? 'notConfigured' : failure === 'AI_NOT_ALLOWED' ? 'notAllowed' : failure === 'AI_TIMEOUT' ? 'timeout' : failure === 'VALIDATION_ERROR' ? 'unavailable' : 'failed'}`)
           : busy
             ? _('translation.translating')
             : ''
@@ -305,36 +368,59 @@ export default function TranslationContent({ bookId, text, preferences, config, 
         }}
         className="reader-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3"
       >
-        {output ? (
-          <div aria-live="off" className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">
-            {output}
-            {busy && (
-              <span className="ml-0.5 inline-block h-3.5 w-1.5 align-middle rounded-xs bg-[var(--bd-read-primary)] animate-pulse" />
+        {!available && !output ? (
+          <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-3 p-4 text-center">
+            <p role="status" className="max-w-[220px] text-xs leading-relaxed text-[var(--bd-read-sub)]">
+              {status}
+            </p>
+            <a
+              href="/settings?section=reading&focus=ai"
+              onClick={onClose}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--bd-read-accent)]/80 bg-stone-500/5 px-3.5 py-1.5 text-xs font-medium text-[var(--bd-read-text)] transition-colors hover:border-[var(--bd-read-accent)] hover:bg-stone-500/10 active:scale-95"
+            >
+              <span>{_('translation.configure')}</span>
+              <svg className="h-3 w-3 text-[var(--bd-read-sub)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </a>
+          </div>
+        ) : (
+          <>
+            {output ? (
+              <div aria-live="off" className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">
+                {output}
+                {busy && (
+                  <span className="ml-0.5 inline-block h-3.5 w-1.5 align-middle rounded-xs bg-[var(--bd-read-primary)] animate-pulse" />
+                )}
+              </div>
+            ) : busy ? (
+              <div className="flex h-full min-h-24 flex-col items-center justify-center gap-2.5 text-xs text-[var(--bd-read-sub)]">
+                <svg className="h-5 w-5 animate-spin text-[var(--bd-read-primary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+                <span className="font-medium">{_('translation.translating')}</span>
+              </div>
+            ) : null}
+
+            {status && !busy && (!output || stopped || failure) && (
+              <p role="status" className="mt-2 text-xs text-[var(--bd-read-sub)]">
+                {status}
+              </p>
             )}
-          </div>
-        ) : busy ? (
-          <div className="flex h-full min-h-24 flex-col items-center justify-center gap-2.5 text-xs text-[var(--bd-read-sub)]">
-            <svg className="h-5 w-5 animate-spin text-[var(--bd-read-primary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-            </svg>
-            <span className="font-medium">{_('translation.translating')}</span>
-          </div>
-        ) : null}
 
-        {status && !busy && (!output || stopped || failure) && (
-          <p role="status" className="mt-2 text-xs text-[var(--bd-read-sub)]">
-            {status}
-          </p>
-        )}
-
-        {(!available || failure === 'AI_NOT_CONFIGURED' || failure === 'AI_NOT_ALLOWED') && (
-          <a
-            href="/settings?section=reading"
-            onClick={onClose}
-            className="mt-3 inline-block text-xs font-medium text-[var(--bd-read-primary)] underline underline-offset-2 hover:opacity-80"
-          >
-            {_('translation.configure')}
-          </a>
+            {(failure === 'AI_NOT_CONFIGURED' || failure === 'AI_NOT_ALLOWED' || failure === 'VALIDATION_ERROR') && (
+              <a
+                href="/settings?section=reading&focus=ai"
+                onClick={onClose}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--bd-read-accent)]/80 bg-stone-500/5 px-3 py-1.5 text-xs font-medium text-[var(--bd-read-text)] transition-colors hover:border-[var(--bd-read-accent)] hover:bg-stone-500/10 active:scale-95"
+              >
+                <span>{_('translation.configure')}</span>
+                <svg className="h-3 w-3 text-[var(--bd-read-sub)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </a>
+            )}
+          </>
         )}
       </div>
 
@@ -355,7 +441,7 @@ export default function TranslationContent({ bookId, text, preferences, config, 
             type="button"
             aria-label={actionLabel}
             title={actionLabel}
-            disabled={config.profiles.length === 0}
+            disabled={!available}
             onClick={() => {
               if (busy) {
                 setStopped(true)

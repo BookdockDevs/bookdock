@@ -32,6 +32,7 @@ export default function SettingsCard({
       id={id}
       className={cn(
         'rounded-2xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6 dark:border-stone-800 dark:bg-stone-900',
+        id && 'scroll-mt-20 sm:scroll-mt-24',
         className,
       )}
     >

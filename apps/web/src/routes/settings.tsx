@@ -5,7 +5,7 @@ import { rootRoute } from './__root'
 
 export interface SettingsSearch {
   section?: 'general' | 'reading' | 'library' | 'integrations' | 'about' | 'admin'
-  focus?: 'tts'
+  focus?: 'tts' | 'dictionary' | 'ai'
   userTab?: 'instance' | 'library'
   libraryId?: string
 }
@@ -19,7 +19,7 @@ export const settingsRoute = createRoute({
     section: typeof input.section === 'string' && VALID_SECTIONS.has(input.section)
       ? input.section as SettingsSearch['section']
       : undefined,
-    focus: input.focus === 'tts' ? 'tts' : undefined,
+    focus: input.focus === 'tts' || input.focus === 'dictionary' || input.focus === 'ai' ? input.focus : undefined,
     userTab: input.userTab === 'instance' || input.userTab === 'library' ? input.userTab : undefined,
     libraryId: typeof input.libraryId === 'string' ? input.libraryId : undefined,
   }),

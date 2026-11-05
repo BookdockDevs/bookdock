@@ -51,8 +51,10 @@ import ReaderKeyboardShortcuts from './components/ReaderKeyboardShortcuts'
 import { Ribbon } from './components/Ribbon'
 import { SelectionToolbar } from './components/SelectionToolbar'
 import { useAiConfig } from '@/api/hooks/useAi'
+import { useDictionaries } from '@/api/hooks/useDictionaries'
 import { useTranslationConfig } from '@/api/hooks/useTranslationConfig'
 import TranslationPopup from './components/TranslationPopup'
+import DictionaryPopup from './components/DictionaryPopup'
 import { clearReaderSelection } from './lib/reader-selection'
 import { ImageContextMenu } from './components/ImageContextMenu'
 import ShareCardDialog from './components/share/ShareCardDialog'
@@ -320,6 +322,7 @@ export default function Reader() {
   const resetForBook = useReaderState((s) => s.resetForBook)
   const replaceTarget = useReaderState((s) => s.replaceTarget)
   const translationTarget = useReaderState((s) => s.translationTarget)
+  const dictionaryTarget = useReaderState((s) => s.dictionaryTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const setTocItems = useReaderState((s) => s.setTocItems)
   const sidebarOpen = useReaderState((s) => s.sidebarOpen)
@@ -345,6 +348,7 @@ export default function Reader() {
   const { data: annotations } = useAnnotations(id, { enabled: !isGuest && !revisionQuarantined })
   useTranslationConfig({ enabled: !isGuest })
   useAiConfig({ enabled: !isGuest })
+  useDictionaries({ enabled: !isGuest })
   const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
   const publicIdeas = useReaderIdeas(id, showFriendIdeas && !revisionQuarantined, displayedRevisionId)
   const publicMarkers = useMemo(() => publicIdeas.isError || !showFriendIdeas ? [] : (publicIdeas.data?.data ?? []).filter((idea) => !idea.own && idea.locationAvailable), [publicIdeas.isError, publicIdeas.data, showFriendIdeas])
@@ -1493,11 +1497,12 @@ export default function Reader() {
     if (noteEditorRange) {
       list.push({ cfiRange: noteEditorRange, type: 'note', color: DEFAULT_IDEA_COLOR, style: 'underline' })
     }
-    if (translationTarget?.cfiRange) {
-      list.push({ cfiRange: translationTarget.cfiRange, type: 'highlight', color: 'blue', style: 'highlight' })
+    const utilityTarget = translationTarget ?? dictionaryTarget
+    if (utilityTarget?.cfiRange) {
+      list.push({ cfiRange: utilityTarget.cfiRange, type: 'highlight', color: 'amber', style: 'highlight' })
     }
     renderer.setAnnotations(list)
-  }, [renderer, annotations?.data, publicMarkers, displayedRevisionId, noteEditorRange, translationTarget])
+  }, [renderer, annotations?.data, publicMarkers, displayedRevisionId, noteEditorRange, translationTarget, dictionaryTarget])
 
   useEffect(() => {
     // A locked desktop toolbar is persistent by intent — reopen the sidebar
@@ -1563,8 +1568,9 @@ export default function Reader() {
   useEffect(() => {
     if (!containerEl) return
     const handler = () => {
-      if (useReaderState.getState().translationTarget) {
+      if (useReaderState.getState().translationTarget || useReaderState.getState().dictionaryTarget) {
         useReaderState.getState().setTranslationTarget(null)
+        useReaderState.getState().setDictionaryTarget(null)
         return
       }
       if (annotationClickHandledRef.current) return
@@ -1589,7 +1595,7 @@ export default function Reader() {
   // popover), the click that dismisses it must not also turn a page or toggle
   // chrome — the renderer swallows click-to-turn while the guard is held
   const isFloatingSelection = Boolean(selection && (!isIdeaSidebarOpen || !selection.isIdea))
-  const popupOpen = isFloatingSelection || settingsOpen || ttsOpen || autoReadingOpen || !!footnoteEntry || !!translationTarget
+  const popupOpen = isFloatingSelection || settingsOpen || ttsOpen || autoReadingOpen || !!footnoteEntry || !!translationTarget || !!dictionaryTarget
   useEffect(() => {
     if (!popupOpen || !renderer) return
     renderer.pushPopupGuard()
@@ -2324,6 +2330,7 @@ export default function Reader() {
         )}
         <ShareCardDialog bookId={id} />
         {!isGuest && !revisionQuarantined && translationTarget && <TranslationPopup bookId={id} target={translationTarget} />}
+        {!isGuest && !revisionQuarantined && dictionaryTarget && <DictionaryPopup key={`${id}:${dictionaryTarget.cfiRange}`} target={dictionaryTarget} />}
         {replaceTarget && (
           <Modal
             title={_('annotation.replaceSelection')}

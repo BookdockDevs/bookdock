@@ -2,6 +2,7 @@ import { useLayoutEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { PADDING, type SmartPosition } from '@/lib/position'
+import { cn } from '@/lib/utils'
 
 interface SmartMenuProps {
   id?: string
@@ -89,7 +90,7 @@ export default function SmartMenu({
         e.preventDefault()
         e.stopPropagation()
       }}
-      className={`fixed z-50 rounded-xl border p-1 shadow-xl backdrop-blur-md ${themeClass} ${className}`.trim()}
+      className={cn('fixed z-50 rounded-xl border p-1 shadow-xl backdrop-blur-md', themeClass, className)}
       style={{
         left: finalPos.left,
         top: finalPos.top,

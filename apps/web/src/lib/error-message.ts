@@ -2,6 +2,9 @@ import { ApiError } from '@/api/client'
 import type { ToastMessage } from '@/stores/toast.store'
 
 const ERROR_KEYS: Record<string, string> = {
+  DICTIONARY_NOT_FOUND: 'errors.notFound',
+  DICTIONARY_INVALID: 'dictionary.invalidDictionary',
+  DICTIONARY_BUSY: 'dictionary.busy',
   BOOK_NOT_FOUND: 'errors.bookNotFound',
   SHELF_NOT_FOUND: 'errors.notFound',
   SHELF_NAME_TAKEN: 'errors.shelfNameTaken',

@@ -1,5 +1,35 @@
 import type { AnnotationStyle } from '@bookdock/shared'
 
+export function DictionaryIcon({
+  size = 18,
+  strokeWidth = 1.8,
+  className,
+}: {
+  size?: number
+  strokeWidth?: number
+  className?: string
+} = {}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
+      <path d="m8 13 4-7 4 7" />
+      <path d="M9.1 11h5.7" />
+      <path d="M6 18h14" />
+    </svg>
+  )
+}
+
 // Shared letter 'A' geometry across all styles: apex at (12, 5), feet at (7.5, 16.5) and (16.5, 16.5), bar at y=12.8
 const A_GLYPH_PATH = 'M7.5 16.5 12 5l4.5 11.5M9 12.8h6'
 

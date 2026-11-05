@@ -1,4 +1,7 @@
 export const ErrorCode = {
+  DICTIONARY_NOT_FOUND: 'DICTIONARY_NOT_FOUND',
+  DICTIONARY_INVALID: 'DICTIONARY_INVALID',
+  DICTIONARY_BUSY: 'DICTIONARY_BUSY',
   ACTIVITY_NOT_FOUND: 'ACTIVITY_NOT_FOUND',
   BOOK_NOT_FOUND: 'BOOK_NOT_FOUND',
   LIBRARY_NOT_FOUND: 'LIBRARY_NOT_FOUND',
@@ -96,6 +99,9 @@ export const ErrorCode = {
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
 
 export const ErrorHttpStatus: Record<ErrorCode, number> = {
+  DICTIONARY_NOT_FOUND: 404,
+  DICTIONARY_INVALID: 400,
+  DICTIONARY_BUSY: 429,
   ACTIVITY_NOT_FOUND: 404,
   BOOK_NOT_FOUND: 404,
   LIBRARY_NOT_FOUND: 404,

@@ -78,6 +78,15 @@ afterEach(() => {
 })
 
 describe('SelectionToolbar', () => {
+  it('hands the selected word to the dictionary card before dismissing the toolbar', () => {
+    setSelection()
+    const snapshot = useReaderState.getState().selection
+    render(<SelectionToolbar bookId="b1" />)
+    fireEvent.click(screen.getByTitle('dictionary.title'))
+    expect(useReaderState.getState().dictionaryTarget).toBe(snapshot)
+    expect(useReaderState.getState().selection).toBeNull()
+    useReaderState.setState({ dictionaryTarget: null })
+  })
   it('hands the selected passage to the translation card before dismissing the toolbar', () => {
     setSelection()
     const snapshot = useReaderState.getState().selection

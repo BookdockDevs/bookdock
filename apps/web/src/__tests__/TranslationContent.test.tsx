@@ -120,10 +120,32 @@ describe('selection translation card', () => {
   it('shows configuration guidance without sending translation requests when no AI service exists', () => {
     mount(preferences, { ...config, profiles: [] })
     expect(screen.getByText('translation.notConfigured')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'translation.configure' })).toHaveAttribute('href', '/settings?section=reading')
+    expect(screen.getByRole('link', { name: 'translation.configure' })).toHaveAttribute('href', '/settings?section=reading&focus=ai')
     expect(screen.getByLabelText('translation.channel')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'translation.retry' })).toBeDisabled()
     expect(streamTranslation).not.toHaveBeenCalled()
     expect(apiPut).not.toHaveBeenCalled()
+  })
+
+  it('shows not configured state without erroring when all models in profile are deleted', () => {
+    const emptyModelsProfile: AiProfileRes = { ...firstProfile, model: null, models: [] }
+    const saved: TranslationPreferences = { targetLang: 'en', channel: { kind: 'ai', profileId: 'first', model: 'gemma-4-31b-it' } }
+    mount(saved, { ...config, profiles: [emptyModelsProfile] })
+    expect(screen.getByText('translation.notConfigured')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'translation.configure' })).toHaveAttribute('href', '/settings?section=reading&focus=ai')
+    expect(screen.getByLabelText('translation.channel')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'translation.retry' })).toBeDisabled()
+    expect(streamTranslation).not.toHaveBeenCalled()
+  })
+
+  it('falls back to remaining model when previously selected model was deleted', async () => {
+    const saved: TranslationPreferences = { targetLang: 'zh-Hans', channel: { kind: 'ai', profileId: 'first', model: 'deleted-model' } }
+    mount(saved)
+    expect(await screen.findByText('翻译结果')).toBeInTheDocument()
+    expect(streamTranslation).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: { kind: 'ai', profileId: 'first', model: null } }),
+      expect.any(AbortSignal),
+      expect.any(Function),
+    )
   })
 })

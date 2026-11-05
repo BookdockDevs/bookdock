@@ -1,3 +1,5 @@
+import { promises as fs } from 'node:fs'
+
 import { and, asc, count, eq, inArray, isNull } from 'drizzle-orm'
 
 import { normalizeUsername } from '@bookdock/shared'
@@ -30,6 +32,7 @@ import { AppError } from '../../middleware/error'
 import { invalidateUserCache } from '../../middleware/auth.guard'
 import { revokeUserSessions, isInstanceOwner } from '../auth/auth.service'
 import { createId } from '../../lib/id'
+import { dictionaryDirectory, releaseDictionaryReader } from '../../lib/mdict-reader'
 import { hashPassword, verifyPassword } from '../../lib/password'
 import { getStorage } from '../../storage'
 
@@ -312,5 +315,8 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
   }
   invalidateUserCache(targetId)
   await cleanContentBlobs()
+  const dictionaryPath = dictionaryDirectory(targetId)
+  await releaseDictionaryReader(dictionaryPath)
+  await fs.rm(dictionaryPath, { recursive: true, force: true })
   return { id: targetId }
 }

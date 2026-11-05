@@ -30,9 +30,9 @@ import {
   popupPosition,
   setLastHighlightStyle,
 } from './annotation-colors'
-import { AiSparkleIcon, BulbIcon, CopyIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TranslateIcon, TrashIcon, TtsIcon } from './annotation-icons'
+import { AiSparkleIcon, BulbIcon, CopyIcon, DictionaryIcon, ExcerptShareIcon, ReplaceIcon, SearchIcon, StyleGlyph, TranslateIcon, TrashIcon, TtsIcon } from './annotation-icons'
 
-const BAR_WIDTH = 392
+const BAR_WIDTH = 428
 const BAR_HEIGHT = 44
 const STYLE_WIDTH = 236
 const STYLE_HEIGHT = 40
@@ -60,6 +60,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
   const setShareTarget = useReaderState((s) => s.setShareTarget)
   const setReplaceTarget = useReaderState((s) => s.setReplaceTarget)
   const setTranslationTarget = useReaderState((s) => s.setTranslationTarget)
+  const setDictionaryTarget = useReaderState((s) => s.setDictionaryTarget)
   const { renderer } = useReaderApi()
   const { controller: ttsController } = useTtsSession()
   const user = useAuthStore((s) => s.user)
@@ -504,18 +505,25 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
   }
 
   // Same bubble for a fresh selection and an existing annotation — once a
-  // highlight exists the middle action just flips from 划线 to 删除划线.
+  // highlight exists the primary action flips from 划线 to 删除划线.
+  // Grouped logically: Annotation (highlight/note/copy) -> Lookup (dict/trans/search) -> AI & Audio -> Output
   const actions = [
-    { key: 'copy', label: _('annotation.copy'), icon: <CopyIcon />, danger: false, onClick: copyText },
     target
       ? { key: 'delete', label: _('annotation.deleteHighlight'), icon: <TrashIcon />, danger: true, onClick: () => removeAnnotation() }
       : { key: 'highlight', label: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, danger: false, onClick: highlight },
     { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
+    { key: 'copy', label: _('annotation.copy'), icon: <CopyIcon />, danger: false, onClick: copyText },
+    { key: 'dictionary', label: _('dictionary.title'), icon: <DictionaryIcon />, danger: false, onClick: () => {
+      if (!selection) return
+      setDictionaryTarget(selection)
+      close()
+    } },
     { key: 'translate', label: _('translation.title'), icon: <TranslateIcon size={18} />, danger: false, onClick: () => {
       if (!selection) return
       setTranslationTarget(selection)
       close()
     } },
+    { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
     { key: 'ai-chat', label: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={20} />, danger: false, onClick: openAiChat },
     { key: 'ai-commands', label: _('reader.aiQuickCommands'), icon: (
       <span className="flex items-center justify-center gap-0.5">
@@ -528,7 +536,6 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
       </span>
     ), danger: false, onClick: toggleAiMenu },
     { key: 'tts', label: _('reader.ttsFromSelection'), icon: <TtsIcon />, danger: false, onClick: readSelection },
-    { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
     { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: () => shareExcerpt(false) },
     // Low-frequency text-editing action sits last so the common actions stay put.
     // The replace dialog lives in Reader (via replaceTarget): opening it must

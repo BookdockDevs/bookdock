@@ -14,6 +14,19 @@ interface TranslationChannelSelectProps {
   disabled?: boolean
 }
 
+const isModelChatCapable = (model: { id: string; name?: string | null }) =>
+  !isAiEmbeddingModel({ id: model.id, name: model.name ?? model.id })
+
+const getProfileChatModels = (profile: { models: { id: string; name: string }[] }) =>
+  (profile.models ?? []).filter(isModelChatCapable)
+
+const isProfileUsable = (profile: { model?: string | null; models: { id: string; name: string }[] }) => {
+  const chatModels = getProfileChatModels(profile)
+  if (chatModels.length > 0) return true
+  if (profile.model && isModelChatCapable({ id: profile.model, name: profile.model })) return true
+  return false
+}
+
 export default function TranslationChannelSelect({ config, value, onChange, disabled }: TranslationChannelSelectProps) {
   const _ = useTranslation()
   const [open, setOpen] = useState(false)
@@ -23,20 +36,32 @@ export default function TranslationChannelSelect({ config, value, onChange, disa
 
   const encode = (profileId: string | null, model: string | null) => JSON.stringify([profileId, model])
   const profiles = config?.profiles ?? []
+  const usableProfiles = profiles.filter(isProfileUsable)
+  const hasAnyServices = usableProfiles.length > 0
+
   const selectedProfile = profiles.find((profile) => profile.id === value.profileId)
-  const selected = encode(value.profileId, value.model === selectedProfile?.model ? null : value.model)
-  const available = profiles.some(
-    (profile) =>
-      profile.id === value.profileId &&
-      (!value.model || profile.models.some((model) => model.id === value.model && !isAiEmbeddingModel(model))),
+  const selectedChatModels = selectedProfile ? getProfileChatModels(selectedProfile) : []
+  const isDefaultModelValid = Boolean(
+    selectedProfile?.model && isModelChatCapable({ id: selectedProfile.model, name: selectedProfile.model }),
   )
 
-  const effectiveModelId = value.model ?? selectedProfile?.model ?? null
-  const selectedModelObj = selectedProfile?.models.find((model) => model.id === effectiveModelId)
-  const selectedModelName = selectedModelObj?.name || effectiveModelId || _('translation.defaultModel')
-  const triggerLabel = selectedProfile
+  const isModelAvailable = Boolean(
+    selectedProfile &&
+    isProfileUsable(selectedProfile) &&
+    (
+      (value.model && selectedChatModels.some((m) => m.id === value.model)) ||
+      (!value.model && (isDefaultModelValid || selectedChatModels.length > 0))
+    ),
+  )
+
+  const selected = encode(value.profileId, value.model === selectedProfile?.model ? null : value.model)
+  const effectiveModelId = value.model ?? selectedProfile?.model ?? selectedChatModels[0]?.id ?? null
+  const selectedModelObj = selectedChatModels.find((model) => model.id === effectiveModelId)
+  const selectedModelName = selectedModelObj?.name || (isModelAvailable ? (effectiveModelId || _('translation.defaultModel')) : '')
+
+  const triggerLabel = isModelAvailable && selectedProfile
     ? `${selectedProfile.name} · ${selectedModelName}`
-    : profiles.length === 0
+    : !hasAnyServices
       ? _('translation.noServices')
       : _('translation.unavailable')
 
@@ -84,7 +109,7 @@ export default function TranslationChannelSelect({ config, value, onChange, disa
       <select
         aria-label={_('translation.channel')}
         value={selected}
-        disabled={disabled || profiles.length === 0}
+        disabled={disabled || !hasAnyServices}
         onChange={(event) => {
           const [profileId, model] = JSON.parse(event.target.value) as [string | null, string | null]
           onChange({ kind: 'ai', profileId, model })
@@ -92,15 +117,31 @@ export default function TranslationChannelSelect({ config, value, onChange, disa
         tabIndex={-1}
         className="sr-only"
       >
-        {!available && <option value={selected} disabled>{_(profiles.length === 0 ? 'translation.noServices' : 'translation.unavailable')}</option>}
-        {profiles.map((profile) => (
-          <optgroup key={profile.id} label={profile.name}>
-            <option value={encode(profile.id, null)}>{profile.name} · {profile.model ?? _('translation.defaultModel')}</option>
-            {profile.models.filter((model) => !isAiEmbeddingModel(model) && model.id !== profile.model).map((model) => (
-              <option key={model.id} value={encode(profile.id, model.id)}>{profile.name} · {model.name || model.id}</option>
-            ))}
-          </optgroup>
-        ))}
+        {!isModelAvailable && (
+          <option value={selected} disabled>
+            {_(!hasAnyServices ? 'translation.noServices' : 'translation.unavailable')}
+          </option>
+        )}
+        {usableProfiles.map((profile) => {
+          const chatModels = getProfileChatModels(profile)
+          const hasDefault = Boolean(profile.model && isModelChatCapable({ id: profile.model, name: profile.model }))
+          return (
+            <optgroup key={profile.id} label={profile.name}>
+              {hasDefault && (
+                <option value={encode(profile.id, null)}>
+                  {profile.name} · {profile.model}
+                </option>
+              )}
+              {chatModels
+                .filter((model) => !hasDefault || model.id !== profile.model)
+                .map((model) => (
+                  <option key={model.id} value={encode(profile.id, model.id)}>
+                    {profile.name} · {model.name || model.id}
+                  </option>
+                ))}
+            </optgroup>
+          )
+        })}
       </select>
 
       {/* Polished interactive trigger button */}
@@ -110,13 +151,13 @@ export default function TranslationChannelSelect({ config, value, onChange, disa
         aria-haspopup="listbox"
         aria-expanded={open}
         title={triggerLabel}
-        disabled={disabled || profiles.length === 0}
+        disabled={disabled || !hasAnyServices}
         onClick={() => setOpen((prev) => !prev)}
         className={`flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-[var(--bd-read-accent)]/60 bg-stone-500/5 px-2 text-left text-xs font-medium text-[var(--bd-read-text)] transition-colors hover:bg-stone-500/10 hover:border-[var(--bd-read-accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)] disabled:cursor-not-allowed disabled:opacity-40 ${
           open ? 'bg-stone-500/15 border-[var(--bd-read-accent)]' : ''
         }`}
       >
-        {selectedProfile && (
+        {isModelAvailable && selectedProfile && (
           <AiBrandIcon
             name={selectedModelName}
             model={selectedModelObj}
@@ -149,13 +190,15 @@ export default function TranslationChannelSelect({ config, value, onChange, disa
           className="reader-scrollbar fixed z-[80] max-h-56 min-w-56 overflow-y-auto overscroll-contain rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1.5 shadow-xl"
           style={{ left: menuPos.left, bottom: menuPos.bottom, maxWidth: menuPos.maxWidth }}
         >
-          {profiles.length === 0 ? (
+          {!hasAnyServices ? (
             <p className="px-3 py-4 text-center text-xs text-[var(--bd-read-sub)]">{_('translation.noServices')}</p>
           ) : (
-            profiles.map((profile) => {
-              const defaultModelObj = profile.models.find((m) => m.id === profile.model)
-              const otherModels = profile.models.filter((m) => !isAiEmbeddingModel(m) && m.id !== profile.model)
-              const isDefaultSelected = value.profileId === profile.id && (value.model === null || value.model === profile.model)
+            usableProfiles.map((profile) => {
+              const chatModels = getProfileChatModels(profile)
+              const defaultModelObj = chatModels.find((m) => m.id === profile.model)
+              const hasDefault = Boolean(profile.model && isModelChatCapable({ id: profile.model, name: profile.model }))
+              const otherModels = hasDefault ? chatModels.filter((m) => m.id !== profile.model) : chatModels
+              const isDefaultSelected = hasDefault && value.profileId === profile.id && (value.model === null || value.model === profile.model)
 
               return (
                 <div key={profile.id} className="mb-1.5 last:mb-0">
@@ -164,44 +207,46 @@ export default function TranslationChannelSelect({ config, value, onChange, disa
                   </div>
 
                   {/* Profile default model */}
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={isDefaultSelected}
-                    onClick={() => {
-                      onChange({ kind: 'ai', profileId: profile.id, model: null })
-                      setOpen(false)
-                    }}
-                    className={`flex min-h-8 min-w-0 w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs transition-colors ${
-                      isDefaultSelected
-                        ? 'bg-[var(--bd-read-primary)]/15 font-medium text-[var(--bd-read-text)]'
-                        : 'text-[var(--bd-read-text)] hover:bg-stone-500/10'
-                    }`}
-                  >
-                    <AiBrandIcon
-                      name={profile.model ?? profile.name}
-                      model={defaultModelObj}
-                      provider={profile.provider}
-                      className="h-3.5 w-3.5 shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">
-                        {defaultModelObj?.name || profile.model || _('translation.defaultModel')}
-                      </p>
-                      {defaultModelObj && defaultModelObj.name !== defaultModelObj.id && (
-                        <p className="truncate text-[10px] text-[var(--bd-read-sub)]">{defaultModelObj.id}</p>
+                  {hasDefault && (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={isDefaultSelected}
+                      onClick={() => {
+                        onChange({ kind: 'ai', profileId: profile.id, model: null })
+                        setOpen(false)
+                      }}
+                      className={`flex min-h-8 min-w-0 w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs transition-colors ${
+                        isDefaultSelected
+                          ? 'bg-[var(--bd-read-primary)]/15 font-medium text-[var(--bd-read-text)]'
+                          : 'text-[var(--bd-read-text)] hover:bg-stone-500/10'
+                      }`}
+                    >
+                      <AiBrandIcon
+                        name={profile.model ?? profile.name}
+                        model={defaultModelObj}
+                        provider={profile.provider}
+                        className="h-3.5 w-3.5 shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium">
+                          {defaultModelObj?.name || profile.model || _('translation.defaultModel')}
+                        </p>
+                        {defaultModelObj && defaultModelObj.name !== defaultModelObj.id && (
+                          <p className="truncate text-[10px] text-[var(--bd-read-sub)]">{defaultModelObj.id}</p>
+                        )}
+                      </div>
+                      {isDefaultSelected && (
+                        <span className="ml-1 shrink-0 text-[var(--bd-read-primary)]">
+                          <CheckIcon size={14} className="stroke-[2.2]" />
+                        </span>
                       )}
-                    </div>
-                    {isDefaultSelected && (
-                      <span className="ml-1 shrink-0 text-[var(--bd-read-primary)]">
-                        <CheckIcon size={14} className="stroke-[2.2]" />
-                      </span>
-                    )}
-                  </button>
+                    </button>
+                  )}
 
                   {/* Additional profile models */}
                   {otherModels.map((model) => {
-                    const isSelected = value.profileId === profile.id && value.model === model.id
+                    const isSelected = value.profileId === profile.id && (value.model === model.id || (!hasDefault && chatModels[0]?.id === model.id && value.model === null))
                     return (
                       <button
                         key={model.id}

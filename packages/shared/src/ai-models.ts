@@ -36,8 +36,8 @@ function isQwenVisionModel(id: string) {
   return Number.isFinite(date) && date >= Date.UTC(2026, 5, 8)
 }
 
-export function getAiModelCapabilityFlags(model: Pick<AiModelRes, 'id' | 'name' | 'capabilities'>): AiModelCapabilityFlags {
-  const text = `${model.id} ${model.name}`.toLowerCase()
+export function getAiModelCapabilityFlags(model: { id: string; name?: string | null; capabilities?: AiModelRes['capabilities'] }): AiModelCapabilityFlags {
+  const text = `${model.id} ${model.name ?? ''}`.toLowerCase()
   const id = model.id.trim().toLowerCase()
   const registry: AiModelCapabilityFlags = {
     vision: isQwenVisionModel(id),
@@ -71,6 +71,6 @@ export function getAiModelCapabilityFlags(model: Pick<AiModelRes, 'id' | 'name' 
   }
 }
 
-export function isAiEmbeddingModel(model: Pick<AiModelRes, 'id' | 'name' | 'capabilities'>) {
+export function isAiEmbeddingModel(model: { id: string; name?: string | null; capabilities?: AiModelRes['capabilities'] }) {
   return getAiModelCapabilityFlags(model).embedding
 }

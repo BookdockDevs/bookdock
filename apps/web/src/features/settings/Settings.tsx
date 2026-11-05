@@ -26,6 +26,7 @@ import ReplacementsSettingsSection from './components/ReplacementsSettingsSectio
 import TocRulesSettingsSection from './components/TocRulesSettingsSection'
 import TtsSettingsSection from './components/TtsSettingsSection'
 import AiSettingsSection from './components/AiSettingsSection'
+import DictionariesSettingsSection from './components/DictionariesSettingsSection'
 import LegadoSettingsSection from './components/LegadoSettingsSection'
 import MetadataSourcesSection from './components/MetadataSourcesSection'
 import StorageConnectionsSection from './components/StorageConnectionsSection'
@@ -80,8 +81,24 @@ export default function Settings() {
 
   useEffect(() => {
     setVisitedSections((prev) => (prev.has(active) ? prev : new Set(prev).add(active)))
-    if (search.section === 'reading' && search.focus === 'tts') {
-      window.requestAnimationFrame(() => document.getElementById('tts-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    if (search.section === 'reading' && (search.focus === 'tts' || search.focus === 'dictionary' || search.focus === 'ai')) {
+      const targetId = search.focus === 'tts' ? 'tts-settings' : search.focus === 'ai' ? 'ai-settings' : 'dictionary-settings'
+      const scrollToTarget = () => {
+        const el = document.getElementById(targetId)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          return true
+        }
+        return false
+      }
+      window.requestAnimationFrame(() => {
+        if (!scrollToTarget()) {
+          const timer = window.setTimeout(scrollToTarget, 80)
+          return () => window.clearTimeout(timer)
+        }
+      })
+      const fallbackTimer = window.setTimeout(scrollToTarget, 160)
+      return () => window.clearTimeout(fallbackTimer)
     }
   }, [active, search.focus, search.section])
 
@@ -273,6 +290,7 @@ export default function Settings() {
               <TtsSettingsSection id="tts-settings" />
               <AiSettingsSection id="ai-settings" />
               <FontsSettingsSection />
+              {!isGuest && <DictionariesSettingsSection />}
               {!isGuest && <ReplacementsSettingsSection />}
             </div>
           )}

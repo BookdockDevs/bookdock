@@ -33,3 +33,8 @@ await build({
 })
 
 cpSync('src/db/migrations', 'dist/migrations', { recursive: true })
+
+await build({
+  entryPoints: ['src/lib/mdict.worker.ts'], bundle: true, platform: 'node', format: 'esm',
+  target: 'node22', outfile: 'dist/mdict.worker.mjs', external,
+})
