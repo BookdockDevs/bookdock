@@ -51,6 +51,17 @@ describe('WeRead Web import channel', () => {
     expect(list.listCounts?.['notebook-1']).toEqual({ notes: 2, reviews: 0 })
   })
 
+  it('adds shelf reading times to notes-only books without adding other shelf entries', async () => {
+    fetchApi.mockImplementation(async (_credential: unknown, params: Record<string, unknown>) => {
+      if (params.api_name === '/user/notebooks') return { books: [{ bookInfo: { bookId: 'a', title: 'A' }, noteCount: 1, sort: 123 }] }
+      if (params.api_name === '/shelf/sync') return { books: [{ bookId: 'a', title: 'A', readUpdateTime: 456 }, { bookId: 'b', title: 'B' }] }
+      throw new Error('unexpected endpoint')
+    })
+    const list = await fetchWereadWebBookList(credential, 'notes')
+    expect(list.books).toHaveLength(1)
+    expect(list.books[0]).toMatchObject({ lastReadAt: 456000, lastNoteAt: 123000 })
+  })
+
   it('fetches notes and daily time through the same Web channel', async () => {
     const proposal = await fetchWereadWebProposal(credential, 'all', ['notebook-1'])
 

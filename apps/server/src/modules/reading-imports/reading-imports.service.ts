@@ -31,6 +31,8 @@ export interface ImportBook {
   coverUrl: string | null
   finished: boolean | null
   meta: Record<string, unknown>
+  lastReadAt?: number | null
+  lastNoteAt?: number | null
 }
 
 export interface ImportDurationFact {
@@ -536,6 +538,7 @@ export function buildBookItems(
   const notes = tally(scoped.notes.map((note) => note.sourceBookId))
   const reviews = tally(scoped.reviews.map((review) => review.sourceBookId))
   const facts = tally(scoped.durationFacts.flatMap((fact) => fact.sourceBookId === null ? [] : [fact.sourceBookId]))
+  const allNotes = tally(proposal.notes.map((note) => note.sourceBookId))
 
   return proposal.books.map((book) => ({
     bookKey: book.sourceBookId,
@@ -550,6 +553,9 @@ export function buildBookItems(
     notes: notes.get(book.sourceBookId) ?? proposal.listCounts?.[book.sourceBookId]?.notes ?? 0,
     reviews: reviews.get(book.sourceBookId) ?? proposal.listCounts?.[book.sourceBookId]?.reviews ?? 0,
     durationFacts: facts.get(book.sourceBookId) ?? 0,
+    lastReadAt: book.lastReadAt ?? null,
+    lastNoteAt: book.lastNoteAt ?? null,
+    sortNoteCount: proposal.listCounts?.[book.sourceBookId]?.notes ?? allNotes.get(book.sourceBookId) ?? 0,
     // In list mode the source already dropped what the scope cannot carry, so
     // "listed" and "selectable" are the same thing.
     selectable: listMode || selectable.has(book.sourceBookId),

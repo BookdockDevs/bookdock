@@ -69,6 +69,30 @@ describe('WereadWebLoginControls', () => {
     expect(screen.getByText('readingImport.webQrInstructions')).toBeInTheDocument()
   })
 
+  it.each(['pending', 'expired'] as const)('generates a new QR when the current challenge is %s', async (status) => {
+    let challengeCount = 0
+    vi.mocked(apiPost).mockImplementation(async (path: string) => {
+      if (path === '/reading-imports/weread/web-session/verify') return { data: { configured: false, vid: null, updatedAt: null, valid: true } }
+      challengeCount += 1
+      return { data: { id: `login-${challengeCount}`, confirmUrl: `https://weread.qq.com/web/confirm?pf=2&uid=${challengeCount}`, expiresAt: Date.now() + 60_000 } }
+    })
+    vi.mocked(apiGet).mockImplementation(async (path: string) => ({
+      data: { status: path.endsWith('/login-1') ? status : 'pending', session: null },
+    }))
+
+    renderControls()
+    fireEvent.click(await screen.findByRole('button', { name: 'readingImport.webQrLogin' }))
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/reading-imports/weread/web-login/login-1'))
+    if (status === 'expired') expect(await screen.findByRole('status')).toHaveTextContent('readingImport.webLoginExpired')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'readingImport.webQrRegenerate' }))
+
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/reading-imports/weread/web-login/login-2'))
+    expect(challengeCount).toBe(2)
+    expect(await screen.findByRole('img', { name: 'readingImport.webQrAlt' })).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('skips the login prompt when a saved session already exists', async () => {
     vi.mocked(apiPost).mockImplementation(async (path: string) => {
       if (path === '/reading-imports/weread/web-session/verify') return { data: { configured: true, vid: '306734116', updatedAt: Date.now(), valid: true } }

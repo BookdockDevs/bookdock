@@ -128,7 +128,7 @@ export default function WereadWebLoginControls() {
               ? _('readingImport.webSessionChecking', { defaultValue: '正在检查登录状态…' })
               : configured
                 ? _('readingImport.webSessionConnected', { defaultValue: '已登录账号 {{vid}}', vid: sessionQuery.data?.data.vid ?? '' })
-                : _('readingImport.webSessionHint', { defaultValue: '网页扫码后可按书籍导入完整的每日阅读时长。' })}
+                : _('readingImport.webSessionHint', { defaultValue: '未登录微信读书账号' })}
           </span>
         </div>
 
@@ -142,7 +142,11 @@ export default function WereadWebLoginControls() {
           </Button>
         ) : (
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => startLogin.mutate()} className="shrink-0 cursor-pointer">
-            {startLogin.isPending ? _('readingImport.webQrPreparing', { defaultValue: '正在准备…' }) : _('readingImport.webQrLogin', { defaultValue: '微信扫码登录' })}
+            {startLogin.isPending
+              ? _('readingImport.webQrPreparing', { defaultValue: '正在准备…' })
+              : confirmUrl
+                ? _('readingImport.webQrRegenerate', { defaultValue: '重新生成二维码' })
+                : _('readingImport.webQrLogin', { defaultValue: '微信扫码登录' })}
           </Button>
         )}
       </div>

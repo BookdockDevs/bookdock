@@ -70,6 +70,7 @@ export async function parseLegadoBackup(buffer: Buffer): Promise<ImportProposal>
       coverUrl: extra?.coverUrl ?? null,
       finished: null,
       meta: extra?.meta ?? {},
+      lastReadAt: extra?.lastReadAt ?? null,
     })
     return key
   }
@@ -83,6 +84,7 @@ export async function parseLegadoBackup(buffer: Buffer): Promise<ImportProposal>
     const cover = typeof row.customCoverUrl === 'string' && row.customCoverUrl ? row.customCoverUrl : typeof row.coverUrl === 'string' ? row.coverUrl : ''
     addBook(name, author, {
       coverUrl: cover || null,
+      lastReadAt: typeof row.durChapterTime === 'number' && Number.isSafeInteger(row.durChapterTime) && row.durChapterTime > 0 ? row.durChapterTime : null,
       meta: {
         ...(origin ? { local: isLocal } : {}),
         originName: typeof row.originName === 'string' ? row.originName.slice(0, 200) : undefined,
@@ -101,6 +103,8 @@ export async function parseLegadoBackup(buffer: Buffer): Promise<ImportProposal>
     const text = typeof row.bookText === 'string' ? row.bookText.slice(0, 20000) : ''
     const content = typeof row.content === 'string' && row.content ? row.content.slice(0, 20000) : null
     const key = addBook(name, author, { meta: { implicit: true } })
+    const book = books.get(key)!
+    if (time > 0) book.lastNoteAt = Math.max(book.lastNoteAt ?? 0, time)
     notes.push({
       sourceBookId: key,
       sourceRecordId: `bm-${time}`,
@@ -140,6 +144,9 @@ export async function parseLegadoBackup(buffer: Buffer): Promise<ImportProposal>
       })
       if (matches.length > 1) bump('duration-book-author-ambiguous')
     }
+    const lastRead = typeof row.lastRead === 'number' && Number.isSafeInteger(row.lastRead) && row.lastRead > 0 ? row.lastRead : null
+    const book = books.get(sourceBookId)!
+    if (lastRead !== null) book.lastReadAt = Math.max(book.lastReadAt ?? 0, lastRead)
     durationFacts.push({
       sourceBookId,
       sourceRecordKey: `device-book:${createHash('sha256').update(JSON.stringify([deviceId, name])).digest('hex')}`,

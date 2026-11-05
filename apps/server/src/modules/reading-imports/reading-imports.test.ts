@@ -67,6 +67,18 @@ describe('reading imports', () => {
     ],
   }
 
+  it('exposes source activity for sorting without assigning ambiguous reading records', async () => {
+    const proposal = await parseLegadoBackup(await legadoBackup({
+      'bookshelf.json': [{ name: 'A', author: 'One', durChapterTime: 100 }, { name: 'A', author: 'Two', durChapterTime: 200 }],
+      'bookmark.json': [{ bookName: 'A', bookAuthor: 'One', time: 300, bookText: 'Note' }],
+      'readRecord.json': [{ deviceId: 'phone', bookName: 'A', readTime: 1000, lastRead: 400 }],
+    }))
+    const preview = buildPreview(ownerId, 'legado', '', proposal, 'time')
+    expect(preview.items.find((item) => item.author === 'One')).toMatchObject({ lastReadAt: 100, lastNoteAt: 300, sortNoteCount: 1 })
+    expect(preview.items.find((item) => item.author === 'Two')).toMatchObject({ lastReadAt: 200, lastNoteAt: null, sortNoteCount: 0 })
+    expect(preview.items.find((item) => item.author === null)).toMatchObject({ lastReadAt: 400 })
+  })
+
   it('imports a legado backup into unified archives with notes and totals', async () => {
     const proposal = await parseLegadoBackup(await legadoBackup(legadoFiles))
     expect(proposal.books).toHaveLength(2)

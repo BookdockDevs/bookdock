@@ -4,13 +4,19 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Reading import book lists can be sorted by recent reading activity, recent note activity, note count, or title in ascending or descending order. Sort preferences are remembered separately for WeRead Skill, WeRead Web, and Legado; books with unknown activity dates stay last in either direction.
+
 ### Changed
 
 - Password and secret inputs across account forms, library dialogs, and integration settings now default to hidden, with independent, keyboard-accessible show/hide controls and consistent validation and submission feedback. Password length errors appear after leaving the field or submitting, without a persistent length hint.
+- WeRead Web sign-in shows a clear signed-out status and changes the sign-in button to "Generate a new QR code" once a QR challenge exists, including after it expires.
 
 ### Fixed
 
 - Failed administrator account creation and password resets now keep the dialog and entered values for retry instead of closing immediately; reopening a closed dialog clears its password draft and resets visibility.
+- Reading import covers display correctly when already cached and retry failed images after sorting while staying paired with their books.
 
 ## [0.7.6] - 2026-11-05
 
@@ -1054,13 +1060,19 @@ All notable changes to Bookdock are documented here.
 
 ### [未发布]
 
+#### 新增
+
+- 阅读导入书籍列表支持按最近阅读、最近笔记、笔记数量或书名升降序排序，并分别记住微信读书 Skill、微信读书 Web 与 Legado 的排序偏好；缺少活动时间的书籍在两个方向下均排在末尾。
+
 #### 优化
 
 - 统一账号表单、书库弹窗与集成设置中的密码及密钥输入交互：默认隐藏，支持独立显示／隐藏与键盘操作，并统一校验及提交反馈。密码长度错误仅在失焦或提交校验不通过时提示，不再显示常驻长度说明。
+- 微信读书 Web 登录区域明确显示未登录状态；生成二维码后，登录按钮改为「重新生成二维码」，二维码过期后仍可直接重新生成。
 
 #### 修复
 
 - 管理员创建账号或重置密码失败时保留弹窗和已输入内容，方便修改重试；关闭后重新打开会清空密码草稿并恢复隐藏状态。
+- 修复阅读导入列表中已缓存封面的显示，并在排序后重试加载失败的封面，保持封面与书籍正确对应。
 
 ### [0.7.6] - 2026-11-05
 

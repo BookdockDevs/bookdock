@@ -10,7 +10,7 @@ export interface SortMenuOption<T extends string> {
   label: string
 }
 
-/** Compact dropdown sorter shared by the archive book list and book notes views. */
+/** Compact dropdown sorter shared by archive and reading-import views. */
 export default function SortMenu<T extends string>({
   value,
   options,
@@ -59,9 +59,9 @@ export default function SortMenu<T extends string>({
         aria-expanded={menu !== null}
         title={label}
         className={cn(
-          'flex items-center justify-between gap-2 transition-colors',
+          'flex items-center justify-between gap-1.5 transition-colors',
           triggerClassName ??
-            'w-[160px] rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700 hover:border-stone-300 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:hover:border-stone-600',
+            'w-[160px] gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700 hover:border-stone-300 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:hover:border-stone-600',
         )}
       >
         <span className="min-w-0 truncate">{active.label}</span>

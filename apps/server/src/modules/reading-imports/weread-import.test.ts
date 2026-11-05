@@ -164,6 +164,7 @@ describe('weread import fidelity', () => {
           }
         case '/shelf/sync':
           return { books: [
+            { bookId: 'book-1', title: '第一本', readUpdateTime: 456 },
             { bookId: 'shelf-1', title: '读完了', finishReading: 1 },
             { bookId: 'shelf-2', title: '还在读', finishReading: 0 },
           ] }
@@ -176,6 +177,7 @@ describe('weread import fidelity', () => {
 
     expect(gateway).toHaveBeenCalledTimes(3)
     expect(list.books).toHaveLength(103)
+    expect(list.books[0]).toMatchObject({ lastReadAt: 456000, lastNoteAt: 100000 })
     expect(list.books.map((book) => book.sourceBookId)).toContain('b101')
     expect(list.books.map((book) => book.sourceBookId)).toContain('shelf-2')
     // noteCount counts highlights, reviewCount counts ideas: 2 + 1 = 3 records.

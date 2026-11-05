@@ -24,6 +24,7 @@ import { getUserErrorMessage } from '@/lib/error-message'
 import { useToastStore } from '@/stores/toast.store'
 import { cn } from '@/lib/utils'
 
+import SortMenu from './SortMenu'
 import WereadWebLoginControls from './WereadWebLoginControls'
 
 interface ReadingImportDialogProps {
@@ -45,6 +46,24 @@ const SCOPES: Array<{ value: ReadingImportScope; labelKey: string; fallback: str
 
 type BookFilter = 'all' | ReadingImportBookStatus
 type WereadChannel = 'skill' | 'web'
+type SortField = 'lastReadAt' | 'lastNoteAt' | 'sortNoteCount' | 'title'
+type SortPreference = { field: SortField; direction: 'asc' | 'desc' }
+const SORT_OPTIONS: Array<{ field: SortField; labelKey: string; fallback: string }> = [
+  { field: 'lastReadAt', labelKey: 'readingImport.sortRecentRead', fallback: '最近阅读' },
+  { field: 'lastNoteAt', labelKey: 'readingImport.sortRecentNote', fallback: '最近笔记' },
+  { field: 'sortNoteCount', labelKey: 'readingImport.sortNoteCount', fallback: '笔记数量' },
+  { field: 'title', labelKey: 'readingImport.sortTitle', fallback: '书名' },
+]
+
+function readSortPreference(channel: string): SortPreference {
+  try {
+    const saved = JSON.parse(localStorage.getItem(`bd-reading-import-sort-${channel}`) ?? 'null')
+    if (saved && ['lastReadAt', 'lastNoteAt', 'sortNoteCount', 'title'].includes(saved.field) && ['asc', 'desc'].includes(saved.direction)) return saved
+  } catch {
+    // Ignore invalid or unavailable storage.
+  }
+  return { field: 'lastReadAt', direction: 'desc' }
+}
 
 const SOURCE_STORAGE_KEY = 'bd-reading-import-source'
 const WEREAD_CHANNEL_STORAGE_KEY = 'bd-reading-import-weread-channel'
@@ -118,11 +137,6 @@ function ImportBookCover({
   const [isLoaded, setIsLoaded] = useState(false)
   const resolved = resolveCoverUrl(coverUrl)
 
-  useEffect(() => {
-    setHasError(false)
-    setIsLoaded(false)
-  }, [coverUrl])
-
   return (
     <div
       className="relative flex h-11 w-8 shrink-0 items-center justify-center overflow-hidden rounded border border-stone-200/80 bg-stone-100 text-stone-400 shadow-2xs dark:border-stone-700/80 dark:bg-stone-800 dark:text-stone-500"
@@ -148,6 +162,9 @@ function ImportBookCover({
 
       {resolved && !hasError && (
         <img
+          ref={(img) => {
+            if (img?.complete && img.naturalWidth > 0 && !isLoaded) setIsLoaded(true)
+          }}
           src={resolved}
           alt={title}
           loading="lazy"
@@ -195,6 +212,15 @@ export default function ReadingImportDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState<BookFilter>('all')
   const [bookQuery, setBookQuery] = useState('')
+  const [sortPreferences, setSortPreferences] = useState(() => ({
+    skill: readSortPreference('skill'), web: readSortPreference('web'), legado: readSortPreference('legado'),
+  }))
+  const sortChannel = source === 'legado' ? 'legado' : wereadChannel
+  const sortPreference = sortPreferences[sortChannel]
+  function changeSort(next: SortPreference) {
+    setSortPreferences((previous) => ({ ...previous, [sortChannel]: next }))
+    try { localStorage.setItem(`bd-reading-import-sort-${sortChannel}`, JSON.stringify(next)) } catch { /* Storage may be unavailable. */ }
+  }
   const [searchOpen, setSearchOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const lastClickedKeyRef = useRef<string | null>(null)
@@ -451,8 +477,16 @@ export default function ReadingImportDialog({
         item.title.toLowerCase().includes(query) || (item.author && item.author.toLowerCase().includes(query)),
       )
     }
-    return listItems
-  }, [items, filter, bookQuery])
+    return [...listItems].sort((a, b) => {
+      const left = a[sortPreference.field]
+      const right = b[sortPreference.field]
+      if (left == null || right == null) return left == null ? (right == null ? 0 : 1) : -1
+      const comparison = typeof left === 'string' && typeof right === 'string'
+        ? left.localeCompare(right, 'zh-CN')
+        : Number(left) - Number(right)
+      return comparison * (sortPreference.direction === 'asc' ? 1 : -1)
+    })
+  }, [items, filter, bookQuery, sortPreference])
 
   const picked = useMemo(() => items.filter((item) => selected.has(item.bookKey)), [items, selected])
   const totals = picked.reduce(
@@ -873,42 +907,32 @@ export default function ReadingImportDialog({
                 })}
               </div>
 
-              {/* 右上角搜索图标按钮与全选 Checkbox */}
-              <div className="flex items-center gap-2.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchOpen((prev) => {
-                      const next = !prev
-                      if (next) {
-                        setTimeout(() => searchInputRef.current?.focus(), 50)
-                      } else {
-                        setBookQuery('')
-                      }
-                      return next
-                    })
-                  }}
-                  className={cn(
-                    'flex h-7 w-7 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100 cursor-pointer',
-                    (searchOpen || bookQuery) && 'bg-stone-200/80 text-stone-900 dark:bg-stone-700 dark:text-stone-100',
-                  )}
-                  aria-label={_('readingImport.toggleSearch', { defaultValue: '搜索' })}
-                  title={_('readingImport.toggleSearch', { defaultValue: '搜索' })}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="11" r="8" />
-                    <path d="m21 21-4.3-4.3" />
-                  </svg>
-                </button>
-
-                <Checkbox
-                  checked={allVisiblePicked}
-                  disabled={selectableVisible.length === 0}
-                  onChange={(checked) => toggleVisible(checked)}
-                  label={<span className="whitespace-nowrap">{_('readingImport.selectAll', { defaultValue: '全选' })}</span>}
-                  className="shrink-0 whitespace-nowrap"
-                />
-              </div>
+              {/* 右上角搜索图标按钮 */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchOpen((prev) => {
+                    const next = !prev
+                    if (next) {
+                      setTimeout(() => searchInputRef.current?.focus(), 50)
+                    } else {
+                      setBookQuery('')
+                    }
+                    return next
+                  })
+                }}
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100 cursor-pointer shrink-0',
+                  (searchOpen || bookQuery) && 'bg-stone-200/80 text-stone-900 dark:bg-stone-700 dark:text-stone-100',
+                )}
+                aria-label={_('readingImport.toggleSearch', { defaultValue: '搜索' })}
+                title={_('readingImport.toggleSearch', { defaultValue: '搜索' })}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
+              </button>
             </div>
 
             {/* 展开式搜索框 */}
@@ -941,6 +965,67 @@ export default function ReadingImportDialog({
                 </div>
               </div>
             )}
+
+            {/* 列表二级操作栏：全选与排序控件 */}
+            <div className="shrink-0 flex items-center justify-between gap-2 border-b border-stone-200/90 bg-stone-50/60 px-3 py-1.5 dark:border-stone-800 dark:bg-stone-900/30">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={allVisiblePicked}
+                  disabled={selectableVisible.length === 0}
+                  onChange={(checked) => toggleVisible(checked)}
+                  label={<span className="text-xs text-stone-700 dark:text-stone-300 whitespace-nowrap">{_('readingImport.selectAll', { defaultValue: '全选' })}</span>}
+                  className="shrink-0 whitespace-nowrap"
+                />
+              </div>
+
+              {/* 右侧：排序组合控件（解法 1：分离维度与升降序） */}
+              <div className="inline-flex items-center rounded-lg border border-stone-200/90 bg-white p-0.5 shadow-2xs dark:border-stone-700/80 dark:bg-stone-800/90">
+                <SortMenu
+                  value={sortPreference.field}
+                  options={SORT_OPTIONS.map(({ field, labelKey, fallback }) => ({
+                    value: field,
+                    label: _(labelKey, { defaultValue: fallback }),
+                  }))}
+                  onChange={(field) => {
+                    if (field === sortPreference.field) return
+                    changeSort({
+                      field,
+                      direction: field === 'title' ? 'asc' : 'desc',
+                    })
+                  }}
+                  label={_('readingImport.sort', { defaultValue: '排序' })}
+                  menuWidth={112}
+                  triggerClassName="h-6 gap-1 rounded px-2 text-xs font-medium text-stone-600 hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100"
+                />
+                <div className="h-3.5 w-px bg-stone-200 dark:bg-stone-700" />
+                <button
+                  type="button"
+                  onClick={() => changeSort({
+                    ...sortPreference,
+                    direction: sortPreference.direction === 'asc' ? 'desc' : 'asc',
+                  })}
+                  aria-label={sortPreference.direction === 'asc'
+                    ? _('readingImport.sortAscending', { defaultValue: '正序' })
+                    : _('readingImport.sortDescending', { defaultValue: '倒序' })}
+                  title={sortPreference.direction === 'asc'
+                    ? _('readingImport.sortAscending', { defaultValue: '正序' })
+                    : _('readingImport.sortDescending', { defaultValue: '倒序' })}
+                  className="flex h-6 w-6 items-center justify-center rounded text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100 cursor-pointer transition-colors"
+                >
+                  {sortPreference.direction === 'asc' ? (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m5 12 7-7 7 7" />
+                      <path d="M12 19V5" />
+                    </svg>
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m19 12-7 7-7-7" />
+                      <path d="M12 5v14" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
 
             {/* 书籍列表（严格内部滚动，不撑开弹窗外层） */}
             <ul className="flex-1 min-h-0 overflow-y-auto divide-y divide-stone-100 dark:divide-stone-800/60 [scrollbar-gutter:stable] custom-scrollbar">
@@ -978,7 +1063,11 @@ export default function ReadingImportDialog({
                   >
                     {/* 书籍封面缩略图（选中时带有显眼徽标） */}
                     <div className="relative shrink-0">
-                      <ImportBookCover coverUrl={item.coverUrl} title={item.title} />
+                      <ImportBookCover
+                        key={`${item.coverUrl}:${sortPreference.field}:${sortPreference.direction}`}
+                        coverUrl={item.coverUrl}
+                        title={item.title}
+                      />
                       {isSelected && (
                         <span className="absolute -left-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-stone-900 text-white shadow dark:bg-white dark:text-stone-900">
                           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">

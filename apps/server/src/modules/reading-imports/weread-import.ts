@@ -26,6 +26,8 @@ interface WereadBookInfo {
   author: string
   cover: string | null
   format?: string
+  lastReadAt?: number | null
+  lastNoteAt?: number | null
 }
 
 interface WereadSnapshot {
@@ -426,6 +428,8 @@ export async function fetchWereadBookListUsing(scope: ImportScope, request: Were
       // Highlights and ideas are the two kinds this product imports; a notebook
       // entry with neither is a shelf marker, not a note source.
       const notes = (int(row.noteCount) ?? 0) + (int(row.reviewCount) ?? 0)
+      const noteTime = int(row.sort)
+      info.lastNoteAt = notes > 0 && noteTime !== null && noteTime > 0 ? noteTime * 1000 : null
       infoById.set(info.bookId, info)
       counts.set(info.bookId, { notes, reviews: 0 })
     }
@@ -440,7 +444,7 @@ export async function fetchWereadBookListUsing(scope: ImportScope, request: Were
   if (reportedNotebookCount !== null && counts.size < reportedNotebookCount) bump('notebook-pagination-incomplete')
 
   // Shelf books are candidates even when they have no note notebook.
-  if (scope === 'all') {
+  {
     const shelf = await call(budget, request, { api_name: '/shelf/sync' })
     if (!shelf) bump('shelf-fetch-failed')
     else {
@@ -448,8 +452,11 @@ export async function fetchWereadBookListUsing(scope: ImportScope, request: Were
         if (!row || typeof row !== 'object') continue
         const info = readBookInfo(row)
         if (!info) continue
+        const readTime = int((row as Record<string, unknown>).readUpdateTime)
+        info.lastReadAt = readTime !== null && readTime > 0 ? readTime * 1000 : null
         const existing = infoById.get(info.bookId)
-        if (existing) { existing.format = existing.format ?? info.format; existing.cover = existing.cover ?? info.cover; continue }
+        if (existing) { existing.format = existing.format ?? info.format; existing.cover = existing.cover ?? info.cover; existing.lastReadAt = info.lastReadAt; continue }
+        if (scope !== 'all') continue
         infoById.set(info.bookId, info)
         counts.set(info.bookId, { notes: 0, reviews: 0 })
       }
@@ -467,6 +474,8 @@ export async function fetchWereadBookListUsing(scope: ImportScope, request: Were
       coverUrl: info.cover,
       finished: null,
       meta: info.format ? { format: info.format } : {},
+      lastReadAt: info.lastReadAt ?? null,
+      lastNoteAt: info.lastNoteAt ?? null,
     })
     listCounts[bookId] = count
   }

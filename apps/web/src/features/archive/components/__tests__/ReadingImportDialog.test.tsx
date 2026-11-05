@@ -87,6 +87,80 @@ describe('ReadingImportDialog', () => {
     mockPosts()
   })
 
+  it('retries failed covers after sorting and keeps covers paired with their books', async () => {
+    const item = list.items[0]!
+    mockPosts({ books: { ...list, items: [
+      { ...item, bookKey: 'a', title: 'Alpha', coverUrl: 'https://example.com/alpha.jpg', lastReadAt: 100 },
+      { ...item, bookKey: 'b', title: 'Beta', coverUrl: 'https://example.com/beta.jpg', lastReadAt: 200 },
+    ] } })
+    render(<ReadingImportDialog onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.preview' }))
+    const alpha = await screen.findByRole('img', { name: 'Alpha' })
+    fireEvent.error(alpha)
+    expect(screen.queryByRole('img', { name: 'Alpha' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.sortRecentRead' }))
+    expect(screen.getByRole('menu').parentElement).toHaveStyle({ width: '112px' })
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.sortDescending' }))
+    const covers = screen.getAllByRole('img')
+    expect(covers.map((img) => [img.getAttribute('alt'), img.getAttribute('src')])).toEqual([
+      ['Alpha', 'https://example.com/alpha.jpg'],
+      ['Beta', 'https://example.com/beta.jpg'],
+    ])
+    fireEvent.load(covers[0]!)
+    expect(covers[0]).toHaveClass('opacity-100')
+  })
+
+  it('sorts in both directions, keeps missing times last, and remembers each channel separately', async () => {
+    const item = list.items[0]!
+    mockPosts({ books: { ...list, items: [
+      { ...item, bookKey: 'a', title: 'Alpha', lastReadAt: 100, lastNoteAt: 300, sortNoteCount: 1 },
+      { ...item, bookKey: 'b', title: 'Beta', lastReadAt: 200, lastNoteAt: 100, sortNoteCount: 3 },
+      { ...item, bookKey: 'c', title: 'Missing', lastReadAt: null, lastNoteAt: null, sortNoteCount: 0 },
+    ] } })
+    const view = render(<ReadingImportDialog onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.preview' }))
+    await screen.findByLabelText('Alpha')
+    const order = () => screen.getAllByRole('button').filter((element) => element.hasAttribute('aria-selected')).map((element) => element.getAttribute('aria-label'))
+    const pickField = (currentLabel: string, nextLabel: string) => {
+      fireEvent.click(screen.getByRole('button', { name: currentLabel }))
+      fireEvent.click(screen.getByRole('menuitemradio', { name: nextLabel }))
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    }
+    expect(order()).toEqual(['Beta', 'Alpha', 'Missing'])
+    expect(screen.queryByRole('menuitemradio')).not.toBeInTheDocument()
+
+    // Toggle direction to ascending
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.sortDescending' }))
+    expect(order()).toEqual(['Alpha', 'Beta', 'Missing'])
+
+    // Toggle direction back to descending
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.sortAscending' }))
+    expect(order()).toEqual(['Beta', 'Alpha', 'Missing'])
+
+    // Switch field to recent notes (defaults to desc)
+    pickField('readingImport.sortRecentRead', 'readingImport.sortRecentNote')
+    expect(order()).toEqual(['Alpha', 'Beta', 'Missing'])
+
+    // Switch field to title (defaults to asc)
+    pickField('readingImport.sortRecentNote', 'readingImport.sortTitle')
+    expect(order()).toEqual(['Alpha', 'Beta', 'Missing'])
+
+    // Toggle title direction to descending
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.sortAscending' }))
+    expect(order()).toEqual(['Missing', 'Beta', 'Alpha'])
+
+    // Switch field to note count (defaults to desc)
+    pickField('readingImport.sortTitle', 'readingImport.sortNoteCount')
+    expect(order()).toEqual(['Beta', 'Alpha', 'Missing'])
+    expect(JSON.parse(localStorage.getItem('bd-reading-import-sort-skill')!)).toEqual({ field: 'sortNoteCount', direction: 'desc' })
+    view.unmount()
+    localStorage.setItem('bd-reading-import-weread-channel', 'web')
+    render(<ReadingImportDialog onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.preview' }))
+    await screen.findByLabelText('Alpha')
+    expect(screen.getByRole('button', { name: 'readingImport.sortRecentRead' })).toHaveAttribute('aria-haspopup', 'menu')
+  })
+
   it('stays idle until the reader explicitly requests the book list', async () => {
     render(<ReadingImportDialog onClose={vi.fn()} />)
 

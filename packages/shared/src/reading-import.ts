@@ -74,6 +74,9 @@ export interface ReadingImportBookItem {
   notes: number
   reviews: number
   durationFacts: number
+  lastReadAt: number | null
+  lastNoteAt: number | null
+  sortNoteCount: number
   /** False when the selected scope leaves nothing to import for this book. */
   selectable: boolean
 }
