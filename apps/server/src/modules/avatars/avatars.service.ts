@@ -1,4 +1,6 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
+import { libraries } from '../../db/schema'
+import { ensurePrivateLibrary } from '../libraries/library-access'
 import sharp from 'sharp'
 
 import type { AccountRes } from '@bookdock/shared'
@@ -78,7 +80,13 @@ export async function generateAvatarThumbnail(buffer: Buffer): Promise<Buffer | 
 }
 
 function toAccountRes(row: typeof users.$inferSelect): AccountRes {
-  return { id: row.id, username: row.username, role: isInstanceOwner(row.id) ? 'owner' : 'member', avatarKey: row.avatarKey }
+  const db = getDb()
+  const privateLib = db.select({ id: libraries.id })
+    .from(libraries)
+    .where(and(eq(libraries.userId, row.id), eq(libraries.type, 'private')))
+    .get()
+  const privateLibraryId = privateLib?.id ?? ensurePrivateLibrary(db, row.id)
+  return { id: row.id, username: row.username, role: isInstanceOwner(row.id) ? 'owner' : 'member', avatarKey: row.avatarKey, privateLibraryId }
 }
 
 // Blobs are content-hash addressed and can be shared across users; delete the

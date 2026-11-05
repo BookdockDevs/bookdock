@@ -72,7 +72,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
 
   const { tags: memTags } = useBookMembership(book?.id ?? null, { tags: !detail?.tagIds })
   const { data: librariesData } = useLibraries()
-  const privateLibraryId = librariesData?.data.find((library) => library.type === 'private')?.id ?? null
+  const privateLibraryId = user?.privateLibraryId ?? librariesData?.data.find((library) => library.type === 'private')?.id ?? null
   const categoriesData = useLibraryCategories(privateLibraryId)
   const { data: tagsData } = useTags()
 

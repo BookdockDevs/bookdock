@@ -224,6 +224,7 @@ export interface LoginRes {
     username: string
     role: string
     avatarKey: string | null
+    privateLibraryId?: string
   }
 }
 
@@ -238,6 +239,7 @@ export interface SetupRes {
     username: string
     role: string
     avatarKey: string | null
+    privateLibraryId?: string
   }
 }
 
@@ -253,6 +255,7 @@ export interface AuthenticatedMeRes {
   role: string
   /** Content-hash addressed avatar blob key; the client builds the file URL as `/api/v1/avatars/<avatarKey>` */
   avatarKey: string | null
+  privateLibraryId?: string
   /** False for an authenticated account. */
   guest?: false
 }
@@ -276,6 +279,7 @@ export interface AccountRes {
   username: string
   role: string
   avatarKey: string | null
+  privateLibraryId?: string
 }
 
 export interface InstanceInfoRes {
@@ -306,6 +310,7 @@ export interface RegisterRes {
     username: string
     role: string
     avatarKey: string | null
+    privateLibraryId?: string
   }
 }
 

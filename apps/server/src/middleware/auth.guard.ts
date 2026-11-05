@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { Context, MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
 
@@ -6,7 +6,8 @@ import { requiredPermissionFor } from '@bookdock/shared'
 import type { AccessTokenPermission } from '@bookdock/shared'
 
 import { getDb } from '../db/client'
-import { users } from '../db/schema'
+import { libraries, users } from '../db/schema'
+import { ensurePrivateLibrary } from '../modules/libraries/library-access'
 import { getInstanceSettings, invalidateSessionCache, isInstanceOwner, refreshSessionIfNeeded, resetInstanceCache, resolveSession, revokeSession } from '../modules/auth/auth.service'
 import { resolveLegadoAccessKey } from '../modules/books/legado-access.service'
 import { resolveAccessToken } from '../modules/tokens/tokens.service'
@@ -18,6 +19,7 @@ export interface AuthUser {
   username: string
   role: 'owner' | 'member'
   avatarKey: string | null
+  privateLibraryId?: string
 }
 
 declare module 'hono' {
@@ -89,7 +91,13 @@ function getFreshUser(userId: string): CachedUser | null {
     userCache.delete(userId)
     return null
   }
-  const user: CachedUser = { role: isInstanceOwner(row.id) ? 'owner' : 'member', id: row.id, username: row.username, disabled: row.disabled === 1, avatarKey: row.avatarKey }
+  const privateLib = db
+    .select({ id: libraries.id })
+    .from(libraries)
+    .where(and(eq(libraries.userId, row.id), eq(libraries.type, 'private')))
+    .get()
+  const privateLibraryId = privateLib?.id ?? ensurePrivateLibrary(db, row.id)
+  const user: CachedUser = { role: isInstanceOwner(row.id) ? 'owner' : 'member', id: row.id, username: row.username, disabled: row.disabled === 1, avatarKey: row.avatarKey, privateLibraryId }
   userCache.set(userId, { user, at: Date.now() })
   return user
 }
@@ -153,7 +161,7 @@ export function authGuard(): MiddlewareHandler {
           const user = getFreshUser(accessKey.userId)
           if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired Legado access key' } }, 401)
           if (user.disabled) return c.json({ error: { code: 'ACCOUNT_DISABLED', message: 'Account is disabled' } }, 403)
-          c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey })
+          c.set('user', { id: user.id, username: user.username, role: user.role, avatarKey: user.avatarKey, privateLibraryId: user.privateLibraryId })
           c.set('legadoAccessKey', true)
           c.set('legadoToken', token)
           c.set('actorRole', user.role)

@@ -12,6 +12,7 @@ export interface AuthUser {
   role: string
   /** Content-hash addressed avatar key; see avatarUrl() in lib/avatar */
   avatarKey?: string | null
+  privateLibraryId?: string
   createdAt?: number
 }
 

@@ -11,11 +11,13 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- User authentication and profile responses (`/auth/me`, login, setup, register, account update) now include `privateLibraryId`, allowing client applications to resolve personal library taxonomy immediately on mount without waiting for the full libraries list.
 - Password and secret inputs across account forms, library dialogs, and integration settings now default to hidden, with independent, keyboard-accessible show/hide controls and consistent validation and submission feedback. Password length errors appear after leaving the field or submitting, without a persistent length hint.
 - WeRead Web sign-in shows a clear signed-out status and changes the sign-in button to "Generate a new QR code" once a QR challenge exists, including after it expires.
 
 ### Fixed
 
+- Fixed a momentary flash of the "No categories yet" empty state in the sidebar when opening the homepage with the category panel active. Category queries now initiate concurrently on mount alongside shelves and tags, and the sidebar guards against rendering empty states before taxonomy queries have resolved.
 - User avatars show a neutral circle while loading and a display-name initial when absent or unavailable, preventing flashes of image alternative text. Signing in now preserves avatar information immediately instead of briefly showing an initial before the profile refreshes.
 - Failed administrator account creation and password resets now keep the dialog and entered values for retry instead of closing immediately; reopening a closed dialog clears its password draft and resets visibility.
 - Reading import covers display correctly when already cached and retry failed images after sorting while staying paired with their books.
@@ -1069,11 +1071,13 @@ All notable changes to Bookdock are documented here.
 
 #### 优化
 
+- 用户认证与账号会话信息（`/auth/me`、登录、初始化、注册、资料更新）新增携带 `privateLibraryId`（私人书库 ID），前端页面在挂载第 1 帧即可同步就绪，消除了以往必须等待书库列表返回才能发起分类请求的网络瀑布流。
 - 统一账号表单、书库弹窗与集成设置中的密码及密钥输入交互：默认隐藏，支持独立显示／隐藏与键盘操作，并统一校验及提交反馈。密码长度错误仅在失焦或提交校验不通过时提示，不再显示常驻长度说明。
 - 微信读书 Web 登录区域明确显示未登录状态；生成二维码后，登录按钮改为「重新生成二维码」，二维码过期后仍可直接重新生成。
 
 #### 修复
 
+- 修复首页侧栏停留在「分类」面板时在页面加载过程中短暂闪现「暂无分类」空状态的问题；分类请求现已在挂载时与书架、标签完全并发发起，侧栏同时增加加载守卫，杜绝在分类查询完成前误判为空状态。
 - 用户头像加载中统一显示中性圆形占位，未设置头像或加载失败时显示名称首字，避免闪出图片替代文字；登录后立即保留头像信息，避免资料刷新前短暂显示首字。
 - 管理员创建账号或重置密码失败时保留弹窗和已输入内容，方便修改重试；关闭后重新打开会清空密码草稿并恢复隐藏状态。
 - 修复阅读导入列表中已缓存封面的显示，并在排序后重试加载失败的封面，保持封面与书籍正确对应。

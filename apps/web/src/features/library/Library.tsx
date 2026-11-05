@@ -148,7 +148,7 @@ export default function Library() {
   const privateLibraryName = isGuest
     ? _('library.allBooks')
     : (libraries.find((library) => library.type === 'private')?.name || cachedLibraryNames.find((library) => library.type === 'private')?.name || (librariesQuery.isError && !librariesData ? '—' : _('library.myLibrary')))
-  const privateLibraryId = libraries.find((library) => library.type === 'private')?.id ?? null
+  const privateLibraryId = user?.privateLibraryId ?? libraries.find((library) => library.type === 'private')?.id ?? null
   const privateLibraryNameLoading = !isGuest && !librariesData && !librariesQuery.isError && !cachedLibraryNames.some((library) => library.type === 'private')
   const privateLibraryNameFailed = !isGuest && !requestedLibraryId && !librariesData && librariesQuery.isError && !cachedLibraryNames.some((library) => library.type === 'private')
   const privateLibrariesFailed = !isGuest && !requestedLibraryId && !librariesData && librariesQuery.isError

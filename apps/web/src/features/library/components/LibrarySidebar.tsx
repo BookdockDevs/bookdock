@@ -192,7 +192,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     ),
     [inLibrary, libraryTagsQuery.data, tagsData, tagOrderOverride, libraryPrefs?.tagSort],
   )
-  const taxonomyLoading = panel === 'categories' ? categoriesQuery.isLoading : panel === 'shelves' ? shelvesLoading : (inLibrary ? libraryTagsQuery.isLoading : tagsLoading)
+  const taxonomyLoading = panel === 'categories' ? (!taxonomyLibraryId ? !librariesResolved : categoriesQuery.isLoading) : panel === 'shelves' ? shelvesLoading : (inLibrary ? (!activeLibraryId || libraryTagsQuery.isLoading) : tagsLoading)
   const revealHidden = useUiStore((s) => s.revealHidden)
   const trashEnabled = useTrashEnabled({ enabled: !readOnly && !inLibrary })
   const { data: trashData } = useBooks({
@@ -572,7 +572,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
                   />
                 )
               })}
-              {shelves.length === 0 && !showUncategorized && !(panel === 'categories' ? categoriesQuery.isError && !categoriesQuery.data : shelvesError && !shelvesData) && (
+              {shelves.length === 0 && !showUncategorized && (panel === 'categories' ? (!taxonomyLibraryId ? librariesResolved : (categoriesQuery.isSuccess || Boolean(categoriesQuery.data))) : panel === 'shelves' ? Boolean(shelvesData) : true) && !(panel === 'categories' ? categoriesQuery.isError && !categoriesQuery.data : shelvesError && !shelvesData) && (
                 <TaxonomyEmptyState type={panel} />
               )}
             </SortableContext>

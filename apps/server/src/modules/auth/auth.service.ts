@@ -1,4 +1,5 @@
 import { and, eq, lt } from 'drizzle-orm'
+import { ensurePrivateLibrary } from '../libraries/library-access'
 
 import { normalizeUsername } from '@bookdock/shared'
 
@@ -216,8 +217,21 @@ export function revokeUserSessions(userId: string): void {
   invalidateUserCache(userId)
 }
 
+function getPrivateLibraryId(userId: string): string {
+  const db = getDb()
+  const row = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
+  return row?.id ?? ensurePrivateLibrary(db, userId)
+}
+
 function toAuthPayload(user: { id: string; username: string; avatarKey: string | null }) {
-  return { id: user.id, username: user.username, role: isInstanceOwner(user.id) ? 'owner' : 'member', avatarKey: user.avatarKey }
+  return {
+    id: user.id,
+    username: user.username,
+    role: isInstanceOwner(user.id) ? 'owner' : 'member',
+    avatarKey: user.avatarKey,
+    privateLibraryId: getPrivateLibraryId(user.id),
+  }
 }
 
 function createPrivateLibrary(tx: Pick<ReturnType<typeof getDb>, 'insert'>, userId: string) {
@@ -315,7 +329,13 @@ export function changeUsername(userId: string, username: string): AccountRes {
   invalidateUserCache(userId)
   const row = db.select().from(users).where(eq(users.id, userId)).get()
   if (!row) throw new AppError('USER_NOT_FOUND')
-  return { id: row.id, username: row.username, role: isInstanceOwner(row.id) ? 'owner' : 'member', avatarKey: row.avatarKey }
+  return {
+    id: row.id,
+    username: row.username,
+    role: isInstanceOwner(row.id) ? 'owner' : 'member',
+    avatarKey: row.avatarKey,
+    privateLibraryId: getPrivateLibraryId(row.id),
+  }
 }
 
 export function updateBio(userId: string, bio: string) {
