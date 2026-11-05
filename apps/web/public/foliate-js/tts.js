@@ -671,7 +671,7 @@ export class TTS {
     from(range, { highlight = true } = {}) {
         if (this.#compat) {
             const entry = this.#compatList.find(range_ =>
-                range.compareBoundaryPoints(Range.END_TO_START, range_.range) <= 0)
+                range.compareBoundaryPoints(Range.END_TO_START, range_.range) < 0)
             return this.#compatResult(entry, { highlight })?.text
         }
         this.#lastMark = null

@@ -3,6 +3,33 @@ import { vi } from 'vitest'
 import { TTS } from '../../public/foliate-js/tts.js'
 
 describe('foliate TTS positioning', () => {
+  it.each([0, 1])('starts from the selected sentence at offset %i and continues forward', (offset) => {
+    const doc = document.implementation.createHTMLDocument()
+    doc.body.innerHTML = '<p>机器人检查齿轮，记录温度；随后关闭舱门，完成准备。飞船驶离港口，进入预定航线。导航系统开始工作。</p>'
+    const textNode = doc.querySelector('p')!.firstChild!
+    const start = textNode.textContent!.indexOf('飞船驶离') + offset
+    const range = doc.createRange()
+    range.setStart(textNode, start)
+    range.setEnd(textNode, start + 3)
+
+    const tts = new TTS(doc, undefined, () => undefined, (range: Range) => range.toString())
+    expect(tts.from(range, { highlight: false })).toBe('飞船驶离港口，进入预定航线。')
+    expect(tts.currentDetail()?.cfi).toBe('飞船驶离港口，进入预定航线。')
+    expect(tts.collectDetails(1).map((detail) => detail.text)).toEqual(['导航系统开始工作。'])
+    expect(tts.next()).toBe('导航系统开始工作。')
+  })
+
+  it.each([true, false])('positions a selection across inline elements (collapsed: %s)', (collapsed) => {
+    const doc = document.implementation.createHTMLDocument()
+    doc.body.innerHTML = '<p>机器人完成准备。<span>飞船驶离</span>港口，进入航线。导航系统开始工作。</p>'
+    const range = doc.createRange()
+    range.setStart(doc.querySelector('span')!.firstChild!, 0)
+    if (!collapsed) range.setEnd(doc.querySelector('p')!.lastChild!, 4)
+
+    const tts = new TTS(doc, undefined, () => undefined, () => '')
+    expect(tts.from(range, { highlight: false })).toBe('飞船驶离港口，进入航线。')
+  })
+
   it('starts from the sentence at the visible range start', () => {
     const doc = document.implementation.createHTMLDocument()
     doc.body.innerHTML = '<p>“哈？”樱岛麻衣皱眉，语气冷淡下来，“那你跑到这地方来干什么？旅游？” “朗读？” 后面的内容。</p>'
