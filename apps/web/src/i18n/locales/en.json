@@ -2281,7 +2281,14 @@
     "storageBackendSaveFailed": "Failed to save storage settings",
     "storagePresetRecommended": "Recommended",
     "storagePresetCustom": "Custom",
-    "restoreDefaults": "Restore defaults"
+    "restoreDefaults": "Restore defaults",
+    "groupGeneral": "General",
+    "groupLibrary": "Library",
+    "groupReading": "Reading",
+    "prefSelectionToolbar": "Selection Toolbar",
+    "prefSelectionToolbarHint": "Drag icons to reorder, click to toggle visibility",
+    "selectionToolbarAtLeastOne": "Keep at least one action visible",
+    "resetDefault": "Reset"
   },
   "admin": {
     "instanceSettings": "Access Control",

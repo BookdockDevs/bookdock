@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { FontPreferences, TtsEngine } from '@bookdock/shared'
+import type { FontPreferences, TtsEngine, SelectionToolbarActionKey } from '@bookdock/shared'
+import { DEFAULT_SELECTION_TOOLBAR_ORDER, SELECTION_TOOLBAR_ACTION_KEYS } from '@bookdock/shared'
 import type { AutoReadingMode, FontFamily, ReadingMode, IdeaDisplayMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField, NavTab, ParagraphStyle } from '../features/reader/types'
 import {
   isReadingThemeMode,
@@ -193,6 +194,11 @@ interface UiState {
   setStatsModuleOrder: (order: StatsModuleKey[]) => void
   toggleStatsModuleVisible: (key: StatsModuleKey) => void
   resetStatsModules: () => void
+  selectionToolbarOrder: SelectionToolbarActionKey[]
+  selectionToolbarHidden: SelectionToolbarActionKey[]
+  setSelectionToolbarOrder: (order: SelectionToolbarActionKey[]) => void
+  toggleSelectionToolbarActionVisible: (key: SelectionToolbarActionKey) => void
+  resetSelectionToolbar: () => void
 
   // Named reading-setting profiles (阅读设置预设): serialized JSON of the
   // multi-config blob (`{ global, presets[] }`). The blob syncs across
@@ -360,6 +366,42 @@ function getInitialListInfoItems(): ListInfoItem[] {
   }
 }
 
+function getInitialSelectionToolbarOrder(): SelectionToolbarActionKey[] {
+  if (typeof window === 'undefined') return [...DEFAULT_SELECTION_TOOLBAR_ORDER]
+  try {
+    const raw = localStorage.getItem('bd-selection-toolbar-order')
+    if (!raw) return [...DEFAULT_SELECTION_TOOLBAR_ORDER]
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return [...DEFAULT_SELECTION_TOOLBAR_ORDER]
+    const valid = parsed.filter((k): k is SelectionToolbarActionKey => (SELECTION_TOOLBAR_ACTION_KEYS as readonly string[]).includes(k))
+    const missing = DEFAULT_SELECTION_TOOLBAR_ORDER.filter((k) => !valid.includes(k))
+    return [...valid, ...missing]
+  } catch {
+    return [...DEFAULT_SELECTION_TOOLBAR_ORDER]
+  }
+}
+
+function getInitialSelectionToolbarHidden(): SelectionToolbarActionKey[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem('bd-selection-toolbar-hidden')
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((k): k is SelectionToolbarActionKey => (SELECTION_TOOLBAR_ACTION_KEYS as readonly string[]).includes(k))
+  } catch {
+    return []
+  }
+}
+
+function persistSelectionToolbarOrder(order: SelectionToolbarActionKey[]) {
+  setStorage('bd-selection-toolbar-order', JSON.stringify(order))
+}
+
+function persistSelectionToolbarHidden(hidden: SelectionToolbarActionKey[]) {
+  setStorage('bd-selection-toolbar-hidden', JSON.stringify(hidden))
+}
+
 function setStorage(key: string, value: string) {
   try {
     window.localStorage.setItem(key, value)
@@ -502,6 +544,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   readingTimerMode: getInitialTimerMode(),
   statsModuleOrder: getInitialStatsModuleOrder(),
   statsHiddenModules: getInitialStatsHiddenModules(),
+  selectionToolbarOrder: getInitialSelectionToolbarOrder(),
+  selectionToolbarHidden: getInitialSelectionToolbarHidden(),
   manualTimerGraceMinutes: getInitialGraceMinutes(),
   ttsEngine: getInitial<string>('bd-tts-engine', 'system') === 'edge' ? 'edge' : getInitial<string>('bd-tts-engine', 'system') === 'service' ? 'service' : 'system',
   ttsServiceId: getInitial<string>('bd-tts-service', '') || null,
@@ -676,6 +720,27 @@ export const useUiStore = create<UiState>((set, get) => ({
     persistStatsModuleOrder(STATS_MODULE_DEFAULTS)
     persistStatsHiddenModules([])
     set({ statsModuleOrder: [...STATS_MODULE_DEFAULTS], statsHiddenModules: [] })
+  },
+  setSelectionToolbarOrder: (selectionToolbarOrder) => {
+    persistSelectionToolbarOrder(selectionToolbarOrder)
+    set({ selectionToolbarOrder })
+  },
+  toggleSelectionToolbarActionVisible: (key) => {
+    const current = get().selectionToolbarHidden
+    const isHidden = current.includes(key)
+    const all = get().selectionToolbarOrder
+    if (!isHidden) {
+      const visibleCount = all.filter((k) => !current.includes(k)).length
+      if (visibleCount <= 1) return
+    }
+    const next = isHidden ? current.filter((k) => k !== key) : [...current, key]
+    persistSelectionToolbarHidden(next)
+    set({ selectionToolbarHidden: next })
+  },
+  resetSelectionToolbar: () => {
+    persistSelectionToolbarOrder([...DEFAULT_SELECTION_TOOLBAR_ORDER])
+    persistSelectionToolbarHidden([])
+    set({ selectionToolbarOrder: [...DEFAULT_SELECTION_TOOLBAR_ORDER], selectionToolbarHidden: [] })
   },
 
   setSystemTheme: (systemTheme) => {
@@ -987,6 +1052,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     // cannot replay these defaults over the server config.
     try {
       localStorage.removeItem(PENDING_SETTINGS_STORAGE_KEY)
+      localStorage.removeItem('bd-selection-toolbar-order')
+      localStorage.removeItem('bd-selection-toolbar-hidden')
     } catch {
       // ignore localStorage errors in private/incognito modes
     }
@@ -1003,6 +1070,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       ttsAutoNext: true,
       ttsFollow: true,
       customThemes: [],
+      selectionToolbarOrder: [...DEFAULT_SELECTION_TOOLBAR_ORDER],
+      selectionToolbarHidden: [],
     })
     applyResolutionFlat()
     useProfilePrefs.getState().resetProfilePrefs()

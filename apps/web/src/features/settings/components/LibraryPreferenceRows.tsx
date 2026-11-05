@@ -206,7 +206,6 @@ export default function LibraryPreferenceRows() {
 
   return (
     <>
-      <Divider />
       <ToggleRow
         label={_('settings.prefReadingStats')}
         hint={_('settings.prefReadingStatsHint')}

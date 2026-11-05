@@ -2271,7 +2271,14 @@
     "storageBackendSaveFailed": "存储设置保存失败",
     "storagePresetRecommended": "推荐",
     "storagePresetCustom": "自定义",
-    "restoreDefaults": "恢复默认"
+    "restoreDefaults": "恢复默认",
+    "groupGeneral": "常规",
+    "groupLibrary": "书库",
+    "groupReading": "阅读",
+    "prefSelectionToolbar": "选中文本工具",
+    "prefSelectionToolbarHint": "拖拽图标排序，点击切换显隐",
+    "selectionToolbarAtLeastOne": "至少保留一个可见操作",
+    "resetDefault": "恢复默认"
   },
   "admin": {
     "instanceSettings": "访问控制",

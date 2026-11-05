@@ -18,6 +18,7 @@ import UserManagementSection from './components/UserManagementSection'
 import LibraryManagementSection from './components/LibraryManagementSection'
 import LanguageSwitcher from './components/LanguageSwitcher'
 import LibraryPreferenceRows from './components/LibraryPreferenceRows'
+import SelectionToolbarPreferenceRow from './components/SelectionToolbarPreferenceRow'
 import TrashSettingsRow from './components/TrashSettingsRow'
 import TitleSettingsRow from './components/TitleSettingsRow'
 import UploadSettingsSection from './components/UploadSettingsSection'
@@ -279,8 +280,30 @@ export default function Settings() {
                 iconBgClass="bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
                 title={_('settings.interface')}
               >
+                <div className="pt-1 pb-1">
+                  <span className="text-xs font-semibold tracking-wider text-stone-400 dark:text-stone-500">
+                    {_('settings.groupGeneral')}
+                  </span>
+                </div>
                 <LanguageSwitcher />
-                {!isGuest && <LibraryPreferenceRows />}
+                {!isGuest && (
+                  <>
+                    <div className="border-t border-stone-100 dark:border-stone-800" />
+                    <div className="pt-2.5 pb-1">
+                      <span className="text-xs font-semibold tracking-wider text-stone-400 dark:text-stone-500">
+                        {_('settings.groupLibrary')}
+                      </span>
+                    </div>
+                    <LibraryPreferenceRows />
+                  </>
+                )}
+                <div className="border-t border-stone-100 dark:border-stone-800" />
+                <div className="pt-2.5 pb-1">
+                  <span className="text-xs font-semibold tracking-wider text-stone-400 dark:text-stone-500">
+                    {_('settings.groupReading')}
+                  </span>
+                </div>
+                <SelectionToolbarPreferenceRow />
               </SettingsCard>
             </div>
           )}

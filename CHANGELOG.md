@@ -6,12 +6,14 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
+- The reader text selection toolbar can now be customized: users can reorder action icons via horizontal drag-and-drop and toggle visibility for individual tools in Interface settings, with account-level cloud synchronization across devices and one-click restore to defaults. The floating toolbar dynamically compacts its width when fewer actions are enabled.
 - Added custom MDict dictionary support (`.mdx`, `.mdd`, `.css`). Users can upload offline dictionaries in personal settings, customize dictionary order, and toggle per-dictionary automatic lookup. The reader selection toolbar features a dedicated dictionary popup supporting multi-dictionary switching, companion CSS rendering, and `.mdd` audio/image resource playback.
 - Added AI translation for selected text in the reader, with service and target language selection.
 - Reading import book lists can be sorted by recent reading activity, recent note activity, note count, or title in ascending or descending order. Sort preferences are remembered separately for WeRead Skill, WeRead Web, and Legado; books with unknown activity dates stay last in either direction.
 
 ### Changed
 
+- Reorganized the Interface settings card with concise section headers (General, Library, Reading) and locked title heights to prevent layout shifts when action toggles update.
 - Standardized the reader selection toolbar action order to Highlight → Note → Copy → Dictionary → Translate → Search → AI Chat → AI Actions → Speak → Excerpt → Replace, with unified vector icons.
 - User authentication and profile responses (`/auth/me`, login, setup, register, account update) now include `privateLibraryId`, allowing client applications to resolve personal library taxonomy immediately on mount without waiting for the full libraries list.
 - Password and secret inputs across account forms, library dialogs, and integration settings now default to hidden, with independent, keyboard-accessible show/hide controls and consistent validation and submission feedback. Password length errors appear after leaving the field or submitting, without a persistent length hint.
@@ -1069,12 +1071,14 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
+- 支持自定义阅读器选中文本工具栏：可在「设置 → 界面」中通过横向拖拽调整操作图标顺序并点击切换显隐（至少保留一项开启），配置自动跨设备云端同步；非默认状态下支持一键恢复默认。阅读器浮动气泡根据开启项自适应收缩，移动端体验更紧凑。
 - 个人设置新增自定义 MDict 词典支持（`.mdx`、`.mdd`、`.css`）：支持上传本地离线词典文件、调整词典排序与单本词典自动查词开关；阅读器划词工具栏新增「词典」查询浮窗，支持多词典快速切换、同目录伴生 CSS 样式渲染与 `.mdd` 离线词典图片／发音音频资源回放。
 - 阅读器支持选中文字进行 AI 翻译，可切换服务和目标语言。
 - 阅读导入书籍列表支持按最近阅读、最近笔记、笔记数量或书名升降序排序，并分别记住微信读书 Skill、微信读书 Web 与 Legado 的排序偏好；缺少活动时间的书籍在两个方向下均排在末尾。
 
 #### 优化
 
+- 优化「界面」设置卡片的结构层次，采用精炼双字分段（常规、书库、阅读），规整排布并锁定行高以杜绝动态按钮显隐引起的卡片高度抖动。
 - 规范阅读器划词浮动工具栏操作项排序，按用户操作频次统一调整为「划线 → 想法 → 复制 → 词典 → 翻译 → 全文搜索 → AI 对话 → AI 快捷指令 → 朗读 → 书摘卡片 → 文本替换」，并统一采用标准描边矢量图标。
 - 用户认证与账号会话信息（`/auth/me`、登录、初始化、注册、资料更新）新增携带 `privateLibraryId`（私人书库 ID），前端页面在挂载第 1 帧即可同步就绪，消除了以往必须等待书库列表返回才能发起分类请求的网络瀑布流。
 - 统一账号表单、书库弹窗与集成设置中的密码及密钥输入交互：默认隐藏，支持独立显示／隐藏与键盘操作，并统一校验及提交反馈。密码长度错误仅在失焦或提交校验不通过时提示，不再显示常驻长度说明。

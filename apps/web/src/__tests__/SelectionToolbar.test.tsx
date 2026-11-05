@@ -580,6 +580,37 @@ describe('SelectionToolbar', () => {
     })
     expect(useReaderState.getState().selection).not.toBeNull()
   })
+
+  it('respects custom action ordering and hidden actions from ui.store', () => {
+    act(() => {
+      useUiStore.setState({
+        selectionToolbarOrder: ['translate', 'dictionary', 'copy'],
+        selectionToolbarHidden: ['dictionary'],
+      })
+    })
+    setSelection()
+    render(<SelectionToolbar bookId="b1" />)
+    const transBtn = screen.getByTitle('translation.title')
+    const toolbar = transBtn.parentElement!
+    const buttons = within(toolbar).getAllByRole('button')
+    expect(buttons.map((b) => b.getAttribute('title'))).toEqual([
+      'translation.title',
+      'annotation.copy',
+    ])
+  })
+
+  it('keeps delete action available on existing highlight even if highlight action is hidden', () => {
+    annotationsData = [ANNOTATION]
+    act(() => {
+      useUiStore.setState({
+        selectionToolbarOrder: ['highlight', 'translate', 'copy'],
+        selectionToolbarHidden: ['highlight'],
+      })
+    })
+    setSelection(ANNOTATION.cfiRange)
+    render(<SelectionToolbar bookId="b1" />)
+    expect(screen.getByTitle('annotation.deleteHighlight')).toBeInTheDocument()
+  })
 })
 
 vi.mock('../features/reader/hooks/useIdeas', () => ({

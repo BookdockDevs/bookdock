@@ -28,6 +28,8 @@ const SESSION_ID = Math.random().toString(36).slice(2)
 const SETTINGS_KEYS = [
   'fontPreferences',
   'fontOrder',
+  'selectionToolbarOrder',
+  'selectionToolbarHidden',
   'coverFit',
   'readingTimerMode',
   'manualTimerGraceMinutes',
@@ -59,7 +61,9 @@ function settingsChanged(
   if (JSON.stringify(state.customThemes) !== JSON.stringify(prevState.customThemes)) return true
   if (JSON.stringify(state.fontPreferences) !== JSON.stringify(prevState.fontPreferences)) return true
   if (JSON.stringify(state.fontOrder) !== JSON.stringify(prevState.fontOrder)) return true
-  return SETTINGS_KEYS.filter((key) => key !== 'fontPreferences' && key !== 'fontOrder').some((key) => {
+  if (JSON.stringify(state.selectionToolbarOrder) !== JSON.stringify(prevState.selectionToolbarOrder)) return true
+  if (JSON.stringify(state.selectionToolbarHidden) !== JSON.stringify(prevState.selectionToolbarHidden)) return true
+  return SETTINGS_KEYS.filter((key) => key !== 'fontPreferences' && key !== 'fontOrder' && key !== 'selectionToolbarOrder' && key !== 'selectionToolbarHidden').some((key) => {
     // @ts-expect-error dynamic settings keys
     return state[key] !== prevState[key]
   })
@@ -115,6 +119,12 @@ function applySettings(settings: Partial<SettingsRes>) {
     }
     return patch
   })
+  if (Array.isArray(settings.selectionToolbarOrder)) {
+    try { localStorage.setItem('bd-selection-toolbar-order', JSON.stringify(settings.selectionToolbarOrder)) } catch { /* ignore */ }
+  }
+  if (Array.isArray(settings.selectionToolbarHidden)) {
+    try { localStorage.setItem('bd-selection-toolbar-hidden', JSON.stringify(settings.selectionToolbarHidden)) } catch { /* ignore */ }
+  }
   if (typeof settings.readingConfig === 'string') {
     try {
       localStorage.setItem('bd-reading-config', settings.readingConfig)

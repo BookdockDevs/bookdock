@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq } from '@bookdock/shared'
+import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq, SelectionToolbarActionKey } from '@bookdock/shared'
+import { DEFAULT_SELECTION_TOOLBAR_ORDER } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -69,6 +70,8 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
   const del = useDeleteAnnotation(bookId)
   const { data: annotations } = useAnnotations(bookId, { enabled: !!user })
   const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
+  const selectionToolbarOrder = useUiStore((state) => state.selectionToolbarOrder)
+  const selectionToolbarHidden = useUiStore((state) => state.selectionToolbarHidden)
   const publicIdeas = useReaderIdeas(bookId, showFriendIdeas, revisionId)
   const composer = useIdeaComposer(bookId, !!user)
   const orphanedKeys = useReaderState((state) => state.orphanedAnnotationKeys)
@@ -507,25 +510,25 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
   // Same bubble for a fresh selection and an existing annotation — once a
   // highlight exists the primary action flips from 划线 to 删除划线.
   // Grouped logically: Annotation (highlight/note/copy) -> Lookup (dict/trans/search) -> AI & Audio -> Output
-  const actions = [
-    target
+  const actionMap: Record<SelectionToolbarActionKey, { key: string; label: string; icon: React.ReactNode; danger: boolean; onClick: () => void }> = {
+    highlight: target
       ? { key: 'delete', label: _('annotation.deleteHighlight'), icon: <TrashIcon />, danger: true, onClick: () => removeAnnotation() }
       : { key: 'highlight', label: _('annotation.drawHighlight'), icon: <StyleGlyph style={getLastHighlightStyle().style} />, danger: false, onClick: highlight },
-    { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
-    { key: 'copy', label: _('annotation.copy'), icon: <CopyIcon />, danger: false, onClick: copyText },
-    { key: 'dictionary', label: _('dictionary.title'), icon: <DictionaryIcon />, danger: false, onClick: () => {
+    note: { key: 'note', label: _('annotation.writeNote'), icon: <BulbIcon />, danger: false, onClick: () => void createNote() },
+    copy: { key: 'copy', label: _('annotation.copy'), icon: <CopyIcon />, danger: false, onClick: copyText },
+    dictionary: { key: 'dictionary', label: _('dictionary.title'), icon: <DictionaryIcon />, danger: false, onClick: () => {
       if (!selection) return
       setDictionaryTarget(selection)
       close()
     } },
-    { key: 'translate', label: _('translation.title'), icon: <TranslateIcon size={18} />, danger: false, onClick: () => {
+    translate: { key: 'translate', label: _('translation.title'), icon: <TranslateIcon size={18} />, danger: false, onClick: () => {
       if (!selection) return
       setTranslationTarget(selection)
       close()
     } },
-    { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
-    { key: 'ai-chat', label: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={20} />, danger: false, onClick: openAiChat },
-    { key: 'ai-commands', label: _('reader.aiQuickCommands'), icon: (
+    search: { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
+    'ai-chat': { key: 'ai-chat', label: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={20} />, danger: false, onClick: openAiChat },
+    'ai-commands': { key: 'ai-commands', label: _('reader.aiQuickCommands'), icon: (
       <span className="flex items-center justify-center gap-0.5">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="m13 2-8 12h7l-1 8 8-12h-7z" />
@@ -535,18 +538,23 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
         </svg>
       </span>
     ), danger: false, onClick: toggleAiMenu },
-    { key: 'tts', label: _('reader.ttsFromSelection'), icon: <TtsIcon />, danger: false, onClick: readSelection },
-    { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: () => shareExcerpt(false) },
-    // Low-frequency text-editing action sits last so the common actions stay put.
-    // The replace dialog lives in Reader (via replaceTarget): opening it must
-    // collapse this toolbar, but clearing the selection unmounts this
-    // component — so only the target is handed off here.
-    { key: 'replace', label: _('annotation.replace'), icon: <ReplaceIcon />, danger: false, onClick: () => {
+    tts: { key: 'tts', label: _('reader.ttsFromSelection'), icon: <TtsIcon />, danger: false, onClick: readSelection },
+    share: { key: 'share', label: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, danger: false, onClick: () => shareExcerpt(false) },
+    replace: { key: 'replace', label: _('annotation.replace'), icon: <ReplaceIcon />, danger: false, onClick: () => {
       if (!selection) return
       setReplaceTarget(selection)
       close()
     } },
+  }
+
+  const baseOrder = selectionToolbarOrder.length > 0 ? selectionToolbarOrder : DEFAULT_SELECTION_TOOLBAR_ORDER
+  const visibleKeys = baseOrder.filter((k) => !selectionToolbarHidden.includes(k))
+  // When an existing highlight is clicked, ensure delete action is available even if highlight creation is hidden
+  const effectiveKeys = [
+    ...(target && !visibleKeys.includes('highlight') ? ['highlight' as const] : []),
+    ...(visibleKeys.length > 0 ? visibleKeys : ['highlight' as const]),
   ]
+  const actions = effectiveKeys.map((k) => actionMap[k]).filter(Boolean)
 
   return (
     <>

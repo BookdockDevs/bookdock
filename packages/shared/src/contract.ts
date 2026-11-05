@@ -488,6 +488,36 @@ export interface AccessTokenUpdateReq {
   expiresIn?: AccessTokenDuration
 }
 
+export const SELECTION_TOOLBAR_ACTION_KEYS = [
+  'highlight',
+  'note',
+  'copy',
+  'dictionary',
+  'translate',
+  'search',
+  'ai-chat',
+  'ai-commands',
+  'tts',
+  'share',
+  'replace',
+] as const
+
+export type SelectionToolbarActionKey = (typeof SELECTION_TOOLBAR_ACTION_KEYS)[number]
+
+export const DEFAULT_SELECTION_TOOLBAR_ORDER: SelectionToolbarActionKey[] = [
+  'highlight',
+  'note',
+  'copy',
+  'dictionary',
+  'translate',
+  'search',
+  'ai-chat',
+  'ai-commands',
+  'tts',
+  'share',
+  'replace',
+]
+
 // Reading preferences (typography, layout, margins, chrome, theme ids) are NOT
 // fields here: they travel inside `readingConfig`. The flat duplicates that used
 // to sit in this row were accepted, persisted, and then never read back, so the
@@ -497,6 +527,10 @@ export interface SettingsRes {
   fontPreferences?: FontPreferences
   /** Per-user display order of stable system, builtin, and uploaded font ids. */
   fontOrder?: string[]
+  /** Per-user display order of text selection toolbar action icons. */
+  selectionToolbarOrder?: SelectionToolbarActionKey[]
+  /** Per-user hidden action keys in the text selection toolbar. */
+  selectionToolbarHidden?: SelectionToolbarActionKey[]
   /** Cover fill mode inside a grid card. */
   coverFit?: 'crop' | 'full'
   /** Reading-time accounting: automatic heuristics, manual timer pill, or off (no reading data) */

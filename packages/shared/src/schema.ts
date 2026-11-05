@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { isOrderedReadingRange, readingRangeShape } from './reading-range'
 
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
-import { BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, LIBRARY_SORT_MODES, RECENTLY_READ_STYLES, SIDEBAR_MODULES } from './contract'
+import { BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, LIBRARY_SORT_MODES, RECENTLY_READ_STYLES, SELECTION_TOOLBAR_ACTION_KEYS, SIDEBAR_MODULES } from './contract'
 import { ANNOTATION_MAX_TEXT_LENGTH, BOOKMARK_CONTEXT_MAX_LENGTH, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, CONTENT_EDITOR_MAX_ITEMS, CONTENT_EDITOR_MAX_TEXT_CHARS, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 import { authorListSchema } from './library'
@@ -152,6 +152,8 @@ export const settingsUpdateSchema = z.object({
     displayName: z.string().trim().min(1).max(100).optional(),
   })).optional(),
   fontOrder: z.array(z.string().min(1).max(100)).optional(),
+  selectionToolbarOrder: z.array(z.enum(SELECTION_TOOLBAR_ACTION_KEYS)).optional(),
+  selectionToolbarHidden: z.array(z.enum(SELECTION_TOOLBAR_ACTION_KEYS)).optional(),
   coverFit: z.enum(['crop', 'full']).optional(),
   readingTimerMode: z.enum(['auto', 'manual', 'both', 'off']).optional(),
   manualTimerGraceMinutes: z.union([z.literal(1), z.literal(5), z.literal(10), z.literal(30)]).optional(),
