@@ -219,4 +219,42 @@ describe('authGuard access token branch', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('access-control-allow-origin')).toBeNull()
   })
+
+  // Cookies ignore the port, so signing in to one local instance sends its
+  // session to every other instance on the same host. An explicit header must
+  // therefore decide the request, or a good token fails as "expired".
+  it('lets an explicit Bearer token outrank a session cookie from another instance', async () => {
+    const app = createGuardApp()
+    const unrelatedSession = await signSession(memberId)
+
+    const res = await app.request('/api/v1/ext/books', {
+      headers: { ...bearer(`bd_${'z'.repeat(43)}`), Cookie: `bd_token=${unrelatedSession}` },
+    })
+    expect(res.status).toBe(401)
+    expect((await res.json()).error.code).toBe('UNAUTHORIZED')
+  })
+
+  it('takes the identity from the header when the cookie belongs to someone else', async () => {
+    const app = createGuardApp()
+    const { plaintext } = issue(['ext:books'])
+    const ownerSession = await signSession(ownerId)
+    const headers = { ...bearer(plaintext), Cookie: `bd_token=${ownerSession}` }
+
+    const me = await app.request('/api/v1/auth/me', { headers })
+    expect(me.status).toBe(200)
+    expect((await me.json()).data.id).toBe(memberId)
+    // A member token never becomes the owner just because the cookie is one.
+    expect((await app.request('/api/v1/auth/instance', { method: 'PATCH', headers })).status).toBe(403)
+  })
+
+  it('falls back to the cookie when the Authorization header is blank', async () => {
+    const app = createGuardApp()
+    const session = await signSession(memberId)
+
+    const me = await app.request('/api/v1/auth/me', {
+      headers: { Authorization: 'Bearer ', Cookie: `bd_token=${session}` },
+    })
+    expect(me.status).toBe(200)
+    expect((await me.json()).data.id).toBe(memberId)
+  })
 })

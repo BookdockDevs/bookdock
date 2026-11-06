@@ -102,10 +102,20 @@ function getFreshUser(userId: string): CachedUser | null {
   return user
 }
 
+/**
+ * An explicit `Authorization: Bearer` states who the caller is and outranks the
+ * ambient cookie. Cookies are keyed by host and ignore the port, so a session
+ * opened on one local instance arrives on every other one too; letting it win
+ * made a valid token for instance B fail as "invalid or expired" whenever the
+ * browser happened to be signed in to instance A.
+ *
+ * A blank header value is treated as absent, so the cookie still works for
+ * callers that only set the header conditionally.
+ */
 function extractToken(authHeader: string | undefined, cookieToken: string | undefined): string | null {
-  if (cookieToken) return cookieToken
-  if (authHeader?.startsWith('Bearer ')) return authHeader.slice(7)
-  return null
+  const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+  if (bearer) return bearer
+  return cookieToken || null
 }
 
 function rejectGuestMutation(c: Context): Response | null {
