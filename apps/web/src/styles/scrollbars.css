@@ -1,0 +1,106 @@
+:root {
+  color-scheme: light;
+  --scrollbar-thumb: color-mix(in srgb, var(--color-stone-500) 28%, var(--color-white));
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--color-stone-500) 44%, var(--color-white));
+  --scrollbar-thumb-active: color-mix(in srgb, var(--color-stone-500) 64%, var(--color-white));
+  --scrollbar-track: transparent;
+}
+
+.dark {
+  color-scheme: dark;
+  --scrollbar-thumb: color-mix(in srgb, var(--color-stone-400) 28%, var(--color-stone-900));
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--color-stone-400) 44%, var(--color-stone-900));
+  --scrollbar-thumb-active: color-mix(in srgb, var(--color-stone-400) 64%, var(--color-stone-900));
+}
+
+html,
+body {
+  margin: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 9999px;
+}
+
+/* Base-layer defaults also cover UI containers without an explicit scrollbar class.
+   Utilities can still hide intentional horizontal scrollbars. */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  html:hover,
+  body:hover,
+  .custom-scrollbar:hover,
+  .sidebar-scrollbar:hover,
+  .reader-scrollbar:hover,
+  .custom-scrollbar:focus-within,
+  .sidebar-scrollbar:focus-within,
+  .reader-scrollbar:focus-within {
+    scrollbar-color: var(--scrollbar-thumb-hover) var(--scrollbar-track);
+  }
+
+  html:active,
+  body:active,
+  .custom-scrollbar:active,
+  .sidebar-scrollbar:active,
+  .reader-scrollbar:active {
+    scrollbar-color: var(--scrollbar-thumb-active) var(--scrollbar-track);
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 9999px;
+  }
+
+  html:hover::-webkit-scrollbar-thumb,
+  body:hover::-webkit-scrollbar-thumb,
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb,
+  .sidebar-scrollbar:hover::-webkit-scrollbar-thumb,
+  .reader-scrollbar:hover::-webkit-scrollbar-thumb,
+  .custom-scrollbar:focus-within::-webkit-scrollbar-thumb,
+  .sidebar-scrollbar:focus-within::-webkit-scrollbar-thumb,
+  .reader-scrollbar:focus-within::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+
+  html::-webkit-scrollbar-thumb:active,
+  body::-webkit-scrollbar-thumb:active,
+  .custom-scrollbar::-webkit-scrollbar-thumb:active,
+  .sidebar-scrollbar::-webkit-scrollbar-thumb:active,
+  .reader-scrollbar::-webkit-scrollbar-thumb:active {
+    background-color: var(--scrollbar-thumb-active);
+  }
+  *::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
+.custom-scrollbar,
+.sidebar-scrollbar,
+.reader-scrollbar {
+  transition: scrollbar-color 0.2s ease;
+}
+

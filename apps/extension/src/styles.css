@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@import "../../web/src/styles/ui-font.css";
+@import "../../web/src/styles/overlays.css";
+@import "../../web/src/styles/scrollbars.css";
+@custom-variant dark (&:where(.dark, .dark *));
+@source "./**/*.ts";
+@source "../pages/**/*.html";
+
+/* Chromium injects an unlayered extension-body font that overrides utilities. */
+body { font: inherit; }

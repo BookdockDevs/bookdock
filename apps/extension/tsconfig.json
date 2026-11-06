@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["chrome"],
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/hooks/useTranslation": ["./src/useTranslation.ts"],
+      "@/*": ["../web/src/*"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

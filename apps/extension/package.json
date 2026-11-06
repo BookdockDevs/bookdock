@@ -1,0 +1,34 @@
+{
+  "name": "@bookdock/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "pack": "node build.mjs --pack"
+  },
+  "dependencies": {
+    "@bookdock/shared": "workspace:*",
+    "@tanstack/react-query": "^5.0.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/node": "^4.0.0",
+    "@tailwindcss/oxide": "^4.0.0",
+    "@types/chrome": "^0.1.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "esbuild": "^0.28.1",
+    "fake-indexeddb": "^6.0.0",
+    "jszip": "^3.10.1",
+    "sharp": "^0.35.4",
+    "tailwindcss": "^4.0.0",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.10"
+  }
+}

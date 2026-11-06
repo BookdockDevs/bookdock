@@ -258,6 +258,8 @@ export interface AuthenticatedMeRes {
   privateLibraryId?: string
   /** False for an authenticated account. */
   guest?: false
+  /** Present only when authenticated with an operation-scoped access token. */
+  tokenPermissions?: AccessTokenPermission[]
 }
 
 export interface UpdateUsernameReq {

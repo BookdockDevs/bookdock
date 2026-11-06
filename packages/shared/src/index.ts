@@ -77,6 +77,7 @@ export type {
   SetupRes,
   SetupRequiredRes,
   MeRes,
+  AuthenticatedMeRes,
   UpdateUsernameReq,
   UpdateBioReq,
   AccountRes,
