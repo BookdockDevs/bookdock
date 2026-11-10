@@ -5,6 +5,7 @@ export interface ReaderShortcut { key: string; ctrl: boolean; alt: boolean; shif
 export type ReaderShortcutMap = Record<ReaderShortcutId, ReaderShortcut | null>
 
 export const READER_SHORTCUT_STORAGE_PREFIX = 'bd-reader-shortcuts:'
+export const LOCAL_READER_SHORTCUT_SCOPE = 'local-vault:device'
 export const READER_SHORTCUT_DEFAULTS: ReaderShortcutMap = {
   sidebar: { key: 'p', ctrl: false, alt: false, shift: false, meta: false },
   toc: { key: 't', ctrl: false, alt: false, shift: false, meta: false },

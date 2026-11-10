@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatBytes } from '@/lib/utils'
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
+import { decodeTxtInWorker } from '@/features/local-library/prepare-txt-worker'
 import { decodeEditorTxtFile } from '../hooks/useEditorContent'
 import type { EditorTocRuleSelection, EditorUnit } from '../lib/editor-draft'
 import { predictContinuationStartIndex, previewTextChapters } from '../lib/text-tools'
@@ -50,6 +52,9 @@ export default function ContentAppendModal({
 
   const [source, setSource] = useState<InputSource>(initialText.trim() ? 'text' : 'file')
   const [file, setFile] = useState<File | null>(null)
+  const local = useLocalCatalog()
+  const decoder = useRef<AbortController | null>(null)
+  useEffect(() => () => { decoder.current?.abort() }, [bookId, local])
   const [text, setText] = useState(initialText)
   const [fileError, setFileError] = useState<string | null>(null)
   const [selectedStartIndex, setSelectedStartIndex] = useState(0)
@@ -141,17 +146,23 @@ export default function ContentAppendModal({
 
   async function handleFile(uploaded?: File) {
     if (!uploaded) return
+    decoder.current?.abort()
+    const controller = new AbortController()
+    decoder.current = controller
     setFileError(null)
     setFile(uploaded)
     try {
-      const res = await decodeEditorTxtFile(bookId, uploaded)
+      const res = local ? { data: await decodeTxtInWorker(uploaded, controller.signal) } : await decodeEditorTxtFile(bookId, uploaded)
+      if (controller.signal.aborted) return
       const decoded = res.data?.text ?? ''
       setText(decoded)
     } catch {
+      if (controller.signal.aborted) return
+      if (local) { setFileError(_('library.appendDecodeError')); return }
       try {
         const buf = await uploaded.arrayBuffer()
         const decoded = new TextDecoder('utf-8', { fatal: true }).decode(buf)
-        setText(decoded)
+        if (!controller.signal.aborted) setText(decoded)
       } catch {
         setFileError(_('library.appendDecodeError') || '无法读取文件或识别编码，请检查文件后重试。')
       }
@@ -159,6 +170,7 @@ export default function ContentAppendModal({
   }
 
   function clearFile() {
+    decoder.current?.abort()
     setFile(null)
     setText('')
     setFileError(null)

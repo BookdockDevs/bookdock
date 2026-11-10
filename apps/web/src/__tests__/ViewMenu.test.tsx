@@ -1,10 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement, ReactNode } from 'react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render as testingRender, screen, fireEvent } from '@testing-library/react'
 
 import i18n from '../i18n/i18n'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import ViewMenu from '../features/library/components/ViewMenu'
+
+const queryClients = new Set<QueryClient>()
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClients.add(client)
+  return testingRender(ui, { wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+}
+afterEach(() => { for (const client of queryClients) client.clear(); queryClients.clear() })
 
 const libraryPrefsMutate = vi.fn()
 let libraryPrefs: { gridCardFields?: Array<'title' | 'author' | 'progress'> } = {}

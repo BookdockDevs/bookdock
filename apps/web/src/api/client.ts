@@ -5,45 +5,66 @@ import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 
 export const BASE_URL = '/api/v1'
 
-export async function streamTranslation(input: import('@bookdock/shared').TranslationRequest, signal: AbortSignal, onText: (text: string) => void) {
-  const response = await fetch(`${BASE_URL}/translation/translate`, {
-    method: 'POST', credentials: 'same-origin', signal,
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
-  })
-  if (response.status === 401) handleUnauthorized('/translation/translate')
-  if (!response.ok || !response.body) {
-    const body = await response.json().catch(() => null)
-    throw new ApiError(body?.error?.code ?? 'AI_PROVIDER_ERROR', body?.error?.message ?? 'Translation failed')
-  }
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let completed = false
-  const consume = (line: string) => {
-    if (!line.trim()) return
-    const event = JSON.parse(line) as import('@bookdock/shared').TranslationEvent
-    if (event.type === 'delta') onText(event.text)
-    else if (event.type === 'done') completed = true
-    else if (event.type === 'error') throw new ApiError(event.code, event.message)
-    else throw new ApiError('AI_PROVIDER_ERROR', 'Invalid translation response')
-  }
+export async function streamTranslation(input: import('@bookdock/shared').TranslationRequest | import('@bookdock/shared').SelectedTextTranslationRequest, signal: AbortSignal, onText: (text: string) => void) {
+  const revision = getAuthSessionRevision()
+  if (!useAuthStore.getState().user) throw new ApiError('UNAUTHORIZED', 'Login required')
+  const controller = new AbortController()
+  const unsubscribe = useAuthStore.subscribe(() => { if (getAuthSessionRevision() !== revision) controller.abort() })
+  const requestSignal = AbortSignal.any([signal, controller.signal])
+  const path = 'bookId' in input ? '/translation/translate' : '/translation/selected-text'
   try {
-    while (true) {
-      const { value, done } = await reader.read()
-      buffer += decoder.decode(value, { stream: !done })
-      let end = buffer.indexOf('\n')
-      while (end >= 0) {
-        consume(buffer.slice(0, end))
-        buffer = buffer.slice(end + 1)
-        end = buffer.indexOf('\n')
-      }
-      if (done) break
+    requestSignal.throwIfAborted()
+    const response = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST', credentials: 'same-origin', signal: requestSignal,
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    })
+    if (response.status === 401) handleUnauthorized(path, revision)
+    if (requestSignal.aborted) {
+      await response.body?.cancel().catch(() => {})
+      requestSignal.throwIfAborted()
     }
-    consume(buffer)
-    if (!completed) throw new ApiError('AI_PROVIDER_ERROR', 'Translation was interrupted')
+    requestSignal.throwIfAborted()
+    if (!response.ok || !response.body) {
+      const body = await response.json().catch(() => null)
+      throw new ApiError(body?.error?.code ?? 'AI_PROVIDER_ERROR', body?.error?.message ?? 'Translation failed')
+    }
+    const reader = response.body.getReader()
+    const cancel = () => { void reader.cancel().catch(() => {}) }
+    requestSignal.addEventListener('abort', cancel, { once: true })
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let completed = false
+    const consume = (line: string) => {
+      requestSignal.throwIfAborted()
+      if (!line.trim()) return
+      const event = JSON.parse(line) as import('@bookdock/shared').TranslationEvent
+      if (event.type === 'delta') onText(event.text)
+      else if (event.type === 'done') completed = true
+      else if (event.type === 'error') throw new ApiError(event.code, event.message)
+      else throw new ApiError('AI_PROVIDER_ERROR', 'Invalid translation response')
+    }
+    try {
+      while (true) {
+        const { value, done } = await reader.read()
+        requestSignal.throwIfAborted()
+        buffer += decoder.decode(value, { stream: !done })
+        let end = buffer.indexOf('\n')
+        while (end >= 0) {
+          consume(buffer.slice(0, end))
+          buffer = buffer.slice(end + 1)
+          end = buffer.indexOf('\n')
+        }
+        if (done) break
+      }
+      consume(buffer)
+      if (!completed) throw new ApiError('AI_PROVIDER_ERROR', 'Translation was interrupted')
+    } finally {
+      requestSignal.removeEventListener('abort', cancel)
+      await reader.cancel().catch(() => {})
+      reader.releaseLock()
+    }
   } finally {
-    await reader.cancel().catch(() => {})
-    reader.releaseLock()
+    unsubscribe()
   }
 }
 
@@ -87,7 +108,8 @@ export class ApiError extends Error {
   }
 }
 
-function handleUnauthorized(path: string) {
+function handleUnauthorized(path: string, requestSessionRevision?: number) {
+  if (requestSessionRevision !== undefined && requestSessionRevision !== getAuthSessionRevision()) return
   if (path.startsWith('/auth/me')) {
     useAuthStore.getState().clearAuth()
     return
@@ -141,7 +163,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers,
   })
   if (!res.ok) {
-    if (res.status === 401) handleUnauthorized(path)
+    if (res.status === 401) handleUnauthorized(path, requestSessionRevision)
     throw await parseError(res)
   }
   const body = await res.json() as T & { undo?: { token: string; expiresAt?: number; generation?: number } }
@@ -162,6 +184,7 @@ export async function apiPost<T>(path: string, body?: unknown, signal?: AbortSig
 }
 
 export async function apiPostBlob(path: string, body: unknown, signal?: AbortSignal): Promise<Blob> {
+  const requestSessionRevision = getAuthSessionRevision()
   const headers = new Headers({ 'Content-Type': 'application/json' })
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
@@ -170,7 +193,7 @@ export async function apiPostBlob(path: string, body: unknown, signal?: AbortSig
     signal,
   })
   if (!res.ok) {
-    if (res.status === 401) handleUnauthorized(path)
+    if (res.status === 401) handleUnauthorized(path, requestSessionRevision)
     throw await parseError(res)
   }
   return res.blob()
@@ -189,6 +212,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
 }
 
 export async function apiUpload<T>(path: string, file: File | FormData, method: 'POST' | 'PUT' = 'POST', options?: { signal?: AbortSignal; onProgress?: (percent: number) => void }): Promise<T> {
+  const requestSessionRevision = getAuthSessionRevision()
   const formData = file instanceof FormData ? file : new FormData()
   if (file instanceof File) formData.append('file', file)
   if (options?.onProgress) {
@@ -206,7 +230,7 @@ export async function apiUpload<T>(path: string, file: File | FormData, method: 
         try { body = JSON.parse(xhr.responseText) } catch { reject(new ApiError('UNKNOWN', 'Invalid upload response')); return }
         if (xhr.status >= 200 && xhr.status < 300) resolve(body)
         else {
-          if (xhr.status === 401) handleUnauthorized(path)
+          if (xhr.status === 401) handleUnauthorized(path, requestSessionRevision)
           reject(new ApiError(body.error?.code ?? 'UNKNOWN', body.error?.message ?? xhr.statusText, body.error?.details))
         }
       }
@@ -223,7 +247,7 @@ export async function apiUpload<T>(path: string, file: File | FormData, method: 
     signal: options?.signal,
   })
   if (!res.ok) {
-    if (res.status === 401) handleUnauthorized(path)
+    if (res.status === 401) handleUnauthorized(path, requestSessionRevision)
     throw await parseError(res)
   }
   return res.json() as Promise<T>

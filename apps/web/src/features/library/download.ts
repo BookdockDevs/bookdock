@@ -1,6 +1,10 @@
 import { ApiError, BASE_URL } from '@/api/client'
 import { withReveal } from '@/lib/reveal-hidden'
 import { BlobReader, BlobWriter, ZipWriter } from '@zip.js/zip.js'
+import type { ClientBookRef } from '@bookdock/shared'
+import { isDeviceBook } from '../reading-data/book-source'
+import { prepareLocalBookFile } from '../reading-data/local-book-download'
+import { localLibraryRepository } from '../local-library/repository'
 
 export interface PreparedBookFile {
   blob: Blob
@@ -8,6 +12,7 @@ export interface PreparedBookFile {
 }
 
 export interface BookDownloadRequest {
+  ref?: ClientBookRef
   id: string
   title: string
   sourceFormat: 'epub' | 'txt'
@@ -43,6 +48,10 @@ async function fetchBookFile(book: BookDownloadRequest, signal?: AbortSignal): P
 }
 
 export function prepareBookFile(book: BookDownloadRequest, signal?: AbortSignal) {
+  if (isDeviceBook(book.ref)) {
+    if (book.ref.bookId !== book.id) return Promise.reject(new Error('Download identity does not match its source'))
+    return prepareLocalBookFile(book.ref, book.format, book.edited, signal).then((blob) => ({ blob, filename: `${safeDownloadFileName(book.title)}.${book.format}` }))
+  }
   return fetchBookFile(book, signal)
 }
 
@@ -164,26 +173,41 @@ export function downloadEpub(bookId: string, title: string, opts: { plain?: bool
 
 async function convertBlobToPng(blob: Blob): Promise<Blob> {
   const imgBitmap = await createImageBitmap(blob)
-  const canvas = document.createElement('canvas')
-  canvas.width = imgBitmap.width
-  canvas.height = imgBitmap.height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Failed to get canvas context')
-  ctx.drawImage(imgBitmap, 0, 0)
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((b) => {
-      if (b) resolve(b)
-      else reject(new Error('Failed to convert image to PNG'))
-    }, 'image/png')
-  })
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = imgBitmap.width
+    canvas.height = imgBitmap.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Failed to get canvas context')
+    ctx.drawImage(imgBitmap, 0, 0)
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => {
+        if (b) resolve(b)
+        else reject(new Error('Failed to convert image to PNG'))
+      }, 'image/png')
+    })
+  } finally { imgBitmap.close() }
 }
 
-export async function downloadCover(bookId: string, title: string) {
-  const res = await fetch(`${BASE_URL}/books/${bookId}/cover?size=original`)
-  if (!res.ok) {
-    throw new ApiError(res.status === 404 ? 'BOOK_NOT_FOUND' : 'DOWNLOAD_FAILED', 'Cover download failed')
+/**
+ * A cover lives wherever its book lives. One resolver serves every cover
+ * consumer, so a new cover action cannot accidentally read the server for a
+ * device book.
+ */
+async function resolveCoverBlob(bookId: string, ref: ClientBookRef | undefined, failure: string): Promise<Blob> {
+  if (isDeviceBook(ref)) {
+    if (ref.bookId !== bookId) throw new Error('Cover identity does not match its source')
+    const local = await localLibraryRepository.getCover(ref)
+    if (!local) throw new ApiError('BOOK_NOT_FOUND', 'Local cover is unavailable')
+    return local
   }
-  const blob = await res.blob()
+  const res = await fetch(`${BASE_URL}/books/${bookId}/cover?size=original`)
+  if (!res.ok) throw new ApiError(res.status === 404 ? 'BOOK_NOT_FOUND' : 'DOWNLOAD_FAILED', failure)
+  return res.blob()
+}
+
+export async function downloadCover(bookId: string, title: string, ref?: ClientBookRef) {
+  const blob = await resolveCoverBlob(bookId, ref, 'Cover download failed')
   const safeName = title.replace(/[^\w　-〿＀-￯一-龥-]/g, '_')
   const ext = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : blob.type === 'image/svg+xml' ? 'svg' : 'jpg'
   const url = URL.createObjectURL(blob)
@@ -196,12 +220,8 @@ export async function downloadCover(bookId: string, title: string) {
   URL.revokeObjectURL(url)
 }
 
-export async function copyCover(bookId: string) {
-  const res = await fetch(`${BASE_URL}/books/${bookId}/cover?size=original`)
-  if (!res.ok) {
-    throw new ApiError(res.status === 404 ? 'BOOK_NOT_FOUND' : 'DOWNLOAD_FAILED', 'Cover copy failed')
-  }
-  const blob = await res.blob()
+export async function copyCover(bookId: string, ref?: ClientBookRef) {
+  const blob = await resolveCoverBlob(bookId, ref, 'Cover copy failed')
   let pngBlob = blob
   if (blob.type !== 'image/png') {
     pngBlob = await convertBlobToPng(blob)

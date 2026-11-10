@@ -74,15 +74,16 @@ describe('library settings readiness and loading state', () => {
     useAuthStore.setState({ user: null })
   })
 
-  it('reports isReady: true with undefined prefs for guests without querying server', () => {
+  it('reads guest preferences from the device vault and never the server', async () => {
     const client = createTestQueryClient()
     const { result } = renderHook(() => useLibraryPrefsState(), {
       wrapper: wrapperWithClient(client),
     })
 
-    expect(result.current.isReady).toBe(true)
+    // Readiness follows the vault read, which settles on its own; an
+    // unreachable vault yields defaults instead of an endless skeleton.
+    await waitFor(() => expect(result.current.isReady).toBe(true))
     expect(result.current.prefs).toBeUndefined()
-    expect(result.current.isLoading).toBe(false)
     expect(apiClient.apiGet).not.toHaveBeenCalled()
   })
 

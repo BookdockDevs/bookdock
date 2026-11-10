@@ -9,9 +9,10 @@ interface EmptyLibraryProps {
    */
   canUpload?: boolean
   isView?: boolean
+  hint?: string
 }
 
-export default function EmptyLibrary({ canUpload = true, isView = false }: EmptyLibraryProps) {
+export default function EmptyLibrary({ canUpload = true, isView = false, hint }: EmptyLibraryProps) {
   const _ = useTranslation()
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
@@ -23,7 +24,7 @@ export default function EmptyLibrary({ canUpload = true, isView = false }: Empty
       </div>
       <p className="font-serif text-lg font-medium text-stone-700 dark:text-stone-200">{_(isView ? 'library.emptyView' : 'library.empty')}</p>
       <p className="text-sm text-stone-400 dark:text-stone-500">
-        {canUpload ? _('library.emptyHint') : _('library.emptyNoUpload')}
+        {hint ?? (canUpload ? _('library.emptyHint') : _('library.emptyNoUpload'))}
       </p>
     </div>
   )

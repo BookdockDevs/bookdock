@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import type { NavTab } from '../types'
 import { AiSparkleIcon } from './annotation-icons'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 
 interface IconButtonProps {
   icon: React.ReactNode
@@ -48,6 +49,7 @@ interface ToolDockProps {
 }
 
 export function ToolDock({ activeNavTab, sidebarOpen, locked, floating = false, statsDisabled, guestReadOnly, hideLock, mobile = false, onNavTab, onToggleLock, footer }: ToolDockProps) {
+  const local = useLocalReader()
   const icons = [
     {
       id: 'toc' as const,
@@ -81,7 +83,7 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, floating = false, 
         </svg>
       ),
     }] as const),
-    ...(!guestReadOnly ? [{
+    ...(!guestReadOnly && !local ? [{
       id: 'ai' as const,
       title: 'AI 助手',
       icon: <AiSparkleIcon size={18} strokeWidth={1.6} />,

@@ -695,6 +695,19 @@ describe('auth module', () => {
       expect(res.status).toBe(200)
       const body = await res.json()
       expect(body.data.guest).toBe(false)
+      expect(body.data).not.toHaveProperty('tokenPermissions')
+    })
+
+    it('exposes effective operation permissions only for access-token clients', async () => {
+      const app = new Hono()
+      app.use('*', async (c, next) => {
+        c.set('user', { id: 'u1', username: 'own', role: 'owner', avatarKey: null })
+        c.set('tokenPermissions', ['ext:upload'])
+        await next()
+      })
+      app.route('/api/v1/auth', authRoutes)
+      const response = await app.request('/api/v1/auth/me')
+      expect((await response.json()).data).toMatchObject({ id: 'u1', tokenPermissions: ['ext:upload'], guest: false })
     })
   })
 

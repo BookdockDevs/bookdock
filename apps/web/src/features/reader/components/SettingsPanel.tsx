@@ -6,7 +6,9 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
 import { resolveReadingTheme, PRESET_READING_THEMES, type CustomReadingTheme } from '@/lib/reading-theme'
 import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
+import { useAuthStore } from '@/stores/auth.store'
 import { useFonts } from '@/api/hooks/useFonts'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { useViewSettings } from '../view-settings-context'
 import { MARGINAL_FIELDS } from '../lib/marginals'
@@ -331,8 +333,10 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
   }, [])
   const _ = useTranslation()
 
-  const { data: fontsData } = useFonts()
-  const uploadedFonts = useMemo(() => fontsData?.data ?? [], [fontsData])
+  const local = useLocalReader()
+  const serviceAccount = useAuthStore((state) => state.user)
+  const { data: fontsData } = useFonts(!local || Boolean(serviceAccount))
+  const uploadedFonts = useMemo(() => local && !serviceAccount ? [] : fontsData?.data ?? [], [fontsData, local, serviceAccount])
   const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
   const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
   const fontLatinIds = useFontLoaderStore((s) => s.latinIds)
@@ -1298,7 +1302,7 @@ function ReplacementsEntryRow({ bookId }: { bookId: string }) {
   const { data } = useBookReplacements(bookId)
   const invalidCount = useReaderState((s) => s.invalidReplacementIds.length)
   const effectiveCount = useMemo(
-    () => (data?.data ?? []).filter((r) => (r.effectiveEnabled ?? r.enabled)).length,
+    () => (data?.data ?? []).filter((r) => (r.effectiveEnabled ?? r.enabled) && r.locationAvailable !== false).length,
     [data],
   )
   return (

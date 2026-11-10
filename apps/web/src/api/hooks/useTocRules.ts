@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 
 import type { RuleBatchDeleteReq, BookDetailRes, CatalogBook, ReTocReq, TocPreviewReq, TocPreviewRes, TocRuleCreateReq, TocRuleImportReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
 
+import { getAuthSessionRevision } from '@/stores/auth.store'
 import { apiGet, apiPost, apiPut } from '../client'
 
 const TOC_RULES_KEY = ['toc-rules'] as const
@@ -12,10 +13,17 @@ function snapshotTocRules(queryClient: QueryClient) {
   return queryClient.getQueryData<TocRulesCache>(TOC_RULES_KEY)
 }
 
-export function useTocRules() {
+export function useTocRules(enabled = true) {
+  const epoch = getAuthSessionRevision()
   return useQuery({
     queryKey: TOC_RULES_KEY,
-    queryFn: () => apiGet<{ data: TocRuleRes[] }>('/toc-rules'),
+    enabled,
+    queryFn: async () => {
+      if (getAuthSessionRevision() !== epoch) throw new DOMException('TOC rule account changed', 'AbortError')
+      const result = await apiGet<{ data: TocRuleRes[] }>('/toc-rules')
+      if (getAuthSessionRevision() !== epoch) throw new DOMException('TOC rule account changed', 'AbortError')
+      return result
+    },
   })
 }
 

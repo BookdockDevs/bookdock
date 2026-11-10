@@ -9,6 +9,14 @@ async function freshStore() {
 beforeEach(() => localStorage.clear())
 
 describe('ui.store current preferences', () => {
+  it('retains invalid anonymous config on startup until an explicit reading edit replaces it', async () => {
+    localStorage.setItem('bd-local-reading-config-v1', 'invalid config')
+    const store = await freshStore()
+    expect(localStorage.getItem('bd-local-reading-config-v1')).toBe('invalid config')
+    store.getState().setFontSize(27)
+    expect(JSON.parse(localStorage.getItem('bd-local-reading-config-v1')!).global.fontSize).toBe(27)
+  })
+
   it('uses the default cover fit', async () => {
     const store = await freshStore()
     expect(store.getState().coverFit).toBe('crop')

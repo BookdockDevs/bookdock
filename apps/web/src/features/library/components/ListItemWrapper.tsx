@@ -1,8 +1,10 @@
 import { useDraggable } from '@dnd-kit/core'
 import { Link } from '@tanstack/react-router'
 
-import type { BookListItem } from '@bookdock/shared'
+import type { ClientLibraryBookView } from '@bookdock/shared'
 
+import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
+import { catalogSelectionKey } from '@/features/reading-data/catalog-selection'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList } from '@/lib/utils'
@@ -18,16 +20,16 @@ import UnpinButton, { PinIcon } from './UnpinButton'
 import { useContextMenu } from './use-context-menu'
 
 interface ListItemWrapperProps {
-  book: BookListItem
+  book: ClientLibraryBookView
   selection: Set<string>
   selectionActive: boolean
   dragJustEndedRef: React.MutableRefObject<boolean>
   readOnly: boolean
   onToggleSelect: (id: string, shiftKey?: boolean) => void
-  onDelete?: (b: BookListItem) => void
-  onPublish?: (b: BookListItem) => void
-  onFork?: (b: BookListItem) => void
-  onShowDetails: (b: BookListItem) => void
+  onDelete?: (b: ClientLibraryBookView) => void
+  onPublish?: (b: ClientLibraryBookView) => void
+  onFork?: (b: ClientLibraryBookView) => void
+  onShowDetails: (b: ClientLibraryBookView) => void
 }
 
 /**
@@ -37,13 +39,13 @@ interface ListItemWrapperProps {
 export default function ListItemWrapper({ book, selection, selectionActive, dragJustEndedRef, onToggleSelect, readOnly, onDelete, onPublish, onFork, onShowDetails }: ListItemWrapperProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
-  const selected = selection.has(book.id)
-  const bookIds = selectionActive && selected ? Array.from(selection) : [book.id]
+  const selected = selection.has(catalogSelectionKey(book))
+  const bookIds = selectionActive && selected ? Array.from(selection) : [catalogSelectionKey(book)]
   // The measuring node is the cover thumbnail (small rect), not the full-width
   // row: the drag overlay wrapper is sized from it, so the preview follows the
   // cursor and edge-clamping keeps it on screen. Listeners still span the row.
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `book:${book.id}`,
+    id: `book:${catalogSelectionKey(book)}`,
     data: { bookIds } satisfies BookDragPayload,
     disabled: readOnly,
   })
@@ -71,8 +73,7 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
       className={isDragging ? 'select-none opacity-60' : 'select-none'}
     >
       <Link
-        to="/books/$id"
-        params={{ id: book.id }}
+        {...catalogBookTarget(book)}
         onClick={(e) => {
           if (dragJustEndedRef.current) {
             e.preventDefault()
@@ -80,12 +81,12 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
           }
           if (selectionActive) {
             e.preventDefault()
-            onToggleSelect(book.id, e.shiftKey)
+            onToggleSelect(catalogSelectionKey(book), e.shiftKey)
             return
           }
           if (e.ctrlKey || e.metaKey || e.shiftKey) {
             e.preventDefault()
-            onToggleSelect(book.id, e.shiftKey)
+            onToggleSelect(catalogSelectionKey(book), e.shiftKey)
           }
         }}
         className={`group flex items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
@@ -134,7 +135,7 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
   )
 }
 
-function ListItemContent({ book }: { book: BookListItem }) {
+function ListItemContent({ book }: { book: ClientLibraryBookView }) {
   const _ = useTranslation()
   const hiddenCause = getHiddenCause(book, 'shelf')
   return (
@@ -147,6 +148,8 @@ function ListItemContent({ book }: { book: BookListItem }) {
         {book.pinnedAt && (
           <UnpinButton
             bookId={book.id}
+            ref={book.ref}
+              expectedVersion={book.clientVersion}
             className="shrink-0 rounded-md p-1 text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 md:opacity-0 md:group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-200"
           >
             <PinIcon size={11} />

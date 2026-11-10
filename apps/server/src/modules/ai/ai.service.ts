@@ -1881,6 +1881,15 @@ export async function translateAiSelection(
 ) {
   if (role !== 'owner' && role !== 'member') throw new AppError('AI_NOT_ALLOWED', 'Login required')
   await getActiveBook(userId, input.bookId)
+  return translateAiSelectedText(userId, role, input, signal, onText)
+}
+
+export async function translateAiSelectedText(
+  userId: string, role: string,
+  input: import('@bookdock/shared').SelectedTextTranslationRequest,
+  signal: AbortSignal, onText: (text: string) => void,
+) {
+  if (role !== 'owner' && role !== 'member') throw new AppError('AI_NOT_ALLOWED', 'Login required')
   let ai = effectiveConfig(userId)
   if (input.channel.profileId) {
     const profile = storedProfiles(storedConfig(userId).value).find((item) => item.id === input.channel.profileId)

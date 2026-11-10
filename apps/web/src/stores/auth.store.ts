@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 import { clearReaderContentStore } from '@/features/reader/lib/idb-chapter-store'
+import { bindReadingPreferenceAccount } from '@/features/reader/lib/reading-preference-owner'
 import { clearLibraryNamesSnapshot } from '@/lib/library-name-cache'
 import { invalidateReaderSession, resetSessionScope, setSessionAccount } from '@/lib/session-scope'
 import { clearStoredSettings } from '@/lib/settings-cache'
@@ -73,6 +74,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (typeof window !== 'undefined') {
       localStorage.setItem('bd-user', JSON.stringify(user))
     }
+    bindReadingPreferenceAccount(user.id)
     set({ user })
     useUiStore.getState().bindRevealHiddenUser(user.id)
   },
@@ -97,7 +99,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     clearLibraryNamesSnapshot()
     resetSessionScope()
     void clearReaderContentStore()
-    if (!useAuthStore.getState().user) return
+    if (!useAuthStore.getState().user) { bindReadingPreferenceAccount(null); return }
     // Drop the session before resetting preferences: the settings subscription
     // skips syncing while logged out, so the reset below stays local and can
     // never be mistaken for a user edit and PUT back to the server.
@@ -112,5 +114,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       // the reader, so a shared browser keeps them across accounts.
       useUiStore.getState().resetUserScopedPrefs()
     }
+    bindReadingPreferenceAccount(null)
   },
 }))

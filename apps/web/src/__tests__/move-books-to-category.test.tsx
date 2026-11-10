@@ -39,7 +39,7 @@ describe('useMoveBooksToCategory', () => {
   it('sends one batch organize request for private books', async () => {
     const { result } = renderHook(() => useMoveBooksToCategory(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ bookIds: ['b1', 'b2'], categoryId: 'cat-1' })
+    result.current.mutate({ books: [{ id: 'b1' }, { id: 'b2' }], categoryId: 'cat-1' })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(apiClient.apiPatch).toHaveBeenCalledExactlyOnceWith('/books/batch/organize', { ids: ['b1', 'b2'], categoryId: 'cat-1' })
@@ -52,7 +52,7 @@ describe('useMoveBooksToCategory', () => {
   it('sends batch organize request to shared library when libraryId is provided', async () => {
     const { result } = renderHook(() => useMoveBooksToCategory(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ libraryId: 'lib-1', bookIds: ['b1'], categoryId: 'cat-2' })
+    result.current.mutate({ libraryId: 'lib-1', books: [{ id: 'b1' }], categoryId: 'cat-2' })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(apiClient.apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/batch/organize', { ids: ['b1'], categoryId: 'cat-2' })
@@ -62,7 +62,7 @@ describe('useMoveBooksToCategory', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const { result } = renderHook(() => useMoveBooksToCategory(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ bookIds: ['b1'], categoryId: null })
+    result.current.mutate({ books: [{ id: 'b1' }], categoryId: null })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['books'] })

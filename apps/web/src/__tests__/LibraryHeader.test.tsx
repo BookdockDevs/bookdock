@@ -22,6 +22,13 @@ vi.mock('@/hooks/useTranslation', () => ({
   },
 }))
 
+// The header's ViewMenu resolves the hidden-content flag through this hook,
+// which needs a QueryClient when bound to a catalog context; the header test
+// exercises the view surface, not the vault preference.
+vi.mock('@/features/reading-data/useCatalogRevealHidden', () => ({
+  useCatalogRevealHidden: () => ({ revealHidden: false, toggle: vi.fn() }),
+}))
+
 const navSearch = vi.fn()
 
 beforeEach(() => {
@@ -78,10 +85,25 @@ describe('LibraryHeader', () => {
   })
 
   it('clicks upload button', () => {
-    const onUploadClick = vi.fn()
-    renderHeader({ onUploadClick })
+    const onAddClick = vi.fn()
+    renderHeader({ onAddClick })
     screen.getByText('library.upload').click()
-    expect(onUploadClick).toHaveBeenCalled()
+    expect(onAddClick).toHaveBeenCalledWith('server')
+    expect(screen.queryByRole('button', { name: 'library.addDestination' })).toBeNull()
+  })
+
+  it('clicks the add button when the default destination is the device', () => {
+    const onAddClick = vi.fn()
+    renderHeader({ onAddClick, defaultAddDestination: 'local' })
+    screen.getByText('localLibrary.add').click()
+    expect(onAddClick).toHaveBeenCalledWith('local')
+  })
+
+  it('falls back to local add button when server upload is disabled', () => {
+    const onAddClick = vi.fn()
+    renderHeader({ onAddClick, defaultAddDestination: 'server', serverUploadDisabled: true })
+    screen.getByText('localLibrary.add').click()
+    expect(onAddClick).toHaveBeenCalledWith('local')
   })
 
   it('toggles select mode via button', () => {

@@ -1,3 +1,4 @@
+import type { ClientBookRef } from '@bookdock/shared'
 import type { ReactNode } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
@@ -6,13 +7,16 @@ import { useUpdateBook } from '../hooks'
 
 interface UnpinButtonProps {
   bookId: string
+  /** The book's own source; a device book unpins in the vault, a server row on the server. */
+  ref?: ClientBookRef
+  expectedVersion?: number
   className: string
   children: ReactNode
 }
 
 /** Clickable pinned indicator. Mounted only for pinned books so the
  *  virtualized grid doesn't attach a mutation hook to every card. */
-export default function UnpinButton({ bookId, className, children }: UnpinButtonProps) {
+export default function UnpinButton({ bookId, ref, expectedVersion, className, children }: UnpinButtonProps) {
   const _ = useTranslation()
   const updateBook = useUpdateBook()
 
@@ -23,7 +27,7 @@ export default function UnpinButton({ bookId, className, children }: UnpinButton
         // Rows/cards are themselves clickable (open book / toggle select).
         e.preventDefault()
         e.stopPropagation()
-        updateBook.mutate({ bookId, pinned: false })
+        updateBook.mutate({ bookId, ref, expectedVersion, pinned: false })
       }}
       className={className}
       aria-label={_('library.unpin')}

@@ -3,17 +3,16 @@ import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
-import { ApiError, apiGet, apiPatch, apiPut } from '@/api/client'
+import { ApiError } from '@/api/client'
 import { usePrefetchBookReadingStats, useReadingRound } from '@/api/hooks/reading-records'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { withReveal } from '@/lib/reveal-hidden'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
-import { isReaderContentTarget, isReaderModalOpen, isReaderShortcutModalOpen, readReaderShortcuts, shortcutMatches } from './lib/reader-shortcuts'
+import { LOCAL_READER_SHORTCUT_SCOPE, isReaderContentTarget, isReaderModalOpen, isReaderShortcutModalOpen, readReaderShortcuts, shortcutMatches } from './lib/reader-shortcuts'
 import { useSettingsSyncStore } from '@/stores/settings-sync.store'
 
 import { cn } from '@/lib/utils'
@@ -24,7 +23,8 @@ import { DialogLayoutContext } from '@/components/ui/dialog-layout-context'
 
 import { useReaderRenderer } from './hooks/useReaderRenderer'
 import { useReadingTimer } from './hooks/useReadingTimer'
-import { useManualTimerStore } from './lib/manual-timer-store'
+import { localAutomaticTimerDestination } from '../local-library/automatic-timer'
+import { useManualTimerSource } from './hooks/useManualTimerSource'
 import { useIsTouch } from './hooks/useIsTouch'
 import { useReaderState } from './state/reader-state'
 import { RendererContext } from './hooks/useReaderApi'
@@ -42,7 +42,8 @@ import { cfiRangesIntersect, loadCfiModule } from './lib/cfi-overlap'
 import { mergeProgressSaveCache } from './lib/progress-cache'
 import { buildRevisionContentUrl, prepareRevisionNavigation } from './lib/revision-navigation'
 import { clearPreparedReaderContentText, primeReaderContentText, ReaderContentError } from './lib/reader-content-client'
-import { getGuestProgress, saveGuestProgress } from './lib/guest-progress'
+import { useLocalReader } from '../reading-data/reader-source-context'
+import { remoteReaderSession } from '../reading-data/remote-reader-session'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
 import { ReaderHeader } from './components/ReaderHeader'
 import { ReaderSidebar } from './components/ReaderSidebar'
@@ -76,8 +77,8 @@ import type { BookReader, FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, 
 import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
 import { ImageViewer } from './components/ImageViewer'
-import { BOOKMARK_CONTEXT_MAX_LENGTH } from '@bookdock/shared'
-import type { AnnotationRes, BookDetailRes, BookListRes, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+import { BOOKMARK_CONTEXT_MAX_LENGTH, resolveClientPresetBinding } from '@bookdock/shared'
+import type { AnnotationRes, BookDetailRes, ClientLibraryDetailView, ClientLibraryListView, ClientPreferenceOwner, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
 const RECENTLY_READ_QUERY = {
   page: 1,
@@ -118,9 +119,21 @@ function isSelectionIdea(
 
 export default function Reader() {
   const _ = useTranslation()
-  const { id } = useParams({ from: '/books/$id' })
+  const { id } = useParams({ strict: false }) as { id: string }
+  const local = useLocalReader()
+  const manualTimerStore = useManualTimerSource()
+  const manualTimerError = manualTimerStore((state) => state.storageError)
+  const retryManualTimer = manualTimerStore((state) => state.retry)
+  useEffect(() => { void manualTimerStore.getState().restore() }, [manualTimerStore])
+  const cacheId = local?.namespace ?? id
+  const localTimerScopeRef = useRef(cacheId)
+  localTimerScopeRef.current = cacheId
   const authUser = useAuthStore((s) => s.user)
-  const isGuest = !authUser
+  const isGuest = !authUser && !local
+  const remote = useMemo(() => remoteReaderSession(id, isGuest), [id, isGuest])
+  const dataSource = local ?? remote
+  const [localSaveError, setLocalSaveError] = useState<string | null>(null)
+  const [localTimerError, setLocalTimerError] = useState<string | null>(null)
   const deepLinkParams = new URLSearchParams(window.location.search)
   const deepLinkAnnotation = deepLinkParams.get('annotation')
   const deepLinkCfi = deepLinkParams.get('cfi')
@@ -346,9 +359,9 @@ export default function Reader() {
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
   const { data: annotations } = useAnnotations(id, { enabled: !isGuest && !revisionQuarantined })
-  useTranslationConfig({ enabled: !isGuest })
-  useAiConfig({ enabled: !isGuest })
-  useDictionaries({ enabled: !isGuest })
+  useTranslationConfig({ enabled: Boolean(authUser) })
+  useAiConfig({ enabled: Boolean(authUser) })
+  useDictionaries({ enabled: Boolean(authUser) })
   const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
   const publicIdeas = useReaderIdeas(id, showFriendIdeas && !revisionQuarantined, displayedRevisionId)
   const publicMarkers = useMemo(() => publicIdeas.isError || !showFriendIdeas ? [] : (publicIdeas.data?.data ?? []).filter((idea) => !idea.own && idea.locationAvailable), [publicIdeas.isError, publicIdeas.data, showFriendIdeas])
@@ -410,8 +423,8 @@ export default function Reader() {
   }, [autoMarkSelection])
 
   const bookQuery = useQuery({
-    queryKey: ['book', id],
-    queryFn: () => apiGet<{ data: BookDetailRes }>(withReveal(`/books/${id}`)),
+    queryKey: ['book', cacheId],
+    queryFn: () => dataSource.getBook(),
     enabled: !!id && !revisionQuarantined,
     staleTime: 0,
     refetchOnMount: 'always',
@@ -491,9 +504,9 @@ export default function Reader() {
   // the PATCH itself is debounced and diffs are merged while pending.
   const saveViewSettingsMutation = useMutation({
     mutationFn: (viewSettings: ViewSettings | null) =>
-      apiPatch<{ data: ReaderBookSettings }>(withReveal(`/books/${id}/reader-settings`), { viewSettings }),
+      dataSource.saveSettings(viewSettings),
     onMutate: (viewSettings) => {
-      queryClient.setQueryData(['book', id], (old: { data: BookDetailRes } | undefined) => {
+      queryClient.setQueryData(['book', cacheId], (old: { data: BookDetailRes } | undefined) => {
         if (!old?.data) return old
         const readerSettings = { ...(old.data.readerSettings ?? {}) }
         if (viewSettings === null) delete readerSettings.viewSettings
@@ -502,7 +515,7 @@ export default function Reader() {
       })
     },
     onError: (error) => {
-      void queryClient.invalidateQueries({ queryKey: ['book', id] })
+      void queryClient.invalidateQueries({ queryKey: ['book', cacheId] })
       notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-settings:${id}` })
     },
   })
@@ -529,13 +542,16 @@ export default function Reader() {
 
   // --- Per-book preset binding ----------------------------------------------
   // Same optimistic-cache pattern as the viewSettings mutation above.
-  const boundPresetId = bookQuery.data?.data?.readerSettings?.boundPresetId ?? null
+  const presetOwner: ClientPreferenceOwner = authUser ? { kind: 'account', connectionId: 'same-origin', accountId: authUser.id } : { kind: 'device' }
+  const localPresetBinding = (bookQuery.data?.data as ClientLibraryDetailView | undefined)?.clientPresetBinding
+  const boundPresetId = local ? resolveClientPresetBinding(localPresetBinding, presetOwner) : bookQuery.data?.data?.readerSettings?.boundPresetId ?? null
   const bindPresetMutation = useMutation({
-    mutationFn: (presetId: string | null) =>
-      apiPatch<{ data: ReaderBookSettings }>(withReveal(`/books/${id}/reader-settings`), { boundPresetId: presetId }),
+    mutationFn: async (presetId: string | null) =>
+      local ? await local.bindPreset(presetId, presetOwner) : await remote.bindPreset(presetId),
     onMutate: (presetId) => {
-      queryClient.setQueryData(['book', id], (old: { data: BookDetailRes } | undefined) => {
+      queryClient.setQueryData(['book', cacheId], (old: { data: ClientLibraryDetailView } | undefined) => {
         if (!old?.data) return old
+        if (local) return { ...old, data: { ...old.data, clientPresetBinding: presetId === null ? null : { presetId, owner: presetOwner } } }
         const readerSettings = { ...(old.data.readerSettings ?? {}) }
         if (presetId === null) delete readerSettings.boundPresetId
         else readerSettings.boundPresetId = presetId
@@ -543,7 +559,7 @@ export default function Reader() {
       })
     },
     onError: (error) => {
-      void queryClient.invalidateQueries({ queryKey: ['book', id] })
+      void queryClient.invalidateQueries({ queryKey: ['book', cacheId] })
       notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-settings:${id}` })
     },
   })
@@ -619,32 +635,31 @@ export default function Reader() {
   )
 
   const progressQuery = useQuery({
-    queryKey: ['progress', id, isGuest ? 'guest' : 'user'],
-    queryFn: () => isGuest
-      ? Promise.resolve({ data: getGuestProgress(id) })
-      : apiGet<{ data: ReadingProgressRes | null }>(withReveal(`/progress/${id}`)),
+    queryKey: ['progress', cacheId, isGuest ? 'guest' : 'user'],
+    queryFn: () => dataSource.getProgress(),
     enabled: !!id,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: !local,
   })
 
 
   const progressMutation = useMutation({
     mutationFn: async (body: ReadingProgressUpdateReq) => {
-      if (isGuest) return { data: saveGuestProgress(id, body) }
       try {
-        return await apiPut<{ data: ReadingProgressRes | null }>(withReveal(`/progress/${id}`), body)
+        return await dataSource.saveProgress(body)
       } catch (error) {
         pendingProgress.current ??= body
         throw error
       }
     },
     onMutate: async (body) => {
-      if (!authUser) return
+      if (!authUser || local) return
       await queryClient.cancelQueries({ queryKey: ['books'] })
       const book = bookQuery.data?.data
       const lastReadAt = Date.now()
       for (const query of queryClient.getQueryCache().findAll({ queryKey: ['books'] })) {
         if (!isRecentlyReadQueryKey(query.queryKey)) continue
-        queryClient.setQueryData<BookListRes>(query.queryKey, (old) => {
+        queryClient.setQueryData<ClientLibraryListView>(query.queryKey, (old) => {
           if (!old) return old
           const existing = old.data.find((item) => item.id === id)
           const source = existing ?? book
@@ -664,7 +679,8 @@ export default function Reader() {
       }
     },
     onSuccess: (result) => {
-      if (useAuthStore.getState().user?.id !== authUser?.id) return
+      setLocalSaveError(null)
+      if (!local && useAuthStore.getState().user?.id !== authUser?.id) return
       // The next reader entry latches initialCfi from this cache. If it holds
       // a stale position while the server holds a newer one, the mount saves
       // the stale position back and the background refetch flips the cache —
@@ -673,14 +689,15 @@ export default function Reader() {
       // previous cache was { data: null } for a book's first reading session.
       // Invalidate (without refetching) so the next mount still revalidates in
       // the background.
-      queryClient.setQueryData(['progress', id, isGuest ? 'guest' : 'user'], (old: { data: ReadingProgressRes | null } | undefined) =>
+      queryClient.setQueryData(['progress', cacheId, isGuest ? 'guest' : 'user'], (old: { data: ReadingProgressRes | null } | undefined) =>
         mergeProgressSaveCache(old, result),
       )
-      void queryClient.invalidateQueries({ queryKey: ['progress', id, isGuest ? 'guest' : 'user'], refetchType: 'none' })
-      if (!isGuest) void queryClient.invalidateQueries({ queryKey: ['books'] })
+      void queryClient.invalidateQueries({ queryKey: ['progress', cacheId, isGuest ? 'guest' : 'user'], refetchType: 'none' })
+      if (!isGuest && !local) void queryClient.invalidateQueries({ queryKey: ['books'] })
     },
-    onError: () => {
-      if (!isGuest) void queryClient.invalidateQueries({ queryKey: ['books'] })
+    onError: (error) => {
+      if (local) setLocalSaveError(error instanceof Error ? error.message : '本地保存失败')
+      if (!isGuest && !local) void queryClient.invalidateQueries({ queryKey: ['books'] })
     },
   })
 
@@ -774,8 +791,8 @@ export default function Reader() {
 
   // Gated on bookQuery data: the reader mounts once bookQuery data exists (from
   // cache on reopen or after the initial fetch).
-  const contentUrl = id && bookQuery.data?.data
-    ? withReveal(`/api/v1/books/${id}/file?reader=1&revisionId=${encodeURIComponent(bookQuery.data.data.revisionId ?? '')}&v=${bookQuery.data.data.updatedAt}`)
+  const contentUrl = local ? (bookQuery.data?.data ? local.namespace : '') : id && bookQuery.data?.data
+    ? remote.contentUrl(bookQuery.data.data)
     : ''
   const [revisionUrlOverride, setRevisionUrlOverride] = useState<string | null>(null)
   const [revisionMountGeneration, setRevisionMountGeneration] = useState(0)
@@ -788,6 +805,7 @@ export default function Reader() {
   const revisionQuarantinedRef = useRef(false)
   const lastRenderedContentUrlRef = useRef<string | null>(null)
   const rendererContentUrl = revisionUrlOverride ?? contentUrl
+  const revisionAccountId = local ? null : authUser?.id
 
   useEffect(() => {
     clearPreparedReaderContentText()
@@ -806,7 +824,7 @@ export default function Reader() {
       revisionSwitchRef.current?.controller.abort()
       revisionSwitchRef.current = null
     }
-  }, [id, authUser?.id])
+  }, [cacheId, revisionAccountId])
 
   // Latch initialCfi at first resolve: later refetches of ['progress'] (e.g.
   // StatsPanel mounting) must not remount the renderer
@@ -878,11 +896,23 @@ export default function Reader() {
 
   // Both mode uses automatic capture until the manual timer takes ownership.
   const readingTimerMode = useUiStore((s) => s.readingTimerMode)
+  const localTimerDestination = useMemo(() => local ? localAutomaticTimerDestination(local.ref, () => { if (localTimerScopeRef.current === cacheId) setLocalTimerError(cacheId) }) : undefined, [local, cacheId])
   const { flush: flushReadingTimer, ping: pingReadingTimer } = useReadingTimer(
-    !isGuest && (readingTimerMode === 'auto' || readingTimerMode === 'both') ? (readerReady ? id : undefined) : undefined,
+    !isGuest && !revisionQuarantined && (readingTimerMode === 'auto' || readingTimerMode === 'both') ? (readerReady ? id : undefined) : undefined,
+    localTimerDestination,
+    manualTimerStore,
   )
   // Warm the sidebar stats tab's queries so first open is instant
   usePrefetchBookReadingStats(isGuest ? undefined : id)
+
+  const handleStatsTabOpen = useCallback(() => {
+    flushReadingTimer()
+    if (!localTimerDestination || !local) return
+    void localTimerDestination.retry().then(() => {
+      if (localTimerScopeRef.current !== cacheId) return
+      return queryClient.invalidateQueries({ queryKey: ['reading-records', local.namespace] })
+    }).catch(() => { if (localTimerScopeRef.current === cacheId) setLocalTimerError(cacheId) })
+  }, [cacheId, flushReadingTimer, local, localTimerDestination, queryClient])
 
   // Per-chapter word counts for the info-bar field; must precede useReaderRenderer
   const chapterWordCounts = useMemo(() => {
@@ -890,7 +920,7 @@ export default function Reader() {
     if (!chapters?.length) return undefined
     return chapters.map((c) => (c.wordCount != null
       ? c.wordCount
-      : c.endOffset - (c.contentStartOffset ?? c.startOffset)))
+      : c.endOffset !== null && c.startOffset !== null ? c.endOffset - (c.contentStartOffset ?? c.startOffset) : undefined))
   }, [chaptersQuery.data])
 
   // Text replacements (文本替换 P1): the module-level rule set must be populated
@@ -900,7 +930,7 @@ export default function Reader() {
   // A late-arriving rule set would rebuild the whole view after the first
   // paint (close + open + re-navigate), so the renderer waits for it.
   const { data: replacementsData, isError: replacementsError } = useBookReplacements(id)
-  const replacementRules = useMemo(() => replacementsData?.data ?? [], [replacementsData])
+  const replacementRules = useMemo(() => (replacementsData?.data ?? []).filter((rule) => rule.locationAvailable !== false), [replacementsData])
   const replacementsReady = replacementsData !== undefined || replacementsError
   useEffect(() => {
     setActiveReplacements(replacementRules)
@@ -956,8 +986,8 @@ export default function Reader() {
 
   const settingsSync = useSettingsSyncStore()
   const resolvedBoundPresetId = useUiStore((s) => s.boundPresetId)
-  const settingsReady = isGuest || (settingsSync.userId === authUser?.id && settingsSync.ready)
-  const settingsFailed = !isGuest && settingsSync.userId === authUser?.id && settingsSync.failed
+  const settingsReady = !!local || isGuest || (settingsSync.userId === authUser?.id && settingsSync.ready)
+  const settingsFailed = !local && !isGuest && settingsSync.userId === authUser?.id && settingsSync.failed
 
   const switchRevisionForNavigation = useCallback(async (intent: {
     target?: string
@@ -1042,13 +1072,18 @@ export default function Reader() {
     }
   }, [bookQuery.data, contentUrl, id, setSidebarOpen, setTocItems])
 
+  const shortcutOwner = local ? LOCAL_READER_SHORTCUT_SCOPE : authUser?.id ?? null
+  const resolvedShortcuts = useCallback(() => readReaderShortcuts(shortcutOwner), [shortcutOwner])
   const { containerRef, renderer, fontStack, fontCss, preparationFailed, retryPreparation } = useReaderRenderer({
+    shortcuts: resolvedShortcuts,
+    bookProvider: local?.provider,
+    resolvedFonts: local && !authUser ? [] : undefined,
     ready: settingsReady && resolvedBoundPresetId === boundPresetId && replacementsReady,
     url: rendererContentUrl,    // undefined while progress is still loading: the renderer defers mounting
     mountGeneration: revisionMountGeneration,
     bookId: id,
     format: bookQuery.data?.data?.format,
-    bookSize: bookQuery.data?.data?.size,
+    bookSize: bookQuery.data?.data?.size ?? undefined,
     // so it navigates exactly once (to the saved CFI, or to the book start
     // when progress resolved to none)
     initialCfi: initialCfiRef.current,
@@ -1060,7 +1095,7 @@ export default function Reader() {
       if (renderedUrl) lastRenderedContentUrlRef.current = renderedUrl
       committedMountGenerationRef.current = revisionMountGeneration
       const activeSwitch = revisionSwitchRef.current
-      const renderedRevisionId = renderedUrl
+      const renderedRevisionId = local ? bookQuery.data?.data.revisionId : renderedUrl
         ? new URLSearchParams(new URL(renderedUrl, window.location.href).search).get('revisionId')
         : null
       if (activeSwitch?.revisionId && activeSwitch.revisionId === renderedRevisionId) {
@@ -1072,9 +1107,9 @@ export default function Reader() {
         latestTocSelectionRef.current = null
         displayedRevisionIdRef.current = activeSwitch.revisionId
         setDisplayedRevisionId(activeSwitch.revisionId)
-        void queryClient.invalidateQueries({ queryKey: ['progress', id, isGuest ? 'guest' : 'user'] })
-        void queryClient.invalidateQueries({ queryKey: ['chapters', id] })
-        void queryClient.invalidateQueries({ queryKey: ['annotations', id] })
+        void queryClient.invalidateQueries({ queryKey: ['progress', cacheId, isGuest ? 'guest' : 'user'] })
+        void queryClient.invalidateQueries({ queryKey: ['chapters', cacheId] })
+        void queryClient.invalidateQueries({ queryKey: ['annotations', cacheId] })
         void queryClient.invalidateQueries({ queryKey: ['reader-ideas', id] })
         void queryClient.invalidateQueries({ queryKey: ['idea-composer', id] })
       }
@@ -1183,8 +1218,8 @@ export default function Reader() {
         if (!Number.isNaN(offset)) {
           // TXT page/percent are book-wide, so detect chapter start by offset distance
           const chapters = chaptersQuery.data?.data
-          const chapter = chapters?.find((c) => offset >= c.startOffset && offset < c.endOffset)
-          setAtChapterStart(!!chapter && offset - chapter.startOffset < 800)
+          const chapter = chapters?.find((c) => c.startOffset !== null && c.endOffset !== null && offset >= c.startOffset && offset < c.endOffset)
+          setAtChapterStart(chapter?.startOffset != null && offset - chapter.startOffset < 800)
         }
       } else {
         // foliate emits per-chapter page in both paginated and scrolled flow
@@ -1197,7 +1232,7 @@ export default function Reader() {
       // TTS maintains its own position and must not overwrite the user's
       // reading progress while it moves the renderer internally.
       if (e.source === 'tts') return
-      const eventRevisionId = e.revisionId
+      const eventRevisionId = local ? bookQuery.data?.data.revisionId : e.revisionId
       const expectedRevisionId = revisionSwitchRef.current?.revisionId || displayedRevisionIdRef.current
       if (revisionQuarantinedRef.current || !expectedRevisionId || eventRevisionId !== expectedRevisionId) return
       // Navigation-aware coverage belongs to the record, independently of position saves.
@@ -1214,9 +1249,10 @@ export default function Reader() {
       if (sample) lastSampleAtRef.current = now
       const readingPosition = { cfi: e.cfi, fraction: e.fraction, segmentStart: segmentStartFraction,
         revisionId: expectedRevisionId, wordCount: bookQuery.data?.data.meta?.wordCount ?? undefined }
+      if (local && segmentStartFraction !== undefined && e.fraction !== undefined) local.captureCoverage(segmentStartFraction, e.fraction)
       pingReadingTimer(readingPosition)
-      useManualTimerStore.getState().updatePosition(id, { ...readingPosition, fraction: e.fraction ?? null, chapterIndex: e.chapterIndex })
-      scheduleProgressSave({ ...(displayedRevisionIdRef.current ? { revisionId: displayedRevisionIdRef.current } : {}), cfi: e.cfi, ...(e.contentCfi ? { contentCfi: e.contentCfi } : {}), chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, sample })
+      manualTimerStore.getState().updatePosition(id, { ...readingPosition, fraction: e.fraction ?? null, chapterIndex: e.chapterIndex })
+      scheduleProgressSave({ ...(displayedRevisionIdRef.current ? { revisionId: displayedRevisionIdRef.current } : {}), cfi: e.cfi, ...(e.contentCfi ? { contentCfi: e.contentCfi } : {}), chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, ...(local ? { segmentStartFraction } : {}), sample })
     },
     onSelected: (e) => {
       setIsSelectingText(false)
@@ -1300,9 +1336,9 @@ export default function Reader() {
     onRevisionChanged: () => {
       revisionQuarantinedRef.current = true
       setRevisionQuarantined(true)
-      void queryClient.cancelQueries({ queryKey: ['progress', id, isGuest ? 'guest' : 'user'] })
-      void queryClient.cancelQueries({ queryKey: ['chapters', id] })
-      void queryClient.cancelQueries({ queryKey: ['annotations', id] })
+      void queryClient.cancelQueries({ queryKey: ['progress', cacheId, isGuest ? 'guest' : 'user'] })
+      void queryClient.cancelQueries({ queryKey: ['chapters', cacheId] })
+      void queryClient.cancelQueries({ queryKey: ['annotations', cacheId] })
       void queryClient.cancelQueries({ queryKey: ['reader-ideas', id] })
       closeSegment(segmentTrackerRef.current)
       if (saveTimer.current) {
@@ -1512,6 +1548,7 @@ export default function Reader() {
     resetForBook(
       !isTouch && ui.toolbarLocked && ui.sidebarRememberedOpen,
       ui.navTabRemembered,
+      id,
     )
     // chapterCount starts empty; the effect below syncs it when chapters arrive
     segmentTrackerRef.current = createSegmentTracker()
@@ -1522,7 +1559,7 @@ export default function Reader() {
     historyAutoHideRef.current?.dispose()
     currentCfiRef.current = null
     setCurrentContentCfi(null)
-  }, [id, resetForBook, syncHistoryCaps, isTouch])
+  }, [cacheId, id, resetForBook, syncHistoryCaps, isTouch])
 
   // While locked, every open/closed toggle is a deliberate choice — remember
   // it (device-local) so the next book open honors it instead of forcing open.
@@ -1557,7 +1594,7 @@ export default function Reader() {
     const offset = Number(cfi.split(':')[1])
     if (Number.isNaN(offset)) return
     const chapters = chaptersQuery.data.data
-    const idx = chapters.findIndex((c) => offset >= c.startOffset && offset < c.endOffset)
+    const idx = chapters.findIndex((c) => c.startOffset !== null && c.endOffset !== null && offset >= c.startOffset && offset < c.endOffset)
     if (idx >= 0) {
       setCurrentChapterIndex(idx)
       setCurrentChapter(chapters[idx].title)
@@ -1651,8 +1688,9 @@ export default function Reader() {
 
   const handleMarkFinished = useCallback(async () => {
     flushReadingTimer()
-    if (!isGuest) {
+    if (!isGuest || local) {
       try {
+        if (localTimerDestination) await localTimerDestination.retry()
         await readingRoundMutation.mutateAsync('finish')
         notify.success({ key: 'reader.markedAsFinished' })
       } catch (err) {
@@ -1661,7 +1699,7 @@ export default function Reader() {
     } else {
       notify.success({ key: 'reader.markedAsFinished' })
     }
-  }, [flushReadingTimer, isGuest, readingRoundMutation])
+  }, [flushReadingTimer, isGuest, local, localTimerDestination, readingRoundMutation])
 
   const onPrevChapter = useCallback(() => {
     keepChromePinnedRef.current = true
@@ -1722,7 +1760,7 @@ export default function Reader() {
   const rateSamples = progressQuery.data?.data?.rateSamples
   const rate = useMemo(() => readingRateOf(rateSamples), [rateSamples])
   const totalChars = useMemo(
-    () => chapterWordCounts?.reduce((sum, n) => sum + (n ?? 0), 0) ?? 0,
+    () => chapterWordCounts?.reduce<number>((sum, n) => sum + (n ?? 0), 0) ?? 0,
     [chapterWordCounts],
   )
   const estimatedMinutes = useMemo(() => {
@@ -1837,7 +1875,7 @@ export default function Reader() {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
       const isBookSearchInput = target.matches('[data-reader-book-search]')
-      const shortcuts = readReaderShortcuts(useAuthStore.getState().user?.id ?? null)
+      const shortcuts = readReaderShortcuts(local ? LOCAL_READER_SHORTCUT_SCOPE : useAuthStore.getState().user?.id ?? null)
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         // A focused input's own Esc handler (or a window-level popup handler)
         // marks the consumed flag synchronously. Consume it in the next tick so
@@ -1967,7 +2005,7 @@ export default function Reader() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [playbackCoordinator, readingMode, navigate, toggleChrome, isGuest, onToggleSettings, onHistoryBack, onHistoryForward, currentChapterIndex, containerEl, effectiveSettings.fontSize, updateSetting])
+  }, [playbackCoordinator, readingMode, navigate, toggleChrome, isGuest, local, onToggleSettings, onHistoryBack, onHistoryForward, currentChapterIndex, containerEl, effectiveSettings.fontSize, updateSetting])
 
   // Belt-and-braces: a stale "consumed" mark from a previous session (Esc
   // closed a popup, then the reader was left without another Esc) must not
@@ -2053,11 +2091,19 @@ export default function Reader() {
       <AutoReadingSessionProvider renderer={renderer} coordinator={playbackCoordinator} onStart={onAutoReadingStart}>
       <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator} guestReadOnly={isGuest} onStart={onTtsStart}>
       <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+        {local && localSaveError && <div role="alert" className="absolute left-1/2 top-4 z-[80] w-max max-w-[90vw] -translate-x-1/2 space-y-2 rounded-xl border border-amber-400 bg-stone-50 p-4 text-sm text-stone-900 shadow-lg">
+          <p>{_('localLibrary.progressFailed')}</p>
+          <div className="flex gap-3"><Button onClick={async () => { try { await local.getProgress(); flushPendingProgress() } catch (error) { setLocalSaveError(error instanceof Error ? error.message : 'Local storage is unavailable') } }}>{_('localLibrary.retryPosition')}</Button><Button onClick={() => window.location.reload()}>{_('localLibrary.restorePosition')}</Button></div>
+        </div>}
+        {local && (localTimerError === cacheId || manualTimerError) && <div role="alert" className="absolute bottom-16 left-1/2 z-[80] w-max max-w-[90vw] -translate-x-1/2 space-y-2 rounded-xl border border-amber-400 bg-stone-50 p-4 text-sm text-stone-900 shadow-lg">
+          <p>{_('localLibrary.timerSaveFailed')}</p>
+          <Button onClick={async () => { try { retryManualTimer(); flushReadingTimer(); await localTimerDestination?.retry(); if (localTimerScopeRef.current === cacheId) setLocalTimerError(null) } catch { if (localTimerScopeRef.current === cacheId) setLocalTimerError(cacheId) } }}>{_('errors.retry')}</Button>
+        </div>}
         <div className="flex h-full w-full">
             <ReaderSidebar
               bookId={id}
               tocPositionReady={readerReady}
-              onStatsTabOpen={flushReadingTimer}
+              onStatsTabOpen={handleStatsTabOpen}
               chromePinned={chromePinned}
               footerVisible={footerVisible}
               mobileDockVisible={mobileDockVisible}
@@ -2314,7 +2360,7 @@ export default function Reader() {
                 mobileDockVisible={mobileDockVisible}
                 onPointerEnter={() => setCornerDwell(true)}
                 onPointerLeave={() => setCornerDwell(false)}
-                readingTimerMode={isGuest ? 'off' : readingTimerMode}
+                readingTimerMode={isGuest && !local ? 'off' : readingTimerMode}
               />
             </div>
           </div>
@@ -2329,8 +2375,8 @@ export default function Reader() {
           />
         )}
         <ShareCardDialog bookId={id} />
-        {!isGuest && !revisionQuarantined && translationTarget && <TranslationPopup bookId={id} target={translationTarget} />}
-        {!isGuest && !revisionQuarantined && dictionaryTarget && <DictionaryPopup key={`${id}:${dictionaryTarget.cfiRange}`} target={dictionaryTarget} />}
+        {!isGuest && !revisionQuarantined && translationTarget && <TranslationPopup key={`${cacheId}:${translationTarget.cfiRange}`} bookId={local ? undefined : id} target={translationTarget} />}
+        {!isGuest && !revisionQuarantined && dictionaryTarget && <DictionaryPopup key={`${cacheId}:${dictionaryTarget.cfiRange}`} target={dictionaryTarget} />}
         {replaceTarget && (
           <Modal
             title={_('annotation.replaceSelection')}

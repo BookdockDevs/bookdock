@@ -159,6 +159,20 @@ describe('NavigationPanel', () => {
     expect(screen.getByRole('button', { name: 'Chapter 3' })).toHaveClass('font-medium')
   })
 
+  it('restores a fresh same-session TOC scroll position before readerReady flips', () => {
+    useReaderState.setState({
+      tocBookId: 'book-1',
+      tocItems: Array.from({ length: 30 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
+      currentChapter: '第15章',
+      currentChapterHref: 'chapter:14',
+      currentChapterIndex: 14,
+      sidebarScrollPositions: { 'book-1': { toc: { top: 240, currentIndex: 14, sessionId: READER_SESSION_ID } } },
+    })
+    const { container } = render(<NavigationPanel bookId="book-1" open tocPositionReady={false} />)
+    expect((container.querySelector('.overflow-y-auto') as HTMLElement).scrollTop).toBe(240)
+    expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+  })
+
   it('scrolls to current chapter on reopen even when the remembered index matches', async () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
 

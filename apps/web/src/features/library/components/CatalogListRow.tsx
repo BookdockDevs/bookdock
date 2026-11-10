@@ -9,6 +9,7 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { formatAuthorList } from '@/lib/utils'
 
+import { catalogSelectionKey } from '@/features/reading-data/catalog-selection'
 import { catalogWorkRow, rowCover } from '../book-row'
 import type { BookDragPayload } from '../dnd'
 import { getHiddenCause } from '../hidden-status'
@@ -60,9 +61,9 @@ export default function CatalogListRow({
   const categoryName = work.categoryId
     ? (categoriesData?.data ?? []).find((c) => c.id === work.categoryId)?.name
     : undefined
-  const bookIds = selectionActive && selected ? Array.from(selection) : [work.id]
+  const bookIds = selectionActive && selected ? Array.from(selection) : [catalogSelectionKey(work)]
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `book:${work.id}`,
+    id: `book:${catalogSelectionKey(work)}`,
     data: { bookIds } satisfies BookDragPayload,
     disabled: !canManage,
   })
@@ -126,7 +127,7 @@ export default function CatalogListRow({
             lastReadAt: null,
             categoryName: categoryName ?? null,
             tags: work.tags.map((t) => t.name),
-            size: first?.size ?? 0,
+            size: first?.size ?? null,
             createdAt: work.createdAt,
           }}
         />

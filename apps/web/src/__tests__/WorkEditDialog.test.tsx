@@ -6,6 +6,7 @@ import i18n from '../i18n/i18n'
 import { notify } from '@/lib/notifications'
 import WorkEditDialog from '../features/library/components/WorkEditDialog'
 import { ApiError } from '../api/client'
+import { useAuthStore } from '../stores/auth.store'
 import type { CatalogBook, FileMetadataSourceRes } from '@bookdock/shared'
 
 function fileSource(overrides: Partial<FileMetadataSourceRes['values']> = {}): FileMetadataSourceRes {
@@ -68,6 +69,9 @@ describe('WorkEditDialog', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     await i18n.changeLanguage('zh-CN')
+    // Metadata lookup is an account service; the entry only exists for a
+    // signed-in session, so the edit form needs one to offer it.
+    useAuthStore.setState({ user: { id: 'metadata-account', username: 'Owner', role: 'owner' } })
     HOOKS.useLibraryCategories.mockReturnValue({ data: { data: [{ id: 'cat1', name: '小说' }, { id: 'cat2', name: '散文' }] } })
     HOOKS.useLibraryTags.mockReturnValue({ data: { data: [{ id: 't1', name: 'classic' }, { id: 't2', name: 'new' }] } })
     HOOKS.useCreateLibraryCategory.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })

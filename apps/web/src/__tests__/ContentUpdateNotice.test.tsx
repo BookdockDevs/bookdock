@@ -7,6 +7,7 @@ import type { BookDetailRes, ReadingProgressRes } from '@bookdock/shared'
 import { apiPut } from '../api/client'
 import { notify } from '../lib/notifications'
 import ContentUpdateNotice from '../features/reader/components/ContentUpdateNotice'
+import { LocalReaderContext, type LocalReaderSession } from '../features/reading-data/reader-source-context'
 
 vi.mock('../api/client', () => ({ apiPut: vi.fn() }))
 vi.mock('../lib/notifications', () => ({ notify: { info: vi.fn(), warning: vi.fn() } }))
@@ -27,6 +28,16 @@ describe('ContentUpdateNotice', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(apiPut).mockResolvedValue({ data: {} })
+  })
+
+  it('reports a local incompatible position through the existing notice without a Server acknowledgment', () => {
+    const local = { namespace: 'local:device-book-after' } as LocalReaderSession
+    const progress = { progressRevisionId: 'before', contentUpdateUnseen: true, locationAvailable: false, coverageAvailable: false } as ReadingProgressRes
+    render(<QueryClientProvider client={client()}><LocalReaderContext.Provider value={local}>
+      <ContentUpdateNotice bookId="b1" book={book({ hasUnreadUpdate: false })} progress={progress} ready guest={false} />
+    </LocalReaderContext.Provider></QueryClientProvider>)
+    expect(notify.warning).toHaveBeenCalledExactlyOnceWith({ key: 'reader.positionAndCoverageUnavailableAfterEdit' }, { dedupeKey: 'reader-progress:local:device-book-after' })
+    expect(apiPut).not.toHaveBeenCalled()
   })
 
   it('shows the fresh reader response and waits for rendering to acknowledge', async () => {

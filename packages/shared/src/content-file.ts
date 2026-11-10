@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import type { ClientBookRef } from './client-reading'
+
 export const CONTENT_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 export const CONTENT_FILES_MAX_COUNT = 20
 export const IDEA_IMAGE_MAX_COUNT = 9
@@ -24,6 +26,7 @@ export interface ContentFile {
   mimeType: string
   size: number
   url: string
+  localSource?: { book: ClientBookRef; id: string }
 }
 
 export const contentFileAssociationSchema = z.object({

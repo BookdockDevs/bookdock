@@ -1,6 +1,32 @@
 # Bookdock Product Context
 
-Bookdock is a self-hosted e-book library and reader. This context defines the canonical product language for user feedback, books, table-of-contents rules, and reading behavior so the same concept is named consistently across the library, reader, settings, and authentication flows.
+Bookdock combines an e-book client with a self-hosted library server. This context defines canonical product language so the same concept is named consistently across books, sources, reading, settings and authentication.
+
+## Client, Books and Sources
+
+**Library source**:
+The authority that stores and reads a library's books and personal records: the device vault or a Bookdock Server library. A book carries its source; the source is an attribute of the book, not something the client switches into.
+_Avoid_: library mode, local mode, remote mode, treating a connection as the identity of a book.
+
+**Device library**:
+The books, metadata and personal reading records held in this browser's vault. It can use network services and configured services; it does not imply offline availability, a reduced feature set, or a separate interface.
+_Avoid_: offline mode, simplified reader, local mode.
+
+**Server library**:
+The books and authorized reading records held by a Bookdock Server instance. The same client surface presents them.
+_Avoid_: remote mode.
+
+**Unified library**:
+The single bookshelf that lists device books and server books together. A source filter narrows the list; it never switches the client into another presentation.
+_Avoid_: merged library, source switch, automatic association. Device and server copies of the same book remain independent records.
+
+**Connected service**:
+A configured network capability used by the client independently of its active library source. Availability, credentials and permission belong to that service, not to the choice of local or remote library.
+_Avoid_: assuming all network services belong to the server library.
+
+**Offline availability**:
+The ability to use a particular capability without a network connection. It is distinct from where library data is stored.
+_Avoid_: reading the device library as a promise of offline availability.
 
 ## Reading History
 
@@ -202,3 +228,10 @@ _Avoid_: shared anonymous User.
 **Instance Owner**:
 The one real account responsible for the deployment and its configuration. Shared-library ownership and membership are separate responsibilities.
 _Avoid_: global user role as an independent source of ownership.
+
+
+**Trashed book**:
+A book reversibly removed from the active library while its content and records remain available for restoration.
+
+**Removed publication**:
+A book whose content is no longer available, while retained personal records can still be maintained. It is distinct from a book awaiting restoration in trash.

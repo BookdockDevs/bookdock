@@ -8,6 +8,8 @@ import { resolveArchiveScope } from '@/features/archive/archive-scope'
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
+import { useVaultCapable } from '@/features/reading-data/vault-availability'
 import { useAuthStore } from '@/stores/auth.store'
 
 import HourDistribution from './components/HourDistribution'
@@ -63,7 +65,9 @@ export default function Stats({
   const _ = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
-  const isGuest = !user
+  const local = useLocalCatalog()
+  const vaultCapable = useVaultCapable()
+  const isGuest = !local && !vaultCapable && !user
   usePageTitle(_(hideHeader ? 'archive.title' : 'stats.title'))
   const onBack = useBackNavigation('/')
 

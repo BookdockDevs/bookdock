@@ -9,7 +9,7 @@ export { UPDATE_PHASES, LIBRARY_SORT_MODES, BOOK_SORT_PREF_FIELDS, GRID_CARD_FIE
 export type { SelectionToolbarActionKey } from './contract'
 export type { SidebarModule } from './contract'
 export { normalizeAiCitationMarkers, sanitizeAiCitationMarkers } from './ai-citations'
-export { DEFAULT_TXT_TOC_PATTERNS, fallbackTxtChapters, normalizeTxtText, pickTxtTocRule, predictTxtContinuationStart, scanTxtChapterBoundaries } from './txt-chapter-tools'
+export { buildTxtEditorSource, normalizeTxtEditorContent, DEFAULT_TXT_TOC_PATTERNS, fallbackTxtChapters, normalizeTxtText, pickTxtTocRule, predictTxtContinuationStart, scanTxtChapterBoundaries } from './txt-chapter-tools'
 export type { TxtChapterBoundary, TxtTocPattern } from './txt-chapter-tools'
 export { expandAiPrompt, getAiPromptVariables } from './ai-prompts'
 export type { AiPromptValues, AiPromptVariable } from './ai-prompts'
@@ -522,3 +522,30 @@ export * from './storage-backend'
 
 export { localDraftEnvelopeSchema, txtLocalDraftSchema, epubLocalDraftSchema } from './local-editor-draft-schema'
 export type { TxtLocalDraft, EpubLocalDraft } from './local-editor-draft-schema'
+export * from './client-reading'
+export * from './client-catalog'
+
+export { buildTxtEpubEntries, TXT_EPUB_ARTIFACT_VERSION } from './txt-publication'
+export type { TxtEpubEntry, TxtToEpubChapter, TxtToEpubCover, TxtToEpubMetadata } from './txt-publication'
+
+export { countWords } from './text-metrics'
+export * from './client-reading-ledger'
+export { mergeTimeFragments, splitReadingTime, subtractTimeFragments } from './reading-time'
+export * from './reading-timer-claim'
+
+export type { LocalEditorDraftEnvelope } from './local-editor-draft-schema'
+
+export { patchEpubPackage, readEpubEditorPackage } from './epub-editor-package'
+
+export { clientNoteImageSchema } from './client-reading'
+export type { ClientNoteImage } from './client-reading'
+
+export { clientReplacementSchema } from './client-reading'
+export type { ClientReplacement } from './client-reading'
+
+export * from './revision-map'
+export * from './revision-coverage'
+export * from './epub-cfi-position'
+export * from './epub-revision-map'
+export * from './revision-anchors'
+export { cleanAuthor, normalizeBookTitle, splitAuthors } from './book-title'

@@ -6,6 +6,7 @@ import { useContextMenu } from '@/features/library/components/use-context-menu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 import { useAuthStore } from '@/stores/auth.store'
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import { useInstanceInfo, useLogout } from './hooks'
 
 const menuItemClass = 'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-stone-700 transition-colors hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800'
@@ -54,7 +55,8 @@ export default function AccountMenu() {
   const navigate = useNavigate()
   const router = useRouter({ warn: false })
   const user = useAuthStore((s) => s.user)
-  const { data: instanceData } = useInstanceInfo()
+  const local = useLocalCatalog()
+  const { data: instanceData } = useInstanceInfo({ enabled: !local })
   const logout = useLogout()
   const menu = useContextMenu()
 
@@ -66,7 +68,7 @@ export default function AccountMenu() {
   if (!user && !isGuest) return null
 
   if (isGuest) {
-    const isUninitialized = !instance?.initialized
+    const isUninitialized = !local && !instance?.initialized
     return (
       <button
         type="button"

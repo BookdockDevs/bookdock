@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { SettingsRes } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
+import { assertSessionEpoch, getSessionEpoch } from '@/lib/session-scope'
 
 export const SETTINGS_CACHE_KEY = 'bd-settings-cache'
 
@@ -74,9 +75,12 @@ export function seedSettingsQuery(client: QueryClient, userId?: string | null): 
 }
 
 export async function fetchSettings(): Promise<{ data: SettingsRes }> {
+  const epoch = getSessionEpoch()
+  const userId = getStoredUserId()
   const res = await apiGet<{ data: SettingsRes }>('/settings')
+  assertSessionEpoch(epoch)
   if (res?.data) {
-    writeStoredSettings(res.data)
+    writeStoredSettings(res.data, userId)
   }
   return res
 }

@@ -4,11 +4,12 @@ import { useNavigate, useRouter } from '@tanstack/react-router'
 import { useDndContext, useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
-import type { Category, LibraryListItem, LibraryRelation } from '@bookdock/shared'
+import type { ClientCategoryView, LibraryListItem, LibraryRelation } from '@bookdock/shared'
 
+import { useCatalogRevealHidden } from '@/features/reading-data/useCatalogRevealHidden'
+import { useVaultCapable } from '@/features/reading-data/vault-availability'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
-import { useUiStore } from '@/stores/ui.store'
 
 import type { LibrarySearch } from '@/routes/index'
 import SmartMenu from '@/components/ui/SmartMenu'
@@ -18,7 +19,7 @@ import NotificationBell from '@/features/notifications/components/NotificationBe
 import { applyLibraryOrder, applyShelfOrder, applyTagOrder, isBookDrag, SHELF_NONE_DROPPABLE } from '../dnd'
 import { sortSidebarItems } from '../sort-modes'
 import { sortCategories } from '../taxonomy'
-import { useBooks, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleShelfHidden, useToggleTagPin, useToggleTagHidden, useTrashEnabled, useLibraryPrefs, useLibraryPrefsState, useHiddenLibraries, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
+import { useBooks, useDeviceMembershipCounts, useShelves, useTags, useDeleteShelf, useDeleteTag, useToggleShelfPin, useToggleShelfHidden, useToggleTagPin, useToggleTagHidden, useTrashEnabled, useLibraryPrefs, useLibraryPrefsState, useHiddenLibraries, useLibraryCategories, useLibraryTags, useLibraryCatalog, useLibraryRelation, useUpdateLibraryCategory, useDeleteLibraryCategory, useUpdateLibraryTag, useDeleteLibraryTag } from '../hooks'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TaxonomyEntry from './TaxonomyEntry'
 import TaxonomyEmptyState from './TaxonomyEmptyState'
@@ -31,7 +32,7 @@ import PrivateLibraryRenameDialog from './PrivateLibraryRenameDialog'
 import { useContextMenu } from './use-context-menu'
 
 const navigationSessions = new Map<string, { panel: 'shelves' | 'categories' | 'tags'; expanded: string[]; scroll: Record<string, number> }>()
-const EMPTY_CATEGORIES: Category[] = []
+const EMPTY_CATEGORIES: ClientCategoryView[] = []
 
 interface LibrarySidebarProps {
   sessionKey?: string
@@ -146,13 +147,15 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
       remember({ panel: availableModules[0] ?? (activeLibraryId ? 'categories' : 'shelves') })
     }
   }, [availableModules, panel, activeLibraryId, remember])
-  const { data: shelvesData, isLoading: shelvesLoading, isError: shelvesError, refetch: refetchShelves } = useShelves()
-  const { data: tagsData, isLoading: tagsLoading, isError: tagsError, refetch: refetchTags } = useTags()
+  // Unified shelf: anonymous visitors fall back to the vault taxonomy, and
+  // device books filed into account groups join the server membership counts.
+  const { data: shelvesData, isLoading: shelvesLoading, isError: shelvesError, refetch: refetchShelves } = useShelves({ fallbackAnonymous: !activeLibraryId, overlayLocalCounts: !activeLibraryId })
+  const { data: tagsData, isLoading: tagsLoading, isError: tagsError, refetch: refetchTags } = useTags({ fallbackAnonymous: !activeLibraryId, overlayLocalCounts: !activeLibraryId })
   // Shared libraries expose their categories here; private shelves and private
   // categories stay independent and load from their respective endpoints.
   const isLibraryActivity = Boolean(inLibrary && librarySearch?.section === 'activity' && !trash)
   const taxonomyLibraryId = activeLibraryId ?? privateLibraryId
-  const categoriesQuery = useLibraryCategories(taxonomyLibraryId)
+  const categoriesQuery = useLibraryCategories(taxonomyLibraryId, { overlayDeviceCounts: !activeLibraryId })
   const libraryTagsQuery = useLibraryTags(activeLibraryId)
   const relationQuery = useLibraryRelation(activeLibraryId)
   const canCurate = inLibrary
@@ -177,7 +180,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     if (autoExpandedSelection.current === key) return
     autoExpandedSelection.current = key
     const parent = selected.parentId ?? (categoriesQuery.data?.data.some((category) => category.parentId === selected.id) ? selected.id : undefined)
-    // Category refreshes must not undo an explicit collapse.
+    // ClientCategoryView refreshes must not undo an explicit collapse.
     if (parent) setSession((previous) => {
       if (previous.expanded.includes(parent)) return previous
       const next = { ...previous, expanded: [...previous.expanded, parent] }
@@ -193,8 +196,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     [inLibrary, libraryTagsQuery.data, tagsData, tagOrderOverride, libraryPrefs?.tagSort],
   )
   const taxonomyLoading = panel === 'categories' ? (!taxonomyLibraryId ? !librariesResolved : categoriesQuery.isLoading) : panel === 'shelves' ? shelvesLoading : (inLibrary ? (!activeLibraryId || libraryTagsQuery.isLoading) : tagsLoading)
-  const revealHidden = useUiStore((s) => s.revealHidden)
-  const trashEnabled = useTrashEnabled({ enabled: !readOnly && !inLibrary })
+  const { revealHidden } = useCatalogRevealHidden()
+  const vaultCapable = useVaultCapable()
+  const canUsePrivateVault = !inLibrary && (!readOnly || vaultCapable)
+  const trashEnabled = useTrashEnabled({ enabled: canUsePrivateVault, fallbackAnonymous: true })
   const { data: trashData } = useBooks({
     page: 1,
     pageSize: 1,
@@ -207,7 +212,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     readStatus: null,
     trash: true,
   }, { enabled: trashEnabled })
-  const trashCount = trashData?.total
+  // The aggregate rows count both kinds of book, because the grid they open
+  // shows both. The device numbers come from the books themselves.
+  const deviceCounts = useDeviceMembershipCounts({ enabled: !inLibrary })
+  const trashCount = trashData || deviceCounts ? (trashData?.total ?? 0) + (deviceCounts?.trash ?? 0) : undefined
   // Shared-library trash is owner-only: the row relation comes from the list,
   // falling back to the per-library query while it loads.
   const activeLibraryRow = (libraries ?? []).find((library) => library.id === activeLibraryId)
@@ -237,7 +245,9 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     activeLibraryId,
     { page: 1, pageSize: 1, trash: false },
   )
-  const allBooksCount = inLibrary ? libraryAllBooksData?.data.total : allBooksData?.total
+  const allBooksCount = inLibrary
+    ? libraryAllBooksData?.data.total
+    : allBooksData || deviceCounts ? (allBooksData?.total ?? 0) + (deviceCounts?.active ?? 0) : undefined
 
   // The uncategorized count is a per-view badge, so it is asked of whichever
   // list is in context: a private library's books, or the shared catalog's
@@ -259,9 +269,13 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     activeLibraryId,
     { page: 1, pageSize: 1, categoryId: 'none' },
   )
-  const uncategorizedCount = inLibrary ? libraryUncategorizedData?.data.total : uncategorizedData?.total
+  const uncategorizedCount = inLibrary
+    ? libraryUncategorizedData?.data.total
+    : uncategorizedData || deviceCounts ? (uncategorizedData?.total ?? 0) + (deviceCounts?.unshelved ?? 0) : undefined
   const { data: unclassifiedData } = useBooks({ page: 1, pageSize: 1, search: '', sortBy: 'createdAt', sortOrder: 'desc', shelfId: null, categoryId: 'none', tagId: null, format: null, readStatus: null, trash: false, showHidden: revealHidden }, { enabled: !inLibrary })
-  const unclassifiedCount = inLibrary ? uncategorizedCount : unclassifiedData?.total
+  const unclassifiedCount = inLibrary
+    ? uncategorizedCount
+    : unclassifiedData || deviceCounts ? (unclassifiedData?.total ?? 0) + (deviceCounts?.uncategorized ?? 0) : undefined
 
   const [shelfDialog, setShelfDialog] = useState<{ shelfId?: string; initialName?: string; initialParentId?: string } | null>(null)
   const [deleteShelfTarget, setDeleteShelfTarget] = useState<TaxonomyRow | null>(null)
@@ -289,8 +303,8 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
 
   // Curating a taxonomy is the library owner's call, never the reader's: a
   // private library is its owner's, a shared one needs owner/admin.
-  const canEditShelves = inLibrary ? canCurate : !readOnly
-  const canEditTags = inLibrary ? canCurate : !readOnly
+  const canEditShelves = inLibrary ? canCurate : canUsePrivateVault
+  const canEditTags = inLibrary ? canCurate : canUsePrivateVault
 
   const localNavRef = useRef<HTMLElement | null>(null)
   const [canScrollUp, setCanScrollUp] = useState(false)
@@ -388,7 +402,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
           }
           onClick={() => selectNavigation({ expression: undefined, shelf: undefined, category: undefined, tag: undefined, q: undefined, format: undefined, status: undefined, author: undefined, series: undefined, categoryScope: undefined, trash: undefined })}
         />
-        {((trashEnabled && !readOnly && !inLibrary) || (sharedTrashVisible && libraryTrashEnabled)) && (
+        {((trashEnabled && canUsePrivateVault) || (sharedTrashVisible && libraryTrashEnabled)) && (
           <NavItem
             label={_('library.trash')}
             count={inLibrary ? libraryTrashCount : trashCount}
@@ -593,7 +607,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
       </div>
 
       <div className="mt-auto flex flex-col gap-0.5 pt-2.5 border-t border-stone-200/50 dark:border-stone-800/50">
-        {!readOnly && <NavItem
+        {(canUsePrivateVault || !readOnly) && <NavItem
           label={_('archive.title')}
           icon={
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -636,6 +650,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
       </div>
 
       <ShelfDialog
+        taxonomyKind={panel === 'categories' ? 'category' : 'shelf'}
         open={shelfDialog !== null}
         libraryId={panel === 'categories' ? taxonomyLibraryId ?? undefined : undefined}
         shelfId={shelfDialog?.shelfId}

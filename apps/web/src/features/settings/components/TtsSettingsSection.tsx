@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 
 import type { TtsProvider, TtsServiceCreateReq, TtsServiceRes, TtsServiceUpdateReq } from '@bookdock/shared'
@@ -108,21 +108,33 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
   const [providerMenuOpen, setProviderMenuOpen] = useState(false)
   const providerMenuRef = useRef<HTMLDivElement>(null)
   const [pendingDelete, setPendingDelete] = useState<TtsServiceRes | null>(null)
+  const [stateAccountId, setStateAccountId] = useState(user?.id ?? null)
+  const ownsState = stateAccountId === (user?.id ?? null)
+  useEffect(() => {
+    if (ownsState) return
+    setForm(null)
+    setPendingDelete(null)
+    setProviderMenuOpen(false)
+    setStateAccountId(user?.id ?? null)
+  }, [ownsState, user?.id])
   const services = useMemo(() => servicesData?.data ?? [], [servicesData])
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.ttsOperationFailed'))
+  const ownsSession = () => Boolean(user && useAuthStore.getState().user?.id === user.id && ownsState)
+  const showError = (error: unknown) => { if (ownsSession()) notify.error(getUserErrorNotification(error, 'settings.ttsOperationFailed')) }
   useDismissiblePopup(providerMenuOpen, providerMenuRef, () => setProviderMenuOpen(false))
 
   function openCreate(provider: TtsProvider) {
+    if (!ownsSession()) return
     setProviderMenuOpen(false)
     setForm(makeForm(provider, providers))
   }
 
   function openEdit(service: TtsServiceRes) {
+    if (!ownsSession()) return
     setForm(makeForm(service.provider, providers, service))
   }
 
   function save() {
-    if (!form) return
+    if (!form || !ownsSession()) return
     const common = {
       name: form.name.trim(),
       provider: form.provider,
@@ -133,23 +145,23 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
     }
     if (form.id) {
       const body: TtsServiceUpdateReq = { ...common, secrets: Object.fromEntries(Object.entries(form.secrets).filter(([, value]) => value.trim())) }
-      update.mutate({ id: form.id, body }, { onSuccess: () => { setForm(null); notify.success({ key: 'settings.ttsSaved' }) }, onError: showError })
+      update.mutate({ id: form.id, body }, { onSuccess: () => { if (ownsSession()) { setForm(null); notify.success({ key: 'settings.ttsSaved' }) } }, onError: showError })
     } else {
       const body: TtsServiceCreateReq = { ...common, secrets: Object.fromEntries(Object.entries(form.secrets).filter(([, value]) => value.trim())) }
-      create.mutate(body, { onSuccess: () => { setForm(null); notify.success({ key: 'settings.ttsSaved' }) }, onError: showError })
+      create.mutate(body, { onSuccess: () => { if (ownsSession()) { setForm(null); notify.success({ key: 'settings.ttsSaved' }) } }, onError: showError })
     }
   }
 
   function confirmDelete() {
-    if (!pendingDelete) return
-    remove.mutate(pendingDelete.id, { onSuccess: () => { if (form?.id === pendingDelete.id) setForm(null); notify.success({ key: 'settings.ttsDeleted' }) }, onError: showError })
+    if (!pendingDelete || !ownsSession()) return
+    remove.mutate(pendingDelete.id, { onSuccess: () => { if (!ownsSession()) return; if (form?.id === pendingDelete.id) setForm(null); notify.success({ key: 'settings.ttsDeleted' }) }, onError: showError })
     setPendingDelete(null)
   }
 
   function testCurrent() {
-    if (!form) return
+    if (!form || !ownsSession()) return
     if (form.id) {
-      test.mutate(form.id, { onSuccess: () => notify.success({ key: 'settings.ttsTestSuccess' }), onError: showError })
+      test.mutate(form.id, { onSuccess: () => { if (ownsSession()) notify.success({ key: 'settings.ttsTestSuccess' }) }, onError: showError })
       return
     }
     const body: TtsServiceCreateReq = {
@@ -161,7 +173,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
       options: form.options,
       secrets: Object.fromEntries(Object.entries(form.secrets).filter(([, value]) => value.trim())),
     }
-    testDraft.mutate(body, { onSuccess: () => notify.success({ key: 'settings.ttsTestSuccess' }), onError: showError })
+    testDraft.mutate(body, { onSuccess: () => { if (ownsSession()) notify.success({ key: 'settings.ttsTestSuccess' }) }, onError: showError })
   }
 
   return (
@@ -276,7 +288,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
         )}
       </SettingsCard>
 
-      {pendingDelete && (
+      {ownsState && pendingDelete && (
         <ConfirmDialog
           title={_('settings.confirmDeleteTitle')}
           message={_('settings.ttsDeleteConfirm', { name: pendingDelete.name })}
@@ -285,7 +297,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
           onClose={() => setPendingDelete(null)}
         />
       )}
-      {form && (
+      {ownsState && form && (
         <Modal title={_(form.id ? 'settings.ttsEdit' : 'settings.ttsAdd')} onClose={() => setForm(null)}>
           <TtsServiceForm
             form={form}

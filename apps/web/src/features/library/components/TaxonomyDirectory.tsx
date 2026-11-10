@@ -4,10 +4,12 @@ import { useQueryClient } from '@tanstack/react-query'
 import { closestCenter, DndContext, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, rectSortingStrategy, SortableContext, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 
-import type { Category, ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { ClientCategoryView, ClientTaxonomyView } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut } from '@/api/client'
 import { notify } from '@/lib/notifications'
+import { useDataAuthority } from '@/features/reading-data/data-authority'
+import { catalogQueryKey } from '@/features/reading-data/catalog'
 
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -42,12 +44,16 @@ const directoryLookups = new Map<string, Partial<Record<'shelves' | 'categories'
 
 export default function TaxonomyDirectory({ libraryId, privateLibraryId, sessionKey, panel, canManage, navSearch, onOpenNavigation }: TaxonomyDirectoryProps) {
   const _ = useTranslation()
+  const local = useDataAuthority()
   const queryClient = useQueryClient()
   const [batchPending, setBatchPending] = useState(false)
   const batchLock = useRef(false)
   const [batchDeleting, setBatchDeleting] = useState(false)
-  const shelvesQuery = useShelves()
-  const tagsQuery = useTags()
+  // Same tree the sidebar shows: the account's when there is one (the vault
+  // mirror follows it), the vault's own for a guest. Counts include device
+  // books, because they sit on the same shelf.
+  const shelvesQuery = useShelves({ fallbackAnonymous: !libraryId, overlayLocalCounts: !libraryId })
+  const tagsQuery = useTags({ fallbackAnonymous: !libraryId, overlayLocalCounts: !libraryId })
   const categoryLibraryId = libraryId ?? privateLibraryId
   const categoriesQuery = useLibraryCategories(categoryLibraryId)
   const libraryTagsQuery = useLibraryTags(libraryId)
@@ -105,6 +111,12 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
     try {
       for (const row of snapshot) {
         try {
+          if (local) {
+            const kind = panel === 'shelves' ? 'shelf' : panel === 'categories' ? 'category' : 'tag'
+            if (action === 'delete') await local.operations.deleteOrganization(kind, row.id)
+            else await local.operations.updateOrganization(kind, row.id, action === 'pin' || action === 'unpin' ? { pinned: action === 'pin' } : { hidden: action === 'hide' })
+            continue
+          }
           const url = panel === 'categories' ? `/libraries/${categoryLibraryId}/${panel}/${row.id}` : libraryId ? `/libraries/${libraryId}/${panel}/${row.id}` : `/${panel}/${row.id}`
           if (action === 'delete') await apiDelete(url)
           else {
@@ -117,6 +129,7 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
         }
       }
       setSelection(failed)
+      if (local) void queryClient.invalidateQueries({ queryKey: catalogQueryKey(local.scope, 'list').slice(0, -1) })
       setBatchDeleting(false)
       const succeeded = snapshot.length - failed.size
       if (failed.size) {
@@ -124,7 +137,7 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
         showResult({ key: 'library.taxonomyBatchPartial', params: { succeeded, failed: failed.size } })
       }
       else notify.success({ key: 'library.taxonomyBatchSucceeded', params: { count: succeeded } })
-      const keys = [['shelves'], ['tags'], ['books'], ['book'], ['batch-selection'], ...(categoryLibraryId ? [['libraries', categoryLibraryId, 'categories']] : []), ...(libraryId ? [['libraries', libraryId, 'tags'], ['libraries', libraryId, 'catalog']] : [])]
+      const keys = local ? [] : [['shelves'], ['tags'], ['books'], ['book'], ['batch-selection'], ...(categoryLibraryId ? [['libraries', categoryLibraryId, 'categories']] : []), ...(libraryId ? [['libraries', libraryId, 'tags'], ['libraries', libraryId, 'catalog']] : [])]
       await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })))
     } finally {
       batchLock.current = false
@@ -168,7 +181,7 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
     }
   }
 
-  function entry(row: ShelfListItem | Category | TagListItem, isTag = false) {
+  function entry(row: ClientTaxonomyView | ClientCategoryView | ClientTaxonomyView, isTag = false) {
     const category = panel === 'categories' && !isTag ? categories.find((item) => item.id === row.id) : undefined
     const parent = category?.parentId ? categories.find((item) => item.id === category.parentId) : undefined
     const count = category && !category.parentId ? category.subtreeBookCount : row.bookCount
@@ -339,7 +352,7 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
       message={_(panel === 'tags' ? 'library.taxonomyBatchDeleteTags' : panel === 'categories' ? 'library.taxonomyBatchDeleteCategories' : 'library.taxonomyBatchDeleteShelves', { count: selectedRows.length })}
       confirmLabel={_('library.delete')} confirmDisabled={batchPending}
       onClose={() => { if (!batchLock.current) setBatchDeleting(false) }} onConfirm={() => applyBatch('delete')} />}
-    <ShelfDialog open={shelfDialog !== null} libraryId={panel === 'categories' ? categoryLibraryId ?? undefined : undefined} shelfId={shelfDialog?.id} initialName={shelfDialog?.name} initialParentId={shelfDialog?.parentId} onClose={() => setShelfDialog(null)} />
+    <ShelfDialog taxonomyKind={panel === 'categories' ? 'category' : 'shelf'} open={shelfDialog !== null} libraryId={panel === 'categories' ? categoryLibraryId ?? undefined : undefined} shelfId={shelfDialog?.id} initialName={shelfDialog?.name} initialParentId={shelfDialog?.parentId} onClose={() => setShelfDialog(null)} />
     <TagDialog open={tagDialog !== null} libraryId={libraryId ?? undefined} tagId={tagDialog?.id} initialName={tagDialog?.name} onClose={() => setTagDialog(null)} />
     {deleting && <ConfirmDialog title={_(deleting.tag ? 'library.deleteTag' : panel === 'categories' ? 'library.deleteCategory' : 'library.deleteShelf')}
       message={_(deleting.tag ? 'library.deleteTagConfirm' : panel === 'categories' ? 'library.deleteCategoryTreeConfirm' : 'library.deleteShelfConfirm', { name: deleting.name })}

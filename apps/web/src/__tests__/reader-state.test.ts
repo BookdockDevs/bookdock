@@ -52,4 +52,29 @@ describe('reader-state resetForBook', () => {
     useReaderState.getState().setSidebarScrollPosition('book-1', 'toc', { top: 123, currentIndex: 14 })
     expect(useReaderState.getState().sidebarScrollPositions['book-1'].toc?.sessionId).toBe(READER_SESSION_ID)
   })
+
+  it('preserves TOC items and current chapter when reopening the same book', () => {
+    const tocItems = [{ label: '第一章', href: 'ch1.xhtml' }]
+    useReaderState.setState({
+      tocItems,
+      tocBookId: 'book-1',
+      currentChapter: '第一章',
+      currentChapterHref: 'ch1.xhtml',
+      currentChapterIndex: 0,
+    })
+
+    useReaderState.getState().resetForBook(true, 'toc', 'book-1')
+    expect(useReaderState.getState().tocItems).toEqual(tocItems)
+    expect(useReaderState.getState().tocBookId).toBe('book-1')
+    expect(useReaderState.getState().currentChapter).toBe('第一章')
+    expect(useReaderState.getState().currentChapterHref).toBe('ch1.xhtml')
+    expect(useReaderState.getState().currentChapterIndex).toBe(0)
+
+    useReaderState.getState().resetForBook(true, 'toc', 'book-2')
+    expect(useReaderState.getState().tocItems).toEqual([])
+    expect(useReaderState.getState().tocBookId).toBeNull()
+    expect(useReaderState.getState().currentChapter).toBeNull()
+    expect(useReaderState.getState().currentChapterHref).toBeNull()
+    expect(useReaderState.getState().currentChapterIndex).toBeNull()
+  })
 })

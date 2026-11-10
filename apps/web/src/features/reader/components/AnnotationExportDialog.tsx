@@ -4,6 +4,7 @@ import type { BookDetailRes, AnnotationRes } from '@bookdock/shared'
 import { useQuery } from '@tanstack/react-query'
 
 import { apiGet } from '@/api/client'
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -91,9 +92,11 @@ export default function AnnotationExportDialog({
   const [previewCopied, setPreviewCopied] = useState(false)
   const quickExported = useRef(false)
 
+  const local = useLocalReader()
   const bookQuery = useQuery({
-    queryKey: ['book', bookId],
-    queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
+    queryKey: ['book', local?.namespace ?? bookId],
+    networkMode: local ? 'always' : 'online',
+    queryFn: () => local ? local.getBook() : apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
   })
   const { data } = bookQuery
   const book = data?.data

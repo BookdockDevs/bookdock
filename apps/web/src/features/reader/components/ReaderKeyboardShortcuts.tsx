@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
+import { useLocalReader } from '../../reading-data/reader-source-context'
+import { LOCAL_READER_SHORTCUT_SCOPE } from '../lib/reader-shortcuts'
 import { apiPut } from '@/api/client'
 import { readStoredSettings, writeStoredSettings } from '@/lib/settings-cache'
 import { notify } from '@/lib/notifications'
@@ -156,8 +158,11 @@ export default function ReaderKeyboardShortcuts({
   const handleClose = onClose ?? onBack ?? (() => {})
   const handleCloseRef = useRef(handleClose)
   handleCloseRef.current = handleClose
-  const userId = useAuthStore((state) => state.user?.id ?? null)
-  const [map, setMap] = useState<ReaderShortcutMap>(() => readReaderShortcuts(userId))
+  const local = useLocalReader()
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
+  const userId = local ? null : accountId
+  const shortcutScope = local ? LOCAL_READER_SHORTCUT_SCOPE : userId
+  const [map, setMap] = useState<ReaderShortcutMap>(() => readReaderShortcuts(shortcutScope))
   const [recording, setRecording] = useState<ReaderShortcutId | null>(null)
   const [draft, setDraft] = useState<DraftShortcut>({ key: null, ctrl: false, alt: false, shift: false, meta: false })
   const [conflict, setConflict] = useState<string | null>(null)
@@ -167,7 +172,7 @@ export default function ReaderKeyboardShortcuts({
 
   const update = useCallback((next: ReaderShortcutMap) => {
     setMap(next)
-    writeReaderShortcuts(userId, next)
+    writeReaderShortcuts(shortcutScope, next)
     if (userId) {
       const readerShortcuts = JSON.stringify(next)
       const cached = readStoredSettings(userId)
@@ -190,7 +195,7 @@ export default function ReaderKeyboardShortcuts({
         }
       })
     }
-  }, [userId])
+  }, [userId, shortcutScope])
 
   const showConflict = useCallback((id: ReaderShortcutId) => {
     const label = commands.find((item) => item.id === id)?.label
@@ -245,12 +250,12 @@ export default function ReaderKeyboardShortcuts({
   }, [recording, draft, map, _, update, showConflict, handleCancelRecording])
 
   useEffect(() => {
-    setMap(readReaderShortcuts(userId))
+    setMap(readReaderShortcuts(shortcutScope))
     handleCancelRecording()
-  }, [userId, handleCancelRecording])
+  }, [shortcutScope, handleCancelRecording])
 
   useEffect(() => {
-    const reload = () => setMap(readReaderShortcuts(userId))
+    const reload = () => setMap(readReaderShortcuts(shortcutScope))
     window.addEventListener('bd-reader-shortcuts-updated', reload)
     window.addEventListener('bd-reader-shortcuts-loaded', reload)
     window.addEventListener('storage', reload)
@@ -259,7 +264,7 @@ export default function ReaderKeyboardShortcuts({
       window.removeEventListener('bd-reader-shortcuts-loaded', reload)
       window.removeEventListener('storage', reload)
     }
-  }, [userId])
+  }, [shortcutScope])
 
   useEffect(() => {
     if (!recording) return

@@ -5,6 +5,7 @@ import type { AiPromptTemplate, AiStatusRes } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 
 export interface AiQuickCommand {
   id: string
@@ -14,10 +15,12 @@ export interface AiQuickCommand {
 }
 
 export function useAiQuickCommands() {
+  const local = useLocalReader()
   const _ = useTranslation()
   const statusQuery = useQuery({
     queryKey: ['ai-status'],
     queryFn: () => apiGet<{ data: AiStatusRes }>('/ai/status'),
+    enabled: !local,
   })
   const fallback = useMemo<AiQuickCommand[]>(() => [
     { id: 'explain-selection', name: _('reader.aiQuickExplain'), prompt: _('reader.aiQuickExplainPrompt'), order: 10 },

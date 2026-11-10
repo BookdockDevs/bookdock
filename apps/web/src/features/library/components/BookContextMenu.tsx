@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
 
-import type { BookListItem } from '@bookdock/shared'
+import type { ClientLibraryBookView } from '@bookdock/shared'
 
 import { useNavigate } from '@tanstack/react-router'
+import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
 import MenuFlyout from '@/components/ui/MenuFlyout'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList } from '@/lib/utils'
@@ -28,7 +29,7 @@ function MenuIcon({ children, className = 'text-stone-400' }: { children: ReactN
 
 export { MenuHeader, MenuDivider, MenuItem, MenuDangerItem } from './RowMenuChrome'
 
-function StatusFlyout({ book, onClose }: { book: BookListItem; onClose: () => void }) {
+function StatusFlyout({ book, onClose }: { book: ClientLibraryBookView; onClose: () => void }) {
   const _ = useTranslation()
   const updateBook = useUpdateBook()
   return (
@@ -66,7 +67,7 @@ function StatusFlyout({ book, onClose }: { book: BookListItem; onClose: () => vo
                 e.stopPropagation()
                 close()
                 onClose()
-                updateBook.mutate({ bookId: book.id, readStatus: action.value })
+                updateBook.mutate({ bookId: book.id, expectedVersion: book.clientVersion, ref: book.ref, readStatus: action.value })
               }}
               className={itemClass}
             >
@@ -86,12 +87,12 @@ function StatusFlyout({ book, onClose }: { book: BookListItem; onClose: () => vo
 }
 
 export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPublish, onFork, onDelete, onClose }: {
-  book: BookListItem
+  book: ClientLibraryBookView
   readOnly?: boolean
-  onShowDetails?: (book: BookListItem) => void
-  onPublish?: (book: BookListItem) => void
-  onFork?: (book: BookListItem) => void
-  onDelete?: (book: BookListItem) => void
+  onShowDetails?: (book: ClientLibraryBookView) => void
+  onPublish?: (book: ClientLibraryBookView) => void
+  onFork?: (book: ClientLibraryBookView) => void
+  onDelete?: (book: ClientLibraryBookView) => void
   onClose: () => void
 }) {
   const _ = useTranslation()
@@ -111,7 +112,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
         subtitle={`${formatAuthorList(book.authors, book.author)}${formatAuthorList(book.authors, book.author) ? ' · ' : ''}${book.format}`}
         onClick={() => {
           onClose()
-          void navigate({ to: '/books/$id', params: { id: book.id } })
+          void navigate({ ...catalogBookTarget(book) })
         }}
       />
 
@@ -142,7 +143,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
               e.preventDefault()
               e.stopPropagation()
               onClose()
-              updateBook.mutate({ bookId: book.id, pinned: !book.pinnedAt })
+              updateBook.mutate({ bookId: book.id, expectedVersion: book.clientVersion, ref: book.ref, pinned: !book.pinnedAt })
             }}
             className={itemClass}
           >
@@ -177,7 +178,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
               e.preventDefault()
               e.stopPropagation()
               onClose()
-              updateBook.mutate({ bookId: book.id, hidden: !book.hidden })
+              updateBook.mutate({ bookId: book.id, expectedVersion: book.clientVersion, ref: book.ref, hidden: !book.hidden })
             }}
             className={itemClass}
           >
@@ -228,7 +229,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
               e.preventDefault()
               e.stopPropagation()
               onClose()
-              useDownloadStore.getState().open({ id: book.id, title: book.title, format: book.format })
+              useDownloadStore.getState().open({ id: book.id, ref: book.ref, title: book.title, format: book.format })
             }}
             className={itemClass}
           >

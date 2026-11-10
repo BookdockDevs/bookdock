@@ -16,11 +16,14 @@ import {
  * runs module-level, surviving Reader unmounts). Pagehide suspends and persists
  * captured fragments so refreshing never counts the time away.
  */
-export function useManualTimer(bookId: string | undefined) {
-  const session = useManualTimerStore((s) => (bookId ? s.sessions[bookId] : undefined))
-  const now = useManualTimerStore((s) => s.now)
-  const lastSummary = useManualTimerStore((s) => s.lastSummary)
-  const clearSummary = useManualTimerStore((s) => s.clearSummary)
+export function useManualTimer(bookId: string | undefined, store = useManualTimerStore) {
+  const session = store((s) => (bookId ? s.sessions[bookId] : undefined))
+  const now = store((s) => s.now)
+  const ready = store((s) => s.ready)
+  const storageError = store((s) => s.storageError)
+  const retry = store((s) => s.retry)
+  const lastSummary = store((s) => s.lastSummary)
+  const clearSummary = store((s) => s.clearSummary)
   const graceMinutes = useUiStore((s) => s.manualTimerGraceMinutes)
   const { renderer } = useReaderApi()
 
@@ -42,23 +45,30 @@ export function useManualTimer(bookId: string | undefined) {
   // Grace re-entry: a suspended session for this book resumes on mount
   useEffect(() => {
     if (!bookId) return
-    useManualTimerStore.getState().restore()
-    const existing = useManualTimerStore.getState().sessions[bookId]
-    if (existing?.phase === 'suspended' && document.visibilityState !== 'hidden') useManualTimerStore.getState().resume(bookId, false)
-  }, [bookId])
+    let active = true
+    const resume = () => {
+      if (!active) return
+      const existing = store.getState().sessions[bookId]
+      if (existing?.phase === 'suspended' && document.visibilityState !== 'hidden') store.getState().resume(bookId, false)
+    }
+    const restored = store.getState().restore()
+    if (restored) void restored.then(resume)
+    else resume()
+    return () => { active = false }
+  }, [bookId, store])
 
   useEffect(() => {
     if (!bookId) return
     const id = bookId
-    const store = () => useManualTimerStore.getState()
+    const state = () => store.getState()
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        store().suspend(id)
-      } else if (store().sessions[id]?.phase === 'suspended') {
-        store().resume(id, false)
+        state().suspend(id)
+      } else if (state().sessions[id]?.phase === 'suspended') {
+        state().resume(id, false)
       }
     }
-    const onPageHide = () => store().suspend(id)
+    const onPageHide = () => state().suspend(id)
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('pagehide', onPageHide)
     return () => {
@@ -67,9 +77,9 @@ export function useManualTimer(bookId: string | undefined) {
       // Leaving the reader (book switch / unmount) suspends instead of
       // terminating — the grace countdown keeps running module-level and the
       // session can be resumed on re-entry
-      store().suspend(id)
+      state().suspend(id)
     }
-  }, [bookId])
+  }, [bookId, store])
 
   const phase: ManualTimerPhase = session?.phase ?? 'idle'
   const durationMs = session ? sessionDurationMs(session, now) : 0
@@ -77,6 +87,7 @@ export function useManualTimer(bookId: string | undefined) {
 
   return {
     phase,
+    ready, storageError, retry,
     session,
     transferred: session?.transferred ?? false,
     elapsedMs: durationMs,
@@ -84,10 +95,10 @@ export function useManualTimer(bookId: string | undefined) {
     graceMinutes,
     lastSummary: lastSummary?.bookId === bookId ? lastSummary : null,
     clearSummary,
-    start: () => bookId && useManualTimerStore.getState().start(bookId, lastPosRef.current),
-    pause: () => bookId && useManualTimerStore.getState().pause(bookId),
-    resume: () => bookId && useManualTimerStore.getState().resume(bookId),
-    terminate: () => bookId && useManualTimerStore.getState().terminate(bookId),
-    discard: () => bookId && useManualTimerStore.getState().discard(bookId),
+    start: () => bookId && store.getState().start(bookId, lastPosRef.current),
+    pause: () => bookId && store.getState().pause(bookId),
+    resume: () => bookId && store.getState().resume(bookId),
+    terminate: () => bookId && store.getState().terminate(bookId),
+    discard: () => bookId && store.getState().discard(bookId),
   }
 }

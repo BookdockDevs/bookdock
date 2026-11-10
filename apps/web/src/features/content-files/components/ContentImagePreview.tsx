@@ -1,3 +1,4 @@
+import { useContentImages } from '../hooks/useContentImages'
 import { useEffect, useState } from 'react'
 
 import type { ContentFile } from '@bookdock/shared'
@@ -11,7 +12,8 @@ interface ContentImagePreviewProps {
   onClose: () => void
 }
 
-export default function ContentImagePreview({ images, initialIndex, onClose }: ContentImagePreviewProps) {
+export default function ContentImagePreview({ images: sourceImages, initialIndex, onClose }: ContentImagePreviewProps) {
+  const images = useContentImages(sourceImages)
   const _ = useTranslation()
   const [index, setIndex] = useState(() => Math.min(Math.max(initialIndex, 0), Math.max(images.length - 1, 0)))
   const image = images[index]
@@ -36,7 +38,7 @@ export default function ContentImagePreview({ images, initialIndex, onClose }: C
       panelClassName="max-h-[90vh] bg-black/90"
       contentClassName="relative flex items-center justify-center !p-4 sm:!p-6"
     >
-      <img src={image.url} alt={image.name} className="max-h-[calc(90vh-3rem)] max-w-full object-contain" />
+      <img src={image.url || undefined} alt={image.name} className="max-h-[calc(90vh-3rem)] max-w-full object-contain" />
       {images.length > 1 && (
         <>
           <button

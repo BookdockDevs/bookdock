@@ -1,4 +1,4 @@
-import type { BookListItem, BookMetadata, CoverPaletteId } from '@bookdock/shared'
+import type { ClientLibraryBookView, BookMetadata, CoverPaletteId } from '@bookdock/shared'
 
 import { notify } from '@/lib/notifications'
 
@@ -21,7 +21,7 @@ export interface MetaDraft {
   coverPaletteId: CoverPaletteId | null
 }
 
-export function draftFrom(book: Pick<BookListItem, 'title' | 'author' | 'authors' | 'coverPaletteId'>, bookmeta?: BookMetadata): MetaDraft {
+export function draftFrom(book: Pick<ClientLibraryBookView, 'title' | 'author' | 'authors' | 'coverPaletteId'>, bookmeta?: BookMetadata): MetaDraft {
   const authors = (book.authors ?? []).map((name) => name.trim()).filter(Boolean)
   return {
     title: book.title,

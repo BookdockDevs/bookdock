@@ -1,3 +1,6 @@
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
+import { catalogQueryKey } from '@/features/reading-data/catalog'
+import { deviceCatalogOperations } from '@/features/local-library/catalog'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -33,36 +36,47 @@ const CAP_LABEL_KEYS: Record<(typeof TRASH_CAPS)[number], string> = {
 }
 
 export default function TrashSettingsRow() {
+  const local = useLocalCatalog()
+  const settingsKey = local ? catalogQueryKey(local.scope, 'trash-settings') : ['settings']
   const _ = useTranslation()
   const queryClient = useQueryClient()
   const [disableOpen, setDisableOpen] = useState(false)
   const settingsQuery = useQuery({
-    queryKey: ['settings'],
-    queryFn: fetchSettings,
+    queryKey: settingsKey,
+    queryFn: () => local ? local.operations.getTrashSettings().then((trash) => ({ data: { trash } })) : fetchSettings(),
+    networkMode: local ? 'always' : 'online',
   })
   const mutation = useMutation({
-    mutationFn: (trash: Partial<TrashSettings>) => apiPut('/settings', { trash }),
+    networkMode: local ? 'always' : 'online',
+    mutationFn: (trash: Partial<TrashSettings>) => local ? local.operations.patchTrashSettings(trash) : apiPut('/settings', { trash }),
     onMutate: async (trash) => {
       // Optimistic like the library-prefs mutation, so a toggle reflects the
       // click immediately rather than after a refetch.
-      await queryClient.cancelQueries({ queryKey: ['settings'] })
-      const prev = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+      await queryClient.cancelQueries({ queryKey: settingsKey })
+      const prev = queryClient.getQueryData<{ data: SettingsRes }>(settingsKey)
       if (prev) {
         const next = { ...prev.data, trash: { ...prev.data.trash, ...trash } as NonNullable<SettingsRes['trash']> }
-        queryClient.setQueryData(['settings'], { data: next })
-        writeStoredSettings(next)
+        queryClient.setQueryData(settingsKey, { data: next })
+        if (!local) writeStoredSettings(next)
       }
       return { prev }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    onSuccess: (_data, trash) => {
+      queryClient.invalidateQueries({ queryKey: settingsKey })
       // Disabling permanently deletes the trash contents; refresh book lists.
-      queryClient.invalidateQueries({ queryKey: ['books'] })
+      queryClient.invalidateQueries({ queryKey: local ? ['client-catalog'] : ['books'] })
+      // The account owns the policy; the device vault only mirrors it. Keep that
+      // mirror in step, otherwise a device book's delete would still follow the
+      // vault's default (keep for 30 days) while the reader switched the trash
+      // off — a book that vanishes from a shelf with no trash to restore it from.
+      if (!local) {
+        void deviceCatalogOperations().patchTrashSettings(trash).catch(() => undefined)
+      }
     },
     onError: (error, _trash, ctx) => {
       if (ctx?.prev) {
-        queryClient.setQueryData(['settings'], ctx.prev)
-        writeStoredSettings(ctx.prev.data)
+        queryClient.setQueryData(settingsKey, ctx.prev)
+        if (!local) writeStoredSettings(ctx.prev.data)
       }
       notify.error(getUserErrorNotification(error, 'settings.trashSettingsUpdateFailed'))
     },

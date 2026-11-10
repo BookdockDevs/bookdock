@@ -22,6 +22,7 @@ import { NotesFilterPanel } from './NotesFilterPanel'
 import { NotesPanel } from './NotesPanel'
 import StatsPanel from './StatsPanel'
 import AiPanel from './AiPanel'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 
 export interface NavigationPanelRef {
   saveScroll: () => void
@@ -205,6 +206,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   ref,
 ) {
   const _ = useTranslation()
+  const local = useLocalReader()
   const tab = useReaderState((s) => s.activeNavTab)
   const tocItems = useReaderState((s) => s.tocItems)
   const tocBookId = useReaderState((s) => s.tocBookId)
@@ -410,7 +412,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       return currentBookTocItems.map((item) => ({ ...item, level: item.level ?? 1 }))
     }
     if (chaptersQuery.data?.data?.length) {
-      return chaptersQuery.data.data.map((c, i) => ({ label: c.title, href: `chapter:${i}`, level: c.level }))
+      return chaptersQuery.data.data.map((c, i) => ({ label: c.title, href: c.href ?? `chapter:${i}`, level: c.level }))
     }
     return []
   }, [bookId, chaptersQuery.data, tocBookId, tocItems])
@@ -775,7 +777,14 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       return
     }
     if (tab === 'ai' || restoredPanel.current === tab) return
-    if (tab === 'toc' && (!tocPositionReady || !tocItems.length || (tocBookId !== null && tocBookId !== bookId))) return
+    const sameSessionTocReady = tab === 'toc'
+      && tocPositionFresh
+      && tocBookId === bookId
+      && tocItems.length > 0
+      && savedScrollTop.current.toc !== undefined
+      && currentIndex >= 0
+      && currentIndex === lastScrolledIndex.current
+    if (tab === 'toc' && ((!tocPositionReady && !sameSessionTocReady) || !tocItems.length || (tocBookId !== null && tocBookId !== bookId))) return
     const saved = savedScrollTop.current[tab]
     if (tab === 'toc') {
       if (saved !== undefined && currentIndex === lastScrolledIndex.current) {
@@ -793,7 +802,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     }
     container.scrollTop = saved ?? 0
     restoredPanel.current = tab
-  }, [bookId, currentIndex, open, searchExpanded, tab, tocBookId, tocItems.length, tocPositionReady, tree])
+  }, [bookId, currentIndex, open, searchExpanded, tab, tocBookId, tocItems.length, tocPositionFresh, tocPositionReady, tree])
 
   // The parsed TOC is authoritative; a synthesized tree must not consume startup positioning.
   useEffect(() => {
@@ -1046,7 +1055,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           </button>
 
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
-            <button
+            {<button
               type="button"
               onClick={() => setNotesExportOpen(true)}
               disabled={selectedNoteIds.size === 0}
@@ -1055,7 +1064,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
               className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current disabled:opacity-35 transition-colors"
             >
               <DocumentExportIcon size={16} />
-            </button>
+            </button>}
             <button
               type="button"
               onClick={() => setBatchDeleteConfirmOpen(true)}
@@ -1618,7 +1627,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         )}
         {tab === 'stats' && !statsDisabled && !guestReadOnly && <StatsPanel bookId={bookId} />}
         <div className={tab === 'ai' && !guestReadOnly ? 'h-full' : 'hidden'}>
-          {!guestReadOnly && (
+          {!guestReadOnly && !local && (
             <AiPanel
               bookId={bookId}
               initialScrollTop={savedScrollTop.current.ai}

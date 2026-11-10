@@ -7,7 +7,10 @@ import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq, ArchiveRecord
 
 import { ApiError } from '@/api/client'
 import { useReadingLedger } from '@/api/hooks/reading-records'
-import { useBookChapters } from '@/api/hooks/useBookChapters'
+import { useBookChapters } from '@/features/reader/hooks/useBookChapters'
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
+import { useDeleteLocalReview, useLocalReview, useSaveLocalReview } from '@/features/local-library/review-hooks'
+import { localRatingHalves, localReviewComposer } from '@/features/local-library/reviews'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
@@ -34,14 +37,14 @@ import { reviewExcerpt } from '@/features/reviews/lib/markdown'
 import ReviewDetailHeaderActions, { ReviewDetailModalTitle } from '@/features/reviews/components/ReviewDetailHeaderActions'
 import ReviewDetailView from '@/features/reviews/components/ReviewDetailView'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
-import { useReviewBookContext } from '@/features/reviews/hooks/useReviews'
+import { useReviewBookContext, type SaveReviewInput } from '@/features/reviews/hooks/useReviews'
 import StarRating from '@/features/reviews/components/StarRating'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import type { ArchiveSearch } from '@/routes/archive'
-import { useAuthStore } from '@/stores/auth.store'
+import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 
 import { useArchiveBookDetail } from './hooks'
 import { hasReadableText, readStatusLabel } from './components/archive-helpers'
@@ -69,29 +72,50 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
+  const local = useLocalReader()
   const setShareTarget = useReaderState((s) => s.setShareTarget)
   const [openReviewId, setOpenReviewId] = useState<string | null>(null)
   const [editingReviewId, setEditingReviewId] = useState<string | null>(null)
+  const [composingReview, setComposingReview] = useState(false)
   const [openIdeaId, setOpenIdeaId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const editingVersion = useRef<number | undefined>(undefined)
   const [editError, setEditError] = useState<string | null>(null)
   const saveLock = useRef(false)
+  const batchDeleteLock = useRef(false)
   const [noteDeleteTarget, setNoteDeleteTarget] = useState<AnnotationRes | null>(null)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const selectedVersions = useRef(new Map<string, number>())
   const [selectExportOpen, setSelectExportOpen] = useState(false)
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
   const [bookDetailOpen, setBookDetailOpen] = useState(false)
   const [locatorOpen, setLocatorOpen] = useState(false)
   const [colorFilter, setColorFilter] = useState<Set<string>>(new Set())
   const [styleFilter, setStyleFilter] = useState<Set<AnnotationStyle>>(new Set())
+  const sourceScope = local?.namespace ?? `remote:${getAuthSessionRevision()}`
+  const scope = `${sourceScope}:${bookVersionId}`
+  const activeScope = useRef(scope)
+  activeScope.current = scope
+  const [previousScope, setPreviousScope] = useState(scope)
+  if (previousScope !== scope) {
+    setPreviousScope(scope)
+    setOpenReviewId(null); setEditingReviewId(null); setComposingReview(false); setOpenIdeaId(null); setEditingId(null)
+    setEditError(null); setNoteDeleteTarget(null); setSelectionMode(false); setSelectedIds(new Set())
+    setSelectExportOpen(false); setBatchDeleteOpen(false); setBookDetailOpen(false); setLocatorOpen(false)
+    selectedVersions.current.clear(); saveLock.current = false; batchDeleteLock.current = false
+    editingVersion.current = undefined
+  }
+
 
   const ledger = useReadingLedger(bookVersionId)
-  const book = useBook(bookVersionId)
-  const sourceUnavailable = book.isError && book.error instanceof ApiError && (book.error.status === 404 || book.error.status === 403)
+  // The archive dispatches per book: a device book carries its ref, so the
+  // detail reads the vault even when the route is not a local route.
+  const book = useBook(bookVersionId, local?.ref ?? null)
+  const sourceUnavailable = local ? !local.sourceAvailable || book.data?.data.sourceUnavailable === true : book.isError && book.error instanceof ApiError && (book.error.status === 404 || book.error.status === 403)
   const importedSource = ledger.data?.data?.importSource ?? null
   const archivedBook = ledger.data?.data ? {
-    id: bookVersionId, title: ledger.data.data.title, author: ledger.data.data.author,
+    ...(local ? { ref: local.ref } : {}), id: bookVersionId, title: ledger.data.data.title, author: ledger.data.data.author,
     format: ledger.data.data.format ?? undefined, coverKey: ledger.data.data.coverKey ?? null,
   } : null
   // The library detail request 404s for archive-only books, so the header
@@ -104,17 +128,21 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   const detail = useArchiveBookDetail(bookVersionId, bookView === 'notes', range)
   // Composer context for the review editor; fetched only while editing so
   // opening a review detail stays a zero-extra-request action.
-  const reviewBookContext = useReviewBookContext(bookVersionId, editingReviewId !== null)
+  const reviewBookContext = useReviewBookContext(bookVersionId, !local && editingReviewId !== null)
+  // A device book keeps its one review in the vault: no author, no
+  // discussion and no shared publish.
+  const localReview = useLocalReview(local?.ref ?? null)
+  const saveLocalReview = useSaveLocalReview(local?.ref ?? null)
+  const deleteLocalReview = useDeleteLocalReview(local?.ref ?? null)
   const updateAnnotation = useUpdateAnnotation(bookVersionId)
   const deleteAnnotation = useDeleteAnnotation(bookVersionId)
   const batchDeleteMutation = useBatchDeleteAnnotations(bookVersionId)
-  const batchDeleteLock = useRef(false)
   // Composer context for the note inline editor; fetched only while editing so
   // opening a book archive stays a zero-extra-request action.
-  const composer = useIdeaComposer(bookVersionId, !!user && editingId !== null)
+  const composer = useIdeaComposer(bookVersionId, Boolean(local || user) && editingId !== null)
 
   const chapterOrder: ChapterOrderItem[] = useMemo(
-    () => (chapters.data?.data ?? []).map((c) => ({ label: c.title, href: c.id })),
+    () => (chapters.data?.data ?? []).map((c) => ({ label: c.title, href: c.href ?? c.id })),
     [chapters.data],
   )
   const lookup = useMemo(() => buildChapterOrderLookup(chapterOrder), [chapterOrder])
@@ -225,11 +253,11 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   }, [tab, colorFilter.size, styleFilter.size, _])
 
   const tabCounts: Record<BookTab, number> = {
-    all: allAnnotations.length + (detail.data?.data.reviews.length ?? 0),
+    all: allAnnotations.length + (detail.data?.data.reviews?.length ?? 0),
     highlight: allAnnotations.filter((a) => a.type === 'highlight').length,
     bookmark: allAnnotations.filter((a) => a.type === 'bookmark').length,
     idea: allAnnotations.filter((a) => a.type === 'note').length,
-    review: detail.data?.data.reviews.length ?? 0,
+    review: detail.data?.data.reviews?.length ?? 0,
   }
 
   // SPA navigation (not a native anchor): a full-document load would reset
@@ -240,8 +268,22 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   }
 
   function refreshArchive() {
-    void queryClient.invalidateQueries({ queryKey: ['archive'] })
+    void queryClient.invalidateQueries({ queryKey: ['archive', ...(local ? [local.namespace] : [])] })
   }
+
+  // The device half of a review: the same composer and the same card, written
+  // to the vault instead of a server row.
+  const saveLocal = local
+    ? async (input: SaveReviewInput) => {
+        await saveLocalReview.mutateAsync({
+          ratingHalves: localRatingHalves(input.rating),
+          title: input.title?.trim() ?? '',
+          body: input.body ?? '',
+          bodyFormat: input.bodyFormat ?? 'markdown',
+          expectedVersion: localReview.data?.version,
+        })
+      }
+    : undefined
 
   function shareItem(item: AnnotationRes) {
     setShareTarget({
@@ -258,14 +300,17 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
     setEditError(null)
     updateAnnotation.mutate({
       id: item.id,
+      expectedVersion: editingVersion.current,
       body: item.type === 'bookmark' ? { text: value } : { note: value, visibility, ...files },
     }, {
       onSuccess: () => {
+        if (activeScope.current !== scope) return
         saveLock.current = false
         setEditingId(null)
         refreshArchive()
       },
       onError: (error) => {
+        if (activeScope.current !== scope) return
         saveLock.current = false
         setEditError(getUserErrorMessage(error, _, 'annotation.editSaveFailed'))
       },
@@ -274,6 +319,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
 
   function startEdit(id: string) {
     if (saveLock.current || updateAnnotation.isPending) return
+    editingVersion.current = allAnnotations.find((item) => item.id === id)?.clientVersion
     setEditError(null)
     setEditingId(id)
   }
@@ -283,8 +329,9 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
       setNoteDeleteTarget(item)
       return
     }
-    deleteAnnotation.mutate(item.id, {
+    deleteAnnotation.mutate(item.clientVersion !== undefined ? { id: item.id, clientVersion: item.clientVersion } : item.id, {
       onSuccess: () => {
+        if (activeScope.current !== scope) return
         setNoteDeleteTarget(null)
         refreshArchive()
         notify.success({ key: item.type === 'bookmark' ? 'reader.bookmarkRemoved' : item.type === 'note' ? 'annotation.ideaDeleted' : 'annotation.deleted' })
@@ -294,6 +341,11 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   }
 
   function toggleSelected(id: string) {
+    if (selectedIds.has(id)) selectedVersions.current.delete(id)
+    else {
+      const note = allAnnotations.find((note) => note.id === id)
+      if (note?.clientVersion !== undefined) selectedVersions.current.set(id, note.clientVersion)
+    }
     setSelectedIds((previous) => {
       const next = new Set(previous)
       if (next.has(id)) next.delete(id)
@@ -304,6 +356,10 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
 
   function selectAllVisible() {
     const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
+    for (const id of visibleIds) {
+      if (allSelected) selectedVersions.current.delete(id)
+      else { const note = allAnnotations.find((note) => note.id === id); if (note?.clientVersion !== undefined) selectedVersions.current.set(id, note.clientVersion) }
+    }
     setSelectedIds((previous) => {
       const next = new Set(previous)
       for (const id of visibleIds) {
@@ -315,12 +371,15 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   }
 
   function exitSelection() {
+    selectedVersions.current.clear()
     setSelectionMode(false)
     setSelectedIds(new Set())
     setSelectExportOpen(false)
   }
 
   function enterSelection() {
+    selectedVersions.current.clear()
+    for (const note of allAnnotations) if (visibleIds.includes(note.id) && note.clientVersion !== undefined) selectedVersions.current.set(note.id, note.clientVersion)
     setEditingId(null)
     setEditError(null)
     setSelectedIds(new Set(visibleIds))
@@ -331,7 +390,8 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
     if (selectedIds.size === 0 || batchDeleteLock.current) return
     batchDeleteLock.current = true
     try {
-      const result = await batchDeleteMutation.mutateAsync(Array.from(selectedIds))
+      const result = await batchDeleteMutation.mutateAsync(local ? Array.from(selectedIds, (id) => ({ id, clientVersion: selectedVersions.current.get(id) })) : Array.from(selectedIds))
+      if (activeScope.current !== scope) return
       // The batch endpoint reports only counts; keep the selection on a
       // partial failure so the surviving items stay visible and retryable.
       if (result.failed === 0) setSelectedIds(new Set())
@@ -344,7 +404,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
     } catch (error) {
       notify.error(getUserErrorNotification(error, 'annotation.deleteFailed'))
     } finally {
-      batchDeleteLock.current = false
+      if (activeScope.current === scope) batchDeleteLock.current = false
     }
   }
 
@@ -358,7 +418,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
         placeholder={isBookmark ? _('annotation.renamePlaceholder') : _('annotation.notePlaceholder')}
         allowEmpty={isBookmark}
         onSave={(value, visibility, files) => saveEdit(a, value, visibility, files)}
-        bookVersionId={a.type === 'note' ? bookVersionId : undefined}
+        bookVersionId={!local && a.type === 'note' ? bookVersionId : undefined}
         targetId={a.type === 'note' ? a.id : undefined}
         initialImages={a.images}
         initialVisibility={a.visibility ?? 'private'}
@@ -768,7 +828,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
                 className={cn('group/cover shrink-0', !sourceUnavailable && 'cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.99]')}
                 title={sourceUnavailable ? undefined : _('library.bookDetails')}
               >
-                <BookCover book={displayedBook!} size="card" coverSrc={importedSource ? ledger.data?.data.coverUrl ?? null : sourceUnavailable ? (displayedBook?.coverKey ? `/api/v1/archive/books/${encodeURIComponent(bookVersionId)}/cover?v=${encodeURIComponent(displayedBook.coverKey)}` : null) : undefined} />
+                <BookCover book={displayedBook!} size="card" coverSrc={local ? undefined : importedSource ? ledger.data?.data.coverUrl ?? null : sourceUnavailable ? (displayedBook?.coverKey ? `/api/v1/archive/books/${encodeURIComponent(bookVersionId)}/cover?v=${encodeURIComponent(displayedBook.coverKey)}` : null) : undefined} />
               </div>
               <div className="min-w-0">
                 <h2
@@ -791,7 +851,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
               {/* Gate on book.data rather than !sourceUnavailable: while the
                   detail request is still pending an archive-only book would
                   otherwise flash the button before its 404 lands. */}
-              {book.data && (
+              {book.data && !sourceUnavailable && (
                 <Button
                   size="sm"
                   className="gap-1.5 rounded-full px-3.5 h-8 text-xs font-medium cursor-pointer shadow-2xs"
@@ -875,7 +935,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
         )}
       </div>
 
-      {bookView === 'data' ? <BookReadingData key={bookVersionId} bookId={bookVersionId} onDeleted={onBack} /> : <>
+      {bookView === 'data' ? <BookReadingData key={scope} bookId={bookVersionId} onDeleted={onBack} range={range} /> : <>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200/70 pb-2 dark:border-stone-800/70">
         <div role="tablist" aria-label={_('archive.filterByType')} className="flex min-w-0 max-w-full flex-wrap items-center gap-1">
           {TABS.map((t) => (
@@ -907,6 +967,15 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
           ))}
         </div>
         <div className="flex items-center gap-2">
+          {local && tab === 'review' && (
+            <button
+              type="button"
+              onClick={() => { setEditingReviewId(null); setComposingReview(true) }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-stone-900 px-2.5 text-xs font-medium text-white transition-colors hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-stone-300"
+            >
+              {localReview.data ? _('review.editReview') : _('review.writeReview')}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => { if (selectionMode) exitSelection(); else enterSelection() }}
@@ -1126,6 +1195,8 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
           actions={
             <ReviewDetailHeaderActions
               review={openReview}
+              local={Boolean(local)}
+              onLocalDelete={local ? () => deleteLocalReview.mutateAsync(localReview.data?.version) : undefined}
               onEdit={(r) => setEditingReviewId(r.id)}
               onDeleted={() => {
                 setOpenReviewId(null)
@@ -1134,10 +1205,21 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
             />
           }
         >
-          <ReviewDetailView review={openReview} />
+          <ReviewDetailView review={openReview} local={Boolean(local)} />
         </Modal>
       )}
-      {editingReviewId && (reviewComposer?.bookVersionId && editingReview ? (
+      {(editingReviewId || composingReview) && (local && saveLocal ? (
+        <ReviewEditor
+          bookVersionId={local.ref.bookId}
+          existing={editingReview ?? null}
+          composer={localReviewComposer(localReview.data ?? null, local.ref.bookId)}
+          saveLocal={saveLocal}
+          onClose={() => { setEditingReviewId(null); setComposingReview(false) }}
+          onSaved={() => {
+            void detail.refetch()
+          }}
+        />
+      ) : reviewComposer?.bookVersionId && editingReview ? (
         <ReviewEditor
           bookVersionId={reviewComposer.bookVersionId}
           existing={editingReview}
@@ -1178,7 +1260,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
         fallbackTitle={archivedBook?.title}
         fallbackAuthor={archivedBook?.author}
       />
-      {locatorOpen && (importedSource || sourceUnavailable) && (
+      {!local && locatorOpen && (importedSource || sourceUnavailable) && (
         <ImportLocatorDialog
           archiveId={bookVersionId}
           archiveTitle={currentBookTitle}

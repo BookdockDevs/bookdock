@@ -63,7 +63,7 @@ export const readingProgressUpdateSchema = z.object({
   }).optional(),
 })
 
-export const readingRecordCreateSchema = z.object({
+export const readingRecordFieldsSchema = z.object({
   replaceSessionIds: z.array(z.string().min(1).max(100)).max(1000).optional(),
   expectedUserId: z.string().min(1).max(100).optional(),
   requestId: z.string().min(1).max(100).optional(),
@@ -93,7 +93,9 @@ export const readingRecordCreateSchema = z.object({
   endFraction: z.number().min(0).max(1).optional(),
   startChapterIndex: z.number().int().min(0).optional(),
   endChapterIndex: z.number().int().min(0).optional(),
-}).refine((v) => v.source !== 'auto' || (v.startFraction !== undefined && v.endFraction !== undefined), {
+})
+
+export const readingRecordCreateSchema = readingRecordFieldsSchema.refine((v) => v.source !== 'auto' || (v.startFraction !== undefined && v.endFraction !== undefined), {
   message: 'Automatic captures require both progress bounds', path: ['endFraction'],
 }).refine((v) => v.source !== 'retroactive' || ((v.startFraction === undefined) === (v.endFraction === undefined)), {
   message: 'Retroactive progress requires both bounds or neither', path: ['endFraction'],
@@ -110,7 +112,7 @@ export const readingRecordCreateSchema = z.object({
   path: ['endedAt'],
 })
 
-export const readingSessionUpdateSchema = z.object({
+export const readingSessionUpdateFieldsSchema = z.object({
   continuous: z.boolean().optional(),
   timezone: readingTimezoneSchema.optional(),
   durationSeconds: z.number().int().min(1).max(24 * 3600).optional(),
@@ -125,7 +127,9 @@ export const readingSessionUpdateSchema = z.object({
   endChapterIndex: z.number().int().min(0).optional(),
   startCfi: z.string().min(1).optional(),
   endCfi: z.string().min(1).optional(),
-}).refine((v) => v.startedAt == null || v.endedAt === undefined || v.endedAt >= v.startedAt, {
+})
+export const isOrderedReadingSessionUpdate = (v: Pick<z.infer<typeof readingSessionUpdateFieldsSchema>, 'startedAt' | 'endedAt'>) => v.startedAt == null || v.endedAt === undefined || v.endedAt >= v.startedAt
+export const readingSessionUpdateSchema = readingSessionUpdateFieldsSchema.refine(isOrderedReadingSessionUpdate, {
   message: 'endedAt must be after startedAt',
   path: ['endedAt'],
 })

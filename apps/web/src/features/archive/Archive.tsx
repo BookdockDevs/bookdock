@@ -15,30 +15,42 @@ import ReadingDataManagerButton from './components/ReadingDataManagerButton'
 import ArchiveOverviewDashboard from './components/ArchiveOverviewDashboard'
 import ArchiveSidebar, { type ArchiveSidebarParams } from './components/ArchiveSidebar'
 import BookNotesView from './BookNotesView'
+import LocalBookArchive from '@/features/local-library/LocalBookArchive'
+import { useVaultCapable } from '@/features/reading-data/vault-availability'
+import type { ArchiveSearch } from '@/routes/archive'
 import { archiveScrollKey, restoreScrollWithRetry, saveArchiveScrollRecord, takeArchiveScrollRecord } from './archive-scroll'
 import { resolveArchiveScope } from './archive-scope'
+import { useLocalArchiveBook } from './hooks'
 
 export default function Archive() {
   const _ = useTranslation()
   const navigate = useNavigate()
   const router = useRouter({ warn: false })
-  const search = useSearch({ from: '/archive' })
-  const selectedBook = useBook(search.bookId ?? null)
-  const selectedBookLedger = useReadingLedger(search.bookId ?? '', { enabled: Boolean(search.bookId) })
-  const selectedBookTitle = selectedBook.data?.data.title ?? selectedBookLedger.data?.data.title
+  const vaultCapable = useVaultCapable()
+  const archivePath = '/archive' as const
+  const search = useSearch({ strict: false }) as ArchiveSearch
+  // One archive for both stores: the selected book says where it lives.
+  const presence = useLocalArchiveBook(search.bookId ?? null)
+  const isLocalBook = presence.data === true
+  const presencePending = Boolean(search.bookId) && presence.isPending
+  // A device book has no server detail: asking for one 404s and, worse, breaks
+  // the "no server traffic for device data" rule. Title comes from the ledger.
+  const selectedBook = useBook(isLocalBook || presencePending ? null : (search.bookId ?? null))
+  const selectedBookLedger = useReadingLedger(search.bookId ?? '', { enabled: Boolean(search.bookId) && presence.data === false })
+  const selectedBookTitle = selectedBook.data?.data.title ?? (isLocalBook ? undefined : selectedBookLedger.data?.data.title)
   usePageTitle(search.bookId && selectedBookTitle
     ? _('archive.bookDocumentTitle', { title: selectedBookTitle })
     : _('archive.title'))
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
-  const isGuest = !user
+  const isGuest = !vaultCapable && !user
   const leftRef = useRef<HTMLDivElement | null>(null)
   const mainRef = useRef<HTMLElement | null>(null)
-  const searchRef = useRef(search)
   const { period, anchor, selectedDate, range, query } = resolveArchiveScope(search)
   const scopedSearch = { ...search, period, anchor: localDateString(anchor), timezone: query.timezone }
-  searchRef.current = scopedSearch
   const scrollKey = archiveScrollKey(scopedSearch)
+  const latestScrollKey = useRef(scrollKey)
+  latestScrollKey.current = scrollKey
 
   const handlePeriodChange = (p: StatsPeriod) => {
     const next = resolveArchiveScope({ period: p, timezone: query.timezone })
@@ -75,7 +87,7 @@ export default function Archive() {
   // Leaving the archive (any destination) remembers this view's scroll
   // positions; returning to the same view restores them below.
   useEffect(() => () => {
-    saveArchiveScrollRecord(archiveScrollKey(searchRef.current), { ...liveScroll.current })
+    saveArchiveScrollRecord(latestScrollKey.current, { ...liveScroll.current })
   }, [])
 
   // A same-view return (e.g. reader back) restores the saved positions once
@@ -162,11 +174,12 @@ export default function Archive() {
 
   if (isGuest) return null
 
+  const SourceBookNotesView = isLocalBook ? LocalBookArchive : BookNotesView
   const patch = (next: Partial<typeof search>) => {
     // Forward history state: navigating without it resets the recorded
     // archive exit source on the first internal move.
     void navigate({
-      to: '/archive',
+      to: archivePath,
       search: { ...scopedSearch, ...next },
       replace: true,
       state: (previous) => ({ ...previous }),
@@ -191,7 +204,7 @@ export default function Archive() {
         <header className="flex items-center justify-between border-b border-stone-200/70 px-4 py-3 sm:px-6 lg:px-8 dark:border-stone-800/70">
           <div className="flex items-center gap-3">
             <Link
-              to="/"
+              to={'/'}
               onClick={exitArchive}
               aria-label={_('archive.back')}
               title={_('archive.back')}
@@ -269,15 +282,20 @@ export default function Archive() {
           {hasSelectedBook && search.bookId ? (
             /* 单书详情（上数据微看板 + 下笔记流） */
             <div className="w-full max-w-3xl">
-              <BookNotesView
-                bookVersionId={search.bookId}
-                bookView={search.bookView ?? 'data'}
-                bookType={search.bookType ?? 'all'}
-                bookSort={search.bookSort ?? 'chapter'}
-                onChange={(next) => patch(next)}
-                onBack={() => patch({ bookId: undefined })}
-                hideBack={false}
-              />
+              {presencePending ? (
+                <div role="status" className="flex flex-col gap-3 p-8">{[0, 1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-stone-500/10" />)}</div>
+              ) : (
+                <SourceBookNotesView
+                  bookVersionId={search.bookId}
+                  bookView={search.bookView ?? 'data'}
+                  bookType={search.bookType ?? 'all'}
+                  bookSort={search.bookSort ?? 'chapter'}
+                  onChange={(next) => patch(next)}
+                  onBack={() => patch({ bookId: undefined })}
+                  hideBack={false}
+                  range={query}
+                />
+              )}
             </div>
           ) : (
             /* 全景总览大看板 */

@@ -20,7 +20,7 @@ import { notify } from '@/lib/notifications'
 
 import { cn } from '@/lib/utils'
 
-import { useSaveReview } from '../hooks/useReviews'
+import { useSaveReview, type SaveReviewInput } from '../hooks/useReviews'
 import StarRating from './StarRating'
 
 const ReviewRichEditor = lazy(() => import('./ReviewRichEditor'))
@@ -31,15 +31,23 @@ export default function ReviewEditor({
   composer,
   onClose,
   onSaved,
+  saveLocal,
 }: {
   bookVersionId: string
   existing: Review | null
   composer: ReviewComposerContext
   onClose: () => void
   onSaved?: () => void
+  /** Device books persist to the vault; there is no server review row. */
+  saveLocal?: (input: SaveReviewInput) => Promise<unknown>
 }) {
   const _ = useTranslation()
-  const save = useSaveReview()
+  const apiSave = useSaveReview()
+  const local = Boolean(saveLocal)
+  const [localSaving, setLocalSaving] = useState(false)
+  // One shape for the buttons: the API mutation owns its pending state, the
+  // vault path owns a local one so every disabled state stays honest.
+  const save = { isPending: local ? localSaving : apiSave.isPending, mutateAsync: apiSave.mutateAsync }
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
   const [rating, setRating] = useState<number | null>(existing?.rating ?? null)
@@ -93,7 +101,8 @@ export default function ReviewEditor({
   const shareHint = composer.anchor === 'private' ? _('review.sharePrivateOnlyHint') : _('review.shareUnavailableHint')
 
   function handlePasteCapture(event: React.ClipboardEvent) {
-    if (bodyFormat !== 'markdown') return
+    // Device reviews have no attachment store behind them yet.
+    if (local || bodyFormat !== 'markdown') return
     const target = event.target as HTMLElement
     if (target.tagName === 'INPUT') return
 
@@ -121,7 +130,7 @@ export default function ReviewEditor({
   }
 
   function handleDropCapture(event: React.DragEvent) {
-    if (bodyFormat !== 'markdown') return
+    if (local || bodyFormat !== 'markdown') return
     const target = event.target as HTMLElement
     if (target.tagName === 'INPUT') return
 
@@ -154,6 +163,22 @@ export default function ReviewEditor({
     // An untouched edit omits visibility so the server retains the row value.
     const chosen = canShare ? visibility : 'private'
     try {
+      if (saveLocal) {
+        setLocalSaving(true)
+        await saveLocal({
+          bookVersionId,
+          reviewId: existing?.id ?? null,
+          rating,
+          title: title.trim() ? title.trim() : null,
+          bodyFormat,
+          body: body.trim() ? body : null,
+        })
+        setLocalSaving(false)
+        notify.success({ key: existing ? 'review.updatedNotice' : 'review.publishedNotice' })
+        onSaved?.()
+        onClose()
+        return
+      }
       await save.mutateAsync({
         bookVersionId,
         reviewId: existing?.id ?? null,
@@ -168,11 +193,12 @@ export default function ReviewEditor({
       onSaved?.()
       onClose()
     } catch (error) {
+      if (saveLocal) setLocalSaving(false)
       notify.error(getUserErrorNotification(error, 'review.saveFailed'))
     }
   }
 
-  const uploads = bodyFormat === 'markdown' ? <ContentUpload compact inline disabled={save.isPending} entries={draft.entries} onAdd={draft.add} onRetry={draft.retry} /> : null
+  const uploads = bodyFormat === 'markdown' && !local ? <ContentUpload compact inline disabled={save.isPending} entries={draft.entries} onAdd={draft.add} onRetry={draft.retry} /> : null
 
   return (
     <Modal

@@ -1,6 +1,7 @@
+import { editorSourceRevision, editorSourceEntries } from '../lib/editor-publication-source'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { BookDetailRes, EditorEpubLoadRes, EditorEpubSaveReq } from '@bookdock/shared'
+import type { ClientLibraryDetailView, EditorEpubLoadRes, EditorEpubSaveReq } from '@bookdock/shared'
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
@@ -41,7 +42,7 @@ import LocalDraftRecovery from './LocalDraftRecovery'
 import LeaveEditorDialog from './LeaveEditorDialog'
 
 interface EpubContentEditorProps {
-  book: BookDetailRes
+  book: ClientLibraryDetailView
   target?: ManagedEditorTarget
 }
 
@@ -131,8 +132,8 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
   useDismissiblePopup(showTitleActions, titleActionsRef, () => setShowTitleActions(false))
 
   const editableDocument = draft?.documents.find((document) => document.href === activeHref) ?? null
-  const previewEntry = !editableDocument && activeHref && source && manifestQuery.data && manifestQuery.data.manifest.revisionId === source.revisionId
-    ? manifestQuery.data.manifest.entries.find((entry) => entry.path === activeHref) : undefined
+  const previewEntry = !editableDocument && activeHref && source && manifestQuery.data && editorSourceRevision(manifestQuery.data) === source.revisionId
+    ? editorSourceEntries(manifestQuery.data).find((entry) => entry.path === activeHref) : undefined
   const previewIsText = Boolean(previewEntry && /^(application\/(xhtml\+xml|xml)|text\/html)$/i.test(previewEntry.mediaType))
   const previewIsImage = Boolean(previewEntry && /^image\/(png|jpeg|gif|webp|avif|svg\+xml)$/i.test(previewEntry.mediaType))
   const previewQuery = useEditorSpineText(book, manifestQuery.data, previewIsText ? activeHref ?? undefined : undefined)
@@ -219,7 +220,7 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
   useEffect(() => {
     const loaded = manifestQuery.data
     const active = activeDocumentRef.current
-    if (!frameDocument || frameDocument !== iframeRef.current?.contentDocument || !active || !loaded || loaded.manifest.revisionId !== sourceRevision.current) return
+    if (!frameDocument || frameDocument !== iframeRef.current?.contentDocument || !active || !loaded || editorSourceRevision(loaded) !== sourceRevision.current) return
     setResourceWarning(false)
     return prepareEditorResources(frameDocument, active.content, active.href, loaded, undefined, () => setResourceWarning(true))
   }, [frameDocument, manifestQuery.data, activeHref, frameGeneration])

@@ -59,6 +59,7 @@ export default function ArchiveOverviewDashboard({
   onSelectBook,
 }: ArchiveOverviewDashboardProps) {
   const _ = useTranslation()
+  const archivePath = '/archive' as const
   const resolved = resolveArchiveScope({
     period,
     anchor: range ? localDateString(range.from) : undefined,
@@ -131,7 +132,7 @@ export default function ArchiveOverviewDashboard({
       {noteCards.map((card) => (
         <Link
           key={card.type}
-          to="/archive"
+          to={archivePath}
           search={{ ...baseSearch, type: card.type }}
           replace
           // Keep the recorded archive exit source across this in-feature move.

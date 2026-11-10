@@ -39,7 +39,7 @@ if (initialUser?.id) {
 
 useAuthStore.subscribe((state, previous) => {
   if (state.user?.id === previous.user?.id && state.user?.role === previous.user?.role) return
-  const filters = { predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] !== 'auth' }
+  const filters = { predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] !== 'auth' && query.queryKey[0] !== 'local-library' && !(query.queryKey[0] === 'client-catalog' && query.queryKey[1] === 'local') && !query.queryKey.some((part) => typeof part === 'string' && part.startsWith('local:')) }
   void queryClient.cancelQueries(filters)
   queryClient.removeQueries(filters)
   void queryClient.invalidateQueries({ queryKey: ['auth', 'me'] })

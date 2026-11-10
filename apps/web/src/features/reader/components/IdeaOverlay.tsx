@@ -21,6 +21,7 @@ import IdeaDiscussionPanel from './IdeaDiscussionPanel'
 import IdeaVisibilityControl from './IdeaVisibilityControl'
 import { markEscConsumed } from '../lib/esc-consumed'
 import { useIdeaDiscussion } from '../hooks/useIdeas'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 import { useIsTouch } from '../hooks/useIsTouch'
 
 /**
@@ -105,6 +106,7 @@ export function IdeaOverlay({
   onClose,
 }: IdeaOverlayProps) {
   const dialogLayout = useDialogLayout()
+  const local = useLocalReader()
   const _ = useTranslation()
   const isTouch = useIsTouch()
   const ideaDisplayMode = useUiStore((s) => s.ideaDisplayMode)
@@ -221,7 +223,7 @@ export function IdeaOverlay({
     { key: 'ai-chat', title: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={20} />, onClick: onAiChat },
     { key: 'search', title: _('reader.search'), icon: <SearchIcon />, onClick: onSearch },
     { key: 'share', title: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, onClick: onShareQuote },
-  ]
+  ].filter((action) => !local || action.key !== 'ai-chat')
   const storedWidth = useUiStore((s) => s.ideaSidebarWidth)
   const setStoredWidth = useUiStore((s) => s.setIdeaSidebarWidth)
   const IDEA_SIDEBAR_MIN = 280
@@ -399,7 +401,7 @@ export function IdeaOverlay({
                         showQuote={false}
                         isExpanded={isExpanded}
                         onOpen={() => setExpandedIdeaId((prev) => (prev === entry.annotation.id ? null : entry.annotation.id))}
-                        onToggleLike={onToggleLike ? () => onToggleLike(entry) : undefined}
+                        onToggleLike={!local && onToggleLike ? () => onToggleLike(entry) : undefined}
                         onCopy={() => onCopyNote(entry)}
                         onShare={() => onShareNote(entry)}
                         onEdit={() => onEdit(entry)}
@@ -407,7 +409,7 @@ export function IdeaOverlay({
                         onJump={onJump && entry.locationAvailable !== false ? () => onJump(entry) : undefined}
                         fontStack={fontStack}
                       />
-                      {isExpanded && (
+                      {isExpanded && !local && (
                         <div className="mt-1.5 ml-3 max-h-80 overflow-y-auto reader-scrollbar border-l-2 border-[var(--bd-read-primary)]/40 pl-3 pb-2 pt-1 animate-in fade-in-50 duration-150">
                           <IdeaDiscussionPanel
                             ideaId={entry.annotation.id}
@@ -467,7 +469,7 @@ export function IdeaOverlay({
                     />
                   </div>
 
-                  <IdeaImageEditor ref={sidebarImageEditorRef} bookVersionId={bookId} disabled={isSidebarSubmitting} onChange={(files, pending) => { setSidebarFiles(files); setSidebarUploading(pending) }} />
+                  {<IdeaImageEditor ref={sidebarImageEditorRef} bookVersionId={local ? undefined : bookId} disabled={isSidebarSubmitting} onChange={(files, pending) => { setSidebarFiles(files); setSidebarUploading(pending) }} />}
                   <div className="flex items-center justify-between border-t border-stone-200/40 pt-2 dark:border-stone-800/40">
                     <div className="flex items-center gap-2">
                       {visibilityEligible && (
@@ -556,15 +558,16 @@ export function IdeaOverlay({
                 fontStack={fontStack}
                 surface
                 liked={isDetailLiked}
+                privateNote={!!local}
                 onBack={() => setDetailId(null)}
                 onJump={onJump}
-                onToggleLike={onToggleLike}
+                onToggleLike={local ? undefined : onToggleLike}
                 onShare={onShareNote}
                 onCopy={onCopyNote}
                 onEdit={onEdit}
                 onDelete={onDelete}
               >
-                <IdeaDiscussionPanel
+                {!local && <IdeaDiscussionPanel
                   key={detail.annotation.id}
                   ideaId={detail.annotation.id}
                   bookId={bookId}
@@ -573,7 +576,7 @@ export function IdeaOverlay({
                   initialLikeCount={detail.likeCount}
                   createdAt={detail.annotation.createdAt}
                   editedAt={detail.annotation.editedAt}
-                />
+                />}
               </IdeaDetailCard>
             </div>
           ) : (
@@ -618,7 +621,7 @@ export function IdeaOverlay({
                     entry={entry}
                     showQuote={false}
                     onOpen={() => setDetailId(entry.annotation.id)}
-                    onToggleLike={onToggleLike ? () => onToggleLike(entry) : undefined}
+                    onToggleLike={!local && onToggleLike ? () => onToggleLike(entry) : undefined}
                     onCopy={() => onCopyNote(entry)}
                     onShare={() => onShareNote(entry)}
                     onEdit={() => onEdit(entry)}

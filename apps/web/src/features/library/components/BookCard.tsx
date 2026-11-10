@@ -1,6 +1,6 @@
 import { memo } from 'react'
 
-import type { BookListItem, GridCardField } from '@bookdock/shared'
+import type { ClientLibraryBookView, GridCardField } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
@@ -16,18 +16,18 @@ import TrashInfo from './TrashInfo'
 import UnpinButton, { PinIcon } from './UnpinButton'
 
 interface BookCardProps {
-  book: BookListItem
+  book: ClientLibraryBookView
   selected?: boolean
   selectionActive?: boolean
   gridCardFields?: GridCardField[]
   readOnly?: boolean
   onToggleSelect?: (id: string, shiftKey?: boolean) => void
-  onDelete?: (book: BookListItem) => void
-  onPublish?: (book: BookListItem) => void
-  onFork?: (book: BookListItem) => void
-  onShowDetails?: (book: BookListItem) => void
-  onRestore?: (book: BookListItem) => void
-  onPermanentDelete?: (book: BookListItem) => void
+  onDelete?: (book: ClientLibraryBookView) => void
+  onPublish?: (book: ClientLibraryBookView) => void
+  onFork?: (book: ClientLibraryBookView) => void
+  onShowDetails?: (book: ClientLibraryBookView) => void
+  onRestore?: (book: ClientLibraryBookView) => void
+  onPermanentDelete?: (book: ClientLibraryBookView) => void
 }
 
 const MENU_W = 184
@@ -71,6 +71,8 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           <div className="absolute left-1.5 top-1.5 z-10 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
             <UnpinButton
               bookId={book.id}
+              ref={book.ref}
+              expectedVersion={book.clientVersion}
               className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm transition-colors hover:bg-black/65"
             >
               <PinIcon size={12} />

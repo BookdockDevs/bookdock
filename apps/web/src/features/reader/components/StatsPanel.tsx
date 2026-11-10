@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { ReadingLedgerSession } from '@bookdock/shared'
 
-import { READING_RECORDS_KEY, useBookReadingLedgerStats, useBookReadingSessions, useDeleteSession, useReadingLedger, useReadingLedgerRecovery } from '@/api/hooks/reading-records'
+import { readingRecordBookKey, useBookReadingLedgerStats, useBookReadingSessions, useDeleteSession, useReadingLedger, useReadingLedgerRecovery } from '@/api/hooks/reading-records'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useBook } from '@/features/library/hooks'
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import ReadingSessionCard from '@/features/archive/components/ReadingSessionCard'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatDuration } from '@/lib/format-duration'
+import { getAuthSessionRevision } from '@/stores/auth.store'
 
 import AddRecordDialog from './AddRecordDialog'
 
@@ -18,11 +20,12 @@ interface StatsPanelProps { bookId: string }
 
 export default function StatsPanel({ bookId }: StatsPanelProps) {
   const _ = useTranslation()
+  const local = useLocalReader()
   const ledgerQuery = useReadingLedger(bookId)
   const dataVersion = ledgerQuery.data?.data?.dataVersion
   const statsQuery = useBookReadingLedgerStats(bookId, undefined, dataVersion)
   const sessionsQuery = useBookReadingSessions(bookId, undefined, dataVersion)
-  const bookQuery = useBook(bookId)
+  const bookQuery = useBook(bookId, local?.ref)
   const deleteMutation = useDeleteSession()
   const queryClient = useQueryClient()
 
@@ -30,6 +33,19 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
   const [editingSession, setEditingSession] = useState<ReadingLedgerSession | null>(null)
   const [deletingSession, setDeletingSession] = useState<ReadingLedgerSession | null>(null)
   const [deletingBusy, setDeletingBusy] = useState(false)
+  const sourceScope = local?.namespace ?? JSON.stringify(['remote', bookId, getAuthSessionRevision()])
+  const scope = `${sourceScope}:${bookId}`
+  const activeScopeRef = useRef(scope)
+  activeScopeRef.current = scope
+  const [previousScope, setPreviousScope] = useState(scope)
+  if (scope !== previousScope) {
+    setPreviousScope(scope)
+    setAddOpen(false)
+    setEditingSession(null)
+    setDeletingSession(null)
+    setDeletingBusy(false)
+  }
+
 
   const ledger = ledgerQuery.data?.data
   const statsVersionMismatch = Boolean(ledger?.dataVersion !== undefined && statsQuery.data?.data && statsQuery.data.data.dataVersion !== ledger.dataVersion)
@@ -50,7 +66,7 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
     if (hasVersionMismatch || recovery.failed) { recovery.retry(); return }
     void ledgerQuery.refetch()
     void statsQuery.refetch()
-    void queryClient.resetQueries({ queryKey: [...READING_RECORDS_KEY, 'ledger-sessions', bookId] })
+    void queryClient.resetQueries({ queryKey: readingRecordBookKey('ledger-sessions', bookId, local?.namespace) })
   }
   const stats = statsVersionMismatch ? undefined : statsQuery.data?.data
   const sessions = useMemo(() => {
@@ -61,6 +77,7 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
   const visibleSessions = sortedSessions
   const days = stats?.readingDays ?? 0
   const coverage = ledger?.coverage ?? 0
+  const initialFraction = coverage
   const ringIntervals = ledger?.coverageIntervals ?? []
   const earliestDate = ledger?.earliestDate ?? null
 
@@ -76,13 +93,53 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
     return coverage * 100
   }, [book?.progress, coverage])
 
+  const dialogs = <>
+      {addOpen && (
+        <AddRecordDialog
+          bookId={bookId}
+          initialStartFraction={initialFraction}
+          onClose={() => setAddOpen(false)}
+        />
+      )}
+
+      {editingSession && (
+        <AddRecordDialog
+          bookId={bookId}
+          variant="reader"
+          editingSession={editingSession}
+          onClose={() => setEditingSession(null)}
+        />
+      )}
+
+      {deletingSession && (
+        <ConfirmDialog
+          title={_('settings.confirmDeleteTitle')}
+          message={_('reader.sessionDeleteConfirm')}
+          confirmLabel={_('reader.sessionDelete')}
+          confirmDisabled={deletingBusy}
+          onClose={() => {
+            if (!deletingBusy) setDeletingSession(null)
+          }}
+          onConfirm={async () => {
+            setDeletingBusy(true)
+            try {
+              await deleteMutation.mutateAsync(deletingSession.clientMembers ? { id: deletingSession.id, clientMembers: deletingSession.clientMembers } : deletingSession.id)
+              if (activeScopeRef.current === scope) setDeletingSession(null)
+            } finally {
+              if (activeScopeRef.current === scope) setDeletingBusy(false)
+            }
+          }}
+        />
+      )}
+  </>
+
   if (ledgerQuery.isError || statsQuery.isError || sessionsQuery.isError) {
-    return <QueryErrorState className="text-[var(--bd-read-sub)]" isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />
+    return <><QueryErrorState className="text-[var(--bd-read-sub)]" isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />{dialogs}</>
   }
   if (hasVersionMismatch && recovery.failed) {
-    return <QueryErrorState className="text-[var(--bd-read-sub)]" isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />
+    return <><QueryErrorState className="text-[var(--bd-read-sub)]" isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />{dialogs}</>
   }
-  if (hasVersionMismatch || ledgerQuery.isPending || statsQuery.isPending || sessionsQuery.isPending) return <div role="status" className="h-40 animate-pulse rounded-xl bg-stone-500/10" />
+  if (hasVersionMismatch || ledgerQuery.isPending || statsQuery.isPending || sessionsQuery.isPending) return <><div role="status" className="h-40 animate-pulse rounded-xl bg-stone-500/10" />{dialogs}</>
 
   const totalSeconds = ledger?.totalSeconds ?? 0
   const totalWords = stats?.totalWordsRead
@@ -92,9 +149,8 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
       : totalWords.toLocaleString()
     : '—'
   const avgDailySeconds = days > 0 ? Math.round(totalSeconds / days) : null
-  const initialFraction = coverage
-
   return (
+    <>
     <div className="space-y-4 px-1 pt-3 pb-6">
       {!ledger?.totalSeconds && (
         <div className="rounded-xl bg-stone-500/5 p-3">
@@ -226,43 +282,8 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
         </div>
       )}
 
-      {addOpen && (
-        <AddRecordDialog
-          bookId={bookId}
-          initialStartFraction={initialFraction}
-          onClose={() => setAddOpen(false)}
-        />
-      )}
-
-      {editingSession && (
-        <AddRecordDialog
-          bookId={bookId}
-          variant="reader"
-          editingSession={editingSession}
-          onClose={() => setEditingSession(null)}
-        />
-      )}
-
-      {deletingSession && (
-        <ConfirmDialog
-          title={_('settings.confirmDeleteTitle')}
-          message={_('reader.sessionDeleteConfirm')}
-          confirmLabel={_('reader.sessionDelete')}
-          confirmDisabled={deletingBusy}
-          onClose={() => {
-            if (!deletingBusy) setDeletingSession(null)
-          }}
-          onConfirm={async () => {
-            setDeletingBusy(true)
-            try {
-              await deleteMutation.mutateAsync(deletingSession.id)
-              setDeletingSession(null)
-            } finally {
-              setDeletingBusy(false)
-            }
-          }}
-        />
-      )}
     </div>
+    {dialogs}
+    </>
   )
 }

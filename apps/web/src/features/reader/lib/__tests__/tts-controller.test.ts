@@ -111,6 +111,22 @@ describe('TtsController', () => {
     expect(new SystemSpeechClient().listVoices()).toEqual([])
   })
 
+  it.each(['start', 'startFromChapter'] as const)('does not revive a disposed session when %s resolves a late renderer segment', async (method) => {
+    const segment = { id: 'local-sentence', text: 'Local text', cfi: 'epubcfi(/6/2)', chapterIndex: 0 }
+    const fake = fakeRenderer([segment])
+    let resolve!: (segment: TtsSegment) => void
+    const read = vi.fn(() => new Promise<TtsSegment>((done) => { resolve = done }))
+    Object.assign(fake.renderer, { getTtsSegment: read, getTtsChapterStartSegment: read })
+    const controller = new TtsController(fake.renderer, { engine: 'system', voiceId: '', rate: 1, autoNext: false, highlight: false })
+    const pending = controller[method]()
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
+    controller.dispose()
+    resolve(segment)
+    await pending
+    expect(speech.speak).not.toHaveBeenCalled()
+    expect(controller.getSnapshot().status).toBe('idle')
+  })
+
   it('keeps voice refresh callbacks bound to the controller', () => {
     const fake = fakeRenderer([{ id: 's1', text: '第一句', cfi: 'epubcfi(/6/2)', chapterIndex: 0 }])
     const controller = new TtsController(fake.renderer, { engine: 'system', voiceId: '', rate: 1, autoNext: false, highlight: false })

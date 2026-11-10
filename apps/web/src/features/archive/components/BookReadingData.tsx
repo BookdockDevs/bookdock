@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { ReadingLedgerSession, ReadingRange } from '@bookdock/shared'
 
-import { localDateString, READING_RECORDS_KEY, useBookReadingLedgerStats, useBookReadingSessions, useDeleteSession, useReadingLedger, useReadingLedgerRecovery } from '@/api/hooks/reading-records'
+import { localDateString, readingRecordBookKey, useBookReadingLedgerStats, useBookReadingSessions, useDeleteSession, useReadingLedger, useReadingLedgerRecovery } from '@/api/hooks/reading-records'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import AddRecordDialog from '@/features/reader/components/AddRecordDialog'
@@ -15,11 +15,14 @@ import { formatDuration } from '@/lib/format-duration'
 import BookReadingTrendChart from './BookReadingTrendChart'
 import ReadingSessionCard from './ReadingSessionCard'
 import { useBook } from '@/features/library/hooks'
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
+import { getAuthSessionRevision } from '@/stores/auth.store'
 
 interface BookReadingDataProps { bookId: string; onDeleted?: () => void; range?: ReadingRange; onSelectDate?: (date: string | null) => void }
 
 export default function BookReadingData({ bookId, range, onSelectDate }: BookReadingDataProps) {
   const _ = useTranslation()
+  const local = useLocalReader()
   const ledgerQuery = useReadingLedger(bookId)
   const dataVersion = ledgerQuery.data?.data?.dataVersion
   const statsQuery = useBookReadingLedgerStats(bookId, range, dataVersion)
@@ -34,13 +37,18 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
   const [deletingSession, setDeletingSession] = useState<ReadingLedgerSession | null>(null)
   const [addRecordOpen, setAddRecordOpen] = useState(false)
   const [deletingBusy, setDeletingBusy] = useState(false)
-  const scopeKey = `${bookId}:${range?.from ?? ''}:${range?.to ?? ''}:${range?.timezone ?? ''}`
+  const sourceScope = local?.namespace ?? `remote:${getAuthSessionRevision()}`
+  const scopeKey = `${sourceScope}:${bookId}:${range?.from ?? ''}:${range?.to ?? ''}:${range?.timezone ?? ''}`
+  const activeScopeRef = useRef(scopeKey)
+  activeScopeRef.current = scopeKey
   const [previousScope, setPreviousScope] = useState(scopeKey)
   if (previousScope !== scopeKey) {
     setPreviousScope(scopeKey)
     setSelectedDate(null)
     setEditingSession(null)
     setDeletingSession(null)
+    setAddRecordOpen(false)
+    setDeletingBusy(false)
   }
   const ledger = ledgerQuery.data?.data
   const currentRound = ledger?.rounds.find((r) => r.id === ledger.currentRoundId) ?? ledger?.rounds.at(-1)
@@ -60,7 +68,7 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
     if (hasVersionMismatch || recovery.failed) { recovery.retry(); return }
     void ledgerQuery.refetch()
     void statsQuery.refetch()
-    void queryClient.resetQueries({ queryKey: [...READING_RECORDS_KEY, 'ledger-sessions', bookId] })
+    void queryClient.resetQueries({ queryKey: readingRecordBookKey('ledger-sessions', bookId, local?.namespace) })
   }
   const stats = statsVersionMismatch ? undefined : statsQuery.data?.data
   const sessions = useMemo(() => {
@@ -100,7 +108,7 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
   const undatedDurationSeconds = stats?.undatedDurationSeconds ?? 0
   const datedTotalSeconds = (stats?.daily ?? []).reduce((sum, day) => sum + day.durationSeconds, 0)
   const coverage = stats?.daily.at(-1)?.cumulativeCoverage ?? ledger?.coverage ?? 0
-  const bookQuery = useBook(bookId)
+  const bookQuery = useBook(bookId, local?.ref ?? null)
   const book = bookQuery.data?.data
   const latestProgress = useMemo(() => {
     if (book?.progress != null) {
@@ -313,15 +321,54 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
     return items
   }, [distribution.days, _])
 
+  const dialogs = <>
+    {addRecordOpen && ledger?.sourceAvailable && (
+      <AddRecordDialog
+        bookId={bookId}
+        variant="default"
+        onClose={() => setAddRecordOpen(false)}
+      />
+    )}
+    {editingSession && (
+      <AddRecordDialog
+        bookId={bookId}
+        variant="default"
+        editingSession={editingSession}
+        onClose={() => setEditingSession(null)}
+      />
+    )}
+    {deletingSession && (
+      <ConfirmDialog
+        title={_('settings.confirmDeleteTitle')}
+        message={_('reader.sessionDeleteConfirm')}
+        confirmLabel={_('reader.sessionDelete')}
+        errorFallback="reader.sessionActionFailed"
+        confirmDisabled={deletingBusy}
+        onClose={() => { if (!deletingBusy) setDeletingSession(null) }}
+        onConfirm={async () => {
+          setDeletingBusy(true)
+          try {
+            await deleteMutation.mutateAsync(deletingSession.clientMembers ? { id: deletingSession.id, clientMembers: deletingSession.clientMembers } : deletingSession.id)
+            if (activeScopeRef.current === scopeKey) setDeletingSession(null)
+          } finally {
+            if (activeScopeRef.current === scopeKey) setDeletingBusy(false)
+          }
+        }}
+      />
+    )}
+
+  </>
+
   if (hasVersionMismatch && recovery.failed) {
-    return <QueryErrorState isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />
+    return <><QueryErrorState isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />{dialogs}</>
   }
-  if (hasVersionMismatch || ledgerQuery.isPending || statsQuery.isPending || sessionsQuery.isPending) return <div role="status" className="h-48 animate-pulse rounded-3xl bg-stone-500/10" />
+  if (hasVersionMismatch || ledgerQuery.isPending || statsQuery.isPending || sessionsQuery.isPending) return <><div role="status" className="h-48 animate-pulse rounded-3xl bg-stone-500/10" />{dialogs}</>
   if (ledgerQuery.isError || statsQuery.isError || sessionsQuery.isError || !ledger) {
-    return <QueryErrorState isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />
+    return <><QueryErrorState isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />{dialogs}</>
   }
 
   return (
+    <>
     <div className="flex flex-col gap-5">
       {!bounded ? (
         <div className="rounded-3xl border border-stone-200/80 bg-white p-5 shadow-xs dark:border-stone-800 dark:bg-stone-900">
@@ -706,41 +753,8 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
       )}
     </section>
 
-    {addRecordOpen && ledger?.sourceAvailable && (
-      <AddRecordDialog
-        bookId={bookId}
-        variant="default"
-        onClose={() => setAddRecordOpen(false)}
-      />
-    )}
-    {editingSession && (
-      <AddRecordDialog
-        bookId={bookId}
-        variant="default"
-        editingSession={editingSession}
-        onClose={() => setEditingSession(null)}
-      />
-    )}
-    {deletingSession && (
-      <ConfirmDialog
-        title={_('settings.confirmDeleteTitle')}
-        message={_('reader.sessionDeleteConfirm')}
-        confirmLabel={_('reader.sessionDelete')}
-        errorFallback="reader.sessionActionFailed"
-        confirmDisabled={deletingBusy}
-        onClose={() => { if (!deletingBusy) setDeletingSession(null) }}
-        onConfirm={async () => {
-          setDeletingBusy(true)
-          try {
-            await deleteMutation.mutateAsync(deletingSession.id)
-            setDeletingSession(null)
-          } finally {
-            setDeletingBusy(false)
-          }
-        }}
-      />
-    )}
-
     </div>
+    {dialogs}
+    </>
   )
 }

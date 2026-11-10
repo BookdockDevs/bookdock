@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { localDraftEnvelopeSchema } from '@bookdock/shared'
 
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 import { DRAFT_MAX_AGE, draftKey, readLocalDraft, replaceLocalDraft, type LocalDraftRecord } from '../lib/local-draft-store'
 import type { ManagedEditorTarget } from './useEditorContent'
@@ -19,8 +20,17 @@ interface Options<T> {
 }
 
 export function useLocalEditorDraft<T>(options: Options<T>) {
-  const accountId = useAuthStore((state) => state.user?.id ?? null)
-  const key = accountId ? draftKey(accountId, options.bookId, options.format, options.target) : null
+  const connectedAccount = useAuthStore((state) => state.user?.id ?? null)
+  const local = useLocalCatalog()
+  const isLocal = Boolean(local)
+  const accountId = isLocal ? null : connectedAccount
+  const owner = local?.scope ?? accountId
+  const ownerIdentity = JSON.stringify(owner)
+  const activeOwner = useRef(ownerIdentity)
+  activeOwner.current = ownerIdentity
+  const key = owner ? draftKey(owner, options.bookId, options.format, options.target) : null
+  const activeKey = useRef(key)
+  activeKey.current = key
   const latest = useRef(options)
   latest.current = options
   const token = useRef<string | null>(null)
@@ -36,20 +46,20 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
   const [epoch, setEpoch] = useState(0)
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key !== 'bd-user') return
+      if (isLocal || event.key !== 'bd-user') return
       generation.current++
       if (timerRef.current !== null) window.clearTimeout(timerRef.current)
       setFailure('账号已在另一标签页更改，本地暂存已停止。')
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  }, [isLocal])
 
   useEffect(() => {
     const generationRef = generation
     const current = ++generationRef.current
     const authRevision = getAuthSessionRevision()
-    const valid = () => generation.current === current && getAuthSessionRevision() === authRevision && useAuthStore.getState().user?.id === accountId
+    const valid = () => generation.current === current && activeKey.current === key && activeOwner.current === ownerIdentity && (isLocal || getAuthSessionRevision() === authRevision && useAuthStore.getState().user?.id === accountId)
     setReady(false); setFailure(null); setCandidate(null); setStatus('idle'); token.current = null; savedChangeToken.current = undefined
     if (!key || !options.enabled || !options.revisionId) return () => { generationRef.current++ }
     void (async () => {
@@ -84,14 +94,14 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
       }
     })()
     return () => { generationRef.current++ }
-  }, [key, accountId, options.enabled, options.revisionId])
+  }, [key, accountId, isLocal, ownerIdentity, options.enabled, options.revisionId])
 
   useEffect(() => {
     if (!key || !ready || candidate || failure || !options.revisionId) return
     const current = generation.current
     const sequence = ++changeSequence.current
     const authRevision = getAuthSessionRevision()
-    const valid = () => generation.current === current && getAuthSessionRevision() === authRevision && useAuthStore.getState().user?.id === accountId
+    const valid = () => generation.current === current && activeKey.current === key && activeOwner.current === ownerIdentity && (isLocal || getAuthSessionRevision() === authRevision && useAuthStore.getState().user?.id === accountId)
     if (options.dirty) setStatus('pending')
     const timer = window.setTimeout(() => {
       timerRef.current = null
@@ -115,12 +125,12 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
     }, 1000)
     timerRef.current = timer
     return () => { window.clearTimeout(timer); if (timerRef.current === timer) timerRef.current = null }
-  }, [key, ready, candidate, failure, options.dirty, options.changeToken, options.revisionId, accountId, epoch])
+  }, [key, ready, candidate, failure, options.dirty, options.changeToken, options.revisionId, accountId, isLocal, ownerIdentity, epoch])
 
   async function discard() {
     if (!key || !candidate) return
     const current = generation.current
-    const valid = () => generation.current === current && useAuthStore.getState().user?.id === accountId
+    const valid = () => generation.current === current && activeKey.current === key && activeOwner.current === ownerIdentity && (isLocal || useAuthStore.getState().user?.id === accountId)
     const removed = await replaceLocalDraft(key, candidate.token, null, valid)
     if (!removed) throw new Error('草稿已在另一标签页更新，请重新打开工作台。')
     token.current = null; setCandidate(null); setReady(true)
@@ -137,7 +147,7 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
     if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null }
     const current = generation.current
     const authRevision = getAuthSessionRevision()
-    const valid = () => generation.current === current && getAuthSessionRevision() === authRevision && useAuthStore.getState().user?.id === accountId
+    const valid = () => generation.current === current && activeKey.current === key && activeOwner.current === ownerIdentity && (isLocal || getAuthSessionRevision() === authRevision && useAuthStore.getState().user?.id === accountId)
     const snapshot = latest.current
     const sequence = ++changeSequence.current
     let success = false
@@ -162,7 +172,7 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
     if (!key) return false
     if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null }
     const current = generation.current
-    const valid = () => generation.current === current && useAuthStore.getState().user?.id === accountId
+    const valid = () => generation.current === current && activeKey.current === key && activeOwner.current === ownerIdentity && (isLocal || useAuthStore.getState().user?.id === accountId)
     await queue.current
     if (!valid()) return false
     if (token.current === null) return !failure

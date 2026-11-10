@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+import { useAuthStore } from '@/stores/auth.store'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
@@ -26,6 +28,8 @@ describe('useReorderShelves', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
+  useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })

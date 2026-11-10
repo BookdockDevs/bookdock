@@ -28,7 +28,8 @@ export default function IdeaDetailCard({
   theme = 'reader',
   surface = false,
   children,
-  liked,
+  liked = false,
+  privateNote = false,
   onBack,
   onJump,
   onToggleLike,
@@ -43,7 +44,8 @@ export default function IdeaDetailCard({
   theme?: IdeaDetailTheme
   surface?: boolean
   children?: ReactNode
-  liked: boolean
+  liked?: boolean
+  privateNote?: boolean
   onBack: () => void
   onJump?: (entry: IdeaEntry) => void
   onToggleLike?: (entry: IdeaEntry) => void
@@ -145,7 +147,7 @@ export default function IdeaDetailCard({
       )}
       {!children && (
         <div className={cn('flex items-center gap-1.5 pt-3 text-xs', subText)}>
-          <span>{_('annotation.publishedAt')}</span>
+          <span>{_(privateNote ? 'annotation.savedAt' : 'annotation.publishedAt')}</span>
           <span title={formatFullDateTime(_, detail.annotation.createdAt)}>{formatRelativeTime(_, detail.annotation.createdAt)}</span>
           {detail.annotation.editedAt && (
             <span title={formatFullDateTime(_, detail.annotation.editedAt)}>· {_('annotation.edited')}</span>

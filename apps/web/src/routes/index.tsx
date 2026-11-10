@@ -1,62 +1,13 @@
 import { createRoute } from '@tanstack/react-router'
 import { rootRoute } from './__root'
 import Library from '@/features/library/Library'
-import { categoryScopeSchema, type CategoryScope } from '@bookdock/shared'
+import { parseLibraryRouteSearch } from './library-route-search'
 
-export interface LibrarySearch {
-  page?: number
-  view?: 'grid' | 'list'
-  expression?: string
-  q?: string
-  sortBy?: string
-  sortOrder?: 'asc' | 'desc'
-  shelf?: string
-  category?: string
-  tag?: string
-  author?: string
-  series?: string
-  format?: 'epub' | 'txt'
-  status?: 'wishlist' | 'reading' | 'idle' | 'finished' | 'abandoned'
-  trash?: boolean
-  /** Active shared library; absent = the user's own private library. */
-  libraryId?: string
-  directory?: 'shelves' | 'categories' | 'tags'
-  categoryScope?: CategoryScope
-  section?: 'books' | 'activity'
-  activityType?: 'all' | 'idea' | 'review' | 'catalog' | 'management'
-}
-
-const VALID_VIEWS = new Set(['grid', 'list'])
-const VALID_ORDERS = new Set(['asc', 'desc'])
-const VALID_FORMATS = new Set(['epub', 'txt'])
-const VALID_STATUSES = new Set(['wishlist', 'reading', 'idle', 'finished', 'abandoned'])
+export type { LibrarySearch } from './library-route-search'
 
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  validateSearch: (input: Record<string, unknown>): LibrarySearch => {
-    const page = typeof input.page === 'string' && /^\d+$/.test(input.page) ? Number(input.page) : input.page
-    return {
-      page: typeof page === 'number' && Number.isSafeInteger(page) && page > 0 ? page : undefined,
-      view: typeof input.view === 'string' && VALID_VIEWS.has(input.view) ? (input.view as 'grid' | 'list') : undefined,
-      expression: typeof input.expression === 'string' && input.expression.length > 0 ? input.expression : undefined,
-      q: typeof input.q === 'string' && input.q.length > 0 ? input.q : undefined,
-      sortBy: typeof input.sortBy === 'string' && input.sortBy.length > 0 ? input.sortBy : undefined,
-      sortOrder: VALID_ORDERS.has(input.sortOrder as string) ? (input.sortOrder as 'asc' | 'desc') : undefined,
-      shelf: typeof input.shelf === 'string' && input.shelf.length > 0 ? input.shelf : undefined,
-      category: typeof input.category === 'string' && input.category.length > 0 ? input.category : undefined,
-      tag: typeof input.tag === 'string' && input.tag.length > 0 ? input.tag : undefined,
-      author: typeof input.author === 'string' && input.author.length > 0 ? input.author : undefined,
-      series: typeof input.series === 'string' && input.series.length > 0 ? input.series : undefined,
-      format: VALID_FORMATS.has(input.format as string) ? (input.format as 'epub' | 'txt') : undefined,
-      status: VALID_STATUSES.has(input.status as string) ? (input.status as LibrarySearch['status']) : undefined,
-      trash: input.trash === true ? true : undefined,
-      libraryId: typeof input.libraryId === 'string' && input.libraryId.length > 0 ? input.libraryId : undefined,
-      directory: input.directory === 'shelves' || input.directory === 'categories' || input.directory === 'tags' ? input.directory : undefined,
-      categoryScope: categoryScopeSchema.safeParse(input.categoryScope).success ? input.categoryScope as CategoryScope : undefined,
-      section: input.section === 'activity' ? 'activity' : undefined,
-      activityType: input.activityType === 'idea' || input.activityType === 'review' || input.activityType === 'catalog' || input.activityType === 'management' ? input.activityType : undefined,
-    }
-  },
+  validateSearch: parseLibraryRouteSearch,
   component: Library,
 })

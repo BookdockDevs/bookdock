@@ -1,3 +1,5 @@
+import type { EditorTxtSaveReq } from './contract'
+import { countWords } from './text-metrics'
 import type { TocRulePattern } from './domain'
 
 export interface TxtChapterBoundary {
@@ -70,6 +72,7 @@ export function scanTxtChapterBoundaries(
   normalized: string,
   patterns?: readonly TxtTocPattern[] | null,
   onFallback?: (fallback: boolean) => void,
+  limits?: { maxChapters: number },
 ): TxtChapterBoundary[] {
   const active = patterns?.length ? patterns.filter((pattern) => pattern.enabled !== false) : DEFAULT_TXT_TOC_PATTERNS
   const claimed = new Set<number>()
@@ -83,6 +86,7 @@ export function scanTxtChapterBoundaries(
       const offset = normalized.lastIndexOf('\n', match.index - 1) + 1
       if (claimed.has(offset)) continue
       claimed.add(offset)
+      if (limits && claimed.size > limits.maxChapters) throw new Error('TXT chapter count exceeds the processing limit')
       const lineEnd = normalized.indexOf('\n', offset)
       const line = normalized.slice(offset, lineEnd < 0 ? normalized.length : lineEnd)
       const lineMatch = lineMatcher.exec(line)
@@ -191,4 +195,23 @@ export function predictTxtContinuationStart(
     if (Math.abs(prefixWords - originalWords) <= Math.max(100, originalWords * 0.15)) return existing.length
   }
   return 0
+}
+
+
+export function normalizeTxtEditorContent(content: string): string {
+  return content.split('\n\n').map((paragraph) => paragraph.trim()).filter(Boolean).join('\n\n')
+}
+
+export function buildTxtEditorSource(input: EditorTxtSaveReq['chapters']) {
+  const sourceChapters = input.map((chapter) => ({ ...chapter, content: normalizeTxtEditorContent(chapter.content) }))
+  let text = ''
+  const chapters = sourceChapters.map((chapter, index) => {
+    if (index > 0) text += '\n\n'
+    const startOffset = text.length
+    if (chapter.title) text += chapter.title + (chapter.content ? '\n\n' : '')
+    const contentStartOffset = text.length
+    text += chapter.content
+    return { id: `ch-${startOffset}`, title: chapter.title, level: chapter.level, startOffset, contentStartOffset, endOffset: text.length, wordCount: countWords(chapter.content) }
+  })
+  return { text, chapters, sourceChapters }
 }

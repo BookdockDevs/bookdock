@@ -8,7 +8,7 @@ import TagSelectPopover from '../TagSelectPopover'
 import { toggleSetItem } from './types'
 
 interface BookClassificationEditorProps {
-  libraryId: string
+  libraryId: string | null
   categoryId: string | null
   categoryTemplateKey?: string
   tagIds: Set<string>

@@ -15,7 +15,7 @@ export interface ReadingLedgerRound {
   id: string
   ordinal: number
   status: 'reading' | 'finished' | 'abandoned'
-  startedAt: number
+  startedAt: number | null
   endedAt: number | null
   coverage: number
   totalSeconds: number
@@ -27,7 +27,8 @@ export interface ReadingLedgerRound {
 
 export interface ReadingLedgerSession {
   id: string
-  roundId: string
+  roundId: string | null
+  clientMembers?: Array<{ id: string; version: number }>
   source: ReadingSource
   date: string
   startedAt: number | null
@@ -154,10 +155,11 @@ export interface ReadingTimerClaim {
 }
 
 export const readingDateSchema = calendarDateSchema
-export const readingTimeFragmentSchema = z.object({
+export const readingTimeFragmentBoundsSchema = z.object({
   startedAt: z.number().int().positive(),
   endedAt: z.number().int().positive(),
-}).refine((value) => value.endedAt > value.startedAt && value.endedAt - value.startedAt <= 24 * 3600_000, 'Invalid reading interval')
+})
+export const readingTimeFragmentSchema = readingTimeFragmentBoundsSchema.refine((value) => value.endedAt > value.startedAt && value.endedAt - value.startedAt <= 24 * 3600_000, 'Invalid reading interval')
 export const readingCoverageSchema = z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)])
 export const readingRoundActionSchema = z.object({ action: z.enum(['reread', 'continue', 'finish', 'abandon']) })
 export const readingTimerClaimSchema = z.object({

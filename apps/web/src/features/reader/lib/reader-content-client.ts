@@ -9,6 +9,7 @@ import {
   type ReaderManifest,
   type ReaderManifestEntry,
   type ReaderTextBatchRes,
+  type ReaderSearchRequest,
 } from '@bookdock/shared'
 
 import {
@@ -545,6 +546,17 @@ export class ReaderContentSession {
     const params = new URLSearchParams(query)
     params.set('revisionId', this.manifest.revisionId)
     return `${pathPart.replace(/\/file$/, '/reader/search')}?${params.toString()}`
+  }
+
+  async search(request: Omit<ReaderSearchRequest, 'revisionId'>, signal: AbortSignal): Promise<Response> {
+    this.assertReadable()
+    const response = await fetch(this.searchUrl(), {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+      body: JSON.stringify({ ...request, revisionId: this.manifest.revisionId }),
+    })
+    this.assertReadable()
+    return response
   }
 
   private readonly contentUrl: string

@@ -110,7 +110,7 @@ export default function BookCardShell({
         )}
       >
         <div className={cn('rounded-xl', trashCard && 'opacity-80 grayscale-[60%]')}>
-          <BookCover book={rowCover(row)} coverSrc={row.coverSrc ?? undefined} />
+          <BookCover book={rowCover(row)} coverSrc={row.coverSrc} />
         </div>
         <CoverRing />
         {!selectionActive && pinAffordance}

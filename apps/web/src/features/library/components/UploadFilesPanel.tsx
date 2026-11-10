@@ -53,7 +53,13 @@ function hasFiles(event: { dataTransfer: DataTransfer | null }): boolean {
 
 export default function UploadFilesPanel({ items, maxBytes, dragOver, setDragOver, isUploading, readable, onChooseFiles, onStartUpload, retry, retryAll, continueUpload, abortAll, handleClose, handleRead, toastObstacle = true, operation = 'upload' }: UploadFilesPanelProps) {
   const translate = useTranslation()
-  const messages: Record<string, string> = { 'library.upload': 'localLibrary.add', 'library.uploadPending': 'localLibrary.addPending', 'library.uploading': 'localLibrary.adding', 'library.uploadFailed': 'localLibrary.addFailed' }
+  const messages: Record<string, string> = {
+    'library.upload': 'localLibrary.addAction',
+    'library.uploadPending': 'localLibrary.addPending',
+    'library.uploading': 'localLibrary.adding',
+    'library.uploadFailed': 'localLibrary.addFailed',
+    'library.uploadCancel': 'library.cancel',
+  }
   const _ = (key: string, params?: Record<string, string | number>) => translate(operation === 'add' ? messages[key] ?? key : key, params)
   const hasPending = items.some((item) => item.status === 'pending')
   const failed = items.filter((item) => item.status === 'error').length

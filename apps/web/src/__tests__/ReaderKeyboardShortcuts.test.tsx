@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiPut } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
 import ReaderKeyboardShortcuts from '../features/reader/components/ReaderKeyboardShortcuts'
+import { LocalReaderContext } from '../features/reading-data/reader-source-context'
+import type { LocalReaderSession } from '../features/reading-data/reader-source-context'
 
 vi.mock('@/api/client', () => ({ apiPut: vi.fn().mockResolvedValue({ data: {} }) }))
 
@@ -14,6 +16,14 @@ describe('ReaderKeyboardShortcuts', () => {
     vi.mocked(apiPut).mockClear()
   })
   afterEach(() => useAuthStore.setState({ user: null }))
+
+  it('keeps local bindings out of account settings and remote retry payloads', () => {
+    render(<LocalReaderContext.Provider value={{ namespace: 'local:test' } as LocalReaderSession}><ReaderKeyboardShortcuts onBack={vi.fn()} /></LocalReaderContext.Provider>)
+    fireEvent.click(screen.getByTestId('shortcut-clear-toc'))
+    expect(apiPut).not.toHaveBeenCalled()
+    expect(JSON.parse(localStorage.getItem('bd-reader-shortcuts:local-vault:device')!).toc).toBeNull()
+    expect(localStorage.getItem('bd-reader-shortcuts:alice')).toBeNull()
+  })
 
   it('persists a recorded binding after confirming with the save button and rejects conflicts', async () => {
     render(<ReaderKeyboardShortcuts onBack={vi.fn()} />)

@@ -60,6 +60,7 @@ export default function StorageConnectionPicker({
   const menu = useContextMenu()
   const selected = connections.find((c) => c.id === value)
   const isLocal = showLocalOption && value === 'local'
+  const triggerLabel = isLocal ? localLabel : (selected?.name || value)
 
   const anchor = menu.btnRef.current?.getBoundingClientRect()
   const resolvedWidth = menuWidth === 'auto'
@@ -105,8 +106,8 @@ export default function StorageConnectionPicker({
         ) : (
           <LocalStorageBadge />
         )}
-        <span className={cn('truncate', triggerNameClassName)} title={isLocal ? localLabel : (selected?.name || value)}>
-          {isLocal ? localLabel : (selected?.name || value)}
+        <span className={cn('truncate', triggerNameClassName)} title={triggerLabel}>
+          {triggerLabel}
         </span>
         <svg
           width="12"

@@ -13,6 +13,16 @@ vi.mock('@/api/client', async (importOriginal) => {
   return { ...actual, apiDelete: vi.fn(), apiPatch: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn() }
 })
 
+// The trash is emptied for the session as well as the device; a signed-in
+// fixture keeps the server half reachable.
+vi.mock('@/stores/auth.store', () => {
+  const state = { user: { id: 'reader', privateLibraryId: 'private' } }
+  const useAuthStore = (selector: (value: unknown) => unknown) => selector(state)
+  useAuthStore.getState = () => state
+  useAuthStore.subscribe = () => () => {}
+  return { useAuthStore, getAuthSessionRevision: () => 0 }
+})
+
 vi.mock('@/lib/notifications', () => ({
   notify: {
     success: vi.fn(),
@@ -47,7 +57,7 @@ describe('book action notifications', () => {
   it('includes the title when moving a book to trash', async () => {
     const { result } = renderHook(() => useDeleteBook(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ id: 'book-1', title: '百年孤独' })
+    result.current.mutate({ id: 'book-1', title: '百年孤独', ref: { scope: { kind: 'remote', connectionId: 'same-origin', accountId: 'reader' }, bookId: 'book-1' } })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
@@ -60,14 +70,14 @@ describe('book action notifications', () => {
   it('reports partial shelf move counts from the single batch response', async () => {
     vi.mocked(apiClient.apiPatch).mockResolvedValue({ data: { succeeded: 1, failed: 1, failedIds: ['b'] } } as never)
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
-    result.current.mutate({ bookIds: ['a', 'b'], shelfId: 'shelf-1' })
+    result.current.mutate({ books: [{ id: 'a' }, { id: 'b' }], shelfId: 'shelf-1' })
     await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'library.moveBooksPartial', params: { succeeded: 1, failed: 1 } }, { undo: undefined }))
     expect(notify.error).not.toHaveBeenCalled()
   })
 
   it('uses one batch shelf request for a multi-book move', async () => {
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
-    result.current.mutate({ bookIds: ['a', 'b'], shelfId: 'shelf-1' })
+    result.current.mutate({ books: [{ id: 'a' }, { id: 'b' }], shelfId: 'shelf-1' })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(apiClient.apiPatch).toHaveBeenCalledWith('/books/batch/move-shelf', { ids: ['a', 'b'], shelfId: 'shelf-1' })
     expect(notify.warning).not.toHaveBeenCalled()
@@ -76,7 +86,7 @@ describe('book action notifications', () => {
   it('includes the title when restoring a book', async () => {
     const { result } = renderHook(() => useRestoreBook(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ id: 'book-1', title: '百年孤独' })
+    result.current.mutate({ id: 'book-1', title: '百年孤独', ref: { scope: { kind: 'remote', connectionId: 'same-origin', accountId: 'reader' }, bookId: 'book-1' } })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
@@ -89,7 +99,7 @@ describe('book action notifications', () => {
   it('includes the title when permanently deleting a book', async () => {
     const { result } = renderHook(() => usePermanentDeleteBook(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ id: 'book-1', title: '百年孤独' })
+    result.current.mutate({ id: 'book-1', title: '百年孤独', ref: { scope: { kind: 'remote', connectionId: 'same-origin', accountId: 'reader' }, bookId: 'book-1' } })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
 

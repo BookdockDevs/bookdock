@@ -2,6 +2,17 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Support device-local EPUB and TXT books stored in the browser without uploading them to the server. Local books share the same unified library, reader, editor, trash, and reading archive workflows alongside server books — including reading progress, notes, timers, metadata/content editing, and merged statistics — and remain usable offline or without signing in.
+- Choose whether newly added books are saved to this device or uploaded to the server, with a per-device default add destination in Settings (automatically defaulting to this device when signed out or server uploads are disabled).
+
+### Changed
+
+- Connected-account capabilities adapt cleanly to local books: signed-in users can translate selected text from device books with server AI without uploading the file, while online-only services (such as server dictionaries, speech gateways, and metadata scraping) clearly note when signing in is required without interrupting offline reading.
+
 ## [0.7.7] - 2026-11-06
 
 ### Added
@@ -1066,6 +1077,17 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [Unreleased]
+
+#### 新增
+
+- 支持在当前设备（浏览器本地）保存和阅读 EPUB / TXT 书籍，无需上传到服务器。本地书与服务端书无缝融入同一套书架、阅读器、编辑、回收站与阅读档案/统计工作流，离线或访客模式下均可完整使用。
+- 添加书籍时支持选择「存到本机」或「上传到服务器」，并可在设置中配置设备级的默认添加位置（未登录或禁止服务端上传时自动默认存到本机）。
+
+#### 优化
+
+- 账号联动能力按需适配本地书：已登录用户可直接对本地书中的选中文本使用服务端 AI 划词翻译而无需上传文件；在线词典、语音网关、元数据刮削等纯联网功能在离线或未登录时给出清晰提示，不影响本地阅读。
 
 ### [0.7.7] - 2026-11-06
 

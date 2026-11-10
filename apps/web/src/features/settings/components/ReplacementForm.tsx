@@ -181,7 +181,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
           body.bookId = bookId
         }
       }
-      updateReplacement.mutate({ id: initial.id, body }, { onSuccess: onSaved, onError })
+      updateReplacement.mutate({ id: initial.id, body, ...(initial.clientVersion !== undefined ? { expectedVersion: initial.clientVersion } : {}) }, { onSuccess: onSaved, onError })
     } else {
       const pointSnapshot = selection && trimmed === selectionText
         ? (selection.pointText?.trim() || trimmed)

@@ -1,5 +1,24 @@
 {
+  "localLibrary": {
+    "pendingReading": "Stop reading timers and let pending captures finish saving before clearing reading history.",
+    "recordConflict": "This record changed or conflicts with existing data. Reload it or adjust the input, then retry.",
+    "untimedDurationLimit": "Entries without a start time cannot exceed 24 hours.",
+    "timerSaveFailed": "Reading time could not be saved locally. Keep this page open and retry when storage is available.",
+    "add": "Add books",
+    "addAction": "Add",
+    "failed": "The operation did not finish. Check browser storage permissions and available space, then retry.",
+    "missing": "The local file was removed or cannot be read. Retained notes are still available in the library.",
+    "progressFailed": "The local reading position was not saved. If another tab changed it, confirm whether to save your current position instead.",
+    "retryPosition": "Retry saving current position",
+    "restorePosition": "Restore saved position",
+    "addPending": "Ready to add",
+    "adding": "Reading file…",
+    "addFailed": "Could not add book"
+  },
   "dictionary": {
+    "accountRequired": "Connect an account to use this dictionary service. Local reading remains available.",
+    "audioFailed": "Dictionary audio could not play. Try again.",
+    "accessRequired": "This account cannot access the dictionary. Check the account or dictionary permissions.",
     "invalidDictionary": "Unable to parse this dictionary. Check its format, companion files and encryption.",
     "busy": "The dictionary is busy. Please retry shortly.",
     "title": "Dictionary",
@@ -25,6 +44,7 @@
     "deleteConfirm": "Delete “{{name}}”?"
   },
   "translation": {
+    "accountRequired": "Connect an account to use translation. Local reading remains available.",
     "title": "Translate",
     "target": "Target language",
     "channel": "Translation channel",
@@ -64,6 +84,7 @@
     "saving": "Saving…"
   },
   "metadataLookup": {
+    "accountRequired": "Connect an account to use this metadata service",
     "qidian": "Qidian",
     "douban": "Douban",
     "weread": "WeRead",
@@ -167,6 +188,9 @@
     "username": "Username",
     "password": "Password",
     "signIn": "Sign In",
+    "extensionAccountMismatch": "Sign in with the account connected to your extension",
+    "extensionAccountMismatchHint": "You are currently signed in as {{username}}, which differs from the account that uploaded this book. Switch accounts to continue reading.",
+    "switchAccount": "Sign out and switch accounts",
     "welcome": "Welcome to Bookdock",
     "setupTitle": "Setup",
     "setupSubtitle": "Set up admin account",
@@ -305,11 +329,10 @@
     "uploadSummaryFailed": "{{count}} failed",
     "uploadSummarySeparator": ", ",
     "uploadSource": "Source",
-    "uploadSourceLocal": "Local File",
     "uploadSourceManage": "Manage storage sources...",
     "uploadImported": "Imported {{count}} book(s)",
     "uploadDuplicateOnly": "No new books added: {{count}} already existed",
-    "uploadLocal": "Local Upload",
+    "uploadLocal": "Local file",
     "uploadFromWebdav": "Import from External Storage",
     "webdavNotConfiguredTitle": "External Storage Not Configured",
     "webdavNotConfiguredDesc": "Connect external storage (such as WebDAV) in settings to browse and import EPUB and TXT books directly.",
@@ -1054,9 +1077,16 @@
     "manageDirectory": "Manage",
     "moveUp": "Move {{name}} up",
     "moveDown": "Move {{name}} down",
-    "deleteCategoryTreeConfirm": "Deleting “{{name}}” moves directly assigned books to Uncategorized and promotes subcategories to the top level. No books are deleted."
+    "deleteCategoryTreeConfirm": "Deleting “{{name}}” moves directly assigned books to Uncategorized and promotes subcategories to the top level. No books are deleted.",
+    "sourceRemote": "Upload to server",
+    "sourceLocal": "Save on this device",
+    "defaultAddDestination": "Default add destination",
+    "defaultAddDestinationHint": "Sets the default save target for the library add button and upload sheet on this device",
+    "addDestination": "Add destination",
+    "serverUploadDisabled": "An administrator has disabled uploads to the server"
   },
   "reader": {
+    "fontServiceUnavailable": "The font service is unavailable. Reading continues with device fonts.",
     "positionUnavailableAfterEdit": "The book changed, so your previous reading position could not be restored.",
     "coverageUnavailableAfterEdit": "The book changed, so your previous reading statistics could not be matched automatically.",
     "positionAndCoverageUnavailableAfterEdit": "The book changed, so your previous reading position and statistics could not be matched automatically.",
@@ -1133,6 +1163,11 @@
     "ttsConfigureOnline": "Configure online voice",
     "ttsFromSelection": "Read aloud",
     "ttsPlaybackFailed": "Read-aloud failed. Check the voice settings and try again.",
+    "ttsUnavailable": {
+      "account": "Connect an account to use this speech gateway, or choose system speech.",
+      "service": "The selected speech service is unavailable or not configured. Retry, configure it, or choose another engine.",
+      "system": "System speech is unavailable in this browser. Choose an available speech service."
+    },
     "autoReadingTitle": "Auto reading",
     "autoReadingStart": "Start auto reading",
     "autoReadingPause": "Pause auto reading",
@@ -2288,7 +2323,8 @@
     "prefSelectionToolbar": "Selection Toolbar",
     "prefSelectionToolbarHint": "Drag icons to reorder, click to toggle visibility",
     "selectionToolbarAtLeastOne": "Keep at least one action visible",
-    "resetDefault": "Reset"
+    "resetDefault": "Reset",
+    "deviceStorageFailed": "Reading settings on this device could not be read or saved. Check browser storage permissions and available space. You can continue reading."
   },
   "admin": {
     "instanceSettings": "Access Control",
@@ -2423,6 +2459,7 @@
     "noteTitle": "Write Note",
     "notePlaceholder": "Write your thoughts…",
     "publish": "Post",
+    "savedAt": "Saved",
     "publishedAt": "Posted",
     "myNote": "My Note",
     "idea": "Thought",
@@ -2960,7 +2997,7 @@
     "booksRead": "Books read",
     "legacyDuration": "Historical baseline time: {{duration}}",
     "deleteArchive": "Delete book reading archive",
-    "deleteArchiveDesc": "Permanently remove all notes and reading time for this archive.",
+    "deleteArchiveDesc": "Permanently remove this archive's reading time, rounds and statistics. Notes and your reading position are kept.",
     "deleteArchiveConfirm": "Clear this archive's reading data? This cannot be undone.",
     "replaceConflicts": "Replace {{n}} conflicting records with this entry (the original records will be deleted)",
     "wordsPartial": "Some historical records lack reading segments; word counts include only calculable data.",

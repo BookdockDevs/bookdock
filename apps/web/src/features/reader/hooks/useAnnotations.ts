@@ -8,26 +8,58 @@ import type { AnnotationRes, AnnotationCreateReq, AnnotationUpdateReq, UndoRecei
 import { ApiError, apiGet, apiPost, apiPut, apiDelete } from '@/api/client'
 import { invalidateActivityQueries } from '@/features/activity/hooks'
 import { withReveal } from '@/lib/reveal-hidden'
+import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 
 import { cfiRangesOverlap, loadCfiModule } from '../lib/cfi-overlap'
+import { useLocalReader } from '../../reading-data/reader-source-context'
+import { localRecordId } from '../../local-library/reader-session'
 
 type AnnotationsCache = { data: AnnotationRes[] }
 
+function useAnnotationSource(bookId: string) {
+  const local = useLocalReader()
+  const user = useAuthStore((state) => state.user)
+  const revision = getAuthSessionRevision()
+  const key = local ? ['annotations', local.namespace, bookId] : ['annotations', bookId]
+  return { local, key,
+    mutationKey: ['annotation-command', local?.namespace ?? 'remote', bookId, ...(local ? [] : [user?.id ?? null, revision])],
+    isCurrent: () => Boolean(local) || getAuthSessionRevision() === revision,
+    assertOwner() {
+      if (!local && getAuthSessionRevision() !== revision) throw new DOMException('Annotation account changed', 'AbortError')
+    },
+  }
+}
+
 export function useAnnotations(bookId: string, options: { enabled?: boolean } = {}) {
+  const { local, key, assertOwner } = useAnnotationSource(bookId)
   return useQuery({
-    queryKey: ['annotations', bookId],
-    queryFn: () => apiGet<AnnotationsCache>(withReveal(`/annotations/book/${bookId}`)),
+    queryKey: key,
+    networkMode: local ? 'always' : 'online',
+    queryFn: async () => {
+      assertOwner()
+      const result = local ? await local.listNotes() : await apiGet<AnnotationsCache>(withReveal(`/annotations/book/${bookId}`))
+      assertOwner()
+      return result
+    },
     enabled: !!bookId && options.enabled !== false,
   })
 }
 
 export function useCreateAnnotation(bookId: string) {
+  const { local, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
   const queryClient = useQueryClient()
-  const key = ['annotations', bookId] as const
   const replacementIdsByBody = useRef(new WeakMap<object, string[]>()).current
+  const commandIds = useRef(new WeakMap<object, string>()).current
   return useMutation({
+    mutationKey, networkMode: local ? 'always' : 'online',
     mutationFn: (body: AnnotationCreateReq) => {
+      assertOwner()
       const replaceAnnotationIds = replacementIdsByBody.get(body)
+      if (local) {
+        let commandId = commandIds.get(body)
+        if (!commandId) { commandId = localRecordId(); commandIds.set(body, commandId) }
+        return local.createNote({ ...body, ...(replaceAnnotationIds?.length ? { replaceAnnotationIds } : {}) }, commandId)
+      }
       return apiPost<{ data: AnnotationRes }>(withReveal(`/annotations/book/${bookId}`), {
         ...body,
         ...(replaceAnnotationIds?.length ? { replaceAnnotationIds } : {}),
@@ -38,6 +70,7 @@ export function useCreateAnnotation(bookId: string) {
         throw new ApiError(ErrorCode.ANNOTATION_TEXT_TOO_LONG, 'Annotation text exceeds the maximum length')
       }
       await queryClient.cancelQueries({ queryKey: key })
+      assertOwner()
       const previous = queryClient.getQueryData<AnnotationsCache>(key)
       const now = Date.now()
       const optimistic: AnnotationRes = {
@@ -78,7 +111,7 @@ export function useCreateAnnotation(bookId: string) {
       return { replaced: previous?.data.filter((a) => replaced.has(a.id)) ?? [], optimisticId: optimistic.id }
     },
     onError: (_err, _body, context) => {
-      if (!context) return
+      if (!isCurrent() || !context) return
       queryClient.setQueryData<AnnotationsCache>(key, (old) => {
         const remaining = (old?.data ?? []).filter((a) => a.id !== context.optimisticId)
         const ids = new Set(remaining.map((a) => a.id))
@@ -86,6 +119,7 @@ export function useCreateAnnotation(bookId: string) {
       })
     },
     onSuccess: (res, _body, context) => {
+      if (!isCurrent()) return
       queryClient.setQueryData<AnnotationsCache>(key, (old) =>
         old
           ? {
@@ -101,6 +135,8 @@ export function useCreateAnnotation(bookId: string) {
     // the refetch resyncs the cache (including overlap deletes) in the background
     onSettled: (result, error, body) => {
       if (body) replacementIdsByBody.delete(body)
+      if (!isCurrent()) return
+      if (local) { void queryClient.invalidateQueries({ queryKey: key }); void queryClient.invalidateQueries({ queryKey: ['archive', local.namespace] }); return }
       void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['idea-composer', bookId] })
@@ -110,16 +146,20 @@ export function useCreateAnnotation(bookId: string) {
   })
 }
 export function useUpdateAnnotation(bookId: string) {
+  const { local, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
   const queryClient = useQueryClient()
-  const key = ['annotations', bookId] as const
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: AnnotationUpdateReq }) =>
-      apiPut<{ data: AnnotationRes }>(`/annotations/${id}`, body),
+    mutationKey, networkMode: local ? 'always' : 'online',
+    mutationFn: ({ id, body, expectedVersion }: { id: string; body: AnnotationUpdateReq; expectedVersion?: number }) => {
+      assertOwner()
+      return local ? local.updateNote(id, body, expectedVersion) : apiPut<{ data: AnnotationRes }>(`/annotations/${id}`, body)
+    },
     onMutate: async ({ id, body }) => {
       if ((body.text?.length ?? 0) > ANNOTATION_MAX_TEXT_LENGTH) {
         throw new ApiError(ErrorCode.ANNOTATION_TEXT_TOO_LONG, 'Annotation text exceeds the maximum length')
       }
       await queryClient.cancelQueries({ queryKey: key })
+      assertOwner()
       const previous = queryClient.getQueryData<AnnotationsCache>(key)
       queryClient.setQueryData<AnnotationsCache>(key, (old) =>
         old
@@ -129,10 +169,13 @@ export function useUpdateAnnotation(bookId: string) {
       return { previous }
     },
     onError: (_err, _vars, context) => {
+      if (!isCurrent()) return
       if (context?.previous) queryClient.setQueryData(key, context.previous)
     },
     // Not awaited on purpose: the refetch resyncs the cache in the background
     onSettled: (result, error, input) => {
+      if (!isCurrent()) return
+      if (local) { void queryClient.invalidateQueries({ queryKey: key }); void queryClient.invalidateQueries({ queryKey: ['archive', local.namespace] }); return }
       void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
@@ -145,22 +188,40 @@ export function useUpdateAnnotation(bookId: string) {
   })
 }
 export function useDeleteAnnotation(bookId: string) {
+  const { local, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
   const queryClient = useQueryClient()
-  const key = ['annotations', bookId] as const
+  const versionScope = JSON.stringify(mutationKey)
+  const versionsRef = useRef({ scope: versionScope, values: new Map<string, number>() })
+  if (versionsRef.current.scope !== versionScope) versionsRef.current = { scope: versionScope, values: new Map() }
+  const versions = versionsRef.current.values
   return useMutation({
-    mutationFn: (id: string) => apiDelete<{ undo?: UndoReceipt }>(`/annotations/${id}`),
-    onMutate: async (id) => {
+    mutationKey, networkMode: local ? 'always' : 'online',
+    mutationFn: async (target: string | Pick<AnnotationRes, 'id' | 'clientVersion'>): Promise<{ undo?: UndoReceipt }> => {
+      assertOwner()
+      const id = typeof target === 'string' ? target : target.id
+      const version = typeof target === 'string' ? versions.get(id) : target.clientVersion
+      if (local && version === undefined) throw new Error('Displayed local note version is required')
+      return local ? (await local.deleteNote(id, version), {}) : apiDelete<{ undo?: UndoReceipt }>(`/annotations/${id}`)
+    },
+    onMutate: async (target) => {
+      const id = typeof target === 'string' ? target : target.id
       await queryClient.cancelQueries({ queryKey: key })
+      assertOwner()
       const previous = queryClient.getQueryData<AnnotationsCache>(key)
+      const version = previous?.data.find((note) => note.id === id)?.clientVersion
+      if (version !== undefined) versions.set(id, version)
       queryClient.setQueryData<AnnotationsCache>(key, (old) =>
         old ? { data: old.data.filter((a) => a.id !== id) } : old,
       )
       return { previous }
     },
     onError: (_err, _id, context) => {
+      if (!isCurrent()) return
       if (context?.previous) queryClient.setQueryData(key, context.previous)
     },
     onSettled: () => {
+      if (!isCurrent()) return
+      if (local) { void queryClient.invalidateQueries({ queryKey: key }); void queryClient.invalidateQueries({ queryKey: ['archive', local.namespace] }); return }
       void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
@@ -173,16 +234,32 @@ export function useDeleteAnnotation(bookId: string) {
 }
 
 export function useBatchDeleteAnnotations(bookId: string) {
+  const { local, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
   const queryClient = useQueryClient()
-  const key = ['annotations', bookId] as const
+  const versionScope = JSON.stringify(mutationKey)
+  const versionsRef = useRef({ scope: versionScope, values: new Map<string, number>() })
+  if (versionsRef.current.scope !== versionScope) versionsRef.current = { scope: versionScope, values: new Map() }
+  const versions = versionsRef.current.values
   return useMutation({
-    mutationFn: async (ids: string[]) => {
+    mutationKey, networkMode: local ? 'always' : 'online',
+    mutationFn: async (targets: string[] | Array<Pick<AnnotationRes, 'id' | 'clientVersion'>>) => {
+      assertOwner()
+      const ids = targets.map((target) => typeof target === 'string' ? target : target.id)
+      if (local) {
+        const notes = targets.map((target) => typeof target === 'string' ? { id: target, clientVersion: versions.get(target) } : target)
+        if (notes.some((note) => note.clientVersion === undefined)) throw new Error('Displayed local note versions are required')
+        await local.deleteNotes(notes)
+        return { succeeded: ids.length, failed: 0, undo: undefined }
+      }
       const result = await apiPost<{ data: { succeeded: number; failed: number }; undo?: UndoReceipt }>('/annotations/batch-delete', { ids })
       return { ...result.data, undo: result.undo }
     },
-    onMutate: async (ids) => {
+    onMutate: async (targets) => {
+      const ids = targets.map((target) => typeof target === 'string' ? target : target.id)
       await queryClient.cancelQueries({ queryKey: key })
+      assertOwner()
       const previous = queryClient.getQueryData<AnnotationsCache>(key)
+      for (const note of previous?.data ?? []) if (ids.includes(note.id) && note.clientVersion !== undefined) versions.set(note.id, note.clientVersion)
       const toDelete = new Set(ids)
       queryClient.setQueryData<AnnotationsCache>(key, (old) =>
         old ? { data: old.data.filter((a) => !toDelete.has(a.id)) } : old,
@@ -190,12 +267,16 @@ export function useBatchDeleteAnnotations(bookId: string) {
       return { previous }
     },
     onError: (_err, _ids, context) => {
+      if (!isCurrent()) return
       if (context?.previous) queryClient.setQueryData(key, context.previous)
     },
     onSuccess: (result) => {
-      if (result.succeeded > 0) void invalidateActivityQueries(queryClient)
+      if (!isCurrent()) return
+      if (!local && result.succeeded > 0) void invalidateActivityQueries(queryClient)
     },
     onSettled: () => {
+      if (!isCurrent()) return
+      if (local) { void queryClient.invalidateQueries({ queryKey: key }); void queryClient.invalidateQueries({ queryKey: ['archive', local.namespace] }); return }
       void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
       void queryClient.invalidateQueries({ queryKey: key })
       void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })

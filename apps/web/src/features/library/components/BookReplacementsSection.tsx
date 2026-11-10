@@ -1,4 +1,4 @@
-import type { TextReplacementRes } from '@bookdock/shared'
+import type { ClientBookRef, TextReplacementRes } from '@bookdock/shared'
 
 import { useBookReplacements, useSetReplacementOverride, useUpdateReplacement } from '@/api/hooks/useReplacements'
 import QueryErrorState from '@/components/ui/QueryErrorState'
@@ -13,6 +13,9 @@ import { nextOverrideValue } from '../replacement-overrides'
 
 interface BookReplacementsSectionProps {
   bookId: string
+  /** The book's own ref, so a device book's rules are read from the vault even
+   *  when this section is not rendered inside the reader. */
+  bookRef?: ClientBookRef | null
   /** Per-rule match counts ("N 处"), computed per book by the reader renderer */
   counts?: Record<string, number>
   /** This book's point patches, merged into one list */
@@ -30,6 +33,7 @@ interface BookReplacementsSectionProps {
 
 export default function BookReplacementsSection({
   bookId,
+  bookRef,
   counts,
   points,
   chapterOf,
@@ -39,7 +43,7 @@ export default function BookReplacementsSection({
   onDelete,
 }: BookReplacementsSectionProps) {
   const _ = useTranslation()
-  const replacementsQuery = useBookReplacements(bookId)
+  const replacementsQuery = useBookReplacements(bookId, bookRef)
   const { data } = replacementsQuery
   const setOverride = useSetReplacementOverride()
   const updateReplacement = useUpdateReplacement()

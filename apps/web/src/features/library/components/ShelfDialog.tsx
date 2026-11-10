@@ -15,13 +15,15 @@ interface ShelfDialogProps {
   open: boolean
   /** Set when the library in context is shared: the same dialog curates its categories. */
   libraryId?: string
+  taxonomyKind?: 'shelf' | 'category'
   shelfId?: string
   initialName?: string
   initialParentId?: string
   onClose: () => void
 }
 
-export default function ShelfDialog({ open, libraryId, shelfId, initialName = '', initialParentId, onClose }: ShelfDialogProps) {
+export default function ShelfDialog({ open, libraryId, taxonomyKind, shelfId, initialName = '', initialParentId, onClose }: ShelfDialogProps) {
+  const isCategory = taxonomyKind === 'category' || Boolean(libraryId)
   const _ = useTranslation()
   const createShelf = useCreateShelf()
   const renameShelf = useRenameShelf()
@@ -74,11 +76,11 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
   const submit = () => {
     const trimmed = name.trim()
     if (!trimmed || isPending) return
-    if (libraryId) {
+    if (isCategory) {
       // A private shelf and a shared library's category are the same row in the
       // same table, so this is the same dialog pointed at the other library.
-      if (isRename && shelfId) renameCategory.mutate({ libraryId, categoryId: shelfId, patch: { name: trimmed, parentId: parentId || null } }, { onSuccess: onClose })
-      else createCategory.mutate({ libraryId, name: trimmed, ...(parentId ? { parentId } : {}) }, { onSuccess: onClose })
+      if (isRename && shelfId) renameCategory.mutate({ libraryId: libraryId!, categoryId: shelfId, patch: { name: trimmed, parentId: parentId || null } }, { onSuccess: onClose })
+      else createCategory.mutate({ libraryId: libraryId!, name: trimmed, ...(parentId ? { parentId } : {}) }, { onSuccess: onClose })
       return
     }
     if (isRename && shelfId) {
@@ -92,8 +94,8 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
   return (
     <Modal
       title={isRename
-        ? _(libraryId ? 'library.editCategory' : 'library.editShelfTitle')
-        : _(libraryId ? 'library.createCategory' : 'library.createShelf')}
+        ? _(isCategory ? 'library.editCategory' : 'library.editShelfTitle')
+        : _(isCategory ? 'library.createCategory' : 'library.createShelf')}
       onClose={() => { if (!isPending) onClose() }}
       size="sm"
       footer={
@@ -110,7 +112,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
           <Button
             type="button"
             onClick={submit}
-            disabled={!name.trim() || isPending || Boolean(libraryId && (taxonomyLoading || taxonomyFailed))}
+            disabled={!name.trim() || isPending || Boolean(isCategory && (taxonomyLoading || taxonomyFailed))}
             variant="primary"
             className="flex-1"
           >
@@ -122,7 +124,7 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
       <div className="space-y-4 pt-1">
         <div className="relative flex items-center">
           <span className="pointer-events-none absolute left-3 flex h-5 w-5 items-center justify-center text-stone-400 dark:text-stone-500">
-            <TaxonomyIcon kind={libraryId ? 'category' : 'shelf'} size={17} />
+            <TaxonomyIcon kind={isCategory ? 'category' : 'shelf'} size={17} />
           </span>
           <input
             type="text"
@@ -131,13 +133,13 @@ export default function ShelfDialog({ open, libraryId, shelfId, initialName = ''
             onKeyDown={(e) => {
               if (e.key === 'Enter') submit()
             }}
-            placeholder={_(libraryId ? 'library.categoryName' : 'library.shelfName')}
+            placeholder={_(isCategory ? 'library.categoryName' : 'library.shelfName')}
             autoFocus
             className="h-10 w-full rounded-xl border border-stone-200/90 bg-stone-50/50 pl-10 pr-3.5 text-sm text-stone-900 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:bg-white focus:ring-2 focus:ring-stone-400/20 dark:border-stone-700/80 dark:bg-stone-900/60 dark:text-stone-100 dark:placeholder:text-stone-500 dark:focus:border-stone-500 dark:focus:bg-stone-900 dark:focus:ring-stone-500/20"
           />
         </div>
 
-        {libraryId && (
+        {isCategory && (
           <div>
             <label className="mb-1.5 block text-xs font-medium text-stone-600 dark:text-stone-300">
               {_('library.parentCategory')}

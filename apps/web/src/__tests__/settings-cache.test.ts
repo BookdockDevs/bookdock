@@ -1,8 +1,10 @@
 import { QueryClient } from '@tanstack/react-query'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resetSessionScope, setSessionAccount } from '@/lib/session-scope'
 
 import {
   clearStoredSettings,
+  fetchSettings,
   readStoredSettings,
   seedSettingsQuery,
   SETTINGS_CACHE_KEY,
@@ -16,10 +18,27 @@ describe('settings-cache', () => {
 
   afterEach(() => {
     localStorage.clear()
+    resetSessionScope()
+    vi.unstubAllGlobals()
   })
 
   it('reads null when nothing is cached', () => {
     expect(readStoredSettings('user-1')).toBeNull()
+  })
+
+  it('rejects a settings response from the previous session before writing the new account cache', async () => {
+    localStorage.setItem('bd-user', JSON.stringify({ id: 'previous' }))
+    setSessionAccount('previous')
+    let resolveResponse!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { resolveResponse = resolve })))
+    const pending = fetchSettings()
+    const rejection = expect(pending).rejects.toThrow()
+    localStorage.setItem('bd-user', JSON.stringify({ id: 'next' }))
+    setSessionAccount('next')
+    resolveResponse(new Response(JSON.stringify({ data: { fontOrder: ['previous-font'] } }), { headers: { 'Content-Type': 'application/json' } }))
+    await rejection
+    expect(readStoredSettings('previous')).toBeNull()
+    expect(readStoredSettings('next')).toBeNull()
   })
 
   it('writes and reads back settings for the matching user', () => {

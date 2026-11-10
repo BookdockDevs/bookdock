@@ -1,5 +1,7 @@
+import type { ClientBookRef } from '@bookdock/shared'
 import { retryReadingRecords } from '@/features/reader/lib/reading-record-queue'
 import DownloadDialogHost from '@/features/library/components/DownloadDialogHost'
+import { isDeviceBook } from '@/features/reading-data/book-source'
 import { useEffect, type ReactNode } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
@@ -15,10 +17,31 @@ import { router } from '../router'
 import { SettingsSync } from './SettingsSync'
 
 export default function AppProviders({ children }: { children?: ReactNode }) {
+  useEffect(() => {
+    const changed = () => {
+      void queryClient.invalidateQueries({ queryKey: ['client-catalog'] })
+      void queryClient.invalidateQueries({ queryKey: ['local-library', 'archive-session'] })
+      void queryClient.invalidateQueries({ queryKey: ['reading-records', 'merged'] })
+      void queryClient.invalidateQueries({ queryKey: ['archive', 'merged'] })
+      void queryClient.invalidateQueries({ queryKey: ['archive', 'device'] })
+      void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'books' && query.queryKey[query.queryKey.length - 1] === 'unified' })
+      void queryClient.invalidateQueries({ predicate: (query) => ['book', 'annotations', 'progress', 'reading-records', 'archive'].includes(String(query.queryKey[0])) && query.queryKey.some((part) => typeof part === 'string' && part.startsWith('local:')) })
+    }
+    const publicationChanged = (event: Event) => {
+      const ref = (event as CustomEvent<ClientBookRef>).detail
+      if (isDeviceBook(ref)) void queryClient.invalidateQueries({ queryKey: ['local-library', 'session', ref.scope.vaultId, ref.bookId] })
+    }
+    window.addEventListener('bd-local-publication-changed', publicationChanged)
+    window.addEventListener('bd-local-library-changed', changed)
+    return () => { window.removeEventListener('bd-local-library-changed', changed); window.removeEventListener('bd-local-publication-changed', publicationChanged) }
+  }, [])
   const effectiveTheme = useUiStore((s) => s.systemTheme)
   const setSystemTheme = useUiStore((s) => s.setSystemTheme)
 
   useEffect(() => {
+    // The pending-records queue belongs to the remote account, not to the
+    // displayed source; retrying it no-ops without a user and never carries
+    // local vault data.
     void retryReadingRecords()
   }, [])
 

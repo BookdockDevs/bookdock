@@ -36,7 +36,7 @@ vi.mock('@/api/hooks/reading-records', () => ({
 }))
 
 const BOOK_ONE = {
-  bookVersionId: 'b1',
+  id: 'b1',
   title: 'Test Book One',
   author: 'Author A',
   coverKey: null,

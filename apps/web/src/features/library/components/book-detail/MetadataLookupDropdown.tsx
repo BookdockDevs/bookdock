@@ -36,7 +36,7 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
       queryKey: ['metadata-lookup', 'config', userId],
       queryFn: () => apiGet<{ data: MetadataConfiguration }>('/integrations/metadata-lookup/config'),
       staleTime: 60_000,
-      enabled: Boolean(contextClient),
+      enabled: Boolean(contextClient && userId && (open || value)),
     },
     queryClient,
   )
@@ -46,7 +46,7 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
       queryKey: ['personal-metadata-sources', userId],
       queryFn: () => apiGet<{ data: PersonalMetadataSourceView[] }>('/integrations/personal-sources'),
       staleTime: 30_000,
-      enabled: Boolean(contextClient),
+      enabled: Boolean(contextClient && userId && (open || value)),
     },
     queryClient,
   )
@@ -139,6 +139,10 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
       </button>
     )
   }
+
+  // No account means no metadata service: the control is absent rather than
+  // greyed out, so the surface looks the same either way.
+  if (!userId) return null
 
   return (
     <div ref={menuRef} className={cn('relative inline-flex', className)}>

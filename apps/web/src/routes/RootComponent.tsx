@@ -5,8 +5,10 @@ import { Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import { AppShell } from '@/components/layout/AppShell'
 import { Button } from '@/components/ui/Button'
 import { apiGet, UNAUTHORIZED_EVENT } from '@/api/client'
-import { useInstanceInfo, ME_QUERY_KEY } from '@/features/auth/hooks'
+import { useInstanceInfo, useLogout, ME_QUERY_KEY } from '@/features/auth/hooks'
+import { clearReaderTarget, pendingReaderTarget, readerTarget, rememberReaderTarget } from '@/features/auth/reader-return'
 import { reportBrowserTimezone } from '@/features/auth/report-timezone'
+import { VaultAvailabilityContext } from '@/features/reading-data/vault-availability'
 import { libraryInviteParam, PENDING_INVITE_KEY } from '@/features/library/invite-link'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
@@ -19,7 +21,46 @@ function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/library/')
 }
 
+function AppLoadingScreen() {
+  const _ = useTranslation()
+  return (
+    <div
+      role="status"
+      aria-busy="true"
+      aria-label={_('common.loading') || '加载中…'}
+      className="flex min-h-screen items-center justify-center bg-stone-50 dark:bg-stone-950"
+    >
+      <div className="flex flex-col items-center gap-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-xs dark:bg-stone-900" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-6 w-6 animate-pulse text-stone-700 dark:text-stone-200"
+          >
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
+            <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
+          </svg>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function RootComponent() {
+  const authUser = useAuthStore((s) => s.user)
+  const instanceQuery = useInstanceInfo()
+  const instance = instanceQuery.data?.data
+  // The device vault is gated by the instance's guest-access setting; a signed-in
+  // session needs no server. Unreachable instance status counts as not allowed.
+  const vaultAllowed = authUser !== null || (instance?.initialized === true && instance.allowGuestAccess === true)
+  return <VaultAvailabilityContext.Provider value={vaultAllowed}><RemoteRootComponent /></VaultAvailabilityContext.Provider>
+}
+
+function RemoteRootComponent() {
   const _ = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
@@ -27,8 +68,11 @@ export function RootComponent() {
   const setAuth = useAuthStore((s) => s.setAuth)
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const authUser = useAuthStore((s) => s.user)
+  const logout = useLogout()
   const recoveringUnauthorizedSession = useRef(false)
   const pathname = location.pathname
+  const currentReaderTarget = readerTarget(pathname, window.location.search)
+  const expectedAccount = currentReaderTarget ? new URLSearchParams(window.location.search).get('account') : null
   const isLegadoLogin = pathname === '/login' && new URLSearchParams(window.location.search).get('legado') === '1'
   const isPublic = isPublicPath(pathname)
   const isLibraryInvite = pathname.startsWith('/library/')
@@ -54,6 +98,7 @@ export function RootComponent() {
       if (PUBLIC_PATHS.includes(window.location.pathname) || window.location.pathname.startsWith('/library/') || recoveringUnauthorizedSession.current) return
       // Several requests can fail together; only the fresh session probe may finish recovery.
       recoveringUnauthorizedSession.current = true
+      rememberReaderTarget(window.location.pathname, window.location.search)
       queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== 'auth' })
       void queryClient.resetQueries({ queryKey: ME_QUERY_KEY, exact: true })
       navigate({ to: '/login', replace: true })
@@ -93,9 +138,13 @@ export function RootComponent() {
       if (me && me.guest !== true) {
         setAuth(me)
         if (isLegadoLogin) {
+          clearReaderTarget()
           window.location.assign('/')
         } else {
           const pending = sessionStorage.getItem(PENDING_INVITE_KEY)
+          if (pending) clearReaderTarget()
+          const target = pending ? null : pendingReaderTarget()
+          if (target) { window.location.assign(target); return }
           navigate(pending
             ? { to: '/library/$token', params: { token: libraryInviteParam(pending) }, replace: true }
             : { to: '/', replace: true })
@@ -116,12 +165,32 @@ export function RootComponent() {
     if (me && me.guest !== true) {
       recoveringUnauthorizedSession.current = false
       setAuth(me)
+      if (currentReaderTarget && (!expectedAccount || expectedAccount === me.id)) clearReaderTarget()
       return
     }
     clearAuth()
     // No session: guests pass through only when guest access is enabled.
-    if (!instance.allowGuestAccess) navigate({ to: '/login' })
-  }, [instance, pathname, isPublic, isLibraryInvite, isLegadoLogin, meQuery.isPending, meQuery.isFetching, meQuery.isError, meQuery.data, navigate, setAuth, clearAuth])
+    if (!instance.allowGuestAccess || expectedAccount) {
+      rememberReaderTarget(pathname, window.location.search)
+      navigate({ to: '/login' })
+    }
+  }, [instance, pathname, currentReaderTarget, expectedAccount, isPublic, isLibraryInvite, isLegadoLogin, meQuery.isPending, meQuery.isFetching, meQuery.isError, meQuery.data, navigate, setAuth, clearAuth])
+
+  const currentMe = meQuery.data?.data
+  if (expectedAccount && currentMe && currentMe.guest !== true && currentMe.id !== expectedAccount && !meQuery.isPending && !meQuery.isFetching) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 dark:bg-slate-950">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 dark:border-slate-800 dark:bg-slate-900">
+          <h1 className="mb-3 text-xl font-semibold">{_('auth.extensionAccountMismatch')}</h1>
+          <p className="mb-6 text-sm leading-6 text-slate-500">{_('auth.extensionAccountMismatchHint', { username: currentMe.username })}</p>
+          <div className="flex flex-wrap gap-3">
+            <Button disabled={logout.isPending} onClick={() => { rememberReaderTarget(pathname, window.location.search); logout.mutate() }}>{_('auth.switchAccount')}</Button>
+            <Button variant="secondary" onClick={() => { clearReaderTarget(); void navigate({ to: '/' }) }}>{_('errors.backToLibrary')}</Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (instanceQuery.isError && !instance) {
     return (
@@ -151,31 +220,7 @@ export function RootComponent() {
     }
   }
   if (!ready) {
-    return (
-      <div
-        role="status"
-        aria-busy="true"
-        aria-label={_('common.loading') || '加载中…'}
-        className="flex min-h-screen items-center justify-center bg-stone-50 dark:bg-stone-950"
-      >
-        <div className="flex flex-col items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-xs dark:bg-stone-900" aria-hidden="true">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-6 w-6 animate-pulse text-stone-700 dark:text-stone-200"
-            >
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
-              <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
-            </svg>
-          </div>
-        </div>
-      </div>
-    )
+    return <AppLoadingScreen />
   }
 
   return (

@@ -1,15 +1,10 @@
-import type { ReaderManifest } from '@bookdock/shared'
+import type { EditorPublicationSource } from '../lib/editor-publication-source'
+import { editorSourceEntries } from '../lib/editor-publication-source'
+import { readEditorResource } from '@/features/local-library/epub-editor'
 
 import { ReaderContentSession } from '@/features/reader/lib/reader-content-client'
 
 import { clearEpubPresentation, setEpubPresentationAttribute, setEpubPresentationText } from './epub-document-adapter'
-
-interface ReaderSource {
-  manifest: ReaderManifest
-  accountScope: string
-  epoch: number
-  contentUrl: string
-}
 
 interface ResourceItem { href: string; mediaType: string; size: number }
 interface ResourceLoader {
@@ -38,10 +33,10 @@ async function loadReaderLoader(): Promise<LoaderModule> {
   return dynamicImport('/foliate-js/epub.js')
 }
 
-export function prepareEditorResources(document: Document, markup: string, href: string, source: ReaderSource, loadModule = loadReaderLoader, onMissing?: () => void): () => void {
+export function prepareEditorResources(document: Document, markup: string, href: string, source: EditorPublicationSource, loadModule = loadReaderLoader, onMissing?: () => void): () => void {
   const controller = new AbortController()
-  const session = new ReaderContentSession(source.manifest, source.accountScope, source.epoch, source.contentUrl, true)
-  const entries = new Map(source.manifest.entries.map((entry) => [entry.path, { href: entry.path, mediaType: entry.mediaType, size: entry.size }]))
+  const session = source.kind === 'local' ? null : new ReaderContentSession(source.manifest, source.accountScope, source.epoch, source.contentUrl, true)
+  const entries = new Map(editorSourceEntries(source).map((entry) => [entry.path, { href: entry.path, mediaType: entry.mediaType, size: entry.size }]))
   let loader: ResourceLoader | null = null
   let disposed = false
   const insertedStyles: Element[] = []
@@ -50,8 +45,8 @@ export function prepareEditorResources(document: Document, markup: string, href:
     if (disposed) return
     loader = new module.Loader({
       resources: { manifest: [...entries.values()] }, entries,
-      loadText: (path: string, signal: AbortSignal) => session.loadText(path, 'foreground', signal),
-      loadBlob: (path: string, type: string, signal: AbortSignal) => session.loadBlob(path, type, 'foreground', signal),
+      loadText: (path: string, signal: AbortSignal) => source.kind === 'local' ? readEditorResource(source.file, path, undefined, AbortSignal.any([controller.signal, ...(signal ? [signal] : [])])) : session!.loadText(path, 'foreground', signal),
+      loadBlob: (path: string, type: string, signal: AbortSignal) => source.kind === 'local' ? readEditorResource(source.file, path, type, AbortSignal.any([controller.signal, ...(signal ? [signal] : [])])) : session!.loadBlob(path, type, 'foreground', signal),
     })
     const activeLoader = loader
     let totalBytes = 0
@@ -132,7 +127,7 @@ export function prepareEditorResources(document: Document, markup: string, href:
         if (!element.hasAttribute('src')) {
           missing()
           setEpubPresentationAttribute(element, 'data-bookdock-missing', '')
-          if (!element.hasAttribute('title')) setEpubPresentationAttribute(element, 'title', '图片无法加载')
+          if (!element.hasAttribute('title')) setEpubPresentationAttribute(element, 'title', '鍥剧墖鏃犳硶鍔犺浇')
         }
       }
       if (element.hasAttribute('style')) {
@@ -148,7 +143,7 @@ export function prepareEditorResources(document: Document, markup: string, href:
           if (url) setEpubPresentationAttribute(element, name, url)
           else if (element.localName === 'img') {
             setEpubPresentationAttribute(element, 'data-bookdock-missing', '')
-            if (!element.hasAttribute('title')) setEpubPresentationAttribute(element, 'title', '图片无法加载')
+            if (!element.hasAttribute('title')) setEpubPresentationAttribute(element, 'title', '鍥剧墖鏃犳硶鍔犺浇')
           }
         }
       }
@@ -159,6 +154,6 @@ export function prepareEditorResources(document: Document, markup: string, href:
     controller.abort()
     clearEpubPresentation(document.documentElement)
     for (const style of insertedStyles) style.remove()
-    void task.finally(() => { loader?.destroy(); session.destroy() })
+    void task.finally(() => { loader?.destroy(); session?.destroy() })
   }
 }

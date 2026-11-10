@@ -6,6 +6,7 @@ import { useReaderRenderer } from '@/features/reader/hooks/useReaderRenderer'
 import { waitForReaderFonts } from '@/features/reader/lib/reader-font-ready'
 import { FoliateReader, openZipFromWholeFile } from '@/features/reader/renderers/FoliateReader'
 import { useUiStore } from '@/stores/ui.store'
+import { getAuthSessionRevision } from '@/stores/auth.store'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
@@ -191,7 +192,9 @@ describe('reader mount preparation', () => {
     const view = render(<QueryClientProvider client={client}><Harness url="" ready={false} /></QueryClientProvider>)
     view.rerender(<QueryClientProvider client={client}><Harness url="/book" ready={false} /></QueryClientProvider>)
     expect(mount).not.toHaveBeenCalled()
-    act(() => { client.setQueryData(['fonts'], { data: [] }) })
+    // The font catalog is account-scoped now: the key carries the account and
+    // the session revision, so a switch cannot leak one account's fonts.
+    act(() => { client.setQueryData(['fonts', null, getAuthSessionRevision()], { data: [] }) })
     expect(mount).not.toHaveBeenCalled()
     view.rerender(<QueryClientProvider client={client}><Harness url="/book" ready /></QueryClientProvider>)
     await waitFor(() => expect(mount).toHaveBeenCalledOnce())

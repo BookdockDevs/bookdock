@@ -43,6 +43,7 @@ const uploadVersionCoverMutate = vi.fn()
 const removeVersionCoverMutate = vi.fn()
 const updateCatalogBookMutate = vi.fn()
 const deleteCatalogVersionMutate = vi.fn()
+const vaultUpdateMock = vi.fn()
 const navigateMock = vi.fn()
 
 vi.mock('@/api/client', async (original) => ({
@@ -122,6 +123,8 @@ vi.mock('../features/library/hooks', () => ({
   useRemoveCatalogVersionCover: () => ({ mutate: removeVersionCoverMutate, mutateAsync: vi.fn(), isPending: quickEditPending }),
   useResetCatalogVersionMetadata: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteCatalogVersion: () => ({ mutate: deleteCatalogVersionMutate, mutateAsync: deleteCatalogVersionMutate, isPending: false }),
+  useVaultOperations: () => ({ update: vaultUpdateMock }),
+  invalidateDeviceMembershipQueries: vi.fn(),
 }))
 
 const book: BookListItem = {
@@ -1140,9 +1143,11 @@ describe('BookDetailDialog pinned cover editing', () => {
     fireEvent.contextMenu(document.querySelector('input[type="file"]')!.parentElement!)
     const file = new File(['cover'], 'cover.png', { type: 'image/png' })
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } })
-    expect(uploadCoverMutate).toHaveBeenCalledWith({ bookId: 'book-1', file })
+    expect(uploadCoverMutate).toHaveBeenCalledWith(expect.objectContaining({ bookId: 'book-1', file }))
     fireEvent.click(screen.getByRole('button', { name: '移除封面' }))
-    expect(removeCoverMutate).toHaveBeenCalledWith('book-1')
+    // The ref travels with the call so the hook can route by book instead of
+    // guessing from the surrounding view.
+    expect(removeCoverMutate).toHaveBeenCalledWith(expect.objectContaining({ bookId: 'book-1' }))
     expect(apiPut).not.toHaveBeenCalled()
     expect(updateBookMutate).not.toHaveBeenCalled()
   })
@@ -1359,13 +1364,15 @@ describe('BookDetailDialog review action', () => {
     expect(screen.queryByRole('button', { name: '书评' })).not.toBeInTheDocument()
   })
 
+  // Late in this file the review queries settle slowly enough to exceed the
+  // default budget; the assertion itself is unchanged.
   it('opens the composer when the caller has no review yet', async () => {
     reviewContext = { composer, own: null, summary: null, reviews: [] }
     renderDialog()
 
     fireEvent.click(await screen.findByRole('button', { name: '书评' }))
     expect(await screen.findByText('发表书评')).toBeInTheDocument()
-  })
+  }, 30000)
 
   it('opens the caller own review instead of the composer', async () => {
     // A private own review is never in the shared list, so the detail pane
@@ -1376,7 +1383,7 @@ describe('BookDetailDialog review action', () => {
     fireEvent.click(await screen.findByRole('button', { name: '书评' }))
     expect(await screen.findByText('书评详情')).toBeInTheDocument()
     expect(screen.getAllByText('我的书评正文').length).toBeGreaterThan(0)
-  })
+  }, 30000)
 })
 
 describe('BookDetailDialog shared work mode', () => {

@@ -2,11 +2,23 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AiConfigRes, AiConfigTestReq, AiConnectionTestRes, AiMessageRevisionRes, AiModelDiscoveryReq, AiModelRes, AiConfigUpdateReq, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiProviderRes, AiThreadDetailRes, AiThreadRes, AiThreadUpdateReq } from '@bookdock/shared'
 
+import { assertSessionEpoch, getSessionEpoch } from '@/lib/session-scope'
+import { useAuthStore } from '@/stores/auth.store'
+
 import { apiDelete, apiGet, apiPatch, apiPost } from '../client'
 
 export const AI_CONFIG_KEY = ['ai', 'config'] as const
+export const aiConfigKey = (accountId: string | null) => [...AI_CONFIG_KEY, 'account', accountId] as const
 export const AI_PROVIDERS_KEY = ['ai', 'providers'] as const
 export const AI_THREADS_KEY = ['ai', 'threads'] as const
+
+async function requestForAiAccount<T>(accountId: string | null, send: () => Promise<T>): Promise<T> {
+  if (!accountId || useAuthStore.getState().user?.id !== accountId) throw new DOMException('AI account changed', 'AbortError')
+  const epoch = getSessionEpoch()
+  const response = await send()
+  assertSessionEpoch(epoch)
+  return response
+}
 
 export function useAiProviders(options?: { enabled?: boolean }) {
   return useQuery({
@@ -18,10 +30,18 @@ export function useAiProviders(options?: { enabled?: boolean }) {
 }
 
 export function useAiConfig(options?: { enabled?: boolean }) {
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
   return useQuery({
-    queryKey: AI_CONFIG_KEY,
-    queryFn: () => apiGet<{ data: AiConfigRes }>('/ai/config'),
-    enabled: options?.enabled ?? true,
+    queryKey: aiConfigKey(accountId),
+    queryFn: async ({ signal }) => {
+      if (!accountId || useAuthStore.getState().user?.id !== accountId) throw new DOMException('AI account changed', 'AbortError')
+      const epoch = getSessionEpoch()
+      const response = await apiGet<{ data: AiConfigRes }>('/ai/config', signal)
+      signal.throwIfAborted()
+      assertSessionEpoch(epoch)
+      return response
+    },
+    enabled: Boolean(accountId) && options?.enabled !== false,
     retry: false,
   })
 }
@@ -65,11 +85,15 @@ export function useSelectAiMessageRevision() {
 
 export function useUpdateAiConfig() {
   const queryClient = useQueryClient()
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
+  const configKey = aiConfigKey(accountId)
   return useMutation({
-    mutationFn: (body: AiConfigUpdateReq) => apiPatch<{ data: AiConfigRes }>('/ai/config', body),
+    mutationKey: [...configKey, 'update'],
+    mutationFn: (body: AiConfigUpdateReq) => requestForAiAccount(accountId, () => apiPatch<{ data: AiConfigRes }>('/ai/config', body)),
     onMutate: async (body) => {
+      if (!accountId || useAuthStore.getState().user?.id !== accountId) throw new DOMException('AI account changed', 'AbortError')
       if (body.prompts === undefined || body.prompts === null) return undefined
-      const previous = queryClient.getQueryData<{ data: AiConfigRes }>(AI_CONFIG_KEY)
+      const previous = queryClient.getQueryData<{ data: AiConfigRes }>(configKey)
       const next = previous ? {
         data: {
           ...previous.data,
@@ -87,16 +111,17 @@ export function useUpdateAiConfig() {
           }),
         },
       } : undefined
-      if (next) queryClient.setQueryData(AI_CONFIG_KEY, next)
-      await queryClient.cancelQueries({ queryKey: AI_CONFIG_KEY })
-      if (next) queryClient.setQueryData(AI_CONFIG_KEY, next)
+      if (next) queryClient.setQueryData(configKey, next)
+      await queryClient.cancelQueries({ queryKey: configKey })
+      if (next && useAuthStore.getState().user?.id === accountId) queryClient.setQueryData(configKey, next)
       return { previous }
     },
     onError: (_error, _variables, context) => {
-      if (context?.previous) queryClient.setQueryData(AI_CONFIG_KEY, context.previous)
+      if (context?.previous && useAuthStore.getState().user?.id === accountId) queryClient.setQueryData(configKey, context.previous)
     },
     onSuccess: (response) => {
-      queryClient.setQueryData(AI_CONFIG_KEY, response)
+      if (useAuthStore.getState().user?.id !== accountId) return
+      queryClient.setQueryData(configKey, response)
       void queryClient.invalidateQueries({ queryKey: ['ai-status'] })
     },
   })
@@ -104,33 +129,57 @@ export function useUpdateAiConfig() {
 
 export function useCreateAiProfile() {
   const queryClient = useQueryClient()
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
   return useMutation({
-    mutationFn: (body: AiProfileCreateReq) => apiPost<{ data: AiProfileRes }>('/ai/profiles', body),
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: AI_CONFIG_KEY }); void queryClient.invalidateQueries({ queryKey: ['ai-status'] }) },
+    mutationKey: [...aiConfigKey(accountId), 'create-profile'],
+    mutationFn: (body: AiProfileCreateReq) => requestForAiAccount(accountId, () => apiPost<{ data: AiProfileRes }>('/ai/profiles', body)),
+    onSuccess: () => {
+      if (useAuthStore.getState().user?.id !== accountId) return
+      void queryClient.invalidateQueries({ queryKey: aiConfigKey(accountId) })
+      void queryClient.invalidateQueries({ queryKey: ['ai-status'] })
+    },
   })
 }
 
 export function useUpdateAiProfile() {
   const queryClient = useQueryClient()
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: AiProfileUpdateReq }) => apiPatch<{ data: AiProfileRes }>(`/ai/profiles/${id}`, body),
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: AI_CONFIG_KEY }); void queryClient.invalidateQueries({ queryKey: ['ai-status'] }) },
+    mutationKey: [...aiConfigKey(accountId), 'update-profile'],
+    mutationFn: ({ id, body }: { id: string; body: AiProfileUpdateReq }) => requestForAiAccount(accountId, () => apiPatch<{ data: AiProfileRes }>(`/ai/profiles/${id}`, body)),
+    onSuccess: () => {
+      if (useAuthStore.getState().user?.id !== accountId) return
+      void queryClient.invalidateQueries({ queryKey: aiConfigKey(accountId) })
+      void queryClient.invalidateQueries({ queryKey: ['ai-status'] })
+    },
   })
 }
 
 export function useDeleteAiProfile() {
   const queryClient = useQueryClient()
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
   return useMutation({
-    mutationFn: (id: string) => apiDelete<{ data: null }>(`/ai/profiles/${id}`),
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: AI_CONFIG_KEY }); void queryClient.invalidateQueries({ queryKey: ['ai-status'] }) },
+    mutationKey: [...aiConfigKey(accountId), 'delete-profile'],
+    mutationFn: (id: string) => requestForAiAccount(accountId, () => apiDelete<{ data: null }>(`/ai/profiles/${id}`)),
+    onSuccess: () => {
+      if (useAuthStore.getState().user?.id !== accountId) return
+      void queryClient.invalidateQueries({ queryKey: aiConfigKey(accountId) })
+      void queryClient.invalidateQueries({ queryKey: ['ai-status'] })
+    },
   })
 }
 
 export function useActivateAiProfile() {
   const queryClient = useQueryClient()
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
   return useMutation({
-    mutationFn: (activeProfileId: string) => apiPatch<{ data: AiConfigRes }>('/ai/config', { activeProfileId }),
-    onSuccess: (response) => { queryClient.setQueryData(AI_CONFIG_KEY, response); void queryClient.invalidateQueries({ queryKey: ['ai-status'] }) },
+    mutationKey: [...aiConfigKey(accountId), 'activate-profile'],
+    mutationFn: (activeProfileId: string) => requestForAiAccount(accountId, () => apiPatch<{ data: AiConfigRes }>('/ai/config', { activeProfileId })),
+    onSuccess: (response) => {
+      if (useAuthStore.getState().user?.id !== accountId) return
+      queryClient.setQueryData(aiConfigKey(accountId), response)
+      void queryClient.invalidateQueries({ queryKey: ['ai-status'] })
+    },
   })
 }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import BookCover from '../features/library/components/BookCover'
+import BookCardShell from '../features/library/components/BookCardShell'
 
 const baseBook = {
   id: 'book-1',
@@ -14,6 +15,12 @@ const baseBook = {
 }
 
 describe('BookCover', () => {
+  it('keeps an explicitly absent EPUB cover through the shared card shell', () => {
+    render(<BookCardShell row={{ ...baseBook, authors: [], format: 'epub', progress: null, coverSrc: null }} />)
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    expect(screen.getByText('Test Book', { selector: 'h3' })).toBeVisible()
+  })
+
   it('renders fallback when coverKey is null', () => {
     render(<BookCover book={baseBook} />)
     expect(screen.queryByRole('img')).not.toBeInTheDocument()

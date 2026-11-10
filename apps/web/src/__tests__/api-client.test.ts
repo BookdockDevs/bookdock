@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AiChatReq } from '@bookdock/shared'
 
-import { apiGet, apiStreamAiChat, apiUpload } from '@/api/client'
+import { apiGet, apiStreamAiChat, apiUpload, UNAUTHORIZED_EVENT } from '@/api/client'
 import { hasUndoOpportunity } from '@/lib/undo'
 import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
@@ -59,6 +59,27 @@ describe('upload transport', () => {
     await rejected
     expect(xhr.abort).toHaveBeenCalledOnce()
   })
+
+  it('does not sign out a new account when an old upload returns 401', async () => {
+    const xhr = transport()
+    const unauthorized = vi.fn()
+    window.addEventListener(UNAUTHORIZED_EVENT, unauthorized)
+    try {
+      useAuthStore.getState().setAuth({ id: 'upload-a', username: 'a', role: 'member' })
+      const request = apiUpload('/dictionaries', new File(['data'], 'sample.mdx'), 'POST', { onProgress: vi.fn() })
+      const rejected = expect(request).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+      useAuthStore.getState().setAuth({ id: 'upload-b', username: 'b', role: 'member' })
+      xhr.status = 401
+      xhr.responseText = '{"error":{"code":"UNAUTHORIZED","message":"expired"}}'
+      xhr.onload?.()
+      await rejected
+      expect(useAuthStore.getState().user?.id).toBe('upload-b')
+      expect(unauthorized).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, unauthorized)
+      useAuthStore.getState().clearAuth()
+    }
+  })
 })
 
 describe('expired hidden display session', () => {
@@ -76,6 +97,25 @@ describe('expired hidden display session', () => {
     expect(useAuthStore.getState().user).toBeNull()
     expect(useUiStore.getState().revealHidden).toBe(false)
     expect(localStorage.getItem('bd-reveal-hidden:expired-user')).toBe('true')
+  })
+
+  it.each(['json', 'upload'] as const)('ignores an old %s request 401 after changing accounts', async (transport) => {
+    useAuthStore.getState().setAuth({ id: 'request-a', username: 'a', role: 'member' })
+    let respond!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { respond = resolve })))
+    const unauthorized = vi.fn()
+    window.addEventListener(UNAUTHORIZED_EVENT, unauthorized)
+    try {
+      const request = transport === 'json' ? apiGet('/dictionaries') : apiUpload('/dictionaries', new File(['data'], 'sample.mdx'))
+      const rejected = expect(request).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+      useAuthStore.getState().setAuth({ id: 'request-b', username: 'b', role: 'member' })
+      respond(new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'expired' } }), { status: 401 }))
+      await rejected
+      expect(useAuthStore.getState().user?.id).toBe('request-b')
+      expect(unauthorized).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, unauthorized)
+    }
   })
 })
 

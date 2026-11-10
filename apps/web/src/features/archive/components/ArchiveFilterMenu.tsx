@@ -51,6 +51,7 @@ interface ArchiveFilterMenuProps {
 
 export default function ArchiveFilterMenu({ params, onChange }: ArchiveFilterMenuProps) {
   const _ = useTranslation()
+  const typeItems = TYPE_ITEMS
   const [menu, setMenu] = useState<SmartPosition | null>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -117,7 +118,7 @@ export default function ArchiveFilterMenu({ params, onChange }: ArchiveFilterMen
       onChange({ type: next.length === 0 ? 'all' : next.join(',') })
     } else {
       const next = [...selectedTypes, typeKey]
-      if (next.length === TYPE_ITEMS.length) {
+      if (next.length === typeItems.length) {
         onChange({ type: 'all' })
       } else {
         onChange({ type: next.join(',') })
@@ -254,7 +255,7 @@ export default function ArchiveFilterMenu({ params, onChange }: ArchiveFilterMen
                 >
                   {_('archive.typeAll', { defaultValue: '全部' })}
                 </button>
-                {TYPE_ITEMS.map((t) => {
+                {typeItems.map((t) => {
                   const active = selectedTypes.includes(t.key)
                   return (
                     <button

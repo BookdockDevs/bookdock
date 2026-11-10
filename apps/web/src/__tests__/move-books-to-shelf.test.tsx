@@ -29,7 +29,7 @@ describe('useMoveBooksToShelf', () => {
   it('sends one batch organize request for all books', async () => {
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ bookIds: ['b1', 'b2'], shelfId: 's1' })
+    result.current.mutate({ books: [{ id: 'b1' }, { id: 'b2' }], shelfId: 's1' })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(apiClient.apiPatch).toHaveBeenCalledExactlyOnceWith('/books/batch/move-shelf', { ids: ['b1', 'b2'], shelfId: 's1' })
@@ -38,7 +38,7 @@ describe('useMoveBooksToShelf', () => {
   it('sends shelfId null when moving out of a shelf', async () => {
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ bookIds: ['b1'], shelfId: null })
+    result.current.mutate({ books: [{ id: 'b1' }], shelfId: null })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(apiClient.apiPatch).toHaveBeenCalledWith('/books/batch/move-shelf', { ids: ['b1'], shelfId: null })
@@ -48,7 +48,7 @@ describe('useMoveBooksToShelf', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ bookIds: ['b1'], shelfId: 's1' })
+    result.current.mutate({ books: [{ id: 'b1' }], shelfId: 's1' })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['batch-selection'] })

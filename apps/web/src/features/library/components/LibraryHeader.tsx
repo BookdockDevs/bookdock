@@ -23,7 +23,11 @@ interface LibraryHeaderProps {
   sortOrder: string
   format: string | null
   readStatus: string | null
-  onUploadClick?: () => void
+  /** Main action uses the saved default destination (or falls back to local when server upload is disabled). */
+  onAddClick?: (destination: 'server' | 'local') => void
+  serverUploadDisabled?: boolean
+  addLabel?: string
+  defaultAddDestination?: 'server' | 'local'
   trash?: boolean
   trashCount?: number
   bookSize?: number
@@ -43,8 +47,13 @@ interface LibraryHeaderProps {
   hideBookControls?: boolean
 }
 
-export default function LibraryHeader({ navSearch, view, query, searchNames, searchContext, searchError, onSearchSubmit, onSearchClear, sortBy, sortOrder, format, readStatus, onUploadClick, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, titleLoading = false, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope, hideBookControls = false }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, searchNames, searchContext, searchError, onSearchSubmit, onSearchClear, sortBy, sortOrder, format, readStatus, onAddClick, defaultAddDestination = 'server', serverUploadDisabled = false, addLabel, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, titleLoading = false, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope, hideBookControls = false }: LibraryHeaderProps) {
   const _ = useTranslation()
+  const effectiveAddDestination: 'server' | 'local' = addLabel
+    ? 'local'
+    : defaultAddDestination === 'server' && !serverUploadDisabled
+      ? 'server'
+      : 'local'
 
   return (
     <header className={cn('mb-6 md:mb-8', hideBookControls && 'mb-4 md:mb-6')}>
@@ -149,8 +158,10 @@ export default function LibraryHeader({ navSearch, view, query, searchNames, sea
                 </svg>
               </button>
             )
-          ) : onUploadClick ? (
-            <Button onClick={onUploadClick}>{_('library.upload')}</Button>
+          ) : onAddClick ? (
+            <Button onClick={() => onAddClick(effectiveAddDestination)}>
+              {effectiveAddDestination === 'local' ? addLabel ?? _('localLibrary.add') : _('library.upload')}
+            </Button>
           ) : null}
         </div>}
       </div>

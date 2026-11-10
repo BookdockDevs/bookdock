@@ -22,6 +22,8 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
+import type { ContentEditorSearch } from '@/routes/books.$id.editor'
 import { useAuthStore } from '@/stores/auth.store'
 
 import {
@@ -203,25 +205,28 @@ function ChapterSortableRow({
 }
 
 export default function ContentEditorPage() {
-  const { id } = useParams({ from: '/books/$id/editor' })
-  const target = useSearch({ from: '/books/$id/editor' })
+  const { id } = useParams({ strict: false }) as { id: string }
+  const target = useSearch({ strict: false }) as ContentEditorSearch
   const accountId = useAuthStore((state) => state.user?.id ?? null)
-  return <ContentEditorWorkbench key={JSON.stringify([accountId, id, target.libraryId, target.libraryBookId, target.versionLinkId])} />
+  const local = useLocalCatalog()
+  return <ContentEditorWorkbench key={JSON.stringify([local?.scope ?? accountId, id, target.libraryId, target.libraryBookId, target.versionLinkId])} />
 }
 
 function ContentEditorWorkbench() {
   const _ = useTranslation()
-  const { id } = useParams({ from: '/books/$id/editor' })
-  const { libraryId, libraryBookId, versionLinkId } = useSearch({ from: '/books/$id/editor' })
+  const local = useLocalCatalog()
+  const serviceAccount = useAuthStore((state) => state.user)
+  const { id } = useParams({ strict: false }) as { id: string }
+  const { libraryId, libraryBookId, versionLinkId } = useSearch({ strict: false }) as ContentEditorSearch
   const managedTarget = libraryId && libraryBookId && versionLinkId ? { libraryId, libraryBookId, versionLinkId } : undefined
   const invalidTarget = Boolean((libraryId || libraryBookId || versionLinkId) && !managedTarget)
   const bookQuery = useEditorBook(id)
   const book = bookQuery.data?.data
   usePageTitle(book ? _('editor.documentTitle', { title: book.title }) : _('editor.title'))
-  const chaptersQuery = useEditorChapters(id, book?.format === 'txt')
+  const chaptersQuery = useEditorChapters(id, book?.format === 'txt', book?.revisionId)
   const sourceQuery = useEditorTxtSource(book)
   const saveMutation = useSaveEditorTxt(id, managedTarget)
-  const tocRulesQuery = useTocRules()
+  const tocRulesQuery = useTocRules(!local || Boolean(serviceAccount))
 
   const [draft, setDraft] = useState<EditorDraft | null>(null)
   const [discardConfirm, setDiscardConfirm] = useState(false)

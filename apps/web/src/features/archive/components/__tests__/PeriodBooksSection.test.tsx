@@ -19,7 +19,7 @@ vi.mock('../../hooks', () => ({
 }))
 
 const BOOK_ONE = {
-  bookVersionId: 'b1',
+  id: 'b1',
   title: '三体',
   author: '刘慈欣',
   coverKey: null,
@@ -38,7 +38,7 @@ const BOOK_ONE = {
 }
 
 const BOOK_TWO = {
-  bookVersionId: 'b2',
+  id: 'b2',
   title: '百年孤独',
   author: '马尔克斯',
   coverKey: null,

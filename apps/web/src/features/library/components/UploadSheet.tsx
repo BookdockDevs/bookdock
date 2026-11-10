@@ -2,15 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as Re
 
 import { useNavigate } from '@tanstack/react-router'
 
+import { useAuthStore } from '@/stores/auth.store'
 import { useStorageConnections } from '@/api/hooks/useStorageConnections'
-import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
-import { formatBytes } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import { StorageConnectionDialog } from '@/features/settings/components/StorageConnectionsSection'
 import StorageConnectionPicker from '@/features/settings/components/StorageConnectionPicker'
 
-import { useShelves, useTags, useUploadBooks, useUploadSettings, type UploadAssignment, type UploadItem, type UploadTarget } from '../hooks'
+import { useShelves, useTags, useUploadBooks, useUploadSettings, type UploadAssignment, type UploadTarget } from '../hooks'
+import UploadFilesPanel from './UploadFilesPanel'
 import WebDavImportBrowser from './WebDavImportBrowser'
 
 interface UploadSheetProps {
@@ -46,27 +48,10 @@ interface UploadSheetProps {
   contextTitle?: string
   /** Fired once per settle cycle with the ids the server answered. */
   onUploaded?: (ids: string[]) => void
-}
-
-function statusLabel(item: UploadItem): string | null {
-  // Returns a translation key suffix (library.upload*) or null for transient states
-  switch (item.status) {
-    case 'pending':
-      return 'uploadPending'
-    case 'queued':
-      return 'uploadQueued'
-    case 'uploading':
-      return 'uploading'
-    case 'processing':
-      return 'processing'
-    case 'success':
-      return 'uploadDone'
-    case 'duplicate':
-      return 'uploadDuplicate'
-    case 'error':
-    case 'corresponding':
-      return null
-  }
+  /** Destination the caller prefers when opening the file panel; falls back to server. */
+  initialSource?: string
+  /** Disables server upload (locks destination to local and hides external drive imports). */
+  serverUploadDisabled?: boolean
 }
 
 function hasFiles(e: { dataTransfer: DataTransfer | null }): boolean {
@@ -78,7 +63,7 @@ const LAST_UPLOAD_SOURCE_KEY = 'bookdock:last_upload_source'
 function getSavedUploadSource(): string {
   try {
     const saved = localStorage.getItem(LAST_UPLOAD_SOURCE_KEY)
-    if (saved) return saved
+    if (saved && saved !== 'server') return saved
   } catch {
     // ignore
   }
@@ -100,11 +85,23 @@ export default function UploadSheet({
   contextNote,
   contextTitle,
   onUploaded,
+  initialSource,
+  serverUploadDisabled = false,
 }: UploadSheetProps) {
   const _ = useTranslation()
-  const { data: connectionsRes } = useStorageConnections()
-  const connections = useMemo(() => connectionsRes?.data ?? [], [connectionsRes?.data])
-  const [selectedSource, setSelectedSource] = useState<string>(() => getSavedUploadSource())
+  const local = useLocalCatalog()
+  const user = useAuthStore((state) => state.user)
+  const { data: connectionsRes } = useStorageConnections({ enabled: !local && !serverUploadDisabled && Boolean(user) })
+  const connections = useMemo(() => (local || serverUploadDisabled) ? [] : connectionsRes?.data ?? [], [local, serverUploadDisabled, connectionsRes?.data])
+  const canSwitchDestination = !local && !target && !serverUploadDisabled
+  const resolveInitialDestination = useCallback((): 'server' | 'local' => {
+    if (local || serverUploadDisabled) return 'local'
+    if (target) return 'server'
+    return initialSource === 'local' ? 'local' : 'server'
+  }, [local, serverUploadDisabled, target, initialSource])
+  const [destination, setDestination] = useState<'server' | 'local'>(resolveInitialDestination)
+  const resolvedDestination: 'server' | 'local' = local || serverUploadDisabled ? 'local' : target ? 'server' : destination
+  const [selectedSource, setSelectedSource] = useState<string>(() => (local || serverUploadDisabled) ? 'local' : getSavedUploadSource())
   const [showAddConnection, setShowAddConnection] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [includeCurrentTag, setIncludeCurrentTag] = useState(false)
@@ -129,11 +126,11 @@ export default function UploadSheet({
   selectedSourceRef.current = selectedSource
 
   // A file drag opens the sheet via the global drag listener while the saved
-  // source may still point at a remote drive. Flip the preview to local as
-  // soon as files hover, so the sheet does not sit on the drive view waiting
-  // for the drop (the drop path flips too, as a second net). Intentionally
-  // visual-only: persisting happens on drop/success so cancelling the drag
-  // keeps the saved preference.
+  // source may still point at a remote drive. Flip the view back to file upload
+  // as soon as files hover, so the sheet does not sit on the drive browser
+  // waiting for the drop.
+  // Intentionally visual-only: persisting happens on drop/success so cancelling
+  // the drag keeps the saved preference.
   useEffect(() => {
     if (!open) return
     const onWindowDragOver = (e: DragEvent) => {
@@ -163,35 +160,27 @@ export default function UploadSheet({
   }, [clearQueue, onClose])
 
   useEffect(() => {
-    if (open) {
-      const saved = getSavedUploadSource()
-      if (saved === 'local') {
-        setSelectedSource('local')
-      } else if (connections.length > 0) {
-        if (connections.some((c) => c.id === saved)) {
-          setSelectedSource(saved)
-        } else {
-          setSelectedSource('local')
-        }
-      }
+    if (!open) return
+    setDestination(resolveInitialDestination())
+  }, [open, resolveInitialDestination])
+
+  useEffect(() => {
+    if (!open) return
+    if (local || serverUploadDisabled) { setSelectedSource('local'); return }
+    const saved = getSavedUploadSource()
+    if (saved === 'local') { setSelectedSource('local'); return }
+    // Wait for the connection list before judging the remembered id: an empty
+    // list during the first fetch must not look like "the drive is gone".
+    if (connectionsRes !== undefined) {
+      setSelectedSource(connections.some((c) => c.id === saved) ? saved : 'local')
     }
-  }, [open, connections])
+  }, [open, connections, connectionsRes, local, serverUploadDisabled])
 
   useEffect(() => {
     if (selectedSource !== 'local' && connections.length > 0 && !connections.some((c) => c.id === selectedSource)) {
       setSelectedSource('local')
     }
   }, [selectedSource, connections])
-
-  useEffect(() => {
-    if (items.some((i) => i.status === 'success')) {
-      try {
-        localStorage.setItem(LAST_UPLOAD_SOURCE_KEY, 'local')
-      } catch {
-        // ignore
-      }
-    }
-  }, [items])
 
   useEffect(() => {
     if (!open) {
@@ -218,7 +207,8 @@ export default function UploadSheet({
     if (e.dataTransfer?.files?.length) {
       addFiles(e.dataTransfer.files, {
         autoStart: true,
-        maxBytes,
+        destination: resolvedDestination,
+        maxBytes: resolvedDestination === 'local' ? undefined : maxBytes,
         ...(versionNameMode && normalizeTitle ? { versionNameMode: true } : {}),
         ...assignment,
       })
@@ -227,7 +217,6 @@ export default function UploadSheet({
 
   const hasPending = items.some((it) => it.status === 'pending')
   const settled = items.length > 0 && !isUploading && !hasPending
-  const failed = items.filter((it) => it.status === 'error').length
 
   // Report fresh successes once per settle cycle so an uploader into an
   // existing work can select the version it just added.
@@ -245,15 +234,16 @@ export default function UploadSheet({
   // onUploaded instead of navigating.
   const readable = settled && items.length === 1
     && (items[0].status === 'success' || items[0].status === 'duplicate')
-    && Boolean(items[0].bookVersionId)
+    && Boolean(items[0].bookVersionId || items[0].bookRef)
     && !(boundWork ?? versionNameMode)
 
   function handleRead() {
+    const localRef = items[0]?.bookRef
     const bookVersionId = items[0]?.bookVersionId
-    if (!bookVersionId) return
+    if (!bookVersionId && !localRef) return
     clearQueue()
     onClose()
-    void navigate({ to: '/books/$id', params: { id: bookVersionId } })
+    void navigate({ to: '/books/$id', params: { id: localRef ? localRef.bookId : bookVersionId! } })
   }
 
   if (!open) return null
@@ -262,8 +252,54 @@ export default function UploadSheet({
     <Modal
       size="wide"
       title={(
-        <div className="flex items-center gap-2">
-          <span>{_('library.upload')}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span>{_(canSwitchDestination || local || serverUploadDisabled ? 'localLibrary.add' : 'library.upload')}</span>
+          {canSwitchDestination && selectedSource === 'local' && (
+            <div
+              role="group"
+              aria-label={_('library.addDestination')}
+              className="inline-flex items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 font-normal dark:bg-stone-800"
+            >
+              <button
+                type="button"
+                disabled={isUploading}
+                aria-pressed={resolvedDestination === 'server'}
+                onClick={() => setDestination('server')}
+                className={cn(
+                  'flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50',
+                  resolvedDestination === 'server'
+                    ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                    : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
+                )}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 13v8" />
+                  <path d="m8 17 4-4 4 4" />
+                  <path d="M20 16.6A4.5 4.5 0 0 0 18 8h-1.3A7 7 0 1 0 5 14.4" />
+                </svg>
+                <span>{_('library.sourceRemote')}</span>
+              </button>
+              <button
+                type="button"
+                disabled={isUploading}
+                aria-pressed={resolvedDestination === 'local'}
+                onClick={() => setDestination('local')}
+                className={cn(
+                  'flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50',
+                  resolvedDestination === 'local'
+                    ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                    : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
+                )}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect width="20" height="14" x="2" y="3" rx="2" />
+                  <line x1="8" x2="16" y1="21" y2="21" />
+                  <line x1="12" x2="12" y1="17" y2="21" />
+                </svg>
+                <span>{_('library.sourceLocal')}</span>
+              </button>
+            </div>
+          )}
           {shelfName && (
             <span
               title={contextTooltip}
@@ -306,14 +342,14 @@ export default function UploadSheet({
           )}
         </div>
       )}
-      actions={(
+      actions={!local && !serverUploadDisabled && (
         <div className="relative flex items-center mr-1">
           <StorageConnectionPicker
             connections={connections}
             value={selectedSource}
             onChange={handleSelectSource}
             showLocalOption
-            localLabel={_('library.uploadSourceLocal') || '本地文件'}
+            localLabel={_('library.uploadLocal') || '本地文件'}
             onAddNew={() => setShowAddConnection(true)}
             addNewLabel={_('settings.storageBackendConnectionAddNew') || '添加存储'}
             triggerClassName="border-stone-200/90 bg-stone-50/80 shadow-2xs hover:bg-stone-100 dark:bg-stone-800/80 dark:hover:bg-stone-700"
@@ -364,163 +400,25 @@ export default function UploadSheet({
         />
       ) : (
         <>
-          <div
-            onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => {
-          if (!hasFiles(e)) return
-          e.preventDefault()
-          setDragOver(true)
-        }}
-        onDragLeave={(e) => {
-          // dragleave bubbles from child nodes; only clear when the pointer
-          // actually left the dropzone, otherwise the highlight flickers
-          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
-          setDragOver(false)
-        }}
-        className={
-          'group flex h-80 cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed text-center transition-all duration-150 ' +
-          (dragOver
-            ? 'border-stone-500 bg-stone-100/80 dark:border-stone-400 dark:bg-stone-800/60'
-            : 'border-stone-300 hover:border-stone-400 hover:bg-stone-50/50 dark:border-stone-700 dark:hover:border-stone-600 dark:hover:bg-stone-800/30')
-        }
-      >
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-stone-100 text-stone-500 transition-transform duration-200 group-hover:scale-105 dark:bg-stone-800 dark:text-stone-400">
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-        </div>
-        <div>
-          <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{_('library.uploadHint')}</p>
-          <div className="mt-2 flex items-center justify-center gap-1.5">
-            <span className="rounded-md bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-stone-500 dark:bg-stone-800 dark:text-stone-400">
-              EPUB
-            </span>
-            <span className="rounded-md bg-stone-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-stone-500 dark:bg-stone-800 dark:text-stone-400">
-              TXT
-            </span>
-          </div>
-          {maxBytes && (
-            <p className="mt-1.5 text-xs text-stone-400 dark:text-stone-500">
-              {_('library.uploadMaxSize', { size: formatBytes(maxBytes) })}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {items.length > 0 && (
-        <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
-          {items.map((item) => {
-            const key = statusLabel(item)
-            const note = item.messageKey ? _(item.messageKey) : null
-            return (
-              <li
-                key={item.id}
-                className="flex items-center gap-3 rounded-xl bg-stone-50 px-3 py-2 text-xs dark:bg-stone-800/60"
-              >
-                <span className="shrink-0">
-                  {item.status === 'success' ? (
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-600 dark:text-emerald-400">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  ) : item.status === 'duplicate' ? (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600 dark:text-amber-400">
-                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                      <path d="M3 3v5h5" />
-                    </svg>
-                  ) : item.status === 'error' ? (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400">
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
-                  ) : null}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-stone-700 dark:text-stone-300">{item.name}</span>
-                {item.status === 'corresponding' ? (
-                  <>
-                    <span className="min-w-0 text-amber-600 dark:text-amber-400">
-                      {_('library.uploadCorresponding', { title: item.corresponding?.title ?? '' })}
-                    </span>
-                    <button type="button" onClick={() => continueUpload(item.id)}
-                      className="shrink-0 font-medium underline underline-offset-2">
-                      {_('library.uploadContinue')}
-                    </button>
-                  </>
-                ) : item.status === 'error' ? (
-                  <>
-                    {note && <span className="shrink-0 text-xs text-red-600 dark:text-red-400">{note}</span>}
-                    <button
-                      type="button"
-                      onClick={() => retry(item.id)}
-                      className="shrink-0 text-xs font-medium text-stone-600 underline decoration-stone-300 underline-offset-2 transition-colors hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100"
-                    >
-                      {_('library.uploadRetry')}
-                    </button>
-                  </>
-                ) : (
-                  key && (
-                    <span
-                      className={
-                        'shrink-0 text-xs ' +
-                        (item.status === 'duplicate' && note
-                          ? 'text-amber-600 dark:text-amber-400'
-                          : 'text-stone-400')
-                      }
-                    >
-                      {note ?? _(`library.${key}`)}
-                    </span>
-                  )
-                )}
-                {(item.status === 'uploading' || item.status === 'processing') && (
-                  <span className="w-24 shrink-0">
-                    <span className="block h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
-                      <span
-                        className="block h-full rounded-full bg-stone-800 transition-all duration-200 dark:bg-stone-200"
-                        style={{ width: `${item.progress}%` }}
-                      />
-                    </span>
-                  </span>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
-      {/* One action per state, and nothing at all while the queue is empty:
-          the close affordance is the header X, and adding files is the drop
-          zone above, which is the bigger and more obvious of the two. */}
-      {items.length > 0 && (
-        <div data-toast-obstacle="" className="mt-6 flex justify-end gap-3">
-          {hasPending ? (
-            <Button onClick={() => startUpload(assignment)}>{_('library.upload')}</Button>
-          ) : isUploading ? (
-            <Button variant="secondary" onClick={abortAll}>{_('library.uploadCancel')}</Button>
-          ) : readable ? (
-            <>
-              <Button variant="secondary" onClick={handleClose}>{_('library.done')}</Button>
-              <Button onClick={handleRead}>{_('library.startReading')}</Button>
-            </>
-          ) : failed > 0 ? (
-            <>
-              <Button variant="secondary" onClick={retryAll}>{_('library.uploadRetryAll')}</Button>
-              <Button onClick={handleClose}>{_('library.done')}</Button>
-            </>
-          ) : (
-            <Button onClick={handleClose}>{_('library.done')}</Button>
-          )}
-        </div>
-      )}
+          <UploadFilesPanel
+            // The destination decides the wording: a local-bound queue adds to
+            // the device vault even on the unified shelf without a context.
+            operation={resolvedDestination === 'local' ? 'add' : 'upload'}
+            items={items}
+            maxBytes={resolvedDestination === 'local' ? undefined : maxBytes}
+            dragOver={dragOver}
+            setDragOver={setDragOver}
+            isUploading={isUploading}
+            readable={readable}
+            onChooseFiles={() => inputRef.current?.click()}
+            onStartUpload={() => startUpload(assignment, resolvedDestination)}
+            retry={retry}
+            retryAll={retryAll}
+            continueUpload={continueUpload}
+            abortAll={abortAll}
+            handleClose={handleClose}
+            handleRead={handleRead}
+          />
         </>
       )}
 
@@ -534,7 +432,8 @@ export default function UploadSheet({
           // Picker-selected files wait for an explicit upload click
           if (e.target.files?.length) {
             addFiles(e.target.files, {
-              maxBytes,
+              destination: resolvedDestination,
+              maxBytes: resolvedDestination === 'local' ? undefined : maxBytes,
               ...(versionNameMode && normalizeTitle ? { versionNameMode: true } : {}),
               ...assignment,
             })

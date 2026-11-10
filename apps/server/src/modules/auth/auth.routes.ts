@@ -162,7 +162,8 @@ authRoutes.put('/timezone', async (c) => {
 
 authRoutes.get('/me', (c) => {
   const user = c.get('user')
-  return c.json({ data: user ? { ...user, guest: false } : { user: null, guest: true } })
+  const tokenPermissions = c.get('tokenPermissions')
+  return c.json({ data: user ? { ...user, guest: false, ...(tokenPermissions ? { tokenPermissions } : {}) } : { user: null, guest: true } })
 })
 
 authRoutes.delete('/account', async (c) => {

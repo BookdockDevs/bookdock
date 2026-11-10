@@ -3,7 +3,7 @@ import type { RecentlyReadStyle } from '@bookdock/shared'
 
 import RecentlyReadCards from './RecentlyReadCards'
 import RecentlyReadCovers from './RecentlyReadCovers'
-import { useBooks } from '../hooks'
+import { useUnifiedBooks } from '../hooks'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 
 const MAX_RECENT = 12
@@ -16,7 +16,7 @@ interface RecentlyReadProps {
 export default function RecentlyRead({ style }: RecentlyReadProps) {
   const _ = useTranslation()
 
-  const { data, isLoading, isError, isFetching, refetch } = useBooks({
+  const shelfParams = {
     page: 1,
     pageSize: INITIAL_FETCH,
     search: '',
@@ -27,7 +27,8 @@ export default function RecentlyRead({ style }: RecentlyReadProps) {
     format: null,
     readStatus: null,
     trash: false,
-  })
+  }
+  const { data, isLoading, isError, isFetching, refetch } = useUnifiedBooks(shelfParams)
 
   const books = (data?.data ?? [])
     .filter(

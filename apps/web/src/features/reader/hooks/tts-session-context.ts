@@ -5,6 +5,7 @@ import type { TtsController, TtsSessionState } from '../lib/tts-controller'
 export interface TtsSessionContextValue {
   controller: TtsController | null
   state: TtsSessionState
+  unavailableReason?: 'account' | 'service' | 'system'
 }
 
 export const IDLE_TTS_STATE: TtsSessionState = {

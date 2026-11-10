@@ -32,6 +32,7 @@ vi.mock('@/features/archive/hooks', () => ({
     isLoading: false,
     isError: false,
   })),
+  useLocalArchiveBook: vi.fn(() => ({ data: false, isPending: false, isError: false })),
 }))
 
 // The page header uses Link for the back button; no router is mounted here.

@@ -35,6 +35,9 @@ vi.mock('@/features/library/hooks', async (importOriginal) => {
     ...actual,
     useLibraries: mocks.libraries,
     useBooks: (...args: unknown[]) => { mocks.books(...args); return { ...query({ data: [], total: mocks.listTotal ?? 0 }), isLoading: mocks.listLoading } },
+    // The unified shelf consumes the merged query, not the legacy one; keep
+    // the (params, options) shape the useBooks assertions expect.
+    useUnifiedBooks: (params: unknown, options: unknown) => { mocks.books(params, options); return { ...query({ data: [], total: mocks.listTotal ?? 0 }), isLoading: mocks.listLoading } },
     useLibraryCatalog: (...args: unknown[]) => { mocks.catalog(...args); return query(mocks.listTotal === null ? undefined : { data: { items: [], total: mocks.listTotal } }) },
     useLibraryRelation: () => query(),
     useLibraryCategories: () => query({ data: [] }),

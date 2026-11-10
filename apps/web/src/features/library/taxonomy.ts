@@ -1,10 +1,10 @@
-import type { Category, LibrarySortPreference } from '@bookdock/shared'
+import type { ClientCategoryView, LibrarySortPreference } from '@bookdock/shared'
 
 import { sortSidebarItems } from './sort-modes'
 
-export function categoryPath(categories: Category[], id: string): Category[] {
+export function categoryPath(categories: ClientCategoryView[], id: string): ClientCategoryView[] {
   const byId = new Map(categories.map((category) => [category.id, category]))
-  const path: Category[] = []
+  const path: ClientCategoryView[] = []
   const seen = new Set<string>()
   let current = byId.get(id)
   while (current && !seen.has(current.id)) {
@@ -15,8 +15,8 @@ export function categoryPath(categories: Category[], id: string): Category[] {
   return path
 }
 
-export function sortCategories(categories: Category[], pref: LibrarySortPreference | undefined): Category[] {
-  const children = new Map<string | null, Category[]>()
+export function sortCategories(categories: ClientCategoryView[], pref: LibrarySortPreference | undefined): ClientCategoryView[] {
+  const children = new Map<string | null, ClientCategoryView[]>()
   const ids = new Set(categories.map((category) => category.id))
   for (const category of categories) {
     const parent = category.parentId && ids.has(category.parentId) ? category.parentId : null
@@ -24,7 +24,7 @@ export function sortCategories(categories: Category[], pref: LibrarySortPreferen
     group.push(category)
     children.set(parent, group)
   }
-  const ordered: Category[] = []
+  const ordered: ClientCategoryView[] = []
   const seen = new Set<string>()
   const visit = (parentId: string | null) => {
     const group = children.get(parentId) ?? []
@@ -44,7 +44,7 @@ export function sortCategories(categories: Category[], pref: LibrarySortPreferen
   return ordered
 }
 
-export function categoryChoices(categories: Category[]) {
+export function categoryChoices(categories: ClientCategoryView[]) {
   return sortCategories(categories, { mode: 'manual' }).map((category) => ({
     ...category,
     name: categoryPath(categories, category.id).map((node) => node.name).join(' / '),

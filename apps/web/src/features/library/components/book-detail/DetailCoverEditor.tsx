@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 
-import type { BookListItem, CoverPaletteId } from '@bookdock/shared'
+import type { ClientLibraryBookView, CoverPaletteId } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -11,7 +11,7 @@ import type { CoverSource } from '../BookCover'
 import BookCoverEditor from './BookCoverEditor'
 
 interface DetailCoverEditorProps {
-  book: CoverSource & { source?: BookListItem['source'] }
+  book: CoverSource & { source?: ClientLibraryBookView['source'] }
   catalog?: { libraryId: string; libraryBookId: string; versionLinkId: string; hasVersionCover: boolean }
   coverPaletteId: CoverPaletteId | null
   active: boolean
@@ -78,7 +78,7 @@ export default function DetailCoverEditor({ book, coverPaletteId, active, onActi
             onSuccess: () => notify.success({ key: 'toast.bookCoverUpdated' }),
             onError: (error) => notify.error(getUserErrorNotification(error, 'toast.updateBookCoverFailed')),
           })
-          else upload.mutate({ bookId: book.id, file })
+          else upload.mutate({ bookId: book.id, expectedVersion: book.clientVersion, ref: book.ref, file })
         }}
         onRemoveCover={() => {
           if (saving) return
@@ -86,9 +86,9 @@ export default function DetailCoverEditor({ book, coverPaletteId, active, onActi
             onSuccess: () => notify.success({ key: 'toast.bookCoverRemoved' }),
             onError: (error) => notify.error(getUserErrorNotification(error, 'toast.removeBookCoverFailed')),
           })
-          else remove.mutate(book.id)
+          else remove.mutate({ bookId: book.id, expectedVersion: book.clientVersion, ref: book.ref })
         }}
-        onPaletteChange={(id) => { if (!saving && id !== coverPaletteId) update.mutate({ bookId: book.id, coverPaletteId: id }) }}
+        onPaletteChange={(id) => { if (!saving && id !== coverPaletteId) update.mutate({ bookId: book.id, ref: book.ref, expectedVersion: book.clientVersion, coverPaletteId: id }) }}
       />
     </div>
   )

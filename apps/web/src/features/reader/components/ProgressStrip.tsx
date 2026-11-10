@@ -13,7 +13,7 @@ interface ProgressStripProps {
   mobileDockVisible?: boolean
   className?: string
   /** Chapter titles in section order for the drag-preview badge */
-  chapters?: Chapter[]
+  chapters?: Pick<Chapter, 'title'>[]
   /**
    * Byte-weight section boundaries (foliate's progress model) — the drag
    * preview derives chapters from these so it matches the seek landing

@@ -4,6 +4,8 @@ import { useDictionaries, useDictionaryLookup } from '@/api/hooks/useDictionarie
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import { isAccessRevocationError } from '@/lib/error-message'
+import { useAuthStore } from '@/stores/auth.store'
 
 import { useReaderState } from '../state/reader-state'
 import type { SelectionInfo } from '../types'
@@ -17,8 +19,12 @@ interface DictionaryPopupProps {
 
 export default function DictionaryPopup({ target }: DictionaryPopupProps) {
   const _ = useTranslation()
-  const list = useDictionaries()
-  const enabled = list.data?.data.items.filter((item) => item.enabled) ?? []
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
+  const [requestAccountId] = useState(accountId)
+  const available = Boolean(accountId && accountId === requestAccountId)
+  const list = useDictionaries({ enabled: available })
+  const revoked = isAccessRevocationError(list.error)
+  const enabled = available && !revoked ? list.data?.data.items.filter((item) => item.enabled) ?? [] : []
   const [selected, setSelected] = useState<string | null>(null)
   const id =
     selected && enabled.some((item) => item.id === selected)
@@ -32,8 +38,8 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
   const [position, setPosition] = useState<SmartPosition | null>(null)
   const close = () => useReaderState.getState().setDictionaryTarget(null)
   const current = enabled.find((item) => item.id === id)
-  const result = lookup.data?.data
-  const showManage = !list.isPending && !list.isError && !enabled.length
+  const result = available && !revoked && !isAccessRevocationError(lookup.error) ? lookup.data?.data : undefined
+  const showManage = available && !list.isPending && !list.isError && !enabled.length
 
   return (
     <SelectionUtilityPopup
@@ -180,7 +186,8 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
 
       {result?.headword && (
         <DictionaryDefinition
-          key={`${id}:${word}`}
+          key={`${accountId}:${id}:${word}`}
+          accountId={accountId!}
           id={id!}
           html={result.html}
           onNavigate={(next) => {
@@ -191,7 +198,7 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
 
       {!result?.headword && (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-xs text-[var(--bd-read-sub)]">
-          {list.isPending || lookup.isFetching ? (
+          {available && (list.isPending || lookup.isFetching) ? (
             <div className="flex items-center gap-2">
               <svg
                 className="h-4 w-4 animate-spin text-[var(--bd-read-primary)]"
@@ -214,7 +221,11 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
               )}
               <p role="status" className="max-w-[220px] leading-relaxed">
                 {_(
-                  word.length > 100
+                  !available
+                    ? 'dictionary.accountRequired'
+                    : revoked || isAccessRevocationError(lookup.error)
+                    ? 'dictionary.accessRequired'
+                    : word.length > 100
                     ? 'dictionary.tooLong'
                     : list.isError || lookup.isError
                       ? 'dictionary.failed'
@@ -223,7 +234,7 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
                         : 'dictionary.notFound',
                 )}
               </p>
-              {(list.isError || lookup.isError) && (
+              {available && (list.isError || lookup.isError) && (
                 <button
                   type="button"
                   onClick={() => {

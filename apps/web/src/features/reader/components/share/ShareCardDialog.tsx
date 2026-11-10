@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { BookDetailRes } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { useFonts } from '@/api/hooks/useFonts'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useDialogLayout } from '@/components/ui/dialog-layout-context'
@@ -48,14 +49,20 @@ export default function ShareCardDialog({ bookId, fallbackTitle, fallbackAuthor 
   const avatarKey = useAuthStore((s) => s.user?.avatarKey)
   const fontPreferences = useUiStore((s) => s.fontPreferences)
   const fontOrder = useUiStore((s) => s.fontOrder)
+  const local = useLocalReader()
   const bookQuery = useQuery({
-    queryKey: ['book', bookId],
-    queryFn: () => apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
+    queryKey: ['book', local?.namespace ?? bookId],
+    networkMode: local ? 'always' : 'online',
+    queryFn: () => local ? local.getBook() : apiGet<{ data: BookDetailRes }>(`/books/${bookId}`),
     // Only fetched for the open dialog: a pre-mounted dialog would otherwise
     // fire a doomed request for archive-only ids on every page load.
     enabled: !!shareTarget,
   })
-  const { data: fontsData, isPending: fontsPending, isError: fontsError } = useFonts()
+  const fontsEnabled = !local || Boolean(shareTarget && user)
+  const fontsQuery = useFonts(fontsEnabled)
+  const fontsData = fontsQuery.data
+  const fontsPending = fontsEnabled && fontsQuery.isPending
+  const fontsError = fontsEnabled && fontsQuery.isError
   const uploadedFonts = useMemo(() => fontsData?.data ?? [], [fontsData])
   const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
   const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)

@@ -100,7 +100,7 @@ async function openMore() {
 describe('AiPanel', () => {
   beforeEach(() => {
     localStorage.clear()
-    useAuthStore.setState({ user: null })
+    useAuthStore.getState().setAuth({ id: 'reader', username: 'reader', role: 'member' })
     useUiStore.setState({ toolbarLocked: false })
     useReaderState.setState({
       aiContext: null,
@@ -231,7 +231,7 @@ describe('AiPanel', () => {
       savedScope = body.settings?.readingScope ?? savedScope
       return { data: { ...thread, messages: [], settings: { readingScope: savedScope, enabledTools: body.settings?.enabledTools ?? ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'], assistantModeId: body.settings?.assistantModeId ?? 'assistant' } } }
     })
-    writeAiPanelMemory('anonymous', 'book-1', {
+    writeAiPanelMemory('reader', 'book-1', {
       activeThreadId: 'thread-1',
       prompt: '',
       chapterReferences: [],
@@ -269,7 +269,7 @@ describe('AiPanel', () => {
       return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
     })
     vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
-    writeAiPanelMemory('anonymous', 'book-1', {
+    writeAiPanelMemory('reader', 'book-1', {
       activeThreadId: 'thread-1',
       prompt: '',
       chapterReferences: [],
@@ -320,7 +320,7 @@ describe('AiPanel', () => {
       if (path === '/annotations/book/book-1') return { data: [{ id: 'annotation-1', bookId: 'book-1', cfiRange: firstRetry.context.cfiRange, cfiAnchor: null, type: 'note', color: 'yellow', style: 'underline', text: firstRetry.context.selection, note: '第一段解释', chapter: '第一章', createdAt: 1_000, updatedAt: 1_000 }] }
       return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
     })
-    writeAiPanelMemory('anonymous', 'book-1', { activeThreadId: 'thread-1', prompt: '', chapterReferences: [] })
+    writeAiPanelMemory('reader', 'book-1', { activeThreadId: 'thread-1', prompt: '', chapterReferences: [] })
 
     renderPanel()
 
@@ -346,7 +346,7 @@ describe('AiPanel', () => {
       return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
     })
     vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
-    writeAiPanelMemory('anonymous', 'book-1', { activeThreadId: 'thread-1', prompt: '', chapterReferences: [] })
+    writeAiPanelMemory('reader', 'book-1', { activeThreadId: 'thread-1', prompt: '', chapterReferences: [] })
 
     renderPanel()
 
@@ -380,7 +380,7 @@ describe('AiPanel', () => {
       ] } }
       return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
     })
-    writeAiPanelMemory('anonymous', 'book-1', { activeThreadId: 'thread-1', prompt: '', chapterReferences: [] })
+    writeAiPanelMemory('reader', 'book-1', { activeThreadId: 'thread-1', prompt: '', chapterReferences: [] })
 
     renderPanel()
 
@@ -424,7 +424,7 @@ describe('AiPanel', () => {
       selectedId = 'assistant-1'
       return { data: { ...revisions[0], selected: true } }
     })
-    writeAiPanelMemory('anonymous', 'book-1', { activeThreadId: 'thread-1', prompt: '', chapterReferences: [] })
+    writeAiPanelMemory('reader', 'book-1', { activeThreadId: 'thread-1', prompt: '', chapterReferences: [] })
 
     renderPanel()
 

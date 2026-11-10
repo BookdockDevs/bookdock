@@ -11,6 +11,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { authErrorKey } from './errors'
 import { useInstanceInfo, useLogin } from './hooks'
+import { clearReaderTarget, pendingReaderTarget } from './reader-return'
 
 export default function Login() {
   const _ = useTranslation()
@@ -46,9 +47,13 @@ export default function Login() {
     try {
       await login.mutateAsync({ username: normalizedUsername, password })
       if (isLegadoLogin) {
+        clearReaderTarget()
         window.location.assign('/')
       } else {
         const pending = sessionStorage.getItem(PENDING_INVITE_KEY)
+        if (pending) clearReaderTarget()
+        const readerTarget = pending ? null : pendingReaderTarget()
+        if (readerTarget) { window.location.assign(readerTarget); return }
         navigate(pending
           ? { to: '/library/$token', params: { token: libraryInviteParam(pending) } }
           : { to: '/' })

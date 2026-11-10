@@ -3,6 +3,8 @@ import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useAuthStore } from '@/stores/auth.store'
+
 import { apiGet, apiPatch, apiPut } from '@/api/client'
 import { useReorderShelves, useReorderTags, useUpdateCatalogBook, useUpdateLibraryCategory } from '@/features/library/hooks'
 
@@ -18,6 +20,8 @@ function setup() {
 }
 
 beforeEach(() => {
+  useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+
   vi.clearAllMocks()
   vi.mocked(apiPatch).mockResolvedValue({ data: {} })
   vi.mocked(apiPut).mockResolvedValue({ data: null })

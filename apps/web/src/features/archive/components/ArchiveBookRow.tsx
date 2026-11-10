@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { parseArchiveRecordTypes, type ArchiveBookItem } from '@bookdock/shared'
+import { parseArchiveRecordTypes, type ClientArchiveBookView } from '@bookdock/shared'
 
 import BookCover from '@/features/library/components/BookCover'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -11,7 +11,7 @@ import type { ArchiveSearch } from '@/routes/archive'
 import { readStatusLabel } from './archive-helpers'
 
 function getArchiveMetricsParts(
-  book: ArchiveBookItem,
+  book: ClientArchiveBookView,
   activeType: string | undefined,
   t: (key: string, options?: Record<string, string | number>) => string,
 ): React.ReactNode[] {
@@ -102,7 +102,7 @@ function getArchiveMetricsParts(
 }
 
 export interface ArchiveBookRowProps {
-  book: ArchiveBookItem
+  book: ClientArchiveBookView
   to: { to: '/archive'; search: ArchiveSearch }
   onOpen?: () => void
   selected?: boolean
@@ -137,10 +137,10 @@ export default function ArchiveBookRow({
     >
       <div className="shrink-0" aria-hidden="true">
         <BookCover
-          book={{ id: book.bookVersionId, title: book.title ?? '', format: book.format ?? undefined, coverKey: book.coverKey }}
+          book={{ ref: book.ref, id: book.id, title: book.title ?? '', format: book.format ?? undefined, coverKey: book.coverKey }}
           size="sm"
-          coverSrc={book.coverKey
-            ? `/api/v1/archive/books/${encodeURIComponent(book.bookVersionId)}/cover?v=${encodeURIComponent(book.coverKey)}`
+          coverSrc={book.ref ? undefined : book.coverKey
+            ? `/api/v1/archive/books/${encodeURIComponent(book.id)}/cover?v=${encodeURIComponent(book.coverKey)}`
             : book.coverUrl ?? undefined}
         />
       </div>

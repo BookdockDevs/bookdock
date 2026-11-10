@@ -1,3 +1,4 @@
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import { useMemo, useState } from 'react'
 
 import { prepareRuleTransferExport, serializeReplacementsForExport, type ReplacementTransferFile, type TextReplacementRes } from '@bookdock/shared'
@@ -56,6 +57,7 @@ function ReplaceIcon({ className }: { className?: string }) {
 }
 
 export default function ReplacementsSettingsSection() {
+  const local = useLocalCatalog()
   const _ = useTranslation()
   const replacementsQuery = useReplacements()
   const { data } = replacementsQuery
@@ -101,7 +103,7 @@ export default function ReplacementsSettingsSection() {
   function confirmDelete() {
     if (!pendingDelete || busy) return
     const ruleIds = pendingDelete.map((rule) => rule.id)
-    deleteReplacement.mutate({ ruleIds }, {
+    deleteReplacement.mutate({ ruleIds, ...(local ? { expectedVersions: Object.fromEntries(pendingDelete.map((rule) => [rule.id, rule.clientVersion!])) } : {}) }, {
       onSuccess: () => {
         setSelectedIds([])
         setPendingDelete(null)
@@ -150,7 +152,7 @@ export default function ReplacementsSettingsSection() {
         }
         action={
           <div className="flex shrink-0 items-center gap-1">
-            {editing && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={() => exportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules)} />}
+            {editing && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={local ? undefined : () => exportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules)} />}
             <EditModeButton
               active={editing}
               activeLabel={_('settings.replacementsEditModeExit')}
@@ -158,7 +160,7 @@ export default function ReplacementsSettingsSection() {
               onClick={toggleEditing}
             />
             {!editing && <>
-              <button
+              {!local && <button
                 type="button"
                 disabled={busy || !listReady}
                 onClick={() => setImportOpen(true)}
@@ -170,8 +172,8 @@ export default function ReplacementsSettingsSection() {
                   <path d="M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4" />
                   <path d="M12 3v11m-5-5 5 5 5-5" />
                 </svg>
-              </button>
-              <button
+              </button>}
+              {!local && <button
                 type="button"
                 disabled={busy || !listReady || rules.length === 0}
                 onClick={() => exportRules(rules)}
@@ -183,7 +185,7 @@ export default function ReplacementsSettingsSection() {
                   <path d="M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4" />
                   <path d="M12 14V3m-5 5 5-5 5 5" />
                 </svg>
-              </button>
+              </button>}
               <button
                 type="button"
                 disabled={busy || !listReady}

@@ -27,6 +27,7 @@ export default function PeriodBooksSection({
   onSelectBook,
 }: PeriodBooksSectionProps) {
   const _ = useTranslation()
+  const archivePath = '/archive' as const
 
   const booksQuery = useArchiveBooksInfinite({
     range: query,
@@ -123,27 +124,27 @@ export default function PeriodBooksSection({
 
             return (
               <Link
-                key={book.bookVersionId}
-                to="/archive"
-                search={{ ...baseSearch, bookId: book.bookVersionId, view: undefined }}
+                key={book.id}
+                to={archivePath}
+                search={{ ...baseSearch, bookId: book.id, view: undefined }}
                 replace
                 state={(previous) => ({ ...previous })}
-                onClick={() => onSelectBook?.(book.bookVersionId)}
+                onClick={() => onSelectBook?.(book.id)}
                 className="group -mx-2 flex items-center justify-between rounded-xl px-2 py-3 transition-colors hover:bg-stone-50/80 sm:px-3 dark:hover:bg-stone-800/50"
               >
                 <div className="flex min-w-0 items-center gap-3.5">
                   <div className="shrink-0" aria-hidden="true">
                     <BookCover
                       book={{
-                        id: book.bookVersionId,
+                        ref: book.ref, id: book.id,
                         title: book.title ?? '',
                         format: book.format ?? undefined,
                         coverKey: book.coverKey,
                       }}
                       size="sm"
                       coverSrc={
-                        book.coverKey
-                          ? `/api/v1/archive/books/${encodeURIComponent(book.bookVersionId)}/cover?v=${encodeURIComponent(book.coverKey)}`
+                        !book.ref && book.coverKey
+                          ? `/api/v1/archive/books/${encodeURIComponent(book.id)}/cover?v=${encodeURIComponent(book.coverKey)}`
                           : book.coverUrl ?? undefined
                       }
                     />

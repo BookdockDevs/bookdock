@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import type { BookListItem, LibraryListItem, PublishedLinkInfo, PublishPrivateBookRes } from '@bookdock/shared'
+import type { ClientLibraryBookView, LibraryListItem, PublishedLinkInfo, PublishPrivateBookRes } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
@@ -168,7 +168,7 @@ function CustomSelect({ id, value, onChange, options, disabled = false, loading 
 }
 
 interface PublishBookDialogProps {
-  book: BookListItem | null
+  book: ClientLibraryBookView | null
   libraries: LibraryListItem[]
   onClose: () => void
   onOpenLibrary: (libraryId: string) => void

@@ -9,6 +9,7 @@ vi.mock('../api/client', async (original) => ({ ...await original<typeof import(
 
 import { apiDelete, apiGet, apiPatch, apiUpload } from '../api/client'
 import DictionariesSettingsSection from '../features/settings/components/DictionariesSettingsSection'
+import { useAuthStore } from '../stores/auth.store'
 
 const data: DictionaryList = {
   items: [
@@ -36,6 +37,7 @@ function mount() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  useAuthStore.setState({ user: { id: 'dictionary-owner', username: 'Reader', role: 'owner' } })
   vi.mocked(apiGet).mockResolvedValue({ data })
   vi.mocked(apiPatch).mockResolvedValue({ data })
   vi.mocked(apiDelete).mockResolvedValue({ data: null })

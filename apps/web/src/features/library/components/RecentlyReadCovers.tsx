@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 
-import type { BookListItem } from '@bookdock/shared'
+import type { ClientLibraryBookView } from '@bookdock/shared'
 
+import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
 
 import BookCover from './BookCover'
 
 interface RecentlyReadCoversProps {
-  books: BookListItem[]
+  books: ClientLibraryBookView[]
 }
 
 export default function RecentlyReadCovers({ books }: RecentlyReadCoversProps) {
@@ -80,8 +81,7 @@ export default function RecentlyReadCovers({ books }: RecentlyReadCoversProps) {
         {books.map((book) => (
           <Link
             key={book.id}
-            to="/books/$id"
-            params={{ id: book.id }}
+            {...catalogBookTarget(book)}
             className="group/item w-28 shrink-0"
           >
             <div className="relative overflow-hidden rounded-xl transition-all duration-200 group-hover/item:-translate-y-1 group-hover/item:shadow-lg dark:group-hover/item:shadow-black/60">

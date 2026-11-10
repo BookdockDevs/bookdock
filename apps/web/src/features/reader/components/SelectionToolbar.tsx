@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq, SelectionToolbarActionKey } from '@bookdock/shared'
 import { DEFAULT_SELECTION_TOOLBAR_ORDER } from '@bookdock/shared'
 
@@ -65,10 +66,11 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
   const { renderer } = useReaderApi()
   const { controller: ttsController } = useTtsSession()
   const user = useAuthStore((s) => s.user)
+  const local = useLocalReader()
   const create = useCreateAnnotation(bookId)
   const update = useUpdateAnnotation(bookId)
   const del = useDeleteAnnotation(bookId)
-  const { data: annotations } = useAnnotations(bookId, { enabled: !!user })
+  const { data: annotations } = useAnnotations(bookId, { enabled: !!user || !!local })
   const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
   const selectionToolbarOrder = useUiStore((state) => state.selectionToolbarOrder)
   const selectionToolbarHidden = useUiStore((state) => state.selectionToolbarHidden)
@@ -81,6 +83,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
   const [highlightPending, setHighlightPending] = useState(false)
   const [createdLocal, setCreatedLocal] = useState<AnnotationRes | null>(null)
   const [noteEditing, setNoteEditing] = useState(false)
+  const editingVersion = useRef<number | undefined>(undefined)
   const [aiMenuAnchor, setAiMenuAnchor] = useState<{ left: number; top: number; bottom: number } | null>(null)
   const aiMenuButtonRef = useRef<HTMLButtonElement>(null)
   const aiMenuRef = useRef<HTMLDivElement>(null)
@@ -213,7 +216,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
     setLastHighlightStyle(color, style)
     if (createdLocal && created) setCreatedLocal({ ...created, color, style })
     try {
-      await update.mutateAsync({ id: target.id, body: patch.color ? patch : { style, color } })
+      await update.mutateAsync({ id: target.id, body: patch.color ? patch : { style, color }, expectedVersion: target.clientVersion })
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'annotation.styleUpdateFailed'))
     }
@@ -270,7 +273,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
           note: note || undefined,
         })
       } else if (target) {
-        await update.mutateAsync({ id: target.id, body: { note: note || undefined, visibility, ...files } })
+        await update.mutateAsync({ id: target.id, body: { note: note || undefined, visibility, ...files }, expectedVersion: editingVersion.current })
       }
       close()
     } catch (err) {
@@ -407,7 +410,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
         rect={selection.rect}
         geometry={selection.geometry}
         initialNote={noteDraft ? '' : (target?.note ?? '')}
-        bookVersionId={bookId}
+        bookVersionId={local ? undefined : bookId}
         targetId={noteDraft ? undefined : target?.id}
         initialImages={noteDraft ? undefined : target?.images}
         initialVisibility={noteDraft ? composer.data?.data.defaultVisibility : target?.visibility ?? 'private'}
@@ -490,12 +493,13 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
         onCopyNote={(entry) => void copyNote(entry)}
         onShareNote={shareIdea}
         onEdit={(entry) => {
+          editingVersion.current = entry.annotation.clientVersion
           setCreatedLocal(entry.annotation)
           setNoteEditorRange(entry.annotation.cfiRange)
           setNoteEditing(true)
         }}
         onDelete={(entry) => setDeleteTarget(entry)}
-        onToggleLike={(entry) => {
+        onToggleLike={local ? undefined : (entry) => {
           toggleIdeaLike.mutate({ ideaId: entry.annotation.id, liked: !entry.liked })
         }}
         onJump={(entry) => { if (entry.locationAvailable !== false && entry.annotation.cfiRange) { void renderer?.display(entry.annotation.cfiRange); close() } }}
@@ -554,7 +558,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
     ...(target && !visibleKeys.includes('highlight') ? ['highlight' as const] : []),
     ...(visibleKeys.length > 0 ? visibleKeys : ['highlight' as const]),
   ]
-  const actions = effectiveKeys.map((k) => actionMap[k]).filter(Boolean)
+  const actions = effectiveKeys.filter((k) => !local || !k.startsWith('ai-')).map((k) => actionMap[k]).filter(Boolean)
 
   return (
     <>

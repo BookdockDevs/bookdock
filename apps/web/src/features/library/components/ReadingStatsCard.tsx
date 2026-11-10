@@ -6,14 +6,14 @@ import { formatDuration } from '@/lib/format-duration'
 
 export default function ReadingStatsCard() {
   const _ = useTranslation()
-  const { data } = useReadingSummary()
+  const { data } = useReadingSummary(undefined, undefined, undefined)
   const summary = data?.data
   if (!summary || summary.totalSeconds === 0) return null
 
   return (
     <section className="mb-8">
       <Link
-        to="/archive"
+        to={'/archive'}
         search={{ view: 'overview' }}
         className="flex items-center gap-4 rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-stone-200/70 transition-all hover:shadow-md sm:gap-8 sm:px-5 dark:bg-stone-900/90 dark:ring-1 dark:ring-white/10 dark:hover:ring-white/20 dark:hover:shadow-black/40"
       >

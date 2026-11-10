@@ -7,6 +7,8 @@ const mutateMock = vi.fn()
 vi.mock('../features/library/hooks', () => ({
   useUpdateBook: () => ({ mutate: mutateMock }),
   useForkBook: () => ({ mutate: vi.fn(), isPending: false }),
+  // Trash cards print a retention note; these fixtures have no settings.
+  useTrashAutoCleanDays: () => undefined,
 }))
 
 vi.mock('@/hooks/useTranslation', () => ({

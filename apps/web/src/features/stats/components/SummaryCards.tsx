@@ -110,7 +110,8 @@ export default function SummaryCards({
   }
 
   const displaySeconds = isAll ? s?.totalSeconds : scope?.totalSeconds
-  const displayWords = isAll ? s?.totalWordsRead : scope?.totalWordsRead
+  const wordsState = isAll ? s?.wordState : scope?.wordState
+  const displayWords = wordsState === 'unknown' ? undefined : isAll ? s?.totalWordsRead : scope?.totalWordsRead
   const displayDays = isAll ? s?.totalDays : scope?.totalDays
   const displayBooks = isAll ? s?.totalBooks : scope?.totalBooks
   const finishedCount = scope?.finishedBooks
@@ -198,6 +199,7 @@ export default function SummaryCards({
       key: 'totalWords',
       label: _('stats.totalWords'),
       value: displayWords !== undefined ? formatWords(displayWords, _) : '—',
+      details: wordsState === 'partial' || wordsState === 'unknown' ? [_('readingData.wordsPartial')] : undefined,
       delta: calcDelta(displayWords, prevScopeData?.totalWordsRead, (v) => formatWords(v, _)),
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

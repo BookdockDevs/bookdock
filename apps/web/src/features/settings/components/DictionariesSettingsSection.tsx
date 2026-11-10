@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
@@ -50,12 +50,22 @@ export default function DictionariesSettingsSection() {
     progress: number
     phase: 'uploading' | 'processing'
   } | null>(null)
+  const [stateAccountId, setStateAccountId] = useState(user?.id ?? null)
+  const ownsState = stateAccountId === (user?.id ?? null)
+  useEffect(() => {
+    if (stateAccountId === (user?.id ?? null)) return
+    setDeleting(null)
+    setEditingItem(null)
+    setEditing(false)
+    setUploadState(null)
+    setStateAccountId(user?.id ?? null)
+  }, [stateAccountId, user?.id])
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-  const items = query.data?.data.items ?? []
-  const failed = (error: unknown) => notify.error(getUserErrorNotification(error, 'library.operationFailed'))
+  const items = user && ownsState ? query.data?.data.items ?? [] : []
+  const failed = (error: unknown) => { if (useAuthStore.getState().user?.id === user?.id) notify.error(getUserErrorNotification(error, 'library.operationFailed')) }
   const isImporting = (mutation.isPending && mutation.variables?.kind === 'import') || Boolean(uploadState)
   const actionTitle = _(isImporting ? 'dictionary.importing' : 'dictionary.import')
 
@@ -94,6 +104,7 @@ export default function DictionariesSettingsSection() {
               onChange={(event) => {
                 const files = Array.from(event.target.files ?? [])
                 event.target.value = ''
+                if (!user || !ownsState) return
                 if (!files.length || mutation.isPending) return
                 const size = files.reduce((sum, file) => sum + file.size, 0)
                 if (
@@ -112,6 +123,7 @@ export default function DictionariesSettingsSection() {
                     kind: 'import',
                     files,
                     onProgress: (percent) => {
+                      if (useAuthStore.getState().user?.id !== user?.id) return
                       setUploadState((prev) =>
                         prev
                           ? {
@@ -125,10 +137,12 @@ export default function DictionariesSettingsSection() {
                   },
                   {
                     onSuccess: () => {
+                      if (useAuthStore.getState().user?.id !== user?.id) return
                       setUploadState(null)
                       notify.success({ key: 'dictionary.imported' })
                     },
                     onError: (error) => {
+                      if (useAuthStore.getState().user?.id !== user?.id) return
                       setUploadState(null)
                       failed(error)
                     },
@@ -138,7 +152,7 @@ export default function DictionariesSettingsSection() {
             />
             <button
               type="button"
-              disabled={mutation.isPending || query.isPending || query.isError}
+              disabled={!user || !ownsState || mutation.isPending || query.isPending || query.isError}
               onClick={() => input.current?.click()}
               aria-label={actionTitle}
               title={actionTitle}
@@ -172,7 +186,7 @@ export default function DictionariesSettingsSection() {
             </span>
           </div>
         )}
-        {query.isError ? (
+        {!user ? <SettingsEmptyState>{_('dictionary.accountRequired')}</SettingsEmptyState> : query.isError ? (
           <QueryErrorState isRetrying={query.isFetching} onRetry={query.refetch} />
         ) : query.isPending && !query.data ? (
           <div className="space-y-3 py-1">
@@ -225,7 +239,7 @@ export default function DictionariesSettingsSection() {
           </DndContext>
         )}
       </SettingsCard>
-      {editingItem && (
+      {user && ownsState && editingItem && (
         <DictionaryEditor
           item={editingItem}
           isOwner={isOwner}
@@ -234,6 +248,7 @@ export default function DictionariesSettingsSection() {
           onSave={async ({ name, scope }) => {
             try {
               await mutation.mutateAsync({ kind: 'update', id: editingItem.id, name, scope })
+              if (useAuthStore.getState().user?.id !== user.id) return
               setEditingItem(null)
               notify.success({ key: 'dictionary.saved' })
             } catch (error) {
@@ -242,7 +257,7 @@ export default function DictionariesSettingsSection() {
           }}
         />
       )}
-      {deleting && (
+      {user && ownsState && deleting && (
         <ConfirmDialog
           title={_('settings.confirmDeleteTitle')}
           message={_('dictionary.deleteConfirm', { name: deleting.name })}
@@ -255,6 +270,7 @@ export default function DictionariesSettingsSection() {
           onConfirm={async () => {
             try {
               await mutation.mutateAsync({ kind: 'delete', id: deleting.id })
+              if (useAuthStore.getState().user?.id !== user.id) return
               setDeleting(null)
               notify.success({ key: 'dictionary.deleted' })
             } catch (error) {

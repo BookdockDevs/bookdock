@@ -9,9 +9,12 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { buildAnnotationCopyText } from '@/features/reader/lib/annotation-text'
+import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
 import type { ReaderReturn } from '@/features/reader/reader-return'
 
 import { useIdeaAction, useIdeaDiscussion } from '../hooks/useIdeas'
+import { useAnnotations } from '../hooks/useAnnotations'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 import IdeaDetailCard from './IdeaDetailCard'
 import IdeaDiscussionPanel from './IdeaDiscussionPanel'
 
@@ -39,62 +42,69 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
   const _ = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const local = useLocalReader()
+  const annotations = useAnnotations(bookVersionId, { enabled: !!local })
   const discussion = useIdeaDiscussion(ideaId, bookVersionId)
+  const source = local ? annotations : discussion
   const likeAction = useIdeaAction(ideaId, bookVersionId)
   const modalVariant = theme === 'reader' ? 'reader' : 'default'
-  if (discussion.isPending) {
+  if (source.isPending) {
     return (
       <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant} size="xl" centered hideHeader contentClassName="!flex-none !overflow-hidden !p-0">
         <div className="p-4"><div role="status" className="h-48 animate-pulse rounded-xl bg-stone-500/10" /></div>
       </Modal>
     )
   }
-  if (discussion.isError || !discussion.data) {
+  if (source.isError || !source.data) {
     return (
       <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant} size="xl" centered hideHeader contentClassName="!flex-none !overflow-hidden !p-0">
-        <div className="p-4"><QueryErrorState isRetrying={discussion.isFetching} onRetry={() => void discussion.refetch()} /></div>
+        <div className="p-4"><QueryErrorState isRetrying={source.isFetching} onRetry={() => void source.refetch()} /></div>
       </Modal>
     )
   }
-  const idea = discussion.data.data.idea
-  const entry: IdeaEntry = {
-    annotation: idea.annotation,
-    authorId: idea.author.id,
-    authorName: idea.author.name,
-    authorAvatarKey: idea.author.avatarKey,
-    own: idea.own,
-    canDelete: idea.canDelete,
-    liked: idea.liked,
-    likeCount: idea.likeCount,
-    commentCount: idea.commentCount,
-    locationAvailable: sourceAvailable && idea.locationAvailable !== false,
+  const idea = discussion.data?.data.idea
+  const annotation = local ? annotations.data?.data.find((item) => item.id === ideaId && item.type === 'note') : idea?.annotation
+  if (!annotation) return (
+    <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant}>
+      <QueryErrorState isRetrying={source.isFetching} onRetry={() => void source.refetch()} />
+    </Modal>
+  )
+  const entry: IdeaEntry = local ? {
+    annotation, own: true, locationAvailable: sourceAvailable && annotation.locationAvailable !== false,
+  } : {
+    annotation, authorId: idea!.author.id, authorName: idea!.author.name,
+    authorAvatarKey: idea!.author.avatarKey, own: idea!.own, canDelete: idea!.canDelete,
+    liked: idea!.liked, likeCount: idea!.likeCount, commentCount: idea!.commentCount,
+    locationAvailable: sourceAvailable && idea!.locationAvailable !== false,
   }
-  const jumpHref = sourceAvailable && idea.locationAvailable !== false
-    ? `/books/${encodeURIComponent(bookVersionId)}?annotation=${encodeURIComponent(idea.annotation.id)}`
-    : null
+  const jumpHref = entry.locationAvailable ? `/books/${encodeURIComponent(bookVersionId)}?annotation=${encodeURIComponent(annotation.id)}` : null
+  const jumpTarget = catalogBookTarget({ id: bookVersionId, ref: local?.ref, sourceUnavailable: false })
   return (
     <Modal title={title} onClose={onClose} closeLabel={_('library.close')} variant={modalVariant} size="xl" centered hideHeader contentClassName="!flex-none !overflow-hidden !p-0">
       <div className="flex min-h-0 max-h-[calc(100dvh-2rem)] flex-col overflow-hidden">
         <IdeaDetailCard
           detail={entry}
-          liked={idea.liked}
+          liked={entry.liked}
+          privateNote={!!local}
           theme={theme}
           surface
           onBack={onClose}
           onJump={jumpHref ? () => {
             onBeforeReaderNavigate?.()
-            if (readerReturn) {
-              void navigate({ to: '/books/$id', params: { id: bookVersionId }, search: { annotation: idea.annotation.id }, state: (previous) => ({ ...previous, readerReturn }) })
+            if (local) {
+              void navigate({ to: jumpTarget.to, params: jumpTarget.params, search: { annotation: annotation.id } })
+            } else if (readerReturn) {
+              void navigate({ to: jumpTarget.to, params: jumpTarget.params, search: { annotation: annotation.id }, state: (previous) => ({ ...previous, readerReturn }) })
             } else {
               window.location.assign(jumpHref)
             }
           } : undefined}
-          onToggleLike={() => likeAction.mutate({ type: 'like', liked: !idea.liked }, {
+          onToggleLike={local ? undefined : () => likeAction.mutate({ type: 'like', liked: !entry.liked }, {
             onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['archive'] }),
             onError: (error) => notify.error(getUserErrorNotification(error, 'comment.actionFailed')),
           })}
           onCopy={() => {
-            const text = buildAnnotationCopyText(idea.annotation, _('reader.bookmark'))
+            const text = buildAnnotationCopyText(annotation, _('reader.bookmark'))
             if (!text) return
             void navigator.clipboard.writeText(text).then(
               () => notify.success({ key: 'reader.copied' }),
@@ -105,8 +115,8 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
           onEdit={onEdit}
           onDelete={onDelete}
         >
-          <IdeaDiscussionPanel
-            ideaId={idea.annotation.id}
+          {!local && idea && <IdeaDiscussionPanel
+            ideaId={annotation.id}
             bookId={bookVersionId}
             detailLayout
             theme={theme}
@@ -114,9 +124,9 @@ export default function IdeaDetailModal({ ideaId, bookVersionId, title, onClose,
             initialLikeCount={idea.likeCount}
             initialTab={initialTab}
             focusCommentId={focusCommentId}
-            createdAt={idea.annotation.createdAt}
-            editedAt={idea.annotation.editedAt}
-          />
+            createdAt={annotation.createdAt}
+            editedAt={annotation.editedAt}
+          />}
         </IdeaDetailCard>
       </div>
     </Modal>

@@ -21,6 +21,7 @@ import { useReaderState } from '../state/reader-state'
 import AnnotationExportDialog from './AnnotationExportDialog'
 import AnnotationInlineEditor from './AnnotationInlineEditor'
 import { useIdeaComposer } from '../hooks/useIdeas'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 import { annotationHex } from './annotation-colors'
 import { ClampedText, HighlightQuote } from './annotation-render'
 import { BookmarkIcon, BulbIcon, CheckIcon, CloseIcon, CopyIcon, DocumentExportIcon, PencilIcon, SelectionIcon, ShareIcon, TrashIcon } from './annotation-icons'
@@ -78,10 +79,12 @@ export const NotesPanel = memo(function NotesPanel({
   // navigate instead of silently landing nowhere
   const orphanedKeys = useReaderState((s) => s.orphanedAnnotationKeys)
   const user = useAuthStore((s) => s.user)
+  const local = useLocalReader()
   const composer = useIdeaComposer(bookId, !!user)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const editingVersion = useRef<number | undefined>(undefined)
   const [editError, setEditError] = useState<string | null>(null)
   const saveLock = useRef(false)
   const [internalSelectedIds, setInternalSelectedIds] = useState<Set<string>>(new Set())
@@ -267,6 +270,7 @@ export const NotesPanel = memo(function NotesPanel({
     setEditError(null)
     updateAnnotation.mutate({
       id: item.id,
+      expectedVersion: editingVersion.current,
       body: item.type === 'bookmark' ? { text: value } : { note: value, visibility, ...files },
     }, {
       onSuccess: () => { saveLock.current = false; setEditingId(null) },
@@ -275,6 +279,7 @@ export const NotesPanel = memo(function NotesPanel({
   }
 
   function startEdit(id: string) {
+    editingVersion.current = items.find((item) => item.id === id)?.clientVersion
     if (saveLock.current || updateAnnotation.isPending) return
     setEditError(null)
     setEditingId(id)
@@ -282,7 +287,7 @@ export const NotesPanel = memo(function NotesPanel({
 
   function deleteItem(item: AnnotationRes, confirmed = false) {
     if (item.type === 'note' && !confirmed) { setNoteDeleteTarget(item); return }
-    deleteAnnotation.mutate(item.id, {
+    deleteAnnotation.mutate(item.clientVersion !== undefined ? { id: item.id, clientVersion: item.clientVersion } : item.id, {
       onSuccess: (result) => {
         setNoteDeleteTarget(null)
         notify.success(
@@ -336,7 +341,7 @@ export const NotesPanel = memo(function NotesPanel({
             placeholder={a.type === 'bookmark' ? _('annotation.renamePlaceholder') : _('annotation.notePlaceholder')}
             allowEmpty={a.type === 'bookmark'}
             onSave={(value, visibility, files) => saveEdit(a, value, visibility, files)}
-            bookVersionId={a.type === 'note' ? bookId : undefined}
+            bookVersionId={!local && a.type === 'note' ? bookId : undefined}
             targetId={a.type === 'note' ? a.id : undefined}
             initialImages={a.images}
             initialVisibility={a.visibility ?? 'private'}
@@ -452,7 +457,7 @@ export const NotesPanel = memo(function NotesPanel({
                     <div className="ml-[1.875rem] min-w-0">
                       <ContentImages images={a.images} />
                     </div>
-                    {!selectionMode && (
+                    {!selectionMode && (!local || local.sourceAvailable) && (
                       <button
                         type="button"
                         onClick={() => openIdeaDetail(a)}

@@ -173,7 +173,7 @@ function ReaderToggle({ label, hint, checked, onChange }: ReaderToggleProps) {
 
 export default function TtsPanel({ onStart }: { onStart?: () => void }) {
   const _ = useTranslation()
-  const { controller, state } = useTtsSession()
+  const { controller, state, unavailableReason } = useTtsSession()
   const { renderer } = useReaderApi()
   const selection = useReaderState((s) => s.selection)
   const setSelection = useReaderState((s) => s.setSelection)
@@ -196,8 +196,8 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
   const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
   const active = state.status === 'playing' || state.status === 'starting' || state.status === 'paused'
-  const selectedEngine = ttsEngine === 'service' && ttsServiceId && services.some((service) => service.id === ttsServiceId)
-    ? `service:${ttsServiceId}`
+  const selectedEngine = ttsEngine === 'service'
+    ? `service:${ttsServiceId ?? ''}`
     : ttsEngine === 'edge' ? 'edge' : 'system'
   const currentTheme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [customThemes, readingThemeId])
   const sliderVars = useMemo(() => ({
@@ -239,13 +239,13 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
       void controller?.resume()
       return
     }
-    if (!controller) return
+    if (!controller || unavailableReason) return
     onStart?.()
     void controller.start()
   }
 
   function startFromChapter() {
-    if (!controller) return
+    if (!controller || unavailableReason) return
     setMenuOpen(false)
     onStart?.()
     void controller.startFromChapter()
@@ -253,7 +253,7 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
 
   function startFromSelection() {
     const cfiRange = selection?.cfiRange
-    if (!cfiRange || !controller) return
+    if (!cfiRange || !controller || unavailableReason) return
     setMenuOpen(false)
     renderer?.clearSelection()
     setSelection(null)
@@ -268,7 +268,7 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
           <button
             type="button"
             onClick={handlePrimaryAction}
-            disabled={!controller}
+            disabled={!controller || Boolean(unavailableReason)}
             className="flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-l-lg bg-[var(--bd-read-text)] px-3 text-sm font-medium text-[var(--bd-read-bg)] transition-opacity disabled:opacity-50"
           >
             {state.status === 'playing' || state.status === 'starting' ? <PauseIcon /> : <PlayIcon />}
@@ -329,6 +329,7 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
       </div>
 
       <div className="flex flex-col gap-4 p-4">
+        {unavailableReason && <p role="status" className="text-xs text-[var(--bd-read-sub)]">{_(`reader.ttsUnavailable.${unavailableReason}`)}</p>}
         {servicesQuery.isError && (
           <QueryErrorState className="py-2" isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} />
         )}
@@ -340,6 +341,7 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
           options={[
             { value: 'system', label: _('reader.ttsSystem') },
             { value: 'edge', label: 'Edge TTS' },
+            ...(ttsEngine === 'service' && !services.some((service) => service.id === ttsServiceId) ? [{ value: selectedEngine, label: _('reader.ttsUnavailable.service') }] : []),
             ...services.map((service) => ({ value: `service:${service.id}`, label: service.name })),
           ]}
         />
@@ -392,7 +394,7 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
 
         <div className="-mt-6 flex justify-end">
           <Link
-            to="/settings"
+            to={"/settings"}
             search={{ section: 'reading', focus: 'tts' }}
             className="text-xs text-[var(--bd-read-sub)] underline underline-offset-2 transition-colors hover:text-current"
           >

@@ -1,3 +1,5 @@
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
+import type { SettingsSearch } from '@/routes/settings'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
@@ -8,6 +10,7 @@ import { useLibraries } from '@/features/library/hooks'
 
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import DefaultAddDestinationRow from './components/DefaultAddDestinationRow'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
 import { cn } from '@/lib/utils'
@@ -39,6 +42,7 @@ type SectionId = 'general' | 'reading' | 'library' | 'integrations' | 'about' | 
 
 export default function Settings() {
   const _ = useTranslation()
+  const local = useLocalCatalog()
   const onBack = useBackNavigation('/')
   const user = useAuthStore((s) => s.user)
   const isOwner = user?.role === 'owner'
@@ -50,16 +54,19 @@ export default function Settings() {
     isError: isLibrariesError,
     isFetching: isLibrariesFetching,
     refetch: refetchLibraries,
-  } = useLibraries()
-  const { data: instanceData } = useInstanceInfo()
+  } = useLibraries({ enabled: Boolean(user) })
+  const { data: instanceData } = useInstanceInfo({ enabled: !local })
   const userUploadAllowed = instanceData?.data.allowUserUpload !== false
+  // Unified shelf: anonymous visitors with vault access still get the
+  // device-level library preferences on the common settings surface.
+  const guestVaultAccess = instanceData?.data.allowGuestAccess === true
   const showWebDav = !isGuest && (isOwner || userUploadAllowed)
   const hasManageableLibraries = (userLibrariesData?.data ?? []).some(
     (lib) => lib.type === 'shared' && (lib.relation === 'owner' || lib.relation === 'admin'),
   )
-  const canAccessAdmin = isOwner || hasManageableLibraries
-  const search = useSearch({ from: '/settings' })
-  const navigate = useNavigate({ from: '/settings' })
+  const canAccessAdmin = !local && (isOwner || hasManageableLibraries)
+  const search = useSearch({ strict: false }) as SettingsSearch
+  const navigate = useNavigate()
   const active = search.section ?? 'general'
   const activeSectionLabel = active === 'general'
     ? _('settings.general')
@@ -113,7 +120,8 @@ export default function Settings() {
 
   const handleSectionChange = (id: SectionId) => {
     void navigate({
-      search: (prev) => ({ ...prev, section: id, focus: undefined }),
+      to: '/settings',
+      search: { ...search, section: id, focus: undefined },
       state: (prev) => prev,
       replace: true,
       resetScroll: false,
@@ -286,7 +294,7 @@ export default function Settings() {
                   </span>
                 </div>
                 <LanguageSwitcher />
-                {!isGuest && (
+                {(local || !isGuest || guestVaultAccess) && (
                   <>
                     <div className="border-t border-stone-100 dark:border-stone-800" />
                     <div className="pt-2.5 pb-1">
@@ -314,12 +322,14 @@ export default function Settings() {
               <AiSettingsSection id="ai-settings" />
               <FontsSettingsSection />
               {!isGuest && <DictionariesSettingsSection />}
-              {!isGuest && <ReplacementsSettingsSection />}
+              {(local || !isGuest || guestVaultAccess) && <ReplacementsSettingsSection />}
             </div>
           )}
           {visitedSections.has('library') && (
             <div className={active === 'library' ? 'flex flex-col gap-6' : 'hidden'}>
-              {isGuest ? (
+              {local || (isGuest && guestVaultAccess) ? (
+                <><SettingsCard icon={<LibraryShelfIcon />} title={_('settings.groupLibrary')}><LibraryPreferenceRows /></SettingsCard></>
+              ) : isGuest ? (
                 <GuestFeatureGateSection
                   title={_('settings.guestLibraryTitle')}
                   description={_('settings.guestLibraryDesc')}
@@ -334,6 +344,8 @@ export default function Settings() {
                     title={_('settings.upload')}
                   >
                     <TitleSettingsRow />
+                    <div className="border-t border-stone-100 dark:border-stone-800" />
+                    <DefaultAddDestinationRow serverUploadDisabled={!isOwner && !userUploadAllowed} />
                     {isOwner && <UploadSettingsSection />}
                   </SettingsCard>
                   <TrashSettingsRow />
@@ -374,7 +386,8 @@ export default function Settings() {
                 lockTab={!isOwner ? 'library' : undefined}
                 onContextChange={(userTab, libraryId) => {
                   void navigate({
-                    search: (prev) => ({ ...prev, userTab, libraryId }),
+                    to: '/settings',
+                    search: { ...search, userTab, libraryId },
                     state: (prev) => prev,
                     replace: true,
                     resetScroll: false,
@@ -410,10 +423,11 @@ interface GuestFeatureGateSectionProps {
 }
 
 function GuestFeatureGateSection({ title, description, icon }: GuestFeatureGateSectionProps) {
+  const local = useLocalCatalog()
   const _ = useTranslation()
   const navigate = useNavigate()
-  const { data: instanceData } = useInstanceInfo()
-  const isUninitialized = !instanceData?.data?.initialized
+  const { data: instanceData } = useInstanceInfo({ enabled: !local })
+  const isUninitialized = local ? false : !instanceData?.data?.initialized
 
   return (
     <section className="flex flex-col items-center justify-center rounded-2xl border border-stone-200 bg-white p-8 text-center shadow-sm sm:p-12 dark:border-stone-800 dark:bg-stone-900">

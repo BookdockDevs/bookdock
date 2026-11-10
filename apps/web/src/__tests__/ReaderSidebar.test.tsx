@@ -5,6 +5,7 @@ import { forwardRef, useImperativeHandle } from 'react'
 import { useReaderState } from '../features/reader/state/reader-state'
 import { useUiStore } from '../stores/ui.store'
 import { ReaderSidebar } from '../features/reader/components/ReaderSidebar'
+import { LocalReaderContext, type LocalReaderSession } from '../features/reading-data/reader-source-context'
 
 const saveScrollMock = vi.hoisted(() => vi.fn())
 
@@ -319,3 +320,22 @@ describe('ReaderSidebar on pointer devices', () => {
   })
 })
 
+
+
+describe('source-aware statistics entry', () => {
+  it('opens the existing statistics tab for local reading', async () => {
+    coarsePointer = false
+    const onStatsTabOpen = vi.fn()
+    const local = { ref: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'b1' }, bookId: 'b1', namespace: 'local:device:b1' } as LocalReaderSession
+    render(<LocalReaderContext.Provider value={local}><ReaderSidebar bookId="b1" onStatsTabOpen={onStatsTabOpen} chromePinned guestReadOnly={false} /></LocalReaderContext.Provider>)
+    fireEvent.click(screen.getAllByTitle('数据')[0])
+    expect(useReaderState.getState().activeNavTab).toBe('stats')
+    expect(useReaderState.getState().sidebarOpen).toBe(true)
+    await waitFor(() => expect(onStatsTabOpen).toHaveBeenCalledTimes(1))
+  })
+  it('retains the remote guest restriction on private statistics', () => {
+    coarsePointer = false
+    render(<ReaderSidebar bookId="b1" onStatsTabOpen={vi.fn()} chromePinned guestReadOnly />)
+    expect(screen.queryByTitle('数据')).not.toBeInTheDocument()
+  })
+})

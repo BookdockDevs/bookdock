@@ -4,6 +4,7 @@ import type { ReadingRange } from '@bookdock/shared'
 
 import { useBookReadingRecords } from '@/api/hooks/reading-records'
 import { useBook } from '@/features/library/hooks'
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { formatDuration } from '@/lib/format-duration'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
@@ -15,8 +16,9 @@ interface BookStatsMicroCardProps {
 
 export default function BookStatsMicroCard({ bookVersionId, range }: BookStatsMicroCardProps) {
   const _ = useTranslation()
+  const local = useLocalReader()
   const recordsQuery = useBookReadingRecords(bookVersionId, { range })
-  const bookQuery = useBook(bookVersionId)
+  const bookQuery = useBook(bookVersionId, local?.ref ?? null)
 
   const book = bookQuery.data?.data
   const records = recordsQuery.data?.data

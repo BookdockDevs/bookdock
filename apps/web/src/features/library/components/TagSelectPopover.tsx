@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import type { Tag } from '@bookdock/shared'
+import type { ClientTaxonomyView } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { useCreateTag } from '../hooks'
 
 interface TagSelectPopoverProps {
-  tags: Tag[]
+  tags: ClientTaxonomyView[]
   selectedTagIds: Set<string>
   onToggleTag: (tagId: string) => void
   onAddTag: (tagId: string) => void
@@ -196,7 +196,7 @@ export default function TagSelectPopover({
             </button>
           )}
 
-          {/* Tag Items List (Checkable rows, stays open on click) */}
+          {/* ClientTaxonomyView Items List (Checkable rows, stays open on click) */}
           <div className="space-y-0.5">
             {filteredTags.map((tag) => {
               const isChecked = selectedTagIds.has(tag.id)

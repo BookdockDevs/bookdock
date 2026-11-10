@@ -1,7 +1,8 @@
+import { localLibraryRepository } from '@/features/local-library/repository'
 import { useEffect, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 
-import type { BookFormat } from '@bookdock/shared'
+import { clientScopeKey, type BookFormat, type ClientBookRef } from '@bookdock/shared'
 
 import { apiGet } from '@/api/client'
 import { Button } from '@/components/ui/Button'
@@ -10,9 +11,12 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage } from '@/lib/error-message'
 import { useAuthStore } from '@/stores/auth.store'
 
+import { isDeviceBook } from '@/features/reading-data/book-source'
+
 import { createBooksArchive, deliverBlob, prepareBookFile, type BookDownloadRequest, type PreparedBookFile } from '../download'
 
 interface DownloadBookTarget {
+  ref?: ClientBookRef
   id: string
   title: string
   format: BookFormat
@@ -21,12 +25,12 @@ interface DownloadBookTarget {
 
 interface DownloadDialogProps {
   books: DownloadBookTarget[]
-  userId: string
+  userId: string | null
   onClose: () => void
 }
 
 type DownloadChoice = { format: 'keep' | 'epub' | 'txt'; edited: boolean }
-type ReplacementResponse = { data: Array<{ enabled: boolean; effectiveEnabled?: boolean }> }
+type ReplacementResponse = { data: Array<{ enabled: boolean; effectiveEnabled?: boolean; locationAvailable?: boolean }> }
 
 function savedChoice(userId: string, batch: boolean): DownloadChoice {
   try {
@@ -42,17 +46,27 @@ function savedChoice(userId: string, batch: boolean): DownloadChoice {
 
 export default function DownloadDialog({ books, userId, onClose }: DownloadDialogProps) {
   const _ = useTranslation()
+  const local = books.every((book) => isDeviceBook(book.ref))
+  const preferenceOwner = local ? JSON.stringify(clientScopeKey(books[0].ref!.scope)) : userId!
   const batch = books.length > 1
-  const preferenceKey = batch ? `bd-download-choice:batch:${userId}` : `bd-download-choice:${userId}`
-  const [choice, setChoice] = useState<DownloadChoice>(() => savedChoice(userId, batch))
+  const preferenceKey = batch ? `bd-download-choice:batch:${preferenceOwner}` : `bd-download-choice:${preferenceOwner}`
+  const [choice, setChoice] = useState<DownloadChoice>(() => savedChoice(preferenceOwner, batch))
   const ruleQueries = useQueries({
     queries: books.map((book) => ({
-      queryKey: ['replacements', 'book', book.id],
-      queryFn: () => apiGet<ReplacementResponse>(`/replacements?bookId=${book.id}`),
+      // A mixed batch asks each book's own authority, so the key is per book
+      // too: a device book's rules must not land in a server cache entry.
+      queryKey: isDeviceBook(book.ref)
+        ? ['client-replacements', book.ref.scope.vaultId, 'book', book.id]
+        : ['replacements', 'book', book.id],
+      queryFn: () => {
+        if (isDeviceBook(book.ref)) return localLibraryRepository.readReplacements(book.ref.scope.vaultId, book.ref.bookId)
+        return apiGet<ReplacementResponse>(`/replacements?bookId=${book.id}`)
+      },
+      networkMode: isDeviceBook(book.ref) ? 'always' as const : 'online' as const,
     })),
   })
   const rulesFailed = ruleQueries.some((query) => query.isError)
-  const hasRules = ruleQueries.map((query) => (query.data?.data ?? []).some((rule) => rule.effectiveEnabled ?? rule.enabled))
+  const hasRules = ruleQueries.map((query) => (query.data?.data ?? []).some((rule) => rule.locationAvailable !== false && (rule.effectiveEnabled ?? rule.enabled)))
   const effectiveFormat = (book: DownloadBookTarget) => choice.format === 'keep' ? book.format : choice.format
   const requiresRuleLookup = (book: DownloadBookTarget) => book.format === 'txt' || effectiveFormat(book) === 'txt'
   const supportsEdited = books.some((book, index) => hasRules[index] && (book.format === 'txt' || effectiveFormat(book) === 'txt'))
@@ -82,6 +96,7 @@ export default function DownloadDialog({ books, userId, onClose }: DownloadDialo
   }
 
   function currentUser() {
+    if (local) return true
     return userAtStart.current === userId && useAuthStore.getState().user?.id === userId
   }
 
@@ -135,6 +150,7 @@ export default function DownloadDialog({ books, userId, onClose }: DownloadDialo
         }
         try {
           const request: BookDownloadRequest = {
+            ref: book.ref,
             id: book.id,
             title: book.title,
             sourceFormat: book.format,

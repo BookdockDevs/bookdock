@@ -6,7 +6,7 @@ import type { BookListItem } from '@bookdock/shared'
 
 import i18n from '../i18n/i18n'
 import RecentlyRead from '../features/library/components/RecentlyRead'
-import { useBooks } from '../features/library/hooks'
+import { useBooks, useUnifiedBooks } from '../features/library/hooks'
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
@@ -14,6 +14,8 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('../features/library/hooks', () => ({
   useBooks: vi.fn(),
+  // Without a catalog context the component consumes the unified query.
+  useUnifiedBooks: vi.fn(),
 }))
 
 // jsdom lacks ResizeObserver (used by the scroll-state effect)
@@ -54,7 +56,7 @@ function mockScrollable(scrollable: boolean) {
 
 beforeEach(async () => {
   localStorage.clear()
-  vi.mocked(useBooks).mockReturnValue({ data: { data: books, total: 2, page: 1, pageSize: 30 }, isLoading: false } as ReturnType<typeof useBooks>)
+  vi.mocked(useUnifiedBooks).mockReturnValue({ data: { data: books, total: 2, page: 1, pageSize: 30 }, isLoading: false } as ReturnType<typeof useBooks>)
   await i18n.changeLanguage('zh-CN')
 })
 
@@ -65,7 +67,7 @@ afterEach(() => {
 
 describe('RecentlyRead covers style', () => {
   it('reserves a local skeleton while the first request is pending', () => {
-    vi.mocked(useBooks).mockReturnValue({ data: undefined, isLoading: true, isError: false } as ReturnType<typeof useBooks>)
+    vi.mocked(useUnifiedBooks).mockReturnValue({ data: undefined, isLoading: true, isError: false } as ReturnType<typeof useBooks>)
     render(<RecentlyRead style="covers" />)
 
     expect(screen.getByRole('heading', { name: '最近阅读' }).parentElement).toHaveAttribute('aria-busy', 'true')
@@ -74,7 +76,7 @@ describe('RecentlyRead covers style', () => {
 
   it('shows a retry state after an initial failure', () => {
     const refetch = vi.fn()
-    vi.mocked(useBooks).mockReturnValue({ data: undefined, isLoading: false, isError: true, isFetching: false, refetch } as ReturnType<typeof useBooks>)
+    vi.mocked(useUnifiedBooks).mockReturnValue({ data: undefined, isLoading: false, isError: true, isFetching: false, refetch } as ReturnType<typeof useBooks>)
     render(<RecentlyRead style="cards" />)
 
     screen.getByRole('button', { name: '重试' }).click()

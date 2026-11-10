@@ -6,6 +6,7 @@ import IdeaImageEditor, { type IdeaImageEditorHandle } from '@/features/content-
 import { ImageIcon } from '@/features/content-files/components/ContentUpload'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 
@@ -43,6 +44,8 @@ interface NoteEditorPopupProps {
 }
 
 export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, onClose, initialVisibility = 'private', visibilityEligible, sourceReadable = false, onSaveVisibility, bookVersionId, targetId, initialImages }: NoteEditorPopupProps) {
+  const local = useLocalReader()
+  const imagesEnabled = Boolean(local || bookVersionId)
   const _ = useTranslation()
   const readingMode = useUiStore((s) => s.readingMode)
   const [draft, setDraft] = useState(initialNote)
@@ -127,7 +130,7 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
   const bounds = { left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) }
   const size = {
     width: Math.max(1, Math.min(EDITOR_WIDTH, bounds.width - VIEWPORT_MARGIN * 2)),
-    height: Math.min(bookVersionId ? 520 : 380, Math.max(bookVersionId ? 240 : 200, contentHeight + 112)),
+    height: Math.min(imagesEnabled ? 520 : 380, Math.max(imagesEnabled ? 240 : 200, contentHeight + 112)),
   }
   const liveGeometry: SelectionGeometry = {
     rects: geometry?.rects ?? (rect ? [rect] : []), bounds,
@@ -186,7 +189,7 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
           : 'bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-500 cursor-not-allowed opacity-60',
       )}
     >
-      {_('annotation.publish')}
+      {_(local ? 'annotation.save' : 'annotation.publish')}
     </button>
   )
 
@@ -226,12 +229,12 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-3">
           {textarea}
-          {bookVersionId && <IdeaImageEditor ref={imageEditorRef} bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} showToolbar={false} onCountChange={setImageCount} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
+          {imagesEnabled && <IdeaImageEditor ref={imageEditorRef} bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} showToolbar={false} onCountChange={setImageCount} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--bd-read-accent)]/25 px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-3">
             {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable} disabled={saving} />}
-            {bookVersionId && (
+            {imagesEnabled && (
               <div className="flex items-center gap-1 text-xs text-[var(--bd-read-sub)]">
                 <button
                   type="button"

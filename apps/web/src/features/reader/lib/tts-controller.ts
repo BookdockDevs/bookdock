@@ -167,11 +167,12 @@ export class TtsController {
   }
 
   async start(startCfi?: string) {
+    const generation = this.generation
     void this.client.unlock?.()
     const claim = this.activation ? await this.activation() : undefined
-    if (claim && (!claim.accepted || !claim.isCurrent())) return
+    if (generation !== this.generation || (claim && (!claim.accepted || !claim.isCurrent()))) return
     const segment = await this.renderer.getTtsSegment(startCfi)
-    if (claim && !claim.isCurrent()) return
+    if (generation !== this.generation || (claim && !claim.isCurrent())) return
     if (!segment) {
       this.state = { ...this.state, status: 'error', error: '当前正文没有可朗读内容' }
       this.emit()
@@ -181,11 +182,12 @@ export class TtsController {
   }
 
   async startFromChapter() {
+    const generation = this.generation
     void this.client.unlock?.()
     const claim = this.activation ? await this.activation() : undefined
-    if (claim && (!claim.accepted || !claim.isCurrent())) return
+    if (generation !== this.generation || (claim && (!claim.accepted || !claim.isCurrent()))) return
     const segment = await this.renderer.getTtsChapterStartSegment()
-    if (claim && !claim.isCurrent()) return
+    if (generation !== this.generation || (claim && !claim.isCurrent())) return
     if (!segment) {
       this.state = { ...this.state, status: 'error', error: '当前章节没有可朗读内容' }
       this.emit()

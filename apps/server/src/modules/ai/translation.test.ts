@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { translationRequestSchema, type TranslationRequest } from '@bookdock/shared'
+import { selectedTextTranslationRequestSchema, translationRequestSchema, type TranslationRequest } from '@bookdock/shared'
 
 vi.mock('../../config', () => ({ config: {
   aiBaseUrl: 'https://ai.example.test/v1', aiApiKey: 'secret', aiModel: 'test-model', aiProvider: 'openai',
@@ -13,7 +13,7 @@ vi.mock('../books/books.service', () => ({ getActiveBook: vi.fn().mockResolvedVa
 import { config } from '../../config'
 import { AppError, errorHandler } from '../../middleware/error'
 import { getActiveBook } from '../books/books.service'
-import { translateAiSelection } from './ai.service'
+import { translateAiSelectedText, translateAiSelection } from './ai.service'
 import translationRoutes from './translation.routes'
 
 const input: TranslationRequest = { bookId: 'book', text: 'Hello\nworld', targetLang: 'zh-Hans', channel: { kind: 'ai', profileId: null, model: null } }
@@ -37,6 +37,7 @@ function app(guest = false) {
 
 describe('selection translation', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(upstream()))
     vi.mocked(getActiveBook).mockResolvedValue({ id: 'book' } as never)
   })
@@ -115,5 +116,46 @@ describe('selection translation', () => {
     expect(text).toContain('"type":"delta"')
     expect(text).toContain('"type":"error"')
     expect(text).not.toContain('"type":"done"')
+  })
+
+  it('translates bounded explicit text without a book read or any context capability', async () => {
+    const { bookId: _bookId, ...selection } = input
+    vi.mocked(getActiveBook).mockRejectedValue(new AppError('BOOK_NOT_FOUND'))
+    const response = await app().request('/api/v1/translation/selected-text', { method: 'POST', body: JSON.stringify(selection) })
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(await response.text()).toContain('"type":"done"')
+    expect(getActiveBook).not.toHaveBeenCalled()
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0]![1]!.body as string)
+    expect(body.messages).toHaveLength(2)
+    expect(body.messages[1]).toEqual({ role: 'user', content: selection.text })
+    expect(body.tools).toBeUndefined()
+  })
+
+  it('rejects guest, server identities, extra context and oversized local utility input', async () => {
+    const { bookId: _bookId, ...selection } = input
+    expect((await app(true).request('/api/v1/translation/selected-text', { method: 'POST', body: JSON.stringify(selection) })).status).toBe(401)
+    for (const body of [input, { ...selection, context: 'surroundings' }, { ...selection, text: 'x'.repeat(6001) }, { ...selection, text: ' ' }]) {
+      expect((await app().request('/api/v1/translation/selected-text', { method: 'POST', body: JSON.stringify(body) })).status).toBe(400)
+      expect(selectedTextTranslationRequestSchema.safeParse(body).success).toBe(false)
+    }
+    await expect(translateAiSelectedText('guest', 'guest', selection, new AbortController().signal, vi.fn())).rejects.toMatchObject({ code: 'AI_NOT_ALLOWED' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('retains account profile validation and shares the remote translation concurrency slot', async () => {
+    const { bookId: _bookId, ...selection } = input
+    await expect(translateAiSelectedText('local-profile', 'member', { ...selection, channel: { ...selection.channel, profileId: 'foreign-profile' } }, new AbortController().signal, vi.fn())).rejects.toMatchObject({ code: 'AI_NOT_CONFIGURED' })
+    vi.mocked(fetch).mockImplementationOnce(async (_url, init) => await new Promise<Response>((_resolve, reject) => {
+      init!.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    }))
+    const controller = new AbortController()
+    const pending = translateAiSelectedText('shared-slot', 'member', selection, controller.signal, vi.fn())
+    const rejection = expect(pending).rejects.toThrow('Aborted')
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    await expect(translateAiSelection('shared-slot', 'member', input, new AbortController().signal, vi.fn())).rejects.toMatchObject({ code: 'AI_BUSY' })
+    controller.abort()
+    await rejection
+    vi.mocked(fetch).mockResolvedValueOnce(upstream())
+    await expect(translateAiSelectedText('shared-slot', 'member', selection, new AbortController().signal, vi.fn())).resolves.toBeUndefined()
   })
 })

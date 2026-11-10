@@ -1,13 +1,17 @@
-import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { ArchiveDataExport, ReadingImportScope } from '@bookdock/shared'
+import type { ArchiveDataExport, ClientReadingLedgerClear, ReadingImportScope } from '@bookdock/shared'
 
+import { deviceCatalogOperations } from '@/features/local-library/catalog'
+import { localRecordId } from '@/features/local-library/id'
+import { getAuthSessionRevision } from '@/stores/auth.store'
 import { apiDelete, apiGet } from '@/api/client'
 import { READING_RECORDS_KEY } from '@/api/hooks/reading-records'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
+import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage } from '@/lib/error-message'
 import { cn } from '@/lib/utils'
@@ -24,6 +28,7 @@ import {
   type ArchiveExportFormat,
 } from '../lib/data-export-file'
 import ImportLocatorDialog from './ImportLocatorDialog'
+import { useLocalArchiveBook } from '../hooks'
 import ReadingImportDialog from './ReadingImportDialog'
 
 interface ReadingDataManagerButtonProps {
@@ -52,9 +57,18 @@ export default function ReadingDataManagerButton({
 }: ReadingDataManagerButtonProps) {
   const _ = useTranslation()
   const queryClient = useQueryClient()
-  const username = useAuthStore((s) => s.user?.username)
+  const presence = useLocalArchiveBook(bookId ?? null)
+  // Device operations follow the selected book, not the route: a device book
+  // opened from the unified archive still clears through the vault.
+  const isLocalBook = presence.data === true
+  const device = useMemo(() => (isLocalBook ? deviceCatalogOperations() : null), [isLocalBook])
+  const account = useAuthStore((state) => state.user)
+  const username = account?.username
   const [modalOpen, setModalOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<ManagerTab>('import')
+  // The vault answers whether the selected book is on this device, so the
+  // opening tab follows that answer until the reader picks one.
+  const [chosenTab, setChosenTab] = useState<ManagerTab | null>(null)
+  const activeTab = chosenTab ?? (device ? 'manage' : 'import')
   const [isImportSubpage, setIsImportSubpage] = useState(false)
   const [importSubpageTitle, setImportSubpageTitle] = useState<string | null>(null)
   const [importBackAction, setImportBackAction] = useState<(() => void) | null>(null)
@@ -73,16 +87,39 @@ export default function ReadingDataManagerButton({
   const [locatorFooter, setLocatorFooter] = useState<React.ReactNode | null>(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [deleteConfirmBusy, setDeleteConfirmBusy] = useState(false)
+  const [clearCommand, setClearCommand] = useState<ClientReadingLedgerClear | null>(null)
+  // The reset below is about the panel's own subpages, so it keys on the book and
+  // the session. The device lookup resolves a moment after mount; folding it in
+  // would look like a scope change and close the panel right after opening it.
+  const scope = JSON.stringify([getAuthSessionRevision(), bookId ?? null])
+  const activeScope = useRef(scope)
+  activeScope.current = scope
+  const [previousScope, setPreviousScope] = useState(scope)
+  if (previousScope !== scope) {
+    setPreviousScope(scope); handleClose(); setDeleteConfirmOpen(false); setDeleteConfirmBusy(false); setClearCommand(null)
+  }
+  const clearPreview = useQuery({
+    queryKey: ['reading-records', device ? `device:${JSON.stringify(device.scope)}` : null, 'clear-preview', bookId],
+    queryFn: async () => {
+      const snapshot = await device!.readReadingSnapshot()
+      const book = snapshot.books.find((book) => book.book.ref.bookId === bookId)
+      if (!book) throw new Error('Local book no longer exists')
+      return book.ledger.version
+    },
+    networkMode: 'always', enabled: Boolean(device && modalOpen && bookId), staleTime: 0,
+  })
+  const deleteTitle = _('readingData.deleteArchive')
 
-  const isSubpage = (activeTab === 'import' && isImportSubpage) || (activeTab === 'manage' && isLocatorSubpage)
 
-  const title = (activeTab === 'import' && importSubpageTitle)
+  const isSubpage = (!device && activeTab === 'import' && isImportSubpage) || (activeTab === 'manage' && isLocatorSubpage)
+
+  const title = (!device && activeTab === 'import' && importSubpageTitle)
     ? importSubpageTitle
     : (activeTab === 'manage' && locatorSubpageTitle)
       ? locatorSubpageTitle
       : _('readingData.archiveManagement', { defaultValue: '阅读档案管理' })
 
-  const headerTitle = (activeTab === 'import' && isImportSubpage && importSubpageTitle) ? (
+  const headerTitle = (!device && activeTab === 'import' && isImportSubpage && importSubpageTitle) ? (
     <div className="flex items-center gap-1.5">
       {importBackAction && (
         <button
@@ -122,27 +159,29 @@ export default function ReadingDataManagerButton({
   }
 
   async function handleExport() {
+    if (device) return
     setExportBusy(true)
     setExportError(null)
     try {
       const params = new URLSearchParams({ scope: exportScope })
       if (bookId) params.set('bookId', bookId)
       const result = await apiGet<{ data: ArchiveDataExport }>(`/archive/data-export?${params}`)
+      if (activeScope.current !== scope) return
       download(
         `${archiveExportFilename({ scope: exportScope, bookTitle, username }, _)}.${archiveExportExtension(exportFormat)}`,
         buildArchiveExportFile(exportFormat, result.data, _),
         archiveExportMime(exportFormat),
       )
     } catch (err) {
-      setExportError(getUserErrorMessage(err, _, 'reader.sessionActionFailed'))
+      if (activeScope.current === scope) setExportError(getUserErrorMessage(err, _, 'reader.sessionActionFailed'))
     } finally {
-      setExportBusy(false)
+      if (activeScope.current === scope) setExportBusy(false)
     }
   }
 
   function handleClose() {
     setModalOpen(false)
-    setActiveTab('import')
+    setChosenTab(null)
     setIsImportSubpage(false)
     setImportSubpageTitle(null)
     setImportBackAction(null)
@@ -172,7 +211,7 @@ export default function ReadingDataManagerButton({
         aria-label={title}
         title={title}
         onClick={() => {
-          setActiveTab('import')
+          setChosenTab(null)
           setModalOpen(true)
         }}
         className={cn(
@@ -210,7 +249,7 @@ export default function ReadingDataManagerButton({
         >
           <div className={cn('flex flex-col gap-4', isSubpage && 'flex-1 min-h-0')}>
             {/* 顶层 Segmented Tabs（选书或结果子页时隐藏，留出完整高度） */}
-            {!isSubpage && (
+            {!device && !isSubpage && (
               <div
                 role="tablist"
                 aria-label={_('readingData.tabsLabel', { defaultValue: '数据管理选项' })}
@@ -221,7 +260,7 @@ export default function ReadingDataManagerButton({
                   type="button"
                   role="tab"
                   aria-selected={activeTab === 'import'}
-                  onClick={() => setActiveTab('import')}
+                  onClick={() => setChosenTab('import')}
                   className={cn(
                     'cursor-pointer rounded-lg py-1.5 text-xs font-semibold transition-all',
                     activeTab === 'import'
@@ -235,7 +274,7 @@ export default function ReadingDataManagerButton({
                   type="button"
                   role="tab"
                   aria-selected={activeTab === 'export'}
-                  onClick={() => setActiveTab('export')}
+                  onClick={() => setChosenTab('export')}
                   className={cn(
                     'cursor-pointer rounded-lg py-1.5 text-xs font-semibold transition-all',
                     activeTab === 'export'
@@ -250,7 +289,7 @@ export default function ReadingDataManagerButton({
                     type="button"
                     role="tab"
                     aria-selected={activeTab === 'manage'}
-                    onClick={() => setActiveTab('manage')}
+                    onClick={() => setChosenTab('manage')}
                     className={cn(
                       'cursor-pointer rounded-lg py-1.5 text-xs font-semibold transition-all',
                       activeTab === 'manage'
@@ -265,7 +304,7 @@ export default function ReadingDataManagerButton({
             )}
 
             {/* TAB 1: 导入数据 */}
-            {activeTab === 'import' && (
+            {!device && activeTab === 'import' && (
               <ReadingImportDialog
                 embedded
                 onClose={handleClose}
@@ -279,7 +318,7 @@ export default function ReadingDataManagerButton({
             )}
 
             {/* TAB 2: 导出数据（方案 B：左右表单行布局） */}
-            {activeTab === 'export' && (
+            {!device && activeTab === 'export' && (
               <div className="flex flex-col gap-4 text-left py-1">
                 <div className="flex flex-col gap-3 rounded-xl border border-stone-200/80 bg-stone-50/40 p-3.5 dark:border-stone-800 dark:bg-stone-900/40">
                   {/* 导出范围行 */}
@@ -373,7 +412,7 @@ export default function ReadingDataManagerButton({
 
             {/* TAB 3: 管理数据（定位检查与删除档案） */}
             {activeTab === 'manage' && bookId && (
-              isLocatorSubpage ? (
+              !device && isLocatorSubpage ? (
                 <ImportLocatorDialog
                   embedded
                   archiveId={bookId}
@@ -392,7 +431,7 @@ export default function ReadingDataManagerButton({
               ) : (
                 <div className="flex flex-col gap-3.5 text-left">
                   {/* 1. 关联书籍卡片 */}
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-stone-200/90 bg-stone-50/40 p-3.5 dark:border-stone-800 dark:bg-stone-900/40">
+                  {!device && <div className="flex items-center justify-between gap-3 rounded-xl border border-stone-200/90 bg-stone-50/40 p-3.5 dark:border-stone-800 dark:bg-stone-900/40">
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-stone-800 dark:text-stone-200">
                         {_('readingImport.locatorTitle', { defaultValue: '关联书籍' })}
@@ -409,26 +448,34 @@ export default function ReadingDataManagerButton({
                     >
                       {_('readingImport.locatorAction', { defaultValue: '关联' })}
                     </Button>
-                  </div>
+                  </div>}
+
+                  {device && clearPreview.isError && <QueryErrorState isRetrying={clearPreview.isFetching} onRetry={() => void clearPreview.refetch()} />}
 
                   {/* 2. 危险操作卡片 */}
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200/60 bg-red-50/20 p-3.5 dark:border-red-950/40 dark:bg-red-950/10">
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-red-600 dark:text-red-400">
-                        {_('readingData.deleteArchive', { defaultValue: '删除本书阅读档案' })}
+                        {deleteTitle}
                       </p>
                       <p className="mt-0.5 text-[11px] leading-relaxed text-stone-500 dark:text-stone-400">
-                        {_('readingData.deleteArchiveDesc', { defaultValue: '永久清除此档案的所有笔记与时长记录。' })}
+                        {_('readingData.deleteArchiveDesc')}
                       </p>
                     </div>
                     <Button
                       size="sm"
                       variant="danger"
-                      disabled={deleteConfirmBusy}
-                      onClick={() => setDeleteConfirmOpen(true)}
+                      disabled={deleteConfirmBusy || Boolean(device && !clearPreview.isSuccess)}
+                      onClick={() => {
+                        if (device) {
+                          if (!bookId || clearPreview.data === undefined) return
+                          setClearCommand({ book: { scope: device.scope, bookId }, expectedVersion: clearPreview.data, requestId: localRecordId() })
+                        }
+                        setDeleteConfirmOpen(true)
+                      }}
                       className="shrink-0 cursor-pointer"
                     >
-                      {_('reader.sessionDelete', { defaultValue: '删除档案' })}
+                      {device ? deleteTitle : _('reader.sessionDelete', { defaultValue: '删除档案' })}
                     </Button>
                   </div>
                 </div>
@@ -441,9 +488,9 @@ export default function ReadingDataManagerButton({
       {/* 删除确认弹窗 */}
       {deleteConfirmOpen && (
         <ConfirmDialog
-          title={_('readingData.deleteArchive')}
+          title={deleteTitle}
           message={_('readingData.deleteArchiveConfirm')}
-          confirmLabel={_('reader.sessionDelete')}
+          confirmLabel={device ? deleteTitle : _('reader.sessionDelete')}
           errorFallback="reader.sessionActionFailed"
           confirmDisabled={deleteConfirmBusy}
           onClose={() => {
@@ -453,7 +500,16 @@ export default function ReadingDataManagerButton({
             if (!bookId) return
             setDeleteConfirmBusy(true)
             try {
+              if (device) {
+                if (!clearCommand) return
+                await device.clearReadingLedger(clearCommand)
+                if (activeScope.current !== scope) return
+                void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.some((part) => typeof part === 'string' && part.startsWith('device:') && part.includes(JSON.stringify(device.scope))) })
+                setDeleteConfirmOpen(false); setClearCommand(null); handleClose()
+                return
+              }
               await apiDelete(`/reading-records/book/${encodeURIComponent(bookId)}/ledger`)
+              if (activeScope.current !== scope) return
               void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
               void queryClient.invalidateQueries({ queryKey: ['archive'] })
               void queryClient.invalidateQueries({ queryKey: ['progress', bookId] })
@@ -461,8 +517,11 @@ export default function ReadingDataManagerButton({
               setDeleteConfirmOpen(false)
               handleClose()
               onBookDeleted?.()
+            } catch (error) {
+              if (device && activeScope.current === scope) void clearPreview.refetch()
+              throw error
             } finally {
-              setDeleteConfirmBusy(false)
+              if (activeScope.current === scope) setDeleteConfirmBusy(false)
             }
           }}
         />

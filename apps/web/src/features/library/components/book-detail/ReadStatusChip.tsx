@@ -1,4 +1,4 @@
-import type { BookListItem, ReadStatus } from '@bookdock/shared'
+import type { ClientLibraryBookView, ReadStatus } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
@@ -7,7 +7,7 @@ import { READ_STATUS_OPTIONS, STATUS_DOT, statusLabelKey } from '../read-status'
 import DetailFieldMenu from './DetailFieldMenu'
 
 interface ReadStatusChipProps {
-  book: BookListItem
+  book: ClientLibraryBookView
   readOnly: boolean
   onFilter: () => void
 }
@@ -31,7 +31,7 @@ export default function ReadStatusChip({ book, readOnly, onFilter }: ReadStatusC
       busy={updateBook.isPending}
       disabled={readOnly || updateBook.isPending}
       onFilter={onFilter}
-      onSelect={(value) => updateBook.mutate({ bookId: book.id, readStatus: value as ReadStatus })}
+      onSelect={(value) => updateBook.mutate({ bookId: book.id, expectedVersion: book.clientVersion, ref: book.ref, readStatus: value as ReadStatus })}
     />
   )
 }

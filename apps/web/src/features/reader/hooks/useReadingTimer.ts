@@ -11,6 +11,7 @@ import { useManualTimerStore } from '../lib/manual-timer-store'
 import { newReadingRequestId, queueReadingRecord, readingTimezone, retryReadingRecords, useReadingSaveState } from '../lib/reading-record-queue'
 import { readingTimerGraceExpiresAt } from '../lib/reading-timer-grace'
 import { claimReadingTimer, readingDeviceId, releaseReadingTimer } from '../lib/reading-timer-lease'
+import type { ReadingTimerDestination, ReadingTimerSnapshot } from '../lib/reading-timer-destination'
 
 const IDLE_TIMEOUT_MS = 120_000
 const MIN_SESSION_MS = 60_000
@@ -23,16 +24,18 @@ interface ReadingPosition {
   wordCount?: number
 }
 
-export function useReadingTimer(bookId: string | undefined) {
+export function useReadingTimer(bookId: string | undefined, destination?: ReadingTimerDestination, manualStore?: typeof useManualTimerStore) {
+  const selectedManualStore = manualStore ?? useManualTimerStore
   const userId = useAuthStore((state) => state.user?.id)
+  const owner = destination?.scopeKey ?? userId
   const observedPositionRef = useRef<ReadingPosition | undefined>(undefined)
   const settleRef = useRef<(options?: { finished?: boolean }) => void>(() => {})
   const pingRef = useRef<(position?: ReadingPosition) => void>(() => {})
 
   useEffect(() => {
-    if (!bookId || !userId) return
+    if (!bookId || !owner) return
     const id = bookId
-    const ownerId = userId
+    const ownerId = owner
     const timezone = readingTimezone()
     const draftKey = `bd-reading-auto:${ownerId}:${readingDeviceId()}`
     let requestId: string = newReadingRequestId()
@@ -44,7 +47,9 @@ export function useReadingTimer(bookId: string | undefined) {
     let lastPosition: ReadingPosition | undefined
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let lastActivityAt = 0
-    let granted = true
+    let granted = !destination
+    let hydrated = !destination
+    let loading = false
     let closed = false
     let claimVersion = 0
     let lastClaimAt = 0
@@ -59,13 +64,15 @@ export function useReadingTimer(bookId: string | undefined) {
       return stored
     }
 
-    function manualOwns() {
-      return Object.values(useManualTimerStore.getState().sessions).some((session) =>
-        session.userId === ownerId && (session.phase === 'running' || (session.bookId === id && session.phase === 'paused')))
+    function manualOwns(sessions = selectedManualStore.getState().sessions, ready = selectedManualStore.getState().ready) {
+      if (destination && !manualStore) return false
+      if (destination && manualStore && !ready) return true
+      return Object.values(sessions).some((session) =>
+        (destination || session.userId === ownerId) && (session.phase === 'running' || (session.bookId === id && session.phase === 'paused')))
     }
     function active() {
       return !closed && !document.hidden && !manualOwns() && granted
-        && useAuthStore.getState().user?.id === ownerId
+        && (destination || useAuthStore.getState().user?.id === ownerId)
     }
     function clearIdle() {
       if (idleTimer !== null) clearTimeout(idleTimer)
@@ -84,13 +91,14 @@ export function useReadingTimer(bookId: string | undefined) {
         bookId: id, requestId, source: 'auto', deviceId: readingDeviceId(),
         date: localDateString(new Date(startedAt)), durationSeconds: Math.floor(elapsed / 1000),
         startedAt, endedAt: effective.at(-1)?.endedAt ?? startedAt,
-        fragments: effective, coverage, timezone,
+        fragments: effective.map((fragment) => ({ ...fragment })), coverage: coverage.map(([from, to]) => [from, to]), timezone,
         revisionId: lastPosition?.revisionId, wordCount: lastPosition?.wordCount,
         startFraction: firstPosition?.fraction, endFraction: lastPosition?.fraction,
         startCfi: firstPosition?.cfi, endCfi: lastPosition?.cfi,
       }
     }
     function checkpoint() {
+      if (!hydrated) { restoreDestination(); return }
       if (suspendedAt !== null && readingTimerGraceExpiresAt(suspendedAt) <= Date.now()) {
         settle()
         return
@@ -98,7 +106,17 @@ export function useReadingTimer(bookId: string | undefined) {
       try {
         const record = body(Date.now())
         if (record) {
+          if (destination && (record.durationSeconds >= 86_400 || record.durationSeconds >= 60 && (record.fragments?.length ?? 0) >= 5000)) {
+            const wasRunning = stretchStart !== null
+            settle()
+            if (wasRunning) resume(Date.now())
+            return
+          }
           const at = suspendedAt ?? Date.now()
+          if (destination) {
+            void destination.saveDraft({ pendingRecord: record, phase: 'suspended', suspendedAt: at, expiresAt: readingTimerGraceExpiresAt(at), updatedAt: Date.now() }).catch(destination.onError)
+            return
+          }
           const drafts = readDrafts()
           drafts[id] = { userId: ownerId, phase: 'suspended', suspendedAt: at, expiresAt: readingTimerGraceExpiresAt(at), pendingRecord: record }
           localStorage.setItem(draftKey, JSON.stringify(drafts))
@@ -113,9 +131,12 @@ export function useReadingTimer(bookId: string | undefined) {
       const record = body(now)
       if (record) {
         if (finished) record.finished = true
-        if (record.durationSeconds * 1000 >= MIN_SESSION_MS || finished) queueReadingRecord(ownerId, record)
+        if (destination) {
+          const at = suspendedAt ?? now
+          void destination.enqueue({ pendingRecord: record, phase: 'queued', suspendedAt: at, expiresAt: readingTimerGraceExpiresAt(at), updatedAt: now }).catch(destination.onError)
+        } else if (record.durationSeconds * 1000 >= MIN_SESSION_MS || finished) queueReadingRecord(ownerId, record)
       }
-      try {
+      if (!destination) try {
         const drafts = readDrafts()
         delete drafts[id]
         localStorage.setItem(draftKey, JSON.stringify(drafts))
@@ -141,13 +162,13 @@ export function useReadingTimer(bookId: string | undefined) {
       clearIdle()
       idleTimer = setTimeout(() => {
         suspend(lastActivityAt + IDLE_TIMEOUT_MS)
-        releaseReadingTimer()
+        release()
       }, IDLE_TIMEOUT_MS)
     }
     function ping(position?: ReadingPosition) {
       if (position?.fraction === undefined || !Number.isFinite(position.fraction) || position.fraction < 0 || position.fraction > 1) return
-      if (closed || document.hidden || manualOwns() || useAuthStore.getState().user?.id !== ownerId) return
-      granted = true
+      if (!hydrated || closed || document.hidden || manualOwns() || !destination && useAuthStore.getState().user?.id !== ownerId) return
+      if (!destination) granted = true
       const now = Date.now()
       if ((suspendedAt !== null && readingTimerGraceExpiresAt(suspendedAt) <= now)
         || (lastPosition?.revisionId && position?.revisionId && lastPosition.revisionId !== position.revisionId)) {
@@ -174,11 +195,17 @@ export function useReadingTimer(bookId: string | undefined) {
     function claimAuto() {
       lastClaimAt = Date.now()
       const version = ++claimVersion
-      void claimReadingTimer('auto', false, lastActivityAt).then((allowed) => {
+      void (destination ? destination.claim(lastActivityAt) : claimReadingTimer('auto', false, lastActivityAt)).then((allowed) => {
         if (closed || claimVersion !== version) return
         granted = allowed
         if (!allowed) { pause(Date.now()); settle(); clearIdle() }
-      })
+        else if (destination && !document.hidden) resume(Date.now())
+      }).catch((error) => { if (destination) { granted = false; pause(Date.now()); checkpoint(); destination.onError(error) } })
+    }
+
+    function release() {
+      if (destination) void destination.release(Date.now()).catch(destination.onError)
+      else releaseReadingTimer()
     }
 
     function onVisibilityChange() {
@@ -186,21 +213,42 @@ export function useReadingTimer(bookId: string | undefined) {
         claimVersion++
         clearIdle()
         suspend()
-        releaseReadingTimer()
+        release()
       } else {
         // A foreground transition cannot prove reading activity. Wait for relocate.
-        granted = true
+        granted = !destination
       }
     }
     function onPageHide() {
       claimVersion++
       clearIdle()
       suspend()
-      releaseReadingTimer()
+      release()
+    }
+
+    function restoreRecord(draft: ReadingRecordCreateReq, at: number) {
+      requestId = draft.requestId!
+      startedAt = draft.startedAt ?? null
+      suspendedAt = at
+      fragments = (draft.fragments ?? []).map((fragment) => ({ ...fragment }))
+      coverage = (draft.coverage ?? []).map(([from, to]) => [from, to])
+      firstPosition = { fraction: draft.startFraction, cfi: draft.startCfi, revisionId: draft.revisionId, wordCount: draft.wordCount }
+      lastPosition = { fraction: draft.endFraction, cfi: draft.endCfi, revisionId: draft.revisionId, wordCount: draft.wordCount }
+    }
+
+    function restoreDestination() {
+      if (!destination || closed || hydrated || loading) return
+      loading = true
+      void destination.loadDraft().then((snapshot: ReadingTimerSnapshot | undefined) => {
+        if (closed) return
+        if (snapshot) restoreRecord(snapshot.pendingRecord, snapshot.suspendedAt)
+        hydrated = true
+        if (observedPositionRef.current) ping(observedPositionRef.current)
+      }).catch(destination.onError).finally(() => { loading = false })
     }
 
     // Re-entry restores captured fragments, never the time spent away.
-    try {
+    if (!destination) try {
       const snapshot = readDrafts()[id]
       const draft = snapshot?.pendingRecord
       if (snapshot?.userId === ownerId && draft?.bookId === id && draft.requestId && draft.source === 'auto') {
@@ -210,31 +258,32 @@ export function useReadingTimer(bookId: string | undefined) {
           delete drafts[id]
           localStorage.setItem(draftKey, JSON.stringify(drafts))
         } else {
-          requestId = draft.requestId
-          startedAt = draft.startedAt ?? null
-          suspendedAt = snapshot.suspendedAt
-          fragments = draft.fragments ?? []
-          coverage = draft.coverage ?? []
-          firstPosition = { fraction: draft.startFraction, cfi: draft.startCfi, revisionId: draft.revisionId, wordCount: draft.wordCount }
-          lastPosition = { fraction: draft.endFraction, cfi: draft.endCfi, revisionId: draft.revisionId, wordCount: draft.wordCount }
+          restoreRecord(draft, snapshot.suspendedAt)
         }
       }
     } catch {
       useReadingSaveState.setState({ storageFailed: true })
     }
-    void retryReadingRecords()
-    const unsubscribe = useManualTimerStore.subscribe((state, previous) => {
-      if (state.sessions === previous.sessions) return
+    if (destination) { restoreDestination(); void destination.retry().catch(destination.onError) }
+    else void retryReadingRecords()
+    const unsubscribe = destination && !manualStore ? undefined : selectedManualStore.subscribe((state, previous) => {
+      if (state.sessions === previous.sessions && state.ready === previous.ready) return
       if (manualOwns()) { claimVersion++; clearIdle(); settle() }
       // Ending/discarding manual starts a new automatic interval without backfill.
-      else if (Object.values(previous.sessions).some((session) => session.bookId === id)) {
-        granted = true
+      else if (manualOwns(previous.sessions, previous.ready)) {
+        granted = !destination
         lastActivityAt = Date.now()
-        resume(lastActivityAt)
+        if (destination) queueMicrotask(() => {
+          if (closed || manualOwns()) return
+          if (!lastPosition && observedPositionRef.current) ping(observedPositionRef.current)
+          else claimAuto()
+        })
+        else resume(lastActivityAt)
         armIdle()
       }
     })
     const checkpointTimer = setInterval(checkpoint, 5000)
+    const retryTimer = destination ? setInterval(() => { void destination.retry().catch(destination.onError) }, 30_000) : undefined
     const leaseTimer = setInterval(() => {
       if (stretchStart === null || Date.now() - lastActivityAt >= IDLE_TIMEOUT_MS) return
       claimAuto()
@@ -255,20 +304,21 @@ export function useReadingTimer(bookId: string | undefined) {
     if (observedPositionRef.current) ping(observedPositionRef.current)
     return () => {
       closed = true
-      unsubscribe()
+      unsubscribe?.()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)
       clearInterval(checkpointTimer)
+      if (retryTimer !== undefined) clearInterval(retryTimer)
       clearInterval(leaseTimer)
       clearIdle()
       if (useUiStore.getState().readingTimerMode === 'off' || useUiStore.getState().readingTimerMode === 'manual') settle()
       else suspend()
-      if (!manualOwns()) releaseReadingTimer()
+      if (!manualOwns()) release()
       settleRef.current = () => {}
       pingRef.current = () => {}
       observedPositionRef.current = undefined
     }
-  }, [bookId, userId])
+  }, [bookId, owner, destination, selectedManualStore, manualStore])
 
   return {
     flush: useCallback((options?: { finished?: boolean }) => settleRef.current(options), []),

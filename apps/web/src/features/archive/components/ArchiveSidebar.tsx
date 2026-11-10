@@ -48,6 +48,7 @@ export default function ArchiveSidebar({
   onSelectBook,
 }: ArchiveSidebarProps) {
   const _ = useTranslation()
+  const archivePath = '/archive' as const
   const [draft, setDraft] = useState(params.q)
 
   const isAll = !range?.from && !range?.to
@@ -146,7 +147,7 @@ export default function ArchiveSidebar({
     <aside aria-label={_('archive.allRecords')} className="flex flex-col gap-3 pb-6">
       {/* 顶部置顶核心项：【全景档案总览】 */}
       <Link
-        to="/archive"
+        to={archivePath}
         search={{ ...baseSearch, bookId: undefined }}
         replace
         // Keep the recorded archive exit source across this in-feature move.
@@ -325,16 +326,16 @@ export default function ArchiveSidebar({
             )}
             {allBooks.map((book) => (
               <ArchiveBookRow
-                key={book.bookVersionId}
+                key={book.id}
                 book={book}
-                selected={selectedBookId === book.bookVersionId}
+                selected={selectedBookId === book.id}
                 activeType={params.type}
-                onOpen={() => onSelectBook(book.bookVersionId)}
+                onOpen={() => onSelectBook(book.id)}
                 to={{
-                  to: '/archive',
+                  to: archivePath,
                   search: {
                     ...baseSearch,
-                    bookId: book.bookVersionId,
+                    bookId: book.id,
                     type: params.type,
                   },
                 }}

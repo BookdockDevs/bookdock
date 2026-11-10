@@ -32,6 +32,10 @@ export interface ReviewDetailHeaderActionsProps {
   onDeleted?: () => void
   onShare?: (review: Review) => void
   theme?: 'reader' | 'app'
+  /** Device reviews have no likes, shares or discussion. */
+  local?: boolean
+  /** Vault deletion for a device review. */
+  onLocalDelete?: () => void | Promise<void>
 }
 
 /** Modal top-bar actions for the review detail: like (countless), copy, share, edit and delete. */
@@ -41,6 +45,8 @@ export default function ReviewDetailHeaderActions({
   onDeleted,
   onShare,
   theme = 'app',
+  local = false,
+  onLocalDelete,
 }: ReviewDetailHeaderActionsProps) {
   const _ = useTranslation()
   const user = useAuthStore((state) => state.user)
@@ -48,7 +54,7 @@ export default function ReviewDetailHeaderActions({
   const deleteReview = useDeleteReview()
 
   function toggleLike() {
-    if (!user || likeAction.isPending) return
+    if (local || !user || likeAction.isPending) return
     likeAction.mutate(
       { type: 'like', liked: !review.liked },
       {
@@ -59,7 +65,12 @@ export default function ReviewDetailHeaderActions({
 
   async function handleDelete() {
     try {
-      await deleteReview.mutateAsync(review.id)
+      if (local) {
+        if (!onLocalDelete) return
+        await onLocalDelete()
+      } else {
+        await deleteReview.mutateAsync(review.id)
+      }
       notify.success({ key: 'review.deletedNotice' })
       onDeleted?.()
     } catch (error) {
@@ -81,12 +92,12 @@ export default function ReviewDetailHeaderActions({
 
   return (
     <InteractionHeaderActions
-      liked={review.liked}
+      liked={local ? false : review.liked}
       onToggleLike={toggleLike}
-      isLikePending={likeAction.isPending}
-      canLike={Boolean(user)}
+      isLikePending={local ? false : likeAction.isPending}
+      canLike={!local && Boolean(user)}
       onCopy={handleCopy}
-      onShare={onShare ? () => onShare(review) : undefined}
+      onShare={!local && onShare ? () => onShare(review) : undefined}
       onEdit={review.own && onEdit ? () => onEdit(review) : undefined}
       onDelete={review.canDelete ? () => void handleDelete() : undefined}
       deleteConfirmTitle={_('review.deleteConfirmTitle')}

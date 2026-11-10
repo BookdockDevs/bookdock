@@ -3,8 +3,12 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import i18n from 'i18next'
 
-import type { BookDetailRes, BookListItem, ReadStatus, Review, UndoReceipt } from '@bookdock/shared'
+import type { ClientLibraryDetailView, ClientLibraryBookView, ReadStatus, Review, UndoReceipt } from '@bookdock/shared'
 
+import { catalogBookTarget, catalogHomeTarget } from '@/features/reading-data/catalog-navigation'
+import { isDeviceBook } from '@/features/reading-data/book-source'
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
+import { clientScopeKey } from '@bookdock/shared'
 import { apiPatch } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
@@ -15,7 +19,7 @@ import { notify } from '@/lib/notifications'
 import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
 import { copyCover, downloadCover } from '../../download'
-import { useForkBook } from '../../hooks'
+import { invalidateDeviceMembershipQueries, useForkBook, useVaultOperations } from '../../hooks'
 import { getHiddenCause } from '../../hidden-status'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import BookCover from '../BookCover'
@@ -36,22 +40,24 @@ import { useReviewBookContext } from '@/features/reviews/hooks/useReviews'
 import { reviewIconPaths } from '@/features/reviews/lib/review-icon'
 
 interface BookDetailViewProps {
-  book: BookListItem
+  book: ClientLibraryBookView
   readOnly?: boolean
-  detail?: BookDetailRes
+  detail?: ClientLibraryDetailView
   categoryName?: string
   memberTags: Array<{ id: string; name: string }>
   isLoading?: boolean
   reviewContext?: import('@bookdock/shared').ReviewBookContext | null
+  /** Device books persist their review to the vault. */
+  saveLocalReview?: (input: import('@/features/reviews/hooks/useReviews').SaveReviewInput) => Promise<void>
   moreActions?: MoreActionsMenuItem[]
   /** Drill into the personal reading data; absent when there is none to show. */
   onOpenReadingData?: () => void
   onOpenAllReviews?: () => void
   onOpenReviewDetail?: (review: Review) => void
   onEdit: () => void
-  onDelete: (book: BookListItem) => void
+  onDelete: (book: ClientLibraryBookView) => void
   onClose: () => void
-  onPublish?: (book: BookListItem) => void
+  onPublish?: (book: ClientLibraryBookView) => void
 }
 
 export default function BookDetailView({
@@ -62,6 +68,7 @@ export default function BookDetailView({
   memberTags,
   isLoading,
   reviewContext: reviewContextProp,
+  saveLocalReview,
   moreActions,
   onOpenReadingData,
   onOpenAllReviews,
@@ -74,6 +81,8 @@ export default function BookDetailView({
   const _ = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const local = useLocalCatalog()
+  const vault = useVaultOperations()
   const forkBook = useForkBook()
 
   const displayBook = detail ?? book
@@ -89,10 +98,15 @@ export default function BookDetailView({
   const [reviewEditorOpen, setReviewEditorOpen] = useState(false)
   const [openingReview, setOpeningReview] = useState(false)
   const signedIn = useAuthStore((state) => Boolean(state.user))
-  const reviewQuery = useReviewBookContext(reviewContextProp !== undefined ? null : (book?.id ?? null))
+  // Reviews are a server-book feature; the ref decides, even on the unified
+  // shelf where no catalog context marks the book as local.
+  const isLocalBook = isDeviceBook(book?.ref)
+  const reviewQuery = useReviewBookContext(local || reviewContextProp !== undefined || isLocalBook ? null : (book?.id ?? null))
   const reviewContext = reviewContextProp !== undefined ? reviewContextProp : reviewQuery.data?.data
   const reviewComposer = reviewContext?.composer
-  const canReview = Boolean(signedIn && reviewComposer?.eligible && reviewComposer.bookVersionId)
+  // A device book's review never leaves the browser, so holding an account is
+  // not what makes it writable: the book's own source does.
+  const canReview = Boolean(reviewComposer?.eligible && reviewComposer.bookVersionId) && (isLocalBook || signedIn)
   const ownReview = reviewContext?.own
 
   // The review glyph carries no state: it opens the caller's own review when
@@ -166,7 +180,7 @@ export default function BookDetailView({
     if (copyingCover) return
     setCopyingCover(true)
     try {
-      await copyCover(book.id)
+      await copyCover(book.id, book.ref)
       notify.success(_('library.coverCopied'))
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'library.copyCoverFailed'))
@@ -177,7 +191,7 @@ export default function BookDetailView({
 
   async function handleDownloadCover() {
     try {
-      await downloadCover(book.id, book.title)
+      await downloadCover(book.id, book.title, book.ref)
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'errors.downloadFailed'))
     }
@@ -185,6 +199,15 @@ export default function BookDetailView({
 
   async function toggleHidden() {
     try {
+      if (isLocalBook) {
+        if (displayBook.clientVersion === undefined) throw new Error('The displayed local book version is required')
+        const targetRef = book.ref!
+        await vault.update(targetRef, { catalog: { hidden: !displayBook.hidden } }, displayBook.clientVersion)
+        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(targetRef.scope)] })
+        if (!local) invalidateDeviceMembershipQueries(queryClient)
+        notify.success({ key: 'toast.bookUpdated' })
+        return
+      }
       const result = await apiPatch<{ undo?: UndoReceipt }>(`/books/${book.id}`, { hidden: !displayBook.hidden })
       void queryClient.invalidateQueries({ queryKey: ['books'] })
       notify.success({ key: 'toast.bookUpdated' }, { undo: result.undo })
@@ -198,7 +221,7 @@ export default function BookDetailView({
     const taxonomy = search.category !== undefined || search.tag !== undefined
       ? { shelf: undefined, category: search.category, tag: search.tag }
       : {}
-    void navigate({ to: '/', search: { ...taxonomy, ...search } })
+    void navigate({ ...catalogHomeTarget(), search: { ...taxonomy, ...search } })
   }
 
   const hasProgress = displayBook.progress != null && displayBook.progress > 0
@@ -225,7 +248,7 @@ export default function BookDetailView({
     metaRows.push({ label: isIsbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true, hint: _('library.copyValue'), onEdit: isIsbn ? metadataEdit('isbn', 'ISBN') : undefined })
   }
   metaRows.push({ label: _('library.format'), value: displayBook.format.toUpperCase() })
-  metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(displayBook.size), hint: `${groupDigits(displayBook.size)} B` })
+  metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(displayBook.size), hint: displayBook.size === null ? undefined : `${groupDigits(displayBook.size)} B` })
   if (detail?.meta?.wordCount != null) {
     const wordCount = detail.meta.wordCount
     metaRows.push({
@@ -353,7 +376,7 @@ export default function BookDetailView({
               className="gap-1.5"
               onClick={() => {
                 onClose()
-                void navigate({ to: '/books/$id', params: { id: book.id } })
+                void navigate({ ...catalogBookTarget(book) })
               }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -371,7 +394,7 @@ export default function BookDetailView({
                 </ActionIcon>
               )}
               {!readOnly && (
-                <DownloadMenu bookId={book.id} title={displayBook.title} format={displayBook.format} />
+                <DownloadMenu bookId={book.id} bookRef={book.ref} title={displayBook.title} format={displayBook.format} />
               )}
               {signedIn && (
                 <ActionIcon
@@ -461,9 +484,12 @@ export default function BookDetailView({
           bookVersionId={reviewComposer.bookVersionId}
           existing={ownReview ?? null}
           composer={reviewComposer}
+          saveLocal={saveLocalReview}
           onClose={() => setReviewEditorOpen(false)}
           onSaved={() => {
-            void reviewQuery.refetch()
+            // The vault mutation already invalidates its own query; probing a
+            // server review endpoint for a device book would be the leak.
+            if (!isLocalBook) void reviewQuery.refetch()
           }}
         />
       )}

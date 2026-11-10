@@ -2,7 +2,6 @@ import { useMemo, useRef, useState } from 'react'
 
 import type { ReadingLedgerSession, ReadingRecordConflictDetails, ReadingRecordCreateReq, ReadingSessionUpdateReq } from '@bookdock/shared'
 
-import { ApiError } from '@/api/client'
 import { localDateString, useAddReadingRecord, useUpdateSession } from '@/api/hooks/reading-records'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
@@ -14,6 +13,7 @@ import { getUserErrorMessage } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
 import { cn } from '@/lib/utils'
+import { isDeviceBook } from '@/features/reading-data/book-source'
 
 import { markEscConsumed } from '../lib/esc-consumed'
 import { sessionDurationMs, type ManualSession } from '../lib/manual-timer-store'
@@ -66,6 +66,7 @@ export default function AddRecordDialog({
   const progressEditable = !progressBounds || (progressBounds.scale !== null && progressBounds.scale > 0)
   const maxProgress = progressBounds?.scale == null ? 100 : progressBounds.scale * 100
 
+  const editingDisplayMinutes = editingSession ? Math.max(1, Math.round(editingSession.durationSeconds / 60)) : 0
   const [date, setDate] = useState(() => manualSession?.date ?? editingSession?.date ?? localDateString())
   const [hours, setHours] = useState(() => {
     if (manualSession) {
@@ -73,7 +74,7 @@ export default function AddRecordDialog({
       return Math.floor(totalMins / 60)
     }
     if (editingSession) {
-      const totalMins = Math.round((editingSession.durationSeconds || 0) / 60)
+      const totalMins = editingDisplayMinutes
       return Math.floor(totalMins / 60)
     }
     return 0
@@ -85,7 +86,7 @@ export default function AddRecordDialog({
       return totalMins === 0 && manualSession.elapsedMs > 0 ? 1 : mins
     }
     if (editingSession) {
-      const totalMins = Math.round((editingSession.durationSeconds || 0) / 60)
+      const totalMins = editingDisplayMinutes
       return totalMins % 60
     }
     return 30
@@ -157,6 +158,7 @@ export default function AddRecordDialog({
     onClose()
   }
 
+  const maxHours = isDeviceBook(manualSession?.book) ? Math.max(24, Math.ceil(manualSession.elapsedMs / 3600_000)) : editingSession?.clientMembers ? Math.max(24, Math.ceil(editingSession.durationSeconds / 3600)) : 24
   const durationSeconds = Math.max(0, hours) * 3600 + Math.max(0, minutes) * 60
   const isReader = variant === 'reader'
 
@@ -211,23 +213,29 @@ export default function AddRecordDialog({
       setError(_('readingData.progressOrder'))
       return
     }
-    const startedAt = startTime !== '' ? new Date(`${date}T${startTime}`).getTime() : null
-    const endedAt = (startedAt ?? new Date(`${date}T12:00`).getTime()) + durationSeconds * 1000
+    const manualStart = manualSession ? new Date(manualSession.startedAt) : null
+    const manualStartTime = manualStart ? `${String(manualStart.getHours()).padStart(2, '0')}:${String(manualStart.getMinutes()).padStart(2, '0')}` : ''
+    const manualDisplayMinutes = manualSession ? Math.round(manualSession.elapsedMs / 60_000) || (manualSession.elapsedMs > 0 ? 1 : 0) : 0
+    const preserveManualTime = Boolean(manualSession && durationSeconds === manualDisplayMinutes * 60 && date === manualSession.date && startTime === manualStartTime)
+    const startedAt = preserveManualTime ? manualSession!.startedAt : startTime !== '' ? new Date(`${date}T${startTime}`).getTime() : null
+    const savedDuration = preserveManualTime ? Math.max(1, Math.round(manualSession!.elapsedMs / 1000)) : durationSeconds
+    const endedAt = preserveManualTime ? manualSession!.fragments.at(-1)?.endedAt ?? manualSession!.startedAt : startedAt === null ? undefined : startedAt + durationSeconds * 1000
 
     if (isEditing && editingSession) {
       const body: ReadingSessionUpdateReq = {}
       const originalTime = editingSession.startedAt ? new Date(editingSession.startedAt) : null
       const originalStartTime = originalTime ? `${String(originalTime.getHours()).padStart(2, '0')}:${String(originalTime.getMinutes()).padStart(2, '0')}` : ''
-      const durationChanged = durationSeconds !== Math.round(editingSession.durationSeconds / 60) * 60
+      const durationChanged = durationSeconds !== editingDisplayMinutes * 60
       const positionInTimeChanged = date !== editingSession.date || startTime !== originalStartTime
       if (durationChanged || positionInTimeChanged) {
         const duration = durationChanged ? durationSeconds : editingSession.durationSeconds
         const startAt = positionInTimeChanged ? startedAt : editingSession.startedAt
+        if (editingSession.clientMembers && startAt === null && duration > 86400) { setError(_('localLibrary.untimedDurationLimit')); return }
         Object.assign(body, {
           date, durationSeconds: duration, startedAt: startAt,
           ...(startAt !== null ? { endedAt: startAt + duration * 1000 } : {}),
           continuous: startAt !== null && (positionInTimeChanged || editingSession.fragments.length > 0),
-          timezone: positionInTimeChanged ? Intl.DateTimeFormat().resolvedOptions().timeZone : editingSession.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ...(positionInTimeChanged && startAt !== null ? { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone } : editingSession.timezone ? { timezone: editingSession.timezone } : {}),
         })
       }
       if (progressEditable && progressChanged) {
@@ -239,6 +247,7 @@ export default function AddRecordDialog({
         {
           id: editingSession.id,
           body,
+          ...(editingSession.clientMembers ? { clientMembers: editingSession.clientMembers } : {}),
         },
         {
           onSuccess: () => {
@@ -253,24 +262,21 @@ export default function AddRecordDialog({
       return
     }
 
-    const originalManualDuration = manualSession ? Math.round(manualSession.elapsedMs / 1000) : 0
-    const manualDurationChanged = manualSession ? Math.abs(durationSeconds - originalManualDuration) > 60 : false
-
     const body: ReadingRecordCreateReq = {
-      bookId, date, durationSeconds, startedAt, endedAt,
-      source: manualSession ? 'manual' : 'retroactive', continuous: startTime !== '', finished,
+      bookId, date, durationSeconds: savedDuration, startedAt, ...(endedAt === undefined ? {} : { endedAt }),
+      source: manualSession && startedAt !== null ? 'manual' : 'retroactive', continuous: !preserveManualTime && startedAt !== null, finished,
       timezone: manualSession?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-      ...(manualSession?.requestId ? { requestId: manualSession.requestId } : {}),
-      ...(manualSession?.fragments && manualSession.fragments.length > 0 && !manualDurationChanged
+      ...(manualSession?.requestId ? { requestId: manualSession.requestId, deviceId: manualSession.deviceId } : {}),
+      ...(preserveManualTime && manualSession?.fragments.length
         ? { fragments: manualSession.fragments }
-        : startedAt !== null ? { fragments: [{ startedAt, endedAt }] } : {}),
+        : startedAt !== null && endedAt !== undefined ? { fragments: [{ startedAt, endedAt }] } : {}),
       ...(manualSession?.coverage ? { coverage: manualSession.coverage } : {}),
       ...(manualSession?.revisionId ? { revisionId: manualSession.revisionId } : {}),
       ...(manualSession?.wordCount ? { wordCount: manualSession.wordCount } : {}),
       ...(manualSession?.startCfi ? { startCfi: manualSession.startCfi } : {}),
       ...(manualSession?.lastCfi ? { endCfi: manualSession.lastCfi } : {}),
-      ...(manualSession?.startChapterIndex != null ? { startChapterIndex: manualSession.startChapterIndex } : {}),
-      ...(manualSession?.lastChapterIndex != null ? { endChapterIndex: manualSession.lastChapterIndex } : {}),
+      ...(manualSession?.startChapterIndex != null && manualSession.startChapterIndex >= 0 ? { startChapterIndex: manualSession.startChapterIndex } : {}),
+      ...(manualSession?.lastChapterIndex != null && manualSession.lastChapterIndex >= 0 ? { endChapterIndex: manualSession.lastChapterIndex } : {}),
       ...(hasStartPct ? { startFraction: start / 100, endFraction: end / 100 } : {}),
       ...(replaceConflicts ? { replaceSessionIds: conflicts } : {}),
     }
@@ -286,7 +292,7 @@ export default function AddRecordDialog({
         },
         onError: (err) => {
           setError(getUserErrorMessage(err, _, 'reader.sessionAddFailed'))
-          if (err instanceof ApiError && err.details && typeof err.details === 'object' && 'conflictingSessionIds' in err.details) {
+          if (err && typeof err === 'object' && 'details' in err && err.details && typeof err.details === 'object' && 'conflictingSessionIds' in err.details) {
             if ((err.details as Partial<ReadingRecordConflictDetails>).hasUnreplaceableConflicts === true) {
               setError(_('readingData.conflictAdjustTime'))
               setConflicts([])
@@ -634,9 +640,9 @@ export default function AddRecordDialog({
                     aria-label={_('reader.addRecordHours')}
                     type="number"
                     min={0}
-                    max={24}
+                    max={maxHours}
                     value={hours}
-                    onChange={(e) => setHours(Math.max(0, Math.min(24, Number(e.target.value))))}
+                    onChange={(e) => setHours(Math.max(0, Math.min(maxHours, Number(e.target.value))))}
                     className={cn(inputCls, 'w-full pr-11 text-center font-mono font-medium')}
                   />
                   <span className={cn('pointer-events-none absolute right-3 text-xs select-none', subTextCls)}>

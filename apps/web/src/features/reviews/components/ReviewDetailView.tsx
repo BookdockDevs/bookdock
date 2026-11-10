@@ -11,10 +11,13 @@ import StarRating from './StarRating'
 
 export interface ReviewDetailViewProps {
   review: Review
+  /** Device reviews have no author identity and no discussion thread. */
+  local?: boolean
 }
 
 export default function ReviewDetailView({
   review,
+  local = false,
 }: ReviewDetailViewProps) {
   const _ = useTranslation()
 
@@ -23,22 +26,31 @@ export default function ReviewDetailView({
       {/* Author bar */}
       <div className="flex items-center justify-between gap-3 border-b border-stone-100 pb-3 dark:border-stone-800">
         <div className="flex items-center gap-2 min-w-0">
-          <ProfileIdentityLink
-            userId={review.author.id}
-            name={review.author.name}
-            avatarKey={review.author.avatarKey}
-            className="inline-flex items-center gap-2 text-sm font-medium text-stone-900 dark:text-stone-100 min-w-0"
-            avatarClassName="h-7 w-7"
-          />
-          {review.visibility === 'private' && (
-            <span title={_('review.visibilityPrivateHint')} className="flex items-center text-stone-400 dark:text-stone-500 shrink-0">
+          {local ? (
+            <span className="flex items-center gap-1.5 text-sm font-medium text-stone-500 dark:text-stone-400">
               <LockIcon size={12} />
+              {_('review.visibilityPrivate')}
             </span>
-          )}
-          {review.own && (
-            <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400 shrink-0">
-              {_('review.ownBadge')}
-            </span>
+          ) : (
+            <>
+              <ProfileIdentityLink
+                userId={review.author.id}
+                name={review.author.name}
+                avatarKey={review.author.avatarKey}
+                className="inline-flex items-center gap-2 text-sm font-medium text-stone-900 dark:text-stone-100 min-w-0"
+                avatarClassName="h-7 w-7"
+              />
+              {review.visibility === 'private' && (
+                <span title={_('review.visibilityPrivateHint')} className="flex items-center text-stone-400 dark:text-stone-500 shrink-0">
+                  <LockIcon size={12} />
+                </span>
+              )}
+              {review.own && (
+                <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] text-stone-500 dark:bg-stone-800 dark:text-stone-400 shrink-0">
+                  {_('review.ownBadge')}
+                </span>
+              )}
+            </>
           )}
         </div>
 
@@ -66,20 +78,26 @@ export default function ReviewDetailView({
         )}
       </div>
 
-      {/* Discussion panel (comments) */}
-      <ReviewDiscussionPanel
-        reviewId={review.id}
-        reviewAuthorId={review.author.id}
-        initialCommentCount={review.commentCount}
-        initialLikeCount={review.likeCount}
-        className="!mt-3"
-        headerRight={
-          <span className="flex items-center gap-1">
-            <span>{_('annotation.publishedAt')}</span>
-            <ReviewTime createdAt={review.createdAt} editedAt={review.editedAt} />
-          </span>
-        }
-      />
+      {local ? (
+        <div className="mt-3 flex items-center gap-1 border-t border-stone-100 pt-3 text-xs text-stone-400 dark:border-stone-800 dark:text-stone-500">
+          <span>{_('annotation.publishedAt')}</span>
+          <ReviewTime createdAt={review.createdAt} editedAt={review.editedAt} />
+        </div>
+      ) : (
+        <ReviewDiscussionPanel
+          reviewId={review.id}
+          reviewAuthorId={review.author.id}
+          initialCommentCount={review.commentCount}
+          initialLikeCount={review.likeCount}
+          className="!mt-3"
+          headerRight={
+            <span className="flex items-center gap-1">
+              <span>{_('annotation.publishedAt')}</span>
+              <ReviewTime createdAt={review.createdAt} editedAt={review.editedAt} />
+            </span>
+          }
+        />
+      )}
     </article>
   )
 }

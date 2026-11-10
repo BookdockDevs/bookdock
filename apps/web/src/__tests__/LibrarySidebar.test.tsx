@@ -1,5 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement, ReactNode } from 'react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render as testingRender, screen, fireEvent, within, waitFor } from '@testing-library/react'
 
 import type { LibraryListItem } from '@bookdock/shared'
 import type { LibrarySearch } from '@/routes/index'
@@ -7,7 +9,16 @@ import type { LibrarySearch } from '@/routes/index'
 import i18n from '../i18n/i18n'
 import LibrarySidebar from '../features/library/components/LibrarySidebar'
 import * as libraryHooks from '../features/library/hooks'
+import { VaultAvailabilityContext } from '@/features/reading-data/vault-availability'
 import { formatDate } from '@/lib/format-date'
+
+const queryClients = new Set<QueryClient>()
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClients.add(client)
+  return testingRender(ui, { wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+}
+afterEach(() => { for (const client of queryClients) client.clear(); queryClients.clear() })
 
 const navSearch = vi.fn()
 
@@ -19,6 +30,8 @@ beforeEach(async () => {
 vi.mock('../features/library/hooks', () => ({
   useShelves: vi.fn(),
   useBooks: vi.fn(),
+  // No device vault in these fixtures unless a test supplies counts.
+  useDeviceMembershipCounts: vi.fn(),
   useTags: vi.fn(),
   useTrashEnabled: vi.fn(),
   useLibraryPrefs: vi.fn(),
@@ -62,6 +75,7 @@ interface ShelfItemData { id: string; name: string; bookCount: number; pinned?: 
 interface TagItemData { id: string; name: string; bookCount: number; pinned?: boolean; hidden?: boolean }
 
 function mockHooks({ shelves = [], tags = [], uncategorizedTotal = 1, trashEnabled = true }: { shelves?: ShelfItemData[]; tags?: TagItemData[]; uncategorizedTotal?: number; trashEnabled?: boolean } = {}) {
+  ;(libraryHooks.useDeviceMembershipCounts as ReturnType<typeof vi.fn>).mockReturnValue(undefined)
   ;(libraryHooks.useShelves as ReturnType<typeof vi.fn>).mockReturnValue({
     data: { data: shelves },
     isLoading: false,
@@ -1160,5 +1174,39 @@ describe('arrowless category navigation', () => {
     expect(screen.queryByRole('button', { name: '展开' })).toBeNull()
     expect(navSearch).not.toHaveBeenCalled()
     expect(close).not.toHaveBeenCalled()
+  })
+})
+
+describe('device vault sidebar integration', () => {
+  it('adds device unshelved count rather than uncategorized count to the unshelved row', () => {
+    mockHooks({
+      shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }],
+      uncategorizedTotal: 1,
+    })
+    ;(libraryHooks.useDeviceMembershipCounts as ReturnType<typeof vi.fn>).mockReturnValue({
+      shelves: new Map(),
+      categories: new Map(),
+      tags: new Map(),
+      unshelved: 2,
+      uncategorized: 5,
+    })
+
+    render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
+
+    const unshelvedButton = screen.getByText('未入架').closest('button')!
+    expect(within(unshelvedButton).getByText('3')).toBeInTheDocument()
+  })
+
+  it('keeps the private trash entry enabled for read-only guests when a device vault is available', () => {
+    mockHooks({ shelves: [{ id: 'shelf-1', name: 'Public Shelf', bookCount: 1 }], trashEnabled: true })
+
+    render(
+      <VaultAvailabilityContext.Provider value={true}>
+        <LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} readOnly />
+      </VaultAvailabilityContext.Provider>,
+    )
+
+    expect(libraryHooks.useTrashEnabled).toHaveBeenCalledWith({ enabled: true, fallbackAnonymous: true })
+    expect(screen.getByText('回收站')).toBeInTheDocument()
   })
 })

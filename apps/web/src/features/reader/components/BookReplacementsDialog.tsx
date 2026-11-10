@@ -1,3 +1,4 @@
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { TextReplacementRes } from '@bookdock/shared'
@@ -27,9 +28,10 @@ type FormState = { mode: 'create' } | { mode: 'edit'; rule: TextReplacementRes }
 const countCache = new Map<string, { counts: Record<string, number> }>()
 
 export default function BookReplacementsDialog({ bookId, onClose }: BookReplacementsDialogProps) {
+  const local = useLocalReader()
   const _ = useTranslation()
   const { renderer } = useReaderApi()
-  const { data } = useBookReplacements(bookId)
+  const { data } = useBookReplacements(bookId, local?.ref)
   const deleteReplacement = useDeleteReplacement()
   const invalidIds = useReaderState((s) => s.invalidReplacementIds)
   const tocItems = useReaderState((s) => s.tocItems)
@@ -51,7 +53,7 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
   const [counts, setCounts] = useState<Record<string, number>>({})
   useEffect(() => {
     let cancelled = false
-    const cacheKey = `${bookId}|${countSignature}`
+    const cacheKey = `${local?.namespace ?? bookId}|${countSignature}`
     const cached = countCache.get(cacheKey)
     if (cached) {
       setCounts(cached.counts)
@@ -69,7 +71,7 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
       })
       .catch(() => { if (!cancelled) setCounts({}) })
     return () => { cancelled = true }
-  }, [renderer, bookId, countSignature, patternRules])
+  }, [local?.namespace, renderer, bookId, countSignature, patternRules])
 
   // "N 处" only matters for rules that are actually effective in this book:
   // a global rule switched off here (or a disabled rule) shows no count —
@@ -103,7 +105,7 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
 
   function confirmDelete() {
     if (!pendingDelete) return
-    deleteReplacement.mutate(pendingDelete.id, {
+    deleteReplacement.mutate(pendingDelete.clientVersion === undefined ? pendingDelete.id : { id: pendingDelete.id, expectedVersion: pendingDelete.clientVersion }, {
       onSuccess: () => {
         if (form?.mode === 'edit' && form.rule.id === pendingDelete.id) setForm(null)
         notify.success({ key: 'toast.rulesDeleted', params: { count: 1 } })
@@ -187,6 +189,7 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
         ) : (
           <BookReplacementsSection
             bookId={bookId}
+            bookRef={local?.ref}
             counts={effectiveCounts}
             points={sortedPoints}
             chapterOf={chapterOf}

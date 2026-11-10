@@ -10,6 +10,7 @@ vi.mock('../api/client', async (original) => ({ ...await original<typeof import(
 
 import { apiPut, streamTranslation } from '../api/client'
 import TranslationContent from '../features/reader/components/TranslationContent'
+import { useAuthStore } from '../stores/auth.store'
 
 const preferences: TranslationPreferences = { targetLang: 'zh-Hans', channel: { kind: 'ai', profileId: null, model: null } }
 const firstProfile: AiProfileRes = { id: 'first', name: 'First AI', provider: 'ollama', baseUrl: 'http://localhost:11434', model: 'first-model', models: [{ id: 'first-model', name: 'first-model' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 1, updatedAt: 1 }
@@ -21,13 +22,14 @@ const config: AiConfigRes = {
   apiKeyConfigured: true, configuredByUser: true,
 }
 
-function mount(saved = preferences, ai = config) {
+function mount(saved = preferences, ai = config, bookId: string | undefined = 'book') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><TranslationContent bookId="book" text="Original private selection" preferences={saved} config={ai} onClose={vi.fn()} /></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><TranslationContent bookId={bookId} text="Original private selection" preferences={saved} config={ai} onClose={vi.fn()} /></QueryClientProvider>)
 }
 
 describe('selection translation card', () => {
   beforeEach(() => {
+    useAuthStore.getState().setAuth({ id: 'translation-reader', username: 'reader', role: 'member' })
     vi.mocked(apiPut).mockClear()
     vi.mocked(apiPut).mockImplementation(async (_path, body) => ({ data: body }) as never)
     vi.mocked(streamTranslation).mockReset()
@@ -41,6 +43,35 @@ describe('selection translation card', () => {
     expect(streamTranslation).toHaveBeenCalledWith({ bookId: 'book', text: 'Original private selection', ...firstPreferences }, expect.any(AbortSignal), expect.any(Function))
     expect(apiPut).toHaveBeenCalledWith('/translation/config', firstPreferences)
     expect(screen.queryByText(/translation.followAi/)).not.toBeInTheDocument()
+  })
+
+  it('uses the same card for local text without a fabricated book identity', async () => {
+    const client = new QueryClient()
+    render(<QueryClientProvider client={client}><TranslationContent text="Local selection" preferences={preferences} config={config} onClose={vi.fn()} /></QueryClientProvider>)
+    expect(await screen.findByText('翻译结果')).toBeInTheDocument()
+    expect(streamTranslation).toHaveBeenCalledWith({ text: 'Local selection', ...firstPreferences }, expect.any(AbortSignal), expect.any(Function))
+  })
+
+  it('shows the account requirement without forwarding anonymous text', () => {
+    useAuthStore.getState().clearAuth()
+    mount()
+    expect(screen.getByText('translation.accountRequired')).toBeInTheDocument()
+    expect(streamTranslation).not.toHaveBeenCalled()
+    expect(apiPut).not.toHaveBeenCalled()
+  })
+
+  it('hides and discards an old account stream without forwarding the selection to the new account', async () => {
+    let chunk!: (text: string) => void
+    vi.mocked(streamTranslation).mockImplementationOnce(async (_input, _signal, onText) => { chunk = onText })
+    mount()
+    await waitFor(() => expect(chunk).toBeTypeOf('function'))
+    act(() => chunk('Old output'))
+    expect(screen.getByText('Old output')).toBeInTheDocument()
+    act(() => useAuthStore.getState().setAuth({ id: 'next-account', username: 'next', role: 'member' }))
+    act(() => chunk('Late output'))
+    expect(screen.queryByText('Old output')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Late output/)).not.toBeInTheDocument()
+    expect(streamTranslation).toHaveBeenCalledOnce()
   })
 
   it('starts only one provider request during StrictMode remounts', async () => {

@@ -3,6 +3,8 @@ import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useAuthStore } from '@/stores/auth.store'
+
 import type { AnnotationRes } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPost, apiPut } from '@/api/client'
@@ -23,6 +25,8 @@ function setup() {
 }
 
 beforeEach(() => {
+  useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+
   vi.clearAllMocks()
   for (const request of [apiDelete, apiPatch, apiPost, apiPut]) vi.mocked(request).mockResolvedValue({ data: {} })
 })

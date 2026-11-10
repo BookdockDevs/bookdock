@@ -26,6 +26,7 @@ import {
   type ReadingSnapshot,
 } from '../features/reader/lib/reading-profiles'
 import { useProfilePrefs } from '@/features/profile/profile-prefs'
+import { canPersistDeviceReadingConfig, DEVICE_READING_CONFIG_KEY, readingPreferenceAccountId, withReadingPreferenceHydration } from '@/features/reader/lib/reading-preference-owner'
 import type { StatsModuleKey } from '../features/stats/stats-modules'
 import {
   STATS_MODULE_DEFAULTS,
@@ -231,6 +232,9 @@ interface UiState {
   setLibraryPageSize: (v: number) => void
   setCoverFit: (v: CoverFit) => void
   setGridColumns: (v: string) => void
+  /** Unified shelf: where the add-book main button sends files. Device preference. */
+  defaultAddDestination: 'server' | 'local'
+  setDefaultAddDestination: (v: 'server' | 'local') => void
   setListInfoItems: (v: ListInfoItem[]) => void
   setSortBy: (v: string) => void
   setSortOrder: (v: 'asc' | 'desc') => void
@@ -419,6 +423,10 @@ function getInitialActivePresetId(): string | null {
 
 function getInitialReadingConfig(): ReadingConfig | null {
   if (typeof window === 'undefined') return null
+  if (!readingPreferenceAccountId()) {
+    const device = parseReadingConfig(localStorage.getItem(DEVICE_READING_CONFIG_KEY))
+    if (device) return device
+  }
   return parseReadingConfig(localStorage.getItem(CONFIG_STORAGE_KEY))
 }
 const initialReadingConfig = getInitialReadingConfig()
@@ -564,6 +572,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   coverFit: getInitialCoverFit(),
   gridColumns: getInitial<string>('bd-grid-columns', 'auto'),
+  defaultAddDestination: (() => { try { return localStorage.getItem('bd-default-add-destination') === 'local' ? 'local' as const : 'server' as const } catch { return 'server' as const } })(),
   libraryPageSize: getInitialLibraryPageSize(),
   listInfoItems: getInitialListInfoItems(),
   sortBy: getInitial<string>('bd-sort-by', 'createdAt'),
@@ -582,6 +591,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setGridColumns: (gridColumns) => {
     setStorage('bd-grid-columns', gridColumns)
     set({ gridColumns })
+  },
+  setDefaultAddDestination: (destination) => {
+    try { localStorage.setItem('bd-default-add-destination', destination) } catch { /* ignore */ }
+    set({ defaultAddDestination: destination })
   },
   setLibraryPageSize: (libraryPageSize) => {
     setStorage('bd-library-page-size', String(libraryPageSize))
@@ -1083,6 +1096,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 function persistReadingConfig(config: ReadingConfig) {
   const raw = serializeReadingConfig(config)
   setStorage(CONFIG_STORAGE_KEY, raw)
+  if (canPersistDeviceReadingConfig()) setStorage(DEVICE_READING_CONFIG_KEY, raw)
   useUiStore.setState({ readingConfig: raw })
 }
 
@@ -1135,7 +1149,7 @@ function applyResolutionFlat() {
   if (existing) {
     useUiStore.getState().applyReadingResolution()
   } else {
-    persistReadingConfig(emptyConfig(pickReadingSnapshot(useUiStore.getState())))
+    withReadingPreferenceHydration(() => persistReadingConfig(emptyConfig(pickReadingSnapshot(useUiStore.getState()))))
   }
 }
 

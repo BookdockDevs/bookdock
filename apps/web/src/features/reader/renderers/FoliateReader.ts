@@ -1,3 +1,6 @@
+import { remoteBookProvider } from '../content/book-provider'
+import { securePublicationMarkup } from '../content/secure-publication-markup'
+
 import {
   BlobWriter as ZipBlobWriter,
   HttpReader,
@@ -41,7 +44,7 @@ import { MediaOverlaySection, type MediaOverlayCue } from '../lib/media-overlay'
 import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../lib/text-replacements'
 import { NavigationPending, type NavigationTarget } from '../lib/navigation-pending'
 import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
-import { canFallbackReaderContent, consumePreparedReaderContentText, fetchReaderManifest, ReaderContentSession } from '../lib/reader-content-client'
+import { canFallbackReaderContent, consumePreparedReaderContentText, fetchReaderManifest, ReaderContentError, ReaderContentSession } from '../lib/reader-content-client'
 import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
 import { forwardTextPaths } from '../lib/forward-text-paths'
 import { getSelectionGeometry } from '../lib/selection-geometry'
@@ -62,7 +65,6 @@ import {
 import { convertChinese } from '@/lib/chinese'
 import { mix, isDark } from '@/lib/color'
 import { getContentAccountScope, getSessionEpoch, onSessionScopeChange } from '@/lib/session-scope'
-import { useAuthStore } from '@/stores/auth.store'
 import { forwardReaderShortcut, readReaderShortcuts } from '../lib/reader-shortcuts'
 
 const ANNOTATION_COLORS: Record<string, string> = {
@@ -267,7 +269,12 @@ export function ttsViewportAction(
 // Sized for typical home libraries (5+ books) so session-wide book hopping
 // never re-pays the open cost.
 const PARSE_CACHE_MAX = 6
-const parseCache = new Map<string, Promise<any>>()
+interface ParseCacheEntry {
+  promise: Promise<any>
+  release?: () => void
+  evicted?: boolean
+}
+const parseCache = new Map<string, ParseCacheEntry>()
 
 // The reader stylesheet reaches a section document through the paginator's
 // per-section <style> element. A superseded section load skips that
@@ -1383,12 +1390,22 @@ function evictResourceBlobCache() {
   }
 }
 
-// One controlled fallback per open session. Destroying the reader removes the
-// marker so reopening a book probes the shared index again.
+// One controlled fallback per cached parse. Evicting the parse entry removes
+// the marker so reopening probes the shared index again.
 const fallbackReaderContent = new Set<string>()
 
+function evictParseCache(cacheKey: string): void {
+  const entry = parseCache.get(cacheKey)
+  if (entry) {
+    entry.evicted = true
+    parseCache.delete(cacheKey)
+    entry.release?.()
+  }
+  fallbackReaderContent.delete(cacheKey)
+}
+
 function clearReaderRuntimeCaches(): void {
-  parseCache.clear()
+  for (const key of [...parseCache.keys()]) evictParseCache(key)
   searchCache.clear()
   resourceBlobCache.clear()
   resourceBlobCacheBytes = 0
@@ -1574,16 +1591,35 @@ function getParsedBook(url: string, foliate: any, bookSize?: number, cleanReadin
     // refresh recency
     parseCache.delete(cacheKey)
     parseCache.set(cacheKey, cached)
-    return cached.then((book) => {
-      if (book?.contentSession instanceof ReaderContentSession) consumePreparedReaderContentText(book.contentSession)
+    return cached.promise.then((book) => {
+      const session = book?.contentSession
+      if (session instanceof ReaderContentSession) {
+        try {
+          session.assertReadable()
+          if (session.hasRevisionChanged) {
+            throw new ReaderContentError('READER_REVISION_CHANGED', 'Reader content revision changed', 409)
+          }
+        } catch {
+          if (parseCache.get(cacheKey) === cached) evictParseCache(cacheKey)
+          return getParsedBook(url, foliate, bookSize, cleanReading)
+        }
+        consumePreparedReaderContentText(session)
+      }
       return book
     })
   }
   const sessionEpoch = getSessionEpoch()
+  const entry: ParseCacheEntry = { promise: null as unknown as Promise<any> }
   const promise = (async () => {
     if (!fallbackReaderContent.has(cacheKey)) {
       try {
-        return await openManifestBook(url, foliate, cacheKey, cleanReading)
+        const book = await openManifestBook(url, foliate, cacheKey, cleanReading)
+        if (book?.contentSession instanceof ReaderContentSession && parseCache.get(cacheKey) === entry && !entry.evicted) {
+          // Hold a cache-level lease so leaving the reader does not destroy the
+          // session's in-memory chapter/resource caches until LRU eviction or invalidation.
+          entry.release = book.contentSession.retain()
+        }
+        return book
       } catch (error) {
         if (!canFallbackReaderContent(error)) throw error
         fallbackReaderContent.add(cacheKey)
@@ -1643,15 +1679,16 @@ function getParsedBook(url: string, foliate: any, bookSize?: number, cleanReadin
     book.contentSource = 'range'
     return book
   })()
+  entry.promise = promise
   // never cache a failure — the next mount must retry
   promise.catch(() => {
-    if (parseCache.get(cacheKey) === promise) parseCache.delete(cacheKey)
+    if (parseCache.get(cacheKey) === entry) evictParseCache(cacheKey)
   })
-  parseCache.set(cacheKey, promise)
+  parseCache.set(cacheKey, entry)
   while (parseCache.size > PARSE_CACHE_MAX) {
     const oldest = parseCache.keys().next().value
     if (oldest === undefined) break
-    parseCache.delete(oldest)
+    evictParseCache(oldest)
   }
   return promise
 }
@@ -1770,9 +1807,10 @@ function attachBookDataTransform(book: any, cleanReading = false, mediaUrl?: (pa
     const mediaType = typeof detail?.type === 'string' ? detail.type.toLowerCase() : ''
     const isMarkup = CONVERTIBLE_MEDIA_TYPES.has(mediaType)
     const isStylesheet = mediaType === 'text/css'
+    const applySecurityTransform = !book.publicationMarkupSecured && ['application/xhtml+xml', 'text/html', 'image/svg+xml'].includes(mediaType)
     const applyBookStyleTransform = !isFixedLayout && !cleanReading && (isMarkup || isStylesheet)
     const applyMarkupTransform = isMarkup && (cleanReading || conversionMode !== 'off' || activeReplacements.length > 0)
-    if (!applyBookStyleTransform && !applyMarkupTransform) return
+    if (!applyBookStyleTransform && !applyMarkupTransform && !applySecurityTransform) return
     const mode = conversionMode
     const rules = activeReplacements
     const docType = mediaType as DOMParserSupportedType
@@ -1788,7 +1826,7 @@ function attachBookDataTransform(book: any, cleanReading = false, mediaUrl?: (pa
     // detail.data may be a promise; the Loader awaits it either way.
     detail.data = Promise.resolve(detail.data).then(async (data: unknown) => {
       if (typeof data !== 'string') return data
-      let transformed = data
+      let transformed = applySecurityTransform ? securePublicationMarkup(data, mediaType) : data
       if (applyBookStyleTransform) {
         const transformOptions: EpubStylesheetTransformOptions = {
           darkTheme,
@@ -1890,6 +1928,7 @@ export function buildAnnotationBuckets(annotations: ReaderAnnotation[]): {
 }
 
 export class FoliateReader implements BookReader {
+  private releaseBookLease: (() => void) | null = null
   private url: string
   private bookId: string
   private bookSize?: number
@@ -2597,9 +2636,10 @@ export class FoliateReader implements BookReader {
   }
 
   private destroyed = false
+  private mountFailed = false
   private startupAbort = new AbortController()
 
-  constructor(url: string, bookId = '', bookSize?: number, bookFormat: BookFormat = 'epub', cleanReading = false) {
+  constructor(url: string, bookId = '', bookSize?: number, bookFormat: BookFormat = 'epub', cleanReading = false, private bookProvider?: import('../content/book-provider').ReaderBookProvider, private shortcuts = () => readReaderShortcuts(null)) {
     this.url = url
     this.bookId = bookId
     this.bookSize = bookSize
@@ -2635,7 +2675,16 @@ export class FoliateReader implements BookReader {
       }
       const tMount1 = performance.now()
 
-      const epub = await getParsedBook(this.url, foliate, this.bookSize, this.cleanReading)
+      const lease = await (this.bookProvider ?? remoteBookProvider(this.url, (engine) => getParsedBook(this.url, engine, this.bookSize, this.cleanReading))).open(foliate, this.startupAbort.signal)
+      if (this.destroyed) {
+        if (lease.book?.contentSession instanceof ReaderContentSession) {
+          try { lease.book.contentSession.retain()() } catch { /* session already invalidated */ }
+        }
+        lease.release()
+        return
+      }
+      this.releaseBookLease = lease.release
+      const epub = lease.book
       const tMount2 = performance.now()
       // StrictMode mounts twice: the first instance is destroyed while its
       // async mount is still in flight — bail out instead of becoming a
@@ -2644,6 +2693,7 @@ export class FoliateReader implements BookReader {
       this.book = epub
       this.contentSession = epub?.contentSession ?? null
       this.releaseContentSession = this.contentSession?.retain() ?? null
+      if (!document.hidden) this.contentSession?.resumeBackgroundPrefetch()
       this.unsubscribeRevisionChanged = this.contentSession?.onRevisionChanged((revisionId) => {
         this.emit('revisionChanged', { revisionId })
       }) ?? null
@@ -2811,6 +2861,7 @@ export class FoliateReader implements BookReader {
       this.emit('rendered')
       this.syncDoc()
     } catch (err) {
+      if (!this.destroyed) this.mountFailed = true
       console.error('[FoliateReader] mount error:', err)
       throw err
     }
@@ -4563,21 +4614,13 @@ export class FoliateReader implements BookReader {
     let status: SearchStatus = { truncated: false, incomplete: false }
     let terminal = false
     try {
-      const response = await fetch(session.searchUrl(), {
-        method: 'POST',
-        credentials: 'same-origin',
-        cache: 'no-store',
-        signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
-        body: JSON.stringify({
-          revisionId: session.manifest.revisionId,
+      const response = await session.search({
           query,
           mode: opts?.mode ?? 'contains',
           matchCase: opts?.matchCase ?? false,
           chineseConversion: this.conversion,
           replacements: this.replacements,
-        }),
-      })
+      }, controller.signal)
       if (!response.ok || !response.body) throw new Error(`Reader search failed (${response.status})`)
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
@@ -5093,7 +5136,7 @@ export class FoliateReader implements BookReader {
         // handler already owns them inside the iframe.
         const forwardedKeys = ['Escape', ' ']
         const keyForwardHandler = (e: KeyboardEvent) => {
-          const shortcuts = readReaderShortcuts(useAuthStore.getState().user?.id ?? null)
+          const shortcuts = this.shortcuts()
           const host = this.container ?? document.body
           if (!host) return
           if (forwardReaderShortcut(e, host, shortcuts)) return
@@ -5120,6 +5163,8 @@ export class FoliateReader implements BookReader {
 
   destroy() {
     this.startupAbort.abort()
+    this.releaseBookLease?.()
+    this.releaseBookLease = null
     this.setAutoReadingActive(false)
     this.destroyed = true
     // stop any in-flight search loop at the next chapter boundary; the
@@ -5191,13 +5236,24 @@ export class FoliateReader implements BookReader {
     this.listeners = []
     this.view = null
     this.book = null
+    const session = this.contentSession
+    let keepCached = !this.mountFailed && !session?.hasRevisionChanged
+    if (keepCached && session) {
+      try {
+        session.assertReadable()
+      } catch {
+        keepCached = false
+      }
+    }
+    session?.pauseBackgroundPrefetch()
     this.unsubscribeRevisionChanged?.()
     this.unsubscribeRevisionChanged = null
     this.releaseContentSession?.()
     this.releaseContentSession = null
     this.contentSession = null
-    fallbackReaderContent.delete(`${this.url}\u0000${this.cleanReading ? 'clean' : 'normal'}`)
-    parseCache.delete(`${this.url}\u0000${this.cleanReading ? 'clean' : 'normal'}`)
+    if (!keepCached) {
+      evictParseCache(`${this.url}\u0000${this.cleanReading ? 'clean' : 'normal'}`)
+    }
     this.container = null
   }
 

@@ -23,7 +23,7 @@ export default function SelectionUtilityPopup({ title, kind, target, onClose, he
   closeRef.current = onClose
   const mode = useUiStore((state) => state.readingMode)
   const user = useAuthStore((state) => state.user)
-  const initialUserId = useRef(user?.id)
+  const initialUserId = useRef(user?.id ?? null)
   const { renderer } = useReaderApi()
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight, bounds: target.geometry?.bounds }))
   useEffect(() => {
@@ -63,7 +63,7 @@ export default function SelectionUtilityPopup({ title, kind, target, onClose, he
       relocated?.(); selection?.()
     }
   }, [renderer])
-  useEffect(() => { if (!user || user.id !== initialUserId.current) closeRef.current() }, [user])
+  useEffect(() => { if ((user?.id ?? null) !== initialUserId.current) closeRef.current() }, [user])
   const bounds = viewport.bounds ?? { left: 0, top: 0, width: viewport.width, height: viewport.height }
   const size = { width: Math.max(1, Math.min(420, bounds.width - 24)), height: Math.max(1, Math.min(height, bounds.height - 24)) }
   const position = noteEditorPosition(target.rect, mode, size, viewport, { rects: target.geometry?.rects ?? (target.rect ? [target.rect] : []), backward: target.geometry?.backward ?? false, focusX: target.geometry?.focusX ?? target.rect?.left ?? 0, ...target.geometry, bounds })

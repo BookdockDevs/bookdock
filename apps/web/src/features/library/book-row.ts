@@ -1,4 +1,4 @@
-import type { BookFormat, BookListItem, CatalogBook, CoverPaletteId } from '@bookdock/shared'
+import type { BookFormat, ClientLibraryBookView, CatalogBook, ClientBookRef, CoverPaletteId } from '@bookdock/shared'
 
 import type { CoverSource } from './components/BookCover'
 
@@ -17,6 +17,8 @@ import type { CoverSource } from './components/BookCover'
  * shows no progress for the same reason it would show none for a book at 0%.
  */
 export interface BookRow {
+  ref?: ClientBookRef
+  clientVersion?: number
   id: string
   title: string
   author: string | null
@@ -34,14 +36,19 @@ export interface BookRow {
   coverPaletteId?: CoverPaletteId | null
   /** Reading progress, 0-100. Null on a row nobody owns. */
   progress: number | null
+  /** Unified-shelf sort inputs; a row without the fact sorts as unknown. */
+  pinnedAt?: number | null
+  lastReadAt?: number | null
   createdAt: number
   updatedAt: number
-  size: number
+  size: number | null
 }
 
 /** What the card component needs to draw artwork, in either row's terms. */
 export function rowCover(row: BookRow): CoverSource {
   return {
+    ref: row.ref,
+    clientVersion: row.clientVersion,
     id: row.id,
     title: row.title,
     format: row.format,
@@ -74,8 +81,10 @@ export function versionOrdinal(versions: { id: string; createdAt: number }[], ve
   return versions.findIndex((v) => v.id === versionId) + 1
 }
 
-export function privateBookRow(book: BookListItem): BookRow {
+export function privateBookRow(book: ClientLibraryBookView): BookRow {
   return {
+    ref: book.ref,
+    clientVersion: book.clientVersion,
     id: book.id,
     title: book.title,
     author: book.author ?? null,
@@ -86,6 +95,8 @@ export function privateBookRow(book: BookListItem): BookRow {
     coverPaletteKey: book.coverPaletteKey ?? book.id,
     coverPaletteId: book.coverPaletteId,
     progress: book.progress ?? null,
+    pinnedAt: book.pinnedAt ?? null,
+    lastReadAt: book.lastReadAt ?? null,
     createdAt: book.createdAt,
     updatedAt: book.updatedAt,
     size: book.size,
@@ -118,8 +129,10 @@ export function catalogWorkRow(work: CatalogBook): BookRow {
     // A work belongs to nobody, so there is no progress to show - and none is
     // invented, exactly as a private book at 0% shows none.
     progress: null,
+    pinnedAt: work.pinnedAt ?? null,
+    lastReadAt: null,
     createdAt: work.createdAt,
     updatedAt: work.updatedAt,
-    size: first?.size ?? 0,
+    size: first?.size ?? null,
   }
 }

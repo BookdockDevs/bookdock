@@ -14,6 +14,10 @@ import { useToastStore } from '@/stores/toast.store'
 const apiPatch = vi.fn()
 const apiPost = vi.fn()
 const apiDelete = vi.fn()
+const invalidateDeviceMembershipQueries = vi.fn()
+const vaultSelection = vi.fn()
+const vaultTrash = vi.fn()
+const vaultPurge = vi.fn()
 let selectionItems: BatchSelectionItem[] = []
 let tags: { id: string; name: string; bookCount: number; parentId?: string | null }[] = []
 let categories: { id: string; name: string; bookCount: number; parentId?: string | null }[] = []
@@ -34,6 +38,19 @@ vi.mock('../features/library/hooks', () => ({
   // factory replaces that module wholesale, so the export has to be
   // re-declared here or the call throws inside the component.
   invalidatePermanentlyDeletedBookQueries: vi.fn(),
+  invalidateDeviceMembershipQueries: (...args: unknown[]) => invalidateDeviceMembershipQueries(...args),
+  // A server-only selection never reaches the vault; the bar binds it at mount.
+  useVaultOperations: () => ({
+    selection: (...args: unknown[]) => vaultSelection(...args),
+    updateSelection: async () => {},
+    trash: (...args: unknown[]) => vaultTrash(...args),
+    restore: async () => {},
+    purge: (...args: unknown[]) => vaultPurge(...args),
+    restoreSelection: async () => {},
+    setReadStatus: async () => {},
+    emptyTrash: async () => 0,
+    readCatalog: async () => ({ books: [] }),
+  }),
 }))
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -58,6 +75,9 @@ beforeEach(() => {
   categories = []
   apiPatch.mockResolvedValue({ data: null })
   apiDelete.mockResolvedValue({ data: null })
+  vaultSelection.mockResolvedValue([])
+  vaultTrash.mockResolvedValue({ deletedAt: 1, version: 1 })
+  vaultPurge.mockResolvedValue(undefined)
   apiPost.mockImplementation((_url: string, body: { ids: string[] }) => Promise.resolve({
     data: body.ids.map((id) => selectionItems.find((row) => row.id === id)),
   }))
@@ -66,7 +86,7 @@ beforeEach(() => {
 describe('SelectionBar', () => {
   it('shows a download label beside the batch download icon', () => {
     selectionItems = [item('a', { bookVersionId: 'version-a', title: 'A', format: 'epub' })]
-    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} />, { wrapper })
 
     expect(screen.getByText('library.download')).toBeVisible()
   })
@@ -75,7 +95,7 @@ describe('SelectionBar', () => {
     selectionItems = [item('w1', { kind: undefined }), item('w2', { kind: undefined })]
     categories = [{ id: 'c1', name: '科幻', bookCount: 2 }]
     const onComplete = vi.fn()
-    render(<SelectionBar selectedIds={['w1', 'w2']} libraryId="lib1" onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:w1', 'server:w2']} libraryId="lib1" onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
 
     await clickReady('library.batchOrganize')
     expect(screen.getByRole('dialog')).toHaveAccessibleName(/library.batchOrganize/)
@@ -93,7 +113,7 @@ describe('SelectionBar', () => {
     selectionItems = [item('a', { categoryId: 'c1' }), item('b', { categoryId: 'c2' })]
     categories = [{ id: 'c1', name: 'Root', bookCount: 1, parentId: null }, { id: 'c2', name: 'Child', bookCount: 1, parentId: 'c1' }]
     tags = [{ id: 'tag', name: 'Topic', bookCount: 0 }]
-    render(<SelectionBar selectedIds={['a', 'b']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a', 'server:b']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
     await clickReady('library.batchOrganize')
     expect(screen.getByText('Root / Child')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Root / Child'))
@@ -109,7 +129,7 @@ describe('SelectionBar', () => {
   it('adds a partially present tag to all selected entries without changing other tags', async () => {
     selectionItems = [item('a', { shelfId: 's1', categoryId: 'c1', tagIds: ['t1', 'other'] }), item('b', { shelfId: 's2', categoryId: 'c2', tagIds: [] })]
     tags = [{ id: 't1', name: '科幻', bookCount: 1 }]
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a', 'server:b']} onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchOrganize')
     fireEvent.click(screen.getByText('library.tags'))
@@ -126,7 +146,7 @@ describe('SelectionBar', () => {
   it('keeps shelf and category selected by default and only unshelves when explicitly chosen', async () => {
     selectionItems = [item('a', { shelfId: 's1', categoryId: 'c1' })]
     categories = [{ id: 's1', name: 'Reading', bookCount: 1 }]
-    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchOrganize')
     expect(screen.getByRole('radio', { name: 'library.keepShelf' })).toBeChecked()
@@ -143,7 +163,7 @@ describe('SelectionBar', () => {
   it('clears a category only after explicitly choosing uncategorized', async () => {
     selectionItems = [item('a', { categoryId: 'c1' })]
     categories = [{ id: 'c1', name: 'Mystery', bookCount: 1 }]
-    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchOrganize')
     fireEvent.click(screen.getByText('library.categories'))
@@ -159,7 +179,7 @@ describe('SelectionBar', () => {
   it('allows private recommendations and resets a recommendation to keep before an unrelated tag edit', async () => {
     selectionItems = [item('a', { categoryId: 'existing' })]
     tags = [{ id: 't1', name: 'Topic', bookCount: 0 }]
-    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchOrganize')
     fireEvent.click(screen.getByText('library.categories'))
@@ -178,7 +198,7 @@ describe('SelectionBar', () => {
 
   it('does not offer private recommended categories in a shared library', async () => {
     selectionItems = [item('a', { kind: undefined })]
-    render(<SelectionBar selectedIds={['a']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchOrganize')
     expect(screen.getByText('library.categories')).toBeInTheDocument()
@@ -187,7 +207,7 @@ describe('SelectionBar', () => {
 
   it('closes the organize dialog on Escape', async () => {
     selectionItems = [item('a')]
-    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchOrganize')
     expect(screen.getByRole('dialog')).toBeInTheDocument()
@@ -202,7 +222,7 @@ describe('SelectionBar', () => {
       resolvePatch = () => resolve({ data: null })
     }))
     const onComplete = vi.fn()
-    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
 
     await clickReady('library.batchOrganize')
     fireEvent.click(screen.getByRole('radio', { name: 'library.notOnShelf' }))
@@ -222,7 +242,7 @@ describe('SelectionBar', () => {
   it('removes a tag only when every selected entry has it', async () => {
     selectionItems = [item('a', { tagIds: ['t1'] }), item('b', { tagIds: ['t1'] })]
     tags = [{ id: 't1', name: '科幻', bookCount: 2 }]
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a', 'server:b']} onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchOrganize')
     fireEvent.click(screen.getByText('library.tags'))
@@ -237,7 +257,7 @@ describe('SelectionBar', () => {
   it('keeps reading status in a private-library menu', async () => {
     selectionItems = [item('a'), item('b')]
     const onComplete = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a', 'server:b']} onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
 
     fireEvent.click(screen.getByRole('button', { name: 'library.readStatusLabel' }))
     fireEvent.click(screen.getByRole('button', { name: 'library.markFinished' }))
@@ -249,7 +269,7 @@ describe('SelectionBar', () => {
 
   it('pins a shared work instead of a version', async () => {
     selectionItems = [item('w1', { kind: undefined })]
-    render(<SelectionBar selectedIds={['w1']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:w1']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.pin')
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/libraries/lib1/books/w1', { pinned: true }))
@@ -257,7 +277,7 @@ describe('SelectionBar', () => {
 
   it('uses one Delete action but explains and applies private A/B effects separately', async () => {
     selectionItems = [item('a'), item('b', { kind: 'shared' })]
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a', 'server:b']} onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchDelete')
     const dialog = screen.getByRole('alertdialog')
@@ -277,14 +297,14 @@ describe('SelectionBar', () => {
       ? Promise.resolve({ data: { succeeded: 1, failed: 1, failedIds: ['b'] }, undo: { token: 'receipt', label: 'undo.action' } })
       : Promise.resolve({ data: body.ids.map((id) => selectionItems.find((row) => row.id === id)) }))
     const onRetainSelection = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b']} trashEnabled onRetainSelection={onRetainSelection} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a', 'server:b']} trashEnabled onRetainSelection={onRetainSelection} />, { wrapper })
 
     await clickReady('library.batchDelete')
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'library.batchDelete' }))
 
     await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/books/batch/trash', { ids: ['a', 'b'] }))
     expect(apiDelete).not.toHaveBeenCalled()
-    expect(onRetainSelection).toHaveBeenCalledWith(['b'])
+    expect(onRetainSelection).toHaveBeenCalledWith(['server:b'])
     expect(useToastStore.getState().toasts).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'warning', message: { key: 'library.batchPartial', params: { action: 'library.batchActionDelete', succeeded: 1, failed: 1 } } }),
     ]))
@@ -292,7 +312,7 @@ describe('SelectionBar', () => {
 
   it('counts all versions in shared-work deletion confirmation', async () => {
     selectionItems = [item('w1', { kind: undefined, versionCount: 3 })]
-    render(<SelectionBar selectedIds={['w1']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:w1']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchDelete')
     expect(screen.getByText('library.batchDeleteSharedTrash')).toBeInTheDocument()
@@ -302,7 +322,7 @@ describe('SelectionBar', () => {
 
   it.each([true, false])('offers personal cleanup for owned books with trash enabled: %s', async (trashEnabled) => {
     selectionItems = [item('owned')]
-    render(<SelectionBar selectedIds={['owned']} trashEnabled={trashEnabled} onClear={vi.fn()} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:owned']} trashEnabled={trashEnabled} onClear={vi.fn()} />, { wrapper })
     await clickReady('library.batchDelete')
     const dialog = screen.getByRole('alertdialog')
     const option = within(dialog).getByRole('switch', { name: 'library.clearUserDataOnRemove' })
@@ -317,11 +337,11 @@ describe('SelectionBar', () => {
     selectionItems = [item('a'), item('b')]
     apiPatch.mockResolvedValue({ data: { succeeded: 1, failed: 1, failedIds: ['b'] } })
     const onRetainSelection = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} onRetainSelection={onRetainSelection} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a', 'server:b']} onClear={vi.fn()} onRetainSelection={onRetainSelection} />, { wrapper })
 
     await clickReady('library.pin')
     expect(apiPatch).toHaveBeenCalledWith('/books/batch/update', { ids: ['a', 'b'], pinned: true })
-    await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['b']))
+    await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['server:b']))
     expect(useToastStore.getState().toasts[0]).toMatchObject({ type: 'warning', message: { key: 'library.batchPartial', params: { succeeded: 1, failed: 1 } } })
   })
 
@@ -329,16 +349,87 @@ describe('SelectionBar', () => {
     selectionItems = [item('a'), item('b')]
     apiPatch.mockRejectedValue(new Error('failed'))
     const onRetainSelection = vi.fn()
-    render(<SelectionBar selectedIds={['a', 'b']} onClear={vi.fn()} onRetainSelection={onRetainSelection} />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a', 'server:b']} onClear={vi.fn()} onRetainSelection={onRetainSelection} />, { wrapper })
     await clickReady('library.pin')
-    await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['a', 'b']))
+    await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['server:a', 'server:b']))
     expect(useToastStore.getState().toasts[0]).toMatchObject({ type: 'error', message: { key: 'library.batchFailed', params: { failed: 2 } } })
   })
 
   it('keeps trash actions separate from ordinary selection actions', () => {
-    render(<SelectionBar selectedIds={['a']} onClear={vi.fn()} trash />, { wrapper })
+    render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} trash />, { wrapper })
     expect(screen.getByRole('button', { name: 'library.restore' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'library.permanentDelete' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'library.batchOrganize' })).toBeNull()
+  })
+
+  it('permanently deletes a server-only trash selection without a selection query', async () => {
+    // Trash mode skips the batch-selection query, so the dialog cannot depend on
+    // its rows; the scope-qualified key already names the owner.
+    apiDelete.mockResolvedValue({ data: null })
+    render(<SelectionBar selectedKeys={['server:a', 'server:b']} onClear={vi.fn()} trash />, { wrapper })
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.permanentDelete' }))
+    const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'library.permanentDelete' }))
+
+    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/books/a/permanent'))
+    expect(apiDelete).toHaveBeenCalledWith('/books/b/permanent')
+    expect(useToastStore.getState().toasts[0]).toMatchObject({
+      type: 'success',
+      message: { key: 'library.batchPermanentDeleteSucceeded', params: { count: 2 } },
+    })
+  })
+
+  it('retains scope-qualified selection keys after a partial permanent delete failure', async () => {
+    selectionItems = [item('a', { title: 'Server A' })]
+    vaultSelection.mockResolvedValue([
+      {
+        ...item('b', {
+          title: 'Local B',
+          ref: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'b' },
+          clientVersion: 1,
+        }),
+      },
+    ])
+    apiDelete.mockRejectedValueOnce(new Error('server error'))
+    const onRetainSelection = vi.fn()
+    render(
+      <SelectionBar
+        selectedKeys={['server:a', 'local:b']}
+        onClear={vi.fn()}
+        onRetainSelection={onRetainSelection}
+        trash
+      />,
+      { wrapper },
+    )
+
+    await clickReady('library.permanentDelete')
+    const dialog = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'library.permanentDelete' }))
+
+    await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['server:a']))
+    expect(invalidateDeviceMembershipQueries).toHaveBeenCalled()
+  })
+
+  it('omits partial undo and invalidates device membership on mixed-authority batch hide', async () => {
+    selectionItems = [item('a', { title: 'Server A', hidden: false })]
+    vaultSelection.mockResolvedValue([
+      item('b', {
+        title: 'Local B',
+        ref: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'b' },
+        hidden: false,
+        clientVersion: 1,
+      }),
+    ])
+    apiPost.mockResolvedValue({ data: selectionItems })
+    apiPatch.mockResolvedValue({ data: { succeeded: 1, failed: 0, failedIds: [] }, undo: { kind: 'books-batch', token: 'u1' } })
+
+    render(<SelectionBar selectedKeys={['server:a', 'local:b']} onClear={vi.fn()} onComplete={vi.fn()} />, { wrapper })
+
+    await clickReady('library.hide')
+    await waitFor(() => expect(invalidateDeviceMembershipQueries).toHaveBeenCalled())
+    const successToast = useToastStore.getState().toasts.find((toast) => toast.type === 'success')
+    expect(successToast).toBeDefined()
+    expect(successToast?.action).toBeUndefined()
   })
 })

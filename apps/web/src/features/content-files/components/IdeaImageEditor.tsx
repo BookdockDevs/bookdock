@@ -1,3 +1,4 @@
+import { useContentImages } from '../hooks/useContentImages'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@dnd-kit/sortable'
@@ -15,7 +16,7 @@ import ContentImagePreview from './ContentImagePreview'
 import { ImageIcon } from './ContentUpload'
 
 interface IdeaImageEditorProps {
-  bookVersionId: string
+  bookVersionId?: string
   targetId?: string
   initialImages?: ContentFile[]
   disabled?: boolean
@@ -53,7 +54,8 @@ const IdeaImageEditor = forwardRef<IdeaImageEditorHandle, IdeaImageEditorProps>(
   const uploadedImages = draft.entries.flatMap((entry) => entry.status === 'ready' && entry.resource ? [entry.resource] : [])
   const readyById = new Map([...initialImages, ...uploadedImages].map((image) => [image.id, image]))
   const removed = new Set(removedIds)
-  const images = imageOrder.map((id) => readyById.get(id)).filter((image): image is ContentFile => image !== undefined && !removed.has(image.id))
+  const orderedImages = imageOrder.map((id) => readyById.get(id)).filter((image): image is ContentFile => image !== undefined && !removed.has(image.id))
+  const images = useContentImages(orderedImages)
   const pending = draft.entries.filter((entry) => entry.status !== 'ready' || !entry.resource)
   const totalCount = images.length + pending.length
   const uploadedImageIds = uploadedImages.map((image) => image.id).join('|')

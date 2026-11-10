@@ -197,3 +197,40 @@ describe('retroactive reading entry', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
+
+
+describe('capture time fidelity in the shared save dialog', () => {
+  it('preserves measured seconds, original start precision and pauses when manual time is unchanged', () => {
+    const startedAt = new Date('2026-11-07T08:00:37').getTime()
+    const fragments = [{ startedAt, endedAt: startedAt + 1250 }, { startedAt: startedAt + 120000, endedAt: startedAt + 121250 }]
+    const manual = { userId: 'reader', bookId: 'b1', requestId: 'precise', deviceId: 'device', timezone: 'Asia/Shanghai', date: '2026-11-07', phase: 'paused' as const, startedAt, elapsedMs: 2500, lastResumeAt: null, suspendedAt: null,
+      startCfi: null, lastCfi: null, startFraction: null, lastFraction: null, startChapterIndex: null, lastChapterIndex: null, fragments, coverage: [] as [number, number][] }
+    render(<AddRecordDialog bookId="b1" manualSession={manual} onClose={vi.fn()} />)
+    fireEvent.submit(screen.getByRole('dialog').querySelector('form')!)
+    expect(state.mutate.mock.calls[0][0]).toMatchObject({ source: 'manual', durationSeconds: 3, startedAt, endedAt: startedAt + 121250, continuous: false, fragments, deviceId: 'device' })
+  })
+  it('keeps an explicitly unknown start untimed rather than fabricating a noon end', () => {
+    render(<AddRecordDialog bookId="b1" onClose={vi.fn()} />)
+    fireEvent.click(screen.getByTitle('readingData.clearTime'))
+    fireEvent.submit(screen.getByText('library.save').closest('form')!)
+    expect(state.mutate.mock.calls[0][0]).toMatchObject({ source: 'retroactive', startedAt: null, continuous: false })
+    expect(state.mutate.mock.calls[0][0]).not.toHaveProperty('endedAt')
+    expect(state.mutate.mock.calls[0][0]).not.toHaveProperty('fragments')
+  })
+})
+
+
+describe('versioned local editing precision', () => {
+  it.each([0.25, 86400.5])('keeps %s measured seconds unchanged during a progress-only edit', (durationSeconds) => {
+    const startedAt = new Date('2026-11-07T08:00:37').getTime()
+    const editingSession: ReadingLedgerSession = { id: 'logical', roundId: 'round', source: 'manual', date: '2026-11-07', durationSeconds, startedAt, endedAt: startedAt + durationSeconds * 1000,
+      startFraction: 0.1, endFraction: 0.2, progressScale: 1, revisionId: 'revision', wordCount: null, coverage: [[0.1, 0.2]], fragments: [{ startedAt, endedAt: startedAt + durationSeconds * 1000 }], timezone: 'Asia/Shanghai', clientMembers: [{ id: 'actual-member', version: 2 }] }
+    render(<AddRecordDialog bookId="b1" editingSession={editingSession} onClose={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('reader.sessionEndPercent'), { target: { value: '30' } })
+    const form = screen.getByText('library.save').closest('form')!
+    expect(form.checkValidity()).toBe(true)
+    expect(screen.getByText('library.save')).not.toBeDisabled()
+    fireEvent.submit(form)
+    expect(state.update.mock.calls[0][0]).toEqual({ id: 'logical', body: { endFraction: 0.3 }, clientMembers: [{ id: 'actual-member', version: 2 }] })
+  })
+})

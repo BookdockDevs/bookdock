@@ -1,15 +1,22 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from 'react'
-import type { BookFormat } from '@bookdock/shared'
+import type { BookFormat, FontListItem } from '@bookdock/shared'
+import type { ReaderBookProvider } from '../content/book-provider'
+import type { readReaderShortcuts } from '../lib/reader-shortcuts'
 
 import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { resolveReadingTheme } from '@/lib/reading-theme'
+import { notify } from '@/lib/notifications'
+import { useTranslation } from '@/hooks/useTranslation'
 import { FoliateReader } from '../renderers/FoliateReader'
 import { resolveDualFont } from '../fonts'
 import type { BookReader, ClickAreaMode, MarginalField, RendererEvents } from '../types'
 import type { EffectiveViewSettings } from '../lib/view-settings'
 
 interface UseReaderRendererOptions {
+  shortcuts?: () => ReturnType<typeof readReaderShortcuts>
+  bookProvider?: ReaderBookProvider
+  resolvedFonts?: FontListItem[]
   ready?: boolean
   url: string
   mountGeneration?: number
@@ -70,6 +77,9 @@ interface RendererMount {
 }
 
 export function useReaderRenderer({
+  shortcuts,
+  bookProvider,
+  resolvedFonts,
   ready = true,
   url,
   mountGeneration = 0,
@@ -176,15 +186,33 @@ export function useReaderRenderer({
   // receives a concrete stack + optional @font-face/@import css. While the
   // fonts query is still loading an uploaded id resolves to the system
   // fallback; fontCss changing re-triggers the applyFont effect below.
-  const fontsQuery = useFonts()
-  const fontsData = fontsQuery.data
+  const fontsQuery = useFonts(resolvedFonts === undefined)
+  const { isError: fontsError, refetch: retryFonts } = fontsQuery
+  const _ = useTranslation()
+  const fontsData = resolvedFonts === undefined ? fontsQuery.data ?? (fontsQuery.isError ? { data: [] } : undefined) : { data: resolvedFonts }
+  useEffect(() => {
+    if (resolvedFonts === undefined && fontsError) {
+      notify.warning({ key: 'reader.fontServiceUnavailable' }, { dedupeKey: 'reader-font-service', action: {
+        label: _('common.retry'), onClick: () => { void retryFonts() },
+      } })
+    }
+  }, [resolvedFonts, fontsError, retryFonts, _])
   const preparedUrlRef = useRef('')
   if (!url || !ready) {
     preparedUrlRef.current = ''
   } else if (fontsData) {
     preparedUrlRef.current = url
   }
-  const canMount = Boolean(url) && ready && preparedUrlRef.current === url
+  // Preparation can dip back to "unknown" on a live book: signing in moves both
+  // the font catalog and the replacement rule set from the device vault to the
+  // account, so each reads as unresolved for a beat. A mounted book must not be
+  // torn down for that — the pending queries land in the engine that is already
+  // on screen (applyFont / applyTextReplacements), instead of reloading the
+  // book in place. So: mount when prepared, and stay mounted while mounted.
+  const liveMount = activeMountRef.current
+  const mountedHere = Boolean(liveMount) && liveMount!.bookId === bookId
+    && liveMount!.url === url && liveMount!.mountGeneration === mountGeneration
+  const canMount = Boolean(url) && ((ready && preparedUrlRef.current === url) || mountedHere)
   const resolvedFont = resolveDualFont(fontFamily, cjkFontFamily, fontsData?.data ?? [], fontPreferences, fontOrder)
   const fontStack = resolvedFont.stack
   const fontCss = resolvedFont.css
@@ -284,7 +312,7 @@ export function useReaderRenderer({
     fontSize: marginalFontSize,
   }
 
-  const createRenderer = useCallback(() => new FoliateReader(url, bookId, bookSize, format, cleanReading), [bookId, bookSize, cleanReading, format, url])
+  const createRenderer = useCallback(() => new FoliateReader(url, bookId, bookSize, format, cleanReading, bookProvider, shortcuts), [bookId, bookSize, cleanReading, format, url, bookProvider, shortcuts])
 
   useEffect(() => {
     if (!containerRef.current || !url || !canMount) return

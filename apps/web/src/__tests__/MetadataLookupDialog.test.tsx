@@ -1,9 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import MetadataLookupDialog from '../features/library/components/book-detail/MetadataLookupDialog'
 import i18n from '../i18n/i18n'
+import { useAuthStore } from '../stores/auth.store'
 
 const api = vi.hoisted(() => ({
   apiGet: vi.fn(),
@@ -27,12 +28,26 @@ function renderDialog(ui: React.ReactElement) {
 }
 
 describe('metadata lookup draft', () => {
+  afterEach(() => { useAuthStore.setState({ user: null }) })
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     vi.clearAllMocks()
     localStorage.clear()
+    useAuthStore.setState({ user: { id: 'metadata-account', username: 'Reader', role: 'user' } })
     api.apiGet.mockResolvedValue({ data: { googlebooks: false, weread: false } })
     api.apiPost.mockResolvedValue({ data: [{ id: '/works/OL1W', provider: 'openlibrary', title: 'Source title', authors: ['Writer'], description: 'Source description', publisher: 'Publisher', sourceUrl: 'https://openlibrary.org/works/OL1W' }] })
+  })
+
+  it('hides the source picker and blocks search without a service account', async () => {
+    useAuthStore.setState({ user: null })
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover autoSearch onApply={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.getByRole('button', { name: '搜索' })).toBeDisabled()
+    // The picker is absent rather than greyed out: no account, no service.
+    expect(screen.queryByRole('button', { name: '豆瓣' })).toBeNull()
+    await vi.waitFor(() => {
+      expect(api.apiGet).not.toHaveBeenCalled()
+      expect(api.apiPost).not.toHaveBeenCalled()
+    })
   })
 
   it('fills empty fields without overwriting existing values until replacement is selected', async () => {

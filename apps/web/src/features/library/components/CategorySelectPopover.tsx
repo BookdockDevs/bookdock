@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import { CATEGORY_TEMPLATES, type Category } from '@bookdock/shared'
+import { CATEGORY_TEMPLATES, type ClientCategoryView } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
@@ -9,8 +9,8 @@ import { categoryPath } from '../taxonomy'
 import TaxonomyIcon from './TaxonomyIcon'
 
 interface CategorySelectPopoverProps {
-  libraryId: string
-  categories: Category[]
+  libraryId: string | null
+  categories: ClientCategoryView[]
   categoryId: string | null | undefined
   categoryTemplateKey?: string
   allowTemplates?: boolean
@@ -64,7 +64,7 @@ export default function CategorySelectPopover({
   // Split into Level 1 (Roots) and Level 2 (Children)
   const rootCategories = useMemo(() => categories.filter((c) => !c.parentId), [categories])
   const childCategoriesMap = useMemo(() => {
-    const map = new Map<string, Category[]>()
+    const map = new Map<string, ClientCategoryView[]>()
     for (const cat of categories) {
       if (cat.parentId) {
         const list = map.get(cat.parentId) ?? []
@@ -127,7 +127,7 @@ export default function CategorySelectPopover({
     if (!name || createCategory.isPending) return
     try {
       const res = await createCategory.mutateAsync({
-        libraryId,
+        libraryId: libraryId!,
         name,
         parentId: newParentId || undefined,
       })
@@ -216,7 +216,7 @@ export default function CategorySelectPopover({
             flipUp ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
           }`}
         >
-          {/* Create Category Action / Inline Form */}
+          {/* Create ClientCategoryView Action / Inline Form */}
           <div className="mb-1 border-b border-stone-100 pb-1.5 dark:border-stone-800">
             {isCreating ? (
               <div className="space-y-2 rounded-lg bg-stone-50 p-2 dark:bg-stone-800/60">

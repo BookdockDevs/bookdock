@@ -12,17 +12,19 @@ export interface SettingsSearch {
 
 const VALID_SECTIONS = new Set(['general', 'reading', 'library', 'integrations', 'about', 'admin'])
 
-export const settingsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/settings',
-  validateSearch: (input: Record<string, unknown>): SettingsSearch => ({
+export const parseSettingsSearch = (input: Record<string, unknown>): SettingsSearch => ({
     section: typeof input.section === 'string' && VALID_SECTIONS.has(input.section)
       ? input.section as SettingsSearch['section']
       : undefined,
     focus: input.focus === 'tts' || input.focus === 'dictionary' || input.focus === 'ai' ? input.focus : undefined,
     userTab: input.userTab === 'instance' || input.userTab === 'library' ? input.userTab : undefined,
     libraryId: typeof input.libraryId === 'string' ? input.libraryId : undefined,
-  }),
+  })
+
+export const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  validateSearch: parseSettingsSearch,
   component: lazyRouteComponent(() => import('@/features/settings/Settings')),
   pendingComponent: SettingsPending,
 })

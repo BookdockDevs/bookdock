@@ -15,6 +15,9 @@ let expiresAt = 0
 let generation = 0
 let queryKeys: readonly (readonly unknown[])[] = []
 let boundToken: string | null = null
+// Local (vault) operations cannot undo through the server token endpoint; when
+// present, runUndo executes this callback instead of POSTing /api/v1/undo/:token.
+let execute: (() => Promise<void>) | null = null
 const generationByUser = new Map<string, number>()
 const expirationByUser = new Map<string, number>()
 
@@ -66,7 +69,7 @@ export function hasUndoOpportunity(): boolean {
   return token !== null && toastId !== null && !running
 }
 
-export function publishUndoOpportunity(receipt: { token: string; expiresAt?: number; generation?: number; messageKey?: string; params?: Record<string, string | number>; queryKeys?: readonly (readonly unknown[])[] }): void {
+export function publishUndoOpportunity(receipt: { token: string; expiresAt?: number; generation?: number; messageKey?: string; params?: Record<string, string | number>; queryKeys?: readonly (readonly unknown[])[]; execute?: () => Promise<void> }): void {
   ensureLifecycleSubscriptions()
   const userId = useAuthStore.getState().user?.id ?? ''
   const lastGeneration = generationByUser.get(userId) ?? 0
@@ -88,11 +91,48 @@ export function publishUndoOpportunity(receipt: { token: string; expiresAt?: num
   boundToken = null
   token = receipt.token
   running = false
+  execute = receipt.execute ?? null
   generation = receipt.generation ?? generation + 1
   generationByUser.set(userId, generation)
   expiresAt = receipt.expiresAt ?? Date.now() + 120_000
   queryKeys = receipt.queryKeys ?? DEFAULT_UNDO_QUERY_KEYS
   expirationByUser.set(userId, expiresAt)
+}
+
+function undoSlotPatch(label: string, icon: 'loading' | 'retry', disabled: boolean, undoInSecondary: boolean, duration?: number) {
+  const action = { label, icon, ...(disabled ? { disabled: true } : {}), keepOpen: true, onClick: () => undefined, onExpire: () => clearUndo() }
+  return {
+    ...(undoInSecondary ? { secondaryAction: action } : { action }),
+    ...(duration !== undefined ? { duration } : {}),
+  }
+}
+
+function setRunningToast(toastId: string, undoInSecondary: boolean): void {
+  useToastStore.getState().updateToast(toastId, {
+    ...undoSlotPatch(i18n.t('undo.running'), 'loading', true, undoInSecondary),
+    duration: 'persistent' as const,
+  })
+}
+
+function setRetryableToast(toastId: string, undoInSecondary: boolean): void {
+  useToastStore.getState().updateToast(toastId, {
+    message: { key: 'undo.retryableFailure' },
+    type: 'error',
+    ...undoSlotPatch(i18n.t('undo.retry'), 'retry', false, undoInSecondary, Math.max(1, Math.min(10_000, expiresAt - Date.now()))),
+  })
+}
+
+function setConflictToast(toastId: string, undoInSecondary: boolean): void {
+  useToastStore.getState().updateToast(toastId, {
+    message: { key: 'undo.conflict' },
+    type: 'error',
+    ...(undoInSecondary ? { secondaryAction: undefined } : { action: undefined }),
+    duration: 9_000,
+    undoActionSlot: undefined,
+    undoFallbackDuration: undefined,
+    priority: undefined,
+    hardExpiresAt: undefined,
+  })
 }
 
 export async function runUndo(): Promise<void> {
@@ -123,12 +163,42 @@ export async function runUndo(): Promise<void> {
     return
   }
   running = true
-  useToastStore.getState().updateToast(currentToastId, {
-    ...(undoInSecondary
-      ? { secondaryAction: { label: i18n.t('undo.running'), icon: 'loading', disabled: true, keepOpen: true, onClick: () => undefined, onExpire: () => clearUndo() } }
-      : { action: { label: i18n.t('undo.running'), icon: 'loading', disabled: true, keepOpen: true, onClick: () => undefined, onExpire: () => clearUndo() } }),
-    duration: 'persistent',
-  })
+  setRunningToast(currentToastId, undoInSecondary)
+  if (execute) {
+    try {
+      await execute()
+      if (currentGeneration !== generation || token !== currentToken) return
+      token = null
+      running = false
+      execute = null
+      useToastStore.getState().updateToast(currentToastId, {
+        message: { key: 'undo.succeeded' },
+        type: 'success',
+        action: undefined,
+        secondaryAction: undefined,
+        duration: 4_000,
+        undoActionSlot: undefined,
+        undoFallbackDuration: undefined,
+        priority: undefined,
+        hardExpiresAt: undefined,
+      })
+      window.dispatchEvent(new CustomEvent('bd:undo-complete', { detail: { queryKeys } }))
+    } catch (error) {
+      if (currentGeneration !== generation || token !== currentToken) return
+      running = false
+      // Local vault errors carry a category; a moved-on target cannot be
+      // retried, while storage failures can, matching the remote mapping.
+      const category = (error as { category?: string } | null | undefined)?.category
+      if (category === 'conflict' || category === 'unavailable-content' || category === 'invalid-input') {
+        token = null
+        execute = null
+        setConflictToast(currentToastId, undoInSecondary)
+      } else {
+        setRetryableToast(currentToastId, undoInSecondary)
+      }
+    }
+    return
+  }
   try {
     const response = await fetch(`/api/v1/undo/${encodeURIComponent(currentToken)}`, { method: 'POST' })
     if (!response.ok) {
@@ -137,14 +207,7 @@ export async function runUndo(): Promise<void> {
       if (retryable) {
         if (currentGeneration !== generation || token !== currentToken) return
         running = false
-        useToastStore.getState().updateToast(currentToastId, {
-          message: { key: 'undo.retryableFailure' },
-          type: 'error',
-          ...(undoInSecondary
-            ? { secondaryAction: { label: i18n.t('undo.retry'), icon: 'retry', keepOpen: true, onClick: () => { void runUndo() }, onExpire: () => clearUndo() } }
-            : { action: { label: i18n.t('undo.retry'), icon: 'retry', keepOpen: true, onClick: () => { void runUndo() }, onExpire: () => clearUndo() } }),
-          duration: Math.max(1, Math.min(10_000, expiresAt - Date.now())),
-        })
+        setRetryableToast(currentToastId, undoInSecondary)
         return
       }
       if (response.status === 401) {
@@ -200,14 +263,7 @@ export async function runUndo(): Promise<void> {
   } catch {
     if (currentGeneration !== generation || token !== currentToken) return
     running = false
-    useToastStore.getState().updateToast(currentToastId, {
-      message: { key: 'undo.retryableFailure' },
-      type: 'error',
-      ...(undoInSecondary
-        ? { secondaryAction: { label: i18n.t('undo.retry'), icon: 'retry', keepOpen: true, onClick: () => { void runUndo() }, onExpire: () => clearUndo() } }
-        : { action: { label: i18n.t('undo.retry'), icon: 'retry', keepOpen: true, onClick: () => { void runUndo() }, onExpire: () => clearUndo() } }),
-      duration: Math.max(1, Math.min(10_000, expiresAt - Date.now())),
-    })
+    setRetryableToast(currentToastId, undoInSecondary)
   }
 }
 
@@ -218,5 +274,6 @@ function clearUndo(removeToast = false): void {
   running = false
   expiresAt = 0
   boundToken = null
+  execute = null
   queryKeys = []
 }

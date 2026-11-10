@@ -11,6 +11,16 @@ describe('getUserErrorMessage', () => {
     expect(getUserErrorMessage(new ApiError('FORBIDDEN', 'internal message'), translate)).toBe('errors.forbidden')
   })
 
+  it('explains local conflicts and storage failures without exposing internal details', () => {
+    const local = (category: string) => Object.assign(new Error('private database details'), { category })
+    expect(getUserErrorMessage(local('conflict'), translate)).toBe('localLibrary.recordConflict')
+    expect(getUserErrorMessage(local('pending-reading'), translate)).toBe('localLibrary.pendingReading')
+    expect(getUserErrorMessage(local('storage-full'), translate)).toBe('localLibrary.failed')
+    expect(getUserErrorMessage(local('storage-unavailable'), translate)).toBe('localLibrary.failed')
+    expect(getUserErrorMessage(local('unavailable-content'), translate)).toBe('localLibrary.missing')
+    expect(isAccessRevocationError(local('conflict'))).toBe(false)
+  })
+
   it('uses a network message for fetch failures', () => {
     expect(getUserErrorMessage(new TypeError('Failed to fetch'), translate)).toBe('errors.network')
   })

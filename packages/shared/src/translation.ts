@@ -17,13 +17,16 @@ export const translationPreferencesSchema = z.object({
   targetLang: translationLanguageSchema.default('zh-Hans'),
   channel: translationChannelSchema.default({ kind: 'ai', profileId: null, model: null }),
 }).strict()
-export const translationRequestSchema = translationPreferencesSchema.extend({
-  bookId: z.string().min(1).max(100),
+export const selectedTextTranslationRequestSchema = translationPreferencesSchema.extend({
   text: z.string().trim().min(1).max(TRANSLATION_MAX_CHARS),
+}).strict()
+export const translationRequestSchema = selectedTextTranslationRequestSchema.extend({
+  bookId: z.string().min(1).max(100),
 }).strict()
 export type TranslationChannel = z.infer<typeof translationChannelSchema>
 export type TranslationPreferences = z.infer<typeof translationPreferencesSchema>
 export type TranslationRequest = z.infer<typeof translationRequestSchema>
+export type SelectedTextTranslationRequest = z.infer<typeof selectedTextTranslationRequestSchema>
 export type TranslationEvent =
   | { type: 'delta'; text: string }
   | { type: 'done' }

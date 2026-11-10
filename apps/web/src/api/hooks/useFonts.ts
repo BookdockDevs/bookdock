@@ -2,15 +2,25 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { FontListItem, FontScope } from '@bookdock/shared'
 
+import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
+
 import { apiDelete, apiGet, apiPatch, apiUpload } from '../client'
 
 const FONTS_KEY = ['fonts'] as const
 
-export function useFonts() {
+export function useFonts(enabled = true) {
+  const user = useAuthStore((state) => state.user)
+  const revision = getAuthSessionRevision()
   return useQuery({
-    queryKey: FONTS_KEY,
-    queryFn: () => apiGet<{ data: FontListItem[] }>('/fonts'),
+    queryKey: [...FONTS_KEY, user?.id ?? null, revision],
+    queryFn: async () => {
+      if (getAuthSessionRevision() !== revision) throw new DOMException('Font account changed', 'AbortError')
+      const result = await apiGet<{ data: FontListItem[] }>('/fonts')
+      if (getAuthSessionRevision() !== revision) throw new DOMException('Font account changed', 'AbortError')
+      return result
+    },
     staleTime: 5 * 60 * 1000,
+    enabled,
   })
 }
 

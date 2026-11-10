@@ -91,6 +91,7 @@ export default function MetadataLookupDialog({
     queryKey: ['personal-metadata-sources', userId],
     queryFn: () => apiGet<{ data: PersonalMetadataSourceView[] }>('/integrations/personal-sources'),
     staleTime: 30_000,
+    enabled: Boolean(userId),
   })
   const personalSources = Array.isArray(sourcesData?.data) ? sourcesData.data : []
 
@@ -162,7 +163,7 @@ export default function MetadataLookupDialog({
   }
 
   async function search(targetProvider: MetadataProviderId = provider, targetScope: WeReadSearchScope = weReadScope) {
-    if (!query.trim()) return
+    if (!userId || !query.trim()) return
     setLoading(true)
     setSelected(null)
     setResults([])
@@ -194,7 +195,7 @@ export default function MetadataLookupDialog({
   }
 
   async function select(result: MetadataCandidate) {
-    if (loading) return
+    if (!userId || loading) return
     if (selected?.id === result.id) {
       setSelected(null)
       return
@@ -397,7 +398,7 @@ export default function MetadataLookupDialog({
             )}
             <button
               type="button"
-              disabled={loading || !query.trim()}
+              disabled={!userId || loading || !query.trim()}
               onClick={() => void search()}
               aria-label={_(loading && !loadingDetailId ? 'metadataLookup.searching' : 'metadataLookup.search')}
               title={_('metadataLookup.search')}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
+import { useCatalogRevealHidden } from '@/features/reading-data/useCatalogRevealHidden'
 import { useTranslation } from '@/hooks/useTranslation'
-import { toggleRevealHidden } from '@/lib/reveal-hidden'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { GRID_CARD_FIELDS, type GridCardField } from '@bookdock/shared'
@@ -14,6 +14,7 @@ import {
   type ListInfoItem,
 } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import { cn } from '@/lib/utils'
 
 import type { LibrarySearch } from '@/routes/index'
@@ -128,9 +129,10 @@ export default function ViewMenu({
   const setSortBy = useUiStore((s) => s.setSortBy)
   const setSortOrder = useUiStore((s) => s.setSortOrder)
   const setView = useUiStore((s) => s.setView)
-  const revealHidden = useUiStore((s) => s.revealHidden)
+  const { revealHidden, toggle: toggleReveal } = useCatalogRevealHidden()
   const user = useAuthStore((s) => s.user)
-  const isGuest = !user
+  const local = useLocalCatalog()
+  const isGuest = !user && !local
   const updateLibraryPrefs = useUpdateLibraryPrefs()
   const libraryPrefs = useLibraryPrefs()
   const gridCardFields = libraryPrefs?.gridCardFields ?? DEFAULT_GRID_CARD_FIELDS
@@ -416,7 +418,7 @@ export default function ViewMenu({
                         aria-checked={catalogMode ? categoryScope !== 'direct' : revealHidden}
                         onClick={() => {
                           if (catalogMode) navSearch({ categoryScope: categoryScope === 'direct' ? 'subtree' : 'direct' })
-                          else void toggleRevealHidden().catch((error) => notify.error(getUserErrorNotification(error)))
+                          else void toggleReveal().catch((error) => notify.error(getUserErrorNotification(error)))
                         }}
                         className="flex w-full items-center justify-between gap-2 px-1 py-1 text-left"
                       >

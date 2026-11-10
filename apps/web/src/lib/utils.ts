@@ -2,7 +2,8 @@ export function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ')
 }
 
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number | null): string {
+  if (bytes === null) return '—'
   if (bytes === 0) return '0 B'
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB']

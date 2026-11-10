@@ -1,3 +1,4 @@
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { useEffect, useRef, useState } from 'react'
 
 import type { AnnotationUpdateReq, ContentFile } from '@bookdock/shared'
@@ -49,6 +50,8 @@ export default function AnnotationInlineEditor({
   initialVisibility?: 'private' | 'shared'
   theme?: AnnotationTextTheme
 }) {
+  const local = useLocalReader()
+  const imagesEnabled = Boolean(local || bookVersionId)
   const _ = useTranslation()
   const [draft, setDraft] = useState(initial)
   const [files, setFiles] = useState<Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>>()
@@ -118,15 +121,15 @@ export default function AnnotationInlineEditor({
             : 'text-stone-800 placeholder:text-stone-400 dark:text-stone-200',
         )}
       />
-      {bookVersionId && <IdeaImageEditor ref={imageEditorRef} bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} showToolbar={false} onCountChange={setImageCount} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
+      {imagesEnabled && <IdeaImageEditor ref={imageEditorRef} bookVersionId={bookVersionId} targetId={targetId} initialImages={initialImages} disabled={saving} showToolbar={false} onCountChange={setImageCount} onChange={(next, pending) => { setFiles(next); setUploading(pending) }} />}
       {error && <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
       <div className={cn(
         'mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-2.5',
         theme === 'reader' ? 'border-[var(--bd-read-accent)]/25' : 'border-stone-200 dark:border-stone-800',
       )}>
-        {(visibilityEligible || bookVersionId) && <div className="flex min-w-0 items-center gap-3">
+        {(visibilityEligible || imagesEnabled) && <div className="flex min-w-0 items-center gap-3">
           {visibilityEligible && <IdeaVisibilityControl value={visibility} onChange={setVisibility} sourceReadable={sourceReadable ?? false} disabled={saving} />}
-          {bookVersionId && <div className={cn('flex shrink-0 items-center gap-1 text-xs', theme === 'reader' ? 'text-[var(--bd-read-sub)]' : 'text-stone-500 dark:text-stone-400')}>
+          {imagesEnabled && <div className={cn('flex shrink-0 items-center gap-1 text-xs', theme === 'reader' ? 'text-[var(--bd-read-sub)]' : 'text-stone-500 dark:text-stone-400')}>
             <button
               type="button"
               disabled={saving || uploading || imageCount >= IDEA_IMAGE_MAX_COUNT}

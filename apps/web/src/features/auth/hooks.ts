@@ -24,12 +24,13 @@ export const INSTANCE_QUERY_KEY = ['auth', 'instance'] as const
 export const ME_QUERY_KEY = ['auth', 'me'] as const
 export const ADMIN_USERS_QUERY_KEY = ['admin', 'users'] as const
 
-export function useInstanceInfo() {
+export function useInstanceInfo(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: INSTANCE_QUERY_KEY,
     queryFn: () => apiGet<{ data: InstanceInfoRes }>('/auth/instance'),
     staleTime: 60_000,
     retry: false,
+    enabled: options.enabled !== false,
   })
 }
 

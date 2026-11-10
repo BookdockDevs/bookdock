@@ -1,4 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render as renderUi, screen, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { apiDelete, apiGet } from '@/api/client'
@@ -9,10 +11,6 @@ vi.mock('@/api/client', () => ({
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiDelete: vi.fn(),
-}))
-
-vi.mock('@tanstack/react-query', () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }))
 
 vi.mock('@/hooks/useTranslation', () => ({
@@ -38,6 +36,10 @@ vi.mock('../ImportLocatorDialog', () => ({
     </div>
   ),
 }))
+
+function render(children: ReactNode) {
+  return renderUi(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>)
+}
 
 describe('ReadingDataManagerButton', () => {
   beforeEach(() => {

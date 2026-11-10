@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from
 
 import { useTtsServiceVoices, useTtsServices } from '@/api/hooks/useTts'
 import { notify } from '@/lib/notifications'
+import { getSessionEpoch, onSessionScopeChange } from '@/lib/session-scope'
+import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
 
 import type { ReaderPlaybackCoordinator } from '../lib/playback-coordinator'
@@ -10,24 +12,33 @@ import { TtsController, type TtsPreferences } from '../lib/tts-controller'
 import { IDLE_TTS_STATE, TtsSessionContext } from './tts-session-context'
 
 export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = false, onStart, children }: { renderer: BookReader | null; coordinator: ReaderPlaybackCoordinator; guestReadOnly?: boolean; onStart?: () => void; children: ReactNode }) {
-  const { data } = useTtsServices({ enabled: !guestReadOnly })
+  const user = useAuthStore((state) => state.user)
+  const accountId = user?.id ?? null
+  const sessionEpoch = getSessionEpoch()
   const engine = useUiStore((state) => state.ttsEngine)
+  const { data, isError } = useTtsServices({ enabled: !guestReadOnly && engine === 'service' })
   const serviceId = useUiStore((state) => state.ttsServiceId)
   const voiceId = useUiStore((state) => state.ttsVoiceId)
   const rate = useUiStore((state) => state.ttsRate)
   const autoNext = useUiStore((state) => state.ttsAutoNext)
   const follow = useUiStore((state) => state.ttsFollow)
-  const service = useMemo(() => engine === 'service' ? data?.data.find((item) => item.id === serviceId) : undefined, [data, engine, serviceId])
+  const service = useMemo(() => accountId && engine === 'service' && !isError ? data?.data.find((item) => item.id === serviceId) : undefined, [accountId, data, engine, isError, serviceId])
   const voicesQuery = useTtsServiceVoices(service?.id)
   const serviceVoices = useMemo(() => voicesQuery.data?.data.map((item) => ({ id: item.id, name: item.name, lang: item.lang, gender: item.gender, description: item.description })) ?? [], [voicesQuery.data])
-  const preferences = useMemo<TtsPreferences>(() => ({ engine: service ? 'service' : engine === 'edge' ? 'edge' : 'system', service, voices: serviceVoices, voiceId, rate, autoNext, highlight: follow }), [autoNext, engine, follow, rate, service, serviceVoices, voiceId])
-  const controllerRef = useRef<{ renderer: BookReader; controller: TtsController } | null>(null)
+  const unavailableReason = engine !== 'system' && !accountId ? 'account' : engine === 'service' && !service?.credentialsConfigured ? 'service' : engine === 'system' && (!globalThis.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') ? 'system' : undefined
+  const preferences = useMemo<TtsPreferences>(() => ({ engine, service, voices: serviceVoices, voiceId, rate, autoNext, highlight: follow }), [autoNext, engine, follow, rate, service, serviceVoices, voiceId])
+  const controllerRef = useRef<{ renderer: BookReader; accountId: string | null; sessionEpoch: number; controller: TtsController } | null>(null)
   if (!renderer) {
     controllerRef.current = null
-  } else if (controllerRef.current?.renderer !== renderer) {
-    controllerRef.current = { renderer, controller: new TtsController(renderer, preferences, undefined, () => coordinator.claim('tts')) }
+  } else if (controllerRef.current?.renderer !== renderer || controllerRef.current.accountId !== accountId || controllerRef.current.sessionEpoch !== sessionEpoch) {
+    controllerRef.current = { renderer, accountId, sessionEpoch, controller: new TtsController(renderer, preferences, undefined, () => coordinator.claim('tts')) }
   }
   const controller = controllerRef.current?.controller ?? null
+
+  useEffect(() => {
+    if (!controller) return
+    return onSessionScopeChange(() => { void controller.stop() })
+  }, [controller])
 
   useEffect(() => {
     controller?.setPreferences(preferences)
@@ -59,7 +70,7 @@ export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = fals
   }, [controller, coordinator])
 
   useEffect(() => {
-    if (!controller || guestReadOnly) return
+    if (!controller || guestReadOnly || unavailableReason) return
     return coordinator.registerCommand('tts', () => {
       const status = controller.getSnapshot().status
       if (status === 'idle' || status === 'error') {
@@ -69,7 +80,7 @@ export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = fals
         void controller.stop()
       }
     })
-  }, [controller, coordinator, guestReadOnly, onStart])
+  }, [controller, coordinator, guestReadOnly, onStart, unavailableReason])
 
   useEffect(() => {
     if (!controller) return
@@ -89,5 +100,5 @@ export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = fals
     // toast instead of leaving an error message in the TTS menu.
     if (state.error) notify.error({ key: 'reader.ttsPlaybackFailed' })
   }, [state.error])
-  return <TtsSessionContext.Provider value={{ controller, state }}>{children}</TtsSessionContext.Provider>
+  return <TtsSessionContext.Provider value={{ controller, state, unavailableReason }}>{children}</TtsSessionContext.Provider>
 }

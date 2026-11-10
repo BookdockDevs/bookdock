@@ -1,3 +1,4 @@
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { useState } from 'react'
 import type { ReadStatus } from '@bookdock/shared'
 
@@ -7,7 +8,7 @@ import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { useAnnotations } from '../hooks/useAnnotations'
-import { useManualTimerStore } from '../lib/manual-timer-store'
+import { useManualTimerSource } from '../hooks/useManualTimerSource'
 import AddRecordDialog from './AddRecordDialog'
 
 interface EndOfBookViewProps {
@@ -84,6 +85,7 @@ export default function EndOfBookView({
   onMarkFinished,
   isMarkingFinished = false,
 }: EndOfBookViewProps) {
+  const local = useLocalReader()
   const _ = useTranslation()
 
   const isFinished = readStatus === 'finished'
@@ -99,19 +101,20 @@ export default function EndOfBookView({
   const annotations = annotationsData?.data
   const annotationsCount = annotations?.length ?? 0
 
-  const reviewContext = useReviewBookContext(bookId, !guestReadOnly)
+  const reviewContext = useReviewBookContext(local ? null : bookId, !local && !guestReadOnly)
   const ownReview = reviewContext.data?.data?.own
   const hasOwnReview = Boolean(ownReview)
 
   const [reviewEditorOpen, setReviewEditorOpen] = useState(false)
   const [manualSaveOpen, setManualSaveOpen] = useState(false)
 
-  const manualSessions = useManualTimerStore((s: { sessions: ReturnType<typeof useManualTimerStore.getState>['sessions'] }) => s.sessions)
+  const manualTimerStore = useManualTimerSource()
+  const manualSessions = manualTimerStore((s) => s.sessions)
   const currentManualSession = manualSessions[bookId]
 
   const handleFinishClick = () => {
     if (currentManualSession && (currentManualSession.phase === 'running' || currentManualSession.phase === 'paused')) {
-      useManualTimerStore.getState().pause(bookId)
+      manualTimerStore.getState().pause(bookId)
       setManualSaveOpen(true)
       return
     }
@@ -296,7 +299,7 @@ export default function EndOfBookView({
           onClose={() => setManualSaveOpen(false)}
           onManualSaved={() => {
             setManualSaveOpen(false)
-            useManualTimerStore.getState().discard(bookId)
+            manualTimerStore.getState().discard(bookId)
           }}
         />
       )}

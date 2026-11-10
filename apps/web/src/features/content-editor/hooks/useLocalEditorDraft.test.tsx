@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
+import LocalCatalogProvider from '@/features/local-library/LocalCatalogProvider'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({ account: 'user-a', records: new Map<string, any>(), fail: false }))
@@ -29,6 +30,22 @@ function options(overrides: Partial<Parameters<typeof useLocalEditorDraft<{ text
 describe('local editor recovery', () => {
   beforeEach(() => { state.records.clear(); state.account = 'user-a'; state.fail = false })
   afterEach(() => { vi.useRealTimers() })
+
+  it('keeps local publication recovery owned by the vault across service-account and cross-tab account changes', async () => {
+    const config = options()
+    const { result, rerender } = renderHook(() => useLocalEditorDraft(config), { wrapper: LocalCatalogProvider })
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => { expect(await result.current.flush()).toBe(true) })
+    const key = [...state.records.keys()][0]!
+    expect(JSON.parse(key)[0]).toEqual({ kind: 'local', vaultId: 'device' })
+    state.account = 'user-b'; rerender()
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: 'bd-user' })))
+    expect(result.current.ready).toBe(true)
+    expect(result.current.failure).toBeNull()
+    await act(async () => { expect(await result.current.flush({ text: 'Still local' })).toBe(true) })
+    expect(state.records.size).toBe(1)
+    expect(state.records.get(key).payload).toEqual({ text: 'Still local' })
+  })
 
   it('automatically restores a same-revision draft after loading', async () => {
     const key = draftKey('user-a', 'book', 'txt')

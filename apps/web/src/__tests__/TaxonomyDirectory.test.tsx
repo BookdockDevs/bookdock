@@ -9,6 +9,7 @@ import type { Category } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '@/api/client'
 import { notify } from '@/lib/notifications'
+import { useAuthStore } from '@/stores/auth.store'
 import TaxonomyDirectory from '@/features/library/components/TaxonomyDirectory'
 
 const drag = vi.hoisted(() => ({ end: undefined as ComponentProps<typeof DndContext>['onDragEnd'] }))
@@ -30,11 +31,14 @@ function category(id: string, parentId: string | null): Category {
 }
 
 function setup(canManage = true) {
+  // The rebuilt taxonomy hooks query per-identity keys and stay disabled
+  // without an account, so the directory test runs as a signed-in member.
+  useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false }, mutations: { retry: false } } })
   client.setQueryData(['libraries', 'lib', 'categories'], { data: [category('Root', null), category('Child', 'Root'), category('Other', null)] })
   client.setQueryData(['libraries', 'lib', 'tags'], { data: [{ ...category('Topic', null), bookCount: 1 }] })
-  client.setQueryData(['shelves'], { data: [] })
-  client.setQueryData(['tags'], { data: [] })
+  client.setQueryData(['shelves', 'account', false], { data: [] })
+  client.setQueryData(['tags', 'account', false], { data: [] })
   const navigate = vi.fn()
   const props = { libraryId: 'lib', privateLibraryId: 'private-lib', sessionKey: `test-${Math.random()}`, panel: 'categories' as const, canManage, navSearch: navigate, onOpenNavigation: vi.fn() }
   const result = render(<QueryClientProvider client={client}><TaxonomyDirectory {...props} /></QueryClientProvider>)
@@ -274,15 +278,15 @@ describe('directory batch selection', () => {
 
   it('updates private shelves and tags through their own endpoints', async () => {
     const { client, props, rerender } = setup()
-    client.setQueryData(['shelves'], { data: [category('Shelf', null)] })
-    client.setQueryData(['tags'], { data: [category('Tag', null)] })
+    client.setQueryData(['shelves', 'account', false], { data: [category('Shelf', null)] })
+    client.setQueryData(['tags', 'account', false], { data: [category('Tag', null)] })
     rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} libraryId={null} panel="shelves" /></QueryClientProvider>)
     start(); select('Shelf')
     fireEvent.click(toolbar().getByRole('button', { name: 'library.hide' }))
     await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/shelves/Shelf', { hidden: true }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'library.selectMode' })).not.toBeDisabled())
     rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} key="tags" libraryId={null} panel="tags" /></QueryClientProvider>)
-    client.setQueryData(['tags'], { data: [category('Tag', null)] })
+    client.setQueryData(['tags', 'account', false], { data: [category('Tag', null)] })
     await screen.findByText('Tag')
     start(); select('Tag')
     fireEvent.click(toolbar().getByRole('button', { name: 'library.pin' }))

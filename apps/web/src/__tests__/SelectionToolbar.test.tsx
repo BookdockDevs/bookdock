@@ -19,6 +19,7 @@ import { SelectionToolbar } from '../features/reader/components/SelectionToolbar
 import { popupPosition } from '../features/reader/components/annotation-colors'
 import { RendererContext } from '../features/reader/hooks/useReaderApi'
 import { useUiStore } from '@/stores/ui.store'
+import { LocalReaderContext, type LocalReaderSession } from '@/features/reading-data/reader-source-context'
 
 const createMutate = vi.fn()
 const updateMutate = vi.fn()
@@ -78,6 +79,16 @@ afterEach(() => {
 })
 
 describe('SelectionToolbar', () => {
+  it.each(['dictionary', 'translation'])('keeps %s available for local selection without treating it as a remote book', (utility) => {
+    setSelection()
+    const snapshot = useReaderState.getState().selection
+    render(<LocalReaderContext.Provider value={{ namespace: 'local:device:book', bookId: 'b1', sourceAvailable: true } as LocalReaderSession}><SelectionToolbar bookId="b1" /></LocalReaderContext.Provider>)
+    fireEvent.click(screen.getByTitle(`${utility}.title`))
+    expect(utility === 'dictionary' ? useReaderState.getState().dictionaryTarget : useReaderState.getState().translationTarget).toBe(snapshot)
+    expect(useReaderState.getState().selection).toBeNull()
+    useReaderState.setState({ dictionaryTarget: null })
+  })
+
   it('hands the selected word to the dictionary card before dismissing the toolbar', () => {
     setSelection()
     const snapshot = useReaderState.getState().selection

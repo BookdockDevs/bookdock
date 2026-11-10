@@ -4,6 +4,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { useManualTimer } from '../hooks/useManualTimer'
+import { useManualTimerSource } from '../hooks/useManualTimerSource'
 import { useReaderApi } from '../hooks/useReaderApi'
 import AddRecordDialog from './AddRecordDialog'
 
@@ -146,7 +147,7 @@ const actionBtn =
  */
 export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
   const _ = useTranslation()
-  const timer = useManualTimer(bookId)
+  const timer = useManualTimer(bookId, useManualTimerSource())
   const { session, phase, elapsedMs, graceMs, lastSummary, clearSummary, start, pause, resume, discard } = timer
   const { renderer } = useReaderApi()
   const [expanded, setExpanded] = useState(false)
@@ -197,6 +198,7 @@ export default function TimerPill({ bookId, inline = false }: TimerPillProps) {
         <div className={cn('pointer-events-auto z-[60]', inline ? 'relative' : 'absolute bottom-3 right-3')}>
           <button
             onClick={() => start()}
+            disabled={timer.ready === false || timer.storageError === true}
             title={_('reader.manualTimerStart')}
             className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 text-[var(--bd-read-sub)] shadow-lg backdrop-blur-md transition-all hover:text-[var(--bd-read-text)] active:scale-95"
           >

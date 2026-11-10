@@ -67,7 +67,7 @@ export default function BookTimeList({ date, period, range }: BookTimeListProps)
               <StatsBookCover item={item} />
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5 text-sm font-medium">
-                  <Link to="/archive" search={{ bookId: item.bookId, bookView: 'data' }} state={(previous) => ({ ...previous })} className="truncate hover:underline">{item.title}</Link>
+                  <Link to={'/archive'} search={{ bookId: item.bookId, bookView: 'data' }} state={(previous) => ({ ...previous })} className="truncate hover:underline">{item.title}</Link>
                   {item.readStatus && (
                     <span className="shrink-0 rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-normal text-stone-500 dark:bg-stone-800 dark:text-stone-400">
                       {_(`library.readStatus${item.readStatus[0].toUpperCase()}${item.readStatus.slice(1)}`)}

@@ -1,6 +1,8 @@
 import type { TtsEdgeSpeechRes, TtsServiceRes } from '@bookdock/shared'
 
 import { apiPost, apiPostBlob } from '@/api/client'
+import { assertSessionEpoch, getContentAccountScope, getSessionEpoch, onSessionScopeChange } from '@/lib/session-scope'
+import { useAuthStore } from '@/stores/auth.store'
 
 import type { TtsSegment } from '../types'
 import { TtsAudioBufferPlayer, type DecodedTtsAudio } from './tts-audio-buffer'
@@ -180,10 +182,29 @@ const EDGE_VOICES: TtsVoice[] = [
   { id: 'ko-KR-SunHiNeural', name: 'SunHi', lang: 'ko-KR' },
 ]
 
+async function requestSpeech<T>(accountId: string | null, epoch: number, signal: AbortSignal, send: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  if (!accountId || useAuthStore.getState().user?.id !== accountId || getContentAccountScope() !== `u:${accountId}`) throw abortedError()
+  assertSessionEpoch(epoch)
+  const controller = new AbortController()
+  const unsubscribe = onSessionScopeChange(() => controller.abort())
+  const combined = AbortSignal.any([signal, controller.signal])
+  try {
+    combined.throwIfAborted()
+    const response = await send(combined)
+    combined.throwIfAborted()
+    assertSessionEpoch(epoch)
+    return response
+  } finally {
+    unsubscribe()
+  }
+}
+
 export class EdgeSpeechClient implements TtsClient {
   readonly id = 'edge' as const
   readonly pauseResume = true
   private readonly audioPlayer = new TtsAudioBufferPlayer()
+  private readonly accountId = useAuthStore.getState().user?.id ?? null
+  private readonly sessionEpoch = getSessionEpoch()
 
   listVoices() {
     return EDGE_VOICES
@@ -193,12 +214,14 @@ export class EdgeSpeechClient implements TtsClient {
 
   async prepare(segment: TtsSegment, options: TtsSpeakOptions, signal: AbortSignal) {
     const voice = options.voiceId || EDGE_VOICES[0].id
-    const response = await apiPost<{ data: TtsEdgeSpeechRes }>('/tts/edge/speech', { text: segment.text, voice, rate: 1 }, signal)
+    const response = await requestSpeech(this.accountId, this.sessionEpoch, signal, (requestSignal) => apiPost<{ data: TtsEdgeSpeechRes }>('/tts/edge/speech', { text: segment.text, voice, rate: 1 }, requestSignal))
     if (signal.aborted) throw abortedError()
     const binary = atob(response.data.audioBase64)
     const bytes = new Uint8Array(binary.length)
     for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
     const audio = await this.audioPlayer.decode(bytes.buffer)
+    signal.throwIfAborted()
+    assertSessionEpoch(this.sessionEpoch)
     audio.boundaries = mapTtsBoundaryTexts(segment.text, response.data.boundaries)
     return audio
   }
@@ -229,6 +252,8 @@ export class ServiceAudioClient implements TtsClient {
   readonly id = 'service' as const
   readonly pauseResume = true
   private readonly audioPlayer = new TtsAudioBufferPlayer()
+  private readonly accountId = useAuthStore.getState().user?.id ?? null
+  private readonly sessionEpoch = getSessionEpoch()
 
   constructor(private service: TtsServiceRes | undefined, private voices: TtsVoice[] = []) {}
 
@@ -241,10 +266,14 @@ export class ServiceAudioClient implements TtsClient {
   async unlock() { await this.audioPlayer.unlock() }
 
   async prepare(segment: TtsSegment, options: TtsSpeakOptions, signal: AbortSignal) {
-    if (!this.service?.credentialsConfigured) throw new Error('TTS service is not configured')
-    const blob = await apiPostBlob('/tts/speech', { serviceId: this.service.id, text: segment.text, voice: options.voiceId || this.service.defaultVoice || undefined, rate: 1 }, signal)
+    const service = this.service
+    if (!service?.credentialsConfigured) throw new Error('TTS service is not configured')
+    const blob = await requestSpeech(this.accountId, this.sessionEpoch, signal, (requestSignal) => apiPostBlob('/tts/speech', { serviceId: service.id, text: segment.text, voice: options.voiceId || service.defaultVoice || undefined, rate: 1 }, requestSignal))
     if (signal.aborted) throw abortedError()
-    return this.audioPlayer.decode(await blob.arrayBuffer())
+    const audio = await this.audioPlayer.decode(await blob.arrayBuffer())
+    signal.throwIfAborted()
+    assertSessionEpoch(this.sessionEpoch)
+    return audio
   }
 
   async playPrepared(_segment: TtsSegment, audio: TtsPreparedAudio, options: TtsSpeakOptions, signal: AbortSignal, events: TtsPlaybackEvents) {

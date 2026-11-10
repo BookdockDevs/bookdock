@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
 
-import { bookUpdateSchema, catalogVersionUpdateSchema, type BookListItem, type BookMetadata, type CatalogVersion } from '@bookdock/shared'
+import { bookUpdateSchema, catalogVersionUpdateSchema, type ClientLibraryBookView, type BookMetadata, type CatalogVersion } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
@@ -16,7 +16,7 @@ import { autoGrow, draftFrom } from './types'
 import { inputClass, textareaClass } from './ui'
 
 interface MetadataFieldDialogProps {
-  book: Pick<BookListItem, 'id' | 'title' | 'author' | 'authors' | 'coverPaletteId'>
+  book: Pick<ClientLibraryBookView, 'id' | 'title' | 'author' | 'authors' | 'coverPaletteId' | 'clientVersion' | 'ref'>
   catalog?: { libraryId: string; libraryBookId: string; version: CatalogVersion }
   bookmeta?: BookMetadata
   field: EditableMetadataField
@@ -25,6 +25,7 @@ interface MetadataFieldDialogProps {
 }
 
 export default function MetadataFieldDialog({ book, bookmeta, field, label, catalog, onClose }: MetadataFieldDialogProps) {
+  const [expectedVersion] = useState(book.clientVersion)
   const _ = useTranslation()
   const formId = useId()
   const updateBook = useUpdateBook()
@@ -34,7 +35,7 @@ export default function MetadataFieldDialog({ book, bookmeta, field, label, cata
   const [initial] = useState(() => draftFrom(book, bookmeta))
   const [value, setValue] = useState(initial[field])
   const [seriesIndex, setSeriesIndex] = useState(initial.seriesIndex)
-  const privateSource = useBookMetadataSource(book.id, !catalog)
+  const privateSource = useBookMetadataSource(book.id, !catalog, book.ref)
   const catalogSource = useCatalogVersionMetadataSource(catalog?.libraryId ?? null, catalog?.libraryBookId ?? null, catalog?.version.id ?? null, Boolean(catalog))
   const sourceQuery = catalog ? catalogSource : privateSource
   const source = !sourceQuery.isFetching && !sourceQuery.isError ? (sourceQuery.data?.data ?? null) : null
@@ -77,7 +78,7 @@ export default function MetadataFieldDialog({ book, bookmeta, field, label, cata
       if (catalog && catalogPatch?.success) {
         await updateVersion.mutateAsync({ libraryId: catalog.libraryId, libraryBookId: catalog.libraryBookId, versionLinkId: catalog.version.id, patch: catalogPatch.data })
         notify.success({ key: 'toast.bookUpdated' })
-      } else if (patch.success) await updateBook.mutateAsync({ bookId: book.id, ...patch.data })
+      } else if (patch.success) await updateBook.mutateAsync({ bookId: book.id, expectedVersion, ref: book.ref, ...patch.data })
       onClose()
     } catch (error) {
       if (catalog) notify.error(getUserErrorNotification(error, 'toast.updateBookFailed'))

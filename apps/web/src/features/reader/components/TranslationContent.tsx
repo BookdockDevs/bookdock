@@ -10,11 +10,12 @@ import TranslationChannelSelect from '@/components/TranslationChannelSelect'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { getUserErrorNotification } from '@/lib/error-message'
+import { useAuthStore } from '@/stores/auth.store'
 
 import { CheckIcon, CloseIcon, TranslateIcon } from './annotation-icons'
 
 interface TranslationContentProps {
-  bookId: string
+  bookId?: string
   text: string
   preferences: TranslationPreferences
   config: AiConfigRes
@@ -93,6 +94,9 @@ function CopyIcon() {
 
 export default function TranslationContent({ bookId, text, preferences, config, onClose }: TranslationContentProps) {
   const _ = useTranslation()
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
+  const [requestAccountId] = useState(accountId)
+  const ownsRequest = Boolean(accountId && accountId === requestAccountId)
   const id = useId()
   const client = useQueryClient()
   const save = useSaveTranslationConfig()
@@ -141,22 +145,23 @@ export default function TranslationContent({ bookId, text, preferences, config, 
   }, [config.profiles])
 
   const channelCheck = resolveValidChannel(request.channel, config.profiles)
-  const available = channelCheck.available && Boolean(request.channel.profileId)
+  const available = ownsRequest && channelCheck.available && Boolean(request.channel.profileId)
   const hasAnyServices = (config.profiles ?? []).some(isProfileUsable)
-  const key = ['translation', 'result', id, attempt, bookId, request] as const
+  const key = ['translation', 'result', accountId, id, attempt, bookId, request] as const
 
   const result = useQuery({
     queryKey: key,
     queryFn: async ({ signal }) => {
       await Promise.resolve()
       signal.throwIfAborted()
+      if (!requestAccountId || useAuthStore.getState().user?.id !== requestAccountId) throw new DOMException('Translation account changed', 'AbortError')
       if (preferences.channel.profileId === null && request.channel.profileId) {
         save.mutate(request, { onError: (error) => notify.error(getUserErrorNotification(error)) })
       }
       setOutput('')
       follow.current = true
-      await streamTranslation({ bookId, text: effectiveText, ...request }, signal, (chunk) => {
-        if (signal.aborted) return
+      await streamTranslation({ ...(bookId ? { bookId } : {}), text: effectiveText, ...request }, signal, (chunk) => {
+        if (signal.aborted || useAuthStore.getState().user?.id !== requestAccountId) return
         setOutput((previous) => previous + chunk)
         if (follow.current) {
           requestAnimationFrame(() => {
@@ -192,6 +197,7 @@ export default function TranslationContent({ bookId, text, preferences, config, 
 
   async function changeTargetLang(targetLang: typeof draft.targetLang) {
     await client.cancelQueries({ queryKey: key })
+    if (useAuthStore.getState().user?.id !== requestAccountId) return
     const updated: TranslationPreferences = { ...draft, targetLang }
     setDraft(updated)
     save.mutate(updated, { onError: (error) => notify.error(getUserErrorNotification(error)) })
@@ -202,6 +208,7 @@ export default function TranslationContent({ bookId, text, preferences, config, 
 
   async function changeChannel(channel: typeof draft.channel) {
     await client.cancelQueries({ queryKey: key })
+    if (useAuthStore.getState().user?.id !== requestAccountId) return
     const updated: TranslationPreferences = { ...draft, channel }
     setDraft(updated)
     save.mutate(updated, { onError: (error) => notify.error(getUserErrorNotification(error)) })
@@ -249,6 +256,8 @@ export default function TranslationContent({ bookId, text, preferences, config, 
   const selectedLangObj = TRANSLATION_LANGUAGES.find((lang) => lang.id === draft.targetLang)
   const selectedLangLabel = selectedLangObj?.label ?? draft.targetLang
   const actionLabel = _(busy ? 'translation.stop' : 'translation.retry')
+
+  if (!ownsRequest) return <p className="p-4 text-sm text-[var(--bd-read-sub)]">{_('translation.accountRequired')}</p>
 
   return (
     <>
@@ -374,7 +383,7 @@ export default function TranslationContent({ bookId, text, preferences, config, 
               {status}
             </p>
             <a
-              href="/settings?section=reading&focus=ai"
+              href={"/settings?section=reading&focus=ai"}
               onClick={onClose}
               className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--bd-read-accent)]/80 bg-stone-500/5 px-3.5 py-1.5 text-xs font-medium text-[var(--bd-read-text)] transition-colors hover:border-[var(--bd-read-accent)] hover:bg-stone-500/10 active:scale-95"
             >
@@ -410,7 +419,7 @@ export default function TranslationContent({ bookId, text, preferences, config, 
 
             {(failure === 'AI_NOT_CONFIGURED' || failure === 'AI_NOT_ALLOWED' || failure === 'VALIDATION_ERROR') && (
               <a
-                href="/settings?section=reading&focus=ai"
+                href={"/settings?section=reading&focus=ai"}
                 onClick={onClose}
                 className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--bd-read-accent)]/80 bg-stone-500/5 px-3 py-1.5 text-xs font-medium text-[var(--bd-read-text)] transition-colors hover:border-[var(--bd-read-accent)] hover:bg-stone-500/10 active:scale-95"
               >

@@ -1,10 +1,10 @@
-import type { BookListItem, BookMetadata, CatalogVersion, CatalogVersionUpdateReq } from '@bookdock/shared'
+import type { ClientLibraryBookView, BookMetadata, CatalogVersion, CatalogVersionUpdateReq } from '@bookdock/shared'
 
 import { draftFrom, draftToBookmeta, parseAuthorList, type MetaDraft } from './types'
 
 export type EditableMetadataField = Exclude<keyof MetaDraft, 'coverPaletteId' | 'seriesIndex'>
 
-export function metadataFieldPatch(book: Pick<BookListItem, 'title' | 'author' | 'authors' | 'coverPaletteId'>, bookmeta: BookMetadata | undefined, field: EditableMetadataField, value: string, seriesIndex = '') {
+export function metadataFieldPatch(book: Pick<ClientLibraryBookView, 'title' | 'author' | 'authors' | 'coverPaletteId'>, bookmeta: BookMetadata | undefined, field: EditableMetadataField, value: string, seriesIndex = '') {
   if (field === 'title') return { title: value.trim() }
   if (field === 'authors') {
     const authors = parseAuthorList(value)

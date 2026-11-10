@@ -3,14 +3,14 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { stream } from 'hono/streaming'
 
-import { translationPreferencesSchema, translationRequestSchema, type TranslationEvent } from '@bookdock/shared'
+import { selectedTextTranslationRequestSchema, translationPreferencesSchema, translationRequestSchema, type TranslationEvent } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { settings } from '../../db/schema'
 import { createId } from '../../lib/id'
 import { log } from '../../lib/logger'
 import { AppError } from '../../middleware/error'
-import { translateAiSelection } from './ai.service'
+import { translateAiSelectedText, translateAiSelection } from './ai.service'
 
 const translationRoutes = new Hono()
 
@@ -37,8 +37,11 @@ translationRoutes.put('/config', async (c) => {
   return c.json({ data: parsed.data })
 })
 
-translationRoutes.post('/translate', async (c) => {
-  const parsed = translationRequestSchema.safeParse(await c.req.json().catch(() => null))
+translationRoutes.on('POST', ['/translate', '/selected-text'], async (c) => {
+  const body = await c.req.json().catch(() => null)
+  const parsed = c.req.path.endsWith('/selected-text')
+    ? selectedTextTranslationRequestSchema.safeParse(body)
+    : translationRequestSchema.safeParse(body)
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid translation request')
   const user = c.get('user')!
   c.header('Content-Type', 'application/x-ndjson; charset=utf-8')
@@ -55,7 +58,9 @@ translationRoutes.post('/translate', async (c) => {
       void pending.catch(() => controller.abort())
     }
     try {
-      await translateAiSelection(user.id, user.role, parsed.data, signal, (text) => send({ type: 'delta', text }))
+      const onText = (text: string) => send({ type: 'delta', text })
+      if ('bookId' in parsed.data && typeof parsed.data.bookId === 'string') await translateAiSelection(user.id, user.role, { ...parsed.data, bookId: parsed.data.bookId }, signal, onText)
+      else await translateAiSelectedText(user.id, user.role, parsed.data, signal, onText)
       send({ type: 'done' })
     } catch (error) {
       if (!signal.aborted) {

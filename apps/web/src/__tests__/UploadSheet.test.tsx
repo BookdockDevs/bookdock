@@ -67,6 +67,7 @@ describe('UploadSheet', () => {
     expect(continueUpload).toHaveBeenCalledWith('up-0')
   })
   beforeEach(() => {
+    localStorage.clear()
     mockUseShelves.mockReturnValue({ data: { data: [] } })
     mockUseTags.mockReturnValue({ data: { data: [] } })
     mockUseUploadBooks.mockReturnValue(defaultUpload())
@@ -76,10 +77,10 @@ describe('UploadSheet', () => {
   it('inherits the current shelf without exposing a destination selector', () => {
     const addFiles = vi.fn()
     mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))
-    render(<UploadSheet open onClose={vi.fn()} shelfId="current-shelf" />)
+    render(<UploadSheet open onClose={vi.fn()} shelfId="current-shelf" initialSource="local" />)
     expect(screen.queryByRole('combobox')).toBeNull()
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(['book'], 'book.txt')] } })
-    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { maxBytes: undefined, shelfId: 'current-shelf', tagIds: [] })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { destination: 'local', maxBytes: undefined, shelfId: 'current-shelf', tagIds: [] })
   })
 
   it('clicking drop zone triggers hidden file input', () => {
@@ -112,9 +113,10 @@ describe('UploadSheet', () => {
         isUploading: true,
       }),
     )
-    render(<UploadSheet open onClose={vi.fn()} />)
+    render(<UploadSheet open onClose={vi.fn()} initialSource="local" />)
     expect(screen.getByText('book0.epub')).toBeTruthy()
-    expect(screen.getByText('library.uploading')).toBeTruthy()
+    // Saving on this device words the queue as adding, not uploading
+    expect(screen.getByText('localLibrary.adding')).toBeTruthy()
     expect(screen.getByText('library.processing')).toBeTruthy()
     expect(screen.getByText('library.uploadDone')).toBeTruthy()
     expect(screen.getByText('library.uploadDuplicate')).toBeTruthy()
@@ -157,26 +159,26 @@ describe('UploadSheet', () => {
     mockUseUploadBooks.mockReturnValue(
       uploadOverrides({ items: makeItems([{ status: 'pending' }]), startUpload }),
     )
-    render(<UploadSheet open onClose={vi.fn()} />)
-    expect(screen.getByText('library.uploadPending')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'library.upload' }))
+    render(<UploadSheet open onClose={vi.fn()} initialSource="local" />)
+    expect(screen.getByText('localLibrary.addPending')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'localLibrary.addAction' }))
     expect(startUpload).toHaveBeenCalled()
   })
 
   it('dropped files auto-start while picked files stay pending', () => {
     const addFiles = vi.fn()
     mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))
-    render(<UploadSheet open onClose={vi.fn()} />)
+    render(<UploadSheet open onClose={vi.fn()} initialSource="local" />)
     const dropZone = screen.getByText('library.uploadHint').parentElement!.parentElement!
     const file = new File([], 'book.epub')
     fireEvent.drop(dropZone, fileDropData([file]))
     expect(addFiles).toHaveBeenCalledTimes(1)
-    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, maxBytes: undefined, shelfId: undefined, tagIds: [] })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, destination: 'local', maxBytes: undefined, shelfId: undefined, tagIds: [] })
 
     addFiles.mockClear()
     const input = document.querySelector('input[type="file"]') as HTMLInputElement
     fireEvent.change(input, { target: { files: [file] } })
-    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { maxBytes: undefined, shelfId: undefined, tagIds: [] })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { destination: 'local', maxBytes: undefined, shelfId: undefined, tagIds: [] })
   })
 
   it('enables version extraction on drop only when both versionNameMode and normalizeTitle are active', () => {
@@ -224,7 +226,7 @@ describe('UploadSheet', () => {
     mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))
     render(<UploadSheet open onClose={vi.fn()} />)
     // the panel wraps the title; dropping on the title area must not lose files
-    const panel = screen.getByRole('heading', { name: 'library.upload' }).parentElement!
+    const panel = screen.getByRole('heading', { name: /localLibrary\.add/ }).parentElement!
     fireEvent.drop(panel, fileDropData([new File([], 'book.epub')]))
     expect(addFiles).toHaveBeenCalledTimes(1)
     expect(addFiles).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ autoStart: true }))
@@ -251,13 +253,42 @@ describe('UploadSheet', () => {
     expect(retry).toHaveBeenCalledWith('up-0')
   })
 
+  it('hides the retry for a failure that a retry cannot change', () => {
+    // Too large / unsupported are verdicts about the file: the same bytes earn the
+    // same answer, and the message already says what to do instead.
+    const retry = vi.fn()
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({ items: makeItems([{ status: 'error', messageKey: 'errors.uploadTooLarge', retryable: false }]), retry }),
+    )
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.getByText('errors.uploadTooLarge')).toBeTruthy()
+    expect(screen.queryByText('library.uploadRetry')).toBeNull()
+  })
+
+  it('offers done alone when every failure is permanent', () => {
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({ items: makeItems([{ status: 'error', retryable: false }, { status: 'success' }]) }),
+    )
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'library.uploadRetryAll' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'library.done' })).toBeTruthy()
+  })
+
+  it('still offers retry-all when one failure can be retried', () => {
+    mockUseUploadBooks.mockReturnValue(
+      uploadOverrides({ items: makeItems([{ status: 'error', retryable: false }, { status: 'error' }]) }),
+    )
+    render(<UploadSheet open onClose={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'library.uploadRetryAll' })).toBeTruthy()
+  })
+
   it('shows the current shelf and keeps the current tag opt-in', () => {
     const addFiles = vi.fn()
     mockUseShelves.mockReturnValue({ data: { data: [{ id: 'shelf-1', name: '科幻' }] } })
     mockUseTags.mockReturnValue({ data: { data: [{ id: 'tag-1', name: '待读' }] } })
     mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))
 
-    render(<UploadSheet open onClose={vi.fn()} shelfId="shelf-1" tagId="tag-1" />)
+    render(<UploadSheet open onClose={vi.fn()} shelfId="shelf-1" tagId="tag-1" initialSource="local" />)
 
     expect(screen.getByText('library.uploadShelfContext')).toBeInTheDocument()
     const tagCheckbox = screen.getByRole('checkbox', { name: 'library.uploadTagContext' })
@@ -267,7 +298,7 @@ describe('UploadSheet', () => {
     const dropZone = screen.getByText('library.uploadHint').parentElement!.parentElement!
     const file = new File([], 'book.epub')
     fireEvent.drop(dropZone, fileDropData([file]))
-    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, maxBytes: undefined, shelfId: 'shelf-1', tagIds: ['tag-1'] })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, destination: 'local', maxBytes: undefined, shelfId: 'shelf-1', tagIds: ['tag-1'] })
   })
 
   it('shows a done button once settled, which clears the queue and closes', () => {
@@ -352,13 +383,53 @@ describe('UploadSheet', () => {
     mockUseUploadBooks.mockReturnValue(
       uploadOverrides({ items: makeItems([{ status: 'pending' }]) }),
     )
-    render(<UploadSheet open onClose={vi.fn()} />)
-    expect(screen.getByRole('button', { name: 'library.upload' })).toBeTruthy()
+    render(<UploadSheet open onClose={vi.fn()} initialSource="local" />)
+    expect(screen.getByRole('button', { name: 'localLibrary.addAction' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'library.uploadCancel' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'library.done' })).toBeNull()
   })
 
-  it('switches upload source between local files and remote storage connection', () => {
+  it('switches the upload destination inside the panel for both dropped and picked files', () => {
+    const addFiles = vi.fn()
+    mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))
+    mockUseUploadSettings.mockReturnValue({ maxBytes: 1024, normalizeTitle: true })
+    render(<UploadSheet open onClose={vi.fn()} initialSource="server" />)
+
+    const serverBtn = screen.getByRole('button', { name: 'library.sourceRemote' })
+    const localBtn = screen.getByRole('button', { name: 'library.sourceLocal' })
+    expect(serverBtn).toHaveAttribute('aria-pressed', 'true')
+    expect(localBtn).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(localBtn)
+    expect(localBtn).toHaveAttribute('aria-pressed', 'true')
+
+    const panel = screen.getByRole('heading', { name: /localLibrary\.add/ }).parentElement!
+    fireEvent.drop(panel, fileDropData([new File([], 'dropped.epub')]))
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ destination: 'local', maxBytes: undefined }))
+
+    addFiles.mockClear()
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, { target: { files: [new File([], 'picked.epub')] } })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ destination: 'local', maxBytes: undefined }))
+  })
+
+  it('hides the destination switch for bound targets and when server upload is disabled', () => {
+    const { rerender } = render(
+      <UploadSheet
+        open
+        onClose={vi.fn()}
+        target={{ url: '/libraries/lib-1/books', invalidateKeys: [] }}
+      />,
+    )
+    expect(screen.queryByRole('group', { name: 'library.addDestination' })).toBeNull()
+
+    rerender(<UploadSheet open onClose={vi.fn()} serverUploadDisabled />)
+    expect(screen.getByRole('heading', { name: 'localLibrary.add' })).toBeTruthy()
+    expect(screen.queryByRole('group', { name: 'library.addDestination' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /library\.uploadLocal/ })).toBeNull()
+  })
+
+  it('switches the import source between local files and a storage connection', () => {
     mockUseStorageConnections.mockReturnValue({
       data: {
         data: [
@@ -368,7 +439,7 @@ describe('UploadSheet', () => {
       isLoading: false,
     })
     render(<UploadSheet open onClose={vi.fn()} />)
-    const sourceBtn = screen.getByRole('button', { name: /library.uploadSourceLocal/ })
+    const sourceBtn = screen.getByRole('button', { name: /library\.uploadLocal/ })
     expect(sourceBtn).toBeTruthy()
 
     fireEvent.click(sourceBtn)
@@ -379,7 +450,7 @@ describe('UploadSheet', () => {
     expect(localStorage.getItem('bookdock:last_upload_source')).toBe('conn_1')
   })
 
-  it('restores last upload source from localStorage on open', () => {
+  it('restores the last upload source from localStorage on open', () => {
     localStorage.setItem('bookdock:last_upload_source', 'conn_2')
     mockUseStorageConnections.mockReturnValue({
       data: {
@@ -394,7 +465,7 @@ describe('UploadSheet', () => {
     expect(screen.getByRole('button', { name: /Cloud Drive/ })).toBeTruthy()
   })
 
-  it('auto-switches source to local when files are dropped onto the modal', () => {
+  it('keeps the chosen destination when files are dropped onto the modal from a drive browser', () => {
     localStorage.setItem('bookdock:last_upload_source', 'conn_1')
     const addFiles = vi.fn()
     mockUseUploadBooks.mockReturnValue(uploadOverrides({ addFiles }))
@@ -409,14 +480,15 @@ describe('UploadSheet', () => {
     render(<UploadSheet open onClose={vi.fn()} />)
     expect(screen.getByRole('button', { name: /My NAS/ })).toBeTruthy()
 
-    const panel = screen.getByRole('heading', { name: 'library.upload' }).parentElement!
+    const panel = screen.getByRole('heading', { name: /localLibrary\.add/ }).parentElement!
     fireEvent.drop(panel, fileDropData([new File([], 'dropped.epub')]))
 
     expect(addFiles).toHaveBeenCalled()
+    expect(addFiles.mock.calls.at(-1)?.[1]).toMatchObject({ destination: 'server' })
     expect(localStorage.getItem('bookdock:last_upload_source')).toBe('local')
   })
 
-  it('flips the preview to local while files hover, before any drop', () => {
+  it('flips the preview off the drive browser while files hover, without persisting', () => {
     localStorage.setItem('bookdock:last_upload_source', 'conn_1')
     mockUseUploadBooks.mockReturnValue(uploadOverrides({}))
     mockUseStorageConnections.mockReturnValue({
@@ -431,7 +503,7 @@ describe('UploadSheet', () => {
     expect(screen.getByRole('button', { name: /My NAS/ })).toBeTruthy()
 
     fireEvent.dragOver(document.body, { dataTransfer: { types: ['Files'] } })
-    expect(screen.getByRole('button', { name: /library.uploadSourceLocal/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /library\.uploadLocal/ })).toBeTruthy()
     // Hover alone must not persist: cancelling the drag keeps the preference.
     expect(localStorage.getItem('bookdock:last_upload_source')).toBe('conn_1')
   })

@@ -209,4 +209,5 @@ describe('RootComponent guard', () => {
     expect(screen.getByRole('button', { name: 'auth.retry' })).toBeInTheDocument()
     expect(screen.queryByTestId('outlet')).not.toBeInTheDocument()
   })
+
 })

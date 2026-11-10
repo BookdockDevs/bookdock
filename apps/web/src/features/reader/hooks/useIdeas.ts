@@ -9,39 +9,44 @@ import { apiDelete, apiGet, apiPost, apiPut } from '@/api/client'
 import { withReveal } from '@/lib/reveal-hidden'
 import { invalidateActivityQueries } from '@/features/activity/hooks'
 import { useAuthStore } from '@/stores/auth.store'
+import { useLocalReader } from '../../reading-data/reader-source-context'
 
 export function useIdeaComposer(bookId: string, enabled = true) {
+  const local = useLocalReader()
   return useQuery({
-    queryKey: ['idea-composer', bookId],
-    queryFn: () => apiGet<{ data: IdeaComposerContext }>(`/ideas/book/${bookId}/composer`),
-    enabled: !!bookId && enabled,
+    queryKey: ['idea-composer', local?.namespace ?? bookId],
+    networkMode: local ? 'always' : 'online',
+    queryFn: () => local ? Promise.resolve({ data: { eligible: false, sourceReadable: true, defaultVisibility: 'private' as const, revisionId: null } }) : apiGet<{ data: IdeaComposerContext }>(`/ideas/book/${bookId}/composer`),
+    enabled: !!bookId && (enabled || !!local),
     staleTime: 30_000,
   })
 }
 
 export function useReaderIdeas(bookId: string, enabled = true, displayedRevisionId?: string | null) {
+  const local = useLocalReader()
   const book = useQuery({
-    queryKey: ['book', bookId],
-    queryFn: () => apiGet<{ data: BookDetailRes }>(withReveal(`/books/${bookId}`)),
-    enabled: !!bookId,
+    queryKey: ['book', local?.namespace ?? bookId],
+    queryFn: () => local ? local.getBook() : apiGet<{ data: BookDetailRes }>(withReveal(`/books/${bookId}`)),
+    enabled: !!bookId && !local,
   })
   const source = book.data?.data.source
   const revisionId = displayedRevisionId ?? book.data?.data.revisionId
   return useQuery({
-    queryKey: ['reader-ideas', bookId, source?.libraryId, source?.libraryBookVersionId, revisionId],
+    queryKey: ['reader-ideas', local?.namespace ?? bookId, source?.libraryId, source?.libraryBookVersionId, revisionId],
     queryFn: () => apiGet<{ data: ReaderIdea[] }>(`/ideas/book/${bookId}?${new URLSearchParams({ libraryId: source!.libraryId, listingId: source!.libraryBookVersionId!, revisionId: revisionId! })}`),
-    enabled: enabled && !!source?.libraryBookVersionId && !!revisionId,
+    enabled: !local && enabled && !!source?.libraryBookVersionId && !!revisionId,
     staleTime: 30_000,
   })
 }
 
 export function useIdeaDiscussion(ideaId: string | null, bookId: string) {
+  const local = useLocalReader()
   const queryClient = useQueryClient()
   const revisionId = queryClient.getQueryData<{ data: BookDetailRes }>(['book', bookId])?.data.revisionId
   return useQuery({
     queryKey: ['idea-discussion', ideaId, revisionId],
     queryFn: () => apiGet<{ data: IdeaDiscussion }>(`/ideas/${ideaId}${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`),
-    enabled: !!ideaId && !ideaId.startsWith('temp-'),
+    enabled: !local && !!ideaId && !ideaId.startsWith('temp-'),
     staleTime: 30_000,
   })
 }
@@ -53,10 +58,12 @@ export type IdeaAction =
   | { type: 'delete'; commentId: string }
 
 export function useIdeaAction(ideaId: string, bookId: string) {
+  const local = useLocalReader()
   const queryClient = useQueryClient()
   const pendingComment = useRef<{ signature: string; requestId: string } | null>(null)
   return useMutation({
     mutationFn: (action: IdeaAction) => {
+      if (local) throw new Error('Local notes do not have a server discussion')
       const path = `/ideas/${ideaId}`
       if (action.type === 'comment') {
         const signature = JSON.stringify([ideaId, action.body, action.replyToId])
@@ -69,6 +76,7 @@ export function useIdeaAction(ideaId: string, bookId: string) {
     },
     onSuccess: (_, action) => { if (action.type === 'comment') pendingComment.current = null },
     onMutate: async (action) => {
+      if (local) throw new Error('Local notes do not have a server discussion')
       if (action.type === 'like') {
         const user = useAuthStore.getState().user
         await queryClient.cancelQueries({ queryKey: ['idea-discussion', ideaId] })
@@ -180,6 +188,7 @@ export function useIdeaAction(ideaId: string, bookId: string) {
       }
     },
     onSettled: async (_result, _error, action) => {
+      if (local) return
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['note-archive'] }),
         queryClient.invalidateQueries({ queryKey: ['idea-discussion', ideaId] }),
@@ -194,11 +203,15 @@ export function useIdeaAction(ideaId: string, bookId: string) {
 }
 
 export function useToggleIdeaLike(bookId: string) {
+  const local = useLocalReader()
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ ideaId, liked }: { ideaId: string; liked: boolean }) =>
-      apiPut(`/ideas/${ideaId}/like`, { liked }),
+    mutationFn: ({ ideaId, liked }: { ideaId: string; liked: boolean }) => {
+      if (local) throw new Error('Local notes do not have a server discussion')
+      return apiPut(`/ideas/${ideaId}/like`, { liked })
+    },
     onMutate: async ({ ideaId, liked }) => {
+      if (local) throw new Error('Local notes do not have a server discussion')
       const user = useAuthStore.getState().user
       await queryClient.cancelQueries({ queryKey: ['reader-ideas', bookId] })
       await queryClient.cancelQueries({ queryKey: ['idea-discussion', ideaId] })
@@ -294,6 +307,7 @@ export function useToggleIdeaLike(bookId: string) {
       }
     },
     onSettled: async (_, __, { ideaId }) => {
+      if (local) return
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['idea-discussion', ideaId] }),

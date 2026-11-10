@@ -125,7 +125,7 @@ interface ReaderState {
   setReplaceTarget: (target: SelectionInfo | null) => void
   setTranslationTarget: (target: SelectionInfo | null) => void
   setDictionaryTarget: (target: SelectionInfo | null) => void
-  resetForBook: (initialSidebarOpen?: boolean, initialNavTab?: NavTab) => void
+  resetForBook: (initialSidebarOpen?: boolean, initialNavTab?: NavTab, bookId?: string) => void
 }
 
 export const useReaderState = create<ReaderState>((set) => ({
@@ -188,26 +188,29 @@ export const useReaderState = create<ReaderState>((set) => ({
   setReplaceTarget: (replaceTarget) => set({ replaceTarget }),
   setTranslationTarget: (translationTarget) => set({ translationTarget }),
   setDictionaryTarget: (dictionaryTarget) => set({ dictionaryTarget }),
-  resetForBook: (initialSidebarOpen = false, initialNavTab: NavTab = 'toc') => set({
-    activeNavTab: initialNavTab,
-    tocItems: [],
-    tocBookId: null,
-    currentChapter: null,
-    currentChapterHref: null,
-    currentChapterIndex: null,
-    selection: null,
-    aiContext: null,
-    aiPendingCommand: null,
-    sidebarOpen: initialSidebarOpen,
-    pendingSearchQuery: null,
-    pendingTocHref: null,
-    pendingNavigationHref: null,
-    noteEditorRange: null,
-    shareTarget: null,
-    invalidReplacementIds: [],
-    orphanedAnnotationKeys: [],
-    replaceTarget: null,
-    translationTarget: null,
-    dictionaryTarget: null,
+  resetForBook: (initialSidebarOpen = false, initialNavTab: NavTab = 'toc', bookId?: string) => set((state) => {
+    const sameBook = Boolean(bookId && state.tocBookId === bookId)
+    return {
+      activeNavTab: initialNavTab,
+      tocItems: sameBook ? state.tocItems : [],
+      tocBookId: sameBook ? state.tocBookId : null,
+      currentChapter: sameBook ? state.currentChapter : null,
+      currentChapterHref: sameBook ? state.currentChapterHref : null,
+      currentChapterIndex: sameBook ? state.currentChapterIndex : null,
+      selection: null,
+      aiContext: null,
+      aiPendingCommand: null,
+      sidebarOpen: initialSidebarOpen,
+      pendingSearchQuery: null,
+      pendingTocHref: null,
+      pendingNavigationHref: null,
+      noteEditorRange: null,
+      shareTarget: null,
+      invalidReplacementIds: [],
+      orphanedAnnotationKeys: [],
+      replaceTarget: null,
+      translationTarget: null,
+      dictionaryTarget: null,
+    }
   }),
 }))

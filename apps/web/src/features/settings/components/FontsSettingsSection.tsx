@@ -27,7 +27,9 @@ export default function FontsSettingsSection() {
   const user = useAuthStore((state) => state.user)
   const isGuest = !user
   const isOwner = user?.role === 'owner'
-  const fontsQuery = useFonts()
+  // Fonts are account-scoped server assets; a vault-capable guest must not
+  // probe /fonts from the unified surface.
+  const fontsQuery = useFonts(Boolean(user))
   const uploadedFonts = useMemo(() => fontsQuery.data?.data ?? [], [fontsQuery.data])
   const fontPreferences = useUiStore((state) => state.fontPreferences)
   const fontOrder = useUiStore((state) => state.fontOrder)

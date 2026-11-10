@@ -1,14 +1,13 @@
-import { createRoute, lazyRouteComponent } from '@tanstack/react-router'
+import { createRoute } from '@tanstack/react-router'
 
-import ReaderPending from '@/features/reader/components/ReaderPending'
+import { BookReaderDispatch } from '@/features/reading-data/BookSourceDispatch'
 
 import { rootRoute } from './__root'
 
 export const readerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/books/$id',
-  // Reader pulls in the whole foliate rendering stack — keep it out of the
-  // library bundle
-  component: lazyRouteComponent(() => import('@/features/reader/Reader')),
-  pendingComponent: ReaderPending,
+  // The dispatch resolves the id against the device vault and lazily loads
+  // only the matching reader bundle, so neither stack lands in the other.
+  component: BookReaderDispatch,
 })

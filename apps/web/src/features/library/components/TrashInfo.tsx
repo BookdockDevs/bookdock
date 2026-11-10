@@ -1,33 +1,28 @@
-import { useQuery } from '@tanstack/react-query'
+import type { ClientBookRef } from '@bookdock/shared'
 
-import type { SettingsRes } from '@bookdock/shared'
-
-import { apiGet } from '@/api/client'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
+import { useTrashAutoCleanDays } from '../hooks'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const WARN_REMAINING_DAYS = 3
 
 interface TrashInfoProps {
-  book: { deletedAt?: number | null }
+  book: { deletedAt?: number | null; ref?: ClientBookRef | null }
   className?: string
   variant?: 'pill' | 'badge'
-  /** Retention days; defaults to the private trash setting. Shared libraries pass their own. */
+  /** Retention days; defaults to the one trash policy (account, or the vault for a guest). Shared libraries pass their own. */
   autoCleanDays?: number
 }
 
 export default function TrashInfo({ book, className, variant = 'badge', autoCleanDays: autoCleanDaysProp }: TrashInfoProps) {
   const _ = useTranslation()
-  // One shared ['settings'] query (seeded by SettingsSync); cards only mount in the trash view
-  const settingsQuery = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => apiGet<{ data: SettingsRes }>('/settings'),
-    enabled: autoCleanDaysProp === undefined,
-  })
+  // The retention window is one policy, not a property of the row: a device book
+  // in the trash is purged on the same schedule as everything else.
+  const retention = useTrashAutoCleanDays(autoCleanDaysProp === undefined)
   if (!book.deletedAt) return null
 
-  const autoCleanDays = autoCleanDaysProp ?? settingsQuery.data?.data.trash?.autoCleanDays ?? 30
+  const autoCleanDays = autoCleanDaysProp ?? retention ?? 30
   const daysSince = Math.max(0, Math.floor((Date.now() - book.deletedAt) / DAY_MS))
   // Only the actionable number stays inline; deleted-days moves to the tooltip
   const deletedLabel = _('library.trashDeletedDays', { days: daysSince })

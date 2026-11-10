@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from 'react'
 
-import { CATEGORY_TEMPLATES, categoryTemplatePath, type Category } from '@bookdock/shared'
+import { CATEGORY_TEMPLATES, categoryTemplatePath, type ClientCategoryView } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
@@ -10,7 +10,7 @@ import TaxonomyChoiceRow from './TaxonomyChoiceRow'
 import TaxonomyIcon from './TaxonomyIcon'
 
 interface CategoryAssignmentSelectorProps {
-  categories: Category[]
+  categories: ClientCategoryView[]
   categoryId: string | null | undefined
   categoryTemplateKey: string | undefined
   allowTemplates: boolean

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { and, desc, eq, inArray, lte, or, sql } from 'drizzle-orm'
 
 import type { ReadingCoverageInterval, ReadingLedgerOverview, ReadingLedgerRes, ReadingLedgerSession, ReadingLedgerSessionPage, ReadingLedgerStatsRes, ReadingRecordConflictDetails, ReadingRecordCreateReq, ReadingSessionUpdateReq, ReadingTimerClaim, ReadingWordState } from '@bookdock/shared'
+import { acceptsReadingTimerClaim } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { bookStates, bookVersions, contentRevisionMaps, contentRevisions, readingArchives, readingImportBindings, readingBookStats, readingContributions, readingDurationFacts, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingTimerClaims, readingWriteReceipts } from '../../db/schema'
@@ -1036,11 +1037,7 @@ export function claimReadingTimer(userId: string, body: { deviceId: string; mode
     const now = Date.now()
     const prior = tx.select().from(readingTimerClaims).where(eq(readingTimerClaims.userId, userId)).get()
     const activityAt = Math.min(body.activityAt, now)
-    const granted = !prior || prior.expiresAt <= now || (activityAt >= prior.activityAt && (
-      (prior.deviceId === body.deviceId && !(prior.mode === 'manual' && body.mode === 'auto'))
-      || (body.mode === 'manual' && body.explicit === true)
-      || (prior.mode === 'auto' && body.mode === 'auto' && activityAt > prior.activityAt)
-    ))
+    const granted = acceptsReadingTimerClaim(prior, body, now)
     if (!granted) return { granted: false, ownerDeviceId: prior!.deviceId, mode: prior!.mode, expiresAt: prior!.expiresAt }
     const row = { userId, deviceId: body.deviceId, mode: body.mode, activityAt, expiresAt: now + 30_000 }
     tx.insert(readingTimerClaims).values(row).onConflictDoUpdate({ target: readingTimerClaims.userId, set: row }).run()

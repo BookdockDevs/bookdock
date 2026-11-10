@@ -16,8 +16,9 @@ import {
 import { restrictToWindowEdges, snapCenterToCursor } from '@dnd-kit/modifiers'
 import { arrayMove } from '@dnd-kit/sortable'
 
-import type { BookListItem, BookSortPrefField, CatalogBook, Library, LibraryListItem, RecentlyReadStyle } from '@bookdock/shared'
+import type { ClientLibraryBookView, BookSortPrefField, CatalogBook, Library, LibraryListItem, RecentlyReadStyle } from '@bookdock/shared'
 
+import { useCatalogRevealHidden } from '@/features/reading-data/useCatalogRevealHidden'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList, formatBytes } from '@/lib/utils'
@@ -36,7 +37,13 @@ import QueryErrorState from '@/components/ui/QueryErrorState'
 import Modal from '@/components/ui/Modal'
 import { readLibraryNames, readTaxonomyNames } from '@/lib/library-name-cache'
 
-import { indexRoute, type LibrarySearch } from '@/routes/index'
+import type { LibrarySearch } from '@/routes/index'
+import { isDeviceBook } from '@/features/reading-data/book-source'
+import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
+import { catalogSelectionId, catalogSelectionKey } from '@/features/reading-data/catalog-selection'
+import { useVaultCapable } from '@/features/reading-data/vault-availability'
+import { localLibraryRepository } from '@/features/local-library/repository'
+import { LOCAL_VAULT_ID } from '@/features/local-library/id'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useInstanceInfo } from '@/features/auth/hooks'
@@ -73,7 +80,7 @@ import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-r
 import { libraryUrlCorrection, pageRangeCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
 import { categoryPath, sortCategories } from './taxonomy'
-import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, catalogQueryParts, useBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useMoveBooksToCategory, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useTrashEnabled, useTrashCapBytes, useLibraryPrefsState, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useCatalogBookDetail, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
+import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, loadUnifiedSearchPage, catalogQueryParts, useUnifiedBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useMoveBooksToCategory, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useTrashEnabled, useTrashCapBytes, useLibraryPrefsState, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useCatalogBookDetail, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
 
 
 function estimateDynColumns(): number {  if (typeof window === 'undefined') return 4
@@ -90,7 +97,8 @@ let lastKnownDynColumns = typeof window !== 'undefined' ? estimateDynColumns() :
 
 export default function Library() {
   const _ = useTranslation()
-  const search = useSearch({ from: indexRoute.id })
+  const search = useSearch({ strict: false }) as LibrarySearch
+  const homePath = '/' as const
   const navigate = useNavigate()
   const location = useLocation()
   const router = useRouter()
@@ -102,11 +110,18 @@ export default function Library() {
   const queryClient = useQueryClient()
 
   const viewPref = useUiStore((s) => s.view)
+  const defaultAddDestination = useUiStore((s) => s.defaultAddDestination)
   const libraryPageSize = useUiStore((s) => s.libraryPageSize)
   const pageSize = libraryPageSize || 24
   const user = useAuthStore((s) => s.user)
   const userId = user?.id
   const isGuest = !user
+  const vaultCapable = useVaultCapable()
+  // Writes follow the row, not the session: a device row is owned by whoever
+  // holds the browser (guest included), while an anonymous visitor's non-local
+  // row is a shared read and stays inert. This is why `isGuest` alone can no
+  // longer decide the card's readOnly/delete wiring.
+  const isRowReadOnly = (book: ClientLibraryBookView) => isGuest && !isDeviceBook(book.ref)
   // Private-surface upload gate: the instance switch closes it for ordinary
   // members (fail-open while the instance query loads; the server enforces).
   const { data: instanceData } = useInstanceInfo()
@@ -114,7 +129,7 @@ export default function Library() {
     || (user?.role === 'owner')
   const sortByPref = useUiStore((s) => s.sortBy)
   const sortOrderPref = useUiStore((s) => s.sortOrder)
-  const revealHidden = useUiStore((s) => s.revealHidden)
+  const { revealHidden } = useCatalogRevealHidden()
   const {
     prefs: libraryPrefs,
     isReady: prefsReady,
@@ -160,11 +175,13 @@ export default function Library() {
   // to the normal catalog. The row relation is authoritative here because the
   // per-library relation query resolves later.
   const activeLibraryIsOwner = activeLibrary?.relation === 'owner'
-  const trash = !isGuest && (search.trash ?? false) && (!activeLibrary || activeLibraryIsOwner)
+  // Trash belongs to the active authority: the device vault for anonymous
+  // visitors on the unified shelf (availability already gated at the route).
+  const trash = (search.trash ?? false) && (!activeLibrary || activeLibraryIsOwner)
   const isLibraryActivity = Boolean(activeLibrary && search.section === 'activity' && !trash)
   const activityType = search.activityType ?? 'all'
-  const privateTrashEnabled = useTrashEnabled({ enabled: !isGuest && !requestedLibraryId })
-  const privateTrashCapBytes = useTrashCapBytes({ enabled: !isGuest && !requestedLibraryId })
+  const privateTrashEnabled = useTrashEnabled({ enabled: !requestedLibraryId, fallbackAnonymous: true })
+  const privateTrashCapBytes = useTrashCapBytes({ enabled: !requestedLibraryId, fallbackAnonymous: true })
   // Per-library switch (owner sees the value, others get null); private rows
   // never carry it. Defaults mirror the private trash: on / unlimited.
   const libraryTrashEnabled = activeLibrary ? (activeLibrary.trashEnabled ?? true) : privateTrashEnabled
@@ -259,16 +276,18 @@ export default function Library() {
   )
 
   const [uploadOpen, setUploadOpen] = useState(false)
+  // The split button's one-off destination; the default lives in device prefs.
+  const [addDestination, setAddDestination] = useState<'server' | 'local' | undefined>(undefined)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<BookListItem | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ClientLibraryBookView | null>(null)
   const [clearUserDataOnRemove, setClearUserDataOnRemove] = useState(false)
-  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<BookListItem | null>(null)
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<ClientLibraryBookView | null>(null)
   useEffect(() => { setClearUserDataOnRemove(false) }, [deleteTarget, permanentDeleteTarget])
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false)
   const [libraryPermanentTarget, setLibraryPermanentTarget] = useState<CatalogBook | null>(null)
-  const [detailTarget, setDetailTarget] = useState<BookListItem | null>(null)
-  const [publishTarget, setPublishTarget] = useState<BookListItem | null>(null)
-  const [forkTarget, setForkTarget] = useState<BookListItem | null>(null)
+  const [detailTarget, setDetailTarget] = useState<ClientLibraryBookView | null>(null)
+  const [publishTarget, setPublishTarget] = useState<ClientLibraryBookView | null>(null)
+  const [forkTarget, setForkTarget] = useState<ClientLibraryBookView | null>(null)
   const [workDetail, setWorkDetail] = useState<CatalogBook | null>(null)
   const [activityWorkTargetId, setActivityWorkTargetId] = useState<string | null>(null)
   const activityWorkQuery = useCatalogBookDetail(activeLibrary?.id ?? null, activityWorkTargetId)
@@ -302,7 +321,7 @@ export default function Library() {
   const emptyLibraryTrash = useEmptyLibraryTrash()
   const sharedTrash = Boolean(activeLibrary && trash)
 
-  function toggleSelect(id: string, index?: number, shiftKey?: boolean) {
+  function toggleSelect(key: string, index?: number, shiftKey?: boolean) {
     if (activeLibrary && !isLibraryManager) return
     const anchor = lastSelectIndexRef.current
     if (shiftKey && index !== undefined && anchor !== null && anchor !== index) {
@@ -310,7 +329,7 @@ export default function Library() {
       // Range-select walks the rows on screen, never the other library's
       // query, or a shared Shift-click would collect private ids.
       const rangeIds = selectableIds.slice(from, to + 1)
-      const selecting = !selection.has(id)
+      const selecting = !selection.has(key)
       setSelection((prev) => {
         const next = new Set(prev)
         for (const rangeId of rangeIds) {
@@ -322,8 +341,8 @@ export default function Library() {
     } else {
       setSelection((prev) => {
         const next = new Set(prev)
-        if (next.has(id)) next.delete(id)
-        else next.add(id)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
         return next
       })
     }
@@ -408,7 +427,7 @@ export default function Library() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   function handleDragStart(event: DragStartEvent) {
-    if (isGuest) return
+    if (isGuest && (Boolean(activeLibrary) || !vaultCapable)) return
     const payload = event.active.data.current as unknown
     if (isBookDrag(payload)) {
       setDragBookIds(payload.bookIds)
@@ -429,7 +448,7 @@ export default function Library() {
   }
 
   function handleDragEnd(event: DragEndEvent) {
-    if (isGuest) return
+    if (isGuest && (Boolean(activeLibrary) || !vaultCapable)) return
     endDrag()
     const { active, over } = event
     if (!over || active.id === over.id) return
@@ -441,36 +460,36 @@ export default function Library() {
       const targetCategoryId = resolveDropShelfId(String(over.id))
       const targetType = (over.data.current as { type?: unknown } | undefined)?.type
       if (activeLibrary) {
-        const moved = payload.bookIds.filter((id) => {
-          const work = catalogWorks.find((w) => w.id === id)
+        const moved = payload.bookIds.filter((key) => {
+          const work = catalogWorks.find((w) => catalogSelectionKey(w) === key)
           return work ? work.categoryId !== targetCategoryId : false
-        })
+        }).map((key) => catalogSelectionId(key))
         if (moved.length === 0) return
-        moveBooksToCategory.mutate({ libraryId: activeLibrary.id, bookIds: moved, categoryId: targetCategoryId })
+        moveBooksToCategory.mutate({ libraryId: activeLibrary.id, books: moved.map((id) => ({ id })), categoryId: targetCategoryId })
         if (selectionActive && payload.bookIds.some((id) => selection.has(id))) {
           completeBatchAction()
         }
         return
       }
+      // Mixed shelf: the dragged keys may span both stores, so the move hook
+      // partitions them and each authority files its own half.
+      const movedBooks = (field: 'categoryId' | 'shelfId') => payload.bookIds.flatMap((key) => {
+        const book = allBooks.find((item) => catalogSelectionKey(item) === key)
+        return book && !isRowReadOnly(book) && book[field] !== targetCategoryId ? [{ id: book.id, ref: book.ref }] : []
+      })
       if (targetType === 'category') {
-        const moved = payload.bookIds.filter((bookId) => {
-          const book = allBooks.find((item) => item.id === bookId)
-          return book ? book.categoryId !== targetCategoryId : false
-        })
+        const moved = movedBooks('categoryId')
         if (moved.length === 0) return
-        moveBooksToCategory.mutate({ bookIds: moved, categoryId: targetCategoryId })
+        moveBooksToCategory.mutate({ books: moved, categoryId: targetCategoryId })
         if (selectionActive && payload.bookIds.some((id) => selection.has(id))) {
           completeBatchAction()
         }
         return
       }
       // No-op when every dragged book already sits in the target shelf.
-      const moved = payload.bookIds.filter((id) => {
-        const book = allBooks.find((b) => b.id === id)
-        return book ? book.shelfId !== targetCategoryId : false
-      })
+      const moved = movedBooks('shelfId')
       if (moved.length === 0) return
-      moveBooksToShelf.mutate({ bookIds: moved, shelfId: targetCategoryId })
+      moveBooksToShelf.mutate({ books: moved, shelfId: targetCategoryId })
       if (selectionActive && payload.bookIds.some((id) => selection.has(id))) {
         completeBatchAction()
       }
@@ -576,7 +595,10 @@ export default function Library() {
     return () => window.removeEventListener('pointermove', onPointerMove)
   }, [dragKind])
 
-  const { data, error: booksError, isLoading, isError, isFetching, refetch, isPlaceholderData: booksPlaceholder } = useBooks({
+  // The unified shelf takes over the personal list when the view is not bound
+  // to a source context: mixed rows, client-side ordering, and a source
+  // filter. The legacy query stays for the /local view and shared libraries.
+  const shelfListParams = {
     page: currentPage,
     pageSize,
     expression: search.expression,
@@ -594,7 +616,17 @@ export default function Library() {
     showHidden: revealHidden,
     // Server rejects trash queries while the feature is off; the redirect
     // effect below swaps the URL out before the next render settles.
-  }, { enabled: (!trash || trashEnabled) && !activeLibrary && !requestedLibraryId })
+  }
+  const booksEnabledBase = (!trash || trashEnabled) && !activeLibrary && !requestedLibraryId
+  const unifiedShelf = !activeLibrary && !requestedLibraryId
+  const unifiedListEnabled = booksEnabledBase && unifiedShelf
+  // A shared library is read through useLibraryCatalog below, so the unified
+  // shelf query is what the private list reads whenever it is enabled. The
+  // legacy /books read that used to sit beside it was disabled by construction
+  // (its guard was `booksEnabledBase && !unifiedShelf`, and booksEnabledBase
+  // already implies unifiedShelf), so it never issued a request.
+  const unifiedQuery = useUnifiedBooks(shelfListParams, { enabled: unifiedListEnabled })
+  const { data, error: booksError, isLoading, isError, isFetching, refetch, isPlaceholderData: booksPlaceholder } = unifiedQuery
 
   // 0.4.0: a shared library is not a second page. It is the same list, same
   // search, same sort, same paging and same category/tag filters - read from
@@ -625,7 +657,7 @@ export default function Library() {
   // on the rows on screen: catalog works in a shared library, private books
   // otherwise. One list for all four keeps shared actions from reaching into
   // the other library's (usually disabled) query.
-  const selectableIds = useMemo(() => rows.map((row) => row.id), [rows])
+  const selectableIds = useMemo(() => rows.map(catalogSelectionKey), [rows])
   const previewRows: BookRow[] = useMemo(
     () => rows.map((row) => ('versions' in row ? catalogWorkRow(row) : privateBookRow(row))),
     [rows],
@@ -674,7 +706,9 @@ export default function Library() {
   const hasPublishTarget = !isGuest && !activeLibrary && libraries.some((library) => (
     library.type === 'shared' && (library.relation === 'owner' || library.relation === 'admin')
   ))
-  const canPublishBook = (book: BookListItem) => hasPublishTarget && (book.kind === undefined || book.kind === 'personal')
+  // Device books never publish: publishing uploads server content, and a
+  // local row must not offer an implicit upload path.
+  const canPublishBook = (book: ClientLibraryBookView) => hasPublishTarget && !isDeviceBook(book.ref) && (book.kind === undefined || book.kind === 'personal')
   const canPublishDetail = detailTarget ? canPublishBook(detailTarget) : false
   // The manage dialog can target a library that is not in context, so its
   // relation comes from the listed row rather than the active-library query;
@@ -694,12 +728,29 @@ export default function Library() {
     && activeLibrary.allowMemberUpload === true
   const canUpload = !isGuest && !libraryContextUnresolved && (activeLibrary ? (isLibraryManager || canContribute) : userUploadAllowed)
   const setUploadOpenIfAllowed = useCallback((open: boolean) => {
-    if (canUpload) setUploadOpen(open)
-  }, [canUpload])
+    if (canUpload || unifiedShelf) setUploadOpen(open)
+  }, [canUpload, unifiedShelf])
 
   const searchAuthors = useLibrarySearchAuthors(activeLibrary?.id ?? null, trash, revealHidden, { enabled: !libraryContextUnresolved && !isLibraryActivity })
-  const shelvesQuery = useShelves({ enabled: !requestedLibraryId })
-  const tagsQuery = useTags({ enabled: !requestedLibraryId })
+  const shelvesQuery = useShelves({ enabled: !requestedLibraryId, fallbackAnonymous: !requestedLibraryId && vaultCapable })
+  const tagsQuery = useTags({ enabled: !requestedLibraryId, fallbackAnonymous: !requestedLibraryId && vaultCapable })
+  // Logged-in unified shelf: mirror the account taxonomy into the vault so
+  // device books can join account groups. Anonymous users keep vault-local
+  // organization only.
+  const accountTaxonomy = useMemo(() => {
+    if (!user || !unifiedShelf) return null
+    const shelves = shelvesQuery.data?.data
+    const tags = tagsQuery.data?.data
+    if (!shelves || !tags) return null
+    return [
+      ...shelves.map((shelf) => ({ id: shelf.id, kind: 'shelf' as const, name: shelf.name, sortOrder: shelf.sortOrder })),
+      ...tags.map((tag) => ({ id: tag.id, kind: 'tag' as const, name: tag.name, sortOrder: tag.sortOrder })),
+    ]
+  }, [user, unifiedShelf, shelvesQuery.data, tagsQuery.data])
+  useEffect(() => {
+    if (!accountTaxonomy) return
+    void localLibraryRepository.syncAccountTaxonomy(LOCAL_VAULT_ID, accountTaxonomy).catch(() => undefined)
+  }, [accountTaxonomy])
   const taxonomyLibraryId = activeLibrary?.id ?? privateLibraryId
   const libraryCategoriesQuery = useLibraryCategories(taxonomyLibraryId)
   const libraryTagsQuery = useLibraryTags(activeLibrary?.id ?? null)
@@ -874,9 +925,9 @@ export default function Library() {
         .some((key) => key in patch && patch[key] !== search[key])
       const activityFilterOnly = ('activityType' in patch) && !('section' in patch) && !('shelf' in patch) && !('category' in patch) && !('q' in patch) && !('expression' in patch);
       const shouldReplace = options?.replace ?? (activityFilterOnly || (!filterChanged && !('directory' in patch)));
-      return navigate({ to: '/', search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, state: (previous) => ({ ...previous, librarySearchReturn: keepsSearchSession(patch) ? previous.librarySearchReturn : undefined, archiveExitScroll: undefined }), replace: shouldReplace })
+      return navigate({ to: homePath, search: { ...search, ...sortPatch, ...(filterChanged ? { page: undefined } : null), ...patch }, state: (previous) => ({ ...previous, librarySearchReturn: keepsSearchSession(patch) ? previous.librarySearchReturn : undefined, archiveExitScroll: undefined }), replace: shouldReplace })
     },
-    [navigate, search, trash],
+    [navigate, search, trash, homePath],
   )
 
   async function submitSearch(source: string, signal: AbortSignal) {
@@ -894,12 +945,14 @@ export default function Library() {
     } else {
       const params = { page: 1, pageSize, expression, search: next.q ?? '', sortBy, sortOrder, shelfId: next.shelf ?? null, categoryId: next.category ?? null, tagId: next.tag ?? null, author: next.author, series: next.series, format: next.format ?? null, readStatus: next.status ?? null, trash, showHidden: revealHidden }
       const request = booksQueryParts(params)
-      loaded = await loadSearchPage(queryClient, { path: request.path, queryKey: booksQueryParts({ ...params, expression: normalizedExpression }).queryKey }, signal)
+      loaded = unifiedShelf
+        ? await loadUnifiedSearchPage(queryClient, { ...params, expression: normalizedExpression }, Boolean(user), signal)
+        : await loadSearchPage(queryClient, { path: request.path, queryKey: booksQueryParts({ ...params, expression: normalizedExpression }).queryKey }, signal)
     }
     patch.expression = normalizedExpression
     if (loaded && !signal.aborted) {
       const saved = location.state.librarySearchReturn
-      await navigate({ to: '/', ...searchSessionNavigation(search, patch, saved, window.scrollY) })
+      await navigate({ to: homePath, ...searchSessionNavigation(search, patch, saved, window.scrollY) })
     }
   }
 
@@ -941,7 +994,7 @@ export default function Library() {
     const target = searchExitTarget(search, saved)
     searchScrollRestore.current = { search: target, top: saved?.scrollTop ?? 0 }
     if (saved?.back && router.history.canGoBack()) { router.history.back(); return }
-    void navigate({ to: '/', search: target, state: (previous) => ({ ...previous, librarySearchReturn: undefined, archiveExitScroll: undefined }), replace: true, resetScroll: false })
+    void navigate({ to: homePath, search: target, state: (previous) => ({ ...previous, librarySearchReturn: undefined, archiveExitScroll: undefined }), replace: true, resetScroll: false })
   }
 
   // Switching libraries leaves every filter that belonged to the previous one,
@@ -1176,7 +1229,7 @@ export default function Library() {
             privateLibraryId={privateLibraryId ?? null}
             sessionKey={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}`}
             panel={search.directory}
-            canManage={!isGuest && (!activeLibrary || isLibraryManager)}
+            canManage={(!isGuest || (!activeLibrary && vaultCapable)) && (!activeLibrary || isLibraryManager)}
             navSearch={navSearch}
             onOpenNavigation={() => setMobileNavOpen(true)}
           />
@@ -1226,16 +1279,18 @@ export default function Library() {
           canSwitchCategoryScope={Boolean(categoryId
             && libraryCategoriesQuery.data?.data.some((category) => category.id === categoryId && !category.parentId)
             && libraryCategoriesQuery.data?.data.some((category) => category.parentId === categoryId))}
-          onUploadClick={canUpload ? () => setUploadOpen(true) : undefined}
+          onAddClick={canUpload || unifiedShelf ? (destination) => { setAddDestination(destination); setUploadOpen(true) } : undefined}
+          serverUploadDisabled={!user || !userUploadAllowed}
           trashCount={hasLoadedTotal ? total : 0}
           bookSize={trash && !activeLibrary ? (hasLoadedTotal ? totalSize : undefined) : undefined}
           trashCapBytes={trash ? trashCapBytes : undefined}
-          onEmptyTrash={isGuest ? undefined : () => setEmptyTrashOpen(true)}
+          onEmptyTrash={!isGuest || (!activeLibrary && vaultCapable) ? () => setEmptyTrashOpen(true) : undefined}
           selectionActive={selectionActive}
-          onToggleSelectMode={isGuest || (activeLibrary && !isLibraryManager) ? undefined : toggleSelectionMode}
+          onToggleSelectMode={(!isGuest || (!activeLibrary && vaultCapable)) && (!activeLibrary || isLibraryManager) ? toggleSelectionMode : undefined}
           onOpenNavigation={() => setMobileNavOpen(true)}
           title={viewTitleLoading ? undefined : viewTitle}
           titleLoading={viewTitleLoading}
+          defaultAddDestination={defaultAddDestination}
           bookCount={!isLibraryActivity && hasLoadedTotal ? total : undefined}
           onResetMetadataFilter={metadataFilter ? () => navSearch({ author: undefined, series: undefined }) : undefined}
           hideBookControls={isLibraryActivity}
@@ -1313,11 +1368,11 @@ export default function Library() {
                       key={work.id}
                       work={work}
                       autoCleanDays={activeLibrary.trashAutoCleanDays ?? 30}
-                      selected={selection.has(work.id)}
+                      selected={selection.has(catalogSelectionKey(work))}
                       selectionActive={selectionActive}
-                      onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                      onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(work), index, shiftKey)}
                       onRestore={() => {
-                        deselect(work.id)
+                        deselect(catalogSelectionKey(work))
                         void restoreLibraryBook.mutateAsync({ libraryId: activeLibrary.id, libraryBookId: work.id, title: work.title }).catch(() => undefined)
                       }}
                       onPermanentDelete={() => setLibraryPermanentTarget(work)}
@@ -1331,11 +1386,11 @@ export default function Library() {
                       key={work.id}
                       work={work}
                       autoCleanDays={activeLibrary.trashAutoCleanDays ?? 30}
-                      selected={selection.has(work.id)}
+                      selected={selection.has(catalogSelectionKey(work))}
                       selectionActive={selectionActive}
-                      onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                      onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(work), index, shiftKey)}
                       onRestore={() => {
-                        deselect(work.id)
+                        deselect(catalogSelectionKey(work))
                         void restoreLibraryBook.mutateAsync({ libraryId: activeLibrary.id, libraryBookId: work.id, title: work.title }).catch(() => undefined)
                       }}
                       onPermanentDelete={() => setLibraryPermanentTarget(work)}
@@ -1354,11 +1409,11 @@ export default function Library() {
                     work={work}
                     canManage={isLibraryManager}
                     canCollect={libraryRelation !== 'guest'}
-                    selected={selection.has(work.id)}
+                    selected={selection.has(catalogSelectionKey(work))}
                     selectionActive={selectionActive}
                     selection={selection}
                     dragJustEndedRef={dragJustEndedRef}
-                    onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                    onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(work), index, shiftKey)}
                     onShowDetails={setWorkDetail}
                   />
                 ))}
@@ -1375,11 +1430,11 @@ export default function Library() {
                     canManage={isLibraryManager}
                     canCollect={libraryRelation !== 'guest'}
                     gridCardFields={gridCardFields}
-                    selected={selection.has(work.id)}
+                    selected={selection.has(catalogSelectionKey(work))}
                     selectionActive={selectionActive}
                     selection={selection}
                     dragJustEndedRef={dragJustEndedRef}
-                    onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                    onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(work), index, shiftKey)}
                     onShowDetails={setWorkDetail}
                   />
                 ))}
@@ -1391,18 +1446,18 @@ export default function Library() {
                 if (trash) {
                   return (
                     <div
-                      key={book.id}
+                      key={catalogSelectionKey(book)}
                       className="rounded-xl"
                     >
                       <BookCard
                         book={book}
-                        selected={selection.has(book.id)}
+                        selected={selection.has(catalogSelectionKey(book))}
                         selectionActive={selectionActive}
                         gridCardFields={['title', 'author']}
-                        onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                        onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(book), index, shiftKey)}
                         onRestore={(b) => {
-                          deselect(b.id)
-                          void restoreBook.mutateAsync({ id: b.id, title: b.title }).catch(() => undefined)
+                          deselect(catalogSelectionKey(b))
+                          void restoreBook.mutateAsync({ id: b.id, title: b.title, ref: b.ref, ...(isDeviceBook(b.ref) ? { expectedVersion: b.clientVersion } : {}) }).catch(() => undefined)
                         }}
                         onPermanentDelete={setPermanentDeleteTarget}
                       />
@@ -1410,10 +1465,9 @@ export default function Library() {
                   )
                 }
                 return (
-                  <DraggableBookCard key={book.id} book={book} selection={selection} selectionActive={selectionActive} disabled={isGuest}>
+                  <DraggableBookCard key={catalogSelectionKey(book)} book={book} selection={selection} selectionActive={selectionActive} disabled={isRowReadOnly(book)}>
                     <Link
-                      to="/books/$id"
-                      params={{ id: book.id }}
+                      {...catalogBookTarget(book)}
                       onClick={(e) => {
                         // dnd-kit does not suppress the click after a drag;
                         // the flag is set by handleDragEnd and cleared on the
@@ -1424,24 +1478,24 @@ export default function Library() {
                         }
                         if (selectionActive) {
                           e.preventDefault()
-                          toggleSelect(book.id, index, e.shiftKey)
+                          toggleSelect(catalogSelectionKey(book), index, e.shiftKey)
                           return
                         }
                         if (e.ctrlKey || e.metaKey || e.shiftKey) {
                           e.preventDefault()
-                          toggleSelect(book.id, index, e.shiftKey)
+                          toggleSelect(catalogSelectionKey(book), index, e.shiftKey)
                         }
                       }}
                       className="block rounded-xl"
                     >
                       <BookCard
                         book={book}
-                        selected={selection.has(book.id)}
+                        selected={selection.has(catalogSelectionKey(book))}
                         selectionActive={selectionActive}
                         gridCardFields={gridCardFields}
-                        onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
-                        readOnly={isGuest}
-                        onDelete={isGuest ? undefined : setDeleteTarget}
+                        onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(book), index, shiftKey)}
+                        readOnly={isRowReadOnly(book)}
+                        onDelete={isRowReadOnly(book) ? undefined : setDeleteTarget}
                         onPublish={canPublishBook(book) ? setPublishTarget : undefined}
                         onFork={isGuest ? undefined : setForkTarget}
                         onShowDetails={setDetailTarget}
@@ -1457,14 +1511,14 @@ export default function Library() {
                 if (trash) {
                   return (
                     <TrashListRow
-                      key={book.id}
+                      key={catalogSelectionKey(book)}
                       book={book}
-                      selected={selection.has(book.id)}
+                      selected={selection.has(catalogSelectionKey(book))}
                       selectionActive={selectionActive}
-                      onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
+                      onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(book), index, shiftKey)}
                       onRestore={(b) => {
-                        deselect(b.id)
-                        void restoreBook.mutateAsync({ id: b.id, title: b.title }).catch(() => undefined)
+                        deselect(catalogSelectionKey(b))
+                        void restoreBook.mutateAsync({ id: b.id, title: b.title, ref: b.ref, ...(isDeviceBook(b.ref) ? { expectedVersion: b.clientVersion } : {}) }).catch(() => undefined)
                       }}
                       onPermanentDelete={setPermanentDeleteTarget}
                     />
@@ -1472,14 +1526,14 @@ export default function Library() {
                 }
                 return (
                   <ListItemWrapper
-                    key={book.id}
+                    key={catalogSelectionKey(book)}
                     book={book}
                     selection={selection}
                     selectionActive={selectionActive}
                     dragJustEndedRef={dragJustEndedRef}
-                    onToggleSelect={(id, shiftKey) => toggleSelect(id, index, shiftKey)}
-                    readOnly={isGuest}
-                    onDelete={isGuest ? undefined : setDeleteTarget}
+                    onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(book), index, shiftKey)}
+                    readOnly={isRowReadOnly(book)}
+                    onDelete={isRowReadOnly(book) ? undefined : setDeleteTarget}
                     onPublish={canPublishBook(book) ? setPublishTarget : undefined}
                     onFork={isGuest ? undefined : setForkTarget}
                     onShowDetails={setDetailTarget}
@@ -1506,12 +1560,12 @@ export default function Library() {
       {/* Shared selections contain work ids; private selections contain version ids.
           The shared trash is owner-only (see the trash guard above), so its
           batch bar only offers restore/permanent-delete. */}
-      {!isGuest && !isLibraryActivity && (!activeLibrary || isLibraryManager) && selection.size > 0 && (
+      {(!isGuest || (!activeLibrary && vaultCapable)) && !isLibraryActivity && (!activeLibrary || isLibraryManager) && selection.size > 0 && (
         <SelectionBar
-          selectedIds={Array.from(selection)}
+          selectedKeys={Array.from(selection)}
           onClear={clearSelection}
           onComplete={completeBatchAction}
-          onRetainSelection={(ids) => { setSelection(new Set(ids)); lastSelectIndexRef.current = null }}
+          onRetainSelection={(keys) => { setSelection(new Set(keys)); lastSelectIndexRef.current = null }}
           trash={trash}
           trashEnabled={trashEnabled}
           elevated={totalPages > 1}
@@ -1554,7 +1608,7 @@ export default function Library() {
       )}
 
       {/* One upload window, pointed at whichever library is in context. */}
-      {canUpload && (activeLibrary ? (
+      {(canUpload || unifiedShelf) && (activeLibrary ? (
         <CatalogUploadSheet
           open={uploadOpen}
           libraryId={activeLibrary.id}
@@ -1564,7 +1618,9 @@ export default function Library() {
       ) : (
         <UploadSheet
           open={uploadOpen}
-          onClose={() => setUploadOpen(false)}
+          onClose={() => { setUploadOpen(false); setAddDestination(undefined) }}
+          initialSource={addDestination ?? (defaultAddDestination === 'local' ? 'local' : 'server')}
+          serverUploadDisabled={!user || !userUploadAllowed}
           shelfId={shelfId && shelfId !== 'none' ? shelfId : undefined}
           categoryId={categoryId && categoryId !== 'none' ? categoryId : undefined}
           shelfName={categoryId && categoryId !== 'none' ? categoryPath(categories, categoryId).map((category) => category.name).join(' / ') : undefined}
@@ -1585,7 +1641,9 @@ export default function Library() {
           canCollect: libraryRelation !== 'guest',
           canContribute,
         } : null}
-        readOnly={isGuest}
+        // Device books stay editable for vault-capable guests; the guest
+        // lock only covers account-owned server books.
+        readOnly={isGuest && !isDeviceBook(detailTarget?.ref)}
         onClose={() => {
           setDetailTarget(null)
           setWorkDetail(null)
@@ -1670,6 +1728,7 @@ export default function Library() {
                   title: target.title,
                   isCollected: true,
                   deleteUserData: clearUserDataOnRemove,
+                  ref: target.ref,
                 }).catch(() => undefined)
               }}
             />
@@ -1696,7 +1755,7 @@ export default function Library() {
           confirmLabel={trashEnabled ? _('library.delete') : _('library.permanentDelete')}
           confirmVariant="danger"
           warning={
-            trashEnabled && trashCapBytes && deleteTarget.size > trashCapBytes
+            trashEnabled && trashCapBytes && deleteTarget.size !== null && deleteTarget.size > trashCapBytes
               ? _('library.trashCapImmediate', { size: formatBytes(deleteTarget.size), cap: formatBytes(trashCapBytes) })
               : undefined
           }
@@ -1704,7 +1763,7 @@ export default function Library() {
           onConfirm={() => {
             const target = deleteTarget
             setDeleteTarget(null)
-            void deleteBook.mutateAsync({ id: target.id, title: target.title, isCollected: false, deleteUserData: clearUserDataOnRemove }).catch(() => undefined)
+            void deleteBook.mutateAsync({ id: target.id, title: target.title, isCollected: false, deleteUserData: clearUserDataOnRemove, ref: target.ref }).catch(() => undefined)
           }}
         />
         )
@@ -1725,8 +1784,8 @@ export default function Library() {
           onConfirm={() => {
             const target = permanentDeleteTarget
             setPermanentDeleteTarget(null)
-            deselect(target.id)
-            void permanentDeleteBook.mutateAsync({ id: target.id, title: target.title }).catch(() => undefined)
+            deselect(catalogSelectionKey(target))
+            void permanentDeleteBook.mutateAsync({ id: target.id, title: target.title, ref: target.ref, ...(isDeviceBook(target.ref) ? { expectedVersion: target.clientVersion } : {}) }).catch(() => undefined)
           }}
         />
       )}
@@ -1774,7 +1833,7 @@ export default function Library() {
             const target = libraryPermanentTarget
             setLibraryPermanentTarget(null)
             if (!activeLibrary) return
-            deselect(target.id)
+            deselect(catalogSelectionKey(target))
             void permanentDeleteLibraryBook.mutateAsync({ libraryId: activeLibrary.id, libraryBookId: target.id, title: target.title }).catch(() => undefined)
           }}
         />
@@ -1794,7 +1853,7 @@ export default function Library() {
 }
 
 function BookDragPreview({ bookIds, rows }: { bookIds: string[]; rows: BookRow[] }) {
-  const first = rows.find((r) => r.id === bookIds[0])
+  const first = rows.find((r) => catalogSelectionKey(r) === bookIds[0] || r.id === bookIds[0])
   if (!first) return null
   const count = bookIds.length
   // The DragOverlay wrapper is sized to the measuring node and centered on the
@@ -1822,16 +1881,17 @@ function DraggableBookCard({
   disabled = false,
   children,
 }: {
-  book: BookListItem
+  book: ClientLibraryBookView
   selection: Set<string>
   selectionActive: boolean
   disabled?: boolean
   children: ReactNode
 }) {
   // Dragging a selected card in selection mode carries the whole selection.
-  const bookIds = selectionActive && selection.has(book.id) ? Array.from(selection) : [book.id]
+  const selectionKey = catalogSelectionKey(book)
+  const bookIds = selectionActive && selection.has(selectionKey) ? Array.from(selection) : [selectionKey]
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `book:${book.id}`,
+    id: `book:${selectionKey}`,
     data: { bookIds } satisfies BookDragPayload,
     disabled,
   })
@@ -1869,9 +1929,10 @@ function DraggableWorkCard({
 }) {
   // A selected card dragged in selection mode carries the whole selection,
   // the same rule a private card follows; a lone card carries only itself.
-  const workIds = selectionActive && selected ? Array.from(selection) : [work.id]
+  const selectionKey = catalogSelectionKey(work)
+  const workIds = selectionActive && selected ? Array.from(selection) : [selectionKey]
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `book:${work.id}`,
+    id: `book:${selectionKey}`,
     data: { bookIds: workIds } satisfies BookDragPayload,
     disabled: !canManage,
   })
@@ -1999,12 +2060,12 @@ function EmptyTrash() {
 }
 
 function TrashListRow({ book, selected, selectionActive, onToggleSelect, onRestore, onPermanentDelete }: {
-  book: BookListItem
+  book: ClientLibraryBookView
   selected: boolean
   selectionActive: boolean
   onToggleSelect: (id: string, shiftKey?: boolean) => void
-  onRestore: (b: BookListItem) => void
-  onPermanentDelete: (b: BookListItem) => void
+  onRestore: (b: ClientLibraryBookView) => void
+  onPermanentDelete: (b: ClientLibraryBookView) => void
 }) {
   const _ = useTranslation()
 

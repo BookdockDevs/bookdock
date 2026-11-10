@@ -14,7 +14,7 @@ export interface ListInfoSource {
   lastReadAt?: number | null
   categoryName?: string | null
   tags?: string[]
-  size: number
+  size: number | null
   createdAt: number
 }
 

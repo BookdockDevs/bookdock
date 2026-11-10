@@ -28,6 +28,7 @@ import {
 } from '../features/reader/renderers/FoliateReader'
 import type { ReaderAnnotation } from '../features/reader/types'
 import type { TextReplacementRule } from '../features/reader/lib/text-replacements'
+import { getSessionEpoch, resetSessionScope, setSessionAccount } from '@/lib/session-scope'
 
 function ann(cfiRange: string, type: ReaderAnnotation['type'] = 'highlight'): ReaderAnnotation {
   return { cfiRange, type, color: 'yellow', style: 'underline', note: null }
@@ -1719,5 +1720,129 @@ describe('FoliateReader activation-click guard', () => {
     } finally {
       delete (document as { hidden?: unknown }).hidden
     }
+  })
+})
+
+describe('parseCache reuse across destroy and re-entry', () => {
+  afterEach(() => {
+    resetSessionScope()
+    delete (window as any).FoliateReader
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('reuses parsed EPUB and in-memory chapter cache after destroy, and evicts on revision change', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    setSessionAccount('user-a')
+    const url = '/api/v1/books/b1/file?reader=1&revisionId=rev-1&v=1'
+    const manifest = {
+      formatVersion: 1,
+      bookId: 'b1',
+      revisionId: 'rev-1',
+      contentHash: 'hash',
+      size: 100,
+      entryCount: 2,
+      entries: [
+        { path: 'OEBPS/text/ch1.xhtml', size: 28, compressedSize: 14, compression: 'deflate', mediaType: 'application/xhtml+xml' },
+        { path: 'META-INF/container.xml', size: 12, compressedSize: 10, compression: 'store', mediaType: 'application/xml' },
+      ],
+      spine: [{ path: 'OEBPS/text/ch1.xhtml', mediaType: 'application/xhtml+xml', linear: true }],
+      startupFiles: [{ path: 'META-INF/container.xml', text: '<container/>' }],
+      opfPath: 'OEBPS/content.opf',
+      navPath: null,
+      ncxPath: null,
+      generated: false,
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input)
+      if (target.includes('/reader/manifest')) {
+        return new Response(JSON.stringify({ data: manifest }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (target.includes('/reader/entry')) {
+        return new Response('<html><body>Cached chapter</body></html>', { status: 200, headers: { 'Content-Type': 'application/xhtml+xml; charset=utf-8' } })
+      }
+      return new Response(null, { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    let epubInitCount = 0
+    const createdBooks: any[] = []
+    ;(window as any).FoliateReader = {
+      EPUB: class {
+        private opts: any
+        constructor(opts: any) { this.opts = opts }
+        async init() {
+          epubInitCount += 1
+          const book = {
+            toc: [{ label: 'Chapter 1', href: 'OEBPS/text/ch1.xhtml' }],
+            sections: [{ id: 'OEBPS/text/ch1.xhtml', linear: 'yes' }],
+            loadText: this.opts.loadText,
+            transformTarget: new EventTarget(),
+            rendition: { layout: 'reflowable' },
+          }
+          createdBooks.push(book)
+          return book
+        }
+      },
+    }
+
+    const sectionDoc = document.implementation.createHTMLDocument('ch1')
+    const appStyle = sectionDoc.createElement('style')
+    appStyle.textContent = ':root { --bd-app-style: 1; }'
+    sectionDoc.head.appendChild(appStyle)
+
+    const origCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+      const el = origCreateElement(tag, options) as any
+      if (tag === 'foliate-view') {
+        const rendererEl = origCreateElement('div') as any
+        rendererEl.goTo = vi.fn(async () => {
+          el.dispatchEvent(new CustomEvent('relocate', { detail: { section: { current: 0, total: 1 }, fraction: 0, cfi: 'epubcfi(/6/2!/4/2:0)' } }))
+        })
+        rendererEl.setStyles = vi.fn()
+        rendererEl.getContents = vi.fn(() => [{ index: 0, doc: sectionDoc }])
+        el.renderer = rendererEl
+        el.open = vi.fn().mockResolvedValue(undefined)
+        el.close = vi.fn()
+        el.goTo = vi.fn().mockResolvedValue(undefined)
+        el.goToFraction = vi.fn().mockResolvedValue(undefined)
+      }
+      return el
+    }) as typeof document.createElement)
+
+    const host1 = document.createElement('div')
+    const first = new FoliateReader(url, 'b1', 100, 'epub')
+    await first.mount(host1)
+    await expect(createdBooks[0].loadText('OEBPS/text/ch1.xhtml')).resolves.toContain('Cached chapter')
+    expect(epubInitCount).toBe(1)
+    expect(fetchMock.mock.calls.filter(([req]) => String(req).includes('/reader/manifest'))).toHaveLength(1)
+    expect(fetchMock.mock.calls.filter(([req]) => String(req).includes('/reader/entry'))).toHaveLength(1)
+
+    first.destroy()
+
+    // Re-entering the same book immediately must hit parseCache and in-memory textMemory.
+    const host2 = document.createElement('div')
+    const second = new FoliateReader(url, 'b1', 100, 'epub')
+    await second.mount(host2)
+    await expect(createdBooks[0].loadText('OEBPS/text/ch1.xhtml')).resolves.toContain('Cached chapter')
+    expect(epubInitCount).toBe(1)
+    expect(fetchMock.mock.calls.filter(([req]) => String(req).includes('/reader/manifest'))).toHaveLength(1)
+    expect(fetchMock.mock.calls.filter(([req]) => String(req).includes('/reader/entry'))).toHaveLength(1)
+
+    // When a session signals a revision change, destroying the view must evict the stale parse.
+    ;(second as any).contentSession.revisionChanged = true
+    second.destroy()
+
+    const host3 = document.createElement('div')
+    const third = new FoliateReader(url, 'b1', 100, 'epub')
+    await third.mount(host3)
+    expect(epubInitCount).toBe(2)
+    expect(fetchMock.mock.calls.filter(([req]) => String(req).includes('/reader/manifest'))).toHaveLength(2)
+    third.destroy()
+    expect(getSessionEpoch()).toBeGreaterThan(0)
   })
 })

@@ -3,8 +3,12 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 
 import { useAuthStore } from '@/stores/auth.store'
+import { deviceCatalogOperations } from '@/features/local-library/catalog'
+import { localReviewMutationInput, useDeleteLocalReview, useLocalReview, useSaveLocalReview } from '@/features/local-library/review-hooks'
+import { localReviewBookContext } from '@/features/local-library/reviews'
 
-import type { BookListItem, CatalogBook, Library, MetadataProviderId, Review, UndoReceipt } from '@bookdock/shared'
+import type { ClientLibraryBookView, CatalogBook, Library, MetadataProviderId, Review, UndoReceipt } from '@bookdock/shared'
+import { clientScopeKey } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
@@ -17,7 +21,7 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import type { ToastMessage } from '@/stores/toast.store'
 
-import { useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useTags, useVersionTocState, useLibraryCategories, useLibraries } from '../hooks'
+import { invalidateDeviceMembershipQueries, useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useTags, useVersionTocState, useLibraryCategories, useLibraries } from '../hooks'
 
 import AppendContentModal from './AppendContentModal'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
@@ -38,11 +42,12 @@ import ReviewDetailHeaderActions, { ReviewDetailModalTitle } from '@/features/re
 import { getReviewTotalCount } from '@/features/reviews/lib/review-count'
 import ReviewDetailView from '@/features/reviews/components/ReviewDetailView'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
-import { useReviewBookContext, useReviewWorkContext } from '@/features/reviews/hooks/useReviews'
+import { useReviewBookContext, useReviewWorkContext, type SaveReviewInput } from '@/features/reviews/hooks/useReviews'
 import { visibleReviews } from '@/features/reviews/lib/review-select'
+import { isDeviceBook } from '@/features/reading-data/book-source'
 
 interface BookDetailDialogProps {
-  book: BookListItem | null
+  book: ClientLibraryBookView | null
   /**
    * A work in a shared library, shown in this same dialog. The design puts a
    * library's versions in its detail (library-design-v1.md §6), so the detail is
@@ -52,8 +57,8 @@ interface BookDetailDialogProps {
   work?: { work: CatalogBook; library: Library; canManage: boolean; canCollect: boolean; canContribute?: boolean } | null
   readOnly?: boolean
   onClose: () => void
-  onDelete: (book: BookListItem) => void
-  onPublish?: (book: BookListItem) => void
+  onDelete: (book: ClientLibraryBookView) => void
+  onPublish?: (book: ClientLibraryBookView) => void
 }
 
 export default function BookDetailDialog({ book, work: workContext = null, readOnly = false, onClose, onDelete, onPublish }: BookDetailDialogProps) {
@@ -61,26 +66,32 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
+  // The opened book decides the source; the context only covers the /local view.
+  const vault = useMemo(() => deviceCatalogOperations(), [])
+  const isLocalBook = isDeviceBook(book?.ref)
   const workQuery = useCatalogBookDetail(workContext?.library.id ?? null, workContext?.work.id ?? null)
   const work = workContext ? { ...workContext, work: workQuery.data?.data ?? workContext.work } : null
 
 
-  const { data: detailData, isLoading: detailLoading } = useBook(book?.id ?? null)
+  const { data: detailData, isLoading: detailLoading } = useBook(book?.id ?? null, book?.ref)
   const detail = detailData?.data
-  const displayBook: BookListItem = detail ?? book!
+  const displayBook: ClientLibraryBookView = detail ?? book!
   const bookmeta = detail?.meta?.bookmeta
 
-  const { tags: memTags } = useBookMembership(book?.id ?? null, { tags: !detail?.tagIds })
-  const { data: librariesData } = useLibraries()
-  const privateLibraryId = user?.privateLibraryId ?? librariesData?.data.find((library) => library.type === 'private')?.id ?? null
+  const { tags: memTags } = useBookMembership(book?.id ?? null, { tags: !detail?.tagIds, ref: book?.ref })
+  // privateLibraryId only matters for server books; a device-book dialog
+  // must not probe the account's library list.
+  const { data: librariesData } = useLibraries({ enabled: !isLocalBook && Boolean(user) })
+  const privateLibraryId = isLocalBook ? null : user?.privateLibraryId ?? librariesData?.data.find((library) => library.type === 'private')?.id ?? null
   const categoriesData = useLibraryCategories(privateLibraryId)
-  const { data: tagsData } = useTags()
+  const { data: tagsData } = useTags({ fallbackAnonymous: isLocalBook })
 
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<ToastMessage | null>(null)
   const [confirmReset, setConfirmReset] = useState(false)
   const [draft, setDraft] = useState<MetaDraft | null>(null)
+  const [editVersion, setEditVersion] = useState<number | undefined>()
   const [draftEpoch, setDraftEpoch] = useState(0)
   const [metadataLookup, setMetadataLookup] = useState<{ open: boolean; provider?: MetadataProviderId; autoSearch?: boolean }>({ open: false })
 
@@ -160,11 +171,23 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const workCanReview = Boolean(workReviewComposer?.eligible && workReviewComposer.bookVersionId)
   const workOwnReview = workReviewContext?.own ?? null
 
-  const reviewBookQuery = useReviewBookContext(!workContext && book ? book.id : null, Boolean(!workContext && book))
-  const bookReviewContext = reviewBookQuery.data?.data
+  const reviewBookQuery = useReviewBookContext(!isLocalBook && !workContext && book ? book.id : null, Boolean(!isLocalBook && !workContext && book))
+  // A device book keeps its review in the vault; the same context shape lets
+  // the existing preview, list and detail panes render it unchanged.
+  const localReview = useLocalReview(isLocalBook ? book?.ref ?? null : null)
+  const saveLocalReview = useSaveLocalReview(isLocalBook ? book?.ref ?? null : null)
+  const deleteLocalReview = useDeleteLocalReview(isLocalBook ? book?.ref ?? null : null)
+  const localReviewContext = useMemo(
+    () => (isLocalBook && book?.ref ? localReviewBookContext(localReview.data ?? null, book.ref.bookId) : undefined),
+    [isLocalBook, book, localReview.data],
+  )
+  const bookReviewContext = localReviewContext ?? reviewBookQuery.data?.data
   const bookReviewComposer = bookReviewContext?.composer
   const bookCanReview = Boolean(!readOnly && bookReviewComposer?.eligible && bookReviewComposer.bookVersionId)
   const bookOwnReview = bookReviewContext?.own ?? null
+  const saveLocalReviewInput = isLocalBook
+    ? async (input: SaveReviewInput) => { await saveLocalReview.mutateAsync(localReviewMutationInput(input, localReview.data?.version)) }
+    : undefined
 
   // The review detail pane opens whatever the surfaces below it show, so the
   // lookup runs against the same union the list and the preview use.
@@ -214,6 +237,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setEditing(false)
     setConfirmReset(false)
     setDraft(null)
+    setEditVersion(undefined)
     setMetadataLookup({ open: false })
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
@@ -257,12 +281,13 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
 
   const isEditLibraryOwned = Boolean(displayBook?.source)
   const editAllowedFields: DraftTextField[] = isEditLibraryOwned ? PRIVATE_B_TEXT_FIELDS : PRIVATE_ALL_TEXT_FIELDS
-  const metadataSource = useBookMetadataSource(book?.id ?? null, editing && Boolean(book))
+  const metadataSource = useBookMetadataSource(book?.id ?? null, editing && Boolean(book), book?.ref)
   const sourceData = !metadataSource.isFetching && !metadataSource.isError ? (metadataSource.data?.data ?? null) : null
 
   function enterEdit() {
     if (!book) return
     setSaveError(null)
+    setEditVersion(displayBook.clientVersion)
     setDraft({
       ...draftFrom(displayBook, bookmeta),
       coverPaletteId: detail?.meta?.coverPaletteId ?? displayBook.coverPaletteId ?? null,
@@ -304,6 +329,22 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setSaving(true)
     try {
       const authors = parseAuthorList(draft.authors)
+      if (isLocalBook) {
+        if (editVersion === undefined) throw new Error('The displayed local book version is required')
+        await vault.update({ scope: book.ref!.scope, bookId: book.id }, {
+          title, authors,
+          catalog: {
+            metadata: draftToBookmetaPreserving(bookmeta, draft), coverPaletteId: draft.coverPaletteId,
+            ...(categorySel.categoryTemplateKey ? {} : { categoryId: categorySel.categoryId ?? null }), tagIds: [...tagSel],
+          },
+          ...(categorySel.categoryTemplateKey ? { categoryTemplateKey: categorySel.categoryTemplateKey } : {}),
+        }, editVersion, coverRemovalPending ? null : pendingCoverFile ?? undefined)
+        await queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(book.ref!.scope)] })
+        invalidateDeviceMembershipQueries(queryClient)
+        notify.success({ key: 'toast.bookUpdated' })
+        discardEdit()
+        return
+      }
       const patch: Record<string, unknown> = {
         title,
         author: authors[0] ?? '',
@@ -549,8 +590,13 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
       ]
       : []
 
-  const openPrivateReadingData = user
+  const openPrivateReadingData = user || isLocalBook
     ? () => {
+        if (isLocalBook) {
+          onClose()
+          void navigate({ to: '/archive', search: { bookId: displayBook.id, bookView: 'data' } })
+          return
+        }
         onClose()
         void navigate({ to: '/archive', search: { bookId: displayBook.id, bookView: 'data' } })
       }
@@ -568,12 +614,14 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           reviewSubView === 'review-detail' && activeBookReview ? (
             <ReviewDetailHeaderActions
               review={activeBookReview}
+              local={isLocalBook}
+              onLocalDelete={isLocalBook ? () => deleteLocalReview.mutateAsync(localReview.data?.version) : undefined}
               onEdit={(r) => {
                 setDialogEditingReview(r)
                 setDialogReviewEditorOpen(true)
               }}
               onDeleted={() => {
-                void reviewBookQuery.refetch()
+                if (!isLocalBook) void reviewBookQuery.refetch()
                 setReviewSubView(reviewDetailReturn)
                 setActiveReviewId(null)
               }}
@@ -672,7 +720,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
 
               {metadataLookup.open && draft && <MetadataLookupDialog draft={draft} limited={isEditLibraryOwned} hasCover={Boolean(pendingCoverFile || displayBook.coverKey || displayBook.format === 'epub')} initialProvider={metadataLookup.provider} autoSearch={metadataLookup.autoSearch} onClose={() => setMetadataLookup({ open: false })} onApply={(next, cover) => { setDraft(next); if (cover) handleCoverFile(cover); setMetadataLookup({ open: false }) }} />}
               <BookClassificationEditor
-                libraryId={privateLibraryId ?? ''}
+                libraryId={privateLibraryId}
                 categoryId={categorySel.categoryId ?? null}
                 categoryTemplateKey={categorySel.categoryTemplateKey}
                 tagIds={tagSel}
@@ -683,6 +731,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           ) : (
             <BookDetailView
               book={displayBook}
+              reviewContext={localReviewContext}
+              saveLocalReview={saveLocalReviewInput}
               // Archive links can open readable shared versions without a
               // private card; their personal-library actions must stay hidden.
               readOnly={readOnly || displayBook.collected === false}
@@ -729,6 +779,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
             {reviewSubView === 'review-detail' && activeBookReview && (
               <ReviewDetailView
                 review={activeBookReview}
+                local={isLocalBook}
               />
             )}
           </>
@@ -752,12 +803,13 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           bookVersionId={bookReviewComposer.bookVersionId}
           existing={dialogEditingReview ?? bookOwnReview}
           composer={bookReviewComposer}
+          saveLocal={saveLocalReviewInput}
           onClose={() => {
             setDialogReviewEditorOpen(false)
             setDialogEditingReview(null)
           }}
           onSaved={() => {
-            void reviewBookQuery.refetch()
+            if (!isLocalBook) void reviewBookQuery.refetch()
           }}
         />
       )}

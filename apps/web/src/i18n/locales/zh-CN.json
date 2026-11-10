@@ -1,5 +1,24 @@
 {
+  "localLibrary": {
+    "pendingReading": "请先结束计时并等待待保存记录写入，再清除阅读时长。",
+    "recordConflict": "记录已变化或与已有数据冲突。请刷新记录或调整输入后重试。",
+    "untimedDurationLimit": "未填写开始时间时，单条记录的时长不能超过 24 小时。",
+    "timerSaveFailed": "阅读时长未能保存到本机，请保留当前页面，待存储可用后重试",
+    "add": "添加书籍",
+    "addAction": "添加",
+    "failed": "操作未完成，请检查浏览器存储权限和可用空间，然后重试。",
+    "missing": "本地文件已移除或无法读取，保留的笔记仍可在书库中查看。",
+    "progressFailed": "本地进度未保存。若其他标签页更新过进度，请确认是否用当前位置继续保存。",
+    "retryPosition": "重试保存当前位置",
+    "restorePosition": "恢复已保存位置",
+    "addPending": "待添加",
+    "adding": "读取中…",
+    "addFailed": "添加失败"
+  },
   "dictionary": {
+    "accountRequired": "此词典服务需要连接账号；本地阅读仍可继续",
+    "audioFailed": "词典音频暂时无法播放，请重试",
+    "accessRequired": "当前账号无法访问此词典，请检查账号或词典权限",
     "invalidDictionary": "词典文件无法解析，请检查格式、配套文件和加密状态。",
     "busy": "词典正在处理其他查询，请稍后重试。",
     "title": "词典",
@@ -25,6 +44,7 @@
     "deleteConfirm": "确定删除“{{name}}”？"
   },
   "translation": {
+    "accountRequired": "翻译服务需要连接账号；本地阅读仍可继续",
     "title": "翻译",
     "target": "目标语言",
     "channel": "翻译渠道",
@@ -64,6 +84,7 @@
     "saving": "保存中…"
   },
   "metadataLookup": {
+    "accountRequired": "此刮削服务需要先连接账号",
     "qidian": "起点",
     "douban": "豆瓣",
     "weread": "微信读书",
@@ -167,6 +188,9 @@
     "username": "用户名",
     "password": "密码",
     "signIn": "登录",
+    "extensionAccountMismatch": "请切换到扩展连接的账号",
+    "extensionAccountMismatchHint": "当前网页登录账号为 {{username}}，与上传这本书的账号不同。切换账号后会继续打开该书。",
+    "switchAccount": "退出并切换账号",
     "welcome": "欢迎使用书坞",
     "setupTitle": "初始化",
     "setupSubtitle": "请设置管理员账号",
@@ -305,9 +329,8 @@
     "uploadSummaryFailed": "{{count}} 本失败",
     "uploadSummarySeparator": "，",
     "uploadSource": "来源",
-    "uploadSourceLocal": "本地文件",
     "uploadSourceManage": "管理存储源...",
-    "uploadLocal": "本地上传",
+    "uploadLocal": "本地文件",
     "uploadFromWebdav": "从外部存储导入",
     "webdavNotConfiguredTitle": "未配置外部存储",
     "webdavNotConfiguredDesc": "在设置中连接外部存储（如 WebDAV）后，即可直接浏览并批量导入 EPUB、TXT 图书。",
@@ -1045,9 +1068,16 @@
     "manageDirectory": "管理",
     "moveUp": "上移 {{name}}",
     "moveDown": "下移 {{name}}",
-    "deleteCategoryTreeConfirm": "删除「{{name}}」后，本级书籍移至未分类，子分类升为一级。不会删除书籍。"
+    "deleteCategoryTreeConfirm": "删除「{{name}}」后，本级书籍移至未分类，子分类升为一级。不会删除书籍。",
+    "sourceRemote": "上传到服务器",
+    "sourceLocal": "存到本机",
+    "defaultAddDestination": "默认添加位置",
+    "defaultAddDestinationHint": "决定书库添加按钮与上传弹窗的默认保存位置，仅保存在当前设备",
+    "addDestination": "添加位置",
+    "serverUploadDisabled": "管理员已禁止上传到服务器"
   },
   "reader": {
+    "fontServiceUnavailable": "字体服务暂不可用，已使用设备字体继续阅读",
     "positionUnavailableAfterEdit": "书籍内容已更新，无法恢复之前的阅读位置。",
     "coverageUnavailableAfterEdit": "书籍内容已更新，之前的阅读统计无法自动对应。",
     "positionAndCoverageUnavailableAfterEdit": "书籍内容已更新，之前的阅读位置和阅读统计无法自动对应。",
@@ -1125,6 +1155,11 @@
     "ttsConfigureOnline": "去设置在线语音",
     "ttsFromSelection": "朗读",
     "ttsPlaybackFailed": "朗读失败，请检查语音设置后重试",
+    "ttsUnavailable": {
+      "account": "此语音渠道需要连接账号，也可选择系统语音",
+      "service": "所选语音服务不可用或尚未配置，请重试、配置服务或选择其他引擎",
+      "system": "当前浏览器不支持系统语音，请选择可用的语音服务"
+    },
     "autoReadingTitle": "自动阅读",
     "autoReadingStart": "开启自动阅读",
     "autoReadingPause": "暂停自动阅读",
@@ -2278,7 +2313,8 @@
     "prefSelectionToolbar": "选中文本工具",
     "prefSelectionToolbarHint": "拖拽图标排序，点击切换显隐",
     "selectionToolbarAtLeastOne": "至少保留一个可见操作",
-    "resetDefault": "恢复默认"
+    "resetDefault": "恢复默认",
+    "deviceStorageFailed": "设备上的阅读设置无法读取或保存，请检查浏览器存储权限和可用空间。阅读仍可继续。"
   },
   "admin": {
     "instanceSettings": "访问控制",
@@ -2413,6 +2449,7 @@
     "noteTitle": "写想法",
     "notePlaceholder": "写下这一刻的想法…",
     "publish": "发表",
+    "savedAt": "保存于",
     "publishedAt": "发表于",
     "myNote": "我的笔记",
     "idea": "想法",
@@ -3026,7 +3063,7 @@
     "booksRead": "阅读书籍数",
     "legacyDuration": "历史基线时长：{{duration}}",
     "deleteArchive": "删除本书阅读档案",
-    "deleteArchiveDesc": "永久清除此档案的所有笔记与时长记录。",
+    "deleteArchiveDesc": "永久清除此档案的时长、轮次和统计数据，笔记与阅读位置会保留。",
     "deleteArchiveConfirm": "清除此档案的阅读数据？此操作无法撤销。",
     "replaceConflicts": "用本次补录替换冲突的 {{n}} 条记录（原记录将删除）",
     "wordsPartial": "部分历史记录缺少阅读片段，字数仅统计可计算部分。",

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, within } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import { SettingsPanel } from '../features/reader/components/SettingsPanel'
 import { useFontLoaderStore } from '../features/reader/fonts'
@@ -7,6 +7,8 @@ import { useUiStore } from '../stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import type { TextReplacementRes } from '@bookdock/shared'
+import { LocalReaderContext, type LocalReaderSession } from '@/features/reading-data/reader-source-context'
+import { useAuthStore } from '@/stores/auth.store'
 
 vi.mock('@/api/hooks/useFonts', () => ({
   useFonts: vi.fn(() => ({ data: { data: [] } })),
@@ -25,6 +27,20 @@ const mockUploadedFonts = (fonts: unknown[]) => {
 }
 
 describe('SettingsPanel', () => {
+  it('allows local theme creation and uses connected font resources independently of book authority', () => {
+    useAuthStore.setState({ user: { id: 'font-account', username: 'Reader', role: 'user' } })
+    try {
+      render(<LocalReaderContext.Provider value={{} as LocalReaderSession}><SettingsPanel /></LocalReaderContext.Provider>)
+      expect(useFonts).toHaveBeenLastCalledWith(true)
+      fireEvent.click(screen.getByTitle('主题'))
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('reader.newTheme') }))
+      expect(screen.getByPlaceholderText(i18n.t('reader.themeName'))).toBeInTheDocument()
+      fireEvent.change(screen.getByPlaceholderText(i18n.t('reader.themeName')), { target: { value: 'Device theme' } })
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('reader.saveTheme') }))
+      expect(useUiStore.getState().customThemes.some((theme) => theme.name === 'Device theme')).toBe(true)
+    } finally { act(() => useAuthStore.setState({ user: null })) }
+  })
+
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     localStorage.removeItem('bd-settings-section')

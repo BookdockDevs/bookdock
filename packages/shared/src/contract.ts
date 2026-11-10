@@ -5,6 +5,7 @@ import type { ErrorCode } from './errors'
 import type { BookSourceInfo, HiddenReason, HiddenVia, LibraryVersionKind } from './library'
 import type { AnnotationStyle, AnnotationType, TocRulePattern, ReplacementMatchType, ReplacementScope, ViewSettings } from './domain'
 import type { ReplacementTransferFile, TocTransferFile } from './rule-transfer'
+import type { ReadingWordState } from './reading-ledger'
 
 export interface ApiResponse<T> {
   data: T
@@ -1647,6 +1648,7 @@ export interface ReadingRecordMonthlyComparison {
 }
 
 export interface ReadingRecordSummaryRes {
+  wordState?: ReadingWordState
   firstRecordedDate?: string
   scope?: {
     longestStreak: number
@@ -1659,6 +1661,7 @@ export interface ReadingRecordSummaryRes {
     finishedRounds: number
     totalWordsRead: number
     wordsPartial?: boolean
+    wordState?: ReadingWordState
   }
   totalSeconds: number
   undatedDurationSeconds: number
@@ -1767,6 +1770,7 @@ export type ReplacementUpdateReq = {
 }
 
 export interface TextReplacementRes {
+  clientVersion?: number
   id: string
   /** Null = user-global pattern rule; set = book-scoped (point patches always carry their book) */
   bookId: string | null
@@ -1980,6 +1984,8 @@ export type AnnotationUpdateReq = {
 }
 
 export interface AnnotationRes {
+  /** Web local-repository concurrency version; absent on server responses. */
+  clientVersion?: number
   images?: ContentFile[]
   locationAvailable?: boolean
   visibility?: 'private' | 'shared'

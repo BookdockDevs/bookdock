@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import { useAiConfig } from '@/api/hooks/useAi'
 import { useTranslationConfig } from '@/api/hooks/useTranslationConfig'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -9,14 +11,16 @@ import { CloseIcon, TranslateIcon } from './annotation-icons'
 import SelectionUtilityPopup from './SelectionUtilityPopup'
 import TranslationContent from './TranslationContent'
 
-interface TranslationPopupProps { bookId: string; target: SelectionInfo }
+interface TranslationPopupProps { bookId?: string; target: SelectionInfo }
 
 export default function TranslationPopup({ bookId, target }: TranslationPopupProps) {
   const _ = useTranslation()
   const user = useAuthStore((state) => state.user)
-  const preferences = useTranslationConfig()
-  const ai = useAiConfig()
-  const hasData = Boolean(preferences.data && ai.data)
+  const [requestAccountId] = useState(user?.id ?? null)
+  const available = Boolean(user && user.id === requestAccountId)
+  const preferences = useTranslationConfig({ enabled: available })
+  const ai = useAiConfig({ enabled: available })
+  const hasData = Boolean(available && preferences.data && ai.data && !preferences.isError && !ai.isError)
   const isError = Boolean(preferences.isError || ai.isError)
   return <SelectionUtilityPopup title={_('translation.title')} kind="translation" target={target} onClose={() => useReaderState.getState().setTranslationTarget(null)}>
         {hasData ? (
@@ -47,7 +51,7 @@ export default function TranslationPopup({ bookId, target }: TranslationPopupPro
             </div>
 
             {/* Content area: Skeleton Loading or Error State */}
-            {isError ? (
+            {!available ? <p className="p-4 text-sm text-[var(--bd-read-sub)]">{_('translation.accountRequired')}</p> : isError ? (
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/10 text-red-600 dark:text-red-400">
                   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

@@ -2,9 +2,12 @@ import { useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { SettingsRes } from '@bookdock/shared'
+import { DEFAULT_SELECTION_TOOLBAR_ORDER, settingsUpdateSchema } from '@bookdock/shared'
 
 import { apiPut } from '@/api/client'
 import { readReaderShortcuts, readerShortcutStorageKey } from '@/features/reader/lib/reader-shortcuts'
+import { bindReadingPreferenceAccount, DEVICE_READING_CONFIG_KEY, DEVICE_SETTINGS_KEY, readingPreferenceAccountId, withReadingPreferenceHydration } from '@/features/reader/lib/reading-preference-owner'
+import { emptyConfig, parseReadingConfig, READING_PROFILE_DEFAULTS, serializeReadingConfig } from '@/features/reader/lib/reading-profiles'
 import { customThemesFromSync } from '@/lib/reading-theme'
 import { notify } from '@/lib/notifications'
 import { fetchSettings, readStoredSettings } from '@/lib/settings-cache'
@@ -69,6 +72,28 @@ function settingsChanged(
   })
 }
 
+function deviceSettings(fallback: SettingsRes): SettingsRes {
+  let stored: SettingsRes = {}
+  let config: string | null = null
+  try {
+    const raw = localStorage.getItem(DEVICE_SETTINGS_KEY)
+    if (raw) stored = settingsUpdateSchema.pick({
+      fontPreferences: true, fontOrder: true, selectionToolbarOrder: true, selectionToolbarHidden: true,
+      customThemes: true, coverFit: true, readingTimerMode: true, manualTimerGraceMinutes: true,
+      ttsEngine: true, ttsServiceId: true, ttsVoiceId: true, ttsRate: true, ttsAutoNext: true, ttsFollow: true, readingConfig: true,
+    }).parse(JSON.parse(raw))
+    config = localStorage.getItem(DEVICE_READING_CONFIG_KEY)
+    if (config && !parseReadingConfig(config)) notify.warning({ key: 'settings.deviceStorageFailed' })
+  } catch { notify.warning({ key: 'settings.deviceStorageFailed' }) }
+  return {
+    fontPreferences: {}, fontOrder: [], selectionToolbarOrder: [...DEFAULT_SELECTION_TOOLBAR_ORDER], selectionToolbarHidden: [],
+    customThemes: '[]', coverFit: 'crop', readingTimerMode: 'auto', manualTimerGraceMinutes: 5,
+    ttsEngine: 'system', ttsServiceId: null, ttsVoiceId: '', ttsRate: 1, ttsAutoNext: true, ttsFollow: true,
+    ...fallback, ...stored,
+    readingConfig: config && parseReadingConfig(config) ? config : stored.readingConfig && parseReadingConfig(stored.readingConfig) ? stored.readingConfig : fallback.readingConfig,
+  }
+}
+
 interface PendingSettings {
   userId: string
   payload: SettingsRes
@@ -105,51 +130,62 @@ function clearPendingSettings(userId: string, payload: SettingsRes) {
 }
 
 function applySettings(settings: Partial<SettingsRes>) {
-  if (typeof settings.readerShortcuts === 'string') {
-    try { localStorage.setItem(readerShortcutStorageKey(useAuthStore.getState().user?.id ?? null), settings.readerShortcuts) } catch { /* ignore */ }
-    window.dispatchEvent(new Event('bd-reader-shortcuts-loaded'))
-  }
-  useUiStore.setState((state) => {
-    const patch: Partial<typeof state> = {}
-    for (const key of SETTINGS_KEYS) {
-      if (key in settings) {
-        // @ts-expect-error dynamic settings keys
-        patch[key] = settings[key]
+  withReadingPreferenceHydration(() => {
+    if (typeof settings.readerShortcuts === 'string') {
+      try { localStorage.setItem(readerShortcutStorageKey(useAuthStore.getState().user?.id ?? null), settings.readerShortcuts) } catch { /* ignore */ }
+      window.dispatchEvent(new Event('bd-reader-shortcuts-loaded'))
+    }
+    useUiStore.setState((state) => {
+      const patch: Partial<typeof state> = {}
+      for (const key of SETTINGS_KEYS) {
+        if (key in settings) {
+          // @ts-expect-error dynamic settings keys
+          patch[key] = settings[key]
+        }
+      }
+      return patch
+    })
+    if (Array.isArray(settings.selectionToolbarOrder)) {
+      try { localStorage.setItem('bd-selection-toolbar-order', JSON.stringify(settings.selectionToolbarOrder)) } catch { /* ignore */ }
+    }
+    if (Array.isArray(settings.selectionToolbarHidden)) {
+      try { localStorage.setItem('bd-selection-toolbar-hidden', JSON.stringify(settings.selectionToolbarHidden)) } catch { /* ignore */ }
+    }
+    if (typeof settings.readingConfig === 'string') {
+      try {
+        localStorage.setItem('bd-reading-config', settings.readingConfig)
+        if (!readingPreferenceAccountId()) {
+          const existing = localStorage.getItem(DEVICE_READING_CONFIG_KEY)
+          if (!existing || parseReadingConfig(existing)) localStorage.setItem(DEVICE_READING_CONFIG_KEY, settings.readingConfig)
+        }
+      } catch {
+        // ignore
       }
     }
-    return patch
+    const syncedThemes = customThemesFromSync(settings.customThemes)
+    if (syncedThemes) useUiStore.getState().setCustomThemes(syncedThemes)
+    // The profiles blob is authoritative for the reading keys: re-apply the
+    // local resolution chain (bound > device active > global) so the flat fields
+    // follow the synced config.
+    useUiStore.getState().applyReadingResolution()
   })
-  if (Array.isArray(settings.selectionToolbarOrder)) {
-    try { localStorage.setItem('bd-selection-toolbar-order', JSON.stringify(settings.selectionToolbarOrder)) } catch { /* ignore */ }
-  }
-  if (Array.isArray(settings.selectionToolbarHidden)) {
-    try { localStorage.setItem('bd-selection-toolbar-hidden', JSON.stringify(settings.selectionToolbarHidden)) } catch { /* ignore */ }
-  }
-  if (typeof settings.readingConfig === 'string') {
-    try {
-      localStorage.setItem('bd-reading-config', settings.readingConfig)
-    } catch {
-      // ignore
-    }
-  }
-  const syncedThemes = customThemesFromSync(settings.customThemes)
-  if (syncedThemes) useUiStore.getState().setCustomThemes(syncedThemes)
-  // The profiles blob is authoritative for the reading keys: re-apply the
-  // local resolution chain (bound > device active > global) so the flat fields
-  // follow the synced config.
-  useUiStore.getState().applyReadingResolution()
 }
 
 export function SettingsSync() {
   const queryClient = useQueryClient()
   const syncFailedRef = useRef(false)
   const { mutate: saveSettings } = useMutation({
-    mutationFn: (settings: SettingsRes) => apiPut('/settings', settings),
-    onError: () => {
+    mutationFn: ({ userId, settings }: { userId: string; settings: SettingsRes }) => {
+      if (useAuthStore.getState().user?.id !== userId) throw new DOMException('Settings owner changed', 'AbortError')
+      return apiPut('/settings', settings)
+    },
+    onError: (_error, request) => {
+      if (useAuthStore.getState().user?.id !== request.userId) return
       syncFailedRef.current = true
       notify.warning({ key: 'settings.syncFailed' }, { dedupeKey: 'settings-sync' })
     },
-    onSuccess: (_result, settings) => {
+    onSuccess: (_result, { userId, settings }) => {
+      if (useAuthStore.getState().user?.id !== userId) return
       if (syncFailedRef.current) {
         const currentUserId = useAuthStore.getState().user?.id
         const pending = currentUserId ? getPendingSettings(currentUserId) : null
@@ -160,7 +196,7 @@ export function SettingsSync() {
     },
   })
   const mutateRef = useRef(saveSettings)
-  const settingsUserRef = useRef<string | null>(null)
+  const settingsUserRef = useRef<string | null | undefined>(undefined)
   const suppressSyncRef = useRef(false)
   useEffect(() => {
     mutateRef.current = saveSettings
@@ -181,7 +217,9 @@ export function SettingsSync() {
 
   useEffect(() => {
     if (settingsUserRef.current !== userId) {
+      const firstOwner = settingsUserRef.current === undefined
       syncFailedRef.current = false
+      bindReadingPreferenceAccount(userId)
       settingsUserRef.current = userId
       if (userId && !isGuest) {
         const cached = readStoredSettings(userId)
@@ -195,12 +233,15 @@ export function SettingsSync() {
         suppressSyncRef.current = false
         useSettingsSyncStore.setState({ userId, ready: Boolean(pending || cached), failed: false })
         if (pending) {
-          mutateRef.current(pending, { onSuccess: () => clearPendingSettings(userId, pending) })
+          mutateRef.current({ userId, settings: pending }, { onSuccess: () => clearPendingSettings(userId, pending) })
         }
       } else {
         useSettingsSyncStore.setState({ userId: null, ready: true, failed: false })
         suppressSyncRef.current = true
-        useUiStore.setState({ fontPreferences: {}, fontOrder: [] })
+        applySettings(deviceSettings(firstOwner ? pickSettings(useUiStore.getState()) : { readingConfig: serializeReadingConfig(emptyConfig(READING_PROFILE_DEFAULTS)) }))
+        try {
+          if (localStorage.getItem(DEVICE_SETTINGS_KEY) === null) localStorage.setItem(DEVICE_SETTINGS_KEY, JSON.stringify(pickSettings(useUiStore.getState())))
+        } catch { notify.warning({ key: 'settings.deviceStorageFailed' }, { dedupeKey: 'device-settings' }) }
         suppressSyncRef.current = false
       }
     }
@@ -256,7 +297,7 @@ export function SettingsSync() {
       const currentUserId = useAuthStore.getState().user?.id
       if (!currentUserId) return
       const pending = getPendingSettings(currentUserId)
-      if (pending) mutateRef.current(pending, { onSuccess: () => clearPendingSettings(currentUserId, pending) })
+      if (pending) mutateRef.current({ userId: currentUserId, settings: pending }, { onSuccess: () => clearPendingSettings(currentUserId, pending) })
     }
     const broadcastShortcuts = () => {
       const currentUser = useAuthStore.getState().user
@@ -288,7 +329,15 @@ export function SettingsSync() {
       const activeTouched = state.activePresetId !== prevState.activePresetId
       if (!settingsTouched && !activeTouched) return
       const user = useAuthStore.getState().user
-      if (!user) return
+      if (readingPreferenceAccountId() !== (user?.id ?? null)) return
+      if (!user) {
+        if (settingsTouched) {
+          try { localStorage.setItem(DEVICE_SETTINGS_KEY, JSON.stringify(pickSettings(state))) }
+          catch { notify.warning({ key: 'settings.deviceStorageFailed' }, { dedupeKey: 'device-settings' }) }
+        }
+        return
+      }
+      const scheduledUserId = user.id
       if (settingsTouched) {
         const userId = useAuthStore.getState().user?.id
         if (userId) persistPendingSettings(userId, pickSettings(state))
@@ -299,12 +348,13 @@ export function SettingsSync() {
         const latestState = useUiStore.getState()
         const payload = pickSettings(latestState)
         const user = useAuthStore.getState().user
+        if (user?.id !== scheduledUserId) { settingsDirty = false; return }
         const pending = user ? getPendingSettings(user.id) : null
         // The device-local active preset is broadcast-only, never PUT
         if (user && (settingsDirty || pending)) {
           settingsDirty = false
           const payloadToSave = pending ?? payload
-          mutateRef.current(payloadToSave, {
+          mutateRef.current({ userId: user.id, settings: payloadToSave }, {
             onSuccess: () => {
               clearPendingSettings(user.id, payloadToSave)
               void queryClient.invalidateQueries({ queryKey: ['settings'] })

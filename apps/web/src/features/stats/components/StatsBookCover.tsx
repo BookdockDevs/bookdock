@@ -1,13 +1,17 @@
 import { useState } from 'react'
 
-import type { ReadingRecordBookItem } from '@bookdock/shared'
+import BookCover from '@/features/library/components/BookCover'
+
+import type { ClientReadingBookView } from '@bookdock/shared'
 
 interface StatsBookCoverProps {
-  item: ReadingRecordBookItem
+  item: ClientReadingBookView
 }
 
 export default function StatsBookCover({ item }: StatsBookCoverProps) {
   const [error, setError] = useState(false)
+
+  if (item.ref) return <BookCover book={{ ref: item.ref, id: item.bookId, title: item.title, coverKey: item.coverKey }} className="h-14 w-10 shrink-0" size="sm" />
 
   if (item.coverKey && !error) {
     return (
