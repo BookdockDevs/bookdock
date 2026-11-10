@@ -206,4 +206,33 @@ describe('reader mount preparation', () => {
     apply.mockRestore(); mount.mockRestore(); destroy.mockRestore()
     useUiStore.setState(baseline)
   })
+
+  it('keeps the live renderer mounted when bookProvider returns a new wrapper for the same cacheIdentity', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { FoliateReader } = await import('@/features/reader/renderers/FoliateReader')
+    const mount = vi.spyOn(FoliateReader.prototype, 'mount').mockImplementation(async () => {})
+    const destroy = vi.spyOn(FoliateReader.prototype, 'destroy').mockImplementation(() => {})
+    const makeProvider = () => ({ cacheIdentity: 'local:book-1:rev-1', open: vi.fn() })
+    function Harness({ provider }: { provider: ReturnType<typeof makeProvider> }) {
+      const { containerRef } = useReaderRenderer({
+        url: 'local:book-1:rev-1',
+        bookId: 'book-1',
+        bookProvider: provider,
+        resolvedFonts: [],
+        initialCfi: '',
+      })
+      return <div ref={containerRef} />
+    }
+    const view = render(<QueryClientProvider client={client}><Harness provider={makeProvider()} /></QueryClientProvider>)
+    try {
+      await waitFor(() => expect(mount).toHaveBeenCalledOnce())
+      view.rerender(<QueryClientProvider client={client}><Harness provider={makeProvider()} /></QueryClientProvider>)
+      expect(mount).toHaveBeenCalledOnce()
+      expect(destroy).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+      client.clear()
+      mount.mockRestore(); destroy.mockRestore()
+    }
+  })
 })

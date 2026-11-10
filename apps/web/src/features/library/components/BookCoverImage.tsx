@@ -51,6 +51,7 @@ export default function BookCoverImage({ book, size = 'md', showFormat = true, c
       ? `/api/v1/books/${book.id}/cover?v=${encodeURIComponent(book.coverKey ?? 'auto')}`
       : null)
     : coverSrc
+  const isLocalBlob = Boolean(source?.startsWith('blob:'))
   const isCached = Boolean(source && loadedCoverCache.has(source))
   const [error, setError] = useState(false)
   const [loaded, setLoaded] = useState(isCached)
@@ -143,11 +144,11 @@ export default function BookCoverImage({ book, size = 'md', showFormat = true, c
           }}
           src={source ?? undefined}
           alt={book.title}
-          decoding="async"
+          decoding={isLocalBlob ? 'sync' : 'async'}
           onLoad={markLoaded}
           className={cn(
             'absolute inset-0 block h-full w-full',
-            isCached ? 'opacity-100' : 'transition-opacity duration-300',
+            isCached || isLocalBlob ? undefined : 'transition-opacity duration-300',
             loaded ? 'opacity-100' : 'opacity-0',
             coverFit === 'full'
               ? 'bg-stone-100 object-contain p-1 dark:bg-stone-800'
@@ -157,7 +158,7 @@ export default function BookCoverImage({ book, size = 'md', showFormat = true, c
             if (source) loadedCoverCache.delete(source)
             setError(true)
           }}
-          loading="lazy"
+          loading={isLocalBlob ? 'eager' : 'lazy'}
         />
       )}
 

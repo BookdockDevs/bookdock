@@ -69,6 +69,7 @@ export const clientReadingStateSchema = z.object({
   position: clientLocatorSchema.nullable(),
   fraction: clientFractionSchema.nullable(),
   fractionContent: clientContentRefSchema.nullable().optional(),
+  chapter: z.string().nullable().optional(),
   coverage: z.object({ content: clientContentRefSchema, fraction: clientFractionSchema, available: z.boolean() }).nullable(),
   positionHistory: z.array(z.object({ position: clientLocatorSchema.nullable(), fraction: clientFractionSchema.nullable(), updatedAt: timestamp })).optional(),
   lastReadAt: timestamp.nullable(),

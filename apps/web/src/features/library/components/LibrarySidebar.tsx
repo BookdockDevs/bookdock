@@ -6,10 +6,12 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 
 import type { ClientCategoryView, LibraryListItem, LibraryRelation } from '@bookdock/shared'
 
+import { overlayCategoryDeviceCounts, overlayTaxonomyDeviceCounts } from '@/features/local-library/catalog-view'
 import { useCatalogRevealHidden } from '@/features/reading-data/useCatalogRevealHidden'
 import { useVaultCapable } from '@/features/reading-data/vault-availability'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth.store'
 
 import type { LibrarySearch } from '@/routes/index'
 import SmartMenu from '@/components/ui/SmartMenu'
@@ -149,23 +151,34 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   }, [availableModules, panel, activeLibraryId, remember])
   // Unified shelf: anonymous visitors fall back to the vault taxonomy, and
   // device books filed into account groups join the server membership counts.
-  const { data: shelvesData, isLoading: shelvesLoading, isError: shelvesError, refetch: refetchShelves } = useShelves({ fallbackAnonymous: !activeLibraryId, overlayLocalCounts: !activeLibraryId })
-  const { data: tagsData, isLoading: tagsLoading, isError: tagsError, refetch: refetchTags } = useTags({ fallbackAnonymous: !activeLibraryId, overlayLocalCounts: !activeLibraryId })
+  const signedIn = useAuthStore((state) => Boolean(state.user))
+  const { data: shelvesData, isLoading: shelvesLoading, isError: shelvesError, refetch: refetchShelves } = useShelves({ fallbackAnonymous: !activeLibraryId })
+  const { data: tagsData, isLoading: tagsLoading, isError: tagsError, refetch: refetchTags } = useTags({ fallbackAnonymous: !activeLibraryId })
   // Shared libraries expose their categories here; private shelves and private
   // categories stay independent and load from their respective endpoints.
   const isLibraryActivity = Boolean(inLibrary && librarySearch?.section === 'activity' && !trash)
   const taxonomyLibraryId = activeLibraryId ?? privateLibraryId
-  const categoriesQuery = useLibraryCategories(taxonomyLibraryId, { overlayDeviceCounts: !activeLibraryId })
+  const categoriesQuery = useLibraryCategories(taxonomyLibraryId)
   const libraryTagsQuery = useLibraryTags(activeLibraryId)
   const relationQuery = useLibraryRelation(activeLibraryId)
   const canCurate = inLibrary
     && (relationQuery.data?.data.relation === 'owner' || relationQuery.data?.data.relation === 'admin')
+  // Overlay device membership counts in the UI from the dedicated vault query
+  // so shared server-taxonomy caches stay pure across all observers.
+  const deviceCounts = useDeviceMembershipCounts({ enabled: !inLibrary })
+  const overlayCounts = !inLibrary && signedIn ? deviceCounts : undefined
 
   // Auto modes re-sort the full list client-side over the server (manual)
   // order; the same memo exists in Library for the drag materialization. Both
   // taxonomies satisfy SidebarSortableItem, so the preference applies to either.
-  const shelfRows = useMemo(() => sortSidebarItems(applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort), [shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort])
-  const categories = categoriesQuery.data?.data ?? EMPTY_CATEGORIES
+  const shelfRows = useMemo(
+    () => sortSidebarItems(applyShelfOrder(overlayTaxonomyDeviceCounts(shelvesData?.data ?? [], overlayCounts?.shelves), shelfOrderOverride), libraryPrefs?.shelfSort),
+    [shelvesData, overlayCounts?.shelves, shelfOrderOverride, libraryPrefs?.shelfSort],
+  )
+  const categories = useMemo(
+    () => overlayCategoryDeviceCounts(categoriesQuery.data?.data ?? EMPTY_CATEGORIES, overlayCounts?.categories),
+    [categoriesQuery.data, overlayCounts?.categories],
+  )
   const categorySort = libraryPrefs?.categorySort ?? libraryPrefs?.shelfSort
   const categoryRows = useMemo(() => sortCategories(applyShelfOrder(categories, shelfOrderOverride), categorySort), [categories, shelfOrderOverride, categorySort])
   const shelves = panel === 'categories' ? categoryRows : shelfRows
@@ -190,10 +203,10 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   }, [categoriesQuery.data, categoryId, sessionKey])
   const tags = useMemo(
     () => sortSidebarItems(
-      applyTagOrder(inLibrary ? (libraryTagsQuery.data?.data ?? []) : (tagsData?.data ?? []), tagOrderOverride),
+      applyTagOrder(inLibrary ? (libraryTagsQuery.data?.data ?? []) : overlayTaxonomyDeviceCounts(tagsData?.data ?? [], overlayCounts?.tags), tagOrderOverride),
       libraryPrefs?.tagSort,
     ),
-    [inLibrary, libraryTagsQuery.data, tagsData, tagOrderOverride, libraryPrefs?.tagSort],
+    [inLibrary, libraryTagsQuery.data, tagsData, overlayCounts?.tags, tagOrderOverride, libraryPrefs?.tagSort],
   )
   const taxonomyLoading = panel === 'categories' ? (!taxonomyLibraryId ? !librariesResolved : categoriesQuery.isLoading) : panel === 'shelves' ? shelvesLoading : (inLibrary ? (!activeLibraryId || libraryTagsQuery.isLoading) : tagsLoading)
   const { revealHidden } = useCatalogRevealHidden()
@@ -214,7 +227,6 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   }, { enabled: trashEnabled })
   // The aggregate rows count both kinds of book, because the grid they open
   // shows both. The device numbers come from the books themselves.
-  const deviceCounts = useDeviceMembershipCounts({ enabled: !inLibrary })
   const trashCount = trashData || deviceCounts ? (trashData?.total ?? 0) + (deviceCounts?.trash ?? 0) : undefined
   // Shared-library trash is owner-only: the row relation comes from the list,
   // falling back to the per-library query while it loads.
@@ -859,33 +871,22 @@ function LibrarySection({
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         className={cn(
-          'group flex w-full items-center gap-3 rounded-xl border px-2.5 py-2 text-left transition-colors cursor-pointer select-none',
-          'border-stone-200/70 bg-stone-200/35 hover:bg-stone-200/65 dark:border-stone-800/70 dark:bg-stone-800/40 dark:hover:bg-stone-800/70',
-          open && 'bg-stone-200/70 border-stone-300/80 dark:bg-stone-800/70 dark:border-stone-700/80',
+          'group flex w-full items-center gap-2.5 rounded-xl bg-white/90 px-2.5 py-2 text-left shadow-2xs ring-1 ring-stone-200/80 transition-all cursor-pointer select-none',
+          'hover:bg-white hover:shadow-xs hover:ring-stone-300/80 active:scale-[0.99]',
+          'disabled:cursor-default disabled:opacity-80',
+          'dark:bg-stone-800/80 dark:ring-stone-700/70 dark:hover:bg-stone-800 dark:hover:ring-stone-600/80',
+          open && 'bg-white shadow-sm ring-stone-300 dark:bg-stone-800 dark:ring-stone-600',
         )}
       >
-        <div
-          className={cn(
-            'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg',
-            activeIsPrivate
-              ? 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400'
-              : 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400',
-          )}
-        >
-          {activeIsPrivate ? (
-            <SolidBookIcon className="h-4 w-4" />
-          ) : (
-            <SolidGroupIcon className="h-4 w-4" />
-          )}
-        </div>
+        <LibraryTypeBadge isPrivate={activeIsPrivate} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100 leading-tight">
+          <div className="truncate text-[13.5px] font-semibold text-stone-900 dark:text-stone-100 leading-tight">
             {activeNameLoading ? <span data-testid="library-switcher-name-skeleton" aria-hidden="true" className="inline-block h-4 w-28 animate-pulse rounded bg-stone-300/70 align-middle motion-reduce:animate-none dark:bg-stone-700/70" /> : activeName}
           </div>
         </div>
-        <svg width="16" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={cn("mr-0.5 shrink-0 transition-colors", open ? "text-stone-700 dark:text-stone-200" : "text-stone-500 group-hover:text-stone-700 dark:text-stone-400 dark:group-hover:text-stone-200")}>
-          <path d="m6 8 6-6 6 6" />
-          <path d="m6 16 6 6 6-6" />
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={cn('mr-0.5 shrink-0 transition-colors', open ? 'text-stone-700 dark:text-stone-200' : 'text-stone-400 group-hover:text-stone-600 dark:text-stone-500 dark:group-hover:text-stone-300')}>
+          <path d="m7 15 5 5 5-5" />
+          <path d="m7 9 5-5 5 5" />
         </svg>
       </button>
 
@@ -913,9 +914,7 @@ function LibrarySection({
                 )}
               >
                 <span className="flex min-w-0 items-center gap-2.5">
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
-                    <SolidBookIcon className="h-4 w-4" />
-                  </div>
+                  <LibraryTypeBadge isPrivate size="sm" />
                   <span className="truncate">{privateLibrary?.name || activeLibraryName || _(disabled ? 'library.allBooks' : 'library.myLibrary')}</span>
                 </span>
               </button>
@@ -1064,18 +1063,7 @@ function LibraryRow({
         )}
       >
         <span className="flex min-w-0 items-center gap-2.5">
-          <div className={cn(
-            'flex h-6 w-6 shrink-0 items-center justify-center rounded-md',
-            library.type === 'private'
-              ? 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400'
-              : 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400',
-          )}>
-            {library.type === 'private' ? (
-              <SolidBookIcon className="h-4 w-4" />
-            ) : (
-              <SolidGroupIcon className="h-4 w-4" />
-            )}
-          </div>
+          <LibraryTypeBadge isPrivate={library.type === 'private'} size="sm" />
           <span className="truncate">{displayName}</span>
         </span>
       </button>
@@ -1270,19 +1258,27 @@ function BookdockLogo({ className = 'h-8 w-8' }: { className?: string }) {
   )
 }
 
-function SolidBookIcon({ className = 'h-4 w-4' }: { className?: string }) {
+function LibraryTypeBadge({ isPrivate, size = 'md' }: { isPrivate: boolean; size?: 'sm' | 'md' }) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H18a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6.5A2.5 2.5 0 0 1 4 19.5v-15ZM8 6a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H8Z" />
-    </svg>
-  )
-}
-
-function SolidGroupIcon({ className = 'h-4 w-4' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M16.5 13c1.38 0 2.5-1.12 2.5-2.5S17.88 8 16.5 8 14 9.12 14 10.5s1.12 2.5 2.5 2.5zm-9 0C8.88 13 10 11.88 10 10.5S8.88 8 7.5 8 5 9.12 5 10.5 6.12 13 7.5 13zm0 2c-2.33 0-7 1.17-7 3.5V20h14v-1.5c0-2.33-4.67-3.5-7-3.5zm9 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V20h6v-1.5c0-2.33-4.67-3.5-7-3.5z" />
-    </svg>
+    <div
+      className={cn(
+        'flex shrink-0 items-center justify-center',
+        size === 'sm' ? 'h-6 w-6 rounded-md' : 'h-7 w-7 rounded-lg',
+        isPrivate
+          ? 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400'
+          : 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400',
+      )}
+    >
+      {isPrivate ? (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+          <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H18a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6.5A2.5 2.5 0 0 1 4 19.5v-15ZM8 6a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H8Z" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+          <path d="M16.5 13c1.38 0 2.5-1.12 2.5-2.5S17.88 8 16.5 8 14 9.12 14 10.5s1.12 2.5 2.5 2.5zm-9 0C8.88 13 10 11.88 10 10.5S8.88 8 7.5 8 5 9.12 5 10.5 6.12 13 7.5 13zm0 2c-2.33 0-7 1.17-7 3.5V20h14v-1.5c0-2.33-4.67-3.5-7-3.5zm9 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V20h6v-1.5c0-2.33-4.67-3.5-7-3.5z" />
+        </svg>
+      )}
+    </div>
   )
 }
 

@@ -56,6 +56,7 @@ import CatalogListRow from './components/CatalogListRow'
 import CatalogUploadSheet from './components/CatalogUploadSheet'
 import LibraryManageDialog from './components/LibraryManageDialog'
 import BookDetailDialog from './components/BookDetailDialog'
+import DeviceBookIndicator from './components/DeviceBookIndicator'
 import PublishBookDialog from './components/PublishBookDialog'
 import EmptyFilter from './components/EmptyFilter'
 import EmptyLibrary from './components/EmptyLibrary'
@@ -268,11 +269,12 @@ export default function Library() {
         series: switching ? null : series,
         format: switching ? null : format,
         readStatus: switching ? null : nextStatus,
+        source: switching ? null : (search.source ?? null),
         trash: nextTrash,
         showHidden: revealHidden,
       })
     },
-    [search.expression, queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, categoryId, tagId, format, readStatus, pageSize, activeLibrary, author, series, revealHidden, categoryScope],
+    [search.expression, search.source, queryClient, query, trash, defaultSortBy, defaultSortOrder, sortBy, sortOrder, shelfId, categoryId, tagId, format, readStatus, pageSize, activeLibrary, author, series, revealHidden, categoryScope],
   )
 
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -323,12 +325,17 @@ export default function Library() {
 
   function toggleSelect(key: string, index?: number, shiftKey?: boolean) {
     if (activeLibrary && !isLibraryManager) return
+    const targetRow = !activeLibrary ? allBooks.find((book) => catalogSelectionKey(book) === key) : undefined
+    if (targetRow && isRowReadOnly(targetRow)) return
     const anchor = lastSelectIndexRef.current
     if (shiftKey && index !== undefined && anchor !== null && anchor !== index) {
       const [from, to] = anchor < index ? [anchor, index] : [index, anchor]
       // Range-select walks the rows on screen, never the other library's
       // query, or a shared Shift-click would collect private ids.
-      const rangeIds = selectableIds.slice(from, to + 1)
+      const rangeIds = rows
+        .slice(from, to + 1)
+        .filter((row) => 'versions' in row || !isRowReadOnly(row))
+        .map(catalogSelectionKey)
       const selecting = !selection.has(key)
       setSelection((prev) => {
         const next = new Set(prev)
@@ -612,6 +619,7 @@ export default function Library() {
     series,
     format: search.format ?? null,
     readStatus: search.status ?? null,
+    source: search.source ?? null,
     trash,
     showHidden: revealHidden,
     // Server rejects trash queries while the feature is off; the redirect
@@ -657,7 +665,10 @@ export default function Library() {
   // on the rows on screen: catalog works in a shared library, private books
   // otherwise. One list for all four keeps shared actions from reaching into
   // the other library's (usually disabled) query.
-  const selectableIds = useMemo(() => rows.map(catalogSelectionKey), [rows])
+  const selectableIds = useMemo(
+    () => rows.filter((row) => 'versions' in row || !isGuest || isDeviceBook(row.ref)).map(catalogSelectionKey),
+    [rows, isGuest],
+  )
   const previewRows: BookRow[] = useMemo(
     () => rows.map((row) => ('versions' in row ? catalogWorkRow(row) : privateBookRow(row))),
     [rows],
@@ -667,7 +678,7 @@ export default function Library() {
   const listFetching = activeLibrary ? catalogQuery.isFetching : isFetching
   const listRefetch = activeLibrary ? catalogQuery.refetch : refetch
 
-  const filterKey = `${activeLibrary?.id ?? ''}:${shelfId ?? ''}:${categoryId ?? ''}:${categoryScope}:${tagId ?? ''}:${query}:${format ?? ''}:${readStatus ?? ''}:${trash}:${author ?? ''}:${series ?? ''}:${sortBy}:${sortOrder}:${pageSize}`
+  const filterKey = `${activeLibrary?.id ?? ''}:${shelfId ?? ''}:${categoryId ?? ''}:${categoryScope}:${tagId ?? ''}:${query}:${format ?? ''}:${readStatus ?? ''}:${search.source ?? ''}:${trash}:${author ?? ''}:${series ?? ''}:${sortBy}:${sortOrder}:${pageSize}`
   const lastFilterKeyRef = useRef(filterKey)
   const lastTotalRef = useRef<number | null>(null)
   const lastTotalSizeRef = useRef<number | null>(null)
@@ -844,7 +855,7 @@ export default function Library() {
     || (libraryContextUnresolved && !viewTitle)
 
   const hasActiveFilter = Boolean(
-    query || search.expression || author || series || format || readStatus,
+    query || search.expression || author || series || format || readStatus || search.source,
   )
 
   const readStatusName = readStatus === 'wishlist'    ? _('library.readStatusWishlist')
@@ -1017,6 +1028,7 @@ export default function Library() {
       q: undefined,
       status: undefined,
       format: undefined,
+      source: undefined,
       author: undefined,
       series: undefined,
       section: undefined,
@@ -1033,6 +1045,7 @@ export default function Library() {
       series: undefined,
       format: undefined,
       status: undefined,
+      source: undefined,
       page: undefined,
     })
   }, [navSearch])
@@ -1069,9 +1082,9 @@ export default function Library() {
   useEffect(() => {
     if (libraryContextUnresolved) return
     if (!activeLibrary) return
-    const patch = libraryUrlCorrection({ readStatus: search.status ?? null, sortBy, sortOrder })
+    const patch = libraryUrlCorrection({ readStatus: search.status ?? null, source: search.source ?? null, sortBy, sortOrder })
     if (Object.keys(patch).length > 0) navSearch(patch)
-  }, [libraryContextUnresolved, activeLibrary, search.status, sortBy, sortOrder, navSearch])
+  }, [libraryContextUnresolved, activeLibrary, search.status, search.source, sortBy, sortOrder, navSearch])
 
   useEffect(() => {
     if (libraryContextUnresolved) return
@@ -1273,6 +1286,7 @@ export default function Library() {
           sortOrder={sortOrder}
           format={format}
           readStatus={readStatus}
+          source={search.source ?? null}
           trash={trash}
           catalogMode={activeLibrary !== null}
           categoryScope={search.categoryScope}
@@ -1454,7 +1468,7 @@ export default function Library() {
                         selected={selection.has(catalogSelectionKey(book))}
                         selectionActive={selectionActive}
                         gridCardFields={['title', 'author']}
-                        onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(book), index, shiftKey)}
+                        onToggleSelect={isRowReadOnly(book) ? undefined : (_, shiftKey) => toggleSelect(catalogSelectionKey(book), index, shiftKey)}
                         onRestore={(b) => {
                           deselect(catalogSelectionKey(b))
                           void restoreBook.mutateAsync({ id: b.id, title: b.title, ref: b.ref, ...(isDeviceBook(b.ref) ? { expectedVersion: b.clientVersion } : {}) }).catch(() => undefined)
@@ -1476,12 +1490,12 @@ export default function Library() {
                           e.preventDefault()
                           return
                         }
-                        if (selectionActive) {
+                        if (!isRowReadOnly(book) && selectionActive) {
                           e.preventDefault()
                           toggleSelect(catalogSelectionKey(book), index, e.shiftKey)
                           return
                         }
-                        if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                        if (!isRowReadOnly(book) && (e.ctrlKey || e.metaKey || e.shiftKey)) {
                           e.preventDefault()
                           toggleSelect(catalogSelectionKey(book), index, e.shiftKey)
                         }
@@ -1493,7 +1507,7 @@ export default function Library() {
                         selected={selection.has(catalogSelectionKey(book))}
                         selectionActive={selectionActive}
                         gridCardFields={gridCardFields}
-                        onToggleSelect={(_, shiftKey) => toggleSelect(catalogSelectionKey(book), index, shiftKey)}
+                        onToggleSelect={isRowReadOnly(book) ? undefined : (_, shiftKey) => toggleSelect(catalogSelectionKey(book), index, shiftKey)}
                         readOnly={isRowReadOnly(book)}
                         onDelete={isRowReadOnly(book) ? undefined : setDeleteTarget}
                         onPublish={canPublishBook(book) ? setPublishTarget : undefined}
@@ -2095,6 +2109,7 @@ function TrashListRow({ book, selected, selectionActive, onToggleSelect, onResto
           <TrashInfo book={book} className="shrink-0" />
         </div>
       </div>
+      {!selectionActive && isDeviceBook(book.ref) && <DeviceBookIndicator />}
       <span className="shrink-0 rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
         {book.format}
       </span>

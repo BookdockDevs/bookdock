@@ -22,6 +22,9 @@ export function useStorageBackendConfig(options: { enabled?: boolean } = {}) {
     queryKey: STORAGE_BACKEND_CONFIG_KEY,
     queryFn: () => apiGet<{ data: StorageBackendConfigRes }>('/integrations/storage-backend'),
     enabled: options.enabled !== false,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   })
 }
 

@@ -49,6 +49,7 @@ import { tocBasePath, invalidateCityVersionQueries, type TocTarget } from '@/api
 import { invalidateActivityQueries } from '@/features/activity/hooks'
 import { useAuthStore } from '@/stores/auth.store'
 import { getAuthSessionRevision } from '@/stores/auth.store'
+import { useUiStore } from '@/stores/ui.store'
 import { interactionRequestId } from '@/lib/interaction-request'
 import { withReveal } from '@/lib/reveal-hidden'
 import i18n from '@/i18n/i18n'
@@ -94,19 +95,28 @@ function useVaultScope() {
   return local?.scope ?? DEVICE_VAULT_SCOPE
 }
 
-/**
- * Device counts for a server-owned tree, or null when the vault cannot answer.
- * A shelf tree must never go blank because the local half is unreadable: the
- * numbers are an overlay, the tree is the server's.
- */
-async function deviceCountsOrNull(vault: ReturnType<typeof useVaultOperations>, signal: AbortSignal) {
+async function seedLocalCoverQueries(
+  queryClient: QueryClient | undefined,
+  rows: readonly ClientLibraryBookView[],
+  readCovers: (refs: readonly ClientBookRef[]) => Promise<Map<string, Blob | null>> = (refs) => localCatalogOperations(DEVICE_VAULT_SCOPE).getCovers(refs),
+) {
+  if (!queryClient || rows.length === 0) return
+  const missing: ClientLibraryBookView[] = []
+  for (const row of rows) {
+    if (!row.ref || !isDeviceBook(row.ref)) continue
+    const key = catalogQueryKey(row.ref.scope, 'cover', [row.ref.bookId, row.clientVersion])
+    if (queryClient.getQueryData(key) === undefined) missing.push(row)
+  }
+  if (missing.length === 0) return
   try {
-    const counts = deviceMembershipCounts(await vault.readCatalog())
-    signal.throwIfAborted()
-    return counts
-  } catch (error) {
-    if (signal.aborted) throw error
-    return null
+    const covers = await readCovers(missing.map((row) => row.ref!))
+    for (const row of missing) {
+      const ref = row.ref!
+      if (!covers.has(ref.bookId)) continue
+      queryClient.setQueryData(catalogQueryKey(ref.scope, 'cover', [ref.bookId, row.clientVersion]), covers.get(ref.bookId) ?? null)
+    }
+  } catch {
+    // Cover pre-seeding is best-effort; SourceBookCover falls back to per-card fetch.
   }
 }
 
@@ -136,22 +146,23 @@ async function fetchUnifiedList(
   params: UseBooksParams,
   signedIn: boolean,
   signal?: AbortSignal,
-  options?: { tolerateRemoteFailure?: boolean },
+  options?: { tolerateRemoteFailure?: boolean; queryClient?: QueryClient },
 ): Promise<ClientLibraryListView> {
-  const vaultRows = await fetchVaultRows(params, signal)
-  // No device book in this view means the shelf IS the server shelf: one
-  // request, the server's own collation and paging, and the server's own
-  // failure. Merging is only for a view that actually holds both halves -
-  // otherwise a reader who never saved anything locally would page through
-  // N requests, see a re-sorted list, and lose the error state.
-  if (vaultRows.total === 0 && signedIn) {
+  const includeLocal = params.source !== 'server'
+  const includeServer = signedIn && params.source !== 'local'
+  const vaultRows = includeLocal
+    ? await fetchVaultRows(params, signal)
+    : { rows: [] as ClientLibraryBookView[], total: 0, totalSize: 0 }
+  // No device book in this view (or filtered to server-only) means the shelf IS the server shelf:
+  // one request, the server's own collation and paging, and the server's own failure.
+  if (vaultRows.total === 0 && includeServer) {
     return guardedRemoteCatalogRead<BookListRes>(buildBooksPath(params), signal)
   }
   let remoteRows: ClientLibraryBookView[] = []
   let remoteTotal = 0
   let remoteTotalSize: number | null = 0
   let remoteFailed = false
-  if (signedIn) {
+  if (includeServer) {
     for (let p = 1; p <= params.page; p++) {
       try {
         const res = await guardedRemoteCatalogRead<BookListRes>(buildBooksPath({ ...params, page: p }), signal)
@@ -168,8 +179,10 @@ async function fetchUnifiedList(
   }
   const rows = mergeUnifiedRows([...remoteRows, ...vaultRows.rows] as BookRow[], params.sortBy, params.sortOrder as 'asc' | 'desc') as ClientLibraryBookView[]
   const start = (params.page - 1) * params.pageSize
+  const pageRows = rows.slice(start, start + params.pageSize)
+  await seedLocalCoverQueries(options?.queryClient, pageRows)
   return {
-    data: rows.slice(start, start + params.pageSize),
+    data: pageRows,
     total: vaultRows.total + (remoteFailed ? remoteRows.length : remoteTotal),
     totalSize: (vaultRows.totalSize ?? 0) + (remoteFailed ? 0 : remoteTotalSize),
     page: params.page,
@@ -188,7 +201,7 @@ export async function loadUnifiedSearchPage(queryClient: QueryClient, params: Us
   const queryKey = [...booksQueryParts(params).queryKey, 'unified']
   const cached = queryClient.getQueryState(queryKey)
   if (cached?.status === 'success' && !cached.isInvalidated) return true
-  const page = await fetchUnifiedList(params, signedIn, signal, { tolerateRemoteFailure: false })
+  const page = await fetchUnifiedList(params, signedIn, signal, { tolerateRemoteFailure: false, queryClient })
   if (signal.aborted) return false
   queryClient.setQueryData(queryKey, page)
   return true
@@ -210,6 +223,7 @@ export async function loadSearchPage(queryClient: QueryClient, request: { queryK
 }
 
 export function useBooks(params: UseBooksParams, options?: { enabled?: boolean }): QueryObserverResult<ClientLibraryListView> {
+  const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.user)
   const local = useLocalCatalog()
   const vault = useVaultOperations()
@@ -222,7 +236,9 @@ export function useBooks(params: UseBooksParams, options?: { enabled?: boolean }
       if (local) {
         const page = await vault.list(params, signal)
         if (!page.organization) throw new Error("Local catalog organization is unavailable")
-        return { data: page.entries.map((entry) => localCatalogBookView(entry.book, entry.state, page.organization!)), total: page.total, totalSize: page.totalSize, page: params.page, pageSize: params.pageSize }
+        const data = page.entries.map((entry) => localCatalogBookView(entry.book, entry.state, page.organization!))
+        await seedLocalCoverQueries(queryClient, data, (refs) => vault.getCovers(refs))
+        return { data, total: page.total, totalSize: page.totalSize, page: params.page, pageSize: params.pageSize }
       }
       return guardedRemoteCatalogRead<BookListRes>(path, signal)
     },
@@ -233,7 +249,7 @@ export function useBooks(params: UseBooksParams, options?: { enabled?: boolean }
     placeholderData: (prev, prevQuery) => {
       if (local) return undefined
       const prevParams = prevQuery?.queryKey[1] as UseBooksParams | undefined
-      return prevParams && prevParams.trash === params.trash && prevParams.showHidden === params.showHidden ? prev : undefined
+      return prevParams && prevParams.source === params.source && prevParams.trash === params.trash && prevParams.showHidden === params.showHidden ? prev : undefined
     },
   })
 }
@@ -246,7 +262,7 @@ export function prefetchBooks(queryClient: QueryClient, params: UseBooksParams) 
   return queryClient.prefetchQuery({
     networkMode: 'always',
     queryKey: [...booksQueryParts(params).queryKey, 'unified'],
-    queryFn: ({ signal }) => fetchUnifiedList(params, Boolean(useAuthStore.getState().user), signal),
+    queryFn: ({ signal }) => fetchUnifiedList(params, Boolean(useAuthStore.getState().user), signal, { queryClient }),
   })
 }
 
@@ -258,16 +274,17 @@ export function prefetchBooks(queryClient: QueryClient, params: UseBooksParams) 
  * cannot be read the vault rows still render.
  */
 export function useUnifiedBooks(params: UseBooksParams, options?: { enabled?: boolean }): QueryObserverResult<ClientLibraryListView> {
+  const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.user)
   const { queryKey } = booksQueryParts(params)
   const mergedQuery = useQuery<ClientLibraryListView>({
     networkMode: 'always',
     queryKey: [...queryKey, 'unified'],
-    queryFn: ({ signal }) => fetchUnifiedList(params, Boolean(user), signal),
+    queryFn: ({ signal }) => fetchUnifiedList(params, Boolean(user), signal, { queryClient }),
     enabled: options?.enabled ?? true,
     placeholderData: (prev, prevQuery) => {
       const prevParams = prevQuery?.queryKey[1] as UseBooksParams | undefined
-      return prevParams && prevParams.trash === params.trash && prevParams.showHidden === params.showHidden ? prev : undefined
+      return prevParams && prevParams.source === params.source && prevParams.trash === params.trash && prevParams.showHidden === params.showHidden ? prev : undefined
     },
   })
   return mergedQuery
@@ -350,27 +367,22 @@ const BOOK_MEMBERSHIP_KEYS = [['books'], ['shelves'], ['tags']] as const
  * read, so it is only touched when there is a session to answer it.
  */
 export function invalidateDeviceMembershipQueries(queryClient: QueryClient) {
-  // Only the shared cache entries are touched: the merged shelf carries the
-  // `unified` marker, and the sign-in-aggregated taxonomies key on `account` /
-  // `device`. A device-only cache (one keyed through `catalogQueryKey`) is
-  // already refreshed by the caller.
+  // Refresh the merged shelf (`unified`), guest-mode vault taxonomies (`device`),
+  // and the reactive `membership-counts` overlay consumed by the sidebar and
+  // taxonomy directory. Server-owned taxonomy caches stay pure so competing
+  // observers never overwrite overlaid counts and local moves avoid extra HTTP.
   void queryClient.invalidateQueries({
     predicate: (query) => {
       const [root, sub] = query.queryKey
       if (root === 'books') return query.queryKey[query.queryKey.length - 1] === 'unified'
-      if (root === 'shelves' || root === 'tags') return sub === 'account' || sub === 'device'
+      if (root === 'shelves' || root === 'tags') return sub === 'device'
       if (root === 'client-catalog') {
-        // The sidebar numbers are their own cache entry; the device list is
-        // refreshed by the caller that also refreshes this.
         const parts = query.queryKey
         return parts[parts.length - 1] === 'membership-counts'
       }
       return false
     },
   })
-  if (useAuthStore.getState().user) {
-    void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'libraries' && query.queryKey[2] === 'categories' })
-  }
 }
 
 /**
@@ -424,6 +436,7 @@ const PRIVATE_UPLOAD_TARGET: UploadTarget = {
 export function useUploadSettings() {
   const local = useLocalCatalog()
   const user = useAuthStore((state) => state.user)
+  const deviceNormalizeTitle = useUiStore((state) => state.deviceNormalizeTitle)
   const { data } = useQuery({
     networkMode: local ? 'always' : 'online',
     enabled: !local && Boolean(user),
@@ -432,7 +445,7 @@ export function useUploadSettings() {
   })
   return {
     maxBytes: local ? undefined : data?.data.uploadMaxBytes,
-    normalizeTitle: data?.data.library?.normalizeTitle !== false,
+    normalizeTitle: user ? data?.data.library?.normalizeTitle !== false : deviceNormalizeTitle,
   }
 }
 
@@ -548,7 +561,7 @@ export function useLibraryRelation(libraryId: string | null, options?: { enabled
 }
 
 /** Shared-library taxonomy for browsing; keyed per library so switching never leaks rows. */
-export function useLibraryCategories(libraryId: string | null, options?: { enabled?: boolean; overlayDeviceCounts?: boolean }) {
+export function useLibraryCategories(libraryId: string | null, options?: { enabled?: boolean }) {
   const local = useDataAuthority()
   const { revealHidden: showHidden } = useCatalogRevealHidden()
   const user = useAuthStore((state) => state.user)
@@ -569,30 +582,6 @@ export function useLibraryCategories(libraryId: string | null, options?: { enabl
         saveLibraryCategoriesSnapshot(userId, libraryId, result.data)
       }
       void vault.mirrorOrganization(result.data.map((item) => ({ id: item.id, kind: 'category' as const, name: item.name, parentId: item.parentId, pinned: item.pinned, hidden: item.hidden, sortOrder: item.sortOrder, createdAt: item.createdAt, updatedAt: item.updatedAt }))).catch(() => {})
-      if (options?.overlayDeviceCounts) {
-        // Device books filed under this tree are counted here: the tree itself
-        // stays the server's, only the numbers pick up the device rows.
-        const counts = await deviceCountsOrNull(vault, signal)
-        if (!counts) return result
-        const byId = new Map(result.data.map((item) => [item.id, item]))
-        const subtree = new Map<string, number>()
-        for (const [id, count] of counts.categories) {
-          const seen = new Set<string>()
-          let current: string | null = id
-          while (current && !seen.has(current)) {
-            seen.add(current)
-            subtree.set(current, (subtree.get(current) ?? 0) + count)
-            current = byId.get(current)?.parentId ?? null
-          }
-        }
-        return {
-          data: result.data.map((item) => ({
-            ...item,
-            bookCount: item.bookCount + (counts.categories.get(item.id) ?? 0),
-            subtreeBookCount: item.subtreeBookCount + (subtree.get(item.id) ?? 0),
-          })),
-        }
-      }
       return result
     },
     enabled: (options?.enabled ?? true) && Boolean(local || libraryId),
@@ -1637,8 +1626,17 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
             try { existing = await vault.detail({ scope: vaultScope, bookId: identity.bookId }) } catch (error) {
               if (!(error instanceof Error) || !('category' in error) || error.category !== 'unavailable-content') throw error
             }
-            const cachedSettings = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])?.data ?? readStoredSettings()
-            const normalizeTitle = cachedSettings?.library?.normalizeTitle !== false
+            if (!existing) {
+              const duplicate = await vault.findDuplicate?.(item.file, controller.signal)
+              if (duplicate) {
+                patchItem(item.id, { status: 'duplicate', progress: 100, bookRef: duplicate.ref })
+                return
+              }
+            }
+            const signedIn = Boolean(useAuthStore.getState().user)
+            const normalizeTitle = signedIn
+              ? (queryClient.getQueryData<{ data: SettingsRes }>(['settings'])?.data ?? readStoredSettings())?.library?.normalizeTitle !== false
+              : useUiStore.getState().deviceNormalizeTitle
             const book = existing ? await vault.acknowledgeIngestion(existing.book.ref, item.file) : await vault.addFile(item.file, { ...identity, normalizeTitle, signal: controller.signal, catalog: { shelfId: item.shelfId ?? null, categoryId: item.categoryId ?? null, tagIds: item.tagIds ?? [] } })
             patchItem(item.id, { status: 'success', progress: 100, bookRef: book.ref })
           } catch {
@@ -2088,7 +2086,7 @@ export function useEmptyTrash() {
   })
 }
 
-export function useShelves(options?: { enabled?: boolean; fallbackAnonymous?: boolean; overlayLocalCounts?: boolean }): QueryObserverResult<{ data: ClientTaxonomyView[] }> {
+export function useShelves(options?: { enabled?: boolean; fallbackAnonymous?: boolean }): QueryObserverResult<{ data: ClientTaxonomyView[] }> {
   const local = useLocalCatalog()
   const user = useAuthStore((state) => state.user)
   const vault = useVaultOperations()
@@ -2110,18 +2108,12 @@ export function useShelves(options?: { enabled?: boolean; fallbackAnonymous?: bo
       if (!signal.aborted && userId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) saveShelvesSnapshot(userId, result.data)
       // The shelf tree the user sees is the tree a device book may point at.
       void vault.mirrorOrganization(result.data.map((item) => ({ id: item.id, kind: 'shelf' as const, name: item.name, parentId: null, pinned: item.pinned, hidden: item.hidden, sortOrder: item.sortOrder, createdAt: item.createdAt, updatedAt: item.updatedAt }))).catch(() => {})
-      if (options?.overlayLocalCounts) {
-        // Counted from the device books, not from a local tree: their shelf id
-        // points at this very tree, which only the server can enumerate.
-        const counts = await deviceCountsOrNull(vault, signal)
-        if (counts) return { data: result.data.map((item) => ({ ...item, bookCount: item.bookCount + (counts.shelves.get(item.id) ?? 0) })) }
-      }
       return result
     },
   })
 }
 
-export function useTags(options?: { enabled?: boolean; fallbackAnonymous?: boolean; overlayLocalCounts?: boolean }): QueryObserverResult<{ data: ClientTaxonomyView[] }> {
+export function useTags(options?: { enabled?: boolean; fallbackAnonymous?: boolean }): QueryObserverResult<{ data: ClientTaxonomyView[] }> {
   const local = useLocalCatalog()
   const user = useAuthStore((state) => state.user)
   const vault = useVaultOperations()
@@ -2142,10 +2134,6 @@ export function useTags(options?: { enabled?: boolean; fallbackAnonymous?: boole
       const result = await apiGet<{ data: TagListItem[] }>(withReveal('/tags'), signal)
       if (!signal.aborted && userId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) saveTagsSnapshot(userId, result.data)
       void vault.mirrorOrganization(result.data.map((item) => ({ id: item.id, kind: 'tag' as const, name: item.name, parentId: null, pinned: item.pinned, hidden: item.hidden, sortOrder: item.sortOrder, createdAt: item.createdAt, updatedAt: item.updatedAt }))).catch(() => {})
-      if (options?.overlayLocalCounts) {
-        const counts = await deviceCountsOrNull(vault, signal)
-        if (counts) return { data: result.data.map((item) => ({ ...item, bookCount: item.bookCount + (counts.tags.get(item.id) ?? 0) })) }
-      }
       return result
     },
   })

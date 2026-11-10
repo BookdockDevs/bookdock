@@ -2,6 +2,7 @@ import type { ClientBookRef } from '@bookdock/shared'
 import { retryReadingRecords } from '@/features/reader/lib/reading-record-queue'
 import DownloadDialogHost from '@/features/library/components/DownloadDialogHost'
 import { isDeviceBook } from '@/features/reading-data/book-source'
+import { evictLocalEpubCacheByPrefix } from '@/features/reader/content/local-epub-provider'
 import { useEffect, type ReactNode } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
@@ -24,12 +25,17 @@ export default function AppProviders({ children }: { children?: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: ['reading-records', 'merged'] })
       void queryClient.invalidateQueries({ queryKey: ['archive', 'merged'] })
       void queryClient.invalidateQueries({ queryKey: ['archive', 'device'] })
+      void queryClient.invalidateQueries({ queryKey: ['archive', 'device-book'] })
       void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'books' && query.queryKey[query.queryKey.length - 1] === 'unified' })
       void queryClient.invalidateQueries({ predicate: (query) => ['book', 'annotations', 'progress', 'reading-records', 'archive'].includes(String(query.queryKey[0])) && query.queryKey.some((part) => typeof part === 'string' && part.startsWith('local:')) })
     }
     const publicationChanged = (event: Event) => {
       const ref = (event as CustomEvent<ClientBookRef>).detail
-      if (isDeviceBook(ref)) void queryClient.invalidateQueries({ queryKey: ['local-library', 'session', ref.scope.vaultId, ref.bookId] })
+      if (isDeviceBook(ref)) {
+        evictLocalEpubCacheByPrefix(`local:${JSON.stringify([ref.scope, ref.bookId]).slice(0, -1)},`)
+        void queryClient.invalidateQueries({ queryKey: ['book-source-resolve', ref.bookId] })
+        void queryClient.invalidateQueries({ queryKey: ['local-library', 'session', ref.scope.vaultId, ref.bookId] })
+      }
     }
     window.addEventListener('bd-local-publication-changed', publicationChanged)
     window.addEventListener('bd-local-library-changed', changed)

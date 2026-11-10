@@ -6,6 +6,9 @@ import type { SettingsRes } from '@bookdock/shared'
 
 import TitleSettingsRow from '../features/settings/components/TitleSettingsRow'
 import { apiPut } from '@/api/client'
+import { VaultAvailabilityContext } from '@/features/reading-data/vault-availability'
+import { useAuthStore } from '@/stores/auth.store'
+import { useUiStore } from '@/stores/ui.store'
 
 vi.mock('../hooks/useTranslation', () => ({
   useTranslation: () => (key: string, options?: Record<string, string | number>) =>
@@ -46,5 +49,24 @@ describe('TitleSettingsRow', () => {
     renderRow({ normalizeTitle: true })
     fireEvent.click(screen.getByRole('switch'))
     await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/settings', { library: { normalizeTitle: false } }))
+  })
+
+  it('stores normalizeTitle locally for guests with device vault without calling /settings', () => {
+    useAuthStore.setState({ user: null })
+    useUiStore.getState().setDeviceNormalizeTitle(true)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <VaultAvailabilityContext.Provider value={true}>
+          <TitleSettingsRow />
+        </VaultAvailabilityContext.Provider>
+      </QueryClientProvider>,
+    )
+
+    const toggle = screen.getByRole('switch')
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(toggle)
+    expect(useUiStore.getState().deviceNormalizeTitle).toBe(false)
+    expect(apiPut).not.toHaveBeenCalled()
   })
 })

@@ -1,6 +1,6 @@
 import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import type { SettingsSearch } from '@/routes/settings'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 
 import { Button } from '@/components/ui/Button'
@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 
 import InstanceSettingsSection from './components/InstanceSettingsSection'
 import StorageBackendSection from './components/StorageBackendSection'
+import DeviceStorageSection from './components/DeviceStorageSection'
 import UserManagementSection from './components/UserManagementSection'
 import LibraryManagementSection from './components/LibraryManagementSection'
 import LanguageSwitcher from './components/LanguageSwitcher'
@@ -86,9 +87,13 @@ export default function Settings() {
     : _('settings.title'))
   const [visitedSections, setVisitedSections] = useState<Set<SectionId>>(() => new Set([search.section ?? 'general']))
   const [showBackToTop, setShowBackToTop] = useState(false)
+  const scrollPositionsRef = useRef<Partial<Record<SectionId, number>>>({})
+  const prevActiveRef = useRef<SectionId>(active)
 
   useEffect(() => {
     setVisitedSections((prev) => (prev.has(active) ? prev : new Set(prev).add(active)))
+    const sectionChanged = prevActiveRef.current !== active
+    prevActiveRef.current = active
     if (search.section === 'reading' && (search.focus === 'tts' || search.focus === 'dictionary' || search.focus === 'ai')) {
       const targetId = search.focus === 'tts' ? 'tts-settings' : search.focus === 'ai' ? 'ai-settings' : 'dictionary-settings'
       const scrollToTarget = () => {
@@ -108,6 +113,9 @@ export default function Settings() {
       const fallbackTimer = window.setTimeout(scrollToTarget, 160)
       return () => window.clearTimeout(fallbackTimer)
     }
+    if (sectionChanged) {
+      window.scrollTo({ top: scrollPositionsRef.current[active] ?? 0, behavior: 'auto' })
+    }
   }, [active, search.focus, search.section])
 
   useEffect(() => {
@@ -119,6 +127,13 @@ export default function Settings() {
   }, [])
 
   const handleSectionChange = (id: SectionId) => {
+    if (id === active) {
+      scrollPositionsRef.current[id] = 0
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      if (!search.focus) return
+    } else {
+      scrollPositionsRef.current[active] = window.scrollY
+    }
     void navigate({
       to: '/settings',
       search: { ...search, section: id, focus: undefined },
@@ -126,7 +141,6 @@ export default function Settings() {
       replace: true,
       resetScroll: false,
     })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const sections: { id: SectionId; label: string; icon: ReactNode }[] = [
@@ -313,6 +327,7 @@ export default function Settings() {
                 </div>
                 <SelectionToolbarPreferenceRow />
               </SettingsCard>
+              <DeviceStorageSection active={active === 'general'} />
             </div>
           )}
           {visitedSections.has('reading') && (
@@ -328,7 +343,17 @@ export default function Settings() {
           {visitedSections.has('library') && (
             <div className={active === 'library' ? 'flex flex-col gap-6' : 'hidden'}>
               {local || (isGuest && guestVaultAccess) ? (
-                <><SettingsCard icon={<LibraryShelfIcon />} title={_('settings.groupLibrary')}><LibraryPreferenceRows /></SettingsCard></>
+                <>
+                  <SettingsCard icon={<LibraryShelfIcon />} title={_('settings.groupLibrary')}><LibraryPreferenceRows /></SettingsCard>
+                  <SettingsCard
+                    icon={<UploadBoxIcon className="h-5 w-5" />}
+                    iconBgClass="bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
+                    title={_('settings.upload')}
+                  >
+                    <TitleSettingsRow />
+                  </SettingsCard>
+                  <TrashSettingsRow />
+                </>
               ) : isGuest ? (
                 <GuestFeatureGateSection
                   title={_('settings.guestLibraryTitle')}
@@ -379,7 +404,7 @@ export default function Settings() {
           {canAccessAdmin && visitedSections.has('admin') && (
             <div className={active === 'admin' ? 'flex flex-col gap-6' : 'hidden'}>
               {isOwner && <InstanceSettingsSection />}
-              {isOwner && <StorageBackendSection />}
+              {isOwner && <StorageBackendSection active={active === 'admin'} />}
               <UserManagementSection
                 tab={!isOwner ? 'library' : search.userTab ?? 'instance'}
                 libraryId={search.libraryId}
@@ -489,9 +514,9 @@ function UploadBoxIcon({ className = 'h-5 w-5' }: { className?: string }) {
 function LayoutIcon({ className = 'h-5 w-5' }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-      <rect x="2" y="3" width="20" height="14" rx="2" />
-      <line x1="8" y1="21" x2="16" y2="21" />
-      <line x1="12" y1="17" x2="12" y2="21" />
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18" />
+      <path d="M9 21V9" />
     </svg>
   )
 }

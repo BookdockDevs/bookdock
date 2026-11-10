@@ -5,6 +5,7 @@ import type { ClientLibraryBookView } from '@bookdock/shared'
 
 import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
 import { catalogSelectionKey } from '@/features/reading-data/catalog-selection'
+import { isDeviceBook } from '@/features/reading-data/book-source'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList } from '@/lib/utils'
@@ -12,6 +13,7 @@ import { formatAuthorList } from '@/lib/utils'
 import type { BookDragPayload } from '../dnd'
 import { getHiddenCause } from '../hidden-status'
 import BookCover from './BookCover'
+import DeviceBookIndicator from './DeviceBookIndicator'
 import HiddenIndicator from './HiddenIndicator'
 import { ContextMenuContent } from './BookContextMenu'
 import ListItemInfo from './ListItemInfo'
@@ -59,6 +61,7 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
   const meta = (
     <div className="flex shrink-0 items-center gap-3">
       <ListItemInfo book={book} />
+      {!selectionActive && isDeviceBook(book.ref) && <DeviceBookIndicator />}
       <span className="rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
         {book.format}
       </span>
@@ -79,24 +82,24 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
             e.preventDefault()
             return
           }
-          if (selectionActive) {
+          if (!readOnly && selectionActive) {
             e.preventDefault()
             onToggleSelect(catalogSelectionKey(book), e.shiftKey)
             return
           }
-          if (e.ctrlKey || e.metaKey || e.shiftKey) {
+          if (!readOnly && (e.ctrlKey || e.metaKey || e.shiftKey)) {
             e.preventDefault()
             onToggleSelect(catalogSelectionKey(book), e.shiftKey)
           }
         }}
-        className={`group flex items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
+        className={`group flex items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive && !readOnly ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
       >
         <div ref={setNodeRef} className="shrink-0">
           <BookCover book={book} size="sm" />
         </div>
         <ListItemContent book={book} />
         {meta}
-        {selectionActive ? (
+        {selectionActive && !readOnly ? (
           <SelectionCheck selected={selected} />
         ) : (
           <div className="flex w-7 shrink-0 items-center justify-center opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">

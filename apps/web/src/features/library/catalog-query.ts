@@ -14,6 +14,7 @@ export interface UseBooksParams {
   series?: string | null
   format: BookFormat | null
   readStatus: ReadStatus | null
+  source?: 'local' | 'server' | null
   trash: boolean
   /** Private-vault reveal; omitted = hidden rows excluded. */
   showHidden?: boolean
@@ -45,7 +46,7 @@ export function booksQueryParts(params: UseBooksParams) {
   // a caller that passes null describe the same request, so they must land on
   // the same cache entry - otherwise writing the validated page after a search
   // submit would miss the entry the shelf reads.
-  const key = { ...params, categoryId: params.categoryId ?? null, author: params.author ?? null, series: params.series ?? null, showHidden: params.showHidden ?? false }
+  const key = { ...params, categoryId: params.categoryId ?? null, author: params.author ?? null, series: params.series ?? null, source: params.source ?? null, showHidden: params.showHidden ?? false }
   return { queryKey: ['books', key] as const, path: buildBooksPath(key) }
 }
 

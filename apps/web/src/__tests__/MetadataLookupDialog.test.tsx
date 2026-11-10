@@ -335,5 +335,38 @@ describe('metadata lookup draft', () => {
     expect(await screen.findByRole('button', { name: /Qidian title/ })).toBeInTheDocument()
     expect(screen.queryByText('Stale title')).not.toBeInTheDocument()
   })
+
+  it('prefetches personal sources on mount and keeps search results visible while applying a cover', async () => {
+    let finishCover!: (value: Response) => void
+    api.apiGet.mockImplementation((path: string) => {
+      if (path === '/integrations/personal-sources') {
+        return Promise.resolve({ data: [{ sourceId: 'my-source', name: 'My Source', version: '1.0.0', originType: 'zip', hasIcon: false, hasDetail: false, createdAt: 1 }] })
+      }
+      return Promise.resolve({ data: { googlebooks: false, weread: false } })
+    })
+    api.apiPost.mockResolvedValue({ data: [{ id: 'src-1', provider: 'personal:my-source', title: 'Personal hit', authors: [], coverUrl: 'https://cdn.example.com/cover.webp', sourceUrl: '' }] })
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 1, 2, 3])
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { finishCover = resolve })))
+
+    const apply = vi.fn()
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover={false} onApply={apply} onClose={vi.fn()} />)
+
+    // Prefetched before clicking the dropdown open.
+    await vi.waitFor(() => expect(api.apiGet).toHaveBeenCalledWith('/integrations/personal-sources'))
+
+    fireEvent.click(screen.getByRole('button', { name: '豆瓣' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'My Source' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Personal hit/ }))
+
+    const applyBtn = screen.getByRole('button', { name: '应用' })
+    fireEvent.click(applyBtn)
+
+    await vi.waitFor(() => expect(applyBtn).toBeDisabled())
+    expect(screen.getByRole('button', { name: /Personal hit/ })).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: '搜索中…' })).toBeNull()
+
+    finishCover(new Response(webp, { status: 200, headers: { 'content-type': 'image/webp' } }))
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.anything(), expect.any(File)))
+  })
 })
 

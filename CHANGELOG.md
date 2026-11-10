@@ -6,12 +6,19 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
-- Support device-local EPUB and TXT books stored in the browser without uploading them to the server. Local books share the same unified library, reader, editor, trash, and reading archive workflows alongside server books — including reading progress, notes, timers, metadata/content editing, and merged statistics — and remain usable offline or without signing in.
+- Support device books (EPUB and TXT) saved on this device in the browser without uploading them to the server. Device books share the same unified library, reader, editor, trash, and reading archive workflows alongside server books — including reading progress, notes, timers, metadata/content editing, and merged statistics — and remain usable offline or without signing in.
 - Choose whether newly added books are saved to this device or uploaded to the server, with a per-device default add destination in Settings (automatically defaulting to this device when signed out or server uploads are disabled).
+- Filter the unified library by source (All / Device / Server), hover over cards or list rows to see a device indicator badge, and view browser device storage usage (device books, book files, and browser total usage) under Settings → General.
 
 ### Changed
 
-- Connected-account capabilities adapt cleanly to local books: signed-in users can translate selected text from device books with server AI without uploading the file, while online-only services (such as server dictionaries, speech gateways, and metadata scraping) clearly note when signing in is required without interrupting offline reading.
+- Connected-account capabilities adapt cleanly to device books: signed-in users can translate selected text from device books with server AI without uploading the file, while online-only services (such as server dictionaries, speech gateways, and metadata scraping) clearly note when signing in is required without interrupting reading on this device.
+- Settings tabs preserve independent scroll positions when switching sections.
+- Metadata lookup preloads installed personal metadata sources in the dropdown and keeps search results visible with an inline applying indicator instead of resetting the list to a loading state when applying.
+
+### Fixed
+
+- Fixed the reader table of contents briefly flashing at the top before jumping to the active chapter on cold open.
 
 ## [0.7.7] - 2026-11-06
 
@@ -1082,12 +1089,19 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
-- 支持在当前设备（浏览器本地）保存和阅读 EPUB / TXT 书籍，无需上传到服务器。本地书与服务端书无缝融入同一套书架、阅读器、编辑、回收站与阅读档案/统计工作流，离线或访客模式下均可完整使用。
+- 支持在当前设备（浏览器）保存和阅读 EPUB / TXT 本机书籍，无需上传到服务器。本机书籍与服务器书籍无缝融入同一套书架、阅读器、编辑、回收站与阅读档案/统计工作流，离线或访客模式下均可完整使用。
 - 添加书籍时支持选择「存到本机」或「上传到服务器」，并可在设置中配置设备级的默认添加位置（未登录或禁止服务端上传时自动默认存到本机）。
+- 统一书架支持按来源筛选（全部 / 本机 / 服务器），悬停卡片或列表行可显示本机标识，并在「设置 → 常规」查看本机存储占用（本机书籍数、书籍文件大小与浏览器总占用）。
 
 #### 优化
 
-- 账号联动能力按需适配本地书：已登录用户可直接对本地书中的选中文本使用服务端 AI 划词翻译而无需上传文件；在线词典、语音网关、元数据刮削等纯联网功能在离线或未登录时给出清晰提示，不影响本地阅读。
+- 账号联动能力按需适配本机书籍：已登录用户可直接对本机书籍中的选中文本使用服务端 AI 划词翻译而无需上传文件；在线词典、语音网关、元数据刮削等纯联网功能在离线或未登录时给出清晰提示，不影响本机阅读。
+- 「设置」页切换各分区时独立记住各自的滚动位置。
+- 元数据刮削弹窗提前加载已安装的个人源，点击「应用」时仅在按钮展示应用状态，不再将搜索结果列表切回加载态。
+
+#### 修复
+
+- 修复冷启动打开阅读器时目录先瞬间闪在顶部再跳回当前章节的问题。
 
 ### [0.7.7] - 2026-11-06
 

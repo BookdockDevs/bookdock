@@ -14,6 +14,7 @@ export interface LibrarySearch {
   series?: string
   format?: 'epub' | 'txt'
   status?: 'wishlist' | 'reading' | 'idle' | 'finished' | 'abandoned'
+  source?: 'local' | 'server'
   trash?: boolean
   /** Active shared library; absent = the user's own private library. */
   libraryId?: string
@@ -44,6 +45,7 @@ export function parseLibraryRouteSearch(input: Record<string, unknown>): Library
       series: typeof input.series === 'string' && input.series.length > 0 ? input.series : undefined,
       format: VALID_FORMATS.has(input.format as string) ? (input.format as 'epub' | 'txt') : undefined,
       status: VALID_STATUSES.has(input.status as string) ? (input.status as LibrarySearch['status']) : undefined,
+      source: input.source === 'local' || input.source === 'server' ? input.source : undefined,
       trash: input.trash === true ? true : undefined,
       libraryId: typeof input.libraryId === 'string' && input.libraryId.length > 0 ? input.libraryId : undefined,
       directory: input.directory === 'shelves' || input.directory === 'categories' || input.directory === 'tags' ? input.directory : undefined,

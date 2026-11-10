@@ -5,10 +5,12 @@ import type { ClientLibraryBookView, GridCardField } from '@bookdock/shared'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import SmartMenu from '@/components/ui/SmartMenu'
+import { isDeviceBook } from '@/features/reading-data/book-source'
 
 import { privateBookRow } from '../book-row'
 import { getHiddenCause } from '../hidden-status'
 import BookCardShell from './BookCardShell'
+import DeviceBookIndicator from './DeviceBookIndicator'
 import HiddenIndicator from './HiddenIndicator'
 import { useContextMenu } from './use-context-menu'
 import { ContextMenuContent } from './BookContextMenu'
@@ -43,6 +45,8 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
   const menu = useContextMenu()
   const trashCard = Boolean(onRestore && onPermanentDelete)
   const showMenu = !trashCard
+  const isLocalBook = isDeviceBook(book.ref)
+  const isHiddenBook = Boolean(book.hidden || book.effectiveHidden)
   // The badge tooltip names the hiding layer when taxonomy hides the book.
   const hiddenCause = getHiddenCause(book, 'shelf')
 
@@ -84,11 +88,23 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
         onPermanentDelete={onPermanentDelete ? () => onPermanentDelete(book) : undefined}
         onContextMenu={handleContextMenu}
         coverOverlay={trashCard ? (
-          <div className="pointer-events-none absolute right-1.5 top-1.5 z-10">
-            <TrashInfo book={book} variant="pill" />
-          </div>
+          <>
+            {!selectionActive && isLocalBook && (
+              <div className="pointer-events-none absolute left-1.5 top-1.5 z-10">
+                <DeviceBookIndicator overlay />
+              </div>
+            )}
+            <div className="pointer-events-none absolute right-1.5 top-1.5 z-10">
+              <TrashInfo book={book} variant="pill" />
+            </div>
+          </>
         ) : undefined}
-        coverBadge={book.hidden || book.effectiveHidden ? <HiddenIndicator kind="private" overlay title={hiddenCause ? _(hiddenCause.hintKey, hiddenCause.hintParams) : undefined} /> : undefined}
+        coverBadge={!trashCard && (isHiddenBook || (!selectionActive && isLocalBook)) ? (
+          <>
+            {isHiddenBook && <HiddenIndicator kind="private" overlay title={hiddenCause ? _(hiddenCause.hintKey, hiddenCause.hintParams) : undefined} />}
+            {!selectionActive && isLocalBook && <DeviceBookIndicator overlay />}
+          </>
+        ) : undefined}
         infoFooter={book.sourceUnavailable ? (
           <div className="mt-0.5 flex items-center gap-1">
             <p className="truncate text-[11px] text-amber-600 dark:text-amber-400">

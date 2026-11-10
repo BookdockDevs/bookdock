@@ -264,4 +264,57 @@ describe('the existing library screen with local authority', () => {
     await waitFor(() => expect(result.current.data?.data).toEqual(['Author']))
     expectNoBookTraffic()
   })
+
+  it('shows read-only device storage status and guest vault upload/trash settings without probing /settings', async () => {
+    router.update({ history: createMemoryHistory({ initialEntries: ['/settings'] }) })
+    render(<QueryClientProvider client={queryClient}><RouterProvider router={router} /></QueryClientProvider>)
+
+    expect(await screen.findByText(i18n.t('settings.deviceStorageTitle'))).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('settings.library') }))
+    expect(await screen.findByText(i18n.t('settings.bookTitleNormalize'))).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('settings.trash'))).toBeInTheDocument()
+    expect(apiGet.mock.calls.filter(([path]) => String(path) === '/settings')).toHaveLength(0)
+  }, 15000)
+
+  it('excludes read-only server books from guest multi-select', async () => {
+    const serverBook = {
+      id: 'srv-1',
+      title: 'Server guest book',
+      author: 'Remote Author',
+      authors: ['Remote Author'],
+      format: 'epub',
+      coverKey: null,
+      size: 100,
+      readStatus: 'unread',
+      categoryId: null,
+      progress: 0,
+      createdAt: 1,
+      updatedAt: 1,
+      guestReadable: true,
+    }
+
+    await openLibrary()
+    act(() => {
+      const unifiedQuery = queryClient.getQueryCache().findAll({ queryKey: ['books'] }).find((q) => q.queryKey.at(-1) === 'unified')
+      expect(unifiedQuery).toBeDefined()
+      queryClient.setQueryData(unifiedQuery!.queryKey, (old: { data: unknown[]; total: number } | undefined) => ({
+        ...old,
+        data: [serverBook, ...(old?.data ?? [])],
+        total: (old?.total ?? 0) + 1,
+      }))
+    })
+    expect(await screen.findByRole('heading', { name: 'Server guest book' })).toBeInTheDocument()
+    const deviceCard = screen.getByRole('heading', { name: book.title }).closest('article')!
+    const serverCard = screen.getByRole('heading', { name: 'Server guest book' }).closest('article')!
+    expect(within(deviceCard).getByRole('img', { name: i18n.t('library.bookSourceLocal') })).toBeInTheDocument()
+    expect(within(serverCard).queryByRole('img', { name: i18n.t('library.bookSourceLocal') })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('library.selectMode') }))
+    fireEvent.keyDown(window, { key: 'a', ctrlKey: true })
+
+    await waitFor(() => expect(screen.getByText(i18n.t('library.selectionCount', { count: 1 }))).toBeInTheDocument())
+    // Clicking the read-only server card while selection is active must not select it.
+    fireEvent.click(screen.getByRole('heading', { name: 'Server guest book' }))
+    expect(screen.getByText(i18n.t('library.selectionCount', { count: 1 }))).toBeInTheDocument()
+  }, 15000)
 })

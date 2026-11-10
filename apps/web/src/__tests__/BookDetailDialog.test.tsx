@@ -1364,6 +1364,16 @@ describe('BookDetailDialog review action', () => {
     expect(screen.queryByRole('button', { name: '书评' })).not.toBeInTheDocument()
   })
 
+  it('shows the review action to guests on a device book', () => {
+    useAuthStore.setState({ user: null })
+    const deviceBook: BookListItem = {
+      ...book,
+      ref: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'dev-1' },
+    }
+    render(<BookDetailDialog book={deviceBook} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    expect(screen.getByRole('button', { name: '书评' })).toBeInTheDocument()
+  })
+
   // Late in this file the review queries settle slowly enough to exceed the
   // default budget; the assertion itself is unchanged.
   it('opens the composer when the caller has no review yet', async () => {

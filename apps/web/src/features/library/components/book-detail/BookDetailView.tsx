@@ -396,7 +396,7 @@ export default function BookDetailView({
               {!readOnly && (
                 <DownloadMenu bookId={book.id} bookRef={book.ref} title={displayBook.title} format={displayBook.format} />
               )}
-              {signedIn && (
+              {(signedIn || isLocalBook) && (
                 <ActionIcon
                   secondary
                   disabled={openingReview}

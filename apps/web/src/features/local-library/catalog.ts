@@ -5,6 +5,7 @@ import type { CatalogPage, CatalogQuery } from '../reading-data/catalog'
 import { localCatalogEntry } from '../reading-data/catalog'
 import { assertSourceBook } from '../reading-data/source'
 import { LocalLibraryError, LocalLibraryRepository, localLibraryRepository } from './repository'
+import { createCoverThumbnail } from './cover-thumbnail'
 import { LOCAL_VAULT_ID, localRecordId } from './id'
 import { addLocalBook } from './ingest'
 import { readPublicationMetadata } from './publication-metadata'
@@ -27,6 +28,8 @@ export function localCatalogOperations(scope: Extract<ClientDataScope, { kind: '
   return {
     scope,
     addFile: (file: File, identity: Parameters<typeof addLocalBook>[2]) => addLocalBook(file, scope.vaultId, identity, repository),
+    findDuplicate: (file: File, signal?: AbortSignal) => repository.findDuplicateBookByFile(scope.vaultId, file, signal),
+    inspectStorage: () => repository.inspectStorage(scope.vaultId),
     readCatalog: () => repository.readCatalog(scope.vaultId), 
     readTxtSource(ref: ClientBookRef, revision: string, signal: AbortSignal) { assertSourceBook(scope, ref); return repository.getNormalizedTxt(ref, revision, signal) },
     saveTxt(ref: ClientBookRef, draft: EditorTxtSaveReq, contentId: string, signal: AbortSignal) { assertSourceBook(scope, ref); return saveLocalTxt(ref, draft, contentId, signal, repository) },
@@ -69,6 +72,7 @@ export function localCatalogOperations(scope: Extract<ClientDataScope, { kind: '
     toggleHidden: () => repository.toggleCatalogHidden(scope.vaultId),
     getBookPreferences(ref: ClientBookRef) { assertSourceBook(scope, ref); return repository.getPreferences(ref) },
     getCover(ref: ClientBookRef) { assertSourceBook(scope, ref); return repository.getCover(ref) },
+    getCovers(refs: readonly ClientBookRef[]) { for (const ref of refs) assertSourceBook(scope, ref); return repository.getCovers(refs) },
     getMetadataSource(ref: ClientBookRef, signal: AbortSignal) { assertSourceBook(scope, ref); return readPublicationMetadata(repository, ref, signal) },
     async acknowledgeIngestion(ref: ClientBookRef, file: Blob) {
       assertSourceBook(scope, ref)
@@ -194,7 +198,8 @@ export function localCatalogOperations(scope: Extract<ClientDataScope, { kind: '
     },
     async update(ref: ClientBookRef, patch: Parameters<LocalLibraryRepository['updateMetadata']>[1], expectedVersion: number, cover?: Blob | null) {
       assertSourceBook(scope, ref)
-      return repository.updateMetadata(ref, patch, expectedVersion, cover)
+      const preparedCover = cover ? (await createCoverThumbnail(cover)) ?? cover : cover
+      return repository.updateMetadata(ref, patch, expectedVersion, preparedCover)
     },
     getOrganization: () => repository.getOrganization(scope.vaultId),
     saveOrganization: (value: ClientOrganization, expectedVersion: number) => repository.saveOrganization(scope.vaultId, value, expectedVersion),

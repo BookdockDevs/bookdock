@@ -171,6 +171,19 @@ describe('NavigationPanel', () => {
     const { container } = render(<NavigationPanel bookId="book-1" open tocPositionReady={false} />)
     expect((container.querySelector('.overflow-y-auto') as HTMLElement).scrollTop).toBe(240)
     expect(window.HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
+    expect(container.querySelector('ul')).not.toHaveClass('opacity-0')
+  })
+
+  it('hides the TOC list until initial positioning completes when no same-session position exists', () => {
+    useReaderState.setState({
+      tocItems: [{ label: 'Chapter 1', href: 'chapter:0' }, { label: 'Chapter 20', href: 'chapter:19' }],
+      currentChapter: 'Chapter 20',
+      currentChapterHref: 'chapter:19',
+    })
+    const view = render(<NavigationPanel bookId="book-1" open tocPositionReady={false} />)
+    expect(view.container.querySelector('ul')).toHaveClass('opacity-0')
+    view.rerender(<NavigationPanel bookId="book-1" open tocPositionReady />)
+    expect(view.container.querySelector('ul')).not.toHaveClass('opacity-0')
   })
 
   it('scrolls to current chapter on reopen even when the remembered index matches', async () => {

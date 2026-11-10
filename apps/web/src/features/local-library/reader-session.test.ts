@@ -107,6 +107,13 @@ describe('local reader adapter behavior', () => {
     await session.deleteNote(initial.data.id)
     await expect(session.createNote(command, 'same-command')).rejects.toMatchObject({ category: 'conflict' })
   })
+
+  it('persists the current chapter title across reopen', async () => {
+    const session = await openLocalReaderSession(ref)
+    await session.saveProgress({ ...position, chapter: 'Chapter 12' })
+    const reopened = await openLocalReaderSession(ref)
+    expect((await reopened.getProgress()).data?.chapter).toBe('Chapter 12')
+  })
 })
 import { Blob as NativeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'

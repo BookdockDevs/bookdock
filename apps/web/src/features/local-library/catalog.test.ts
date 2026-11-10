@@ -139,6 +139,16 @@ describe('scoped catalog operations', () => {
     const controller = new AbortController(); controller.abort()
     await expect(operations.list(query, controller.signal)).rejects.toThrow()
   })
+
+  it('batch reads local covers in one call', async () => {
+    await repository.addBook(book, new Blob(['abc']), new Blob(['cover-one']))
+    const second = { ...book, ref: { scope, bookId: 'second' }, title: 'Second', content: { book: { scope, bookId: 'second' }, contentId: 'c2' } }
+    await repository.addBook(second, new Blob(['xyz']))
+    const operations = localCatalogOperations(scope, repository)
+    const covers = await operations.getCovers([book.ref, second.ref])
+    expect(covers.get('same-id')?.size).toBe(9)
+    expect(covers.get('second')).toBeNull()
+  })
 })
 import { Blob as NativeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'

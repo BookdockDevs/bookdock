@@ -43,6 +43,7 @@ vi.mock('@/features/library/hooks', () => ({
 
 vi.mock('@/features/settings/components/InstanceSettingsSection', () => ({ default: () => null }))
 vi.mock('@/features/settings/components/StorageBackendSection', () => ({ default: () => null }))
+vi.mock('@/features/settings/components/DeviceStorageSection', () => ({ default: () => null }))
 vi.mock('@/features/settings/components/LibraryManagementSection', () => ({ default: () => null }))
 vi.mock('@/features/settings/components/LanguageSwitcher', () => ({ default: () => null }))
 vi.mock('@/features/settings/components/LibraryPreferenceRows', () => ({ default: () => null }))
@@ -145,5 +146,33 @@ describe('settings URL navigation', () => {
     await waitFor(() => expect(screen.getByText('Reading settings')).toBeVisible())
     await act(async () => { await router.navigate({ to: '/settings', search: {} }) })
     await waitFor(() => expect(screen.getByText('Reading settings')).not.toBeVisible())
+  })
+
+  it('preserves each section scroll position across tab switches and scrolls to top when re-clicking active tab', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    let currentY = 420
+    Object.defineProperty(window, 'scrollY', { configurable: true, get: () => currentY })
+
+    const history = createMemoryHistory({ initialEntries: ['/settings'] })
+    const router = buildRouter(history)
+    await router.load()
+    render(<RouterProvider router={router} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '书库' }))
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'auto' }))
+
+    scrollTo.mockClear()
+    currentY = 180
+    fireEvent.click(screen.getByRole('button', { name: '通用' }))
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 420, behavior: 'auto' }))
+
+    scrollTo.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: '通用' }))
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
+
+    scrollTo.mockClear()
+    currentY = 0
+    fireEvent.click(screen.getByRole('button', { name: '书库' }))
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 180, behavior: 'auto' }))
   })
 })

@@ -88,4 +88,35 @@ describe('unified shelf with no device book', () => {
     expect(result.current.isError).toBe(false)
     expect(result.current.data?.data).toHaveLength(1)
   })
+
+  it('skips server requests when source is local and skips local vault when source is server', async () => {
+    auth.user = { id: 'u1' }
+    list.mockResolvedValue({
+      entries: [{
+        book: {
+          ref: { scope: { kind: 'local', vaultId: 'v' }, bookId: 'local-1' },
+          title: 'Local', authors: [], format: 'epub', size: 10, createdAt: 1, updatedAt: 1,
+          availability: 'available', catalog: null,
+        },
+        state: null,
+      }],
+      organization: { version: 1, items: [] },
+      total: 1,
+      totalSize: 10,
+    })
+    const serverPage = { data: [{ id: 's1' }], total: 1, totalSize: 20, page: 1, pageSize: 24 }
+    remoteRead.mockResolvedValue(serverPage)
+
+    const { wrapper } = setup()
+    const localOnly = renderHook(() => useUnifiedBooks({ ...params, source: 'local' }), { wrapper })
+    await waitFor(() => expect(localOnly.result.current.isSuccess).toBe(true))
+    expect(remoteRead).not.toHaveBeenCalled()
+    expect(localOnly.result.current.data?.total).toBe(1)
+
+    list.mockClear()
+    const serverOnly = renderHook(() => useUnifiedBooks({ ...params, source: 'server' }), { wrapper })
+    await waitFor(() => expect(serverOnly.result.current.isSuccess).toBe(true))
+    expect(list).not.toHaveBeenCalled()
+    expect(serverOnly.result.current.data).toBe(serverPage)
+  })
 })

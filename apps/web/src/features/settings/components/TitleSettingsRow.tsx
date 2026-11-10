@@ -8,12 +8,23 @@ import QueryErrorState from '@/components/ui/QueryErrorState'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
+import { useVaultCapable } from '@/features/reading-data/vault-availability'
 import { notify } from '@/lib/notifications'
+import { useAuthStore } from '@/stores/auth.store'
+import { useUiStore } from '@/stores/ui.store'
 
 export default function TitleSettingsRow() {
   const _ = useTranslation()
+  const local = useLocalCatalog()
+  const vaultCapable = useVaultCapable()
+  const user = useAuthStore((state) => state.user)
+  const usesDevicePreference = Boolean(local || (!user && vaultCapable))
+  const deviceNormalizeTitle = useUiStore((state) => state.deviceNormalizeTitle)
+  const setDeviceNormalizeTitle = useUiStore((state) => state.setDeviceNormalizeTitle)
   const queryClient = useQueryClient()
   const settingsQuery = useQuery({
+    enabled: !usesDevicePreference,
     queryKey: ['settings'],
     queryFn: fetchSettings,
   })
@@ -56,7 +67,9 @@ export default function TitleSettingsRow() {
   }
 
   // On while settings load or when stored settings predate the toggle.
-  const normalizeTitle = settingsQuery.data?.data.library?.normalizeTitle !== false
+  const normalizeTitle = usesDevicePreference
+    ? deviceNormalizeTitle
+    : settingsQuery.data?.data.library?.normalizeTitle !== false
 
   return (
     <div className="flex items-center justify-between gap-4 py-3">
@@ -66,9 +79,9 @@ export default function TitleSettingsRow() {
       </div>
       <Toggle
         checked={normalizeTitle}
-        disabled={mutation.isPending}
+        disabled={usesDevicePreference ? false : mutation.isPending}
         ariaLabel={_('settings.bookTitleNormalize')}
-        onChange={(v) => mutation.mutate(v)}
+        onChange={(v) => (usesDevicePreference ? setDeviceNormalizeTitle(v) : mutation.mutate(v))}
       />
     </div>
   )

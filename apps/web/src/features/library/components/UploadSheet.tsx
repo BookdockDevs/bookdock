@@ -248,13 +248,16 @@ export default function UploadSheet({
 
   if (!open) return null
 
+  const showDestinationSwitch = canSwitchDestination && selectedSource === 'local'
+  const sheetTitle = _(canSwitchDestination || local || serverUploadDisabled ? 'localLibrary.add' : 'library.upload')
+
   return (
     <Modal
       size="wide"
       title={(
         <div className="flex flex-wrap items-center gap-2">
-          <span>{_(canSwitchDestination || local || serverUploadDisabled ? 'localLibrary.add' : 'library.upload')}</span>
-          {canSwitchDestination && selectedSource === 'local' && (
+          <span className={showDestinationSwitch ? 'sr-only' : undefined}>{sheetTitle}</span>
+          {showDestinationSwitch && (
             <div
               role="group"
               aria-label={_('library.addDestination')}

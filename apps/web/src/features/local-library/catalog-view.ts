@@ -114,3 +114,45 @@ export function deviceMembershipCounts(snapshot: { books: Array<{ book: ClientBo
   }
   return { shelves, categories, tags, active, trash, unshelved, uncategorized }
 }
+
+/** Add device book counts onto a server-owned flat taxonomy (shelves or tags). */
+export function overlayTaxonomyDeviceCounts<T extends { id: string; bookCount: number }>(
+  items: readonly T[],
+  counts: ReadonlyMap<string, number> | undefined,
+): T[] {
+  if (!counts || counts.size === 0) return items as T[]
+  return items.map((item) => {
+    const extra = counts.get(item.id)
+    return extra ? { ...item, bookCount: item.bookCount + extra } : item
+  })
+}
+
+/**
+ * Add device book counts onto a server-owned category tree, rolling leaf
+ * additions up through parent `subtreeBookCount` values.
+ */
+export function overlayCategoryDeviceCounts<T extends { id: string; parentId: string | null; bookCount: number; subtreeBookCount: number }>(
+  categories: readonly T[],
+  counts: ReadonlyMap<string, number> | undefined,
+): T[] {
+  if (!counts || counts.size === 0) return categories as T[]
+  const byId = new Map(categories.map((item) => [item.id, item]))
+  const subtree = new Map<string, number>()
+  for (const [id, count] of counts) {
+    if (!count) continue
+    const seen = new Set<string>()
+    let current: string | null = id
+    while (current && !seen.has(current)) {
+      seen.add(current)
+      subtree.set(current, (subtree.get(current) ?? 0) + count)
+      current = byId.get(current)?.parentId ?? null
+    }
+  }
+  return categories.map((item) => {
+    const direct = counts.get(item.id) ?? 0
+    const rolled = subtree.get(item.id) ?? 0
+    return direct || rolled
+      ? { ...item, bookCount: item.bookCount + direct, subtreeBookCount: item.subtreeBookCount + rolled }
+      : item
+  })
+}

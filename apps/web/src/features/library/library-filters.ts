@@ -46,11 +46,13 @@ export const CATALOG_FALLBACK_SORT = 'createdAt'
  */
 export function libraryUrlCorrection(params: {
   readStatus: string | null
+  source?: 'local' | 'server' | null
   sortBy: string
   sortOrder: string
 }): Partial<LibrarySearch> {
   const patch: Partial<LibrarySearch> = {}
   if (params.readStatus) patch.status = undefined
+  if (params.source) patch.source = undefined
   if (READING_STATE_SORTS.includes(params.sortBy)) {
     patch.sortBy = CATALOG_FALLBACK_SORT
     patch.sortOrder = 'desc'

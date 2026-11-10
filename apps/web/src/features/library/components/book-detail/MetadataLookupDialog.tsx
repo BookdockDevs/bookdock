@@ -110,6 +110,7 @@ export default function MetadataLookupDialog({
     }
   })
   const [loading, setLoading] = useState(false)
+  const [applying, setApplying] = useState(false)
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null)
   const [searched, setSearched] = useState(false)
   const [isFocused, setIsFocused] = useState(false)
@@ -163,7 +164,7 @@ export default function MetadataLookupDialog({
   }
 
   async function search(targetProvider: MetadataProviderId = provider, targetScope: WeReadSearchScope = weReadScope) {
-    if (!userId || !query.trim()) return
+    if (!userId || !query.trim() || applying) return
     setLoading(true)
     setSelected(null)
     setResults([])
@@ -195,7 +196,7 @@ export default function MetadataLookupDialog({
   }
 
   async function select(result: MetadataCandidate) {
-    if (!userId || loading) return
+    if (!userId || loading || applying) return
     if (selected?.id === result.id) {
       setSelected(null)
       return
@@ -267,8 +268,8 @@ export default function MetadataLookupDialog({
   ) as [string, string][])
 
   async function apply() {
-    if (!selected) return
-    setLoading(true)
+    if (!selected || loading || applying) return
+    setApplying(true)
     const controller = new AbortController()
     request.current = controller
     try {
@@ -290,7 +291,7 @@ export default function MetadataLookupDialog({
     } catch {
       if (active.current) notify.error(_('metadataLookup.coverError'))
     } finally {
-      if (active.current) setLoading(false)
+      if (active.current) setApplying(false)
     }
   }
 
@@ -302,7 +303,7 @@ export default function MetadataLookupDialog({
         {provider === 'weread' && (
           <div role="group" aria-label={_('metadataLookup.weReadSearchScope')} className="inline-flex h-7 items-center rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
             {(['all', 'ebooks'] as const).map((scope) => (
-              <button key={scope} type="button" aria-pressed={weReadScope === scope} disabled={loading} onClick={() => {
+              <button key={scope} type="button" aria-pressed={weReadScope === scope} disabled={loading || applying} onClick={() => {
                 if (scope === weReadScope) return
                 setWeReadScope(scope)
                 try { localStorage.setItem('bd-weread-search-scope', scope) } catch { /* Storage is optional. */ }
@@ -318,6 +319,7 @@ export default function MetadataLookupDialog({
         )}
         <MetadataLookupDropdown
           value={provider}
+          disabled={applying}
           onSelect={(next) => {
             if (next === provider) return
             setProvider(next)
@@ -352,10 +354,16 @@ export default function MetadataLookupDialog({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button
-              disabled={loading || !selected || (changes.length === 0 && !(updateCover && selected.coverUrl))}
+              disabled={loading || applying || !selected || (changes.length === 0 && !(updateCover && selected.coverUrl))}
               onClick={() => void apply()}
             >
-              {_('metadataLookup.apply')}
+              {applying && (
+                <svg className="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              )}
+              <span>{_('metadataLookup.apply')}</span>
             </Button>
           </div>
         </div>
@@ -398,7 +406,7 @@ export default function MetadataLookupDialog({
             )}
             <button
               type="button"
-              disabled={!userId || loading || !query.trim()}
+              disabled={!userId || loading || applying || !query.trim()}
               onClick={() => void search()}
               aria-label={_(loading && !loadingDetailId ? 'metadataLookup.searching' : 'metadataLookup.search')}
               title={_('metadataLookup.search')}
@@ -471,7 +479,7 @@ export default function MetadataLookupDialog({
                   <button
                     key={result.id}
                     type="button"
-                    disabled={loading}
+                    disabled={loading || applying}
                     onClick={() => void select(result)}
                     className={`group flex w-full gap-3 rounded-xl border p-2.5 text-left transition-all ${
                       isChosen || isItemLoading

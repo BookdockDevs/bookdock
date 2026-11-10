@@ -22,11 +22,11 @@ export default function DefaultAddDestinationRow({ serverUploadDisabled = false 
   const options: Array<{ value: 'server' | 'local'; labelKey: string; disabled?: boolean; title?: string }> = [
     {
       value: 'server',
-      labelKey: 'library.sourceRemote',
+      labelKey: 'library.bookSourceServer',
       disabled: serverDisabled,
       title: serverUploadDisabled ? _('library.serverUploadDisabled') : undefined,
     },
-    { value: 'local', labelKey: 'library.sourceLocal' },
+    { value: 'local', labelKey: 'library.bookSourceLocal' },
   ]
 
   return (

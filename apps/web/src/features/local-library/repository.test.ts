@@ -13,7 +13,7 @@ const state: ClientReadingState = { book: book.ref, readStatus: 'reading', posit
 const note: ClientNote = { id: 'n', book: book.ref, kind: 'highlight', locator: null, text: 'Quote', color: 'yellow', style: 'underline', chapter: null, createdAt: 1, updatedAt: 1, version: 0 }
 let repository: LocalLibraryRepository
 
-beforeEach(() => { vi.stubGlobal('indexedDB', new IDBFactory()); vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('Blob', NativeBlob); repository = new LocalLibraryRepository('test') })
+beforeEach(() => { vi.stubGlobal('indexedDB', new IDBFactory()); vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('Blob', NativeBlob); vi.stubGlobal('File', NativeFile); repository = new LocalLibraryRepository('test') })
 afterEach(async () => { await repository.close(); vi.unstubAllGlobals() })
 
 describe('authoritative local library transactions', () => {
@@ -152,6 +152,45 @@ describe('authoritative local library transactions', () => {
     await expect(repository.getBook(book.ref)).rejects.toMatchObject({ category: 'storage-unavailable' })
     expect(await repository.listNotes(book.ref)).toHaveLength(1)
   })
+
+  it('finds active duplicate device books by file digest and ignores trashed ones', async () => {
+    const file = new Blob(['duplicate content'], { type: 'text/plain' })
+    await repository.addBook(book, file)
+    const matched = await repository.findDuplicateBookByFile('v', file)
+    expect(matched?.ref).toEqual(book.ref)
+
+    await repository.trashBook(book.ref)
+    const afterTrash = await repository.findDuplicateBookByFile('v', file)
+    expect(afterTrash).toBeNull()
+  })
+
+  it('summarizes active and trashed device books, file bytes, note images, and browser storage state', async () => {
+    const secondBook: ClientBook = {
+      ...book,
+      ref: { scope: { kind: 'local', vaultId: 'v' }, bookId: 'b2' },
+      content: { book: { scope: { kind: 'local', vaultId: 'v' }, bookId: 'b2' }, contentId: 'c2' },
+      size: 5,
+    }
+    await repository.addBook(book, new Blob(['abc']))
+    await repository.addBook(secondBook, new Blob(['12345']))
+    const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])
+    const imageFile = new File([pngBytes], 'img.png', { type: 'image/png' })
+    await repository.stageNoteImage(book.ref, 'draft-1', undefined, imageFile, new AbortController().signal)
+    await repository.trashBook(secondBook.ref)
+
+    vi.stubGlobal('navigator', {
+      storage: {
+        estimate: vi.fn(async () => ({ usage: 1024, quota: 4096 })),
+      },
+    })
+
+    const summary = await repository.inspectStorage('v')
+    expect(summary).toEqual({
+      activeBooks: 1,
+      totalBytes: 3 + 5 + pngBytes.byteLength,
+      browserUsage: 1024,
+    })
+  })
 })
-import { Blob as NativeBlob } from 'node:buffer'
+import { Blob as NativeBlob, File as NativeFile } from 'node:buffer'
 import { webcrypto } from 'node:crypto'

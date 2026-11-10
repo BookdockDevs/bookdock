@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import BookCoverImage from '../library/components/BookCoverImage'
@@ -20,7 +20,7 @@ export default function SourceBookCover(props: BookCoverProps) {
     },
   })
   const [lease, setLease] = useState<{ blob: Blob; url: string } | null>(null)
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!cover.data) { setLease(null); return }
     const url = URL.createObjectURL(cover.data)
     setLease({ blob: cover.data, url })

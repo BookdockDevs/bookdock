@@ -1,6 +1,7 @@
 import { normalizeBookTitle, type ClientBook, type ClientCatalogAttributes } from '@bookdock/shared'
 import { loadFoliateEngine } from '../reader/content/load-engine'
 import { localEpubProvider } from '../reader/content/local-epub-provider'
+import { createCoverThumbnail } from './cover-thumbnail'
 import { localRecordId } from './id'
 import { publicationBookMetadata, publicationMetadata } from './publication-metadata'
 import { prepareTxtInWorker } from './prepare-txt-worker'
@@ -23,19 +24,7 @@ export async function addLocalEpub(file: File, vaultId: string, identity?: { boo
       format: 'epub', content: { book: ref, contentId }, availability: 'available', size: file.size, createdAt: now, updatedAt: now, version: 0,
       catalog: { ...identity?.catalog, metadata: publicationBookMetadata(metadata, source) } }
     const cover = await lease.book.getCover?.().catch(() => null)
-    let thumbnail: Blob | undefined
-    if (cover) {
-      try {
-        const image = await createImageBitmap(cover)
-        try {
-          const canvas = document.createElement('canvas')
-          const scale = Math.min(1, 360 / Math.max(image.width, image.height))
-          canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale))
-          canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
-          thumbnail = await new Promise<Blob | undefined>((resolve) => canvas.toBlob((value) => resolve(value ?? undefined), 'image/png'))
-        } finally { image.close() }
-      } catch { /* Invalid or unsupported covers use the shared placeholder. */ }
-    }
+    const thumbnail = cover ? await createCoverThumbnail(cover) : undefined
     signal.throwIfAborted()
     return await repository.addBook(book, file, thumbnail, undefined, signal)
   } finally { lease.release() }

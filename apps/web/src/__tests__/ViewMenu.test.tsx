@@ -296,7 +296,7 @@ describe('ViewMenu category scope', () => {
     fireEvent.click(toggle)
     expect(navigate).toHaveBeenLastCalledWith({ categoryScope: 'subtree' })
     fireEvent.click(screen.getByText(i18n.t('library.resetFilter')))
-    expect(navigate).toHaveBeenLastCalledWith({ format: undefined, status: undefined })
+    expect(navigate).toHaveBeenLastCalledWith({ format: undefined, status: undefined, source: undefined })
   })
 
   it('shows no scope switch without eligible children or in private and trash views', () => {
@@ -308,5 +308,41 @@ describe('ViewMenu category scope', () => {
     expect(screen.queryByRole('switch', { name: '包含子分类' })).toBeNull()
     rerender(<ViewMenu {...props} catalogMode canSwitchCategoryScope trash />)
     expect(screen.queryByRole('switch', { name: '包含子分类' })).toBeNull()
+  })
+})
+
+describe('ViewMenu source filter', () => {
+  it('shows source filter only for signed-in non-catalog views including trash', () => {
+    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+    try {
+      const navSearch = renderMenu({ source: 'local' })
+      expect(screen.getByText('来源')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '本机' })).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.click(screen.getByRole('button', { name: '服务器' }))
+      expect(navSearch).toHaveBeenLastCalledWith({ source: 'server' })
+      fireEvent.click(screen.getByText(i18n.t('library.resetFilter')))
+      expect(navSearch).toHaveBeenLastCalledWith({ format: undefined, status: undefined, source: undefined })
+    } finally {
+      useAuthStore.setState({ user: null })
+    }
+  })
+
+  it('keeps source filter available in signed-in trash and hides it for guests or shared catalogs', () => {
+    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+    try {
+      const props = { navSearch: vi.fn(), view: 'grid', sortBy: 'deletedAt', sortOrder: 'desc', format: null, readStatus: null }
+      const { rerender } = render(<ViewMenu {...props} trash />)
+      fireEvent.click(screen.getByRole('button', { name: '视图菜单' }))
+      expect(screen.getByRole('button', { name: '本机' })).toBeInTheDocument()
+
+      rerender(<ViewMenu {...props} catalogMode />)
+      expect(screen.queryByText('来源')).toBeNull()
+
+      useAuthStore.setState({ user: null })
+      rerender(<ViewMenu {...props} />)
+      expect(screen.queryByText('来源')).toBeNull()
+    } finally {
+      useAuthStore.setState({ user: null })
+    }
   })
 })

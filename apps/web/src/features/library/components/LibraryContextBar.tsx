@@ -19,6 +19,7 @@ export default function LibraryContextBar({ search, navSearch, onClear }: Librar
     { key: 'expression' as const, label: search.expression && !simple ? expressionDisplay(search.expression) : undefined },
     { key: 'q' as const, label: search.q },
     { key: 'format' as const, label: search.format?.toUpperCase() },
+    { key: 'source' as const, label: search.source === 'local' ? _('library.bookSourceLocal') : search.source === 'server' ? _('library.bookSourceServer') : undefined },
     { key: 'status' as const, label: search.status ? _(`library.readStatus${search.status.charAt(0).toUpperCase()}${search.status.slice(1)}`) : undefined },
     { key: 'author' as const, label: search.author },
     { key: 'series' as const, label: search.series },

@@ -11,6 +11,7 @@ import LibrarySidebar from '../features/library/components/LibrarySidebar'
 import * as libraryHooks from '../features/library/hooks'
 import { VaultAvailabilityContext } from '@/features/reading-data/vault-availability'
 import { formatDate } from '@/lib/format-date'
+import { useAuthStore } from '@/stores/auth.store'
 
 const queryClients = new Set<QueryClient>()
 function render(ui: ReactElement) {
@@ -1208,5 +1209,47 @@ describe('device vault sidebar integration', () => {
 
     expect(libraryHooks.useTrashEnabled).toHaveBeenCalledWith({ enabled: true, fallbackAnonymous: true })
     expect(screen.getByText('回收站')).toBeInTheDocument()
+  })
+
+  it('overlays device category and shelf counts on signed-in private sidebar rows including parent subtrees', () => {
+    useAuthStore.setState({ user: { id: 'u1', username: 'owner', role: 'owner' } })
+    try {
+      mockHooks({
+        shelves: [{ id: 'shelf-1', name: 'Favorites', bookCount: 1 }],
+        uncategorizedTotal: 1,
+      })
+      mockLibraryHooks({
+        categories: [
+          { id: 'cat-root', name: '文学', bookCount: 1, subtreeBookCount: 2, parentId: null, pinned: false, hidden: false },
+          { id: 'cat-leaf', name: '小说', bookCount: 1, subtreeBookCount: 1, parentId: 'cat-root', pinned: false, hidden: false },
+        ] as unknown as ShelfItemData[],
+      })
+      ;(libraryHooks.useDeviceMembershipCounts as ReturnType<typeof vi.fn>).mockReturnValue({
+        shelves: new Map([['shelf-1', 2]]),
+        categories: new Map([['cat-leaf', 1]]),
+        tags: new Map(),
+        unshelved: 0,
+        uncategorized: 0,
+      })
+
+      render(
+        <LibrarySidebar
+          sessionKey="overlay-signed-in-categories"
+          privateLibraryId="private-1"
+          navSearch={navSearch}
+          shelfId={null}
+          categoryId="cat-leaf"
+          tagId={null}
+          trash={false}
+        />,
+      )
+
+      expect(within(screen.getByText('Favorites').closest('button')!).getByText('3')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '分类', exact: true }))
+      expect(within(screen.getByText('文学').closest('button')!).getByText('3')).toBeInTheDocument()
+      expect(within(screen.getByText('小说').closest('button')!).getByText('2')).toBeInTheDocument()
+    } finally {
+      useAuthStore.setState({ user: null })
+    }
   })
 })

@@ -13,7 +13,7 @@ export default function LocalReaderRoute() {
   const session = useQuery({
     queryKey: ['local-library', 'session', LOCAL_VAULT_ID, id],
     queryFn: () => openLocalReaderSession({ scope: { kind: 'local', vaultId: LOCAL_VAULT_ID }, bookId: id }),
-    networkMode: 'always', staleTime: 0, gcTime: 0, refetchOnMount: 'always',
+    networkMode: 'always', staleTime: Infinity,
   })
   if (session.isPending) return <div className="p-8" role="status"><div className="h-64 animate-pulse rounded-xl bg-stone-500/10" /></div>
   if (session.isError) return <div className="space-y-4 p-8"><p role="alert">{_('localLibrary.missing')}</p><a href="/" className="underline">{_('reader.back')}</a></div>

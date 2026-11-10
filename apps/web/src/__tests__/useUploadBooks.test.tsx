@@ -1,9 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { CatalogSourceContext } from '@/features/reading-data/catalog-source-context'
+import { useAuthStore } from '@/stores/auth.store'
 import { useToastStore } from '@/stores/toast.store'
+import { useUiStore } from '@/stores/ui.store'
 
 import { extractVersionNameFromFileName, useUploadBooks } from '../features/library/hooks'
 
@@ -538,5 +541,69 @@ describe('useUploadBooks', () => {
 
     expect(result.current.items[0]?.versionName).toBe('精校全本')
     expect(result.current.items[1]?.versionName).toBeUndefined()
+  })
+
+  it('marks duplicate device imports without re-ingesting via addFile', async () => {
+    const dupRef = { scope: { kind: 'local' as const, vaultId: 'device' }, bookId: 'existing-1' }
+    const addFile = vi.fn()
+    const findDuplicate = vi.fn(async () => ({ ref: dupRef }))
+    const detail = vi.fn(async () => {
+      throw Object.assign(new Error('missing'), { category: 'unavailable-content' })
+    })
+    const localWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <CatalogSourceContext.Provider
+          value={{
+            scope: { kind: 'local', vaultId: 'device' },
+            operations: { detail, findDuplicate, addFile } as never,
+          }}
+        >
+          {children}
+        </CatalogSourceContext.Provider>
+      </QueryClientProvider>
+    )
+
+    const { result } = renderHook(() => useUploadBooks(), { wrapper: localWrapper })
+    act(() => {
+      result.current.addFiles([new File(['same content'], 'book.epub')], { autoStart: true, destination: 'local' })
+    })
+
+    await waitFor(() => expect(result.current.items[0]?.status).toBe('duplicate'))
+    expect(result.current.items[0]?.progress).toBe(100)
+    expect(result.current.items[0]?.bookRef).toEqual(dupRef)
+    expect(findDuplicate).toHaveBeenCalledTimes(1)
+    expect(addFile).not.toHaveBeenCalled()
+  })
+
+  it('reads guest deviceNormalizeTitle for local uploads without account settings', async () => {
+    useAuthStore.setState({ user: null })
+    useUiStore.getState().setDeviceNormalizeTitle(false)
+    const createdRef = { scope: { kind: 'local' as const, vaultId: 'device' }, bookId: 'created-1' }
+    const addFile = vi.fn(async () => ({ ref: createdRef }))
+    const findDuplicate = vi.fn(async () => null)
+    const detail = vi.fn(async () => {
+      throw Object.assign(new Error('missing'), { category: 'unavailable-content' })
+    })
+    const localWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <CatalogSourceContext.Provider
+          value={{
+            scope: { kind: 'local', vaultId: 'device' },
+            operations: { detail, findDuplicate, addFile } as never,
+          }}
+        >
+          {children}
+        </CatalogSourceContext.Provider>
+      </QueryClientProvider>
+    )
+
+    const { result } = renderHook(() => useUploadBooks(), { wrapper: localWrapper })
+    act(() => {
+      result.current.addFiles([new File(['body'], 'novel.txt')], { autoStart: true, destination: 'local' })
+    })
+
+    await waitFor(() => expect(result.current.items[0]?.status).toBe('success'))
+    expect(addFile).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({ normalizeTitle: false }))
+    useUiStore.getState().setDeviceNormalizeTitle(true)
   })
 })

@@ -29,6 +29,7 @@ interface ViewMenuProps {
   sortOrder: string
   format: string | null
   readStatus: string | null
+  source?: 'local' | 'server' | null
   trash?: boolean
   /**
    * A shared library's catalog is the same list, minus the dimensions that only
@@ -105,6 +106,7 @@ export default function ViewMenu({
   sortOrder,
   format,
   readStatus,
+  source = null,
   trash = false,
   catalogMode = false,
   canSwitchCategoryScope = false,
@@ -189,7 +191,7 @@ export default function ViewMenu({
     }
   }, [open, isNarrow])
 
-  const isFilterActive = Boolean(format) || Boolean(readStatus)
+  const isFilterActive = Boolean(format) || Boolean(readStatus) || Boolean(source)
   function handleSort(field: string, defaultOrder: 'asc' | 'desc') {
     // Trash sorting is ephemeral: it must not overwrite the library-wide preference
     if (sortBy === field) {
@@ -302,7 +304,7 @@ export default function ViewMenu({
             {isFilterActive && activeTab === 'sortFilter' && (
               <button
                 type="button"
-                onClick={() => navSearch({ format: undefined, status: undefined })}
+                onClick={() => navSearch({ format: undefined, status: undefined, source: undefined })}
                 aria-label={_('library.resetFilter')}
                 title={_('library.resetFilter')}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-stone-100/80 text-stone-500 transition-colors hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
@@ -350,6 +352,37 @@ export default function ViewMenu({
                   })}
                 </div>
               </div>
+
+              {/* Source Filter (signed-in personal library & trash) */}
+              {!catalogMode && Boolean(user) && (
+                <div className={cn(!trash && 'mb-3')}>
+                  <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
+                    {_('library.bookSourceLabel')}
+                  </div>
+                  <div className="flex gap-1.5">
+                    {(['', 'server', 'local'] as const).map((s) => {
+                      const active = (source ?? '') === s
+                      const label = s === '' ? _('library.bookSourceAll') : s === 'local' ? _('library.bookSourceLocal') : _('library.bookSourceServer')
+                      return (
+                        <button
+                          key={s || 'all'}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => navSearch({ source: s === '' ? undefined : s })}
+                          className={cn(
+                            'flex h-7 flex-1 items-center justify-center rounded-lg text-xs font-medium transition-all',
+                            active
+                              ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                              : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+                          )}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {!trash && (
                 <>

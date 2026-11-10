@@ -188,4 +188,43 @@ describe('StorageBackendSection', () => {
       expect(apiPost).toHaveBeenCalledWith('/integrations/storage-backend/clear-cache', {})
     })
   })
+
+  it('refreshes storage metrics when returning to the active settings tab', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    let configCalls = 0
+    vi.mocked(apiGet).mockImplementation(async (path) => {
+      if (path === '/integrations/storage-backend') {
+        configCalls += 1
+        return {
+          data: {
+            ...sampleLocalConfig,
+            localTotalBytes: configCalls === 1 ? 1024 : 4096,
+            totalBookBytes: 512,
+          },
+        }
+      }
+      if (path === '/integrations/storage-connections') return { data: [] }
+      return { data: {} }
+    })
+
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <StorageBackendSection active />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(screen.getByText('1')).toBeInTheDocument())
+
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <StorageBackendSection active={false} />
+      </QueryClientProvider>,
+    )
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <StorageBackendSection active />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(screen.getByText('4')).toBeInTheDocument())
+    expect(configCalls).toBe(2)
+  })
 })

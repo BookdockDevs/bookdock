@@ -235,6 +235,9 @@ interface UiState {
   /** Unified shelf: where the add-book main button sends files. Device preference. */
   defaultAddDestination: 'server' | 'local'
   setDefaultAddDestination: (v: 'server' | 'local') => void
+  /** Device import preference for guests (no server /settings account). */
+  deviceNormalizeTitle: boolean
+  setDeviceNormalizeTitle: (v: boolean) => void
   setListInfoItems: (v: ListInfoItem[]) => void
   setSortBy: (v: string) => void
   setSortOrder: (v: 'asc' | 'desc') => void
@@ -573,6 +576,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   coverFit: getInitialCoverFit(),
   gridColumns: getInitial<string>('bd-grid-columns', 'auto'),
   defaultAddDestination: (() => { try { return localStorage.getItem('bd-default-add-destination') === 'local' ? 'local' as const : 'server' as const } catch { return 'server' as const } })(),
+  deviceNormalizeTitle: (() => { try { return localStorage.getItem('bd-device-normalize-title') !== 'false' } catch { return true } })(),
   libraryPageSize: getInitialLibraryPageSize(),
   listInfoItems: getInitialListInfoItems(),
   sortBy: getInitial<string>('bd-sort-by', 'createdAt'),
@@ -595,6 +599,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setDefaultAddDestination: (destination) => {
     try { localStorage.setItem('bd-default-add-destination', destination) } catch { /* ignore */ }
     set({ defaultAddDestination: destination })
+  },
+  setDeviceNormalizeTitle: (enabled) => {
+    try { localStorage.setItem('bd-device-normalize-title', String(enabled)) } catch { /* ignore */ }
+    set({ deviceNormalizeTitle: enabled })
   },
   setLibraryPageSize: (libraryPageSize) => {
     setStorage('bd-library-page-size', String(libraryPageSize))

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ClientBook } from '@bookdock/shared'
 
 import { localCatalogOperations } from './catalog'
-import { deviceMembershipCounts } from './catalog-view'
+import { deviceMembershipCounts, overlayCategoryDeviceCounts, overlayTaxonomyDeviceCounts } from './catalog-view'
 import { LocalLibraryRepository } from './repository'
 
 const scope = { kind: 'local' as const, vaultId: 'device' }
@@ -125,5 +125,22 @@ describe('device membership', () => {
     } finally {
       txSpy.mockRestore()
     }
+  })
+
+  it('overlays device shelf, tag, and category subtree counts without mutating server trees', () => {
+    const shelves = [{ id: 's1', bookCount: 2 }, { id: 's2', bookCount: 0 }]
+    const nextShelves = overlayTaxonomyDeviceCounts(shelves, new Map([['s1', 3]]))
+    expect(nextShelves).toEqual([{ id: 's1', bookCount: 5 }, { id: 's2', bookCount: 0 }])
+    expect(shelves[0]?.bookCount).toBe(2)
+
+    const categories = [
+      { id: 'parent', parentId: null, bookCount: 1, subtreeBookCount: 2 },
+      { id: 'child', parentId: 'parent', bookCount: 1, subtreeBookCount: 1 },
+    ]
+    const nextCategories = overlayCategoryDeviceCounts(categories, new Map([['child', 2]]))
+    expect(nextCategories).toEqual([
+      { id: 'parent', parentId: null, bookCount: 1, subtreeBookCount: 4 },
+      { id: 'child', parentId: 'parent', bookCount: 3, subtreeBookCount: 3 },
+    ])
   })
 })

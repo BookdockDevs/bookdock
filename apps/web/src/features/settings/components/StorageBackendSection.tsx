@@ -84,10 +84,22 @@ function TrashIcon({ className }: { className?: string }) {
   )
 }
 
-export default function StorageBackendSection() {
+interface StorageBackendSectionProps {
+  active?: boolean
+}
+
+export default function StorageBackendSection({ active = true }: StorageBackendSectionProps) {
   const _ = useTranslation()
 
   const configQuery = useStorageBackendConfig()
+  const { refetch: refetchConfig } = configQuery
+  const wasActiveRef = useRef(active)
+  useEffect(() => {
+    if (active && !wasActiveRef.current) {
+      void refetchConfig()
+    }
+    wasActiveRef.current = active
+  }, [active, refetchConfig])
   const connectionsQuery = useStorageConnections()
 
   const clearCacheMutation = useClearStorageBackendCache()

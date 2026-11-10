@@ -6,6 +6,19 @@ import type { SettingsRes } from '@bookdock/shared'
 
 import TrashSettingsRow from '../features/settings/components/TrashSettingsRow'
 import { apiPut } from '@/api/client'
+import { VaultAvailabilityContext } from '@/features/reading-data/vault-availability'
+import { useAuthStore } from '@/stores/auth.store'
+
+const vaultGetTrashSettings = vi.fn(async () => ({ autoCleanDays: 30, maxTrashBytes: 0 }))
+const vaultPatchTrashSettings = vi.fn(async (patch: Record<string, unknown>) => ({ autoCleanDays: 30, maxTrashBytes: 0, ...patch }))
+
+vi.mock('@/features/local-library/catalog', () => ({
+  DEVICE_VAULT_SCOPE: { kind: 'local', vaultId: 'device' },
+  deviceCatalogOperations: () => ({
+    getTrashSettings: vaultGetTrashSettings,
+    patchTrashSettings: vaultPatchTrashSettings,
+  }),
+}))
 
 vi.mock('../hooks/useTranslation', () => ({
   useTranslation: () => (key: string, options?: Record<string, string | number>) =>
@@ -84,5 +97,22 @@ describe('TrashSettingsRow', () => {
   it('defaults the cap selection to unlimited when unset', () => {
     renderRow({ autoCleanDays: 30 })
     expect(screen.getByRole('button', { name: 'settings.trashCapUnlimited' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('reads and updates device vault trash settings for guests without calling /settings', async () => {
+    useAuthStore.setState({ user: null })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <VaultAvailabilityContext.Provider value={true}>
+          <TrashSettingsRow />
+        </VaultAvailabilityContext.Provider>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(vaultGetTrashSettings).toHaveBeenCalledTimes(1))
+    fireEvent.click(await screen.findByRole('button', { name: 'settings.trashClean7Days' }))
+    await waitFor(() => expect(vaultPatchTrashSettings).toHaveBeenCalledWith({ autoCleanDays: 7 }))
+    expect(apiPut).not.toHaveBeenCalled()
   })
 })

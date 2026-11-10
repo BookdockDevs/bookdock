@@ -397,6 +397,7 @@ describe('UploadSheet', () => {
 
     const serverBtn = screen.getByRole('button', { name: 'library.sourceRemote' })
     const localBtn = screen.getByRole('button', { name: 'library.sourceLocal' })
+    expect(screen.getByText('localLibrary.add')).toHaveClass('sr-only')
     expect(serverBtn).toHaveAttribute('aria-pressed', 'true')
     expect(localBtn).toHaveAttribute('aria-pressed', 'false')
 
@@ -425,6 +426,7 @@ describe('UploadSheet', () => {
 
     rerender(<UploadSheet open onClose={vi.fn()} serverUploadDisabled />)
     expect(screen.getByRole('heading', { name: 'localLibrary.add' })).toBeTruthy()
+    expect(screen.getByText('localLibrary.add')).not.toHaveClass('sr-only')
     expect(screen.queryByRole('group', { name: 'library.addDestination' })).toBeNull()
     expect(screen.queryByRole('button', { name: /library\.uploadLocal/ })).toBeNull()
   })

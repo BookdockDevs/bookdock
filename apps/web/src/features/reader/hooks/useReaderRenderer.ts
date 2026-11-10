@@ -312,7 +312,26 @@ export function useReaderRenderer({
     fontSize: marginalFontSize,
   }
 
-  const createRenderer = useCallback(() => new FoliateReader(url, bookId, bookSize, format, cleanReading, bookProvider, shortcuts), [bookId, bookSize, cleanReading, format, url, bookProvider, shortcuts])
+  const bookProviderRef = useRef(bookProvider)
+  bookProviderRef.current = bookProvider
+  const shortcutsRef = useRef(shortcuts)
+  shortcutsRef.current = shortcuts
+  const bookProviderIdentity = bookProvider?.cacheIdentity
+  const stableBookProvider = useMemo<ReaderBookProvider | undefined>(
+    () => (bookProviderIdentity === undefined
+      ? undefined
+      : {
+          cacheIdentity: bookProviderIdentity,
+          open: (foliate, signal) => bookProviderRef.current!.open(foliate, signal),
+        }),
+    [bookProviderIdentity],
+  )
+  const stableShortcuts = useCallback(() => shortcutsRef.current!(), [])
+
+  const createRenderer = useCallback(
+    () => new FoliateReader(url, bookId, bookSize, format, cleanReading, stableBookProvider, shortcutsRef.current ? stableShortcuts : undefined),
+    [bookId, bookSize, cleanReading, format, url, stableBookProvider, stableShortcuts],
+  )
 
   useEffect(() => {
     if (!containerRef.current || !url || !canMount) return

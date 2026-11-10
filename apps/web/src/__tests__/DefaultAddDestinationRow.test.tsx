@@ -22,8 +22,8 @@ describe('DefaultAddDestinationRow', () => {
     const group = screen.getByRole('group', { name: 'library.defaultAddDestination' })
     expect(group).toBeInTheDocument()
 
-    const serverBtn = screen.getByRole('button', { name: 'library.sourceRemote' })
-    const localBtn = screen.getByRole('button', { name: 'library.sourceLocal' })
+    const serverBtn = screen.getByRole('button', { name: 'library.bookSourceServer' })
+    const localBtn = screen.getByRole('button', { name: 'library.bookSourceLocal' })
     expect(serverBtn).toHaveAttribute('aria-pressed', 'true')
     expect(localBtn).toHaveAttribute('aria-pressed', 'false')
 
@@ -35,8 +35,8 @@ describe('DefaultAddDestinationRow', () => {
   it('disables server option and reflects local fallback when serverUploadDisabled is true for non-owners', () => {
     render(<DefaultAddDestinationRow serverUploadDisabled />)
 
-    const serverBtn = screen.getByRole('button', { name: 'library.sourceRemote' })
-    const localBtn = screen.getByRole('button', { name: 'library.sourceLocal' })
+    const serverBtn = screen.getByRole('button', { name: 'library.bookSourceServer' })
+    const localBtn = screen.getByRole('button', { name: 'library.bookSourceLocal' })
     expect(serverBtn).toBeDisabled()
     expect(serverBtn).toHaveAttribute('aria-pressed', 'false')
     expect(localBtn).toHaveAttribute('aria-pressed', 'true')
@@ -46,7 +46,7 @@ describe('DefaultAddDestinationRow', () => {
     useAuthStore.setState({ user: { id: 'u-owner', username: 'owner', role: 'owner' } })
     render(<DefaultAddDestinationRow serverUploadDisabled />)
 
-    const serverBtn = screen.getByRole('button', { name: 'library.sourceRemote' })
+    const serverBtn = screen.getByRole('button', { name: 'library.bookSourceServer' })
     expect(serverBtn).not.toBeDisabled()
     expect(serverBtn).toHaveAttribute('aria-pressed', 'true')
   })

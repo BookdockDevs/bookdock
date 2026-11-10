@@ -1,6 +1,7 @@
 import { acceptsReadingTimerClaim, categoryTemplatePath, clientBookRefSchema, settingsUpdateSchema, clientReplacementSchema, replacementCreateSchema, replacementUpdateSchema, clientNoteImageSchema, CONTENT_DRAFT_TTL_MS, IDEA_IMAGE_MAX_COUNT, clientBookKey, clientBookSchema, clientPublicationReplacementSchema, clientCatalogAttributesSchema, clientCatalogPreferencesSchema, clientManualTimerSnapshotSchema, clientNoteSchema, clientOrganizationSchema, clientReadingCaptureGroupSchema, clientReadingCaptureSchema, clientReadingEntrySchema, clientReadingCoverageIntervalsSchema, clientReadingGroupEntrySchema, clientReadingSessionSchema, clientReadingSessionCommandSchema, clientReadingLedgerClearSchema, clientReadingSessionUpdateSchema, clientReadingRoundsSchema, clientReadingStateSchema, clientReadingTimerDraftSchema, clientReviewSchema, localDraftEnvelopeSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, mergeTimeFragments, readingTimerClaimSchema, sameClientBook, subtractTimeFragments, viewSettingsSchema } from '@bookdock/shared'
 import type { TrashSettings, ClientReplacement, TextReplacementRes, ReplacementCreateReq, ReplacementUpdateReq, ClientNoteImage, ClientBook, ClientTxtPublication, LocalEditorDraftEnvelope, ClientPublicationReplacement, EditorTxtSaveRes, ClientReadingLedgerClear, ClientVaultReadingSnapshot, ClientBookNotesSnapshot, ClientBookRef, ClientCatalogAttributes, ClientCatalogPreferences, ClientManualTimerSnapshot, ClientNote, ClientOrganization, ClientReadingCapture, ClientReadingCaptureGroup, ClientReadingEntry, ClientReadingBookSnapshot, ClientReadingGroupEntry, ClientReadingLedger, ClientReadingSession, ClientReadingSessionCommand, ClientReadingSessionUpdate, ClientReadingRounds, ClientReadingRoundAction, ClientReadingState, ClientReadingTimerDraft, ClientReview, ClientReviewInput, ReadingTimerClaimInput, ReadingTimerLease, ReadStatus } from '@bookdock/shared'
 
+import { createCoverThumbnail } from './cover-thumbnail'
 import { preparePublicationRelocationInWorker } from './epub-editor-worker'
 import type { PublicationRelocationSnapshot } from './publication-relocation'
 import { localRecordId } from './id'
@@ -19,6 +20,46 @@ export class LocalLibraryError extends Error {
 const key = (ref: ClientBookRef) => JSON.stringify(clientBookKey(ref))
 const noteKey = (ref: ClientBookRef, id: string) => JSON.stringify([clientBookKey(ref), id])
 const noteFingerprint = (note: ClientNote) => JSON.stringify(clientNoteSchema.parse({ ...note, createdAt: 0, updatedAt: 0, version: 0 }))
+
+const FILE_KEY_PREFIXES = ['original-digest:', 'publication-digest:', 'publication:', 'original:', 'digest:', 'cover:', 'text:'] as const
+
+export interface DeviceStorageSummary {
+  activeBooks: number
+  totalBytes: number
+  browserUsage: number | null
+}
+
+function storedBlobSize(value: unknown): number {
+  if (!value || typeof value !== 'object') return 0
+  const candidate = value as { size?: unknown; arrayBuffer?: unknown; blob?: unknown }
+  if (typeof candidate.size === 'number' && typeof candidate.arrayBuffer === 'function') return candidate.size
+  if ('blob' in candidate && candidate.blob !== undefined) return storedBlobSize(candidate.blob)
+  return 0
+}
+
+async function computeBlobSha256(blob: Blob): Promise<string> {
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function isFileInVault(rawKey: IDBValidKey, vaultId: string): boolean {
+  if (typeof rawKey !== 'string') return false
+  let body = rawKey
+  for (const prefix of FILE_KEY_PREFIXES) {
+    if (body.startsWith(prefix)) {
+      body = body.slice(prefix.length)
+      break
+    }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return false
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return false
+  return (parsed[0] === 'local' && parsed[1] === vaultId)
+    || (parsed[0] === 'note-image' && parsed[1] === 'local' && parsed[2] === vaultId)
+}
 
 function readingCaptureFragments(capture: ClientReadingCapture) {
   return mergeTimeFragments(capture.continuous && capture.startedAt !== null ? [{ startedAt: capture.startedAt, endedAt: capture.startedAt + capture.durationSeconds * 1000 }] : capture.fragments ?? [])
@@ -146,8 +187,8 @@ export class LocalLibraryRepository {
     book = clientBookSchema.parse(book)
     if (book.format === 'txt' && (!book.textSource || !textPublication?.publication.size || !textPublication.normalizedText.size)) throw new LocalLibraryError('invalid-input', 'TXT publication and normalized text are required')
     if (!book.content || !sameClientBook(book.content.book, book.ref) || book.availability !== 'available') throw new LocalLibraryError('invalid-input', 'Local content identity is required')
-    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())), (byte) => byte.toString(16).padStart(2, '0')).join('')
-    const publicationDigest = textPublication ? Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await textPublication.publication.arrayBuffer())), (byte) => byte.toString(16).padStart(2, '0')).join('') : null
+    const digest = await computeBlobSha256(blob)
+    const publicationDigest = textPublication ? await computeBlobSha256(textPublication.publication) : null
     return this.transaction(['books', 'files', 'deleted', 'settings'], 'readwrite', async (tx) => {
       if (await request(tx.objectStore('deleted').get(key(book.ref)))) throw new LocalLibraryError('conflict', 'Deleted book identity cannot be reused')
       const existing = await request<ClientBook | undefined>(tx.objectStore('books').get(key(book.ref)))
@@ -373,9 +414,38 @@ export class LocalLibraryRepository {
     return result
   }
 
+  private async compactCoverIfOversized(ref: ClientBookRef, blob: Blob | null): Promise<Blob | null> {
+    if (!blob || blob.size <= 256 * 1024) return blob
+    const thumbnail = await createCoverThumbnail(blob)
+    if (!thumbnail || thumbnail.size >= blob.size) return blob
+    const coverKey = `cover:${key(ref)}`
+    void this.transaction(['files'], 'readwrite', async (tx) => {
+      const current = await request<Blob | undefined>(tx.objectStore('files').get(coverKey))
+      if (current && current.size === blob.size && current.type === blob.type) {
+        await request(tx.objectStore('files').put(thumbnail, coverKey))
+      }
+    }).catch(() => {})
+    return thumbnail
+  }
+
   async getCover(ref: ClientBookRef): Promise<Blob | null> {
     this.assertLocal(ref)
-    return this.transaction(['files'], 'readonly', async (tx) => await request<Blob | undefined>(tx.objectStore('files').get(`cover:${key(ref)}`)) ?? null)
+    const blob = await this.transaction(['files'], 'readonly', async (tx) => await request<Blob | undefined>(tx.objectStore('files').get(`cover:${key(ref)}`)) ?? null)
+    return this.compactCoverIfOversized(ref, blob)
+  }
+
+  async getCovers(refs: readonly ClientBookRef[]): Promise<Map<string, Blob | null>> {
+    const result = new Map<string, Blob | null>()
+    if (refs.length === 0) return result
+    for (const ref of refs) this.assertLocal(ref)
+    const raw = await this.transaction(['files'], 'readonly', async (tx) => {
+      const store = tx.objectStore('files')
+      return Promise.all(refs.map(async (ref) => [ref, await request<Blob | undefined>(store.get(`cover:${key(ref)}`)) ?? null] as const))
+    })
+    await Promise.all(raw.map(async ([ref, blob]) => {
+      result.set(ref.bookId, await this.compactCoverIfOversized(ref, blob))
+    }))
+    return result
   }
 
   async getPublicationFile(ref: ClientBookRef): Promise<Blob> {
@@ -1832,6 +1902,61 @@ export class LocalLibraryRepository {
   for (const note of await request<ClientNote[]>(tx.objectStore('notes').index('book').getAll([ref.scope.kind === 'local' ? ref.scope.vaultId : '', ref.bookId]))) await request(tx.objectStore('notes').delete(noteKey(ref, note.id)))
   await request(tx.objectStore('reviews').delete(key(ref)))
   await request(tx.objectStore('deleted').put(true, key(ref)))
+  }
+
+  async findDuplicateBookByFile(vaultId: string, file: Blob, signal?: AbortSignal): Promise<ClientBook | null> {
+    const digest = await computeBlobSha256(file)
+    signal?.throwIfAborted()
+    return this.transaction(['books', 'files'], 'readonly', async (tx) => {
+      const books = await request<ClientBook[]>(tx.objectStore('books').getAll())
+      const files = tx.objectStore('files')
+      for (const raw of books) {
+        if (raw.ref.scope.kind !== 'local' || raw.ref.scope.vaultId !== vaultId) continue
+        const book = clientBookSchema.parse(raw)
+        if (book.deletedAt != null || book.catalogRemoved || book.availability !== 'available') continue
+        const bookKey = key(book.ref)
+        const storedDigest = await request<string | undefined>(files.get(`digest:${bookKey}`))
+        const originalDigest = await request<string | undefined>(files.get(`original-digest:${bookKey}`))
+        if (storedDigest === digest || originalDigest === digest) return book
+      }
+      return null
+    }, signal)
+  }
+
+  async inspectStorage(vaultId: string): Promise<DeviceStorageSummary> {
+    const vaultStats = await this.transaction(['books', 'files'], 'readonly', async (tx) => {
+      const books = await request<ClientBook[]>(tx.objectStore('books').getAll())
+      let activeBooks = 0
+      for (const raw of books) {
+        if (raw.ref.scope.kind !== 'local' || raw.ref.scope.vaultId !== vaultId) continue
+        const book = clientBookSchema.parse(raw)
+        if (!book.catalogRemoved && book.deletedAt == null) activeBooks++
+      }
+      let totalBytes = 0
+      await new Promise<void>((resolve, reject) => {
+        const cursorReq = tx.objectStore('files').openCursor()
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result
+          if (!cursor) { resolve(); return }
+          if (isFileInVault(cursor.key, vaultId)) totalBytes += storedBlobSize(cursor.value)
+          cursor.continue()
+        }
+        cursorReq.onerror = () => reject(cursorReq.error)
+      })
+      return { activeBooks, totalBytes }
+    })
+
+    const storage = typeof navigator !== 'undefined' ? navigator.storage : undefined
+    let browserUsage: number | null = null
+    if (storage?.estimate) {
+      try {
+        const estimate = await storage.estimate()
+        browserUsage = estimate?.usage ?? null
+      } catch {
+        // Capacity estimates are optional.
+      }
+    }
+    return { ...vaultStats, browserUsage }
   }
 
   async close(): Promise<void> {

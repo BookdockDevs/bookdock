@@ -23,6 +23,7 @@ interface LibraryHeaderProps {
   sortOrder: string
   format: string | null
   readStatus: string | null
+  source?: 'local' | 'server' | null
   /** Main action uses the saved default destination (or falls back to local when server upload is disabled). */
   onAddClick?: (destination: 'server' | 'local') => void
   serverUploadDisabled?: boolean
@@ -47,7 +48,7 @@ interface LibraryHeaderProps {
   hideBookControls?: boolean
 }
 
-export default function LibraryHeader({ navSearch, view, query, searchNames, searchContext, searchError, onSearchSubmit, onSearchClear, sortBy, sortOrder, format, readStatus, onAddClick, defaultAddDestination = 'server', serverUploadDisabled = false, addLabel, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, titleLoading = false, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope, hideBookControls = false }: LibraryHeaderProps) {
+export default function LibraryHeader({ navSearch, view, query, searchNames, searchContext, searchError, onSearchSubmit, onSearchClear, sortBy, sortOrder, format, readStatus, source = null, onAddClick, defaultAddDestination = 'server', serverUploadDisabled = false, addLabel, trash = false, trashCount = 0, bookSize, trashCapBytes, onEmptyTrash, selectionActive = false, onToggleSelectMode, onOpenNavigation, title, titleLoading = false, bookCount, onResetMetadataFilter, catalogMode = false, canSwitchCategoryScope = false, categoryScope, hideBookControls = false }: LibraryHeaderProps) {
   const _ = useTranslation()
   const effectiveAddDestination: 'server' | 'local' = addLabel
     ? 'local'
@@ -134,6 +135,7 @@ export default function LibraryHeader({ navSearch, view, query, searchNames, sea
             sortOrder={sortOrder}
             format={format}
             readStatus={readStatus}
+            source={source}
             trash={trash}
             catalogMode={catalogMode}
             canSwitchCategoryScope={canSwitchCategoryScope}

@@ -53,7 +53,7 @@ export async function openLocalReaderSession(ref: ClientBookRef, recordsOnly = f
     return {
       id: namespace, bookId: ref.bookId, progressRevisionId: positionRevision,
       cfi: state.position?.layout?.value ?? state.position?.value ?? null, contentCfi: state.position?.value ?? null,
-      chapter: null, percent: (state.fraction ?? 0) * 100, fraction: state.fraction,
+      chapter: state.chapter ?? null, percent: (state.fraction ?? 0) * 100, fraction: state.fraction,
       locationAvailable, coverageAvailable, contentUpdateUnseen: !locationAvailable || !coverageAvailable,
       readFraction: coverageAvailable ? state.coverage?.fraction ?? 0 : 0, updatedAt: state.updatedAt,
     }
@@ -61,11 +61,11 @@ export async function openLocalReaderSession(ref: ClientBookRef, recordsOnly = f
   const readingProjection = async (range?: ReadingRange) => projectLocalReadingBook(await repository.readReadingBookSnapshot(ref), range)
   let saveChain = Promise.resolve()
   const session: LocalReaderSession = {
-    content, ref, bookId: ref.bookId, namespace, sourceAvailable, provider: blob ? localEpubProvider(namespace, blob) : { cacheIdentity: namespace, async open(foliate, signal) {
+    content, ref, bookId: ref.bookId, namespace, sourceAvailable, provider: blob ? localEpubProvider(namespace, blob, { cache: true }) : { cacheIdentity: namespace, async open(foliate, signal) {
       if (!sourceAvailable) throw new LocalLibraryError('unavailable-content', 'Source file is unavailable')
       const current = await repository.getBook(ref)
       if (current.content?.contentId !== content.contentId) throw new LocalLibraryError('conflict', 'Publication revision changed')
-      return localEpubProvider(namespace, await repository.getPublicationFile(ref)).open(foliate, signal)
+      return localEpubProvider(namespace, await repository.getPublicationFile(ref), { cache: true }).open(foliate, signal)
     } },
     async getBook() {
       const current = await repository.getBook(ref)
@@ -150,7 +150,8 @@ export async function openLocalReaderSession(ref: ClientBookRef, recordsOnly = f
         if (canonical && body.cfi && body.cfi !== canonical.value) canonical.layout = { engine: 'bookdock-foliate', version: '1', value: body.cfi }
         const nextCoverage = body.segmentStartFraction !== undefined && body.fraction !== undefined ? addReadingCoverage(coverage, body.segmentStartFraction, body.fraction) : coverage
         const now = Date.now()
-        state = await repository.saveState({ book: ref, readStatus: state?.readStatus ?? 'reading', position: canonical, fraction: body.fraction ?? body.percent / 100,
+        const nextChapter = body.chapter !== undefined ? (body.chapter ?? null) : (state?.chapter ?? null)
+        state = await repository.saveState({ book: ref, readStatus: state?.readStatus ?? 'reading', position: canonical, fraction: body.fraction ?? body.percent / 100, chapter: nextChapter,
           coverage: { content, fraction: nextCoverage.reduce((sum, [from, to]) => sum + to - from, 0), available: true }, lastReadAt: now, updatedAt: now, version: state?.version ?? 0 }, state?.version ?? 0, nextCoverage)
         coverage = nextCoverage
       })

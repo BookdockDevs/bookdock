@@ -770,13 +770,17 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // chapter changes, the TOC auto-scroll effect below takes precedence.
   // useLayoutEffect restores before paint so the panel doesn't flash at the wrong position.
   const restoredPanel = useRef<NavTab | null>(null)
+  const [tocPlaced, setTocPlaced] = useState(false)
   useLayoutEffect(() => {
     const container = listRef.current
     if (!container || !open || (tab === 'toc' && searchExpanded)) {
       restoredPanel.current = null
       return
     }
-    if (tab === 'ai' || restoredPanel.current === tab) return
+    if (tab === 'ai' || restoredPanel.current === tab) {
+      if (tab === 'toc') setTocPlaced(true)
+      return
+    }
     const sameSessionTocReady = tab === 'toc'
       && tocPositionFresh
       && tocBookId === bookId
@@ -784,7 +788,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       && savedScrollTop.current.toc !== undefined
       && currentIndex >= 0
       && currentIndex === lastScrolledIndex.current
-    if (tab === 'toc' && ((!tocPositionReady && !sameSessionTocReady) || !tocItems.length || (tocBookId !== null && tocBookId !== bookId))) return
+    if (tab === 'toc' && ((!tocPositionReady && !sameSessionTocReady) || !tocItems.length || (tocBookId !== null && tocBookId !== bookId))) {
+      if (tab === 'toc' && tocPositionReady && !tocItems.length) setTocPlaced(true)
+      return
+    }
     const saved = savedScrollTop.current[tab]
     if (tab === 'toc') {
       if (saved !== undefined && currentIndex === lastScrolledIndex.current) {
@@ -797,6 +804,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         }
         restoredPanel.current = tab
         hasPositioned.current = true
+        setTocPlaced(true)
+      } else if (tocPositionReady && (currentIndex < 0 || currentIndex === lastScrolledIndex.current)) {
+        setTocPlaced(true)
       }
       return
     }
@@ -808,7 +818,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   useEffect(() => {
     if (tab !== 'toc' || !open || currentIndex < 0 || searchExpanded || (!tocPositionReady && !pendingNavigationHref)) return
     if (!tocItems.length || (tocBookId !== null && tocBookId !== bookId)) return
-    if (currentIndex === lastScrolledIndex.current) return
+    if (currentIndex === lastScrolledIndex.current) {
+      setTocPlaced(true)
+      return
+    }
     const item = itemRefs.current.get(currentIndex)
     const container = listRef.current
     if (!item || !container) return
@@ -819,10 +832,12 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       lastScrolledIndex.current = currentIndex
       hasPositioned.current = true
       rememberSidebarScroll('toc', container.scrollTop, currentIndex)
+      setTocPlaced(true)
       return
     }
     scrollToCurrentChapter(hasPositioned.current)
     restoredPanel.current = 'toc'
+    setTocPlaced(true)
     return () => {
       if (locateFrame.current !== null) cancelAnimationFrame(locateFrame.current)
       locateFrame.current = null
@@ -1595,7 +1610,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           )}
         >
           {tab === 'toc' && (
-            <ul className="space-y-0.5 pt-1">
+            <ul className={cn('space-y-0.5 pt-1', !searchExpanded && open && !tocPlaced && 'opacity-0')}>
               {renderSubtree(rootNodes.map((n) => n.index))}
             </ul>
           )}

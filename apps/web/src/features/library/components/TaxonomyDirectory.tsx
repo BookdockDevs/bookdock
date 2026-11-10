@@ -8,6 +8,7 @@ import type { ClientCategoryView, ClientTaxonomyView } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPut } from '@/api/client'
 import { notify } from '@/lib/notifications'
+import { overlayCategoryDeviceCounts, overlayTaxonomyDeviceCounts } from '@/features/local-library/catalog-view'
 import { useDataAuthority } from '@/features/reading-data/data-authority'
 import { catalogQueryKey } from '@/features/reading-data/catalog'
 
@@ -15,10 +16,11 @@ import QueryErrorState from '@/components/ui/QueryErrorState'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/hooks/useTranslation'
 import type { LibrarySearch } from '@/routes/index'
+import { useAuthStore } from '@/stores/auth.store'
 
 import {
   useDeleteLibraryCategory, useDeleteLibraryTag, useDeleteShelf, useDeleteTag,
-  useLibraryCategories, useLibraryPrefs, useLibraryTags, useReorderLibraryCategories, useReorderLibraryTags,
+  useDeviceMembershipCounts, useLibraryCategories, useLibraryPrefs, useLibraryTags, useReorderLibraryCategories, useReorderLibraryTags,
   useReorderShelves, useReorderTags, useShelves, useTags, useToggleShelfHidden, useToggleShelfPin,
   useToggleTagHidden, useToggleTagPin, useUpdateLibraryCategory, useUpdateLibraryPrefs, useUpdateLibraryTag,
 } from '../hooks'
@@ -52,8 +54,11 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
   // Same tree the sidebar shows: the account's when there is one (the vault
   // mirror follows it), the vault's own for a guest. Counts include device
   // books, because they sit on the same shelf.
-  const shelvesQuery = useShelves({ fallbackAnonymous: !libraryId, overlayLocalCounts: !libraryId })
-  const tagsQuery = useTags({ fallbackAnonymous: !libraryId, overlayLocalCounts: !libraryId })
+  const signedIn = useAuthStore((state) => Boolean(state.user))
+  const deviceCounts = useDeviceMembershipCounts({ enabled: !libraryId })
+  const overlayCounts = !libraryId && signedIn ? deviceCounts : undefined
+  const shelvesQuery = useShelves({ fallbackAnonymous: !libraryId })
+  const tagsQuery = useTags({ fallbackAnonymous: !libraryId })
   const categoryLibraryId = libraryId ?? privateLibraryId
   const categoriesQuery = useLibraryCategories(categoryLibraryId)
   const libraryTagsQuery = useLibraryTags(libraryId)
@@ -87,9 +92,18 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
   const reorderLibraryTags = useReorderLibraryTags()
   const reorderShelves = useReorderShelves()
   const reorderTags = useReorderTags()
-  const categories = useMemo(() => sortCategories(panel === 'categories' ? categoriesQuery.data?.data ?? [] : [], prefs?.categorySort ?? prefs?.shelfSort), [categoriesQuery.data, prefs?.categorySort, prefs?.shelfSort, panel])
-  const shelves = useMemo(() => sortSidebarItems(shelvesQuery.data?.data ?? [], prefs?.shelfSort), [shelvesQuery.data, prefs?.shelfSort])
-  const tags = useMemo(() => sortSidebarItems(libraryId ? libraryTagsQuery.data?.data ?? [] : tagsQuery.data?.data ?? [], prefs?.tagSort), [libraryId, libraryTagsQuery.data, tagsQuery.data, prefs?.tagSort])
+  const categories = useMemo(
+    () => sortCategories(panel === 'categories' ? overlayCategoryDeviceCounts(categoriesQuery.data?.data ?? [], overlayCounts?.categories) : [], prefs?.categorySort ?? prefs?.shelfSort),
+    [categoriesQuery.data, overlayCounts?.categories, prefs?.categorySort, prefs?.shelfSort, panel],
+  )
+  const shelves = useMemo(
+    () => sortSidebarItems(overlayTaxonomyDeviceCounts(shelvesQuery.data?.data ?? [], overlayCounts?.shelves), prefs?.shelfSort),
+    [shelvesQuery.data, overlayCounts?.shelves, prefs?.shelfSort],
+  )
+  const tags = useMemo(
+    () => sortSidebarItems(libraryId ? libraryTagsQuery.data?.data ?? [] : overlayTaxonomyDeviceCounts(tagsQuery.data?.data ?? [], overlayCounts?.tags), prefs?.tagSort),
+    [libraryId, libraryTagsQuery.data, tagsQuery.data, overlayCounts?.tags, prefs?.tagSort],
+  )
   const term = (lookup[panel] ?? '').trim().toLocaleLowerCase()
   const matches = (name: string) => name.toLocaleLowerCase().includes(term)
   const query = panel === 'tags' ? (libraryId ? libraryTagsQuery : tagsQuery) : panel === 'categories' ? categoriesQuery : shelvesQuery

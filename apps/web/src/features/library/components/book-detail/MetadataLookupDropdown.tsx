@@ -36,17 +36,17 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
       queryKey: ['metadata-lookup', 'config', userId],
       queryFn: () => apiGet<{ data: MetadataConfiguration }>('/integrations/metadata-lookup/config'),
       staleTime: 60_000,
-      enabled: Boolean(contextClient && userId && (open || value)),
+      enabled: Boolean(contextClient && userId),
     },
     queryClient,
   )
   const config = configRes?.data
-  const { data: sourcesRes } = useQuery(
+  const { data: sourcesRes, isFetching: sourcesFetching } = useQuery(
     {
       queryKey: ['personal-metadata-sources', userId],
       queryFn: () => apiGet<{ data: PersonalMetadataSourceView[] }>('/integrations/personal-sources'),
       staleTime: 30_000,
-      enabled: Boolean(contextClient && userId && (open || value)),
+      enabled: Boolean(contextClient && userId),
     },
     queryClient,
   )
@@ -187,6 +187,12 @@ export default function MetadataLookupDropdown({ onSelect, disabled = false, cla
           {availableProviders.map((item) => renderMenuItem(item))}
           {personalSources && personalSources.length > 0 && (
             personalSources.map((source) => renderMenuItem(`personal:${source.sourceId}` as MetadataProviderId))
+          )}
+          {sourcesFetching && personalSources.length === 0 && (
+            <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-stone-400 dark:text-stone-500">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-stone-300 border-t-stone-500 dark:border-stone-700 dark:border-t-stone-400" aria-hidden="true" />
+              <span>{_('reader.loading')}</span>
+            </div>
           )}
         </div>
       )}
