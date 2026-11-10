@@ -10,6 +10,7 @@ import { notify } from '@/lib/notifications'
 import { formatAuthorList } from '@/lib/utils'
 
 import { catalogSelectionKey } from '@/features/reading-data/catalog-selection'
+import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import { catalogWorkRow, rowCover } from '../book-row'
 import type { BookDragPayload } from '../dnd'
 import { getHiddenCause } from '../hidden-status'
@@ -47,6 +48,7 @@ export default function CatalogListRow({
 }: CatalogListRowProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
+  const warmReader = useWarmReaderEntry()
   const updateWork = useUpdateCatalogBook()
   // Same rule as the card: the delete dialog must outlive the menu.
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -174,6 +176,7 @@ export default function CatalogListRow({
         <Link
           to="/books/$id"
           params={{ id: first.bookVersionId }}
+          onPointerEnter={() => warmReader({ bookId: first.bookVersionId, isLocal: false, prefetch: false })}
           onClick={(e) => {
             if (dragJustEndedRef.current) {
               e.preventDefault()
@@ -192,10 +195,13 @@ export default function CatalogListRow({
             if (work.hidden || first.status === 'unlisted') {
               // Managers keep reading hidden works like delisted ones; only
               // ordinary readers fall through to the detail dialog.
-              if (canManage) return
-              e.preventDefault()
-              onShowDetails(work)
+              if (!canManage) {
+                e.preventDefault()
+                onShowDetails(work)
+                return
+              }
             }
+            warmReader({ bookId: first.bookVersionId, isLocal: false })
           }}
           className={`group flex w-full items-center gap-3.5 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
         >

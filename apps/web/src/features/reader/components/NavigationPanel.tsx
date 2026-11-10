@@ -1609,11 +1609,33 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             tab === 'notes' && 'flex flex-col',
           )}
         >
-          {tab === 'toc' && (
-            <ul className={cn('space-y-0.5 pt-1', !searchExpanded && open && !tocPlaced && 'opacity-0')}>
-              {renderSubtree(rootNodes.map((n) => n.index))}
-            </ul>
-          )}
+          {tab === 'toc' && (() => {
+            const showTocSkeleton = rootNodes.length === 0
+              ? (chaptersQuery.isLoading || !tocPositionReady)
+              : (!searchExpanded && open && !tocPlaced)
+            return (
+              <div className={cn('relative', showTocSkeleton && rootNodes.length === 0 && 'min-h-60')}>
+                {showTocSkeleton && (
+                  <div
+                    aria-hidden="true"
+                    data-testid="toc-loading-skeleton"
+                    className="pointer-events-none absolute inset-x-0 top-0 space-y-2 px-2 pt-2"
+                  >
+                    {[78, 64, 88, 72, 60, 84, 70, 76].map((width, index) => (
+                      <div
+                        key={index}
+                        className="h-6 animate-pulse rounded-md bg-stone-500/10"
+                        style={{ width: `${width}%` }}
+                      />
+                    ))}
+                  </div>
+                )}
+                <ul className={cn('space-y-0.5 pt-1', !searchExpanded && open && !tocPlaced && 'opacity-0')}>
+                  {renderSubtree(rootNodes.map((n) => n.index))}
+                </ul>
+              </div>
+            )
+          })()}
         {tab === 'notes' && !guestReadOnly && annotationsQuery.isError && (!annotations?.data || isAccessRevocationError(annotationsQuery.error)) ? (
           <QueryErrorState
             className="py-8 text-[var(--bd-read-sub)]"

@@ -3,7 +3,9 @@ import type { ReactNode } from 'react'
 import type { ClientLibraryBookView } from '@bookdock/shared'
 
 import { useNavigate } from '@tanstack/react-router'
+import { isDeviceBook } from '@/features/reading-data/book-source'
 import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
+import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import MenuFlyout from '@/components/ui/MenuFlyout'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList } from '@/lib/utils'
@@ -97,6 +99,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
 }) {
   const _ = useTranslation()
   const navigate = useNavigate()
+  const warmReader = useWarmReaderEntry()
   const updateBook = useUpdateBook()
   // B to a personal copy while the source still reads; A/C rows and library
   // reads (collected === false) have no source binding to cut. The actual
@@ -112,6 +115,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
         subtitle={`${formatAuthorList(book.authors, book.author)}${formatAuthorList(book.authors, book.author) ? ' · ' : ''}${book.format}`}
         onClick={() => {
           onClose()
+          warmReader({ bookId: book.id, isLocal: isDeviceBook(book.ref) })
           void navigate({ ...catalogBookTarget(book) })
         }}
       />

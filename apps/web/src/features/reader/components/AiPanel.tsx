@@ -1634,6 +1634,16 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   }
 
   const historyThreads = useMemo(() => Array.isArray(threadsQuery.data?.data) ? threadsQuery.data.data : [], [threadsQuery.data])
+  const restoringThread = Boolean(
+    !streaming
+    && threadId
+    && messages.length === 0
+    && (
+      threadsQuery.isPending
+      || (threadsQuery.isFetching && !Array.isArray(threadsQuery.data?.data))
+      || (rememberedThreadExists && !threadQuery.isError && threadQuery.data?.data.id !== threadId)
+    ),
+  )
   const latestUserMessageId = useMemo(() => [...messages].reverse().find((message) => message.role === 'user')?.id ?? null, [messages])
 
   return (
@@ -1778,6 +1788,22 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                 </div>
               )
               })}
+              </div>
+            </div>
+          ) : restoringThread ? (
+            <div data-testid="ai-thread-loading" role="status" aria-busy="true" className="h-full space-y-3 px-3 pb-2 pt-4">
+              <div className="flex justify-end">
+                <div className="h-10 w-3/5 animate-pulse rounded-xl bg-[var(--bd-read-accent)]/20 motion-reduce:animate-none" />
+              </div>
+              <div className="flex justify-start">
+                <div className="w-4/5 space-y-2 rounded-xl bg-[var(--bd-read-page-bg)] p-3">
+                  <div className="h-3.5 w-11/12 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+                  <div className="h-3.5 w-4/5 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                  <div className="h-3.5 w-3/5 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <div className="h-9 w-1/2 animate-pulse rounded-xl bg-[var(--bd-read-accent)]/20 motion-reduce:animate-none" />
               </div>
             </div>
           ) : (

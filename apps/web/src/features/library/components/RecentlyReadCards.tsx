@@ -4,6 +4,8 @@ import { Link } from '@tanstack/react-router'
 import type { ClientLibraryBookView } from '@bookdock/shared'
 
 import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
+import { isDeviceBook } from '@/features/reading-data/book-source'
+import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
 
@@ -15,6 +17,7 @@ interface RecentlyReadCardsProps {
 
 export default function RecentlyReadCards({ books }: RecentlyReadCardsProps) {
   const _ = useTranslation()
+  const warmReader = useWarmReaderEntry()
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
@@ -82,6 +85,8 @@ export default function RecentlyReadCards({ books }: RecentlyReadCardsProps) {
           <Link
             key={book.id}
             {...catalogBookTarget(book)}
+            onPointerEnter={() => warmReader({ bookId: book.id, isLocal: isDeviceBook(book.ref), prefetch: false })}
+            onClick={() => warmReader({ bookId: book.id, isLocal: isDeviceBook(book.ref) })}
             className="group/item w-[250px] shrink-0"
           >
             <div className="flex h-full items-center gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-stone-200/70 transition-all duration-200 group-hover/item:-translate-y-0.5 group-hover/item:shadow-md dark:bg-stone-900/90 dark:ring-1 dark:ring-white/10 dark:group-hover/item:ring-white/20 dark:group-hover/item:shadow-black/50">

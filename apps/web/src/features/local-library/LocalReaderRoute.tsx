@@ -1,6 +1,7 @@
 import { useParams } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import Reader from '../reader/Reader'
+import ReaderPending from '../reader/components/ReaderPending'
 import { LocalReaderContext } from '../reading-data/reader-source-context'
 import { openLocalReaderSession } from './reader-session'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -15,7 +16,7 @@ export default function LocalReaderRoute() {
     queryFn: () => openLocalReaderSession({ scope: { kind: 'local', vaultId: LOCAL_VAULT_ID }, bookId: id }),
     networkMode: 'always', staleTime: Infinity,
   })
-  if (session.isPending) return <div className="p-8" role="status"><div className="h-64 animate-pulse rounded-xl bg-stone-500/10" /></div>
+  if (session.isPending) return <ReaderPending />
   if (session.isError) return <div className="space-y-4 p-8"><p role="alert">{_('localLibrary.missing')}</p><a href="/" className="underline">{_('reader.back')}</a></div>
   return <LocalReaderContext.Provider value={session.data}><Reader key={session.data.namespace} /></LocalReaderContext.Provider>
 }

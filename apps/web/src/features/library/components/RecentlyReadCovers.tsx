@@ -4,6 +4,8 @@ import { Link } from '@tanstack/react-router'
 import type { ClientLibraryBookView } from '@bookdock/shared'
 
 import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
+import { isDeviceBook } from '@/features/reading-data/book-source'
+import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
 
@@ -15,6 +17,7 @@ interface RecentlyReadCoversProps {
 
 export default function RecentlyReadCovers({ books }: RecentlyReadCoversProps) {
   const _ = useTranslation()
+  const warmReader = useWarmReaderEntry()
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
@@ -82,6 +85,8 @@ export default function RecentlyReadCovers({ books }: RecentlyReadCoversProps) {
           <Link
             key={book.id}
             {...catalogBookTarget(book)}
+            onPointerEnter={() => warmReader({ bookId: book.id, isLocal: isDeviceBook(book.ref), prefetch: false })}
+            onClick={() => warmReader({ bookId: book.id, isLocal: isDeviceBook(book.ref) })}
             className="group/item w-28 shrink-0"
           >
             <div className="relative overflow-hidden rounded-xl transition-all duration-200 group-hover/item:-translate-y-1 group-hover/item:shadow-lg dark:group-hover/item:shadow-black/60">

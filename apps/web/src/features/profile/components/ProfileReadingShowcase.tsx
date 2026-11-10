@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import type { ProfileReadingBook } from '@bookdock/shared'
 
 import BookCover from '@/features/library/components/BookCover'
+import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import { useTranslation } from '@/hooks/useTranslation'
 import type { ReaderReturn } from '@/features/reader/reader-return'
 
@@ -17,10 +18,12 @@ export default function ProfileReadingShowcase({ books, readerReturn, showBrowse
   const _ = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
+  const warmReader = useWarmReaderEntry()
 
   const openBook = (event: MouseEvent<HTMLAnchorElement>, bookId: string) => {
     if (event.button !== 0 || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
     event.preventDefault()
+    warmReader({ bookId, isLocal: false })
     void navigate({
       to: '/books/$id',
       params: { id: bookId },

@@ -8,6 +8,7 @@ import type { CatalogBook, Library, Review } from '@bookdock/shared'
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import ReviewPreviewSection from '@/features/reviews/components/ReviewPreviewSection'
 import { useReviewWorkContext } from '@/features/reviews/hooks/useReviews'
@@ -76,6 +77,7 @@ export default function WorkDetailBody({
 }) {
   const _ = useTranslation()
   const navigate = useNavigate()
+  const warmReader = useWarmReaderEntry()
   const categories = useLibraryCategories(library.id, { enabled: Boolean(work.categoryId) })
   const categoryName = categories.isError ? undefined : (work.categoryId && categories.data?.data.some((category) => category.id === work.categoryId) ? categoryPath(categories.data.data, work.categoryId).map((category) => category.name).join(' / ') : undefined)
   const row = catalogWorkRow(work)
@@ -177,6 +179,7 @@ export default function WorkDetailBody({
   function readSelected() {
     if (!selected) return
     onClose()
+    warmReader({ bookId: selected.bookVersionId, isLocal: false })
     void navigate({ to: '/books/$id', params: { id: selected.bookVersionId } })
   }
 

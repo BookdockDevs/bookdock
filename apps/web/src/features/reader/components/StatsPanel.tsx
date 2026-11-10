@@ -139,7 +139,48 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
   if (hasVersionMismatch && recovery.failed) {
     return <><QueryErrorState className="text-[var(--bd-read-sub)]" isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />{dialogs}</>
   }
-  if (hasVersionMismatch || ledgerQuery.isPending || statsQuery.isPending || sessionsQuery.isPending) return <><div role="status" className="h-40 animate-pulse rounded-xl bg-stone-500/10" />{dialogs}</>
+  if (hasVersionMismatch || ledgerQuery.isPending || statsQuery.isPending || sessionsQuery.isPending) {
+    return (
+      <>
+        <div role="status" aria-busy="true" data-testid="stats-loading-skeleton" className="space-y-4 px-1 pt-3 pb-6">
+          <div className="rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)] p-3.5">
+            <div className="flex items-center gap-4">
+              <div className="flex shrink-0 flex-col items-center gap-2">
+                <div className="h-22 w-22 animate-pulse rounded-full bg-stone-500/10 motion-reduce:animate-none" />
+                <div className="h-4 w-12 animate-pulse rounded-full bg-stone-500/10 motion-reduce:animate-none" />
+              </div>
+              <div className="flex flex-1 flex-col gap-3">
+                <div className="space-y-1.5">
+                  <div className="h-3 w-14 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                  <div className="h-5 w-24 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="h-3 w-14 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                  <div className="h-5 w-20 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[var(--bd-read-accent)]/50 pt-2.5">
+              <div className="space-y-1.5">
+                <div className="h-3 w-14 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                <div className="h-4 w-12 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+              </div>
+              <div className="space-y-1.5">
+                <div className="h-3 w-16 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                <div className="h-4 w-16 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+              </div>
+            </div>
+          </div>
+          <div className="space-y-2 pt-2">
+            <div className="h-4 w-24 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+            <div className="h-14 animate-pulse rounded-xl bg-stone-500/10 motion-reduce:animate-none" />
+            <div className="h-14 animate-pulse rounded-xl bg-stone-500/10 motion-reduce:animate-none" />
+          </div>
+        </div>
+        {dialogs}
+      </>
+    )
+  }
 
   const totalSeconds = ledger?.totalSeconds ?? 0
   const totalWords = stats?.totalWordsRead

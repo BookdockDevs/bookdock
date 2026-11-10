@@ -1602,4 +1602,41 @@ describe('AiPanel', () => {
     expect(screen.queryByRole('button', { name: 'reader.aiRemoveSelectedText' })).toBeNull()
     expect(screen.queryByLabelText(/移除章节附件/)).toBeNull()
   })
+
+  it('shows a conversation skeleton instead of flashing the empty state while restoring a remembered thread', async () => {
+    const thread = { id: 'thread-1', bookId: 'book-1', title: '继续讨论', createdAt: 1_000, updatedAt: 2_000, messageCount: 2 }
+    let resolveThread!: (value: unknown) => void
+    vi.mocked(apiGet).mockImplementation(async (path) => {
+      if (path === '/ai/threads?bookId=book-1') return { data: [thread] }
+      if (path === '/ai/threads/thread-1') {
+        return new Promise((resolve) => {
+          resolveThread = resolve
+        })
+      }
+      return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } }
+    })
+    writeAiPanelMemory('reader', 'book-1', {
+      activeThreadId: 'thread-1',
+      prompt: '',
+      chapterReferences: [],
+    })
+
+    renderPanel()
+
+    expect(screen.getByTestId('ai-thread-loading')).toBeInTheDocument()
+    expect(screen.queryByText('reader.aiStartChat')).toBeNull()
+
+    await waitFor(() => expect(resolveThread).toBeTypeOf('function'))
+    resolveThread({
+      data: {
+        ...thread,
+        messages: [
+          { id: 'message-1', threadId: 'thread-1', role: 'user', content: '恢复出的历史提问', context: null, createdAt: 1_000, aborted: false },
+        ],
+      },
+    })
+
+    expect(await screen.findByText('恢复出的历史提问')).toBeInTheDocument()
+    expect(screen.queryByTestId('ai-thread-loading')).toBeNull()
+  })
 })

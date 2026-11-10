@@ -8,6 +8,7 @@ import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
+import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import { StorageConnectionDialog } from '@/features/settings/components/StorageConnectionsSection'
 import StorageConnectionPicker from '@/features/settings/components/StorageConnectionPicker'
 
@@ -90,6 +91,7 @@ export default function UploadSheet({
 }: UploadSheetProps) {
   const _ = useTranslation()
   const local = useLocalCatalog()
+  const warmReader = useWarmReaderEntry()
   const user = useAuthStore((state) => state.user)
   const { data: connectionsRes } = useStorageConnections({ enabled: !local && !serverUploadDisabled && Boolean(user) })
   const connections = useMemo(() => (local || serverUploadDisabled) ? [] : connectionsRes?.data ?? [], [local, serverUploadDisabled, connectionsRes?.data])
@@ -241,9 +243,11 @@ export default function UploadSheet({
     const localRef = items[0]?.bookRef
     const bookVersionId = items[0]?.bookVersionId
     if (!bookVersionId && !localRef) return
+    const targetBookId = localRef ? localRef.bookId : bookVersionId!
+    warmReader({ bookId: targetBookId, isLocal: Boolean(localRef) })
     clearQueue()
     onClose()
-    void navigate({ to: '/books/$id', params: { id: localRef ? localRef.bookId : bookVersionId! } })
+    void navigate({ to: '/books/$id', params: { id: targetBookId } })
   }
 
   if (!open) return null

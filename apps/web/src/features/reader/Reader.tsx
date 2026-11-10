@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -1540,7 +1540,7 @@ export default function Reader() {
     renderer.setAnnotations(list)
   }, [renderer, annotations?.data, publicMarkers, displayedRevisionId, noteEditorRange, translationTarget, dictionaryTarget])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // A locked desktop toolbar is persistent by intent — reopen the sidebar
     // with it, unless the user last collapsed it (remembered while locked).
     // Touch devices have no lock, so the sidebar always starts closed.
@@ -2014,17 +2014,6 @@ export default function Reader() {
     consumeEscFlag()
   }, [])
 
-  if (bookQuery.isLoading) {
-    return (
-      <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
-        <div ref={containerCallbackRef} />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <ReaderLoadingBadge />
-        </div>
-      </div>
-    )
-  }
-
   if (bookQuery.isError) {
     return (
       <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
@@ -2059,7 +2048,7 @@ export default function Reader() {
     )
   }
 
-  if (!bookQuery.data?.data) {
+  if (!bookQuery.isLoading && !bookQuery.data?.data) {
     return (
       <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
@@ -2081,7 +2070,7 @@ export default function Reader() {
     )
   }
 
-  const book = bookQuery.data.data
+  const book = bookQuery.data?.data ?? null
 
   return (
     <ErrorBoundary>
@@ -2125,7 +2114,7 @@ export default function Reader() {
                 onPointerLeave={isTouch ? undefined : onHeaderLeave}
               >
                 <ReaderHeader
-                  title={pendingNavChapter || currentChapter || book.title}
+                  title={pendingNavChapter || currentChapter || book?.title || _('reader.loading')}
                   visible={headerVisible}
                   pinned={chromePinned}
                   settingsOpen={settingsOpen}
@@ -2165,7 +2154,7 @@ export default function Reader() {
               )}
             />
             <AutoReadingProgressBar readingMode={readingMode} />
-            {endOfBookMount && createPortal(
+            {book && endOfBookMount && createPortal(
               <EndOfBookView
                 bookId={id}
                 bookTitle={book.title}

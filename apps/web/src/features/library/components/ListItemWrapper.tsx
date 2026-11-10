@@ -6,6 +6,7 @@ import type { ClientLibraryBookView } from '@bookdock/shared'
 import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
 import { catalogSelectionKey } from '@/features/reading-data/catalog-selection'
 import { isDeviceBook } from '@/features/reading-data/book-source'
+import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList } from '@/lib/utils'
@@ -41,6 +42,7 @@ interface ListItemWrapperProps {
 export default function ListItemWrapper({ book, selection, selectionActive, dragJustEndedRef, onToggleSelect, readOnly, onDelete, onPublish, onFork, onShowDetails }: ListItemWrapperProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
+  const warmReader = useWarmReaderEntry()
   const selected = selection.has(catalogSelectionKey(book))
   const bookIds = selectionActive && selected ? Array.from(selection) : [catalogSelectionKey(book)]
   // The measuring node is the cover thumbnail (small rect), not the full-width
@@ -77,6 +79,7 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
     >
       <Link
         {...catalogBookTarget(book)}
+        onPointerEnter={() => warmReader({ bookId: book.id, isLocal: isDeviceBook(book.ref), prefetch: false })}
         onClick={(e) => {
           if (dragJustEndedRef.current) {
             e.preventDefault()
@@ -90,7 +93,9 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
           if (!readOnly && (e.ctrlKey || e.metaKey || e.shiftKey)) {
             e.preventDefault()
             onToggleSelect(catalogSelectionKey(book), e.shiftKey)
+            return
           }
+          warmReader({ bookId: book.id, isLocal: isDeviceBook(book.ref) })
         }}
         className={`group flex items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive && !readOnly ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
       >

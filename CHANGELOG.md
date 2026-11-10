@@ -15,10 +15,12 @@ All notable changes to Bookdock are documented here.
 - Connected-account capabilities adapt cleanly to device books: signed-in users can translate selected text from device books with server AI without uploading the file, while online-only services (such as server dictionaries, speech gateways, and metadata scraping) clearly note when signing in is required without interrupting reading on this device.
 - Settings tabs preserve independent scroll positions when switching sections.
 - Metadata lookup preloads installed personal metadata sources in the dropdown and keeps search results visible with an inline applying indicator instead of resetting the list to a loading state when applying.
+- Pre-warm reader source resolution and book metadata when opening a book from shelves, detail dialogs, upload results, or profile showcases, keep the pinned reader sidebar mounted immediately while the book loads instead of showing a full-page loader, and refine the reader statistics loading placeholder into a card-shaped skeleton.
 
 ### Fixed
 
 - Fixed the reader table of contents briefly flashing at the top before jumping to the active chapter on cold open.
+- Fixed the reader sidebar table of contents and remembered AI conversation panel briefly appearing blank or flashing the empty chat state while loading, and aligned device book session loading with the reader background theme.
 
 ## [0.7.7] - 2026-11-06
 
@@ -1098,10 +1100,12 @@ All notable changes to Bookdock are documented here.
 - 账号联动能力按需适配本机书籍：已登录用户可直接对本机书籍中的选中文本使用服务端 AI 划词翻译而无需上传文件；在线词典、语音网关、元数据刮削等纯联网功能在离线或未登录时给出清晰提示，不影响本机阅读。
 - 「设置」页切换各分区时独立记住各自的滚动位置。
 - 元数据刮削弹窗提前加载已安装的个人源，点击「应用」时仅在按钮展示应用状态，不再将搜索结果列表切回加载态。
+- 从书架、书籍详情、上传完成入口或个人展示页打开书籍时预热来源解析与元数据，书籍加载期间直接保持常驻阅读器侧边栏挂载而不再退回整页加载；统计侧页加载占位细化为卡片结构骨架。
 
 #### 修复
 
 - 修复冷启动打开阅读器时目录先瞬间闪在顶部再跳回当前章节的问题。
+- 修复阅读器目录侧页与已记住的 AI 对话在加载完成前先短暂显示空白或闪出「开始对话」空态的问题，并将本机书籍会话打开阶段的加载界面统一为阅读器主题背景。
 
 ### [0.7.7] - 2026-11-06
 

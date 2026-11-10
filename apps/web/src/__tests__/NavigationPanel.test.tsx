@@ -182,8 +182,17 @@ describe('NavigationPanel', () => {
     })
     const view = render(<NavigationPanel bookId="book-1" open tocPositionReady={false} />)
     expect(view.container.querySelector('ul')).toHaveClass('opacity-0')
+    expect(screen.getByTestId('toc-loading-skeleton')).toBeInTheDocument()
     view.rerender(<NavigationPanel bookId="book-1" open tocPositionReady />)
     expect(view.container.querySelector('ul')).not.toHaveClass('opacity-0')
+    expect(screen.queryByTestId('toc-loading-skeleton')).toBeNull()
+  })
+
+  it('shows a TOC loading skeleton while chapter data has not arrived yet before readerReady', () => {
+    const view = render(<NavigationPanel bookId="book-1" open tocPositionReady={false} />)
+    expect(screen.getByTestId('toc-loading-skeleton')).toBeInTheDocument()
+    view.rerender(<NavigationPanel bookId="book-1" open tocPositionReady />)
+    expect(screen.queryByTestId('toc-loading-skeleton')).toBeNull()
   })
 
   it('scrolls to current chapter on reopen even when the remembered index matches', async () => {

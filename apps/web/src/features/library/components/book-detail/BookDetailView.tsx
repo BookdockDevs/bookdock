@@ -7,6 +7,7 @@ import type { ClientLibraryDetailView, ClientLibraryBookView, ReadStatus, Review
 
 import { catalogBookTarget, catalogHomeTarget } from '@/features/reading-data/catalog-navigation'
 import { isDeviceBook } from '@/features/reading-data/book-source'
+import { warmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import { clientScopeKey } from '@bookdock/shared'
 import { apiPatch } from '@/api/client'
@@ -374,8 +375,10 @@ export default function BookDetailView({
             <Button
               size="sm"
               className="gap-1.5"
+              onPointerEnter={() => warmReaderEntry(queryClient, { bookId: book.id, isLocal: isDeviceBook(book.ref), prefetch: false })}
               onClick={() => {
                 onClose()
+                warmReaderEntry(queryClient, { bookId: book.id, isLocal: isDeviceBook(book.ref) })
                 void navigate({ ...catalogBookTarget(book) })
               }}
             >

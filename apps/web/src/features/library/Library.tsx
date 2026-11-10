@@ -40,6 +40,7 @@ import { readLibraryNames, readTaxonomyNames } from '@/lib/library-name-cache'
 import type { LibrarySearch } from '@/routes/index'
 import { isDeviceBook } from '@/features/reading-data/book-source'
 import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
+import { warmReaderEntry, useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import { catalogSelectionId, catalogSelectionKey } from '@/features/reading-data/catalog-selection'
 import { useVaultCapable } from '@/features/reading-data/vault-availability'
 import { localLibraryRepository } from '@/features/local-library/repository'
@@ -1482,6 +1483,7 @@ export default function Library() {
                   <DraggableBookCard key={catalogSelectionKey(book)} book={book} selection={selection} selectionActive={selectionActive} disabled={isRowReadOnly(book)}>
                     <Link
                       {...catalogBookTarget(book)}
+                      onPointerEnter={() => warmReaderEntry(queryClient, { bookId: book.id, isLocal: isDeviceBook(book.ref), prefetch: false })}
                       onClick={(e) => {
                         // dnd-kit does not suppress the click after a drag;
                         // the flag is set by handleDragEnd and cleared on the
@@ -1498,7 +1500,9 @@ export default function Library() {
                         if (!isRowReadOnly(book) && (e.ctrlKey || e.metaKey || e.shiftKey)) {
                           e.preventDefault()
                           toggleSelect(catalogSelectionKey(book), index, e.shiftKey)
+                          return
                         }
+                        warmReaderEntry(queryClient, { bookId: book.id, isLocal: isDeviceBook(book.ref) })
                       }}
                       className="block rounded-xl"
                     >
@@ -1941,6 +1945,7 @@ function DraggableWorkCard({
   onToggleSelect: (id: string, shiftKey?: boolean) => void
   onShowDetails: (work: CatalogBook) => void
 }) {
+  const warmReader = useWarmReaderEntry()
   // A selected card dragged in selection mode carries the whole selection,
   // the same rule a private card follows; a lone card carries only itself.
   const selectionKey = catalogSelectionKey(work)
@@ -1988,6 +1993,7 @@ function DraggableWorkCard({
         <Link
           to="/books/$id"
           params={{ id: firstVersionId }}
+          onPointerEnter={() => warmReader({ bookId: firstVersionId, isLocal: false, prefetch: false })}
           onClick={(e) => {
             if (dragJustEndedRef.current) {
               e.preventDefault()
@@ -2006,10 +2012,13 @@ function DraggableWorkCard({
             if (work.hidden || work.versions[0]?.status === 'unlisted') {
               // Managers keep reading hidden works like delisted ones; only
               // ordinary readers fall through to the detail dialog.
-              if (canManage) return
-              e.preventDefault()
-              onShowDetails(work)
+              if (!canManage) {
+                e.preventDefault()
+                onShowDetails(work)
+                return
+              }
             }
+            warmReader({ bookId: firstVersionId, isLocal: false })
           }}
           className="block rounded-xl"
         >

@@ -8,7 +8,7 @@ import type { ReadingLedgerRes } from '@bookdock/shared'
 
 import StatsPanel from '@/features/reader/components/StatsPanel'
 
-const state = vi.hoisted(() => ({ ledger: null as ReadingLedgerRes | null, error: false, retry: vi.fn() }))
+const state = vi.hoisted(() => ({ ledger: null as ReadingLedgerRes | null, error: false, pending: false, retry: vi.fn() }))
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
 function renderPanel() {
@@ -16,7 +16,7 @@ function renderPanel() {
 }
 vi.mock('@/api/hooks/reading-records', async (original) => ({
   ...await original<typeof import('@/api/hooks/reading-records')>(),
-  useReadingLedger: () => ({ data: { data: state.ledger }, isPending: false, isError: state.error, isFetching: false, refetch: state.retry }),
+  useReadingLedger: () => ({ data: { data: state.ledger }, isPending: state.pending, isError: state.error, isFetching: false, refetch: state.retry }),
   useDeleteSession: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useBookReadingLedgerStats: () => ({
     data: { data: { dataVersion: 1, totalSeconds: state.ledger?.totalSeconds ?? 0, totalWordsRead: 0, wordState: 'known', readingDays: state.ledger?.totalSeconds ? 2 : 0, daily: [], hourly: [], legacyDaily: [] } },
@@ -34,6 +34,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   queryClient.clear()
   state.error = false
+  state.pending = false
   state.ledger = {
     bookId: 'b1', title: 'A book', author: 'An author', sourceAvailable: true, currentRoundId: 'r2', coverage: 0.25, totalSeconds: 9000,
     legacyCoverage: true, legacyDaily: [{ date: '2026-10-16', durationSeconds: 3600 }], legacyIntervals: [[0, 0.1]], legacyWordCount: 10000,
@@ -82,4 +83,12 @@ describe('reader statistics overview', () => {
     expect(state.retry).toHaveBeenCalledTimes(2)
     expect(resetQueries).toHaveBeenCalledTimes(1)
   })
+
+  it('renders a card-shaped skeleton while ledger data is pending', () => {
+    state.pending = true
+    renderPanel()
+    expect(screen.getByTestId('stats-loading-skeleton')).toBeInTheDocument()
+    expect(screen.queryByText('reader.statsProgress')).not.toBeInTheDocument()
+  })
 })
+

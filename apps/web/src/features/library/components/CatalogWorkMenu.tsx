@@ -4,6 +4,7 @@ import { useNavigate } from '@tanstack/react-router'
 import type { CatalogBook } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
+import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList } from '@/lib/utils'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -45,6 +46,7 @@ interface CatalogWorkMenuProps {
 export default function CatalogWorkMenu({ innerRef, triggerRef, position, width, onClose, work, canManage, canCollect, canDownload, onShowDetails, onDeleteRequest }: CatalogWorkMenuProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
+  const warmReader = useWarmReaderEntry()
   const collectBook = useCollectBook()
   const updateWork = useUpdateCatalogBook()
   // The menu predates versions in the UI: one work, one version, the first one.
@@ -65,6 +67,7 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
         onClick={firstVersionId ? () => {
           onClose()
           if (readable) {
+            warmReader({ bookId: firstVersionId, isLocal: false })
             void navigate({ to: '/books/$id', params: { id: firstVersionId } })
           } else {
             onShowDetails()
