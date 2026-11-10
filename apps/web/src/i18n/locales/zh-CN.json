@@ -104,6 +104,8 @@
     "install": "安装",
     "installing": "安装中…",
     "installSuccess": "元数据源已安装",
+    "installMultipleSuccess": "已安装 {{count}} 个元数据源",
+    "installPartialError": "已安装 {{installed}} 个，{{failed}} 个失败",
     "installError": "安装元数据源失败",
     "deleteSource": "移除",
     "deleteSourceConfirmTitle": "移除来源",

@@ -14,7 +14,7 @@ const variants: Record<Variant, string> = {
   primary:
     'bg-stone-900 text-white border border-stone-900/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_1px_2px_rgba(0,0,0,0.12)] hover:bg-stone-800 hover:border-stone-800 active:bg-stone-950 dark:bg-stone-100 dark:text-stone-900 dark:border-white/90 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_1px_2px_rgba(0,0,0,0.25)] dark:hover:bg-white dark:active:bg-stone-200',
   secondary:
-    'bg-white text-stone-700 border border-stone-200/90 shadow-2xs hover:bg-stone-50 hover:text-stone-900 hover:border-stone-300 active:bg-stone-100 dark:bg-stone-800 dark:text-stone-200 dark:border-stone-700/80 dark:hover:bg-stone-750 dark:hover:text-stone-100 dark:hover:border-stone-600 dark:active:bg-stone-700',
+    'bg-white text-stone-700 border border-stone-200/90 shadow-2xs hover:bg-stone-50 hover:text-stone-900 hover:border-stone-300 active:bg-stone-100 dark:bg-stone-800 dark:text-stone-200 dark:border-stone-700/80 dark:hover:bg-stone-700/80 dark:hover:text-stone-100 dark:hover:border-stone-600 dark:active:bg-stone-700',
   ghost:
     'text-stone-600 border border-transparent hover:bg-stone-100 hover:text-stone-900 active:bg-stone-200/60 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100 dark:active:bg-stone-800/80',
   danger:

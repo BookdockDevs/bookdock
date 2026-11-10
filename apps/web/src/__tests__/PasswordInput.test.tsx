@@ -23,30 +23,44 @@ function PasswordForm({ submit = () => {} }: { submit?: () => void }) {
 describe('PasswordInput', () => {
   beforeEach(async () => { await i18n.changeLanguage('zh-CN') })
 
-  it('reveals fields independently without submitting or changing their values', () => {
+  it('hides the visibility toggle when empty and reveals fields independently once entered', () => {
     const submit = vi.fn()
     render(<PasswordForm submit={submit} />)
     const password = screen.getByLabelText('Password')
     const confirm = screen.getByLabelText('Confirm')
+    expect(screen.queryByRole('button', { name: '显示密码' })).toBeNull()
     fireEvent.change(password, { target: { value: ' secret12 ' } })
     expect(password).toHaveAttribute('type', 'password')
-    const toggle = screen.getAllByRole('button', { name: '显示密码' })[0]
+    const toggle = screen.getByRole('button', { name: '显示密码' })
     expect(toggle.tabIndex).toBe(0)
     fireEvent.click(toggle)
     expect(password).toHaveAttribute('type', 'text')
     expect(password).toHaveValue(' secret12 ')
     expect(confirm).toHaveAttribute('type', 'password')
     expect(submit).not.toHaveBeenCalled()
+    fireEvent.change(password, { target: { value: '' } })
+    expect(screen.getByRole('button', { name: '隐藏密码' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '隐藏密码' }))
     expect(password).toHaveAttribute('type', 'password')
+    expect(screen.queryByRole('button', { name: '显示密码' })).toBeNull()
   })
 
-  it('waits for blur, updates feedback while editing, and focuses the first invalid field', () => {
+  it('stays quiet when blurring an untouched empty field, but validates on edit+blur or submit', () => {
     const submit = vi.fn()
     render(<PasswordForm submit={submit} />)
     const password = screen.getByLabelText('Password')
-    fireEvent.change(password, { target: { value: 'short' } })
+    fireEvent.focus(password)
+    fireEvent.blur(password)
+    expect(password).toHaveAttribute('aria-invalid', 'false')
     expect(screen.queryByRole('alert')).toBeNull()
+
+    fireEvent.change(password, { target: { value: 'a' } })
+    fireEvent.change(password, { target: { value: '' } })
+    fireEvent.blur(password)
+    expect(password).toHaveAttribute('aria-invalid', 'true')
+    expect(password).toHaveAccessibleDescription('请输入密码')
+
+    fireEvent.change(password, { target: { value: 'short' } })
     fireEvent.blur(password)
     expect(password).toHaveAttribute('aria-invalid', 'true')
     expect(password).toHaveAccessibleDescription('密码长度至少为 8 位')
@@ -75,9 +89,13 @@ describe('PasswordInput', () => {
 
   it('preserves a configured secret placeholder and keeps its action independent', () => {
     const clear = vi.fn()
-    render(<PasswordInput secret aria-label="API Key" value="" placeholder="已配置，留空保留" action={<button type="button" onClick={clear}>Clear</button>} disabled />)
+    const { rerender } = render(<PasswordInput secret aria-label="API Key" value="" placeholder="已配置，留空保留" action={<button type="button" onClick={clear}>Clear</button>} disabled />)
     expect(screen.getByLabelText('API Key')).toHaveValue('')
-    expect(screen.getByRole('button', { name: '显示密钥' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '显示密钥' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeInTheDocument()
     expect(screen.getByPlaceholderText('已配置，留空保留')).toHaveAttribute('type', 'password')
+
+    rerender(<PasswordInput secret aria-label="API Key" value="sk-test" placeholder="已配置，留空保留" action={<button type="button" onClick={clear}>Clear</button>} disabled />)
+    expect(screen.getByRole('button', { name: '显示密钥' })).toBeDisabled()
   })
 })

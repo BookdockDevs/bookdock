@@ -642,7 +642,7 @@ export default function Library() {
   // the catalog endpoint instead of /books. Both hooks are always mounted so
   // the rules of hooks hold; whichever does not match the library in context is
   // disabled and contributes nothing.
-  const catalogQuery = useLibraryCatalog(activeLibrary?.id ?? null, {
+  const catalogListParams = {
     page: currentPage,
     pageSize,
     expression: search.expression,
@@ -656,7 +656,8 @@ export default function Library() {
     author: search.author,
     series: series ?? undefined,
     trash: activeLibrary ? trash : undefined,
-  }, { enabled: !isLibraryActivity })
+  }
+  const catalogQuery = useLibraryCatalog(activeLibrary?.id ?? null, catalogListParams, { enabled: !isLibraryActivity })
   const libraryRelationQuery = useLibraryRelation(activeLibrary?.id ?? null)
 
   const allBooks = useMemo(() => data?.data ?? [], [data])
@@ -678,6 +679,12 @@ export default function Library() {
   const listError = activeLibrary ? catalogQuery.isError : isError
   const listFetching = activeLibrary ? catalogQuery.isFetching : isFetching
   const listRefetch = activeLibrary ? catalogQuery.refetch : refetch
+  const isListPlaceholder = activeLibrary ? catalogQuery.isPlaceholderData : booksPlaceholder
+  const settledPageRef = useRef(currentPage)
+  if (!isListPlaceholder) {
+    settledPageRef.current = currentPage
+  }
+  const gridPageKey = settledPageRef.current
 
   const filterKey = `${activeLibrary?.id ?? ''}:${shelfId ?? ''}:${categoryId ?? ''}:${categoryScope}:${tagId ?? ''}:${query}:${format ?? ''}:${readStatus ?? ''}:${search.source ?? ''}:${trash}:${author ?? ''}:${series ?? ''}:${sortBy}:${sortOrder}:${pageSize}`
   const lastFilterKeyRef = useRef(filterKey)
@@ -1161,6 +1168,15 @@ export default function Library() {
     })
   }
 
+  function prefetchPage(targetPage: number) {
+    if (targetPage < 1 || targetPage > totalPages || targetPage === currentPage) return
+    if (activeLibrary) {
+      void prefetchLibraryCatalog(queryClient, activeLibrary.id, { ...catalogListParams, page: targetPage })
+    } else if (unifiedListEnabled) {
+      void prefetchBooks(queryClient, { ...shelfListParams, page: targetPage })
+    }
+  }
+
 
 
   if (libraryContextUnresolved) {
@@ -1377,7 +1393,7 @@ export default function Library() {
           ) : activeLibrary ? (
             sharedTrash ? (
               view === 'list' ? (
-                <BookGrid pageKey={currentPage} view="list" columns={columns}>
+                <BookGrid pageKey={gridPageKey} view="list" columns={columns} isTransitioning={isListPlaceholder}>
                   {catalogWorks.map((work, index) => (
                     <LibraryTrashWorkRow
                       key={work.id}
@@ -1395,7 +1411,7 @@ export default function Library() {
                   ))}
                 </BookGrid>
               ) : (
-                <BookGrid pageKey={currentPage} view={view} columns={columns}>
+                <BookGrid pageKey={gridPageKey} view={view} columns={columns} isTransitioning={isListPlaceholder}>
                   {catalogWorks.map((work, index) => (
                     <LibraryTrashWorkCard
                       key={work.id}
@@ -1417,7 +1433,7 @@ export default function Library() {
               /* List view draws rows, not cards: the same data, the same
                  selection and the same drag rules, only the row chrome differs
                  the way a private list row differs from a private card. */
-              <BookGrid pageKey={currentPage} view="list" columns={columns}>
+              <BookGrid pageKey={gridPageKey} view="list" columns={columns} isTransitioning={isListPlaceholder}>
                 {catalogWorks.map((work, index) => (
                   <CatalogListRow
                     key={work.id}
@@ -1437,7 +1453,7 @@ export default function Library() {
               /* Same container, same card, same view switch and same drag rules as
                  the private list; only the row's data differs, because a catalog
                  row is a work with its versions rather than one book. */
-              <BookGrid pageKey={currentPage} view={view} columns={columns}>
+              <BookGrid pageKey={gridPageKey} view={view} columns={columns} isTransitioning={isListPlaceholder}>
                 {catalogWorks.map((work, index) => (
                   <DraggableWorkCard
                     key={work.id}
@@ -1456,7 +1472,7 @@ export default function Library() {
               </BookGrid>
             )
           ) : view === 'grid' ? (
-            <BookGrid pageKey={currentPage} view="grid" columns={columns}>
+            <BookGrid pageKey={gridPageKey} view="grid" columns={columns} isTransitioning={isListPlaceholder}>
               {allBooks.map((book, index) => {
                 if (trash) {
                   return (
@@ -1524,7 +1540,7 @@ export default function Library() {
               })}
             </BookGrid>
           ) : (
-            <BookGrid pageKey={currentPage} view="list" columns={columns}>
+            <BookGrid pageKey={gridPageKey} view="list" columns={columns} isTransitioning={isListPlaceholder}>
               {allBooks.map((book, index) => {
                 if (trash) {
                   return (
@@ -1568,6 +1584,7 @@ export default function Library() {
             totalPages={totalPages}
             totalBooks={total}
             onPageChange={goToPage}
+            onPrefetchPage={prefetchPage}
             selectionActive={selectionActive}
           />
         )}

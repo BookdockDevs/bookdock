@@ -17,7 +17,7 @@ interface YearHeatmapProps {
 
 // 书香暖珀色系 (温润人文感，告别冷峻绿格子)
 function levelClass(seconds: number, max: number): string {
-  if (seconds <= 0 || max <= 0) return 'bg-stone-100 hover:bg-stone-200 dark:bg-stone-800/60 dark:hover:bg-stone-750'
+  if (seconds <= 0 || max <= 0) return 'bg-stone-100 hover:bg-stone-200 dark:bg-stone-800/60 dark:hover:bg-stone-700'
   const ratio = seconds / max
   if (ratio <= 0.25) return 'bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900'
   if (ratio <= 0.5) return 'bg-amber-300 hover:bg-amber-400 dark:bg-amber-700/80 dark:hover:bg-amber-600'

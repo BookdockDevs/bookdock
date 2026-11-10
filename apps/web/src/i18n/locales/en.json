@@ -104,6 +104,8 @@
     "install": "Install",
     "installing": "Installing…",
     "installSuccess": "Metadata source installed",
+    "installMultipleSuccess": "Installed {{count}} metadata sources",
+    "installPartialError": "Installed {{installed}}; {{failed}} failed",
     "installError": "Failed to install the metadata source",
     "deleteSource": "Remove",
     "deleteSourceConfirmTitle": "Remove source",

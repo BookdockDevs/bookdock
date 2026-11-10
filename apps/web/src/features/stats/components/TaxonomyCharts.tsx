@@ -285,7 +285,7 @@ function DonutChartView({
                 'flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-all cursor-pointer text-left',
                 isHovered
                   ? 'bg-stone-100 dark:bg-stone-800 ring-1 ring-stone-200 dark:ring-stone-700 font-semibold'
-                  : 'hover:bg-stone-50 dark:hover:bg-stone-850',
+                  : 'hover:bg-stone-50 dark:hover:bg-stone-800/70',
                 isSelected ? 'font-bold opacity-100' : 'text-stone-700 dark:text-stone-300',
               )}
             >
@@ -709,7 +709,7 @@ function TreemapView({
   return (
     <div className="w-full py-1">
       {/* 采用纯 HTML/CSS 绝对定位盒，文字字形绝对不失真/拉扁 */}
-      <div className="relative h-[250px] sm:h-[280px] w-full overflow-hidden rounded-xl bg-stone-100 p-0.5 dark:bg-stone-850 shadow-2xs">
+      <div className="relative h-[250px] sm:h-[280px] w-full overflow-hidden rounded-xl bg-stone-100 p-0.5 dark:bg-stone-800 shadow-2xs">
         {nodes.map((node) => {
           const isSelected = selectedName === node.item.name
           const isHovered = hoveredNode?.item.id === node.item.id

@@ -298,4 +298,30 @@ describe('CatalogCard', () => {
     expect(screen.getByLabelText('置顶')).toBeInTheDocument()
     expect(screen.queryByLabelText('取消置顶')).toBeNull()
   })
+
+  it('keeps the card hover elevation and action affordances visible while its context menu is open', () => {
+    const { container } = renderCard(work({ pinnedAt: 99 }), { canManage: true })
+    const coverWrapper = container.querySelector('article > div') as HTMLElement
+    const menuBtnWrapper = screen.getByLabelText('更多操作').parentElement as HTMLElement
+    const pinBtnWrapper = screen.getByLabelText('取消置顶').parentElement as HTMLElement
+
+    expect(coverWrapper.className).not.toContain(' -translate-y-1.5')
+    expect(menuBtnWrapper.className).toContain('md:opacity-0')
+    expect(pinBtnWrapper.className).toContain('md:opacity-0')
+
+    openMenu(container)
+
+    expect(coverWrapper.className).toContain('-translate-y-1.5')
+    expect(coverWrapper.className).toContain('shadow-xl')
+    expect(menuBtnWrapper.className).toContain('md:opacity-100')
+    expect(menuBtnWrapper.className).not.toContain('md:opacity-0')
+    expect(pinBtnWrapper.className).toContain('md:opacity-100')
+    expect(pinBtnWrapper.className).not.toContain('md:opacity-0')
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(coverWrapper.className).not.toContain(' -translate-y-1.5')
+    expect(menuBtnWrapper.className).toContain('md:opacity-0')
+    expect(pinBtnWrapper.className).toContain('md:opacity-0')
+  })
 })

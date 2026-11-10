@@ -5,6 +5,7 @@ import type { CatalogBook, GridCardField } from '@bookdock/shared'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { cn } from '@/lib/utils'
 
 import { catalogWorkRow } from '../book-row'
 import { getHiddenCause } from '../hidden-status'
@@ -65,7 +66,7 @@ export default function CatalogCard({
         selectionActive={selectionActive}
         onToggleSelect={onToggleSelect}
         pinAffordance={isPinned ? (
-          <div className="absolute left-1.5 top-1.5 z-10 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
+          <div className={cn('absolute left-1.5 top-1.5 z-10 transition-opacity duration-150 md:group-hover:opacity-100', menu.open ? 'md:opacity-100' : 'md:opacity-0')}>
             {canManage ? (
               <button
                 type="button"
@@ -106,6 +107,7 @@ export default function CatalogCard({
             {hasHiddenVersions && <HiddenIndicator kind="versions" overlay />}
           </>
         ) : undefined}
+        menuOpen={menu.open}
         menu={(
           <button
             ref={menu.btnRef}

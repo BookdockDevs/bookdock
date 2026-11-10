@@ -10,7 +10,7 @@ import Modal from '@/components/ui/Modal'
 import PasswordInput from '@/components/ui/PasswordInput'
 import MetadataProviderIcon from '@/components/ui/MetadataProviderIcon'
 import { useTranslation } from '@/hooks/useTranslation'
-import { getUserErrorNotification } from '@/lib/error-message'
+import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { extractZipPreview, type ZipPackagePreview } from '@/lib/personal-source-zip'
 import { cn, formatBytes } from '@/lib/utils'
@@ -63,6 +63,37 @@ const SOURCE_VIEWS = [
 ] as const
 
 type SourceViewId = (typeof SOURCE_VIEWS)[number]['id']
+type SourceInstallMode = 'github' | 'zip'
+
+interface ZipUploadItem {
+  id: string
+  file: File
+  preview: ZipPackagePreview | null
+  status: 'pending' | 'installing' | 'error'
+  errorMessage?: string
+}
+
+const SOURCE_MODE_STORAGE_KEY = 'bd-metadata-source-mode'
+
+function readStoredSourceMode(): SourceInstallMode {
+  try {
+    return localStorage.getItem(SOURCE_MODE_STORAGE_KEY) === 'zip' ? 'zip' : 'github'
+  } catch {
+    return 'github'
+  }
+}
+
+function persistSourceMode(mode: SourceInstallMode) {
+  try {
+    localStorage.setItem(SOURCE_MODE_STORAGE_KEY, mode)
+  } catch {
+    // ignore localStorage errors in private/incognito modes
+  }
+}
+
+function zipItemKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`
+}
 
 export default function MetadataSourcesSection() {
   const _ = useTranslation()
@@ -93,11 +124,11 @@ export default function MetadataSourcesSection() {
   const hasChanged = trimmedKey !== savedKey
 
   const [addOpen, setAddOpen] = useState(false)
-  const [mode, setMode] = useState<'github' | 'zip'>('github')
+  const [mode, setMode] = useState<SourceInstallMode>(readStoredSourceMode)
   const [url, setUrl] = useState('')
-  const [zipFile, setZipFile] = useState<File | null>(null)
-  const [zipPreview, setZipPreview] = useState<ZipPackagePreview | null>(null)
-  const zipFileRef = useRef<File | null>(null)
+  const [zipItems, setZipItems] = useState<ZipUploadItem[]>([])
+  const zipItemsRef = useRef<ZipUploadItem[]>([])
+  const activeZipIdsRef = useRef<Set<string>>(new Set())
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [installing, setInstalling] = useState(false)
@@ -130,43 +161,86 @@ export default function MetadataSourcesSection() {
     }
   }, [viewMenuOpen])
 
-  function releaseZipPreview() {
-    zipFileRef.current = null
-    setZipPreview((current) => {
-      if (current?.iconUrl) URL.revokeObjectURL(current.iconUrl)
-      return null
+  zipItemsRef.current = zipItems
+
+  useEffect(() => () => {
+    activeZipIdsRef.current.clear()
+    for (const item of zipItemsRef.current) {
+      if (item.preview?.iconUrl) URL.revokeObjectURL(item.preview.iconUrl)
+    }
+  }, [])
+
+  function clearZipItems() {
+    activeZipIdsRef.current.clear()
+    setZipItems((current) => {
+      for (const item of current) {
+        if (item.preview?.iconUrl) URL.revokeObjectURL(item.preview.iconUrl)
+      }
+      return []
     })
   }
 
+  function removeZipItem(id: string) {
+    activeZipIdsRef.current.delete(id)
+    setZipItems((current) => {
+      const target = current.find((item) => item.id === id)
+      if (target?.preview?.iconUrl) URL.revokeObjectURL(target.preview.iconUrl)
+      return current.filter((item) => item.id !== id)
+    })
+  }
+
+  function selectMode(nextMode: SourceInstallMode) {
+    setMode(nextMode)
+    persistSourceMode(nextMode)
+  }
+
   function openAddDialog() {
-    setMode('github')
+    setMode(readStoredSourceMode())
     setUrl('')
-    releaseZipPreview()
-    setZipFile(null)
+    clearZipItems()
     setDragOver(false)
     setAddOpen(true)
   }
 
-  function handleZipSelect(file: File | null | undefined) {
-    if (!file) return
-    if (!file.name.toLowerCase().endsWith('.zip')) {
+  function handleZipSelect(files: FileList | File[] | null | undefined) {
+    const picked = Array.from(files ?? [])
+    if (picked.length === 0) return
+
+    const validFiles = picked.filter((file) => file.name.toLowerCase().endsWith('.zip'))
+    if (validFiles.length < picked.length) {
       notify.error({ key: 'metadataLookup.sourceZipOnly' })
-      return
     }
-    releaseZipPreview()
-    zipFileRef.current = file
-    setZipFile(file)
-    // Preview the packaged icon and name; failures fall back to the plain badge.
-    void extractZipPreview(file).then((preview) => {
-      if (zipFileRef.current !== file) {
-        if (preview.iconUrl) URL.revokeObjectURL(preview.iconUrl)
-        return
-      }
-      setZipPreview((current) => {
-        if (current?.iconUrl) URL.revokeObjectURL(current.iconUrl)
-        return preview
+    if (validFiles.length === 0) return
+
+    const existingIds = new Set(zipItemsRef.current.map((item) => item.id))
+    const additions: ZipUploadItem[] = []
+    for (const file of validFiles) {
+      const id = zipItemKey(file)
+      if (existingIds.has(id)) continue
+      existingIds.add(id)
+      activeZipIdsRef.current.add(id)
+      additions.push({ id, file, preview: null, status: 'pending' })
+    }
+    if (additions.length === 0) return
+
+    setZipItems((current) => [...current, ...additions])
+
+    for (const added of additions) {
+      // Preview the packaged icon and name; failures fall back to the plain badge.
+      void extractZipPreview(added.file).then((preview) => {
+        if (!activeZipIdsRef.current.has(added.id)) {
+          if (preview.iconUrl) URL.revokeObjectURL(preview.iconUrl)
+          return
+        }
+        setZipItems((current) => current.map((item) => {
+          if (item.id !== added.id) return item
+          if (item.preview?.iconUrl && item.preview.iconUrl !== preview.iconUrl) {
+            URL.revokeObjectURL(item.preview.iconUrl)
+          }
+          return { ...item, preview }
+        }))
       })
-    })
+    }
   }
 
   const deleteSource = useMutation({
@@ -180,17 +254,56 @@ export default function MetadataSourcesSection() {
   })
 
   async function install() {
-    if (installing || (mode === 'github' ? !url.trim() : !zipFile)) return
+    if (installing || (mode === 'github' ? !url.trim() : zipItems.length === 0)) return
     setInstalling(true)
     try {
-      if (mode === 'github') await apiPost('/integrations/personal-sources/install/github', { url: url.trim() })
-      else await apiUpload('/integrations/personal-sources/install/zip', zipFile!)
-      void queryClient.invalidateQueries({ queryKey: sourcesQueryKey })
-      notify.success({ key: 'metadataLookup.installSuccess' })
-      setAddOpen(false)
-      setUrl('')
-      releaseZipPreview()
-      setZipFile(null)
+      if (mode === 'github') {
+        await apiPost('/integrations/personal-sources/install/github', { url: url.trim() })
+        void queryClient.invalidateQueries({ queryKey: sourcesQueryKey })
+        notify.success({ key: 'metadataLookup.installSuccess' })
+        setAddOpen(false)
+        setUrl('')
+        return
+      }
+
+      const targets = [...zipItems]
+      let installedCount = 0
+      let failedCount = 0
+
+      for (const target of targets) {
+        setZipItems((current) => current.map((item) => (
+          item.id === target.id ? { ...item, status: 'installing', errorMessage: undefined } : item
+        )))
+        try {
+          await apiUpload('/integrations/personal-sources/install/zip', target.file)
+          installedCount += 1
+          removeZipItem(target.id)
+        } catch (err) {
+          failedCount += 1
+          const errorMessage = getUserErrorMessage(err, _, 'metadataLookup.installError')
+          setZipItems((current) => current.map((item) => (
+            item.id === target.id ? { ...item, status: 'error', errorMessage } : item
+          )))
+        }
+      }
+
+      if (installedCount > 0) {
+        void queryClient.invalidateQueries({ queryKey: sourcesQueryKey })
+      }
+      if (failedCount === 0) {
+        notify.success(installedCount > 1
+          ? { key: 'metadataLookup.installMultipleSuccess', params: { count: installedCount } }
+          : { key: 'metadataLookup.installSuccess' })
+        setAddOpen(false)
+        clearZipItems()
+      } else if (installedCount > 0) {
+        notify.error({
+          key: 'metadataLookup.installPartialError',
+          params: { installed: installedCount, failed: failedCount },
+        })
+      } else {
+        notify.error({ key: 'metadataLookup.installError' })
+      }
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'metadataLookup.installError'))
     } finally {
@@ -489,7 +602,7 @@ export default function MetadataSourcesSection() {
                 {_('metadataLookup.cancel')}
               </Button>
               <Button
-                disabled={installing || (mode === 'github' ? !url.trim() : !zipFile)}
+                disabled={installing || (mode === 'github' ? !url.trim() : zipItems.length === 0)}
                 onClick={() => void install()}
                 className="gap-1.5"
               >
@@ -512,7 +625,7 @@ export default function MetadataSourcesSection() {
                   type="button"
                   aria-pressed={mode === item}
                   disabled={installing}
-                  onClick={() => setMode(item)}
+                  onClick={() => selectMode(item)}
                   className={cn(
                     'flex items-center justify-center gap-2 rounded-lg py-1.5 text-xs font-medium transition-all duration-150 disabled:opacity-50',
                     mode === item
@@ -564,93 +677,108 @@ export default function MetadataSourcesSection() {
                 <label className="block text-xs font-medium text-stone-700 dark:text-stone-300">
                   {_('metadataLookup.sourceZipLabel')}
                 </label>
-                {zipFile ? (
-                  <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs dark:border-stone-700 dark:bg-stone-800/80">
-                    {zipPreview?.iconUrl ? (
-                      <img
-                        src={zipPreview.iconUrl}
-                        alt=""
-                        className="size-10 shrink-0 rounded-xl bg-white object-contain p-0.5 dark:bg-stone-700/60"
-                      />
-                    ) : (
-                      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 font-mono text-xs font-bold text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
-                        ZIP
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-stone-900 dark:text-stone-100" title={zipPreview?.name ?? zipFile.name}>
-                        {zipPreview?.name ?? zipFile.name}
-                      </p>
-                      <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
-                        {formatBytes(zipFile.size)}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={installing}
-                      onClick={() => {
-                        releaseZipPreview()
-                        setZipFile(null)
-                      }}
-                      className="shrink-0 rounded-lg p-1.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 disabled:opacity-40 dark:hover:bg-stone-700 dark:hover:text-stone-200"
-                      title={_('metadataLookup.removeFile')}
-                      aria-label={_('metadataLookup.removeFile')}
-                    >
-                      <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M18 6 6 18M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                ) : (
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => fileInputRef.current?.click()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        fileInputRef.current?.click()
-                      }
-                    }}
-                    onDragOver={(e) => {
+                <div
+                  role="button"
+                  tabIndex={installing ? -1 : 0}
+                  aria-disabled={installing || undefined}
+                  onClick={() => { if (!installing) fileInputRef.current?.click() }}
+                  onKeyDown={(e) => {
+                    if (!installing && (e.key === 'Enter' || e.key === ' ')) {
                       e.preventDefault()
-                      setDragOver(true)
-                    }}
-                    onDragLeave={(e) => {
-                      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
-                      setDragOver(false)
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault()
-                      setDragOver(false)
-                      handleZipSelect(e.dataTransfer.files?.[0])
-                    }}
-                    className={cn(
-                      'group flex h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed p-4 text-center transition-all duration-150',
-                      dragOver
-                        ? 'border-stone-500 bg-stone-100/80 dark:border-stone-400 dark:bg-stone-800/60'
-                        : 'border-stone-200 bg-stone-50/50 hover:border-stone-300 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800/20 dark:hover:border-stone-600 dark:hover:bg-stone-800/40'
-                    )}
-                  >
-                    <div className="flex size-10 items-center justify-center rounded-xl bg-stone-100 text-stone-500 transition-transform duration-200 group-hover:scale-105 dark:bg-stone-800 dark:text-stone-400">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="17 8 12 3 7 8" />
-                        <line x1="12" y1="3" x2="12" y2="15" />
-                      </svg>
-                    </div>
-                    <p className="text-xs font-medium text-stone-700 dark:text-stone-200">
-                      {_('metadataLookup.sourceDropHint')}
-                    </p>
+                      fileInputRef.current?.click()
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    if (!installing) setDragOver(true)
+                  }}
+                  onDragLeave={(e) => {
+                    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+                    setDragOver(false)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    setDragOver(false)
+                    if (!installing) handleZipSelect(e.dataTransfer.files)
+                  }}
+                  className={cn(
+                    'group flex h-32 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed p-4 text-center transition-all duration-150',
+                    installing ? 'pointer-events-none opacity-50' : 'cursor-pointer',
+                    dragOver
+                      ? 'border-stone-500 bg-stone-100/80 dark:border-stone-400 dark:bg-stone-800/60'
+                      : 'border-stone-200 bg-stone-50/50 hover:border-stone-300 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800/20 dark:hover:border-stone-600 dark:hover:bg-stone-800/40',
+                  )}
+                >
+                  <div className="flex size-10 items-center justify-center rounded-xl bg-stone-100 text-stone-500 transition-transform duration-200 group-hover:scale-105 dark:bg-stone-800 dark:text-stone-400">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
                   </div>
+                  <p className="text-xs font-medium text-stone-700 dark:text-stone-200">
+                    {_('metadataLookup.sourceDropHint')}
+                  </p>
+                </div>
+                {zipItems.length > 0 && (
+                  <ul className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-0.5">
+                    {zipItems.map((item) => (
+                      <li key={item.id} className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-2xs dark:border-stone-700 dark:bg-stone-800/80">
+                        {item.preview?.iconUrl ? (
+                          <img
+                            src={item.preview.iconUrl}
+                            alt=""
+                            className="size-9 shrink-0 rounded-xl bg-white object-contain p-0.5 dark:bg-stone-700/60"
+                          />
+                        ) : (
+                          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 font-mono text-xs font-bold text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                            ZIP
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-stone-900 dark:text-stone-100" title={item.preview?.name ?? item.file.name}>
+                            {item.preview?.name ?? item.file.name}
+                          </p>
+                          <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">
+                            {formatBytes(item.file.size)}
+                          </p>
+                          {item.status === 'error' && item.errorMessage && (
+                            <p role="alert" className="mt-0.5 truncate text-xs text-red-600 dark:text-red-400" title={item.errorMessage}>
+                              {item.errorMessage}
+                            </p>
+                          )}
+                        </div>
+                        {item.status === 'installing' ? (
+                          <svg className="size-4 shrink-0 animate-spin text-stone-400" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                          </svg>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={installing}
+                            onClick={() => removeZipItem(item.id)}
+                            className="shrink-0 rounded-lg p-1.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600 disabled:opacity-40 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+                            title={_('metadataLookup.removeFile')}
+                            aria-label={_('metadataLookup.removeFile')}
+                          >
+                            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M18 6 6 18M6 6l12 12" />
+                            </svg>
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 )}
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   accept=".zip,application/zip"
                   disabled={installing}
                   onChange={(event) => {
-                    handleZipSelect(event.target.files?.[0])
+                    handleZipSelect(event.target.files)
                     event.target.value = ''
                   }}
                   className="sr-only"

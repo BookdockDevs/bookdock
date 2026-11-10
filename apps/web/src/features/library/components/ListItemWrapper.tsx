@@ -63,7 +63,7 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
   const meta = (
     <div className="flex shrink-0 items-center gap-3">
       <ListItemInfo book={book} />
-      {!selectionActive && isDeviceBook(book.ref) && <DeviceBookIndicator />}
+      {!selectionActive && isDeviceBook(book.ref) && <DeviceBookIndicator menuOpen={menu.open} />}
       <span className="rounded border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500">
         {book.format}
       </span>
@@ -97,17 +97,17 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
           }
           warmReader({ bookId: book.id, isLocal: isDeviceBook(book.ref) })
         }}
-        className={`group flex items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive && !readOnly ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
+        className={`group flex items-center gap-3.5 rounded-xl px-3 py-2.5 transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive && !readOnly ? 'cursor-pointer' : ''} ${menu.open && !selected ? 'bg-white shadow-sm dark:bg-stone-900' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
       >
         <div ref={setNodeRef} className="shrink-0">
           <BookCover book={book} size="sm" />
         </div>
-        <ListItemContent book={book} />
+        <ListItemContent book={book} menuOpen={menu.open} />
         {meta}
         {selectionActive && !readOnly ? (
           <SelectionCheck selected={selected} />
         ) : (
-          <div className="flex w-7 shrink-0 items-center justify-center opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+          <div className={`flex w-7 shrink-0 items-center justify-center opacity-100 transition-opacity md:group-hover:opacity-100 ${menu.open ? 'md:opacity-100' : 'md:opacity-0'}`}>
             <button
               ref={menu.btnRef}
               type="button"
@@ -143,7 +143,7 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
   )
 }
 
-function ListItemContent({ book }: { book: ClientLibraryBookView }) {
+function ListItemContent({ book, menuOpen = false }: { book: ClientLibraryBookView; menuOpen?: boolean }) {
   const _ = useTranslation()
   const hiddenCause = getHiddenCause(book, 'shelf')
   return (
@@ -157,8 +157,8 @@ function ListItemContent({ book }: { book: ClientLibraryBookView }) {
           <UnpinButton
             bookId={book.id}
             ref={book.ref}
-              expectedVersion={book.clientVersion}
-            className="shrink-0 rounded-md p-1 text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 md:opacity-0 md:group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+            expectedVersion={book.clientVersion}
+            className={`shrink-0 rounded-md p-1 text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 md:group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-200 ${menuOpen ? 'md:opacity-100' : 'md:opacity-0'}`}
           >
             <PinIcon size={11} />
           </UnpinButton>

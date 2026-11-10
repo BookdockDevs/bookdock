@@ -7,6 +7,7 @@ interface BookGridProps {
   pageKey: number | string
   view: 'grid' | 'list'
   columns: number
+  isTransitioning?: boolean
   children: ReactNode
 }
 
@@ -20,12 +21,14 @@ interface BookGridProps {
  * adds no semantics the rows do not already have, and keeps the private list's
  * markup byte-identical to what it was before.
  */
-export default function BookGrid({ pageKey, view, columns, children }: BookGridProps) {
+export default function BookGrid({ pageKey, view, columns, isTransitioning = false, children }: BookGridProps) {
   return (
     <div
       key={pageKey}
+      aria-busy={isTransitioning || undefined}
       className={cn(
-        'py-2 transition-opacity duration-150 animate-in fade-in',
+        'py-2 transition-opacity duration-150 animate-page-fade-in',
+        isTransitioning && 'pointer-events-none opacity-55',
         view === 'grid' ? 'grid gap-4' : 'flex flex-col gap-2',
       )}
       style={view === 'grid' ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined}

@@ -20,4 +20,11 @@ describe('Button', () => {
     screen.getByText('Click').click()
     expect(clicked).toBe(true)
   })
+
+  it('uses valid Tailwind dark hover classes on secondary buttons', () => {
+    render(<Button variant="secondary">Secondary</Button>)
+    const button = screen.getByRole('button', { name: 'Secondary' })
+    expect(button.className).toContain('dark:hover:bg-stone-700/80')
+    expect(button.className).not.toContain('stone-750')
+  })
 })

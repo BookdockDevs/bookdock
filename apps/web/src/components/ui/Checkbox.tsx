@@ -35,7 +35,7 @@ export default function Checkbox({ checked, onChange, disabled, label, className
             'peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500/30 peer-focus-visible:ring-offset-1',
             checked
               ? 'border-blue-600 bg-blue-600 text-white shadow-2xs dark:border-blue-500 dark:bg-blue-500'
-              : 'border-stone-300 bg-white hover:border-stone-400 dark:border-stone-600 dark:bg-stone-850 dark:hover:border-stone-500',
+              : 'border-stone-300 bg-white hover:border-stone-400 dark:border-stone-600 dark:bg-stone-900 dark:hover:border-stone-500',
           )}
         >
           {checked && (

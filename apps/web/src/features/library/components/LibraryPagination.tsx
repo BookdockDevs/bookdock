@@ -8,6 +8,7 @@ interface LibraryPaginationProps {
   totalPages: number
   totalBooks: number
   onPageChange: (page: number) => void
+  onPrefetchPage?: (page: number) => void
   disabled?: boolean
   selectionActive?: boolean
 }
@@ -17,6 +18,7 @@ export default function LibraryPagination({
   totalPages,
   totalBooks,
   onPageChange,
+  onPrefetchPage,
   disabled = false,
   selectionActive = false,
 }: LibraryPaginationProps) {
@@ -130,6 +132,12 @@ export default function LibraryPagination({
 
   const isAwake = isHovered || isNearBottom || isJumping
 
+  function prefetch(targetPage: number) {
+    if (disabled || !onPrefetchPage) return
+    if (targetPage < 1 || targetPage > totalPages || targetPage === currentPage) return
+    onPrefetchPage(targetPage)
+  }
+
   return (
     <div
       className={cn(
@@ -207,6 +215,8 @@ export default function LibraryPagination({
               type="button"
               disabled={disabled || currentPage <= 1}
               onClick={() => onPageChange(currentPage - 1)}
+              onMouseEnter={() => prefetch(currentPage - 1)}
+              onFocus={() => prefetch(currentPage - 1)}
               aria-label={_('library.previousPage')}
               title={_('library.previousPage')}
               className={cn(
@@ -227,15 +237,21 @@ export default function LibraryPagination({
                 if (item === 'ellipsis-prev' || item === 'ellipsis-next') {
                   const which = item === 'ellipsis-prev' ? 'prev' : 'next'
                   const isHoveredWhich = hoveredEllipsis === which
+                  const jumpPage = which === 'prev' ? Math.max(1, currentPage - 5) : Math.min(totalPages, currentPage + 5)
                   return (
                     <button
                       key={item}
                       type="button"
+                      disabled={disabled}
                       aria-label={which === 'prev' ? _('library.jumpBackward') : _('library.jumpForward')}
                       title={which === 'prev' ? _('library.jumpBackward') : _('library.jumpForward')}
-                      onMouseEnter={() => setHoveredEllipsis(which)}
+                      onMouseEnter={() => {
+                        setHoveredEllipsis(which)
+                        prefetch(jumpPage)
+                      }}
+                      onFocus={() => prefetch(jumpPage)}
                       onMouseLeave={() => setHoveredEllipsis(null)}
-                      onClick={() => onPageChange(which === 'prev' ? Math.max(1, currentPage - 5) : Math.min(totalPages, currentPage + 5))}
+                      onClick={() => onPageChange(jumpPage)}
                       onDoubleClick={() => {
                         setIsJumping(true)
                         setJumpInputValue(String(currentPage))
@@ -275,6 +291,8 @@ export default function LibraryPagination({
                     aria-label={_('library.pageNumber', { page })}
                     aria-current={isActive ? 'page' : undefined}
                     disabled={disabled}
+                    onMouseEnter={() => prefetch(page)}
+                    onFocus={() => prefetch(page)}
                     onClick={() => {
                       if (isActive) {
                         setIsJumping(true)
@@ -306,6 +324,8 @@ export default function LibraryPagination({
               type="button"
               disabled={disabled || currentPage >= totalPages}
               onClick={() => onPageChange(currentPage + 1)}
+              onMouseEnter={() => prefetch(currentPage + 1)}
+              onFocus={() => prefetch(currentPage + 1)}
               aria-label={_('library.nextPage')}
               title={_('library.nextPage')}
               className={cn(

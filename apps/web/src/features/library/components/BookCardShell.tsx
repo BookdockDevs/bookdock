@@ -50,6 +50,7 @@ interface BookCardShellProps {
   infoFooter?: ReactNode
   /** The overflow menu, anchored by the row that owns it. */
   menu?: ReactNode
+  menuOpen?: boolean
   onContextMenu?: (e: React.MouseEvent) => void
   className?: string
 }
@@ -68,6 +69,7 @@ export default function BookCardShell({
   coverBadge,
   infoFooter,
   menu,
+  menuOpen = false,
   onContextMenu,
   className,
 }: BookCardShellProps) {
@@ -106,7 +108,12 @@ export default function BookCardShell({
       <div
         className={cn(
           'relative rounded-xl transition-all duration-200 ease-out',
-          selectionActive ? '' : 'group-hover:-translate-y-1.5 group-hover:shadow-xl group-hover:shadow-stone-900/15 dark:group-hover:shadow-black/50',
+          selectionActive
+            ? ''
+            : cn(
+                'group-hover:-translate-y-1.5 group-hover:shadow-xl group-hover:shadow-stone-900/15 dark:group-hover:shadow-black/50',
+                menuOpen && '-translate-y-1.5 shadow-xl shadow-stone-900/15 dark:shadow-black/50',
+              ),
         )}
       >
         <div className={cn('rounded-xl', trashCard && 'opacity-80 grayscale-[60%]')}>
@@ -116,7 +123,16 @@ export default function BookCardShell({
         {!selectionActive && pinAffordance}
         {selected && <SelectedRing />}
         {selectable && selectionActive && <SelectionCheckOverlay selected={selected} />}
-        {showMenu && <div className="absolute right-1.5 top-1.5 z-10 transition-opacity duration-150 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">{menu}</div>}
+        {showMenu && (
+          <div
+            className={cn(
+              'absolute right-1.5 top-1.5 z-10 opacity-100 transition-opacity duration-150 md:group-hover:opacity-100 md:focus-within:opacity-100',
+              menuOpen ? 'md:opacity-100' : 'md:opacity-0',
+            )}
+          >
+            {menu}
+          </div>
+        )}
         {coverOverlay}
         {coverBadge && (
           <div className="absolute bottom-1.5 left-1.5 z-10 flex items-center gap-1">

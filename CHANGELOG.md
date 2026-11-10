@@ -2,6 +2,24 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Support selecting and dropping multiple ZIP packages at once when adding personal metadata sources in Settings → Integrations, with per-package previews, sequential installation progress, and partial-failure retention.
+
+### Changed
+
+- Library pagination prefetches target pages on hover or focus, dims the current list while loading the next page, and triggers the fade-in transition once the target page data arrives.
+- Book cards and list rows keep their hover highlight, overflow button, pin indicator, and device badge visible while their context menu is open; the device badge now follows the same narrow-screen visibility rule as the menu button.
+- Password and secret inputs hide the visibility toggle while empty, suppress required validation errors when blurring an untouched empty field, and hide Edge's duplicate native password reveal button; the login username input also shows invalid border styling consistently.
+- The Add Source dialog in Settings → Integrations remembers the last used installation mode (GitHub repository or ZIP package) and keeps the dropzone fixed above the queued file list.
+
+### Fixed
+
+- Fixed dark-mode styling regressions caused by invalid `stone-750` / `stone-850` Tailwind classes on secondary buttons (white-on-white hover state), unchecked checkboxes, taxonomy charts, and empty year-heatmap cells.
+- Fixed a brief white flash when refreshing the app in dark mode by applying the initial theme class, color scheme, background color, and boot loading indicator in `index.html` before React mounts.
+
 ## [0.8.0] - 2026-11-11
 
 ### Highlights
@@ -1094,6 +1112,24 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [Unreleased]
+
+#### 新增
+
+- 「设置 → 集成」添加个人元数据源时支持一次性多选或拖入多个 ZIP 扩展包，逐包展示图标与名称预览、安装状态，并在部分安装失败时保留失败项以便重试或移除。
+
+#### 优化
+
+- 书库分页按钮在鼠标悬停或聚焦时提前预取目标页，翻页加载期间将当前列表做半透明过渡并在目标页数据到达后再触发淡入切换。
+- 打开书籍卡片或列表行的右键／更多菜单时，保持卡片浮起、行高亮、菜单按钮、置顶标与本机书籍标识可见；本机标识同步对齐菜单按钮在窄屏下的默认显示规则。
+- 密码与密钥输入框在未输入内容时隐藏显示／隐藏眼睛图标，仅聚焦空框并移开焦点时不再误报必填错误，屏蔽 Edge 浏览器自带的重复密码显示按钮，并为登录页用户名补齐校验错误边框样式。
+- 「设置 → 集成」的「添加来源」弹窗会记住上次使用的安装方式（GitHub 仓库或 ZIP 扩展包），并将拖放投递区固定在已选包列表上方。
+
+#### 修复
+
+- 修复多处使用不存在的 Tailwind `stone-750` / `stone-850` 色阶导致的夜间主题异常，包括次要按钮悬停变白字看不清、未勾选复选框底色发白、统计分布图与年度热力图空格子在深色下显示亮色背景的问题。
+- 修复深色模式下刷新页面瞬间闪现白屏再进入加载页的问题，在 React 挂载前通过 `index.html` 同步应用主题类名、配色方案、首屏背景色与启动加载图标。
 
 ### [0.8.0] - 2026-11-11
 

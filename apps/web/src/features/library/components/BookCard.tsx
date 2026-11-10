@@ -3,6 +3,7 @@ import { memo } from 'react'
 import type { ClientLibraryBookView, GridCardField } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { cn } from '@/lib/utils'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { isDeviceBook } from '@/features/reading-data/book-source'
@@ -72,7 +73,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
         selectionActive={selectionActive}
         onToggleSelect={onToggleSelect}
         pinAffordance={book.pinnedAt ? (
-          <div className="absolute left-1.5 top-1.5 z-10 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100">
+          <div className={cn('absolute left-1.5 top-1.5 z-10 transition-opacity duration-150 md:group-hover:opacity-100', menu.open ? 'md:opacity-100' : 'md:opacity-0')}>
             <UnpinButton
               bookId={book.id}
               ref={book.ref}
@@ -102,7 +103,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
         coverBadge={!trashCard && (isHiddenBook || (!selectionActive && isLocalBook)) ? (
           <>
             {isHiddenBook && <HiddenIndicator kind="private" overlay title={hiddenCause ? _(hiddenCause.hintKey, hiddenCause.hintParams) : undefined} />}
-            {!selectionActive && isLocalBook && <DeviceBookIndicator overlay />}
+            {!selectionActive && isLocalBook && <DeviceBookIndicator overlay menuOpen={showMenu && menu.open} />}
           </>
         ) : undefined}
         infoFooter={book.sourceUnavailable ? (
@@ -112,6 +113,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
             </p>
           </div>
         ) : undefined}
+        menuOpen={showMenu && menu.open}
         menu={showMenu ? (
           <button
             ref={menu.btnRef}

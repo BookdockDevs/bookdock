@@ -210,4 +210,29 @@ describe('CatalogListRow', () => {
     fireEvent.click(screen.getByText('显示作品'))
     expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({ patch: { hidden: false } }), expect.any(Object))
   })
+
+  it('keeps the row hover background and menu affordance visible while its context menu is open', () => {
+    renderRow(work({ pinnedAt: 99 }), { canManage: true })
+    const rowLink = screen.getByText('City Book').closest('a') as HTMLElement
+    const menuBtnWrapper = screen.getByLabelText('更多操作').parentElement as HTMLElement
+    const pinBtn = screen.getByLabelText('取消置顶')
+
+    expect(rowLink.className).not.toContain(' bg-white shadow-sm')
+    expect(menuBtnWrapper.className).toContain('md:opacity-0')
+    expect(pinBtn.className).toContain('md:opacity-0')
+
+    fireEvent.contextMenu(screen.getByText('City Book'))
+
+    expect(rowLink.className).toContain('bg-white shadow-sm')
+    expect(menuBtnWrapper.className).toContain('md:opacity-100')
+    expect(menuBtnWrapper.className).not.toContain('md:opacity-0')
+    expect(pinBtn.className).toContain('md:opacity-100')
+    expect(pinBtn.className).not.toContain('md:opacity-0')
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(rowLink.className).not.toContain(' bg-white shadow-sm')
+    expect(menuBtnWrapper.className).toContain('md:opacity-0')
+    expect(pinBtn.className).toContain('md:opacity-0')
+  })
 })

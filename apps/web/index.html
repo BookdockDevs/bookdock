@@ -2,13 +2,80 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <meta name="color-scheme" content="light dark" />
     <link id="bookdock-favicon" rel="icon" type="image/svg+xml" href="/favicon.svg?v=5" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="preload" href="/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin />
     <title>书坞</title>
+    <script>
+      (function () {
+        try {
+          var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var root = document.documentElement;
+          root.classList.toggle('dark', dark);
+          root.style.colorScheme = dark ? 'dark' : 'light';
+          var favicon = document.getElementById('bookdock-favicon');
+          if (favicon) favicon.href = dark ? '/favicon-dark.svg?v=1' : '/favicon.svg?v=5';
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      html, body { margin: 0; background-color: #fafaf9; }
+      html.dark, html.dark body { background-color: #0c0a09; }
+      @media (prefers-color-scheme: dark) {
+        html, body { background-color: #0c0a09; }
+      }
+      #bd-boot-loader {
+        display: flex;
+        min-height: 100vh;
+        align-items: center;
+        justify-content: center;
+      }
+      #bd-boot-loader-box {
+        display: flex;
+        height: 3rem;
+        width: 3rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: 1rem;
+        background-color: #ffffff;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        color: #44403c;
+      }
+      html.dark #bd-boot-loader-box {
+        background-color: #1c1917;
+        color: #e7e5e4;
+      }
+      @media (prefers-color-scheme: dark) {
+        #bd-boot-loader-box {
+          background-color: #1c1917;
+          color: #e7e5e4;
+        }
+      }
+      #bd-boot-loader-svg {
+        height: 1.5rem;
+        width: 1.5rem;
+        animation: bd-boot-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+      @keyframes bd-boot-pulse {
+        50% { opacity: 0.5; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #bd-boot-loader-svg { animation: none; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="bd-boot-loader" role="status" aria-busy="true" aria-label="加载中…">
+        <div id="bd-boot-loader-box" aria-hidden="true">
+          <svg id="bd-boot-loader-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
+            <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
+          </svg>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

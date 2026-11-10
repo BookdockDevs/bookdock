@@ -101,7 +101,7 @@ export default function CatalogListRow({
                     patch: { pinned: false },
                   }, { onError: (error) => notify.error(getUserErrorNotification(error, 'library.catalogPinFailed')) })
                 }}
-                className="shrink-0 rounded-md p-1 text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 md:opacity-0 md:group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+                className={`shrink-0 rounded-md p-1 text-stone-400 transition-all hover:bg-stone-200/70 hover:text-stone-700 md:group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-stone-700 dark:hover:text-stone-200 ${menu.open ? 'md:opacity-100' : 'md:opacity-0'}`}
                 aria-label={_('library.unpin')}
                 title={_('library.unpin')}
               >
@@ -109,7 +109,7 @@ export default function CatalogListRow({
               </button>
             ) : (
               <span
-                className="shrink-0 rounded-md p-1 text-stone-400 md:opacity-0 md:group-hover:opacity-100 dark:text-stone-500 cursor-default"
+                className={`shrink-0 rounded-md p-1 text-stone-400 md:group-hover:opacity-100 dark:text-stone-500 cursor-default ${menu.open ? 'md:opacity-100' : 'md:opacity-0'}`}
                 aria-label={_('library.pin')}
                 title={_('library.pin')}
               >
@@ -142,7 +142,7 @@ export default function CatalogListRow({
       {selectionActive ? (
         <SelectionCheck selected={selected} />
       ) : (
-        <div className="flex w-7 shrink-0 items-center justify-center opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+        <div className={`flex w-7 shrink-0 items-center justify-center opacity-100 transition-opacity md:group-hover:opacity-100 ${menu.open ? 'md:opacity-100' : 'md:opacity-0'}`}>
           <button
             ref={menu.btnRef}
             type="button"
@@ -203,13 +203,13 @@ export default function CatalogListRow({
             }
             warmReader({ bookId: first.bookVersionId, isLocal: false })
           }}
-          className={`group flex w-full items-center gap-3.5 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
+          className={`group flex w-full items-center gap-3.5 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${menu.open && !selected ? 'bg-white shadow-sm dark:bg-stone-900' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
         >
           {body}
         </Link>
       ) : (
         <div
-          className={`group flex w-full items-center gap-3.5 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
+          className={`group flex w-full items-center gap-3.5 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white hover:shadow-sm dark:hover:bg-stone-900 ${selectionActive ? 'cursor-pointer' : ''} ${menu.open && !selected ? 'bg-white shadow-sm dark:bg-stone-900' : ''} ${selected ? 'bg-white shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-700' : ''}`}
         >
           {body}
         </div>
