@@ -206,6 +206,20 @@ jobs:
           # pnpm's symlinked store layout.
           node scripts/verify-bundle-imports.mjs "$ARTIFACT_DIR/bookdock-${version}-linux-x64-musl.zip"
 
+      - name: Build and verify browser extension
+        run: |
+          set -euo pipefail
+          pnpm --filter @bookdock/extension typecheck
+          pnpm --filter @bookdock/extension test
+          pnpm build:extension
+          node scripts/verify-extension-package.mjs
+          (
+            cd apps/extension/dist
+            for archive in bookdock-extension-*.zip; do
+              sha256sum "$archive" > "${archive}.sha256"
+            done
+          )
+
       - name: Build and push image
         uses: docker/build-push-action@v7
         with:
@@ -251,4 +265,15 @@ jobs:
             "$ARTIFACT_DIR/release.json" \
             "$ARTIFACT_DIR"/bookdock-*.zip \
             "$ARTIFACT_DIR"/bookdock-*.zip.sha256 \
+            --clobber
+
+      - name: Upload extension artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            apps/extension/dist/bookdock-extension-*.zip \
+            apps/extension/dist/bookdock-extension-*.zip.sha256 \
             --clobber

@@ -66,6 +66,22 @@ The upload interface runs in its own tab rather than an ephemeral popup or modal
 
 ---
 
+## Installing from GitHub Releases
+
+Download the pre-built extension archive from [GitHub Releases](https://github.com/BookdockDevs/bookdock/releases):
+
+- **Chrome / Edge / Brave** (`bookdock-extension-chrome-<version>.zip`):
+  1. Extract the `.zip` archive to a folder on your computer.
+  2. Open `chrome://extensions` (or `edge://extensions`) and enable **Developer mode**.
+  3. Click **Load unpacked** and select the extracted folder (the directory containing `manifest.json`).
+  4. When updating later, extract the new release into that folder and click **Reload** on the extension card.
+
+- **Firefox** (`bookdock-extension-firefox-<version>.zip`):
+  - Standard release builds of Firefox require Mozilla add-on signatures for permanent installation.
+  - Extract the `.zip` archive, open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on...**, and select `manifest.json` inside the extracted folder (remains active until Firefox restarts; Developer Edition, Nightly, or ESR builds allow unsigned installation when signature checks are disabled).
+
+---
+
 ## Development & Building
 
 ### Prerequisites
@@ -144,10 +160,11 @@ node scripts/verify-extension-drop.mjs
 
 The extension requests only minimal permissions necessary for core operation:
 
-- `storage`: Preserves instance configuration, preferences, and offline upload queues locally in `chrome.storage.local`.
 - `scripting`: Activates drop listeners on existing open tabs immediately upon connection without requiring manual page refreshes.
 - `alarms`: Automatically purges expired temporary chunks and abandoned upload tasks.
-- `<all_urls>` / Host permissions: Enables drag detection on arbitrary websites and communication with self-hosted instance endpoints.
+- `http://*/*` and `https://*/*` (`host_permissions`): Enables drag detection on arbitrary HTTP/HTTPS sites and uploads to user-configured self-hosted instances.
+
+Connection settings, preferences, and temporary upload chunks are stored locally in the extension's IndexedDB (`bookdock-extension`), so no `storage` permission is required.
 
 **What the extension does NOT do**:
 - No browser history, tabs, or browsing activity collection.

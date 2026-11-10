@@ -14,7 +14,8 @@ Organize EPUB and TXT books, read them online, and keep your highlights, notes, 
 
 ![Web](https://img.shields.io/badge/Web-4285F4?style=flat-square&logo=googlechrome&logoColor=white) ![Android](https://img.shields.io/badge/Android-3DDC84?style=flat-square&logo=android&logoColor=white) ![iOS](https://img.shields.io/badge/iOS-555555?style=flat-square&logo=apple&logoColor=white) ![Kindle](https://img.shields.io/badge/Kindle-555555?style=flat-square)
 
-- **Web**: Use Bookdock in a browser on a computer, phone, or tablet.
+- **Web**: Use Bookdock in a browser on a computer, phone, or tablet, including offline-capable device books stored in your browser.
+- **Browser extension**: Install the standalone Chrome, Edge, or Firefox extension to drag and drop or pick EPUB/TXT files from any web page straight into your self-hosted library (see [the extension guide](./apps/extension/README.md)).
 - **Android / iOS**: Access your library with a reader that supports Legado book sources.
 - **Kindle and other e-ink devices**: Use a lightweight reading interface designed for e-ink screens.
 
@@ -22,7 +23,9 @@ Organize EPUB and TXT books, read them online, and keep your highlights, notes, 
 
 | Feature | Description |
 | :--- | :--- |
-| **Library management** | Upload EPUB and TXT books, organize them with shelves, categories, and tags, search your collection, and manage books in batches. |
+| **Library management** | Upload EPUB and TXT books, organize them with shelves, categories, and tags, filter by source, search your collection, and manage books in batches. |
+| **Device books** | Save and read EPUB and TXT books locally in your browser without uploading to the server, with offline/signed-out support and device storage overview. |
+| **Browser extension** | Deliver EPUB and TXT files from any ordinary web page or upload tab via standalone Chrome/Edge and Firefox release packages. |
 | **Book metadata** | Search built-in or personally installed sources to update book information and covers. |
 | **Reading** | Customize fonts, themes, layout, and page turns; use reading presets, navigate with the table of contents and bookmarks, search the full book, and convert between Simplified and Traditional Chinese. |
 | **Fonts and media** | Use built-in fonts or upload your own, and play audio and video embedded in EPUB books. |

@@ -15,9 +15,12 @@ export interface WarmReaderEntryOptions {
 }
 
 export function preloadReaderRouteModule(isLocal: boolean): void {
+  // Skip lazy chunk preloads under Vitest so tests that navigate and exit
+  // immediately do not race Vite environment teardown mid-import.
+  if (import.meta.env.MODE === 'test') return
   void (isLocal
     ? import('@/features/local-library/LocalReaderRoute')
-    : import('@/features/reader/Reader'))
+    : import('@/features/reader/Reader')).catch(() => undefined)
 }
 
 /**

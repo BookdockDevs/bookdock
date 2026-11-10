@@ -2,25 +2,33 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.0] - 2026-11-11
+
+### Highlights
+
+- Support device books saved locally in the browser without uploading them to the server, sharing the same unified library, reader, editor, trash, and reading archive workflows even offline or signed out.
+- Added the standalone Bookdock browser extension (v0.1.0) to deliver EPUB and TXT files from any web page to your self-hosted library.
 
 ### Added
 
 - Support device books (EPUB and TXT) saved on this device in the browser without uploading them to the server. Device books share the same unified library, reader, editor, trash, and reading archive workflows alongside server books — including reading progress, notes, timers, metadata/content editing, and merged statistics — and remain usable offline or without signing in.
 - Choose whether newly added books are saved to this device or uploaded to the server, with a per-device default add destination in Settings (automatically defaulting to this device when signed out or server uploads are disabled).
 - Filter the unified library by source (All / Device / Server), hover over cards or list rows to see a device indicator badge, and view browser device storage usage (device books, book files, and browser total usage) under Settings → General.
+- Added the standalone Bookdock browser extension (v0.1.0, packaged as Chrome/Edge and Firefox ZIP archives in release assets). Connect an access token with upload permissions, drop EPUB or TXT files onto any ordinary web page, or pick multiple files from the extension toolbar to upload directly to your private library with transfer progress, duplicate recognition, and retry controls.
 
 ### Changed
 
 - Connected-account capabilities adapt cleanly to device books: signed-in users can translate selected text from device books with server AI without uploading the file, while online-only services (such as server dictionaries, speech gateways, and metadata scraping) clearly note when signing in is required without interrupting reading on this device.
+- Opening a book from library shelves, detail dialogs, upload results, or profile showcases pre-warms reader source resolution and book metadata, and keeps the pinned reader toolbar and remembered sidebar mounted immediately instead of covering the screen with a full-page loader.
+- Refined the reader statistics loading placeholder into a card-shaped skeleton matching the overview layout.
 - Settings tabs preserve independent scroll positions when switching sections.
 - Metadata lookup preloads installed personal metadata sources in the dropdown and keeps search results visible with an inline applying indicator instead of resetting the list to a loading state when applying.
-- Pre-warm reader source resolution and book metadata when opening a book from shelves, detail dialogs, upload results, or profile showcases, keep the pinned reader sidebar mounted immediately while the book loads instead of showing a full-page loader, and refine the reader statistics loading placeholder into a card-shaped skeleton.
 
 ### Fixed
 
-- Fixed the reader table of contents briefly flashing at the top before jumping to the active chapter on cold open.
-- Fixed the reader sidebar table of contents and remembered AI conversation panel briefly appearing blank or flashing the empty chat state while loading, and aligned device book session loading with the reader background theme.
+- Fixed the reader sidebar table of contents briefly flashing at the top or appearing blank while initial chapter positioning settles.
+- Fixed remembered AI conversations briefly flashing the empty chat state while restoring historical threads, and aligned device book session loading with the reader background theme.
+- Fixed explicit bearer tokens being overridden by browser session cookies on the same host, so extension and API clients targeting one local instance are not confused with another instance's login session.
 
 ## [0.7.7] - 2026-11-06
 
@@ -1087,25 +1095,33 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [Unreleased]
+### [0.8.0] - 2026-11-11
+
+#### 亮点
+
+- 支持在当前设备浏览器中保存和阅读 EPUB / TXT 本机书籍，无需上传服务器，并与服务器书籍共用同一套书架、阅读器、编辑、回收站与阅读档案工作流，离线和未登录下均可使用。
+- 新增独立的 Bookdock 浏览器扩展（v0.1.0），可在任意网页拖拽或从工具栏选择 EPUB / TXT 一键推送到自建书坞私人书库。
 
 #### 新增
 
 - 支持在当前设备（浏览器）保存和阅读 EPUB / TXT 本机书籍，无需上传到服务器。本机书籍与服务器书籍无缝融入同一套书架、阅读器、编辑、回收站与阅读档案/统计工作流，离线或访客模式下均可完整使用。
 - 添加书籍时支持选择「存到本机」或「上传到服务器」，并可在设置中配置设备级的默认添加位置（未登录或禁止服务端上传时自动默认存到本机）。
 - 统一书架支持按来源筛选（全部 / 本机 / 服务器），悬停卡片或列表行可显示本机标识，并在「设置 → 常规」查看本机存储占用（本机书籍数、书籍文件大小与浏览器总占用）。
+- 新增独立的 Bookdock 浏览器扩展（v0.1.0，随版本附件提供 Chrome/Edge 与 Firefox 安装包）：配置勾选上传权限的访问令牌后，可在任意普通网页拖入或通过扩展工具栏批量选取 EPUB / TXT 推送到私人书库，支持分片进度、重复书籍识别与失败重试。
 
 #### 优化
 
 - 账号联动能力按需适配本机书籍：已登录用户可直接对本机书籍中的选中文本使用服务端 AI 划词翻译而无需上传文件；在线词典、语音网关、元数据刮削等纯联网功能在离线或未登录时给出清晰提示，不影响本机阅读。
+- 从书架、书籍详情、上传完成入口或个人展示页打开书籍时预热来源解析与元数据，并在书籍加载期间直接保持常驻工具栏与已打开的阅读器侧边栏挂载，不再先显示整页加载界面。
+- 统计侧页的加载占位细化为贴合概览卡片布局的结构骨架。
 - 「设置」页切换各分区时独立记住各自的滚动位置。
 - 元数据刮削弹窗提前加载已安装的个人源，点击「应用」时仅在按钮展示应用状态，不再将搜索结果列表切回加载态。
-- 从书架、书籍详情、上传完成入口或个人展示页打开书籍时预热来源解析与元数据，书籍加载期间直接保持常驻阅读器侧边栏挂载而不再退回整页加载；统计侧页加载占位细化为卡片结构骨架。
 
 #### 修复
 
-- 修复冷启动打开阅读器时目录先瞬间闪在顶部再跳回当前章节的问题。
-- 修复阅读器目录侧页与已记住的 AI 对话在加载完成前先短暂显示空白或闪出「开始对话」空态的问题，并将本机书籍会话打开阶段的加载界面统一为阅读器主题背景。
+- 修复打开阅读器时目录先瞬间闪在顶部、或在章节定位完成前短暂显示空白的问题。
+- 修复已记住的 AI 对话在恢复历史消息前先闪出「开始对话」空态的问题，并将本机书籍会话打开阶段的加载界面统一为阅读器主题背景。
+- 修复同时存在浏览器会话 Cookie 时覆盖显式 Bearer 访问令牌的问题，避免同一主机上不同端口或实例之间的登录态互相干扰。
 
 ### [0.7.7] - 2026-11-06
 

@@ -14,7 +14,8 @@
 
 ![Web](https://img.shields.io/badge/Web-4285F4?style=flat-square&logo=googlechrome&logoColor=white) ![Android](https://img.shields.io/badge/Android-3DDC84?style=flat-square&logo=android&logoColor=white) ![iOS](https://img.shields.io/badge/iOS-555555?style=flat-square&logo=apple&logoColor=white) ![Kindle](https://img.shields.io/badge/Kindle-555555?style=flat-square)
 
-- **Web**：在电脑、手机和平板的浏览器中使用。
+- **Web**：在电脑、手机和平板的浏览器中使用，支持保存和离线阅读本机书籍。
+- **浏览器扩展**：在 Chrome、Edge 和 Firefox 中安装后，可从任意网页拖拽或选取 EPUB / TXT 一键推送到自建书坞（详见 [扩展说明](./apps/extension/README.md)）。
 - **Android / iOS**：通过支持「阅读」书源的阅读器访问书库。
 - **Kindle 等墨水屏设备**：使用专为墨水屏优化的轻量阅读界面。
 
@@ -23,7 +24,9 @@
 
 | 功能           | 说明                                                                                 |
 | :------------- | :----------------------------------------------------------------------------------- |
-| **书库管理**   | 上传 EPUB 和 TXT，通过书架、分类和标签整理藏书，搜索书籍并批量管理。                 |
+| **书库管理**   | 上传 EPUB 和 TXT，通过书架、分类和标签整理藏书，按来源筛选，搜索书籍并批量管理。     |
+| **本机书籍**   | 在浏览器本地保存和阅读 EPUB / TXT 而不上传服务器，离线与未登录也可用，支持统一书架和存储空间查看。 |
+| **浏览器扩展** | 通过独立发布的 Chrome / Edge / Firefox 扩展，在网页上拖拽投送或批量上传书籍到私人书库。 |
 | **书籍信息** | 从内置或个人安装的信息源搜索并更新书籍信息和封面。 |
 | **阅读体验**   | 自定义字体、主题、排版和翻页方式，使用阅读预设、目录、书签、全书搜索和简繁转换。 |
 | **字体与媒体** | 使用内置字体或上传自定义字体，播放 EPUB 中的音频和视频。 |
