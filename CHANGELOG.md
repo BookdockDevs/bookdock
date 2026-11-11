@@ -2,32 +2,33 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.1] - 2026-11-12
 
 ### Added
 
-- Migrate device books to your personal server library via **Upload** in the card or list context menu. Migration performs a duplicate check and transfers the book file, cover, metadata, shelf/category/tag placement, read status, progress/coverage, annotations (including idea images), private review, reading records, reader settings, and replacement rules in a single transaction before removing the local device copy, blocking while active or unsettled reading timers exist.
-- Cache readable server books in the browser via **Cache** in the card or list context menu for fast local rendering and offline reading/writing. The menu button tracks progress with an inline ring (**Caching** → **Clear cache**), highlights server content updates with a one-time reader notice and **Update cache**, queues offline progress, annotation edits (with images), and timed reading captures, and syncs queued changes automatically upon reconnection or returning to the page.
-- Support selecting and dropping multiple ZIP packages at once when adding personal metadata sources in Settings → Integrations, with per-package previews, sequential installation progress, and partial-failure retention.
-- Support AI assistant conversations for device books saved in the browser: signed-in users can open the reader AI panel or ask about selections from the selection toolbar, quick commands, and idea overlay without uploading the book file. Conversations persist per book in the browser and stream responses through your configured server AI service (server-side book and annotation tools are omitted in device-book chat).
+- Migrate device books to your personal server library via "Upload" in the book card or list menu. Migration checks for duplicates (offering to remove redundant local copies), transfers the book file, cover, metadata, shelves, categories, tags, reading status and progress, notes (including images), private review, reading records, reader settings, and replacement rules, and removes the local copy once saved; active or unsettled timers must be finished first.
+- Cache readable server books in your browser via "Cache" in the book card or list menu for fast local opening and offline reading. The menu tracks progress inline, lets you clear or update the cache, shows a one-time notice in the reader when server content changes, and queues offline progress, annotation changes (including images), and timed reading records for automatic sync once reconnected or when returning to the app.
+- Support selecting or dropping multiple ZIP packages at once when installing personal metadata sources in Settings → Integrations, with per-package previews, sequential progress, and failure retention for retry.
+- Support AI assistant conversations for device books: signed-in users can open the reader AI panel or ask about selections from the selection toolbar, quick commands, and idea notes without uploading the book file. Threads are saved per book in the browser and stream replies from your configured server AI service (without server-side book or note lookup tools).
 
 ### Changed
 
-- Library pagination prefetches target pages on hover or focus, dims the current list while loading the next page, and triggers the fade-in transition once the target page data arrives.
-- Book cards and list rows keep their hover highlight, overflow button, pin indicator, and device badge visible while their context menu is open; the device badge now follows the same narrow-screen visibility rule as the menu button.
-- Password and secret inputs hide the visibility toggle while empty, suppress required validation errors when blurring an untouched empty field, and hide Edge's duplicate native password reveal button; the login username input also shows invalid border styling consistently.
-- The Add Source dialog in Settings → Integrations remembers the last used installation mode (GitHub repository or ZIP package) and keeps the dropzone fixed above the queued file list.
-- Reading Archive Management now supports scoped deletion (**All** / **Time** / **Notes**) alongside import and export for both server and device books: clearing **Time** removes reading sessions, rounds, statistics, and coverage progress while keeping notes and reviews; deleting **Notes** removes highlights, bookmarks, ideas, and reviews (including shared items) while keeping reading time; and **All** clears both. Book files, reading positions, and read statuses are preserved, archive snapshots and import bindings are cleaned up only when no time or notes remain, the detail view only exits when the archive becomes empty, and archive/personal-data copy across the management dialog and book removal prompts is unified around reading time and notes. Book deletion/uncollection with **Also clear my personal data** enabled now removes your shared ideas and reviews for that book as well (leaving it unchecked retains them as before).
-- Unified preference persistence in the Reading Archive Management dialog: in addition to the existing import source, channel, and sort memory, the dialog now remembers the last used top-level tab, import scope, export scope/format (automatically narrowing incompatible formats without overwriting your saved preference), and delete scope, with safe fallbacks for global and WeRead Skill modes.
-- Refined the built-in AI assistant mode prompt and server core prompt to be more concise and direct, and dynamically omit tool-calling and citation-marker instructions when no read-only tools are active (such as device-book chats or chats with all tools disabled).
-- Aligned the AI mode add/edit modal with the reader modal layout and button hierarchy: gave the bottom-left **Restore Defaults** and **Delete** actions consistent bordered buttons with icons, inserted prompt variables at the current cursor position, changed **Restore Defaults** to reset the draft fields directly without a confirmation prompt (hiding the button when already at the default values), and disabled **Save** when no changes have been made.
+- Reading Archive Management now supports scoped deletion (All / Time / Notes) for individual server and device books alongside import and export: deleting Time clears sessions, rounds, statistics, and coverage while preserving notes and reviews; deleting Notes clears highlights, bookmarks, ideas, and reviews (including shared items) while keeping reading time; and All clears both. Book files, reading positions, and read statuses are always preserved, and empty archive snapshots, import bindings, and the archive detail view close only when no time or notes remain.
+- Removing or uncollecting a book from a library with "Also clear my personal data" enabled now deletes your shared ideas and reviews for that book alongside private data; leaving it unchecked retains them as before.
+- Reading Archive Management remembers your last used tab, import scope, export scope and format (automatically narrowing incompatible formats without overwriting your saved choice), and delete scope alongside existing source, channel, and sort preferences, with safe fallbacks for global and WeRead Skill views. Archive and personal-data wording is also unified around reading time and notes.
+- Book cards and list rows keep their hover highlight, overflow button, pin indicator, and device badge visible while their context menu is open, and the device badge follows the same narrow-screen visibility rule as the menu button.
+- Library pagination prefetches target pages on hover or focus, dims the current list while loading, and fades in the new page once data arrives.
+- Password and secret inputs hide their visibility toggle while empty, suppress Edge's duplicate native reveal icon, and avoid showing required-field errors when blurring an untouched empty input; the login username field now shows matching invalid-border styling.
+- The Add Source dialog in Settings → Integrations remembers your last used installation mode (GitHub repository or ZIP package) and keeps the dropzone fixed above the queued file list.
+- Streamlined the built-in Assistant mode prompt and system instructions to reduce unnecessary refusals when no lookup tools apply, automatically omitting tool-use and citation instructions during device-book chats or when all tools are turned off.
+- Refined the AI mode add and edit dialog to match the reader dialog layout: "Restore Defaults" and "Delete" use bordered icon buttons, prompt variables insert at the cursor, "Restore Defaults" resets the draft directly without a confirmation prompt (and hides when already at defaults), and "Save" stays disabled until changes are made and required fields are filled.
 - Aligned the reader Data sidebar's empty state and copy with the Notes and AI sidebars, hiding the empty overview card when no reading records exist, and refined the reading-completion estimation prompt for smoother wording.
 
 ### Fixed
 
-- Fixed dark-mode styling regressions caused by invalid `stone-750` / `stone-850` Tailwind classes on secondary buttons (white-on-white hover state), unchecked checkboxes, taxonomy charts, and empty year-heatmap cells.
-- Fixed a brief white flash when refreshing the app in dark mode by applying the initial theme class, color scheme, background color, and boot loading indicator in `index.html` before React mounts.
-- Fixed the frosted-glass background on the copy/download cover buttons in the book detail header lagging behind the icons when hovering over the cover, by separating the gradient scrim from the button container and sliding the buttons in without an intermediate `opacity` transition blocking `backdrop-filter`.
+- Fixed dark-mode styling regressions on secondary button hover states, unchecked checkboxes, taxonomy charts, and empty year-heatmap cells.
+- Fixed a brief white flash before the loading screen appears when refreshing the app in dark mode.
+- Fixed the frosted-glass background on the copy and download cover buttons in book details appearing slightly after the icons on hover.
 - Fixed single-book detail views in the Reading Archive inheriting the Overview's active date-range filter, which previously hid the circular progress overview card and scoped book data and notes unexpectedly.
 - Fixed placeholder cover colors differing between the Reading Archive sidebar, period book lists, statistics lists, and single-book detail headers by passing the same cover palette identity and custom palette choice across all views.
 
@@ -1124,32 +1125,33 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [Unreleased]
+### [0.8.1] - 2026-11-12
 
 #### 新增
 
-- 本机书籍卡片与列表行菜单新增 **「上传」**，支持将其一键迁移至服务器私人书库：先执行服务端查重并展示上传进度圆环，再在单次事务中完整迁移书籍文件、封面、元数据、书架／分类／标签归属、阅读状态与进度覆盖、笔记与想法配图、个人书评、阅读记录、阅读器偏好与文本替换规则，确认成功后删除本机副本；若当前存在未结束或待结算的阅读计时则会先提醒结算并拦截迁移。
-- 服务器可读书籍卡片与列表行菜单新增 **「缓存」** 离线缓存能力：点击后原地切换为带进度圆环的 **「缓存中」**，完成后转为 **「清除缓存」**；已缓存书籍支持本地快速打开与断网下的阅读、进度保存、笔记增删改（含带图想法）及阅读计时，并在联网或回到页面时自动同步待传记录；当服务端内容产生新版本时，在线打开阅读器将弹出一次性更新提醒，菜单按钮自动切换为 **「更新缓存」**。
-- 「设置 → 集成」添加个人元数据源时支持一次性多选或拖入多个 ZIP 扩展包，逐包展示图标与名称预览、安装状态，并在部分安装失败时保留失败项以便重试或移除。
-- 本机书籍支持 AI 阅读助手对话：已登录用户在浏览器中阅读未上传的本机书籍时，也可直接通过侧边栏 AI 面板、划词工具栏、快捷指令与想法浮层发起提问，无需先把书籍上传到服务器；对话记录按书籍保存在本机浏览器中，通过服务端已配置的 AI 服务流式回复（本机书籍对话不启用服务端书籍／笔记检索工具）。
+- 本机书籍卡片与列表行菜单新增「上传」，支持将本机书籍迁移至服务器私人书库：先执行服务端查重（若服务端已存在相同书籍可选择删除多余本机副本），随后完整迁移书籍文件、封面、元数据、书架／分类／标签、阅读状态与进度、笔记与想法配图、个人书评、阅读记录、阅读器偏好及文本替换规则，确认成功后删除本机副本；存在未结束或待结算的阅读计时时会先提示结算。
+- 服务器可读书籍卡片与列表行菜单新增「缓存」离线能力：菜单原地展示缓存进度圆环，并在完成后转为「清除缓存」；已缓存书籍支持本地快速打开、断网阅读、进度保存、笔记增删改（含带图想法）与阅读计时，联网或回到应用时自动同步待传修改；服务端内容更新后，在线打开阅读器将弹出一次性更新提醒，菜单自动切换为「更新缓存」。
+- 「设置 → 集成」添加个人元数据源时支持一次性多选或拖入多个 ZIP 扩展包，逐包预览图标与名称并展示安装进度，部分失败时保留失败项以便重试或移除。
+- 本机书籍支持 AI 阅读助手对话：已登录用户阅读本机书籍时，可直接通过侧边栏 AI 面板、划词工具栏、快捷指令与想法浮层发起提问，无需上传书籍文件；对话记录按书保存在本机浏览器中，由已配置的服务端 AI 服务流式回复（不启用服务端书籍／笔记检索工具）。
 
 #### 优化
 
-- 书库分页按钮在鼠标悬停或聚焦时提前预取目标页，翻页加载期间将当前列表做半透明过渡并在目标页数据到达后再触发淡入切换。
-- 打开书籍卡片或列表行的右键／更多菜单时，保持卡片浮起、行高亮、菜单按钮、置顶标与本机书籍标识可见；本机标识同步对齐菜单按钮在窄屏下的默认显示规则。
-- 密码与密钥输入框在未输入内容时隐藏显示／隐藏眼睛图标，仅聚焦空框并移开焦点时不再误报必填错误，屏蔽 Edge 浏览器自带的重复密码显示按钮，并为登录页用户名补齐校验错误边框样式。
-- 「设置 → 集成」的「添加来源」弹窗会记住上次使用的安装方式（GitHub 仓库或 ZIP 扩展包），并将拖放投递区固定在已选包列表上方。
-- 「阅读档案管理」的删除功能现对齐导入与导出，支持按 **全部 / 时长 / 笔记** 三种范围清理单本书的档案数据（服务端与本机书籍同步支持）：删「时长」仅清空阅读时长、轮次、统计与覆盖进度；删「笔记」清除划线、书签、想法与书评并保留时长；删「全部」则一并清空。操作始终保留书库书籍文件、阅读位置与阅读状态；仅当不再剩余任何时长或笔记时才移除档案快照与导入绑定并退出当前详情页，并同步统一了档案管理与删书清理确认中的文案表达。此外，书架删书或移出收藏时若勾选「同时清理个人数据」，现在也会一并删除该书下自己发布的共享想法与书评（不勾选则继续保留）。
-- 统一补全「阅读档案管理」弹窗的选项记忆：在原有导入来源、渠道与排序记忆的基础上，现一并记住上次使用的顶层标签页、导入范围、导出范围与格式（切换范围导致格式不兼容时自动适配展示而不覆盖原偏好）以及删除范围，并在全局入口或微信读书 Skill 模式下安全回退。
-- 精简默认「助理」人设与核心系统提示词，减少无工具上下文下的冗余拒答，并在未启用任何只读工具（如本机书籍对话或关闭全部工具）时自动省略工具调用与 `[1]` / `[2]` 引用角标规则。
-- 统一阅读器内 AI 模式「添加／编辑模式」弹窗的界面规范与交互细节：左下角「恢复默认」与「删除」改用带图标的统一样式按钮，提示词变量支持在光标处插入；「恢复默认」改为仅当草稿偏离默认值时显示，点击后直接回填默认值而不弹出二次确认框（需点击「保存」生效），并在未修改内容或必填项为空时禁用「保存」。
+- 「阅读档案管理」的删除功能对齐导入与导出，支持按「全部 / 时长 / 笔记」范围清理单本服务端或本机书籍的档案数据：删「时长」仅清空阅读时长、轮次、统计与覆盖进度；删「笔记」清除划线、书签、想法与书评（含共享内容）并保留时长；删「全部」一并清空。书库书籍文件、阅读位置与阅读状态始终保留；仅当不再剩余任何时长或笔记时才清理档案快照与导入绑定，并退出当前详情页。
+- 从书库删除书籍或移出收藏并勾选「同时清理个人数据」时，现会同步清理你为该书发布的共享想法与书评；未勾选时仍予以保留。
+- 补全「阅读档案管理」弹窗的选项记忆：在原有导入来源、渠道与排序记忆的基础上，现一并记住上次使用的顶层标签页、导入范围、导出范围与格式（切换范围导致格式不兼容时自动收窄展示而不覆盖原偏好）及删除范围，并在全局或微信读书 Skill 视图下安全回退；同步统一档案管理与删书清理确认中的文案表达。
+- 打开书籍卡片或列表行的更多菜单时，保持卡片浮起、行高亮、菜单按钮、置顶标与本机书籍标识可见；本机标识在窄屏下的默认显示规则同步对齐菜单按钮。
+- 书库分页按钮在悬停或聚焦时预取目标页，翻页加载期间对当前列表做半透明过渡并在数据到达后淡入切换。
+- 密码与密钥输入框在未输入内容时隐藏显示／隐藏切换按钮，屏蔽 Edge 浏览器重复的原生密码显示图标，仅聚焦空框并移开焦点时不再误报必填错误；登录页用户名输入框补齐校验错误边框样式。
+- 「设置 → 集成」的「添加来源」弹窗记住上次使用的安装方式（GitHub 仓库或 ZIP 扩展包），并将拖放投递区固定在已选扩展包列表上方。
+- 精简默认「助理」模式与系统提示词，减少无工具可用时的冗余拒答；在本机书籍对话或关闭全部工具时，自动省略工具调用与引用角标规则。
+- 优化阅读器 AI「添加／编辑模式」弹窗的布局与交互：「恢复默认」与「删除」改用带边框和图标的统一按钮，提示词变量支持在光标处插入；「恢复默认」仅在草稿与默认值不同时显示，点击后直接回填草稿而不再弹出二次确认（保存后生效），未做修改或必填项为空时禁用「保存」。
 - 统一阅读器「数据」侧边栏的空状态样式与文案，与「笔记」和「AI 助手」侧边栏保持一致，无阅读记录时不再显示空白数据卡片，并优化了单书详情页读完预估不足时的提示文案。
 
 #### 修复
 
-- 修复多处使用不存在的 Tailwind `stone-750` / `stone-850` 色阶导致的夜间主题异常，包括次要按钮悬停变白字看不清、未勾选复选框底色发白、统计分布图与年度热力图空格子在深色下显示亮色背景的问题。
-- 修复深色模式下刷新页面瞬间闪现白屏再进入加载页的问题，在 React 挂载前通过 `index.html` 同步应用主题类名、配色方案、首屏背景色与启动加载图标。
-- 修复书籍详情页鼠标悬停封面时，复制与下载封面图标先出现、毛玻璃模糊背景延后一瞬间才显示的问题：将底部渐变遮罩与按钮栏拆分为独立图层，改用位移滑入且不再对 `backdrop-filter` 的父容器执行 `opacity` 过渡。
+- 修复深色模式下多处样式异常，包括次要按钮悬停发白看不清、未勾选复选框底色过亮，以及分类/标签统计图与年度热力图空格子背景偏亮的问题。
+- 修复深色模式下刷新页面时在进入加载页前短暂闪现白屏的问题。
+- 修复书籍详情页鼠标悬停封面时，复制与下载封面图标先于毛玻璃模糊背景出现的问题。
 - 修复阅读档案「单书详情」意外套用总览顶部时间筛选范围的问题，恢复单书全生涯总览统计与圆环进度卡片展示。
 - 修复阅读档案侧栏、时段书单、统计榜单与单书详情页之间默认封面底色不一致的问题，统一传递封面调色板标识与自定义配色。
 

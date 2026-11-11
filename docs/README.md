@@ -12,9 +12,10 @@ A self-hosted web e-book library. pnpm monorepo — `@bookdock/shared` (contract
 | [Dictionaries](./architecture.md#personal-dictionaries) | MDict imports, personal and instance scope, resource isolation and file ownership |
 | [Selection toolbar](./architecture.md#selection-toolbar-preferences) | Action ordering, visibility and account preference synchronization |
 | [Selection translation](./architecture.md#selection-translation) | AI service selection, streamed results and preference ownership |
-| [Reading data](./architecture.md#reading-ledger-maturity-2026-10-18) | Current reading-history ownership, timing, correction, statistics, transfer, and personal-archive retention boundaries |
+| [Reading data](./architecture.md#reading-ledger-maturity-2026-10-18) | Current reading-history ownership, timing, correction, statistics, transfer, personal-archive retention boundaries, and `all` / `time` / `notes` scoped archive deletion (v0.8.1) |
 | [Device books and the unified shelf](./architecture.md#dual-library-client-foundation) | Device vault storage, source-scoped references, the unified bookshelf direction (v0.8.0), and connected-service boundaries |
 | [Companion extension](./architecture.md#63-companion-browser-extension) | Independently versioned uploader, scoped access tokens, drop/upload workflow, and separation from the shelved local-reader prototype |
+| [Book transfer and offline cache](./architecture.md#explicit-local-server-upload-migration-and-browser-full-book-caching) | Explicit device-to-server upload migration (v0.8.1), removable server-book full-book cache, offline write replay, and the boundaries that keep both sources independent |
 
 ## Quick start
 

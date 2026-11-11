@@ -17,16 +17,32 @@ The books and authorized reading records held by a Bookdock Server instance. The
 _Avoid_: remote mode.
 
 **Unified library**:
-The single bookshelf that lists device books and server books together. A source filter narrows the list; it never switches the client into another presentation.
-_Avoid_: merged library, source switch, automatic association. Device and server copies of the same book remain independent records.
+The single bookshelf that lists device books and server books together. A source filter narrows the list; it never switches the client into another presentation. Device and server copies of the same book remain independent records; crossing between them requires an explicit user action.
+_Avoid_: merged library, source switch, automatic association, treating a migration or a cache as a third source.
+
+**Book upload migration**:
+An explicit per-book action that moves a device book into the signed-in user's private server library. The server creates a new book from the device copy in one bounded transaction, then the device copy is removed. It is not a merge, a two-way sync, or a background association; active or unsettled reading timers block the action.
+_Avoid_: synchronization, mirroring, automatic upload.
+
+**Full-book cache**:
+An explicit, removable browser-local copy of a readable server book's content, cover, structure and baseline personal records. Its purpose is fast local rendering and offline reading/writing. The server book remains the only authoritative record; a cache never becomes a second book in the unified library.
+_Avoid_: device book, local copy as a new library record, offline mode.
+
+**Offline write queue**:
+Personal reading progress, annotation edits and timed captures recorded while a cached server book is offline. They are replayed against the server automatically on reconnection or returning to the page, with queued state retained until the replay succeeds.
+_Avoid_: claiming offline writes are immediately durable on the server.
+
+**Archive deletion scope**:
+The `all`, `time`, or `notes` extent of a user's personal archive cleanup for one book. `time` clears sessions, rounds, statistics and coverage; `notes` clears highlights, bookmarks, ideas and reviews; `all` clears both. Book files, reading position and read status are never touched.
+_Avoid_: deleting the book, treating a scope as a filter for export only.
 
 **Connected service**:
 A configured network capability used by the client independently of its active library source. Availability, credentials and permission belong to that service, not to the choice of local or remote library.
 _Avoid_: assuming all network services belong to the server library.
 
 **Offline availability**:
-The ability to use a particular capability without a network connection. It is distinct from where library data is stored.
-_Avoid_: reading the device library as a promise of offline availability.
+The ability to use a particular capability without a network connection. It is distinct from where library data is stored: a device book is readable offline by default, while a server book becomes readable offline only after the reader explicitly caches the whole book.
+_Avoid_: reading the device library as a promise of offline availability, or assuming every server book is offline-ready.
 
 ## Reading History
 

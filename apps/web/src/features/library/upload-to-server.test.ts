@@ -8,7 +8,7 @@ import type { Book, ClientBook, ClientNote, ClientReadingState } from '@bookdock
 
 import { ApiError } from '@/api/client'
 
-import { LocalLibraryError, LocalLibraryRepository } from './repository'
+import { LocalLibraryError, LocalLibraryRepository } from '@/features/local-library/repository'
 import { uploadLocalBookToServer } from './upload-to-server'
 
 const apiPostMock = vi.fn()

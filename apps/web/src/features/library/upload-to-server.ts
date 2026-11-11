@@ -11,8 +11,8 @@ import {
 import { ApiError, apiPost, apiUpload } from '@/api/client'
 import { queryClient } from '@/lib/query-client'
 
-import { localRecordId } from './id'
-import { localLibraryRepository, type LocalLibraryRepository } from './repository'
+import { localRecordId } from '@/features/local-library/id'
+import { localLibraryRepository, type LocalLibraryRepository } from '@/features/local-library/repository'
 
 export interface UploadLocalBookOptions {
   accountId: string

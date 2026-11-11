@@ -2152,6 +2152,7 @@ not part of this public document.
 | ADR-26 | tiered WebDAV storage backend with bounded local cache |
 | ADR-27 | per-user personal metadata sources in a bounded QuickJS sandbox |
 | ADR-28 | device vault and unified bookshelf as the shipped client model |
+| ADR-29 | explicit one-way device-book upload migration and removable server-book full-book cache with offline write replay |
 
 ADR identifiers remain stable even when a decision is superseded or its
 implementation details change.

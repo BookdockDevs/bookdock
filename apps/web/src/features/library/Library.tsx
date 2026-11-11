@@ -28,11 +28,11 @@ import { useAuthStore } from '@/stores/auth.store'
 import { ErrorCode, normalizeLibrarySearch, readLibrarySearchExpression } from '@bookdock/shared'
 
 import { LocalLibraryError } from '@/features/local-library/repository'
-import { uploadLocalBookToServer } from '@/features/local-library/upload-to-server'
 import { CacheProgressRing } from '@/features/remote-cache/components/CacheActionControls'
 
 import ClearBookDataOption from './components/ClearBookDataOption'
 import { adoptArchiveExitRestore, clearActivityForLibraryNavigation, clearActivityForLibrarySwitch, editSearchControls, expressionDisplay, keepsSearchSession, searchExitTarget, searchProjection, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
+import { uploadLocalBookToServer } from './upload-to-server'
 
 import { ApiError } from '@/api/client'
 import { notify } from '@/lib/notifications'

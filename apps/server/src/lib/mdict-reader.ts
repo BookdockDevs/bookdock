@@ -39,8 +39,7 @@ export async function readDictionary(job: DictionaryJob): Promise<DictionaryRepl
     if (activePath !== job.mdx) await releaseDictionaryReader()
     if (!worker) {
       const bundled = new URL('./mdict.worker.mjs', import.meta.url)
-      worker = new Worker(existsSync(bundled) ? bundled : new URL('./mdict.worker.ts', import.meta.url), {
-        ...(!existsSync(bundled) ? { execArgv: ['--import', 'tsx'] } : {}),
+      worker = new Worker(existsSync(bundled) ? bundled : new URL('./mdict.worker.bootstrap.mjs', import.meta.url), {
         resourceLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32 },
       })
       worker.on('error', () => {})

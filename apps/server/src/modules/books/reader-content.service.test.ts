@@ -185,11 +185,17 @@ describe('shared reader content service', () => {
     expect(markup).not.toMatch(/<img[^>]+width="64"[^>]+height="32"/)
     expect(markup).not.toMatch(/<img[^>]*\sheight=/)
     expect(markup).toContain('src="../images/cover.png"')
-    await vi.waitFor(async () => expect(await fs.readdir(path.join(testDataDir, 'reader-content-index', 'v3'))).not.toHaveLength(0))
-    const derived = JSON.parse(await fs.readFile(
-      path.join(testDataDir, 'reader-content-index', 'v3', (await fs.readdir(path.join(testDataDir, 'reader-content-index', 'v3')))[0]!),
-      'utf8',
-    )) as { imageDimensions: Record<string, { width: number; height: number }> }
+    // The archive is persisted as soon as it is parsed, before any chapter image is
+    // measured, and rewritten once the chapter dimensions are known. Waiting for the
+    // first file to show up can therefore observe the dimension-less snapshot, so wait
+    // for the write queue to drain instead.
+    const indexDirectory = path.join(testDataDir, 'reader-content-index', 'v3')
+    await waitForReaderDerivedWritesForTests()
+    const indexNames = (await fs.readdir(indexDirectory)).filter((name) => name.endsWith('.json'))
+    expect(indexNames).not.toHaveLength(0)
+    const derived = JSON.parse(await fs.readFile(path.join(indexDirectory, indexNames[0]!), 'utf8')) as {
+      imageDimensions: Record<string, { width: number; height: number }>
+    }
     expect(derived.imageDimensions['OEBPS/images/cover.png']).toEqual({ width: 64, height: 32 })
 
     const sourceReadsAfterDimensions = sourceReadCount

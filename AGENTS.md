@@ -2,7 +2,7 @@
 
 ## Scope
 - Self-hosted web e-book library. pnpm monorepo, single Docker container deployment, data volume persistence.
-- Three packages: `@bookdock/shared` (contracts/types/zod), `@bookdock/server` (Hono), `@bookdock/web` (React).
+- Four workspace packages: `@bookdock/shared` (contracts/types/zod), `@bookdock/server` (Hono), `@bookdock/web` (React), and `@bookdock/extension` (MV3 browser extension, independently versioned, built and released).
 
 ## Architecture
 
@@ -66,7 +66,7 @@ pnpm test      # Server and Web Vitest suites
 5. Apply the ownership and authorization rules above to new tables and queries.
 6. When backend routes, request/response schemas change, update `@bookdock/shared` contract types and schemas.
 7. After modifying shared types, run `pnpm --filter @bookdock/shared --filter @bookdock/server --filter @bookdock/web run typecheck` to verify the contract and both consumers compile.
-8. **Language**: code, comments, log messages, commit messages, and PR titles/descriptions must all be in English (project targets internationalization). UI strings stay Chinese for now, structured to be extractable.
+8. **Language**: code, comments, log messages, commit messages, and PR titles/descriptions must all be in English (project targets internationalization). UI strings default to Chinese; English translations live in `apps/web/src/i18n/locales/`. Add new strings to the i18n catalogues rather than hardcoded literals.
 9. **Do not create report/summary files** (e.g. `CHANGES_SUMMARY.md`, `TASK_REPORT.md`) unless explicitly requested by the user.
 10. Consider cross-platform compatibility: code runs in a Linux Docker container in production, but development happens on Windows. Avoid platform-specific assumptions; use `node:path` and Drizzle/SQLite abstractions, not shell fragments in code.
 
@@ -89,7 +89,7 @@ Follow first principles: identify the real problem, required behavior, and small
 - Primary keys: nanoid strings (`apps/server/src/lib/id.ts`), never auto-increment integers.
 - Timestamps: INTEGER unix ms.
 - Unstable/rarely-queried fields go into JSON columns (e.g. `books.meta`). Stable, frequently-queried fields get dedicated columns.
-- Auth: JWT in HttpOnly Cookie `bd_token` (SameSite=Strict); guard verifies then loads the fresh user from DB (short-TTL cache) so role/disabled changes take effect immediately. First run always requires creating the owner via `/setup`; afterwards the owner can toggle open registration and guest access (stored in `instance_settings`, runtime-editable). Guest access injects the default user and is rejected by owner-only endpoints. See `docs/local/dev/accounts.md`.
+- Auth: HttpOnly Cookie `bd_token` (SameSite=Strict) carries a random server-side session token whose hash is stored in SQLite; Bearer headers also accept session tokens, and an explicit Bearer token outranks the ambient cookie (v0.8.0). The guard verifies the token then loads the fresh user from DB (short-TTL cache) so role/disabled changes take effect immediately. First run always requires creating the owner via `/setup`; afterwards the owner can toggle open registration and guest access (stored in `instance_settings`, runtime-editable). Guest access injects the default user and is rejected by owner-only endpoints. See `docs/local/dev/accounts.md`.
 - Security: sensitive config (JWT_SECRET etc.) from env only, never committed. Server config validated via zod. Upload size limits enforced.
 
 ### API response shapes (authoritative)

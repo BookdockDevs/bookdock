@@ -104,10 +104,10 @@ interface ChapterHit { start: number; end: number; excerpt: { pre: string; match
 
 function createSearchWorker(): Worker {
   const bundledWorker = new URL('./reader-search.worker.mjs', import.meta.url)
-  const useBundledWorker = existsSync(fileURLToPath(bundledWorker))
-  const workerPath = useBundledWorker ? bundledWorker : new URL('./reader-search.worker.ts', import.meta.url)
+  const workerPath = existsSync(fileURLToPath(bundledWorker))
+    ? bundledWorker
+    : new URL('./reader-search.worker.bootstrap.mjs', import.meta.url)
   return new Worker(workerPath, {
-    ...(!useBundledWorker ? { execArgv: ['--import', 'tsx'] } : {}),
     resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16 },
   })
 }
