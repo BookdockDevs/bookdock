@@ -21,7 +21,7 @@ export async function addLocalEpub(file: File, vaultId: string, identity?: { boo
     const now = identity?.createdAt ?? Date.now()
     const ref = { scope: { kind: 'local' as const, vaultId }, bookId }
     const book: ClientBook = { ref, title: source.values.title ?? file.name.replace(/\.epub$/i, ''), authors: source.values.authors ?? [],
-      format: 'epub', content: { book: ref, contentId }, availability: 'available', size: file.size, createdAt: now, updatedAt: now, version: 0,
+      format: 'epub', ...(file.name ? { fileName: file.name } : {}), content: { book: ref, contentId }, availability: 'available', size: file.size, createdAt: now, updatedAt: now, version: 0,
       catalog: { ...identity?.catalog, metadata: publicationBookMetadata(metadata, source) } }
     const cover = await lease.book.getCover?.().catch(() => null)
     const thumbnail = cover ? await createCoverThumbnail(cover) : undefined
@@ -47,7 +47,7 @@ export async function addLocalBook(file: File, vaultId: string, identity?: Param
   signal.throwIfAborted()
   const now = identity?.createdAt ?? Date.now()
   const ref = { scope: { kind: 'local' as const, vaultId }, bookId }
-  const book: ClientBook = { ref, title, authors, format: 'txt', content: { book: ref, contentId }, textSource: prepared.source,
+  const book: ClientBook = { ref, title, authors, format: 'txt', ...(file.name ? { fileName: file.name } : {}), content: { book: ref, contentId }, textSource: prepared.source,
     availability: 'available', size: file.size, createdAt: now, updatedAt: now, version: 0, ...(identity?.catalog ? { catalog: identity.catalog } : {}) }
   return repository.addBook(book, file, undefined, prepared, signal)
 }

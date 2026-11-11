@@ -26,13 +26,13 @@ beforeEach(async () => {
 })
 afterEach(async () => { await repository.close(); expect(fetch).not.toHaveBeenCalled(); vi.unstubAllGlobals() })
 
-it('patches real package bytes while retaining originals, rejecting stale saves and validating semantic replay', async () => {
+it('patches real package bytes into the single active file, rejecting stale saves and validating semantic replay', async () => {
   const signal = new AbortController().signal
   const loaded = await readLocalEpub(ref, 'before', signal, repository)
   const draft = { ...loaded.data, baseRevisionId: 'before', documents: loaded.data.documents.map((document) => ({ ...document, content: document.content.replace('Original text.', 'Changed text.') })) }
   expect((await saveLocalEpub(ref, draft, 'after', signal, repository)).data).toMatchObject({ changed: true, revisionId: 'after' })
   expect((await readLocalEpub(ref, 'after', signal, repository)).data.documents[0]!.content).toContain('Changed text.')
-  expect(new Uint8Array(await (await repository.getFile(ref, true)).arrayBuffer())).toEqual(new Uint8Array(await file.arrayBuffer()))
+  expect(new Uint8Array(await (await repository.getFile(ref)).arrayBuffer())).not.toEqual(new Uint8Array(await file.arrayBuffer()))
   expect((await saveLocalEpub(ref, draft, 'after', signal, repository)).data.revisionId).toBe('after')
   await expect(saveLocalEpub(ref, { ...draft, documents: loaded.data.documents }, 'after', signal, repository)).rejects.toMatchObject({ category: 'conflict' })
   await expect(saveLocalEpub(ref, draft, 'another', signal, repository)).rejects.toMatchObject({ category: 'conflict' })

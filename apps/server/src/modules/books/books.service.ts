@@ -428,7 +428,7 @@ export async function bufferFromStream(stream: Readable): Promise<Buffer> {
 /** Dedup across uploads: the personal version in this library whose CURRENT
  * content matches the candidate blob. Old revisions with the same bytes do
  * not count (content moved on). */
-function findPersonalVersionByBlob(libraryId: string, blobKey: string, format: BookFormat): { versionId: string; libraryBookId: string } | null {
+export function findPersonalVersionByBlob(libraryId: string, blobKey: string, format: BookFormat): { versionId: string; libraryBookId: string } | null {
   const db = getDb()
   const sourceHash = hashFromBlobKey(blobKey)
   const candidates = db.select({
@@ -462,7 +462,17 @@ function findPersonalVersionByBlob(libraryId: string, blobKey: string, format: B
  * the caller will register the new BookVersion under; TXT generation embeds it
  * as the EPUB identifier.
  */
-async function materializeUpload(userId: string, file: File, buffer: Buffer, versionId: string, opts?: { normalizeTitle?: boolean }) {
+export async function materializeUpload(
+  userId: string,
+  file: File,
+  buffer: Buffer,
+  versionId: string,
+  opts?: {
+    normalizeTitle?: boolean
+    txtRulePatterns?: TocRulePattern[] | null
+    txtChapters?: Array<{ title: string; level: number; startOffset: number; endOffset: number; contentStartOffset: number; wordCount: number }>
+  },
+) {
   const storage = getStorage()
   const fileName = file.name
   const mime = file.type
@@ -518,9 +528,14 @@ async function materializeUpload(userId: string, file: File, buffer: Buffer, ver
     const text = decodeTextBuffer(buffer)
     const normalized = normalizeText(text)
     const sample = normalized.slice(0, TOC_SAMPLE_SIZE)
-    const scored = scoreTocRules(userId, sample)
-    const effectivePatterns = scored ? scored.patterns.filter((p) => p.enabled !== false) : undefined
-    const chapters = scanTxtChapters(normalized, effectivePatterns)
+    const explicitPatterns = opts?.txtRulePatterns
+    const scored = explicitPatterns === undefined ? scoreTocRules(userId, sample) : null
+    const effectivePatterns = explicitPatterns !== undefined
+      ? (explicitPatterns ? explicitPatterns.filter((p) => p.enabled !== false) : undefined)
+      : (scored ? scored.patterns.filter((p) => p.enabled !== false) : undefined)
+    const chapters = opts?.txtChapters?.length && opts.txtChapters.at(-1)?.endOffset === normalized.length
+      ? opts.txtChapters.map((c) => ({ ...c, synthetic: false }))
+      : scanTxtChapters(normalized, effectivePatterns)
     meta.chapters = chapters.map((c) => ({
       id: `ch-${c.startOffset}`,
       title: c.title,
@@ -535,6 +550,8 @@ async function materializeUpload(userId: string, file: File, buffer: Buffer, ver
     if (scored) {
       meta.tocRuleId = scored.id
       meta.tocRuleAuto = true
+    } else if (explicitPatterns) {
+      meta.customTocPatterns = explicitPatterns
     }
     meta.txtArtifactVersion = TXT_EPUB_ARTIFACT_VERSION
 
@@ -1438,7 +1455,7 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
 }
 
 /** Content-hash namespace keys embed the hash; anything else yields null. */
-function hashFromBlobKey(key: string): string | null {
+export function hashFromBlobKey(key: string): string | null {
   const match = /^blobs\/[0-9a-f]{2}\/([0-9a-f]{64})\.epub$/.exec(key)
   return match ? match[1]! : null
 }

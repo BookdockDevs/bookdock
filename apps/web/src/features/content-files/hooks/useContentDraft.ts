@@ -8,6 +8,9 @@ import type { ContentFile, ContentFileUpload } from '@bookdock/shared'
 import { apiDelete, apiUpload } from '@/api/client'
 import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { localLibraryRepository } from '@/features/local-library/repository'
+import { remoteBookCache, remoteCacheScopeKey } from '@/features/remote-cache/remote-book-cache'
+import { useRemoteCacheStore } from '@/features/remote-cache/remote-cache.store'
+import { isOfflineOrNetworkError } from '@/features/remote-cache/offline-sync'
 import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 import { interactionRequestId } from '@/lib/interaction-request'
 
@@ -53,8 +56,9 @@ export function useContentDraft(context: Omit<ContentFileUpload, 'draftId' | 'ki
     }
   }, [draftId, local, ownerKey])
 
+  const isCachedRemote = useRemoteCacheStore((state) => Boolean(!local && context.bookVersionId && state.cached[context.bookVersionId]))
   const upload = useMutation({
-    networkMode: local ? 'always' : 'online',
+    networkMode: local || isCachedRemote ? 'always' : 'online',
     mutationFn: async (entry: ContentUploadEntry) => {
       if (!mounted.current || owner.current !== ownerKey || !local && getAuthSessionRevision() !== epoch) throw new DOMException('Content draft owner changed', 'AbortError')
       const controller = new AbortController()
@@ -62,17 +66,43 @@ export function useContentDraft(context: Omit<ContentFileUpload, 'draftId' | 'ki
       if (!local && !context.bookVersionId) throw new Error('Content upload requires an authorized book')
       const query = new URLSearchParams({ domain: context.domain, bookVersionId: context.bookVersionId ?? '', draftId, kind: entry.kind })
       if (context.targetId) query.set('targetId', context.targetId)
+      const stageOfflineImage = async (): Promise<{ data: ContentFile }> => {
+        if (context.domain !== 'idea' || entry.kind !== 'image' || !account || !context.bookVersionId) {
+          throw new Error('Offline attachment staging is only supported for cached idea images')
+        }
+        const pendingId = `pending-image_${interactionRequestId()}`
+        await remoteBookCache.stageOutboxImage(remoteCacheScopeKey(account.id), context.bookVersionId, pendingId, entry.file)
+        return {
+          data: {
+            id: pendingId,
+            kind: 'image',
+            name: entry.file.name,
+            mimeType: entry.file.type || 'image/webp',
+            size: entry.file.size,
+            url: '',
+            localSource: {
+              book: { scope: { kind: 'remote', connectionId: 'default', accountId: account.id }, bookId: context.bookVersionId },
+              id: pendingId,
+            },
+          },
+        }
+      }
       try {
         const result = local ? await (async () => {
           if (context.domain !== 'idea' || entry.kind !== 'image') throw new Error('Unsupported local content draft')
           const image = await localLibraryRepository.stageNoteImage(local.ref, draftId, context.targetId, entry.file, controller.signal)
           return { data: { ...image, kind: 'image' as const, url: '', localSource: { book: local.ref, id: image.id } } }
-        })() : await apiUpload<{ data: ContentFile }>(`/content-files?${query}`, entry.file, 'POST', {
-          signal: controller.signal,
-          onProgress: (progress) => {
-            if (mounted.current && owner.current === ownerKey) setEntries((rows) => rows.map((row) => row.id === entry.id ? { ...row, progress } : row))
-          },
-        })
+        })() : (isCachedRemote && typeof navigator !== 'undefined' && navigator.onLine === false)
+          ? await stageOfflineImage()
+          : await apiUpload<{ data: ContentFile }>(`/content-files?${query}`, entry.file, 'POST', {
+              signal: controller.signal,
+              onProgress: (progress) => {
+                if (mounted.current && owner.current === ownerKey) setEntries((rows) => rows.map((row) => row.id === entry.id ? { ...row, progress } : row))
+              },
+            }).catch(async (error: unknown) => {
+              if (isCachedRemote && isOfflineOrNetworkError(error)) return stageOfflineImage()
+              throw error
+            })
         controller.signal.throwIfAborted()
         if (mounted.current && owner.current === ownerKey) {
           setEntries((rows) => rows.map((row) => row.id === entry.id ? { ...row, status: 'ready', resource: result.data } : row))

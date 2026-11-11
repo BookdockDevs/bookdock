@@ -51,7 +51,7 @@ describe('source-owned publication promotion', () => {
     })
     expect(stored).toBeUndefined()
   })
-  it('preserves originals, unrelated metadata and old-basis private records without restoring old anchors into new content', async () => {
+  it('replaces publication bytes while preserving unrelated metadata and old-basis private records without restoring old anchors into new content', async () => {
     const ref = { scope: { kind: 'local' as const, vaultId: 'editing' }, bookId: 'real-publication' }
     const command = { book: ref, baseContentId: 'before', contentId: 'after' }
     const original = (await prepareLocalTxt(new Blob(['A'.repeat(200)]), 'source.txt', 'Book', 'before')).publication
@@ -69,7 +69,17 @@ describe('source-owned publication promotion', () => {
     expect((await repository.getBook(ref)).title).toBe('Renamed while preparing')
     expect((await repository.getBook(ref)).version).toBe(2)
     expect(new Uint8Array(await (await repository.getFile(ref)).arrayBuffer())).toEqual(new Uint8Array(await updated.arrayBuffer()))
-    expect(new Uint8Array(await (await repository.getFile(ref, true)).arrayBuffer())).toEqual(new Uint8Array(await original.arrayBuffer()))
+    const fileKeys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+      const open = indexedDB.open('bookdock-local-library')
+      open.onerror = () => reject(open.error)
+      open.onsuccess = () => {
+        const tx = open.result.transaction('files', 'readonly')
+        const req = tx.objectStore('files').getAllKeys()
+        tx.oncomplete = () => { open.result.close(); resolve(req.result) }
+        tx.onerror = () => reject(tx.error)
+      }
+    })
+    expect(fileKeys.some((entry) => typeof entry === 'string' && (entry.startsWith('original:') || entry.startsWith('original-digest:')))).toBe(false)
     const reader = await openLocalReaderSession(ref, true)
     const progress = (await reader.getProgress()).data
     expect(progress).toMatchObject({ progressRevisionId: 'before', locationAvailable: false, coverageAvailable: true })
@@ -95,10 +105,9 @@ describe('source-owned publication promotion', () => {
     await expect(repository.replacePublication(command, file)).rejects.toMatchObject({ category: 'conflict' })
     await expect(repository.replacePublication({ ...command, baseContentId: 'successor', contentId: 'before' }, new Blob(['Before']))).rejects.toMatchObject({ category: 'conflict' })
     expect(await (await repository.getFile(ref)).text()).toBe('Successor')
-    expect(await (await repository.getFile(ref, true)).text()).toBe('Before')
     await repository.removeBook(ref)
     await expect(repository.replacePublication({ ...command, baseContentId: 'after', contentId: 'successor' }, new Blob(['Successor']))).rejects.toMatchObject({ category: 'unavailable-content' })
-    await expect(repository.getFile(ref, true)).rejects.toMatchObject({ category: 'unavailable-content' })
+    await expect(repository.getFile(ref)).rejects.toMatchObject({ category: 'unavailable-content' })
   })
 
   it('promotes normalized TXT and its actual generated publication together, including a valid empty edited body', async () => {
@@ -110,11 +119,11 @@ describe('source-owned publication promotion', () => {
     await repository.replacePublication({ book: txtRef, baseContentId: 'text-before', contentId: 'text-after', textSource: empty.source }, empty.normalizedText, empty)
     expect(await repository.getNormalizedTxt(txtRef, 'text-after')).toBe('')
     expect((await repository.getPublicationFile(txtRef)).size).toBe(empty.publication.size)
-    expect(await (await repository.getFile(txtRef, true)).text()).toBe(await original.text())
+    expect(await (await repository.getFile(txtRef)).text()).toBe('')
     await expect(repository.getNormalizedTxt(txtRef, 'text-before')).rejects.toMatchObject({ category: 'conflict' })
   })
 
-  it('rolls back file/original/identity changes on quota failure and honors cancellation before mutation', async () => {
+  it('rolls back file/identity changes on quota failure and honors cancellation before mutation', async () => {
     const put = IDBObjectStore.prototype.put
     const fail = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
       if (this.name === 'books') throw new DOMException('Quota exhausted', 'QuotaExceededError')

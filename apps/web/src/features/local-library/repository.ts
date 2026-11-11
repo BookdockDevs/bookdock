@@ -21,12 +21,29 @@ const key = (ref: ClientBookRef) => JSON.stringify(clientBookKey(ref))
 const noteKey = (ref: ClientBookRef, id: string) => JSON.stringify([clientBookKey(ref), id])
 const noteFingerprint = (note: ClientNote) => JSON.stringify(clientNoteSchema.parse({ ...note, createdAt: 0, updatedAt: 0, version: 0 }))
 
-const FILE_KEY_PREFIXES = ['original-digest:', 'publication-digest:', 'publication:', 'original:', 'digest:', 'cover:', 'text:'] as const
+const FILE_KEY_PREFIXES = ['publication-digest:', 'publication:', 'original-digest:', 'original:', 'digest:', 'cover:', 'text:'] as const
 
 export interface DeviceStorageSummary {
   activeBooks: number
   totalBytes: number
   browserUsage: number | null
+}
+
+export interface LocalBookTransferSnapshot {
+  book: ClientBook
+  file: Blob
+  fileSha256: string
+  cover: Blob | null
+  state: ClientReadingState | null
+  notes: ClientNote[]
+  noteImages: Map<string, Blob>
+  review: ClientReview | null
+  rounds: ClientReadingRounds['rounds']
+  sessions: ClientReadingSession[]
+  coverageIntervals: Array<[number, number]>
+  preferences: Record<string, unknown>
+  pointRules: ClientReplacement[]
+  replacementOverrides: Record<string, boolean>
 }
 
 function storedBlobSize(value: unknown): number {
@@ -262,13 +279,11 @@ export class LocalLibraryRepository {
     return this.transaction(['books'], 'readonly', (tx) => this.requireBook(tx, ref))
   }
 
-  async getFile(ref: ClientBookRef, original = false): Promise<Blob> {
+  async getFile(ref: ClientBookRef): Promise<Blob> {
     this.assertLocal(ref)
     return this.transaction(['books', 'files'], 'readonly', async (tx) => {
       const book = await this.requireBook(tx, ref)
-      const files = tx.objectStore('files')
-      const retained = original ? await request<Blob | undefined>(files.get(`original:${key(ref)}`)) : undefined
-      const file = retained ?? await request<Blob | undefined>(files.get(key(ref)))
+      const file = await request<Blob | undefined>(tx.objectStore('files').get(key(ref)))
       if (book.deletedAt != null || book.availability !== 'available' || !file) throw new LocalLibraryError('unavailable-content', 'Local book file is unavailable')
       return file
     })
@@ -364,13 +379,7 @@ export class LocalLibraryRepository {
       if (await request(settings.get(JSON.stringify(['publication-retired', ...clientBookKey(ref), command.contentId])))) throw new LocalLibraryError('conflict', 'Retired publication identity cannot be reused')
       if (current.format === 'epub' && !file.size) throw new LocalLibraryError('invalid-input', 'EPUB publication cannot be empty')
       if (current.availability !== 'available' || (current.format === 'txt') !== Boolean(command.textSource)) throw new LocalLibraryError('unavailable-content', 'Publication cannot be replaced in this state')
-      const prior = await request<Blob | undefined>(files.get(key(ref)))
-      if (!prior) throw new LocalLibraryError('unavailable-content', 'Publication source was removed')
-      if (await request(files.getKey(`original:${key(ref)}`)) === undefined) {
-        await request(files.put(prior, `original:${key(ref)}`))
-        const priorDigest = await request<string | undefined>(files.get(`digest:${key(ref)}`))
-        if (priorDigest) await request(files.put(priorDigest, `original-digest:${key(ref)}`))
-      }
+      if (!await request<Blob | undefined>(files.get(key(ref)))) throw new LocalLibraryError('unavailable-content', 'Publication source was removed')
       const rawState = await request(tx.objectStore('states').get(key(ref)))
       const state = rawState ? clientReadingStateSchema.parse(rawState) : null
       if (state && !sameClientBook(state.book, ref)) throw new LocalLibraryError('storage-unavailable', 'Stored reading state belongs to another book')
@@ -1866,8 +1875,6 @@ export class LocalLibraryRepository {
     complete ||= book.trashDeleteUserData === true
   await request(tx.objectStore('files').delete(key(ref)))
   await request(tx.objectStore('files').delete(`digest:${key(ref)}`))
-  await request(tx.objectStore('files').delete(`original:${key(ref)}`))
-  await request(tx.objectStore('files').delete(`original-digest:${key(ref)}`))
   await request(tx.objectStore('files').delete(`publication:${key(ref)}`))
   await request(tx.objectStore('files').delete(`publication-digest:${key(ref)}`))
   await request(tx.objectStore('files').delete(`text:${key(ref)}`))
@@ -1894,7 +1901,7 @@ export class LocalLibraryRepository {
   await request(tx.objectStore('settings').delete(key(ref)))
   await request(tx.objectStore('settings').delete(JSON.stringify(['reading-rounds', ...clientBookKey(ref)])))
   const vaultId = ref.scope.kind === 'local' ? ref.scope.vaultId : ''
-  const capturePrefixes = ['reading-pending', 'reading-pending-group', 'reading-draft', 'reading-manual'].map((tag) => `${JSON.stringify([tag, vaultId, ref.bookId]).slice(0, -1)},`)
+  const capturePrefixes = ['reading-pending', 'reading-pending-group', 'reading-draft', 'reading-manual', 'upload-migration'].map((tag) => `${JSON.stringify([tag, vaultId, ref.bookId]).slice(0, -1)},`)
   for (const entry of await request(tx.objectStore('settings').getAllKeys())) if (typeof entry === 'string' && capturePrefixes.some((prefix) => entry.startsWith(prefix))) await request(tx.objectStore('settings').delete(entry))
   const sessions = await request<ClientReadingSession[]>(tx.objectStore('reading-sessions').index('book').getAll([vaultId, ref.bookId]))
   for (const session of sessions) await request(tx.objectStore('reading-sessions').delete(noteKey(ref, session.id)))
@@ -1916,11 +1923,113 @@ export class LocalLibraryRepository {
         if (book.deletedAt != null || book.catalogRemoved || book.availability !== 'available') continue
         const bookKey = key(book.ref)
         const storedDigest = await request<string | undefined>(files.get(`digest:${bookKey}`))
-        const originalDigest = await request<string | undefined>(files.get(`original-digest:${bookKey}`))
-        if (storedDigest === digest || originalDigest === digest) return book
+        if (storedDigest === digest) return book
       }
       return null
     }, signal)
+  }
+
+  async getUploadMigrationReceipt(ref: ClientBookRef, accountId: string): Promise<string | null> {
+    this.assertLocal(ref)
+    const vaultId = ref.scope.kind === 'local' ? ref.scope.vaultId : ''
+    const receiptKey = JSON.stringify(['upload-migration', vaultId, ref.bookId, accountId])
+    return this.transaction(['settings'], 'readonly', async (tx) => {
+      const value = await request<{ requestId?: unknown } | undefined>(tx.objectStore('settings').get(receiptKey))
+      return typeof value?.requestId === 'string' && value.requestId ? value.requestId : null
+    })
+  }
+
+  async setUploadMigrationReceipt(ref: ClientBookRef, accountId: string, requestId: string): Promise<void> {
+    this.assertLocal(ref)
+    const vaultId = ref.scope.kind === 'local' ? ref.scope.vaultId : ''
+    const receiptKey = JSON.stringify(['upload-migration', vaultId, ref.bookId, accountId])
+    await this.transaction(['books', 'settings'], 'readwrite', async (tx) => {
+      await this.requireBook(tx, ref)
+      await request(tx.objectStore('settings').put({ requestId, updatedAt: Date.now() }, receiptKey))
+    })
+  }
+
+  async exportBookTransferSnapshot(ref: ClientBookRef): Promise<LocalBookTransferSnapshot> {
+    this.assertLocal(ref)
+    const result = await this.transaction(['books', 'files', 'states', 'notes', 'reviews', 'settings', 'reading-sessions'], 'readonly', async (tx) => {
+      const book = await this.requireBook(tx, ref)
+      if (book.deletedAt != null || book.availability !== 'available') {
+        throw new LocalLibraryError('unavailable-content', 'Local book file is unavailable')
+      }
+      const vaultId = ref.scope.kind === 'local' ? ref.scope.vaultId : ''
+      const settingsStore = tx.objectStore('settings')
+      const lease = await request<ReadingTimerLease | undefined>(settingsStore.get(JSON.stringify(['reading-timer-lease', vaultId])))
+      if (lease && lease.expiresAt > Date.now()) {
+        throw new LocalLibraryError('pending-reading', 'Stop active reading timers before uploading this book')
+      }
+      const pendingPrefixes = ['reading-pending', 'reading-pending-group', 'reading-draft', 'reading-manual']
+        .map((kind) => `${JSON.stringify([kind, vaultId, ref.bookId]).slice(0, -1)},`)
+      if ((await request(settingsStore.getAllKeys())).some((entry) => typeof entry === 'string' && pendingPrefixes.some((prefix) => entry.startsWith(prefix)))) {
+        throw new LocalLibraryError('pending-reading', 'Settle pending reading captures before uploading this book')
+      }
+
+      const filesStore = tx.objectStore('files')
+      const file = await request<Blob | undefined>(filesStore.get(key(ref)))
+      if (!file) throw new LocalLibraryError('unavailable-content', 'Local book file is unavailable')
+      const storedDigest = await request<string | undefined>(filesStore.get(`digest:${key(ref)}`))
+      const cover = await request<Blob | undefined>(filesStore.get(`cover:${key(ref)}`)) ?? null
+      const snapshot = await this.readingBookSnapshotInTx(tx, ref)
+      const notes = (await request<ClientNote[]>(tx.objectStore('notes').index('book').getAll([vaultId, ref.bookId])))
+        .map((note) => clientNoteSchema.parse(note))
+      const noteImages = new Map<string, Blob>()
+      for (const note of notes) {
+        if (note.kind !== 'idea' || !note.images?.length) continue
+        for (const image of note.images) {
+          const row = await request<{ blob?: Blob } | undefined>(filesStore.get(JSON.stringify(['note-image', ...clientBookKey(ref), image.id])))
+          if (row?.blob) noteImages.set(image.id, row.blob)
+        }
+      }
+      const rawReview = await request<ClientReview | undefined>(tx.objectStore('reviews').get(key(ref)))
+      const review = rawReview ? clientReviewSchema.parse(rawReview) : null
+      const preferences = await request<Record<string, unknown> | undefined>(settingsStore.get(key(ref))) ?? {}
+      const coverageIntervals = clientReadingCoverageIntervalsSchema.parse(preferences.coverageIntervals ?? [])
+      const allRules = await request<ClientReplacement[] | undefined>(settingsStore.get(JSON.stringify(['replacement-rules', vaultId]))) ?? []
+      const pointRules = allRules
+        .map((row) => clientReplacementSchema.parse(row))
+        .filter((row) => row.book && sameClientBook(row.book, ref) && row.rule.matchType === 'point')
+      const replacementOverrides = await request<Record<string, boolean> | undefined>(
+        settingsStore.get(JSON.stringify(['replacement-overrides', vaultId, ref.bookId])),
+      ) ?? {}
+
+      return {
+        book,
+        file,
+        storedDigest,
+        cover,
+        state: snapshot.state,
+        notes,
+        noteImages,
+        review,
+        rounds: snapshot.rounds.rounds,
+        sessions: snapshot.ledger.sessions,
+        coverageIntervals,
+        preferences,
+        pointRules,
+        replacementOverrides,
+      }
+    })
+    const fileSha256 = result.storedDigest ?? await computeBlobSha256(result.file)
+    return {
+      book: result.book,
+      file: result.file,
+      fileSha256,
+      cover: result.cover,
+      state: result.state,
+      notes: result.notes,
+      noteImages: result.noteImages,
+      review: result.review,
+      rounds: result.rounds,
+      sessions: result.sessions,
+      coverageIntervals: result.coverageIntervals,
+      preferences: result.preferences,
+      pointRules: result.pointRules,
+      replacementOverrides: result.replacementOverrides,
+    }
   }
 
   async inspectStorage(vaultId: string): Promise<DeviceStorageSummary> {

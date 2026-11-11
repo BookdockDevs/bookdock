@@ -6,6 +6,8 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
+- Migrate device books to your personal server library via **Upload** in the card or list context menu. Migration performs a duplicate check and transfers the book file, cover, metadata, shelf/category/tag placement, read status, progress/coverage, annotations (including idea images), private review, reading records, reader settings, and replacement rules in a single transaction before removing the local device copy, blocking while active or unsettled reading timers exist.
+- Cache readable server books in the browser via **Cache** in the card or list context menu for fast local rendering and offline reading/writing. The menu button tracks progress with an inline ring (**Caching** → **Clear cache**), highlights server content updates with a one-time reader notice and **Update cache**, queues offline progress, annotation edits (with images), and timed reading captures, and syncs queued changes automatically upon reconnection or returning to the page.
 - Support selecting and dropping multiple ZIP packages at once when adding personal metadata sources in Settings → Integrations, with per-package previews, sequential installation progress, and partial-failure retention.
 
 ### Changed
@@ -1117,6 +1119,8 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
+- 本机书籍卡片与列表行菜单新增 **「上传」**，支持将其一键迁移至服务器私人书库：先执行服务端查重并展示上传进度圆环，再在单次事务中完整迁移书籍文件、封面、元数据、书架／分类／标签归属、阅读状态与进度覆盖、笔记与想法配图、个人书评、阅读记录、阅读器偏好与文本替换规则，确认成功后删除本机副本；若当前存在未结束或待结算的阅读计时则会先提醒结算并拦截迁移。
+- 服务器可读书籍卡片与列表行菜单新增 **「缓存」** 离线缓存能力：点击后原地切换为带进度圆环的 **「缓存中」**，完成后转为 **「清除缓存」**；已缓存书籍支持本地快速打开与断网下的阅读、进度保存、笔记增删改（含带图想法）及阅读计时，并在联网或回到页面时自动同步待传记录；当服务端内容产生新版本时，在线打开阅读器将弹出一次性更新提醒，菜单按钮自动切换为 **「更新缓存」**。
 - 「设置 → 集成」添加个人元数据源时支持一次性多选或拖入多个 ZIP 扩展包，逐包展示图标与名称预览、安装状态，并在部分安装失败时保留失败项以便重试或移除。
 
 #### 优化

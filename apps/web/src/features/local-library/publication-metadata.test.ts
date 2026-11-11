@@ -77,7 +77,7 @@ describe('local publication metadata', () => {
     } finally { publication.destroy() }
   })
 
-  it('reads retained bytes without writing edited metadata and always releases its lease', async () => {
+  it('reads current file bytes without writing edited metadata and always releases its lease', async () => {
     const release = vi.fn()
     vi.mocked(localEpubProvider).mockReturnValue({ cacheIdentity: 'content', open: async () => ({ book: { metadata: { title: 'Original file title' } }, release }) })
     const source = await readPublicationMetadata(repository, ref, new AbortController().signal)
@@ -87,12 +87,23 @@ describe('local publication metadata', () => {
     expect(source.fileName).toBeNull()
     expect(await repository.getBook(ref)).toEqual(book)
     expect(release).toHaveBeenCalledOnce()
-    // The reader opens the retained original bytes, so the engine cache is
-    // keyed by the original file identity, not the derived content id.
     expect(localEpubProvider).toHaveBeenCalledWith(
-      `original:${JSON.stringify([ref.scope, ref.bookId, book.content!.contentId])}`,
+      `metadata:${JSON.stringify([ref.scope, ref.bookId, book.content!.contentId])}`,
       expect.objectContaining({ size: 3 }),
     )
+  })
+
+  it('retains original fileName for filename-based metadata fallback after replacing EPUB bytes with a Blob', async () => {
+    const release = vi.fn()
+    vi.mocked(localEpubProvider).mockReturnValue({ cacheIdentity: 'ingested', open: async () => ({ book: { metadata: {} }, release }) })
+    const namedRef = { scope: { kind: 'local' as const, vaultId: 'device' }, bookId: 'named-book' }
+    await addLocalEpub(new NativeFile(['abc'], '间客 作者：猫腻.epub') as File, 'device', { bookId: namedRef.bookId, contentId: 'before', createdAt: 10 }, repository)
+    await repository.replacePublication({ book: namedRef, baseContentId: 'before', contentId: 'after' }, new NativeBlob(['updated']) as Blob)
+    const source = await readPublicationMetadata(repository, namedRef, new AbortController().signal, true)
+    expect(source.fileName).toBe('间客 作者：猫腻.epub')
+    expect(source.values.title).toBe('间客')
+    expect(source.values.authors).toEqual(['猫腻'])
+    expect(source.provenance.title).toBe('filename')
   })
 
   it.each([['metadata', readPublicationMetadata], ['structure', readPublicationStructure]] as const)('rejects removal during %s extraction and releases the opened content', async (_name, read) => {

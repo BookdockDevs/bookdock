@@ -1,5 +1,6 @@
 import type { ClientBookRef } from '@bookdock/shared'
 import { retryReadingRecords } from '@/features/reader/lib/reading-record-queue'
+import { initRemoteOfflineSync } from '@/features/remote-cache/offline-sync'
 import DownloadDialogHost from '@/features/library/components/DownloadDialogHost'
 import { isDeviceBook } from '@/features/reading-data/book-source'
 import { evictLocalEpubCacheByPrefix } from '@/features/reader/content/local-epub-provider'
@@ -49,6 +50,7 @@ export default function AppProviders({ children }: { children?: ReactNode }) {
     // displayed source; retrying it no-ops without a user and never carries
     // local vault data.
     void retryReadingRecords()
+    return initRemoteOfflineSync()
   }, [])
 
   useEffect(() => {

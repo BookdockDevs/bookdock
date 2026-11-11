@@ -13,15 +13,21 @@ import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 import { cfiRangesOverlap, loadCfiModule } from '../lib/cfi-overlap'
 import { useLocalReader } from '../../reading-data/reader-source-context'
 import { localRecordId } from '../../local-library/reader-session'
+import { remoteBookCache, remoteCacheScopeKey } from '@/features/remote-cache/remote-book-cache'
+import { useRemoteCacheStore } from '@/features/remote-cache/remote-cache.store'
+import { applyOfflineNoteOps, flushRemoteOfflineOutbox, isOfflineOrNetworkError } from '@/features/remote-cache/offline-sync'
 
 type AnnotationsCache = { data: AnnotationRes[] }
 
 function useAnnotationSource(bookId: string) {
   const local = useLocalReader()
   const user = useAuthStore((state) => state.user)
+  const cachedRemote = useRemoteCacheStore((state) => Boolean(!local && state.cached[bookId]))
+  const canQueueOffline = Boolean(cachedRemote && user?.id)
+  const scopeKey = remoteCacheScopeKey(user?.id ?? null)
   const revision = getAuthSessionRevision()
   const key = local ? ['annotations', local.namespace, bookId] : ['annotations', bookId]
-  return { local, key,
+  return { local, cachedRemote, canQueueOffline, scopeKey, userId: user?.id ?? null, key,
     mutationKey: ['annotation-command', local?.namespace ?? 'remote', bookId, ...(local ? [] : [user?.id ?? null, revision])],
     isCurrent: () => Boolean(local) || getAuthSessionRevision() === revision,
     assertOwner() {
@@ -31,28 +37,49 @@ function useAnnotationSource(bookId: string) {
 }
 
 export function useAnnotations(bookId: string, options: { enabled?: boolean } = {}) {
-  const { local, key, assertOwner } = useAnnotationSource(bookId)
+  const { local, cachedRemote, scopeKey, userId, key, assertOwner } = useAnnotationSource(bookId)
   return useQuery({
     queryKey: key,
-    networkMode: local ? 'always' : 'online',
+    networkMode: local || cachedRemote ? 'always' : 'online',
     queryFn: async () => {
       assertOwner()
-      const result = local ? await local.listNotes() : await apiGet<AnnotationsCache>(withReveal(`/annotations/book/${bookId}`))
-      assertOwner()
-      return result
+      if (local) {
+        const result = await local.listNotes()
+        assertOwner()
+        return result
+      }
+      const pendingOps = await remoteBookCache.getPendingNoteOps(scopeKey, bookId).catch(() => [])
+      try {
+        const result = await apiGet<AnnotationsCache>(withReveal(`/annotations/book/${bookId}`))
+        assertOwner()
+        if (pendingOps.length > 0 && userId) {
+          void flushRemoteOfflineOutbox(userId, bookId)
+          return { data: applyOfflineNoteOps(result.data, pendingOps) }
+        }
+        if (cachedRemote) {
+          void remoteBookCache.updateCachedSnapshot(scopeKey, bookId, (curr) => ({ ...curr, notes: result.data })).catch(() => {})
+        }
+        return result
+      } catch (error) {
+        if (!isOfflineOrNetworkError(error)) throw error
+        const cached = await remoteBookCache.getBookRecord(scopeKey, bookId).catch(() => null)
+        if (!cached && pendingOps.length === 0) throw error
+        assertOwner()
+        return { data: applyOfflineNoteOps(cached?.notes ?? [], pendingOps) }
+      }
     },
     enabled: !!bookId && options.enabled !== false,
   })
 }
 
 export function useCreateAnnotation(bookId: string) {
-  const { local, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
+  const { local, canQueueOffline, scopeKey, userId, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
   const queryClient = useQueryClient()
   const replacementIdsByBody = useRef(new WeakMap<object, string[]>()).current
   const commandIds = useRef(new WeakMap<object, string>()).current
   return useMutation({
-    mutationKey, networkMode: local ? 'always' : 'online',
-    mutationFn: (body: AnnotationCreateReq) => {
+    mutationKey, networkMode: local || canQueueOffline ? 'always' : 'online',
+    mutationFn: async (body: AnnotationCreateReq) => {
       assertOwner()
       const replaceAnnotationIds = replacementIdsByBody.get(body)
       if (local) {
@@ -60,10 +87,57 @@ export function useCreateAnnotation(bookId: string) {
         if (!commandId) { commandId = localRecordId(); commandIds.set(body, commandId) }
         return local.createNote({ ...body, ...(replaceAnnotationIds?.length ? { replaceAnnotationIds } : {}) }, commandId)
       }
-      return apiPost<{ data: AnnotationRes }>(withReveal(`/annotations/book/${bookId}`), {
-        ...body,
-        ...(replaceAnnotationIds?.length ? { replaceAnnotationIds } : {}),
-      })
+      const pendingImageIds = (body.imageIds ?? []).filter((id) => id.startsWith('pending-image_'))
+      const serverImageIds = (body.imageIds ?? []).filter((id) => !id.startsWith('pending-image_'))
+      const queueOfflineCreate = async () => {
+        const now = Date.now()
+        const tempId = `pending-note_${localRecordId()}`
+        const optimistic: AnnotationRes = {
+          id: tempId,
+          bookId,
+          revisionId: body.revisionId ?? null,
+          cfiRange: body.cfiRange,
+          cfiAnchor: body.cfiAnchor ?? null,
+          type: body.type,
+          color: body.color ?? 'yellow',
+          style: body.style ?? 'underline',
+          text: body.text ?? '',
+          contextText: body.contextText ?? null,
+          note: body.note ?? null,
+          chapter: body.chapter ?? null,
+          chapterHref: body.chapterHref ?? null,
+          createdAt: now,
+          updatedAt: now,
+        }
+        await remoteBookCache.enqueueNoteOp(scopeKey, bookId, {
+          opId: localRecordId(),
+          type: 'create',
+          tempId,
+          body: {
+            ...body,
+            ...(serverImageIds.length > 0 ? { imageIds: serverImageIds } : {}),
+            ...(pendingImageIds.length > 0 && serverImageIds.length === 0 ? { imageIds: undefined } : {}),
+            ...(replaceAnnotationIds?.length ? { replaceAnnotationIds } : {}),
+          },
+          ...(pendingImageIds.length > 0 ? { pendingImageIds } : {}),
+          optimistic,
+          createdAt: now,
+        })
+        await useRemoteCacheStore.getState().refreshPendingSync(userId)
+        return { data: optimistic }
+      }
+      if (pendingImageIds.length > 0 || (canQueueOffline && typeof navigator !== 'undefined' && navigator.onLine === false)) {
+        return queueOfflineCreate()
+      }
+      try {
+        return await apiPost<{ data: AnnotationRes }>(withReveal(`/annotations/book/${bookId}`), {
+          ...body,
+          ...(replaceAnnotationIds?.length ? { replaceAnnotationIds } : {}),
+        })
+      } catch (error) {
+        if (canQueueOffline && isOfflineOrNetworkError(error)) return queueOfflineCreate()
+        throw error
+      }
     },
     onMutate: async (body) => {
       if ((body.text?.length ?? 0) > ANNOTATION_MAX_TEXT_LENGTH) {
@@ -146,13 +220,29 @@ export function useCreateAnnotation(bookId: string) {
   })
 }
 export function useUpdateAnnotation(bookId: string) {
-  const { local, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
+  const { local, canQueueOffline, scopeKey, userId, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
   const queryClient = useQueryClient()
   return useMutation({
-    mutationKey, networkMode: local ? 'always' : 'online',
-    mutationFn: ({ id, body, expectedVersion }: { id: string; body: AnnotationUpdateReq; expectedVersion?: number }) => {
+    mutationKey, networkMode: local || canQueueOffline ? 'always' : 'online',
+    mutationFn: async ({ id, body, expectedVersion }: { id: string; body: AnnotationUpdateReq; expectedVersion?: number }) => {
       assertOwner()
-      return local ? local.updateNote(id, body, expectedVersion) : apiPut<{ data: AnnotationRes }>(`/annotations/${id}`, body)
+      if (local) return local.updateNote(id, body, expectedVersion)
+      const queueOfflineUpdate = async () => {
+        const now = Date.now()
+        await remoteBookCache.enqueueNoteOp(scopeKey, bookId, { opId: localRecordId(), type: 'update', noteId: id, body, updatedAt: now })
+        await useRemoteCacheStore.getState().refreshPendingSync(userId)
+        const cached = queryClient.getQueryData<AnnotationsCache>(key)?.data.find((a) => a.id === id)
+        return { data: cached ? { ...cached, ...body, updatedAt: now } : ({ id, bookId, ...body, updatedAt: now } as unknown as AnnotationRes) }
+      }
+      if (canQueueOffline && (id.startsWith('pending-note_') || (typeof navigator !== 'undefined' && navigator.onLine === false))) {
+        return queueOfflineUpdate()
+      }
+      try {
+        return await apiPut<{ data: AnnotationRes }>(`/annotations/${id}`, body)
+      } catch (error) {
+        if (canQueueOffline && isOfflineOrNetworkError(error)) return queueOfflineUpdate()
+        throw error
+      }
     },
     onMutate: async ({ id, body }) => {
       if ((body.text?.length ?? 0) > ANNOTATION_MAX_TEXT_LENGTH) {
@@ -188,20 +278,37 @@ export function useUpdateAnnotation(bookId: string) {
   })
 }
 export function useDeleteAnnotation(bookId: string) {
-  const { local, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
+  const { local, canQueueOffline, scopeKey, userId, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
   const queryClient = useQueryClient()
   const versionScope = JSON.stringify(mutationKey)
   const versionsRef = useRef({ scope: versionScope, values: new Map<string, number>() })
   if (versionsRef.current.scope !== versionScope) versionsRef.current = { scope: versionScope, values: new Map() }
   const versions = versionsRef.current.values
   return useMutation({
-    mutationKey, networkMode: local ? 'always' : 'online',
+    mutationKey, networkMode: local || canQueueOffline ? 'always' : 'online',
     mutationFn: async (target: string | Pick<AnnotationRes, 'id' | 'clientVersion'>): Promise<{ undo?: UndoReceipt }> => {
       assertOwner()
       const id = typeof target === 'string' ? target : target.id
       const version = typeof target === 'string' ? versions.get(id) : target.clientVersion
       if (local && version === undefined) throw new Error('Displayed local note version is required')
-      return local ? (await local.deleteNote(id, version), {}) : apiDelete<{ undo?: UndoReceipt }>(`/annotations/${id}`)
+      if (local) {
+        await local.deleteNote(id, version)
+        return {}
+      }
+      const queueOfflineDelete = async () => {
+        await remoteBookCache.enqueueNoteOp(scopeKey, bookId, { opId: localRecordId(), type: 'delete', noteId: id, deletedAt: Date.now() })
+        await useRemoteCacheStore.getState().refreshPendingSync(userId)
+        return {}
+      }
+      if (canQueueOffline && (id.startsWith('pending-note_') || (typeof navigator !== 'undefined' && navigator.onLine === false))) {
+        return queueOfflineDelete()
+      }
+      try {
+        return await apiDelete<{ undo?: UndoReceipt }>(`/annotations/${id}`)
+      } catch (error) {
+        if (canQueueOffline && isOfflineOrNetworkError(error)) return queueOfflineDelete()
+        throw error
+      }
     },
     onMutate: async (target) => {
       const id = typeof target === 'string' ? target : target.id
@@ -234,14 +341,14 @@ export function useDeleteAnnotation(bookId: string) {
 }
 
 export function useBatchDeleteAnnotations(bookId: string) {
-  const { local, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
+  const { local, canQueueOffline, scopeKey, userId, key, mutationKey, assertOwner, isCurrent } = useAnnotationSource(bookId)
   const queryClient = useQueryClient()
   const versionScope = JSON.stringify(mutationKey)
   const versionsRef = useRef({ scope: versionScope, values: new Map<string, number>() })
   if (versionsRef.current.scope !== versionScope) versionsRef.current = { scope: versionScope, values: new Map() }
   const versions = versionsRef.current.values
   return useMutation({
-    mutationKey, networkMode: local ? 'always' : 'online',
+    mutationKey, networkMode: local || canQueueOffline ? 'always' : 'online',
     mutationFn: async (targets: string[] | Array<Pick<AnnotationRes, 'id' | 'clientVersion'>>) => {
       assertOwner()
       const ids = targets.map((target) => typeof target === 'string' ? target : target.id)
@@ -251,8 +358,24 @@ export function useBatchDeleteAnnotations(bookId: string) {
         await local.deleteNotes(notes)
         return { succeeded: ids.length, failed: 0, undo: undefined }
       }
-      const result = await apiPost<{ data: { succeeded: number; failed: number }; undo?: UndoReceipt }>('/annotations/batch-delete', { ids })
-      return { ...result.data, undo: result.undo }
+      const queueOfflineDeletes = async () => {
+        const now = Date.now()
+        for (const id of ids) {
+          await remoteBookCache.enqueueNoteOp(scopeKey, bookId, { opId: localRecordId(), type: 'delete', noteId: id, deletedAt: now })
+        }
+        await useRemoteCacheStore.getState().refreshPendingSync(userId)
+        return { succeeded: ids.length, failed: 0, undo: undefined }
+      }
+      if (canQueueOffline && (ids.every((id) => id.startsWith('pending-note_')) || (typeof navigator !== 'undefined' && navigator.onLine === false))) {
+        return queueOfflineDeletes()
+      }
+      try {
+        const result = await apiPost<{ data: { succeeded: number; failed: number }; undo?: UndoReceipt }>('/annotations/batch-delete', { ids })
+        return { ...result.data, undo: result.undo }
+      } catch (error) {
+        if (canQueueOffline && isOfflineOrNetworkError(error)) return queueOfflineDeletes()
+        throw error
+      }
     },
     onMutate: async (targets) => {
       const ids = targets.map((target) => typeof target === 'string' ? target : target.id)

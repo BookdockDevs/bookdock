@@ -447,7 +447,15 @@ export type {
   CatalogVersionMetadataSourceRes,
 } from './metadata-source'
 
-export { metadataSourceFieldSchema, metadataSourceProvenanceSchema, metadataSourceValuesSchema } from './metadata-source'
+export {
+  applyFilenameMetadataFallback,
+  buildTxtFileMetadataSource,
+  emptyFileMetadataValues,
+  metadataSourceFieldSchema,
+  metadataSourceProvenanceSchema,
+  metadataSourceValuesSchema,
+  missingFileMetadataProvenance,
+} from './metadata-source'
 
 export type {
   ExternalBook,
@@ -548,4 +556,25 @@ export * from './revision-coverage'
 export * from './epub-cfi-position'
 export * from './epub-revision-map'
 export * from './revision-anchors'
+export {
+  LOCAL_IMPORT_MAX_IMAGES,
+  LOCAL_IMPORT_MAX_NOTES,
+  LOCAL_IMPORT_MAX_OVERRIDES,
+  LOCAL_IMPORT_MAX_PAYLOAD_BYTES,
+  LOCAL_IMPORT_MAX_POINT_RULES,
+  LOCAL_IMPORT_MAX_ROUNDS,
+  LOCAL_IMPORT_MAX_SESSIONS,
+  localBookDuplicateCheckSchema,
+  localBookImportNoteSchema,
+  localBookImportPayloadSchema,
+  localBookImportPointRuleSchema,
+  localBookImportRoundSchema,
+  localBookImportSessionSchema,
+  type LocalBookDuplicateCheckReq,
+  type LocalBookDuplicateCheckRes,
+  type LocalBookImportNote,
+  type LocalBookImportPayload,
+  type LocalBookImportRound,
+  type LocalBookImportSession,
+} from './local-book-transfer'
 export { cleanAuthor, normalizeBookTitle, splitAuthors } from './book-title'

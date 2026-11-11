@@ -25,7 +25,11 @@ import { formatAuthorList, formatBytes } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 
-import { normalizeLibrarySearch, readLibrarySearchExpression } from '@bookdock/shared'
+import { ErrorCode, normalizeLibrarySearch, readLibrarySearchExpression } from '@bookdock/shared'
+
+import { LocalLibraryError } from '@/features/local-library/repository'
+import { uploadLocalBookToServer } from '@/features/local-library/upload-to-server'
+import { CacheProgressRing } from '@/features/remote-cache/components/CacheActionControls'
 
 import ClearBookDataOption from './components/ClearBookDataOption'
 import { adoptArchiveExitRestore, clearActivityForLibraryNavigation, clearActivityForLibrarySwitch, editSearchControls, expressionDisplay, keepsSearchSession, searchExitTarget, searchProjection, searchSessionNavigation, submittedSearchPatch } from './library-search-state'
@@ -290,6 +294,10 @@ export default function Library() {
   const [libraryPermanentTarget, setLibraryPermanentTarget] = useState<CatalogBook | null>(null)
   const [detailTarget, setDetailTarget] = useState<ClientLibraryBookView | null>(null)
   const [publishTarget, setPublishTarget] = useState<ClientLibraryBookView | null>(null)
+  const [uploadToServerTarget, setUploadToServerTarget] = useState<ClientLibraryBookView | null>(null)
+  const [duplicateCleanupTarget, setDuplicateCleanupTarget] = useState<ClientLibraryBookView | null>(null)
+  const [uploadingToServer, setUploadingToServer] = useState(false)
+  const [uploadToServerProgress, setUploadToServerProgress] = useState(0)
   const [forkTarget, setForkTarget] = useState<ClientLibraryBookView | null>(null)
   const [workDetail, setWorkDetail] = useState<CatalogBook | null>(null)
   const [activityWorkTargetId, setActivityWorkTargetId] = useState<string | null>(null)
@@ -729,6 +737,7 @@ export default function Library() {
   // local row must not offer an implicit upload path.
   const canPublishBook = (book: ClientLibraryBookView) => hasPublishTarget && !isDeviceBook(book.ref) && (book.kind === undefined || book.kind === 'personal')
   const canPublishDetail = detailTarget ? canPublishBook(detailTarget) : false
+  const canUploadToServerBook = (book: ClientLibraryBookView) => !isGuest && userUploadAllowed && isDeviceBook(book.ref) && !book.deletedAt
   // The manage dialog can target a library that is not in context, so its
   // relation comes from the listed row rather than the active-library query;
   // the row's own relation is the fallback before the list loads.
@@ -1531,6 +1540,7 @@ export default function Library() {
                         readOnly={isRowReadOnly(book)}
                         onDelete={isRowReadOnly(book) ? undefined : setDeleteTarget}
                         onPublish={canPublishBook(book) ? setPublishTarget : undefined}
+                        onUploadToServer={canUploadToServerBook(book) ? setUploadToServerTarget : undefined}
                         onFork={isGuest ? undefined : setForkTarget}
                         onShowDetails={setDetailTarget}
                       />
@@ -1569,6 +1579,7 @@ export default function Library() {
                     readOnly={isRowReadOnly(book)}
                     onDelete={isRowReadOnly(book) ? undefined : setDeleteTarget}
                     onPublish={canPublishBook(book) ? setPublishTarget : undefined}
+                    onUploadToServer={canUploadToServerBook(book) ? setUploadToServerTarget : undefined}
                     onFork={isGuest ? undefined : setForkTarget}
                     onShowDetails={setDetailTarget}
                   />
@@ -1693,6 +1704,79 @@ export default function Library() {
           setDeleteTarget(b)
         }}
       />
+
+      {uploadToServerTarget && user && (
+        <ConfirmDialog
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 13v8" />
+              <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+              <path d="m8 17 4-4 4 4" />
+            </svg>
+          }
+          title={_('library.uploadToServerTitle')}
+          message={_('library.uploadToServerConfirm', { title: uploadToServerTarget.title })}
+          confirmLabel={_('library.uploadToServer')}
+          submittingLabel={_('library.uploading')}
+          submittingIcon={<CacheProgressRing progress={uploadToServerProgress} size={14} />}
+          confirmVariant="primary"
+          confirmDisabled={uploadingToServer}
+          onClose={() => { if (!uploadingToServer) setUploadToServerTarget(null) }}
+          onConfirm={async () => {
+            const target = uploadToServerTarget
+            if (!target.ref) {
+              setUploadToServerTarget(null)
+              return
+            }
+            setUploadingToServer(true)
+            setUploadToServerProgress(5)
+            try {
+              await uploadLocalBookToServer(target.ref, {
+                accountId: user.id,
+                onProgress: (percent) => setUploadToServerProgress(Math.max(5, percent)),
+              })
+              setUploadToServerTarget(null)
+              notify.success(_('library.uploadToServerSuccess'))
+            } catch (error) {
+              if (error instanceof LocalLibraryError && error.category === 'pending-reading') {
+                notify.error(_('library.uploadToServerPendingTimer'))
+              } else if (error instanceof ApiError && error.code === ErrorCode.BOOK_DUPLICATE) {
+                setUploadToServerTarget(null)
+                setDuplicateCleanupTarget(target)
+              } else {
+                notify.error(getUserErrorNotification(error, 'library.uploadToServerFailed'))
+              }
+            } finally {
+              setUploadingToServer(false)
+              setUploadToServerProgress(0)
+            }
+          }}
+        />
+      )}
+
+      {duplicateCleanupTarget && (
+        <ConfirmDialog
+          title={_('library.duplicateLocalDeleteTitle')}
+          message={_('library.duplicateLocalDeleteConfirm', { title: duplicateCleanupTarget.title })}
+          confirmLabel={_('library.duplicateLocalDeleteConfirmBtn')}
+          confirmVariant="danger"
+          onClose={() => setDuplicateCleanupTarget(null)}
+          onConfirm={async () => {
+            const target = duplicateCleanupTarget
+            if (target.ref) {
+              await localLibraryRepository.removeBook(target.ref, true)
+              await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['local-catalog'] }),
+                queryClient.invalidateQueries({ queryKey: ['books'] }),
+                queryClient.invalidateQueries({ queryKey: ['reading-records'] }),
+                queryClient.invalidateQueries({ queryKey: ['archive'] }),
+              ])
+            }
+            setDuplicateCleanupTarget(null)
+            notify.success(_('library.duplicateLocalDeleteSuccess'))
+          }}
+        />
+      )}
 
       {publishTarget && (
         <PublishBookDialog

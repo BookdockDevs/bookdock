@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { normalizeBookTitle } from './book-title'
+
 export const metadataSourceFieldSchema = z.enum([
   'title',
   'authors',
@@ -66,3 +68,74 @@ export const metadataSourceValuesSchema: z.ZodType<MetadataSourceValues> = z.obj
   series: z.string().nullable(),
   seriesIndex: z.number().nullable(),
 })
+
+export function emptyFileMetadataValues(): MetadataSourceValues {
+  return {
+    title: null,
+    authors: null,
+    description: null,
+    publisher: null,
+    published: null,
+    language: null,
+    isbn: null,
+    subjects: null,
+    series: null,
+    seriesIndex: null,
+  }
+}
+
+export function missingFileMetadataProvenance(): MetadataSourceProvenanceMap {
+  return {
+    title: 'missing',
+    authors: 'missing',
+    description: 'missing',
+    publisher: 'missing',
+    published: 'missing',
+    language: 'missing',
+    isbn: 'missing',
+    subjects: 'missing',
+    series: 'missing',
+    seriesIndex: 'missing',
+  }
+}
+
+export function applyFilenameMetadataFallback(
+  values: MetadataSourceValues,
+  provenance: MetadataSourceProvenanceMap,
+  fileName: string | null,
+  normalizeTitleApplied: boolean,
+): void {
+  if (!normalizeTitleApplied || !fileName || (values.title && values.authors)) return
+  const derived = normalizeBookTitle(fileName)
+  if (!values.title && derived.title) {
+    values.title = derived.title
+    provenance.title = 'filename'
+  }
+  if (!values.authors) {
+    if (derived.authors && derived.authors.length > 0) {
+      values.authors = derived.authors
+      provenance.authors = 'filename'
+    } else if (derived.author) {
+      values.authors = [derived.author]
+      provenance.authors = 'filename'
+    }
+  }
+}
+
+export function buildTxtFileMetadataSource(
+  fileName: string | null,
+  normalizeTitleApplied: boolean,
+  fallbackRawTitle = false,
+): FileMetadataSourceRes {
+  const values = emptyFileMetadataValues()
+  const provenance = missingFileMetadataProvenance()
+  applyFilenameMetadataFallback(values, provenance, fileName, normalizeTitleApplied)
+  if (fallbackRawTitle && !normalizeTitleApplied && fileName) {
+    const title = fileName.replace(/\.txt$/i, '') || fileName
+    if (title) {
+      values.title = title
+      provenance.title = 'filename'
+    }
+  }
+  return { kind: 'file', format: 'txt', fileName, normalizeTitleApplied, values, provenance }
+}

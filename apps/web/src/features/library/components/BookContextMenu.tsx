@@ -6,6 +6,8 @@ import { useNavigate } from '@tanstack/react-router'
 import { isDeviceBook } from '@/features/reading-data/book-source'
 import { catalogBookTarget } from '@/features/reading-data/catalog-navigation'
 import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
+import { RemoteCacheActionIcon } from '@/features/remote-cache/components/CacheActionControls'
+import { useRemoteBookCacheAction } from '@/features/remote-cache/use-remote-book-cache-action'
 import MenuFlyout from '@/components/ui/MenuFlyout'
 import { useTranslation } from '@/hooks/useTranslation'
 import { formatAuthorList } from '@/lib/utils'
@@ -88,11 +90,12 @@ function StatusFlyout({ book, onClose }: { book: ClientLibraryBookView; onClose:
   )
 }
 
-export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPublish, onFork, onDelete, onClose }: {
+export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPublish, onUploadToServer, onFork, onDelete, onClose }: {
   book: ClientLibraryBookView
   readOnly?: boolean
   onShowDetails?: (book: ClientLibraryBookView) => void
   onPublish?: (book: ClientLibraryBookView) => void
+  onUploadToServer?: (book: ClientLibraryBookView) => void
   onFork?: (book: ClientLibraryBookView) => void
   onDelete?: (book: ClientLibraryBookView) => void
   onClose: () => void
@@ -101,6 +104,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
   const navigate = useNavigate()
   const warmReader = useWarmReaderEntry()
   const updateBook = useUpdateBook()
+  const cacheAction = useRemoteBookCacheAction(book)
   // B to a personal copy while the source still reads; A/C rows and library
   // reads (collected === false) have no source binding to cut. The actual
   // confirm lives with the caller, like onPublish/onDelete.
@@ -206,24 +210,69 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
           )}
 
           {divider}
+        </>
+      )}
 
-          {onPublish && (
+      {cacheAction.eligible && (
+        <>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              cacheAction.trigger()
+            }}
+            className={itemClass}
+          >
+            <RemoteCacheActionIcon
+              status={cacheAction.status}
+              progress={cacheAction.progress}
+              size={15}
+              className={cacheAction.status === 'caching' ? 'text-stone-700 dark:text-stone-200' : 'text-stone-400'}
+            />
+            <span className="flex-1">{cacheAction.label}</span>
+            {cacheAction.pendingSyncCount > 0 && (
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                {cacheAction.pendingSyncCount}
+              </span>
+            )}
+          </button>
+          {cacheAction.status === 'update-available' && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                cacheAction.clearCache()
+              }}
+              className={itemClass}
+            >
+              <RemoteCacheActionIcon status="cached" progress={100} size={15} className="text-stone-400" />
+              <span className="flex-1">{cacheAction.clearLabel}</span>
+            </button>
+          )}
+        </>
+      )}
+
+      {!readOnly && (
+        <>
+          {onUploadToServer && isDeviceBook(book.ref) && !book.deletedAt && (
             <button
               type="button"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 onClose()
-                onPublish(book)
+                onUploadToServer(book)
               }}
               className={itemClass}
             >
               <MenuIcon>
-                <path d="M12 17V3" />
-                <path d="m7 8 5-5 5 5" />
-                <path d="M5 21h14" />
+                <path d="M12 13v8" />
+                <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+                <path d="m8 17 4-4 4 4" />
               </MenuIcon>
-              {_('library.publish')}
+              {_('library.uploadToServer')}
             </button>
           )}
 
@@ -244,6 +293,26 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
             </MenuIcon>
             {_('library.download')}
           </button>
+
+          {onPublish && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onClose()
+                onPublish(book)
+              }}
+              className={itemClass}
+            >
+              <MenuIcon>
+                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
+                <path d="M12 13V7" />
+                <path d="m9 10 3-3 3 3" />
+              </MenuIcon>
+              {_('library.publish')}
+            </button>
+          )}
 
           {canFork && (
             <button

@@ -42,6 +42,9 @@ import { cfiRangesIntersect, loadCfiModule } from './lib/cfi-overlap'
 import { mergeProgressSaveCache } from './lib/progress-cache'
 import { buildRevisionContentUrl, prepareRevisionNavigation } from './lib/revision-navigation'
 import { clearPreparedReaderContentText, primeReaderContentText, ReaderContentError } from './lib/reader-content-client'
+import { localEpubProvider } from './content/local-epub-provider'
+import { remoteBookCache } from '../remote-cache/remote-book-cache'
+import { useRemoteCacheStore } from '../remote-cache/remote-cache.store'
 import { useLocalReader } from '../reading-data/reader-source-context'
 import { remoteReaderSession } from '../reading-data/remote-reader-session'
 import { useCreateAnnotation, useAnnotations, useDeleteAnnotation } from './hooks/useAnnotations'
@@ -132,6 +135,11 @@ export default function Reader() {
   const isGuest = !authUser && !local
   const remote = useMemo(() => remoteReaderSession(id, isGuest), [id, isGuest])
   const dataSource = local ?? remote
+  const cacheHydrated = useRemoteCacheStore((s) => s.hydrated)
+  const cachedSummary = useRemoteCacheStore((s) => (!local && id ? s.cached[id] : undefined))
+  useEffect(() => {
+    if (!local && !cacheHydrated) void useRemoteCacheStore.getState().hydrate(authUser?.id ?? null)
+  }, [local, cacheHydrated, authUser?.id])
   const [localSaveError, setLocalSaveError] = useState<string | null>(null)
   const [localTimerError, setLocalTimerError] = useState<string | null>(null)
   const deepLinkParams = new URLSearchParams(window.location.search)
@@ -424,6 +432,7 @@ export default function Reader() {
 
   const bookQuery = useQuery({
     queryKey: ['book', cacheId],
+    networkMode: local || cachedSummary ? 'always' : 'online',
     queryFn: () => dataSource.getBook(),
     enabled: !!id && !revisionQuarantined,
     staleTime: 0,
@@ -636,6 +645,7 @@ export default function Reader() {
 
   const progressQuery = useQuery({
     queryKey: ['progress', cacheId, isGuest ? 'guest' : 'user'],
+    networkMode: local || cachedSummary ? 'always' : 'online',
     queryFn: () => dataSource.getProgress(),
     enabled: !!id,
     refetchOnWindowFocus: false,
@@ -644,6 +654,7 @@ export default function Reader() {
 
 
   const progressMutation = useMutation({
+    networkMode: local || cachedSummary ? 'always' : 'online',
     mutationFn: async (body: ReadingProgressUpdateReq) => {
       try {
         return await dataSource.saveProgress(body)
@@ -1072,13 +1083,34 @@ export default function Reader() {
     }
   }, [bookQuery.data, contentUrl, id, setSidebarOpen, setTocItems])
 
+  const cachedMatchesRevision = Boolean(
+    !local && cachedSummary && (!bookQuery.data?.data.revisionId || cachedSummary.revisionId === bookQuery.data.data.revisionId),
+  )
+  const cachedBlobQuery = useQuery({
+    queryKey: ['remote-cache-blob', cachedSummary?.scopeKey ?? null, id, cachedSummary?.revisionId ?? null],
+    networkMode: 'always',
+    enabled: Boolean(!local && id && cachedMatchesRevision),
+    queryFn: () => remoteBookCache.getBook(cachedSummary!.scopeKey, id!),
+    staleTime: Infinity,
+  })
+  const cachedRemoteProvider = useMemo(() => {
+    if (!cachedMatchesRevision || !cachedBlobQuery.data?.file || !cachedSummary || !id) return undefined
+    return localEpubProvider(
+      `remote-cache:${cachedSummary.scopeKey}:${id}:${cachedBlobQuery.data.record.revisionId}`,
+      cachedBlobQuery.data.file,
+      { cache: true },
+    )
+  }, [cachedBlobQuery.data, cachedMatchesRevision, cachedSummary, id])
+  const awaitingCacheHydration = Boolean(!local && typeof indexedDB !== 'undefined' && !cacheHydrated)
+  const awaitingCachedBlob = Boolean(!local && cachedMatchesRevision && cachedBlobQuery.isLoading)
+
   const shortcutOwner = local ? LOCAL_READER_SHORTCUT_SCOPE : authUser?.id ?? null
   const resolvedShortcuts = useCallback(() => readReaderShortcuts(shortcutOwner), [shortcutOwner])
   const { containerRef, renderer, fontStack, fontCss, preparationFailed, retryPreparation } = useReaderRenderer({
     shortcuts: resolvedShortcuts,
-    bookProvider: local?.provider,
+    bookProvider: local?.provider ?? cachedRemoteProvider,
     resolvedFonts: local && !authUser ? [] : undefined,
-    ready: settingsReady && resolvedBoundPresetId === boundPresetId && replacementsReady,
+    ready: settingsReady && resolvedBoundPresetId === boundPresetId && replacementsReady && !awaitingCacheHydration && !awaitingCachedBlob,
     url: rendererContentUrl,    // undefined while progress is still loading: the renderer defers mounting
     mountGeneration: revisionMountGeneration,
     bookId: id,

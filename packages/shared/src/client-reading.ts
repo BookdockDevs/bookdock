@@ -135,6 +135,7 @@ export const clientBookSchema = z.object({
   title: z.string(),
   authors: z.array(z.string()),
   format: z.enum(['epub', 'txt']),
+  fileName: identity.optional(),
   content: clientContentRefSchema.nullable(),
   availability: z.enum(['available', 'missing', 'removed']),
   deletedAt: timestamp.nullable().optional(),

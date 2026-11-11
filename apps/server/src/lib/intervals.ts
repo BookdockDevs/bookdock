@@ -1,6 +1,6 @@
 export type FractionInterval = [number, number]
 
-function normalize(all: FractionInterval[]): FractionInterval[] {
+export function normalizeCoverage(all: FractionInterval[]): FractionInterval[] {
   const sorted = [...all].sort((a, b) => a[0] - b[0])
   const merged: FractionInterval[] = []
   for (const [s, e] of sorted) {
@@ -18,9 +18,9 @@ function normalize(all: FractionInterval[]): FractionInterval[] {
 }
 
 export function mergeInterval(intervals: FractionInterval[], interval: FractionInterval): FractionInterval[] {
-  return normalize([...intervals, interval])
+  return normalizeCoverage([...intervals, interval])
 }
 
 export function unionLength(intervals: FractionInterval[]): number {
-  return normalize(intervals).reduce((total, [s, e]) => total + (e - s), 0)
+  return normalizeCoverage(intervals).reduce((total, [s, e]) => total + (e - s), 0)
 }

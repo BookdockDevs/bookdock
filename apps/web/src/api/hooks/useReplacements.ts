@@ -8,6 +8,9 @@ import { deviceScope, isDeviceBook } from '@/features/reading-data/book-source'
 import { DEVICE_VAULT_SCOPE } from '@/features/local-library/catalog'
 import { localLibraryRepository as repository } from '@/features/local-library/repository'
 import { localRecordId } from '@/features/local-library/id'
+import { remoteBookCache, remoteCacheScopeKey } from '@/features/remote-cache/remote-book-cache'
+import { useRemoteCacheStore } from '@/features/remote-cache/remote-cache.store'
+import { isOfflineOrNetworkError } from '@/features/remote-cache/offline-sync'
 import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../client'
@@ -122,12 +125,27 @@ export function useBookReplacements(bookId: string | undefined, ref?: ClientBook
   // reads the account even for a guest.
   const scope = source.deviceFor(bookId, ref)
   const local = scope ? { scope } : null
+  const isCachedRemote = useRemoteCacheStore((s) => Boolean(!local && bookId && s.cached[bookId]))
+  const userId = useAuthStore((s) => s.user?.id ?? null)
   const key = scope ? ['client-replacements', scope.vaultId] : REPLACEMENTS_KEY
   return useQuery({
-    queryKey: [...key, 'book', bookId], networkMode: local ? 'always' : 'online',
+    queryKey: [...key, 'book', bookId], networkMode: local || isCachedRemote ? 'always' : 'online',
     queryFn: async ({ signal }) => {
       if (!local) {
-        source.assertCurrent(); const result = await apiGet<ReplacementsCache>(`/replacements?bookId=${bookId}`); source.assertCurrent(); return result
+        source.assertCurrent()
+        try {
+          const result = await apiGet<ReplacementsCache>(`/replacements?bookId=${bookId}`)
+          source.assertCurrent()
+          if (bookId && isCachedRemote) {
+            void remoteBookCache.updateCachedSnapshot(remoteCacheScopeKey(userId), bookId, (curr) => ({ ...curr, replacements: result.data })).catch(() => {})
+          }
+          return result
+        } catch (error) {
+          if (!isOfflineOrNetworkError(error) || !bookId) throw error
+          const cached = await remoteBookCache.getBookRecord(remoteCacheScopeKey(userId), bookId).catch(() => null)
+          if (!cached) throw error
+          return { data: cached.replacements }
+        }
       }
       if (!bookId) return { data: [] }
       // This book's own rules live with the book; the global set is the one the

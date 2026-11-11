@@ -131,7 +131,7 @@ describe('the existing library screen with local authority', () => {
     await waitFor(async () => expect((await repository.getBook(txtRef)).content?.contentId).not.toBe('before-edit'))
     const saved = await repository.getBook(txtRef)
     expect(await repository.getNormalizedTxt(txtRef, saved.content!.contentId)).toContain('Edited on this device.')
-    expect(await (await repository.getFile(txtRef, true)).text()).toBe(await original.text())
+    expect(await (await repository.getFile(txtRef)).text()).toContain('Edited on this device.')
     expect(prepareEditedTxtInWorker).toHaveBeenCalledOnce()
     for (const method of [apiGet, apiPost, apiPut, apiPatch, apiDelete, apiUpload]) expect(method).not.toHaveBeenCalled()
   }, 15000)

@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, editorEpubSaveSchema, editorTxtSaveSchema, privateBatchShelfSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
+import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, editorEpubSaveSchema, editorTxtSaveSchema, LOCAL_IMPORT_MAX_IMAGES, LOCAL_IMPORT_MAX_PAYLOAD_BYTES, localBookDuplicateCheckSchema, localBookImportPayloadSchema, privateBatchShelfSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -55,6 +55,7 @@ import { requestUserId } from '../../middleware/auth.guard'
 import { decodeTextBuffer } from '../../formats/txt'
 import { exportEpubBook, exportTxtBook } from './txt-export'
 import { getEditorAccess, getEditorEpubContent, saveEditorEpubContent, saveEditorTxtContent } from './content-editor.service'
+import { checkLocalBookDuplicate, importLocalBookFromClient } from './local-import.service'
 
 const booksRoutes = new Hono()
 const appendOptionsSchema = appendContentSchema.pick({ startOffset: true })
@@ -224,6 +225,57 @@ booksRoutes.post('/', async (c) => {
     normalizeTitle: isTitleNormalizeEnabled(user.id), allowCorresponding: options.data.allowCorresponding,
   })
   return c.json({ data: book, duplicated, ...(corresponding ? { corresponding } : {}) }, corresponding ? 200 : 201)
+})
+
+booksRoutes.post('/duplicate-check', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const parsed = localBookDuplicateCheckSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid duplicate check payload', parsed.error.flatten())
+  return c.json({ data: await checkLocalBookDuplicate(user.id, parsed.data) })
+})
+
+booksRoutes.post('/import-from-local', async (c, next) => bodyLimit({
+  maxSize: effectiveUploadMaxBytes() + 64 * 1024 * 1024,
+  onError: () => { throw new AppError('UPLOAD_TOO_LARGE', 'Import payload exceeds maximum size') },
+})(c, next), async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const body = await c.req.parseBody()
+  const file = body['file']
+  if (!file || !(file instanceof File)) throw new AppError('VALIDATION_ERROR', 'File is required')
+  if (file.size > effectiveUploadMaxBytes()) throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
+
+  const rawPayload = body['payload']
+  if (typeof rawPayload !== 'string') throw new AppError('VALIDATION_ERROR', 'Import payload is required')
+  if (Buffer.byteLength(rawPayload, 'utf8') > LOCAL_IMPORT_MAX_PAYLOAD_BYTES) {
+    throw new AppError('UPLOAD_TOO_LARGE', 'Import metadata payload is too large')
+  }
+  let jsonPayload: unknown
+  try {
+    jsonPayload = JSON.parse(rawPayload)
+  } catch {
+    throw new AppError('VALIDATION_ERROR', 'Invalid import payload JSON')
+  }
+  const parsed = localBookImportPayloadSchema.safeParse(jsonPayload)
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid import payload', parsed.error.flatten())
+
+  const referencedImageIds = new Set(
+    parsed.data.notes.flatMap((note) => (note.kind === 'idea' ? note.imageIds ?? [] : [])),
+  )
+  const cover = body['cover'] instanceof File ? body['cover'] : undefined
+  const noteImages = new Map<string, File>()
+  for (const [field, value] of Object.entries(body)) {
+    if (!field.startsWith('image_') || !(value instanceof File)) continue
+    const imageId = field.slice('image_'.length)
+    if (!referencedImageIds.has(imageId)) continue
+    if (noteImages.size >= LOCAL_IMPORT_MAX_IMAGES) {
+      throw new AppError('VALIDATION_ERROR', `Too many note images (max ${LOCAL_IMPORT_MAX_IMAGES})`)
+    }
+    noteImages.set(imageId, value)
+  }
+  const result = await importLocalBookFromClient(user.id, file, parsed.data, { cover, noteImages })
+  return c.json({ data: result }, 201)
 })
 
 booksRoutes.on(['GET', 'HEAD'], '/:id/file', async (c) => {

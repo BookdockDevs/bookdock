@@ -27,6 +27,7 @@ interface BookCardProps {
   onToggleSelect?: (id: string, shiftKey?: boolean) => void
   onDelete?: (book: ClientLibraryBookView) => void
   onPublish?: (book: ClientLibraryBookView) => void
+  onUploadToServer?: (book: ClientLibraryBookView) => void
   onFork?: (book: ClientLibraryBookView) => void
   onShowDetails?: (book: ClientLibraryBookView) => void
   onRestore?: (book: ClientLibraryBookView) => void
@@ -41,7 +42,7 @@ const MENU_H = 300
  * someone owns can do: be pinned, be trashed and restored, be deleted, and open
  * the context menu whose actions all address that ownership.
  */
-const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, gridCardFields, readOnly = false, onToggleSelect, onDelete, onPublish, onFork, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
+const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, gridCardFields, readOnly = false, onToggleSelect, onDelete, onPublish, onUploadToServer, onFork, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
   const _ = useTranslation()
   const menu = useContextMenu()
   const trashCard = Boolean(onRestore && onPermanentDelete)
@@ -138,7 +139,7 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
           width={MENU_W}
           onClose={menu.close}
         >
-          <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onPublish={onPublish} onFork={onFork} onDelete={onDelete} onClose={menu.close} />
+          <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onPublish={onPublish} onUploadToServer={onUploadToServer} onFork={onFork} onDelete={onDelete} onClose={menu.close} />
         </SmartMenu>
       )}
     </>

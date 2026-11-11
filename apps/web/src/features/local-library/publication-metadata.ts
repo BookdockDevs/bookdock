@@ -1,5 +1,5 @@
 import type { BookMetadata, ClientBookRef, FileMetadataSourceRes } from '@bookdock/shared'
-import { bookMetadataSchema, metadataSourceFieldSchema, normalizeBookTitle } from '@bookdock/shared'
+import { applyFilenameMetadataFallback, bookMetadataSchema, buildTxtFileMetadataSource, metadataSourceFieldSchema } from '@bookdock/shared'
 
 import { readStoredSettings } from '@/lib/settings-cache'
 import { loadFoliateEngine } from '../reader/content/load-engine'
@@ -38,22 +38,7 @@ export function publicationMetadata(metadata: Record<string, unknown>, fileName:
   }
   const provenance = Object.fromEntries(metadataSourceFieldSchema.options.map((field) => [field, values[field] === null ? 'missing' : 'file'])) as FileMetadataSourceRes['provenance']
   const normalizeTitleApplied = Boolean(normalizeTitle && fileName)
-  if (normalizeTitleApplied && fileName && (!values.title || !values.authors)) {
-    const derived = normalizeBookTitle(fileName)
-    if (!values.title && derived.title) {
-      values.title = derived.title
-      provenance.title = 'filename'
-    }
-    if (!values.authors) {
-      if (derived.authors && derived.authors.length > 0) {
-        values.authors = derived.authors
-        provenance.authors = 'filename'
-      } else if (derived.author) {
-        values.authors = [derived.author]
-        provenance.authors = 'filename'
-      }
-    }
-  }
+  applyFilenameMetadataFallback(values, provenance, fileName, normalizeTitleApplied)
   return { kind: 'file', format: 'epub', fileName, normalizeTitleApplied, values, provenance }
 }
 
@@ -79,22 +64,17 @@ export async function readPublicationMetadata(
   signal.throwIfAborted()
   const book = await repository.getBook(ref)
   if (!book.content) throw new LocalLibraryError('unavailable-content', 'Publication metadata requires available content')
-  const file = await repository.getFile(ref, true)
+  const file = await repository.getFile(ref)
   if (book.format === 'txt') {
     signal.throwIfAborted()
-    const fileName = book.textSource?.fileName ?? null
-    const normalizeTitleApplied = Boolean(normalizeTitle && fileName)
-    const source = publicationMetadata({}, fileName, normalizeTitleApplied)
-    if (!normalizeTitleApplied) {
-      const title = fileName ? fileName.replace(/\.txt$/i, '') || fileName : null
-      return { ...source, format: 'txt', values: { ...source.values, title }, provenance: { ...source.provenance, title: title ? 'filename' : 'missing' } }
-    }
-    return { ...source, format: 'txt' }
+    const fileName = book.textSource?.fileName ?? book.fileName ?? null
+    return buildTxtFileMetadataSource(fileName, Boolean(normalizeTitle && fileName), true)
   }
-  const lease = await localEpubProvider(`original:${JSON.stringify([ref.scope, ref.bookId, book.content.contentId])}`, file).open(await loadFoliateEngine(), signal)
+  const fileName = book.fileName ?? ('name' in file && typeof file.name === 'string' ? file.name : null)
+  const lease = await localEpubProvider(`metadata:${JSON.stringify([ref.scope, ref.bookId, book.content.contentId])}`, file).open(await loadFoliateEngine(), signal)
   try {
     signal.throwIfAborted()
-    const source = publicationMetadata(lease.book.metadata ?? {}, 'name' in file && typeof file.name === 'string' ? file.name : null, normalizeTitle)
+    const source = publicationMetadata(lease.book.metadata ?? {}, fileName, normalizeTitle)
     const current = await repository.getBook(ref)
     if (current.availability !== 'available' || current.content?.contentId !== book.content.contentId) throw new LocalLibraryError('unavailable-content', 'Publication content changed during extraction')
     signal.throwIfAborted()

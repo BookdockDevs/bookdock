@@ -14,6 +14,8 @@ export interface ConfirmDialogProps {
   warning?: ReactNode
   icon?: ReactNode
   confirmLabel: string
+  submittingLabel?: string
+  submittingIcon?: ReactNode
   cancelLabel?: string
   footerLeading?: ReactNode
   dismissible?: boolean
@@ -39,6 +41,8 @@ export default function ConfirmDialog({
   warning,
   icon,
   confirmLabel,
+  submittingLabel,
+  submittingIcon,
   cancelLabel,
   footerLeading,
   dismissible = true,
@@ -274,12 +278,14 @@ export default function ConfirmDialog({
             className="h-9 px-4 text-xs sm:text-sm inline-flex items-center gap-1.5"
           >
             {submitting && (
-              <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
+              submittingIcon ?? (
+                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              )
             )}
-            <span>{submitting ? _('library.confirmSubmitting') : confirmLabel}</span>
+            <span>{submitting ? (submittingLabel ?? _('library.confirmSubmitting')) : confirmLabel}</span>
           </Button>
         </div>
       </div>

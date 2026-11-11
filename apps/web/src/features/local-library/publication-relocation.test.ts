@@ -84,7 +84,7 @@ it('maps real CFI progress, quotes, bookmarks, coverage and point replacements w
   const rounds = await repository.readReadingRounds(ref)
   expect(rounds.rounds).toHaveLength(1)
   expect(rounds.rounds[0]).toMatchObject({ id: roundId, coverage: { content: { contentId: 'after' } }, coverageHistory: [{ content: { contentId: 'before' }, intervals: [[0, 1]] }] })
-  expect(new Uint8Array(await (await repository.getFile(ref, true)).arrayBuffer())).toEqual(new Uint8Array(await original.arrayBuffer()))
+  expect(new Uint8Array(await (await repository.getFile(ref)).arrayBuffer())).toEqual(new Uint8Array(await target.arrayBuffer()))
 })
 
 it('rejects new notes arriving during preparation rather than promoting bytes with an unmapped late record', async () => {
