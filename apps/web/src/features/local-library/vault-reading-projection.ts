@@ -77,6 +77,8 @@ export function projectLocalVaultReading(snapshot: ClientVaultReadingSnapshot, i
   }
   const byBook: ClientReadingBookView[] = books.filter((book) => book.scoped.stats.totalSeconds > 0).map(({ snapshot: book, scoped }) => ({
     ref: book.book.ref, bookId: book.book.ref.bookId, title: book.book.title, author: book.book.authors.join(', '), coverKey: null,
+    coverPaletteId: book.book.catalog?.coverPaletteId ?? null,
+    coverPaletteKey: JSON.stringify([book.book.ref.scope, book.book.ref.bookId]),
     progress: book.state?.fraction === undefined || book.state.fraction === null ? null : book.state.fraction * 100,
     durationSeconds: scoped.stats.totalSeconds, referenceDurationSeconds: 0,
     days: scoped.stats.daily.filter((day) => day.durationSeconds >= 60).length, readStatus: book.state?.readStatus ?? null,

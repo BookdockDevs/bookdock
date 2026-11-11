@@ -59,6 +59,7 @@ describe('source-owned publication promotion', () => {
     await repository.addBook({ ...book, ref, content: { book: ref, contentId: 'before' } }, original)
     const oldReader = await openLocalReaderSession(ref, true)
     await oldReader.saveProgress(location)
+    await oldReader.addReadingRecord({ bookId: ref.bookId, source: 'retroactive', date: '2026-11-10', durationSeconds: 60, startFraction: 0.1, endFraction: 0.3, coverage: [[0.1, 0.3]], revisionId: 'before' })
     const note = (await oldReader.createNote({ type: 'highlight', cfiRange: location.cfi, revisionId: 'before', text: 'Retain quotation' })).data
     await repository.updateMetadata(ref, { title: 'Renamed while preparing' }, 0)
     const stateBefore = await repository.getState(ref)
@@ -87,6 +88,7 @@ describe('source-owned publication promotion', () => {
     expect((await reader.listNotes()).data[0]).toMatchObject({ id: note.id, text: 'Retain quotation', locationAvailable: false })
     await expect(oldReader.saveProgress(location)).rejects.toMatchObject({ category: 'invalid-input' })
     await reader.saveProgress({ ...location, revisionId: 'after', percent: 60, fraction: 0.6, segmentStartFraction: 0.5 })
+    await reader.addReadingRecord({ bookId: ref.bookId, source: 'retroactive', date: '2026-11-11', durationSeconds: 60, startFraction: 0.5, endFraction: 0.6, coverage: [[0.5, 0.6]], revisionId: 'after' })
     const rounds = (await repository.readReadingRounds(ref)).rounds
     expect(rounds).toHaveLength(1)
     expect(rounds[0]).toMatchObject({ id: roundBefore.id, coverage: { content: { contentId: 'after' }, intervals: [[0.5, 0.6]] }, coverageHistory: [{ content: { contentId: 'before' }, intervals: [[0.1, 0.3]] }] })

@@ -140,6 +140,8 @@ export default function PeriodBooksSection({
                         title: book.title ?? '',
                         format: book.format ?? undefined,
                         coverKey: book.coverKey,
+                        coverPaletteId: book.coverPaletteId,
+                        coverPaletteKey: book.coverPaletteKey,
                       }}
                       size="sm"
                       coverSrc={

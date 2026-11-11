@@ -137,7 +137,15 @@ export default function ArchiveBookRow({
     >
       <div className="shrink-0" aria-hidden="true">
         <BookCover
-          book={{ ref: book.ref, id: book.id, title: book.title ?? '', format: book.format ?? undefined, coverKey: book.coverKey }}
+          book={{
+            ref: book.ref,
+            id: book.id,
+            title: book.title ?? '',
+            format: book.format ?? undefined,
+            coverKey: book.coverKey,
+            coverPaletteId: book.coverPaletteId,
+            coverPaletteKey: book.coverPaletteKey,
+          }}
           size="sm"
           coverSrc={book.ref ? undefined : book.coverKey
             ? `/api/v1/archive/books/${encodeURIComponent(book.id)}/cover?v=${encodeURIComponent(book.coverKey)}`

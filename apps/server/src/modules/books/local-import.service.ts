@@ -43,7 +43,7 @@ import { withContentBlob } from '../../lib/content-file-lifecycle'
 import { blobKey, coverThumbnailKey, detectImageExtension, generateCoverThumbnail } from '../../lib/cover'
 import { sha256 } from '../../lib/hash'
 import { createId } from '../../lib/id'
-import { normalizeCoverage, unionLength } from '../../lib/intervals'
+import { normalizeCoverage } from '../../lib/intervals'
 import { log } from '../../lib/logger'
 import { AppError } from '../../middleware/error'
 import { getStorage } from '../../storage'
@@ -297,8 +297,6 @@ export async function importLocalBookFromClient(
 
       const localState = payload.state
       const positionMatched = Boolean(localState?.cfi && (!localState.positionContentId || localState.positionContentId === payload.book.contentId))
-      const coverageMatched = Boolean(!localState?.coverageContentId || localState.coverageContentId === payload.book.contentId)
-      const stateIntervals = coverageMatched ? normalizeCoverage(localState?.coverageIntervals ?? []) : []
       const stateFraction = positionMatched ? (localState?.fraction ?? null) : null
       const statePercent = stateFraction !== null ? stateFraction * 100 : 0
       const stateCfi = positionMatched ? (localState?.layoutCfi ?? localState?.cfi ?? null) : null
@@ -315,17 +313,17 @@ export async function importLocalBookFromClient(
         lastReadAt: localState?.lastReadAt ?? null,
         readRevisionId: revisionId,
         progressRevisionId: positionMatched ? revisionId : null,
-        coverageRevisionId: coverageMatched ? revisionId : null,
-        readFraction: unionLength(stateIntervals),
+        coverageRevisionId: null,
+        readFraction: 0,
         progressData: {
           progressRevisionId: positionMatched ? revisionId : null,
-          coverageRevisionId: coverageMatched ? revisionId : null,
+          coverageRevisionId: null,
           cfi: stateCfi,
           contentCfi,
           chapter: positionMatched ? (localState?.chapter ?? null) : null,
           percent: statePercent,
           fraction: stateFraction,
-          intervals: stateIntervals,
+          intervals: [],
           updatedAt: progressUpdatedAt,
         },
         updatedAt: progressUpdatedAt,
@@ -526,7 +524,7 @@ export async function importLocalBookFromClient(
         }).run()
       }
 
-      if (payload.sessions.length > 0 || payload.rounds.length > 0 || stateIntervals.length > 0) {
+      if (payload.sessions.length > 0 || payload.rounds.length > 0) {
         tx.insert(readingArchives).values({
           userId,
           bookVersionId: versionId,
@@ -534,7 +532,7 @@ export async function importLocalBookFromClient(
           author: authors.author,
           format: upload.format,
           coverKey: effectiveCoverKey,
-          legacyIntervals: payload.rounds.length <= 1 && payload.sessions.length === 0 ? stateIntervals : [],
+          legacyIntervals: [],
           legacyWordCount: upload.wordCount,
           legacyRevisionId: revisionId,
           legacyDaily: [],
@@ -542,19 +540,6 @@ export async function importLocalBookFromClient(
           updatedAt: now,
         }).run()
         rebuildReadingProjection(tx as unknown as Parameters<typeof rebuildReadingProjection>[0], userId, versionId)
-
-        if (stateIntervals.length > 0) {
-          const after = tx.select({ readFraction: bookStates.readFraction, progressData: bookStates.progressData }).from(bookStates)
-            .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, versionId))).get()
-          const mergedIntervals = normalizeCoverage([...(after?.progressData?.intervals ?? []), ...stateIntervals])
-          const mergedFraction = unionLength(mergedIntervals)
-          if (after && mergedFraction > after.readFraction) {
-            tx.update(bookStates).set({
-              readFraction: mergedFraction,
-              progressData: { ...(after.progressData ?? { percent: statePercent, intervals: [], updatedAt: progressUpdatedAt }), intervals: mergedIntervals },
-            }).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, versionId))).run()
-          }
-        }
       }
 
       if (payload.pointRules.length > 0) {

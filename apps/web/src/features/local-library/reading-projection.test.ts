@@ -69,24 +69,29 @@ describe('single-source atomic reading projections', () => {
     expect(result.stats.hourly[2].durationSeconds).toBe(1800)
     expect(result.stats.readingDays).toBe(1)
   })
-  it('retains timer-off round coverage through reread and undo without moving the locator', async () => {
+  it('does not fabricate statistical coverage from untimed page-turn progress alone and preserves round coverage across reread and undo', async () => {
     const state = await repository.saveState({ book: ref, readStatus: 'reading', position: null, fraction: 0.3, coverage: { content, fraction: 0.2, available: true }, lastReadAt: base, updatedAt: base, version: 0 }, 0, [[0.1, 0.3]])
+    const untimed = await repository.readReadingBookSnapshot(ref)
+    expect(projectLocalReadingBook(untimed).overview.coverage).toBe(0)
+    expect(projectLocalReadingBook(untimed).overview.coverageIntervals).toEqual([])
+    expect(projectLocalReadingBook(untimed).overview.rounds[0]?.coverage).toBe(0)
+
+    await repository.writeReadingSession(capture('round-1', 0, 60))
     const first = await repository.readReadingBookSnapshot(ref)
-    expect(projectLocalReadingBook(first).overview.coverage).toBeCloseTo(0.2)
+    expect(projectLocalReadingBook(first).overview.coverage).toBeCloseTo(0.1)
     const reread = await repository.changeReadingRound(ref, 'reread', first.rounds.version, 'reread')
     const next = await repository.readReadingBookSnapshot(ref)
     expect(projectLocalReadingBook(next).overview.coverage).toBe(0)
-    expect(projectLocalReadingBook(next).overview.rounds.find((round) => round.ordinal === 1)?.coverage).toBeCloseTo(0.2)
+    expect(projectLocalReadingBook(next).overview.rounds.find((round) => round.ordinal === 1)?.coverage).toBeCloseTo(0.1)
     await repository.changeReadingRound(ref, 'continue', reread.version, 'undo')
     const restored = await repository.readReadingBookSnapshot(ref)
-    expect(projectLocalReadingBook(restored).overview.coverage).toBeCloseTo(0.2)
+    expect(projectLocalReadingBook(restored).overview.coverage).toBeCloseTo(0.1)
     expect(restored.state?.fraction).toBe(state.fraction)
     expect(restored.ledger.version).toBeGreaterThan(first.ledger.version)
   })
-  it('does not undo a reread with timer-off coverage merely because it has no timed sessions', async () => {
+  it('does not undo a reread when round 2 already recorded a reading session', async () => {
     const initial = await repository.changeReadingRound(ref, 'reread', 0, 'reread')
-    const state = (await repository.getState(ref))!
-    await repository.saveState({ ...state, fraction: 0.2, coverage: { content, fraction: 0.1, available: true } }, state.version, [[0.1, 0.2]])
+    await repository.writeReadingSession(capture('round-2', 0, 60))
     const measured = await repository.readReadingBookSnapshot(ref)
     const continued = await repository.changeReadingRound(ref, 'continue', measured.rounds.version, 'continue')
     expect(continued.rounds.at(-1)?.id).toBe(initial.rounds.at(-1)?.id)

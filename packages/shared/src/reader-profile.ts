@@ -4,7 +4,7 @@ import { isOrderedReadingRange, readingRangeShape } from './reading-range'
 
 import type { AnnotationRes } from './contract'
 import type { AnnotationStyle } from './domain'
-import type { BookFormat, ReadStatus } from './constants'
+import type { BookFormat, CoverPaletteId, ReadStatus } from './constants'
 import type { MyReviewEntry, Review } from './review'
 
 export interface ProfileReadingSummary {
@@ -200,6 +200,8 @@ export interface ArchiveBookItem {
   title: string | null
   author: string | null
   coverKey: string | null
+  coverPaletteId?: CoverPaletteId | null
+  coverPaletteKey?: string | null
   /** Remote cover URL for imported archive rows (coverKey is null there). */
   coverUrl?: string | null
   /** True for imported reading history rows (no bookdock work/version behind the id). */

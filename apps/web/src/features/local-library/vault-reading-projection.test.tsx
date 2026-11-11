@@ -220,7 +220,8 @@ describe('vault archive and reading projections', () => {
     const range = { from: '2026-11-07', to: '2026-11-07', timezone: 'America/New_York' }
     expect(projectLocalArchive(snapshot, range).overview).toEqual({ counts: { highlights: 0, bookmarks: 0, ideas: 1, reviews: 0, total: 1 }, totalBooks: 2 })
     const page = projectLocalArchivePage(snapshot, { ...range, type: 'idea', page: 1, pageSize: 1, sort: 'recent' })
-    expect(page).toMatchObject({ hasMore: false, entries: [{ id: 'First', ref: ref('First'), ideas: 1 }] })
+    expect(page).toMatchObject({ hasMore: false, entries: [{ id: 'First', ref: ref('First'), ideas: 1, coverPaletteKey: JSON.stringify([ref('First').scope, 'First']), coverPaletteId: null }] })
+    expect(projectLocalVaultReading(snapshot).byBook[0]).toMatchObject({ bookId: 'First', coverPaletteKey: JSON.stringify([ref('First').scope, 'First']), coverPaletteId: null })
     expect(page.entries[0]).not.toHaveProperty('bookVersionId')
     expect(projectLocalArchivePage(snapshot, { ...range, page: 1, pageSize: 1, sort: 'reading-time' })).toMatchObject({ hasMore: true, entries: [{ id: 'First' }] })
     expect(projectLocalArchive(snapshot, { ...range, timezone: 'UTC' }).overview.counts.ideas).toBe(0)

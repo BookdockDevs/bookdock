@@ -1714,6 +1714,8 @@ export interface ReadingRecordBookItem {
   title: string
   author: string
   coverKey: string | null
+  coverPaletteId?: CoverPaletteId | null
+  coverPaletteKey?: string | null
   progress: number | null
   durationSeconds: number
   referenceDurationSeconds: number

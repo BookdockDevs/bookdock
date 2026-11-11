@@ -21,7 +21,7 @@ import { errorHandler } from '../../middleware/error'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { resetInstanceCache } from '../auth/auth.service'
-import { getReadingLedger } from '../reading-records/reading-ledger.service'
+import { getReadingLedger, getReadingLedgerOverview } from '../reading-records/reading-ledger.service'
 import booksRoutes from './books.routes'
 import { uploadBook } from './books.service'
 import { checkLocalBookDuplicate, importLocalBookFromClient } from './local-import.service'
@@ -225,6 +225,50 @@ describe('local-to-server import', () => {
     // Idempotent replay with same requestId returns the same book without duplicating
     const replay = await importLocalBookFromClient(userId, epubFile, payload)
     expect(replay.book.id).toBe(res.book.id)
+  })
+
+  it('does not fabricate statistical coverage when importing a local book with zero reading sessions', async () => {
+    const epubFile = new File([Buffer.from('untimed-local-book')], 'Untimed.epub', { type: 'application/epub+zip' })
+    const res = await importLocalBookFromClient(userId, epubFile, {
+      requestId: 'req-local-import-untimed',
+      book: {
+        title: 'Untimed Book',
+        authors: ['Author'],
+        format: 'epub',
+        contentId: 'untimed-content-1',
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
+      state: {
+        readStatus: 'reading',
+        cfi: 'epubcfi(/6/2!/4/2:10)',
+        chapter: 'Chapter 1',
+        fraction: 0.35,
+        positionContentId: 'untimed-content-1',
+        coverageIntervals: [[0.08, 0.14], [0.64, 1]],
+        coverageContentId: 'untimed-content-1',
+        lastReadAt: 1900,
+      },
+      rounds: [{ ordinal: 1, status: 'reading', startedAt: null, endedAt: null }],
+      notes: [],
+      sessions: [],
+      pointRules: [],
+      replacementOverrides: {},
+    })
+
+    const state = db.select().from(schema.bookStates).where(eq(schema.bookStates.bookVersionId, res.book.id)).get()!
+    expect(state.percent).toBe(35)
+    expect(state.readFraction).toBe(0)
+
+    const ledger = await getReadingLedger(userId, res.book.id)
+    expect(ledger.totalSeconds).toBe(0)
+    expect(ledger.coverage).toBe(0)
+    expect(ledger.legacyIntervals).toEqual([])
+
+    const overview = await getReadingLedgerOverview(userId, res.book.id)
+    expect(overview.totalSeconds).toBe(0)
+    expect(overview.coverage).toBe(0)
+    expect(overview.coverageIntervals).toEqual([])
   })
 
   it('detects duplicates via duplicate-check and rejects duplicate import with BOOK_DUPLICATE', async () => {

@@ -117,6 +117,7 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
   const archivedBook = ledger.data?.data ? {
     ...(local ? { ref: local.ref } : {}), id: bookVersionId, title: ledger.data.data.title, author: ledger.data.data.author,
     format: ledger.data.data.format ?? undefined, coverKey: ledger.data.data.coverKey ?? null,
+    ...(local ? { coverPaletteKey: JSON.stringify([local.ref.scope, local.ref.bookId]) } : {}),
   } : null
   // The library detail request 404s for archive-only books, so the header
   // must not wait on it: ledger metadata (staleTime Infinity, always cached)
@@ -828,7 +829,12 @@ export default function BookNotesView({ bookVersionId, bookView = 'notes', bookT
                 className={cn('group/cover shrink-0', !sourceUnavailable && 'cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.99]')}
                 title={sourceUnavailable ? undefined : _('library.bookDetails')}
               >
-                <BookCover book={displayedBook!} size="card" coverSrc={local ? undefined : importedSource ? ledger.data?.data.coverUrl ?? null : sourceUnavailable ? (displayedBook?.coverKey ? `/api/v1/archive/books/${encodeURIComponent(bookVersionId)}/cover?v=${encodeURIComponent(displayedBook.coverKey)}` : null) : undefined} />
+                <BookCover
+                  book={displayedBook!}
+                  size="card"
+                  coverPaletteId={book.data?.data.meta?.coverPaletteId ?? (book.data?.data as { coverPaletteId?: typeof displayedBook extends { coverPaletteId?: infer P } ? P : never } | undefined)?.coverPaletteId ?? null}
+                  coverSrc={local ? undefined : importedSource ? ledger.data?.data.coverUrl ?? null : sourceUnavailable ? (displayedBook?.coverKey ? `/api/v1/archive/books/${encodeURIComponent(bookVersionId)}/cover?v=${encodeURIComponent(displayedBook.coverKey)}` : null) : undefined}
+                />
               </div>
               <div className="min-w-0">
                 <h2

@@ -79,8 +79,7 @@ export function projectLocalReadingBook(snapshot: ClientReadingBookSnapshot, inp
     }
   }
   const currentRows = logical.filter((item) => item.session.roundId === currentRoundId)
-  const currentCoverage = snapshot.state?.coverage && snapshot.state.coverage.content.contentId === revision ? snapshot.coverageIntervals : []
-  const coverageIntervals = union([...currentCoverage, ...currentRows.flatMap((item) => item.session.projectedCoverage ?? [])])
+  const coverageIntervals = union(currentRows.flatMap((item) => item.session.projectedCoverage ?? []))
   const coverage = length(coverageIntervals)
   const currentCounts = new Set(logical.filter((item) => item.session.progressScale === 1 && item.session.wordCount !== null).map((item) => item.session.wordCount!))
   const contentWordCount = snapshot.book.textSource ? snapshot.book.textSource.chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0) : currentCounts.size === 1 ? [...currentCounts][0]! : null
@@ -107,19 +106,18 @@ export function projectLocalReadingBook(snapshot: ClientReadingBookSnapshot, inp
     rounds: [...snapshot.rounds.rounds].reverse().map((round) => {
       const entries = logical.filter((item) => item.session.roundId === round.id)
       const wordCounts = new Set(entries.map((item) => item.session.wordCount))
-      const roundWordCount = wordCounts.size === 1 ? [...wordCounts][0]! : round.coverage?.content.contentId === revision ? contentWordCount : null
-      const recordedCoverage = round.coverage && round.coverage.content.contentId === revision ? round.coverage.intervals : []
+      const roundWordCount = wordCounts.size === 1 ? [...wordCounts][0]! : null
       return { id: round.id, ordinal: round.ordinal, status: round.status, startedAt: round.startedAt, endedAt: round.endedAt,
-        coverage: length([...recordedCoverage, ...entries.flatMap((item) => item.session.projectedCoverage ?? [])]),
+        coverage: length(entries.flatMap((item) => item.session.projectedCoverage ?? [])),
         totalSeconds: entries.reduce((sum, item) => sum + item.session.durationSeconds, 0), wordCount: roundWordCount, legacyCoverage: false,
-        unalignedCoverage: Boolean(round.coverage && round.coverage.content.contentId !== revision) || Boolean(round.coverageHistory?.some((basis) => basis.content.contentId !== revision)) || entries.some((item) => item.session.unalignedCoverage),
+        unalignedCoverage: entries.some((item) => item.session.unalignedCoverage),
       }
     }),
     coverage, coverageIntervals, totalSeconds: logical.reduce((sum, item) => sum + item.session.durationSeconds, 0), undatedDurationSeconds: 0, referenceDurationSeconds: 0,
     totalWordsRead: allUnknown && !allKnown ? null : logical.reduce((sum, item) => sum + (item.words ?? 0), 0), wordState: wordState(allKnown, allUnknown),
     readingDays: [...allDates.values()].filter((seconds) => seconds >= 60).length, earliestDate: [...allDates.keys()].sort()[0] ?? null,
     legacyIntervals: [], legacyWordCount: null, dataVersion: snapshot.ledger.version,
-    unalignedCoverage: logical.some((item) => item.session.unalignedCoverage) || snapshot.rounds.rounds.some((round) => Boolean(round.coverage && round.coverage.content.contentId !== revision) || Boolean(round.coverageHistory?.some((basis) => basis.content.contentId !== revision))) || Boolean(snapshot.state?.coverage && snapshot.state.coverage.content.contentId !== revision),
+    unalignedCoverage: logical.some((item) => item.session.unalignedCoverage),
   }
   return { overview, stats, sessions: logical.filter((item) => item.slices.some((slice) => inRange(slice.date))).map((item) => item.session) }
 }

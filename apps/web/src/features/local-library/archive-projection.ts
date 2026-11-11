@@ -24,7 +24,10 @@ export function projectLocalArchive(snapshot: ClientVaultReadingSnapshot, input:
     const lastRecordAt = clocks.reduce<number | null>((last, clock) => last === null ? clock : Math.max(last, clock), null)
     const entry: ClientArchiveBookView = {
       id: source.book.ref.bookId, ref: source.book.ref, title: source.book.title, author: source.book.authors.join(', '),
-      format: source.book.format, coverKey: null, readStatus: source.state?.readStatus ?? null,
+      format: source.book.format, coverKey: null,
+      coverPaletteId: source.book.catalog?.coverPaletteId ?? null,
+      coverPaletteKey: JSON.stringify([source.book.ref.scope, source.book.ref.bookId]),
+      readStatus: source.state?.readStatus ?? null,
       highlights: notes.filter((note) => note.kind === 'highlight').length,
       bookmarks: notes.filter((note) => note.kind === 'bookmark').length,
       ideas: notes.filter((note) => note.kind === 'idea').length, reviews: visibleReviews.length, total: notes.length + visibleReviews.length,

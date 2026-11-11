@@ -183,6 +183,40 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
   }
 
   const totalSeconds = ledger?.totalSeconds ?? 0
+  const isEmpty = totalSeconds === 0 && (stats?.totalSeconds ?? 0) === 0 && sortedSessions.length === 0 && days === 0
+  if (isEmpty) {
+    return (
+      <>
+        <div className="flex flex-1 flex-col items-center justify-center px-4 pb-24 text-center">
+          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]">
+            <svg
+              className="h-7 w-7"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M18 20V10" />
+              <path d="M12 20V4" />
+              <path d="M6 20v-6" />
+              <path d="M3 20h18" />
+            </svg>
+          </div>
+          <p className="text-base font-normal text-current">
+            {_('reader.statsEmptyTitle')}
+          </p>
+          <p className="mt-1.5 max-w-64 text-xs leading-relaxed text-[var(--bd-read-sub)]">
+            {_('reader.statsEmptyDesc')}
+          </p>
+        </div>
+        {dialogs}
+      </>
+    )
+  }
+
   const totalWords = stats?.totalWordsRead
   const totalWordsDisplay = totalWords !== null && totalWords !== undefined && totalWords > 0
     ? totalWords >= 10000
@@ -193,13 +227,6 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
   return (
     <>
     <div className="space-y-4 px-1 pt-3 pb-6">
-      {!ledger?.totalSeconds && (
-        <div className="rounded-xl bg-stone-500/5 p-3">
-          <p className="text-sm font-semibold text-[var(--bd-read-text)]">{_('reader.statsEmptyTitle')}</p>
-          <p className="mt-1 text-xs text-[var(--bd-read-sub)]">{_('reader.statsEmptyDesc')}</p>
-        </div>
-      )}
-
       {/* 概览卡片：单书详情同款分段覆盖环形图（居中最新进度）+ 4项核心指标（总时长、已读字数、阅读天数、日均时长） */}
       <section className="rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)] p-3.5 shadow-2xs">
         {/* 卡片上半部：左侧分段环形进度圈 + 轮次，右侧总时长与字数 */}

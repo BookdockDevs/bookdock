@@ -21,12 +21,15 @@ All notable changes to Bookdock are documented here.
 - Unified preference persistence in the Reading Archive Management dialog: in addition to the existing import source, channel, and sort memory, the dialog now remembers the last used top-level tab, import scope, export scope/format (automatically narrowing incompatible formats without overwriting your saved preference), and delete scope, with safe fallbacks for global and WeRead Skill modes.
 - Refined the built-in AI assistant mode prompt and server core prompt to be more concise and direct, and dynamically omit tool-calling and citation-marker instructions when no read-only tools are active (such as device-book chats or chats with all tools disabled).
 - Aligned the AI mode add/edit modal with the reader modal layout and button hierarchy: gave the bottom-left **Restore Defaults** and **Delete** actions consistent bordered buttons with icons, inserted prompt variables at the current cursor position, changed **Restore Defaults** to reset the draft fields directly without a confirmation prompt (hiding the button when already at the default values), and disabled **Save** when no changes have been made.
+- Aligned the reader Data sidebar's empty state and copy with the Notes and AI sidebars, hiding the empty overview card when no reading records exist, and refined the reading-completion estimation prompt for smoother wording.
 
 ### Fixed
 
 - Fixed dark-mode styling regressions caused by invalid `stone-750` / `stone-850` Tailwind classes on secondary buttons (white-on-white hover state), unchecked checkboxes, taxonomy charts, and empty year-heatmap cells.
 - Fixed a brief white flash when refreshing the app in dark mode by applying the initial theme class, color scheme, background color, and boot loading indicator in `index.html` before React mounts.
 - Fixed the frosted-glass background on the copy/download cover buttons in the book detail header lagging behind the icons when hovering over the cover, by separating the gradient scrim from the button container and sliding the buttons in without an intermediate `opacity` transition blocking `backdrop-filter`.
+- Fixed single-book detail views in the Reading Archive inheriting the Overview's active date-range filter, which previously hid the circular progress overview card and scoped book data and notes unexpectedly.
+- Fixed placeholder cover colors differing between the Reading Archive sidebar, period book lists, statistics lists, and single-book detail headers by passing the same cover palette identity and custom palette choice across all views.
 
 ## [0.8.0] - 2026-11-11
 
@@ -1140,12 +1143,15 @@ All notable changes to Bookdock are documented here.
 - 统一补全「阅读档案管理」弹窗的选项记忆：在原有导入来源、渠道与排序记忆的基础上，现一并记住上次使用的顶层标签页、导入范围、导出范围与格式（切换范围导致格式不兼容时自动适配展示而不覆盖原偏好）以及删除范围，并在全局入口或微信读书 Skill 模式下安全回退。
 - 精简默认「助理」人设与核心系统提示词，减少无工具上下文下的冗余拒答，并在未启用任何只读工具（如本机书籍对话或关闭全部工具）时自动省略工具调用与 `[1]` / `[2]` 引用角标规则。
 - 统一阅读器内 AI 模式「添加／编辑模式」弹窗的界面规范与交互细节：左下角「恢复默认」与「删除」改用带图标的统一样式按钮，提示词变量支持在光标处插入；「恢复默认」改为仅当草稿偏离默认值时显示，点击后直接回填默认值而不弹出二次确认框（需点击「保存」生效），并在未修改内容或必填项为空时禁用「保存」。
+- 统一阅读器「数据」侧边栏的空状态样式与文案，与「笔记」和「AI 助手」侧边栏保持一致，无阅读记录时不再显示空白数据卡片，并优化了单书详情页读完预估不足时的提示文案。
 
 #### 修复
 
 - 修复多处使用不存在的 Tailwind `stone-750` / `stone-850` 色阶导致的夜间主题异常，包括次要按钮悬停变白字看不清、未勾选复选框底色发白、统计分布图与年度热力图空格子在深色下显示亮色背景的问题。
 - 修复深色模式下刷新页面瞬间闪现白屏再进入加载页的问题，在 React 挂载前通过 `index.html` 同步应用主题类名、配色方案、首屏背景色与启动加载图标。
 - 修复书籍详情页鼠标悬停封面时，复制与下载封面图标先出现、毛玻璃模糊背景延后一瞬间才显示的问题：将底部渐变遮罩与按钮栏拆分为独立图层，改用位移滑入且不再对 `backdrop-filter` 的父容器执行 `opacity` 过渡。
+- 修复阅读档案「单书详情」意外套用总览顶部时间筛选范围的问题，恢复单书全生涯总览统计与圆环进度卡片展示。
+- 修复阅读档案侧栏、时段书单、统计榜单与单书详情页之间默认封面底色不一致的问题，统一传递封面调色板标识与自定义配色。
 
 ### [0.8.0] - 2026-11-11
 

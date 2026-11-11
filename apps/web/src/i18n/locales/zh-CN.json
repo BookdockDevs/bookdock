@@ -1618,8 +1618,8 @@
     "statsDailyAvg": "日均 {{time}}",
     "statsToday": "今天",
     "stats30DaysAgo": "30天前",
-    "statsEmptyTitle": "暂无阅读记录",
-    "statsEmptyDesc": "开始翻阅本书后，系统将自动记录并统计你的阅读时长、进度与历史趋势",
+    "statsEmptyTitle": "还没有阅读记录",
+    "statsEmptyDesc": "持续阅读后，这里会记录你的阅读时长与进度",
     "ai": "AI 助手",
     "aiPromptsEmpty": "暂无快捷指令",
     "sessionAddFailed": "添加阅读记录失败",
@@ -3057,7 +3057,7 @@
     "estimatePrefix": "读完本书预估还需 ",
     "estimateDaysUnit": " 天，",
     "estimateTimePrefix": "大概用时 ",
-    "estimateNeedMore": "读完本书预估需更多阅读数据",
+    "estimateNeedMore": "积累更多阅读记录后，即可预估读完时间",
     "completedHint": "🎉 本书已读完",
     "status": {
       "finished": "已读完"

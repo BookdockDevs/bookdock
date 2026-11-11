@@ -13,6 +13,7 @@ import {
   type ArchiveDataExport,
   type ArchiveDeleteRes,
   type ArchiveOverview,
+  type CoverPaletteId,
   type NotesExport,
   type NotesExportBook,
   type NotesExportHighlight,
@@ -29,6 +30,7 @@ import {
   bookReviews,
   bookStates,
   bookVersions,
+  contentRevisions,
   highlights,
   ideas,
   libraries,
@@ -361,6 +363,17 @@ async function enrichBooks(userId: string, tallies: Map<string, VersionTally>): 
       .map((row) => [row.bookVersionId, row] as const),
   )
 
+  const revisionPalettes = new Map<string, { coverPaletteId: CoverPaletteId | null; coverPaletteKey: string | null }>()
+  for (const row of db.select({
+    bookVersionId: contentRevisions.bookVersionId,
+    coverPaletteId: sql<CoverPaletteId | null>`json_extract(${contentRevisions.meta}, '$.coverPaletteId')`,
+    coverPaletteKey: sql<string | null>`json_extract(${contentRevisions.meta}, '$.coverPaletteKey')`,
+  }).from(contentRevisions).where(inArray(contentRevisions.bookVersionId, versionIds)).orderBy(desc(contentRevisions.revisionNo)).all()) {
+    if (!revisionPalettes.has(row.bookVersionId)) {
+      revisionPalettes.set(row.bookVersionId, { coverPaletteId: row.coverPaletteId, coverPaletteKey: row.coverPaletteKey })
+    }
+  }
+
   return Promise.all(
     versionIds.map(async (versionId) => {
       const tally = tallies.get(versionId)!
@@ -388,9 +401,12 @@ async function enrichBooks(userId: string, tallies: Map<string, VersionTally>): 
       }
       const format = formats.get(versionId) ?? snapshot?.format ?? null
       const privateCard = privateCards.get(versionId)
+      const palette = revisionPalettes.get(versionId)
       let title: string | null = privateCard?.title ?? null
       let author: string | null = privateCard?.author ?? null
       let coverKey: string | null = privateCard?.coverKey ?? snapshot?.coverKey ?? null
+      let coverPaletteId: CoverPaletteId | null = palette?.coverPaletteId ?? null
+      let coverPaletteKey: string | null = palette?.coverPaletteKey ?? null
 
       if (!privateCard) {
         try {
@@ -398,6 +414,8 @@ async function enrichBooks(userId: string, tallies: Map<string, VersionTally>): 
           title = book.title
           author = book.author
           coverKey = book.coverKey
+          coverPaletteId = typeof book.meta?.coverPaletteId === 'string' ? (book.meta.coverPaletteId as CoverPaletteId) : coverPaletteId
+          coverPaletteKey = book.coverPaletteKey ?? coverPaletteKey
         } catch (error) {
           if (!(error instanceof AppError) || !['BOOK_NOT_FOUND', 'BOOK_FILE_MISSING', 'FORBIDDEN'].includes(error.code)) throw error
           title = snapshot?.title ?? 'Unavailable book'
@@ -410,7 +428,7 @@ async function enrichBooks(userId: string, tallies: Map<string, VersionTally>): 
       const progress = state?.progress ?? null
       const total = tally.highlights + tally.bookmarks + tally.ideas + tally.reviews
       return {
-        bookVersionId: versionId, title, author, coverKey, format, readStatus,
+        bookVersionId: versionId, title, author, coverKey, coverPaletteId, coverPaletteKey, format, readStatus,
         highlights: tally.highlights, bookmarks: tally.bookmarks,
         ideas: tally.ideas, reviews: tally.reviews, total,
         durationSeconds: tally.durationSeconds,

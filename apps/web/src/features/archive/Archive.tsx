@@ -293,7 +293,6 @@ export default function Archive() {
                   onChange={(next) => patch(next)}
                   onBack={() => patch({ bookId: undefined })}
                   hideBack={false}
-                  range={query}
                 />
               )}
             </div>

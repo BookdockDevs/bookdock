@@ -1634,8 +1634,8 @@
     "statsDailyAvg": "Daily avg {{time}}",
     "statsToday": "Today",
     "stats30DaysAgo": "30 days ago",
-    "statsEmptyTitle": "No reading data yet",
-    "statsEmptyDesc": "Your reading time, progress, and daily trends will be recorded here as you read",
+    "statsEmptyTitle": "No reading records yet",
+    "statsEmptyDesc": "Your reading time and progress will appear here as you read",
     "ai": "AI Assistant",
     "aiPromptsEmpty": "No quick prompts configured",
     "searchPlaceholderChapter": "Search in chapter...",
@@ -2991,7 +2991,7 @@
     "estimatePrefix": "Estimated ",
     "estimateDaysUnit": " days remaining, ",
     "estimateTimePrefix": "taking about ",
-    "estimateNeedMore": "More reading data needed to estimate completion",
+    "estimateNeedMore": "Read a bit more to estimate completion time",
     "completedHint": "🎉 Book completed",
     "status": {
       "finished": "Finished"

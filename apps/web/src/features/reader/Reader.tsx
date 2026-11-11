@@ -1281,10 +1281,9 @@ export default function Reader() {
       if (sample) lastSampleAtRef.current = now
       const readingPosition = { cfi: e.cfi, fraction: e.fraction, segmentStart: segmentStartFraction,
         revisionId: expectedRevisionId, wordCount: bookQuery.data?.data.meta?.wordCount ?? undefined }
-      if (local && segmentStartFraction !== undefined && e.fraction !== undefined) local.captureCoverage(segmentStartFraction, e.fraction)
       pingReadingTimer(readingPosition)
       manualTimerStore.getState().updatePosition(id, { ...readingPosition, fraction: e.fraction ?? null, chapterIndex: e.chapterIndex })
-      scheduleProgressSave({ ...(displayedRevisionIdRef.current ? { revisionId: displayedRevisionIdRef.current } : {}), cfi: e.cfi, ...(e.contentCfi ? { contentCfi: e.contentCfi } : {}), chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, ...(local ? { segmentStartFraction } : {}), sample })
+      scheduleProgressSave({ ...(displayedRevisionIdRef.current ? { revisionId: displayedRevisionIdRef.current } : {}), cfi: e.cfi, ...(e.contentCfi ? { contentCfi: e.contentCfi } : {}), chapter: e.chapter, ...(e.chapterIndex === undefined ? {} : { chapterIndex: e.chapterIndex }), percent: e.percent, fraction: e.fraction, sample })
     },
     onSelected: (e) => {
       setIsSelectingText(false)

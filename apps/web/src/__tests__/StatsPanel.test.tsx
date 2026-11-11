@@ -8,7 +8,7 @@ import type { ReadingLedgerRes } from '@bookdock/shared'
 
 import StatsPanel from '@/features/reader/components/StatsPanel'
 
-const state = vi.hoisted(() => ({ ledger: null as ReadingLedgerRes | null, error: false, pending: false, retry: vi.fn() }))
+const state = vi.hoisted(() => ({ ledger: null as ReadingLedgerRes | null, bookProgress: null as number | null, error: false, pending: false, retry: vi.fn() }))
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
 function renderPanel() {
@@ -26,13 +26,14 @@ vi.mock('@/api/hooks/reading-records', async (original) => ({
 }))
 vi.mock('@tanstack/react-router', () => ({ Link: ({ children, search, to, ...props }: { children: React.ReactNode; to: string; search: unknown }) => <a href={to} data-search={JSON.stringify(search)} {...props}>{children}</a> }))
 vi.mock('@/features/library/hooks', () => ({
-  useBook: () => ({ data: null, isPending: false, isError: false }),
+  useBook: () => ({ data: state.bookProgress !== null ? { data: { progress: state.bookProgress } } : null, isPending: false, isError: false }),
 }))
 vi.mock('@/features/reader/components/AddRecordDialog', () => ({ default: () => <div data-testid="quick-add" /> }))
 
 beforeEach(() => {
   vi.clearAllMocks()
   queryClient.clear()
+  state.bookProgress = null
   state.error = false
   state.pending = false
   state.ledger = {
@@ -63,7 +64,10 @@ describe('reader statistics overview', () => {
     expect(screen.getByTestId('quick-add')).toBeInTheDocument()
   })
 
-  it('keeps quick entry available for empty history', () => {
+  it('renders only the empty state when reading history is empty', () => {
+    state.bookProgress = 38.3
+    state.ledger!.coverage = 0.35
+    state.ledger!.coverageIntervals = [[0, 0.35]]
     state.ledger!.totalSeconds = 0
     state.ledger!.legacyDaily = []
     state.ledger!.legacyIntervals = []
@@ -72,6 +76,9 @@ describe('reader statistics overview', () => {
     renderPanel()
     expect(screen.getByText('reader.statsEmptyTitle')).toBeInTheDocument()
     expect(screen.getByText('reader.statsEmptyDesc')).toBeInTheDocument()
+    expect(screen.queryByText('reader.statsProgress')).not.toBeInTheDocument()
+    expect(screen.queryByText('reader.statsTotalTime')).not.toBeInTheDocument()
+    expect(screen.queryByText('38.3%')).not.toBeInTheDocument()
   })
 
   it('uses an explicit retry state when the ledger cannot be loaded', () => {
