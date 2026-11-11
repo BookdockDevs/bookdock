@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AiConfigRes, AiConfigTestReq, AiConnectionTestRes, AiMessageRevisionRes, AiModelDiscoveryReq, AiModelRes, AiConfigUpdateReq, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiProviderRes, AiThreadDetailRes, AiThreadRes, AiThreadUpdateReq } from '@bookdock/shared'
 
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { assertSessionEpoch, getSessionEpoch } from '@/lib/session-scope'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -11,6 +12,10 @@ export const AI_CONFIG_KEY = ['ai', 'config'] as const
 export const aiConfigKey = (accountId: string | null) => [...AI_CONFIG_KEY, 'account', accountId] as const
 export const AI_PROVIDERS_KEY = ['ai', 'providers'] as const
 export const AI_THREADS_KEY = ['ai', 'threads'] as const
+export const aiThreadsScopeKey = (bookId: string, localNamespace?: string | null) =>
+  localNamespace ? [...AI_THREADS_KEY, localNamespace] as const : [...AI_THREADS_KEY, bookId] as const
+export const aiThreadDetailKey = (threadId: string | null, localNamespace?: string | null) =>
+  localNamespace ? [...AI_THREADS_KEY, localNamespace, 'detail', threadId] as const : [...AI_THREADS_KEY, 'detail', threadId] as const
 
 async function requestForAiAccount<T>(accountId: string | null, send: () => Promise<T>): Promise<T> {
   if (!accountId || useAuthStore.getState().user?.id !== accountId) throw new DOMException('AI account changed', 'AbortError')
@@ -47,18 +52,22 @@ export function useAiConfig(options?: { enabled?: boolean }) {
 }
 
 export function useAiThreads(bookId: string, options?: { enabled?: boolean }) {
+  const local = useLocalReader()
   return useQuery({
-    queryKey: [...AI_THREADS_KEY, bookId],
-    queryFn: () => apiGet<{ data: AiThreadRes[] }>(`/ai/threads?bookId=${encodeURIComponent(bookId)}`),
+    queryKey: aiThreadsScopeKey(bookId, local?.namespace),
+    networkMode: local ? 'always' : 'online',
+    queryFn: () => local ? local.listAiThreads() : apiGet<{ data: AiThreadRes[] }>(`/ai/threads?bookId=${encodeURIComponent(bookId)}`),
     enabled: options?.enabled ?? Boolean(bookId),
     staleTime: 30 * 1000,
   })
 }
 
 export function useAiThread(threadId: string | null, options?: { enabled?: boolean }) {
+  const local = useLocalReader()
   return useQuery({
-    queryKey: [...AI_THREADS_KEY, 'detail', threadId],
-    queryFn: () => apiGet<{ data: AiThreadDetailRes }>(`/ai/threads/${threadId}`),
+    queryKey: aiThreadDetailKey(threadId, local?.namespace),
+    networkMode: local ? 'always' : 'online',
+    queryFn: () => local ? local.getAiThread(threadId!) : apiGet<{ data: AiThreadDetailRes }>(`/ai/threads/${threadId}`),
     enabled: (options?.enabled ?? true) && Boolean(threadId),
   })
 }
@@ -196,23 +205,29 @@ export function useTestAiConfigDraft() {
 }
 
 export function useUpdateAiThread() {
+  const local = useLocalReader()
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: AiThreadUpdateReq }) => apiPatch<{ data: AiThreadRes }>(`/ai/threads/${id}`, body),
+    networkMode: local ? 'always' : 'online',
+    mutationFn: ({ id, body }: { id: string; body: AiThreadUpdateReq }) =>
+      local ? local.updateAiThread(id, body) : apiPatch<{ data: AiThreadRes }>(`/ai/threads/${id}`, body),
     onSuccess: (response) => {
-      void queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, response.data.bookId] })
-      void queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, 'detail', response.data.id] })
+      void queryClient.invalidateQueries({ queryKey: aiThreadsScopeKey(response.data.bookId, local?.namespace) })
+      void queryClient.invalidateQueries({ queryKey: aiThreadDetailKey(response.data.id, local?.namespace) })
     },
   })
 }
 
 export function useDeleteAiThread() {
+  const local = useLocalReader()
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id }: { id: string; bookId: string }) => apiDelete<{ data: null }>(`/ai/threads/${id}`),
+    networkMode: local ? 'always' : 'online',
+    mutationFn: ({ id }: { id: string; bookId: string }) =>
+      local ? local.deleteAiThread(id).then(() => ({ data: null })) : apiDelete<{ data: null }>(`/ai/threads/${id}`),
     onSuccess: (_response, variables) => {
-      void queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, variables.bookId] })
-      queryClient.removeQueries({ queryKey: [...AI_THREADS_KEY, 'detail', variables.id] })
+      void queryClient.invalidateQueries({ queryKey: aiThreadsScopeKey(variables.bookId, local?.namespace) })
+      queryClient.removeQueries({ queryKey: aiThreadDetailKey(variables.id, local?.namespace) })
     },
   })
 }

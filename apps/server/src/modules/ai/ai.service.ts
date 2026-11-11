@@ -2,8 +2,8 @@ import crypto from 'node:crypto'
 
 import { and, eq } from 'drizzle-orm'
 
-import { AI_CORE_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CONTEXT_CHARS, AI_TOOL_NAMES, expandAiPrompt, getAiModelCapabilityFlags, getAiPromptVariables, isAiEmbeddingModel, normalizeAiCitationMarkers, normalizeAiToolName } from '@bookdock/shared'
-import type { AiAssistantMode, AiAssistantModeInput, AiChatReq, AiCitation, AiConfigRes, AiConfigTestReq, AiConfigUpdateReq, AiConnectionTestRes, AiContextPlan, AiContextReceipt, AiContextTruncationReason, AiConversationSettings, AiGenerationDiagnostics, AiGenerationUsage, AiHistoryMessage, AiModelCapabilities, AiModelDiscoveryReq, AiModelKind, AiModelRes, AiNormalizedEvent, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiPromptTemplate, AiPromptTemplateInput, AiPromptVariable, AiProvider, AiProviderRes, AiProtocol, AiReadingScope, AiRetryRecipe, AiStatusRes, AiToolName } from '@bookdock/shared'
+import { AI_CORE_SYSTEM_PROMPT, AI_CORE_TOOL_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CONTEXT_CHARS, AI_TOOL_NAMES, expandAiPrompt, getAiModelCapabilityFlags, getAiPromptVariables, isAiEmbeddingModel, normalizeAiCitationMarkers, normalizeAiToolName } from '@bookdock/shared'
+import type { AiAssistantMode, AiAssistantModeInput, AiChatReq, AiCitation, AiConfigRes, AiConfigTestReq, AiConfigUpdateReq, AiConnectionTestRes, AiContextPlan, AiContextReceipt, AiContextTruncationReason, AiConversationSettings, AiGenerationDiagnostics, AiGenerationUsage, AiHistoryMessage, AiLocalChatReq, AiModelCapabilities, AiModelDiscoveryReq, AiModelKind, AiModelRes, AiNormalizedEvent, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiPromptTemplate, AiPromptTemplateInput, AiPromptVariable, AiProvider, AiProviderRes, AiProtocol, AiReadingScope, AiRetryRecipe, AiStatusRes, AiToolName } from '@bookdock/shared'
 
 import { config } from '../../config'
 import { getDb } from '../../db/client'
@@ -853,7 +853,7 @@ function prepareProviderMessages(messages: ConversationMessage[], tools: readonl
   return { messages: boundedMessages, providerInputChars: boundedChars, droppedHistoryChars, droppedHistoryMessageCount, droppedHistoryTurnCount, toolResultTrimmedChars }
 }
 
-function buildMessages(input: AiChatReq, context: string): { messages: ChatMessage[]; plan: AiContextPlan } {
+function buildMessages(input: Pick<AiChatReq, 'prompt' | 'context' | 'history' | 'assistantModePrompt'>, context: string, hasTools = false): { messages: ChatMessage[]; plan: AiContextPlan } {
   const history: ChatMessage[] = []
   for (const message of input.history ?? []) {
     if (message.role !== 'user' || !message.context) {
@@ -869,11 +869,12 @@ function buildMessages(input: AiChatReq, context: string): { messages: ChatMessa
       throw error
     }
   }
+  const coreSystemPrompt = hasTools ? AI_CORE_TOOL_SYSTEM_PROMPT : AI_CORE_SYSTEM_PROMPT
   const assistantModePrompt = input.assistantModePrompt?.trim()
-  const modeInstruction = assistantModePrompt && assistantModePrompt !== AI_CORE_SYSTEM_PROMPT
+  const modeInstruction = assistantModePrompt && assistantModePrompt !== AI_CORE_SYSTEM_PROMPT && assistantModePrompt !== AI_CORE_TOOL_SYSTEM_PROMPT
     ? assistantModePrompt
     : ''
-  const systemContent = [modeInstruction, AI_CORE_SYSTEM_PROMPT].filter(Boolean).join('\n\n')
+  const systemContent = [modeInstruction, coreSystemPrompt].filter(Boolean).join('\n\n')
   const systemMessages: ChatMessage[] = [{ role: 'system', content: systemContent }]
   const currentPrompt = expandAiPrompt(input.prompt, promptValues(input.context))
   const currentMessage = { role: 'user' as const, content: context ? `${context}\n\n用户问题：\n${currentPrompt.trim()}` : `用户问题：\n${currentPrompt.trim()}` }
@@ -908,7 +909,7 @@ function buildMessages(input: AiChatReq, context: string): { messages: ChatMessa
     plan: {
       maxChars: MAX_PROVIDER_INPUT_CHARS,
       modeChars: modeInstruction.length,
-      coreSystemChars: AI_CORE_SYSTEM_PROMPT.length,
+      coreSystemChars: coreSystemPrompt.length,
       systemChars: systemContent.length,
       currentRequestChars: currentMessage.content.length,
       directContextChars: context.length,
@@ -2011,7 +2012,7 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
   let response: Response
   let assistantDraftId: string | undefined
   try {
-    const builtMessages = buildMessages({ ...input, history: input.threadId ? thread.history : input.history }, context)
+    const builtMessages = buildMessages({ ...input, history: input.threadId ? thread.history : input.history }, context, availableTools.length > 0)
     const initialPlan: AiContextPlan = {
       ...builtMessages.plan,
       readingBoundary: {
@@ -2374,4 +2375,134 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
   })
 
   return { stream, requestId, runId, receipt }
+}
+
+export async function createAiLocalChatStream(
+  userId: string,
+  role: string,
+  input: AiLocalChatReq,
+  requestSignal: AbortSignal,
+): Promise<Omit<AiChatStream, 'runId'>> {
+  if (role !== 'owner' && role !== 'member') throw new AppError('AI_NOT_ALLOWED', 'Login required')
+  const ai = effectiveConfig(userId)
+  assertAvailable(role, ai)
+  const requestController = reserveAiRequest(userId)
+  const startedAt = Date.now()
+  const requestId = createId('ai')
+  const timeoutController = new AbortController()
+  const timeout = setTimeout(() => timeoutController.abort(), config.aiTimeoutMs)
+  const signal = AbortSignal.any([requestSignal, requestController.signal, timeoutController.signal])
+
+  let receipt: AiContextReceipt
+  let messages: ConversationMessage[]
+  let response: Response
+  try {
+    const builtContext = buildContext(input.context, consumedPromptVariables(input.prompt, input.context))
+    const builtMessages = buildMessages(input, builtContext.content, false)
+    const prepared = prepareProviderMessages(builtMessages.messages, [])
+    messages = prepared.messages
+    const contextPlan = mergePreparedContextPlan({
+      ...builtMessages.plan,
+      ...(input.context.visibleTextVersion?.trim() ? { visibleTextVersion: input.context.visibleTextVersion.trim() } : {}),
+    }, prepared)
+    receipt = {
+      ...builtContext.receipt,
+      questionChars: input.prompt.trim().length,
+      model: ai.model,
+      ...(input.assistantMode?.trim() ? { assistantMode: input.assistantMode.trim() } : {}),
+      contextPlan,
+    }
+    response = await fetchUpstreamResponse(ai, messages, signal, [])
+  } catch (error) {
+    clearTimeout(timeout)
+    if (activeRequests.get(userId)?.controller === requestController) activeRequests.delete(userId)
+    const timedOut = timeoutController.signal.aborted
+    log(timedOut || !(requestSignal.aborted || requestController.signal.aborted) ? 'warn' : 'info', 'ai.local_chat.failed', {
+      requestId,
+      actorRole: role === 'owner' ? 'owner' : 'member',
+      durationMs: Date.now() - startedAt,
+      ...(timedOut || !(requestSignal.aborted || requestController.signal.aborted) ? { error } : {}),
+    })
+    if (timedOut) throw new AppError('AI_TIMEOUT', 'AI request timed out', { retryable: true })
+    if (requestSignal.aborted || isAbort(error)) throw error
+    if (error instanceof AppError) throw error
+    throw new AppError('AI_PROVIDER_ERROR', 'Unable to connect to the AI provider')
+  }
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const encoder = new TextEncoder()
+      let status: 'completed' | 'failed' | 'interrupted' = 'completed'
+      let assistantContent = ''
+      let inputTokens = 0
+      let outputTokens = 0
+      let inputTokensSeen = false
+      let outputTokensSeen = false
+      let timeToFirstTokenMs: number | undefined
+      try {
+        controller.enqueue(encoder.encode(sseEvent('meta', { requestId, model: ai.model, receipt })))
+        await consumeUpstreamResponse(
+          response,
+          ai.protocol,
+          signal,
+          (text) => {
+            if (timeToFirstTokenMs === undefined) timeToFirstTokenMs = Date.now() - startedAt
+            assistantContent += text
+            controller.enqueue(encoder.encode(sseEvent('delta', { text })))
+          },
+          (usage) => {
+            if (usage.inputTokens !== undefined) {
+              inputTokens += usage.inputTokens
+              inputTokensSeen = true
+            }
+            if (usage.outputTokens !== undefined) {
+              outputTokens += usage.outputTokens
+              outputTokensSeen = true
+            }
+            controller.enqueue(encoder.encode(sseEvent('usage', usage)))
+          },
+        )
+        const normalized = normalizeAiCitationMarkers(assistantContent, [])
+        controller.enqueue(encoder.encode(sseEvent('done', { content: normalized.content, citations: [] })))
+      } catch (error) {
+        const timedOut = timeoutController.signal.aborted
+        const disconnected = requestSignal.aborted || requestController.signal.aborted
+        status = disconnected ? 'interrupted' : 'failed'
+        if (status === 'failed') {
+          const providerError = error instanceof AppError && error.code === 'AI_PROVIDER_ERROR'
+          controller.enqueue(encoder.encode(sseEvent('error', {
+            code: timedOut ? 'AI_TIMEOUT' : 'AI_PROVIDER_ERROR',
+            message: timedOut ? 'AI request timed out' : providerError ? error.message : 'AI provider stream failed',
+            retryable: isRetryableAiError(error),
+          })))
+        }
+      } finally {
+        clearTimeout(timeout)
+        if (activeRequests.get(userId)?.controller === requestController) activeRequests.delete(userId)
+        log(status === 'failed' ? 'warn' : 'info', 'ai.local_chat.completed', {
+          requestId,
+          actorRole: role === 'owner' ? 'owner' : 'member',
+          durationMs: Date.now() - startedAt,
+          meta: {
+            selectionChars: receipt.selectionChars,
+            questionChars: receipt.questionChars ?? 0,
+            contextChars: receipt.contextChars,
+            outputChars: assistantContent.length,
+            provider: ai.provider,
+            ...(ai.model ? { model: ai.model } : {}),
+            ...(timeToFirstTokenMs === undefined ? {} : { timeToFirstTokenMs }),
+            status,
+            ...(inputTokensSeen ? { inputTokens } : {}),
+            ...(outputTokensSeen ? { outputTokens } : {}),
+          },
+        })
+        controller.close()
+      }
+    },
+    cancel() {
+      requestController.abort()
+    },
+  })
+
+  return { stream, requestId, receipt }
 }

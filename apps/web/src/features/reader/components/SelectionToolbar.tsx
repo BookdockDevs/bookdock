@@ -558,7 +558,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
     ...(target && !visibleKeys.includes('highlight') ? ['highlight' as const] : []),
     ...(visibleKeys.length > 0 ? visibleKeys : ['highlight' as const]),
   ]
-  const actions = effectiveKeys.filter((k) => !local || !k.startsWith('ai-')).map((k) => actionMap[k]).filter(Boolean)
+  const actions = effectiveKeys.map((k) => actionMap[k]).filter(Boolean)
 
   return (
     <>

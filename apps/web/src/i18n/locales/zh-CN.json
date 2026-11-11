@@ -1313,6 +1313,7 @@
     "aiPreviousAnswer": "上一个回答版本",
     "aiNextAnswer": "下一个回答版本",
     "aiStartChat": "开始与 AI 对话",
+    "aiAccountRequired": "AI 助手需要连接账号；本机阅读仍可继续",
     "aiBackToLatest": "回到最新位置",
     "aiViewNewAnswer": "查看新回答",
     "aiAddChapterReference": "添加章节引用",

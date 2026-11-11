@@ -9,10 +9,14 @@ import { apiGet, apiPost } from '@/api/client'
 import { useBookReplacements, useCreateReplacement, useSetReplacementOverride } from '@/api/hooks/useReplacements'
 import { LocalReaderContext, type LocalReaderSession } from './reader-source-context'
 
-const authState: { user: { id: string; privateLibraryId: string } | null } = { user: null }
+// Hoisted so the mock factory below can reference it: mocked modules may load during the
+// factory call, which happens before a plain `const` in this file is initialised.
+const { authState } = vi.hoisted(() => ({
+  authState: { user: null } as { user: { id: string; privateLibraryId: string } | null },
+}))
 vi.mock('@/stores/auth.store', () => {
   const useAuthStore = (selector: (state: typeof authState) => unknown) => selector(authState)
-  return { useAuthStore: Object.assign(useAuthStore, { getState: () => authState }), getAuthSessionRevision: () => 0 }
+  return { useAuthStore: Object.assign(useAuthStore, { getState: () => authState, subscribe: () => () => {} }), getAuthSessionRevision: () => 0 }
 })
 
 const { readReplacements, readReplacementOverrides, mutateReplacement, overrideReplacement } = vi.hoisted(() => ({

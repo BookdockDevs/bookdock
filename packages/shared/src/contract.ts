@@ -838,6 +838,19 @@ export interface AiChatReq {
   enabledTools?: AiToolName[]
 }
 
+/**
+ * Bounded stateless AI chat input for device-local books that have no server
+ * `bookId`, persisted thread, or server-side read tools.
+ */
+export interface AiLocalChatReq {
+  prompt: string
+  context: AiContextReq
+  history?: AiHistoryMessage[]
+  assistantModePrompt?: string
+  assistantMode?: string
+  assistantModeId?: string
+}
+
 export interface AiRetryRecipe {
   /** The bounded context and selected mode prompt needed to issue the same request again. */
   context: AiChatReq['context']

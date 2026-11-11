@@ -223,7 +223,7 @@ export function IdeaOverlay({
     { key: 'ai-chat', title: _('reader.aiChatSelection'), icon: <AiSparkleIcon size={20} />, onClick: onAiChat },
     { key: 'search', title: _('reader.search'), icon: <SearchIcon />, onClick: onSearch },
     { key: 'share', title: _('annotation.shareExcerpt'), icon: <ExcerptShareIcon />, onClick: onShareQuote },
-  ].filter((action) => !local || action.key !== 'ai-chat')
+  ]
   const storedWidth = useUiStore((s) => s.ideaSidebarWidth)
   const setStoredWidth = useUiStore((s) => s.setIdeaSidebarWidth)
   const IDEA_SIDEBAR_MIN = 280

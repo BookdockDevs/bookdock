@@ -326,6 +326,15 @@ export const aiChatSchema = z.object({
   enabledTools: z.array(aiToolNameSchema).max(AI_TOOL_NAMES.length).optional(),
 }).strict()
 
+export const aiLocalChatSchema = z.object({
+  prompt: z.string().trim().min(1).max(AI_MAX_CHAT_PROMPT_CHARS),
+  context: aiContextSchema,
+  history: z.array(aiHistoryMessageSchema).max(12).optional(),
+  assistantModePrompt: z.string().trim().max(2_000).optional(),
+  assistantMode: z.string().trim().max(80).optional(),
+  assistantModeId: z.string().trim().min(1).max(100).optional(),
+}).strict()
+
 const aiThreadTitleSchema = z.string().trim().min(1).max(100)
 
 export const aiThreadCreateSchema = z.object({

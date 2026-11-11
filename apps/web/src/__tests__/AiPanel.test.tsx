@@ -6,8 +6,9 @@ vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) =
 
 import { AI_DEFAULT_ASSISTANT_MODE_PROMPT } from '@bookdock/shared'
 
-import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiStreamAiChat } from '../api/client'
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiStreamAiChat, apiStreamAiLocalChat } from '../api/client'
 import AiPanel from '../features/reader/components/AiPanel'
+import { LocalReaderContext, type LocalReaderSession } from '../features/reading-data/reader-source-context'
 import { RendererContext } from '../features/reader/hooks/useReaderApi'
 import { writeAiPanelMemory } from '../features/reader/lib/ai-panel-memory'
 import { formatTime } from '@/lib/format-date'
@@ -22,6 +23,7 @@ vi.mock('../api/client', () => ({
   apiPatch: vi.fn(),
   apiPost: vi.fn(),
   apiStreamAiChat: vi.fn(),
+  apiStreamAiLocalChat: vi.fn(),
   ApiError: class ApiError extends Error {
     code: string
 
@@ -115,6 +117,7 @@ describe('AiPanel', () => {
     vi.mocked(apiPatch).mockReset()
     vi.mocked(apiPost).mockReset()
     vi.mocked(apiStreamAiChat).mockReset()
+    vi.mocked(apiStreamAiLocalChat).mockReset()
   })
 
   it('keeps the composer editable when no model is configured', async () => {
@@ -574,8 +577,13 @@ describe('AiPanel', () => {
     expect(screen.getByRole('heading', { name: 'reader.aiEditMode' })).toBeInTheDocument()
     expect(screen.getByLabelText('reader.aiModeName')).toHaveValue('助理')
     expect(screen.getByLabelText('reader.aiModePrompt')).toHaveValue(AI_DEFAULT_ASSISTANT_MODE_PROMPT)
+    expect(screen.getByRole('button', { name: 'reader.aiSave' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'reader.aiRestoreDefault' })).toBeNull()
+
     fireEvent.change(screen.getByLabelText('reader.aiModeName'), { target: { value: '自由助理' } })
     fireEvent.change(screen.getByLabelText('reader.aiModePrompt'), { target: { value: '按照我的要求自由回答。' } })
+    expect(screen.getByRole('button', { name: 'reader.aiSave' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'reader.aiRestoreDefault' }).querySelector('svg')).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiSave' }))
 
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/ai/config', {
@@ -586,11 +594,23 @@ describe('AiPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiSelectAssistantMode' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'reader.aiEditMode 自由助理' }))
-    fireEvent.click(screen.getByRole('button', { name: 'reader.aiRestoreDefault' }))
-    expect(screen.getByText('reader.aiRestoreDefaultConfirm')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'settings.confirmRestoreAction' }))
+    expect(screen.getByRole('button', { name: 'reader.aiSave' })).toBeDisabled()
+    const restoreButton = screen.getByRole('button', { name: 'reader.aiRestoreDefault' })
+    expect(restoreButton.querySelector('svg')).not.toBeNull()
 
-    await waitFor(() => expect(apiPatch).toHaveBeenLastCalledWith('/ai/config', { defaultAssistantMode: null }))
+    fireEvent.click(restoreButton)
+    expect(screen.queryByText('reader.aiRestoreDefaultConfirm')).toBeNull()
+    expect(screen.getByLabelText('reader.aiModeName')).toHaveValue('助理')
+    expect(screen.getByLabelText('reader.aiModePrompt')).toHaveValue(AI_DEFAULT_ASSISTANT_MODE_PROMPT)
+    expect(screen.queryByRole('button', { name: 'reader.aiRestoreDefault' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'reader.aiSave' })).toBeEnabled()
+    expect(apiPatch).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiSave' }))
+    await waitFor(() => expect(apiPatch).toHaveBeenLastCalledWith('/ai/config', {
+      modes: [],
+      defaultAssistantMode: null,
+    }))
     expect(screen.getByRole('button', { name: 'reader.aiSelectAssistantMode' })).toHaveTextContent('reader.aiDefaultAssistantModeName')
   })
 
@@ -617,7 +637,10 @@ describe('AiPanel', () => {
     expect(screen.getByRole('heading', { name: 'reader.aiEditMode' })).toBeInTheDocument()
     expect(screen.getByLabelText('reader.aiModeName')).toHaveValue('书评人')
     expect(screen.getByLabelText('reader.aiModePrompt')).toHaveValue('用书评人的口吻回答。')
+    expect(screen.getByRole('button', { name: 'reader.aiSave' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'reader.aiDelete' }).querySelector('svg')).not.toBeNull()
     fireEvent.change(screen.getByLabelText('reader.aiModeName'), { target: { value: '严谨书评人' } })
+    expect(screen.getByRole('button', { name: 'reader.aiSave' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiSave' }))
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/ai/config', {
       modes: [{ id: 'custom-reviewer', name: '严谨书评人', prompt: '用书评人的口吻回答。' }],
@@ -1638,5 +1661,105 @@ describe('AiPanel', () => {
 
     expect(await screen.findByText('恢复出的历史提问')).toBeInTheDocument()
     expect(screen.queryByTestId('ai-thread-loading')).toBeNull()
+  })
+
+  it('supports local-book AI chat via /ai/local-chat without server book tools or thread endpoints', async () => {
+    const saveAiThreadTurn = vi.fn().mockResolvedValue({
+      data: {
+        id: 'local-thread-1',
+        bookId: 'local-book-1',
+        title: '解释选区',
+        createdAt: 1000,
+        updatedAt: 2000,
+        messageCount: 2,
+        settings: { readingScope: 'to_here', enabledTools: [], assistantModeId: 'assistant' },
+        messages: [],
+        generation: null,
+      },
+    })
+    const localSession = {
+      ref: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'local-book-1' },
+      bookId: 'local-book-1',
+      namespace: 'local:device:local-book-1:content-1',
+      sourceAvailable: true,
+      content: { book: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'local-book-1' }, contentId: 'content-1' },
+      getStructure: vi.fn().mockResolvedValue({
+        content: { book: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'local-book-1' }, contentId: 'content-1' },
+        sections: [{ index: 0, title: '第一章', href: 'ch1.xhtml', wordCount: 100 }],
+      }),
+      listNotes: vi.fn().mockResolvedValue({ data: [] }),
+      listAiThreads: vi.fn().mockResolvedValue({ data: [] }),
+      getAiThread: vi.fn(),
+      saveAiThreadTurn,
+      updateAiThread: vi.fn(),
+      deleteAiThread: vi.fn(),
+    } as unknown as LocalReaderSession
+
+    vi.mocked(apiGet).mockImplementation(async (path) => {
+      if (path === '/ai/status') return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', prompts: [], modes: [], lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: [], assistantModeId: 'assistant' } } }
+      throw new Error(`Unexpected apiGet: ${path}`)
+    })
+    vi.mocked(apiStreamAiLocalChat).mockImplementation(async (_body, handlers) => {
+      handlers.onMeta?.({ requestId: 'req-local-1', model: 'qwen3:8b', receipt: { selectionChars: 4, beforeChars: 0, contextChars: 4, chapterTitle: '第一章', sourceCfi: 'epubcfi(/6/4!/2)' } })
+      handlers.onDelta?.('本地解读结果')
+      handlers.onDone?.({ content: '本地解读结果', citations: [] })
+    })
+
+    useReaderState.setState({
+      aiContext: { cfiRange: 'epubcfi(/6/4!/2)', text: '本地原文', chapterTitle: '第一章', chapterIndex: 0, rect: { left: 0, top: 0, width: 10, height: 10 } },
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LocalReaderContext.Provider value={localSession}>
+          <RendererContext.Provider value={{ renderer: readerWithChapterReferences() as never }}>
+            <AiPanel bookId="local-book-1" />
+          </RendererContext.Provider>
+        </LocalReaderContext.Provider>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByRole('button', { name: 'reader.aiTools' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /aiReadingScopeToggle/ })).toBeNull()
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '解释选区' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiSend' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiSend' }))
+
+    await waitFor(() => expect(apiStreamAiLocalChat).toHaveBeenCalledTimes(1))
+    expect(apiStreamAiChat).not.toHaveBeenCalled()
+    expect(apiStreamAiLocalChat.mock.calls[0]?.[0]).toMatchObject({
+      prompt: '解释选区',
+      context: { selection: '本地原文', chapterTitle: '第一章' },
+    })
+    expect(apiStreamAiLocalChat.mock.calls[0]?.[0]).not.toHaveProperty('bookId')
+    await waitFor(() => expect(saveAiThreadTurn).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText('本地解读结果')).toBeInTheDocument()
+  })
+
+  it('shows an account-required notice without querying /ai/status for anonymous local reading', async () => {
+    useAuthStore.getState().clearAuth()
+    const localSession = {
+      ref: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'local-book-anon' },
+      bookId: 'local-book-anon',
+      namespace: 'local:device:local-book-anon:content-1',
+      sourceAvailable: true,
+      getStructure: vi.fn().mockResolvedValue({ content: { contentId: 'content-1' }, sections: [] }),
+      listNotes: vi.fn().mockResolvedValue({ data: [] }),
+      listAiThreads: vi.fn().mockResolvedValue({ data: [] }),
+    } as unknown as LocalReaderSession
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LocalReaderContext.Provider value={localSession}>
+          <AiPanel bookId="local-book-anon" />
+        </LocalReaderContext.Provider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('reader.aiAccountRequired')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'reader.aiSend' })).toBeDisabled()
+    expect(apiGet).not.toHaveBeenCalled()
   })
 })

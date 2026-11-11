@@ -1,8 +1,8 @@
 import { Hono } from 'hono'
 
-import { aiChatSchema, aiConfigTestSchema, aiConfigUpdateSchema, aiGenerationRunIdSchema, aiIndexSchema, aiIndexStatusSchema, aiMessageIdSchema, aiModelDiscoverySchema, aiProfileCreateSchema, aiProfileUpdateSchema, aiSearchSchema, aiThreadCreateSchema, aiThreadListSchema, aiThreadUpdateSchema, type AiConfigRes, type AiConnectionTestRes, type AiGenerationRunRes, type AiIndexRes, type AiMessageRevisionRes, type AiModelRes, type AiProfileRes, type AiProviderRes, type AiSearchRes, type AiStatusRes, type AiThreadDetailRes, type AiThreadRes } from '@bookdock/shared'
+import { aiChatSchema, aiConfigTestSchema, aiConfigUpdateSchema, aiGenerationRunIdSchema, aiIndexSchema, aiIndexStatusSchema, aiLocalChatSchema, aiMessageIdSchema, aiModelDiscoverySchema, aiProfileCreateSchema, aiProfileUpdateSchema, aiSearchSchema, aiThreadCreateSchema, aiThreadListSchema, aiThreadUpdateSchema, type AiConfigRes, type AiConnectionTestRes, type AiGenerationRunRes, type AiIndexRes, type AiMessageRevisionRes, type AiModelRes, type AiProfileRes, type AiProviderRes, type AiSearchRes, type AiStatusRes, type AiThreadDetailRes, type AiThreadRes } from '@bookdock/shared'
 
-import { cancelAiChatRun, createAiChatStream, createAiProfile, deleteAiProfile, embedAiTexts, getAiConfig, getAiSearchChapterLimit, getAiStatus, isAiEmbeddingConfigured, listAiModels, listAiProviders, testAiConfig, testAiConfigDraft, updateAiConfig, updateAiProfile } from './ai.service'
+import { cancelAiChatRun, createAiChatStream, createAiLocalChatStream, createAiProfile, deleteAiProfile, embedAiTexts, getAiConfig, getAiSearchChapterLimit, getAiStatus, isAiEmbeddingConfigured, listAiModels, listAiProviders, testAiConfig, testAiConfigDraft, updateAiConfig, updateAiProfile } from './ai.service'
 import { createAiThread, deleteAiThread, getAiThread, listAiMessageRevisions, listAiThreads, selectAiMessageRevision, updateAiThread } from './ai.sessions.service'
 import { cancelAiBookIndex, clearAiBookIndex, getAiIndexStatus, indexAiBook, searchAiBook } from './ai.retrieval.service'
 import { getAiGenerationRun } from './ai.runs.service'
@@ -254,6 +254,22 @@ aiRoutes.post('/chat', async (c) => {
     Connection: 'keep-alive',
     'X-AI-Request-ID': result.requestId,
     'X-AI-Run-ID': result.runId,
+  })
+})
+
+aiRoutes.post('/local-chat', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = aiLocalChatSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid local AI chat request', details: parsed.error.flatten() } }, 400)
+  }
+  const result = await createAiLocalChatStream(user.id, user.role, parsed.data, c.req.raw.signal)
+  return c.newResponse(result.stream, 200, {
+    'Cache-Control': 'no-cache, no-transform',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    Connection: 'keep-alive',
+    'X-AI-Request-ID': result.requestId,
   })
 })
 

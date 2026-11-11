@@ -89,6 +89,13 @@ describe('SelectionToolbar', () => {
     useReaderState.setState({ dictionaryTarget: null })
   })
 
+  it('keeps AI chat and quick commands available for local selection', () => {
+    setSelection()
+    render(<LocalReaderContext.Provider value={{ namespace: 'local:device:book', bookId: 'b1', sourceAvailable: true } as LocalReaderSession}><SelectionToolbar bookId="b1" /></LocalReaderContext.Provider>)
+    expect(screen.getByTitle('reader.aiChatSelection')).toBeInTheDocument()
+    expect(screen.getByTitle('reader.aiQuickCommands')).toBeInTheDocument()
+  })
+
   it('hands the selected word to the dictionary card before dismissing the toolbar', () => {
     setSelection()
     const snapshot = useReaderState.getState().selection

@@ -1321,6 +1321,7 @@
     "aiPreviousAnswer": "Previous answer",
     "aiNextAnswer": "Next answer",
     "aiStartChat": "Start a conversation with AI",
+    "aiAccountRequired": "Connect an account to use AI Assistant. Reading on this device remains available.",
     "aiBackToLatest": "Back to latest",
     "aiViewNewAnswer": "View new answer",
     "aiAddChapterReference": "Add chapter reference",

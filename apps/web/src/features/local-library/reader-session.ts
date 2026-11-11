@@ -203,6 +203,11 @@ export async function openLocalReaderSession(ref: ClientBookRef, recordsOnly = f
       const binding = presetId === null ? null : clientPresetBindingSchema.parse({ presetId, owner })
       await repository.patchPreferences(ref, { presetBinding: binding })
     },
+    async listAiThreads() { return { data: await repository.listAiThreads(ref) } },
+    async getAiThread(threadId) { return { data: await repository.getAiThread(ref, threadId) } },
+    async saveAiThreadTurn(input) { return { data: await repository.saveAiThreadTurn(ref, input) } },
+    async updateAiThread(threadId, body) { return { data: await repository.updateAiThread(ref, threadId, body) } },
+    async deleteAiThread(threadId) { await repository.deleteAiThread(ref, threadId) },
   }
   return session
 }

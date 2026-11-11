@@ -22,7 +22,6 @@ import { NotesFilterPanel } from './NotesFilterPanel'
 import { NotesPanel } from './NotesPanel'
 import StatsPanel from './StatsPanel'
 import AiPanel from './AiPanel'
-import { useLocalReader } from '../../reading-data/reader-source-context'
 
 export interface NavigationPanelRef {
   saveScroll: () => void
@@ -206,7 +205,6 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   ref,
 ) {
   const _ = useTranslation()
-  const local = useLocalReader()
   const tab = useReaderState((s) => s.activeNavTab)
   const tocItems = useReaderState((s) => s.tocItems)
   const tocBookId = useReaderState((s) => s.tocBookId)
@@ -1606,7 +1604,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             tab === 'ai'
               ? 'overflow-hidden px-0 py-0'
               : 'overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] pl-2 pr-3 pt-0 pb-2 text-sm',
-            tab === 'notes' && 'flex flex-col',
+            (tab === 'notes' || tab === 'stats') && 'flex flex-col',
           )}
         >
           {tab === 'toc' && (() => {
@@ -1664,7 +1662,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         )}
         {tab === 'stats' && !statsDisabled && !guestReadOnly && <StatsPanel bookId={bookId} />}
         <div className={tab === 'ai' && !guestReadOnly ? 'h-full' : 'hidden'}>
-          {!guestReadOnly && !local && (
+          {!guestReadOnly && (
             <AiPanel
               bookId={bookId}
               initialScrollTop={savedScrollTop.current.ai}

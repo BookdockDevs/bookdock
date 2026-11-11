@@ -114,6 +114,69 @@ describe('local reader adapter behavior', () => {
     const reopened = await openLocalReaderSession(ref)
     expect((await reopened.getProgress()).data?.chapter).toBe('Chapter 12')
   })
+
+  it('persists, updates, and deletes local AI threads across reopen and removes them on complete deletion', async () => {
+    const session = await openLocalReaderSession(ref)
+    const saved = await session.saveAiThreadTurn({
+      settings: { readingScope: 'to_here', enabledTools: [], assistantModeId: 'assistant' },
+      userMessage: {
+        id: 'u-1',
+        role: 'user',
+        revisionGroupId: null,
+        revision: 0,
+        content: '解释这段原文',
+        context: null,
+        retry: null,
+        citations: [],
+        events: [],
+        createdAt: 1000,
+        aborted: false,
+      },
+      assistantMessage: {
+        id: 'a-1',
+        role: 'assistant',
+        revisionGroupId: null,
+        revision: 0,
+        content: '本地 AI 解释',
+        context: null,
+        retry: null,
+        citations: [],
+        events: [],
+        createdAt: 1001,
+        aborted: false,
+      },
+    })
+    expect((await session.listAiThreads()).data).toHaveLength(1)
+    expect((await session.getAiThread(saved.data.id)).data.messages).toHaveLength(2)
+
+    await session.updateAiThread(saved.data.id, { title: '重命名对话' })
+    const reopened = await openLocalReaderSession(ref)
+    expect((await reopened.listAiThreads()).data[0]?.title).toBe('重命名对话')
+
+    await reopened.deleteAiThread(saved.data.id)
+    expect((await reopened.listAiThreads()).data).toHaveLength(0)
+
+    await reopened.saveAiThreadTurn({
+      settings: { readingScope: 'to_here', enabledTools: [], assistantModeId: 'assistant' },
+      userMessage: { id: 'u-2', role: 'user', revisionGroupId: null, revision: 0, content: '第二个对话', context: null, retry: null, citations: [], events: [], createdAt: 2000, aborted: false },
+      assistantMessage: { id: 'a-2', role: 'assistant', revisionGroupId: null, revision: 0, content: '回复', context: null, retry: null, citations: [], events: [], createdAt: 2001, aborted: false },
+    })
+    await repository.removeBook(ref, true)
+    await expect(repository.listAiThreads(ref)).rejects.toMatchObject({ category: 'unavailable-content' })
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open('bookdock-local-library')
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    const remainingAiThreads = await new Promise<unknown>((resolve, reject) => {
+      const tx = db.transaction('settings', 'readonly')
+      const req = tx.objectStore('settings').get(JSON.stringify(['ai-threads', 'local', 'device', ref.bookId]))
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    db.close()
+    expect(remainingAiThreads).toBeUndefined()
+  })
 })
 import { Blob as NativeBlob } from 'node:buffer'
 import { webcrypto } from 'node:crypto'

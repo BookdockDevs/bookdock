@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { AI_DEFAULT_ASSISTANT_MODE_PROMPT } from '@bookdock/shared'
+import { AI_CORE_SYSTEM_PROMPT, AI_CORE_TOOL_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT } from '@bookdock/shared'
 import type { AiChatReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
@@ -82,6 +82,7 @@ import { config } from '../../config'
 import { getAiIndexStatus, indexAiBook, searchAiBook } from './ai.retrieval.service'
 import { cancelAiGenerationRun, finalizeAiGenerationRun, getAiGenerationRun } from './ai.runs.service'
 import { createAiThread, deleteAiThread, getAiThread, listAiMessageRevisions, listAiThreads, prepareAiThread, saveAiMessage, selectAiMessageRevision, updateAiMessageContext, updateAiThread } from './ai.sessions.service'
+import { getActiveBook, getBookChapters } from '../books/books.service'
 
 interface TestUser {
   id: string
@@ -953,7 +954,7 @@ describe('ai routes', () => {
     const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ role: string; content?: string }> }
     expect(payload.messages[0]?.role).toBe('system')
     expect(payload.messages[0]?.content).toContain('请优先指出叙事视角的变化。')
-    expect(payload.messages[0]?.content).toContain(AI_DEFAULT_ASSISTANT_MODE_PROMPT)
+    expect(payload.messages[0]?.content).toContain(AI_CORE_TOOL_SYSTEM_PROMPT)
     expect(payload.messages.filter((message) => message.role === 'system')).toHaveLength(1)
     expect(payload.messages.at(-1)?.content).toContain('<chapter_reference chapter="第二章" chapter_index="1">')
     expect(payload.messages.at(-1)?.content).toContain('变换后的&lt;正文&gt;')
@@ -980,7 +981,38 @@ describe('ai routes', () => {
     await response.text()
     const [, init] = fetchMock.mock.calls[0] ?? []
     const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ role: string; content?: string }> }
-    expect(payload.messages[0]).toEqual({ role: 'system', content: AI_DEFAULT_ASSISTANT_MODE_PROMPT })
+    expect(payload.messages[0]).toEqual({
+      role: 'system',
+      content: `${AI_DEFAULT_ASSISTANT_MODE_PROMPT}\n\n${AI_CORE_TOOL_SYSTEM_PROMPT}`,
+    })
+  })
+
+  it('uses the tool-free core system prompt when all tools are disabled', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"完成"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+
+    const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...requestBody,
+        enabledTools: [],
+        assistantMode: '助理',
+        assistantModePrompt: AI_DEFAULT_ASSISTANT_MODE_PROMPT,
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await response.text()
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ role: string; content?: string }> }
+    expect(payload.messages[0]).toEqual({
+      role: 'system',
+      content: `${AI_DEFAULT_ASSISTANT_MODE_PROMPT}\n\n${AI_CORE_SYSTEM_PROMPT}`,
+    })
   })
 
   it('allows explicit chapter references beyond the current reading boundary', async () => {
@@ -2048,6 +2080,78 @@ describe('ai routes', () => {
     expect(secondRequest.contents?.[1]?.parts?.[0]).toMatchObject({
       functionCall: { name: 'get_book_toc', args: {} },
       thoughtSignature: 'signature-detached',
+    })
+  })
+
+  describe('POST /local-chat', () => {
+    it('rejects unauthenticated or guest requests', async () => {
+      const response = await createApp({ id: 'guest', role: 'guest' }).request('http://test/api/v1/ai/local-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: '请解释这段文字',
+          context: requestBody.context,
+        }),
+      })
+      expect(response.status).toBe(401)
+    })
+
+    it('rejects server-book fields such as bookId or enabledTools', async () => {
+      const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/local-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookId: 'book-1',
+          prompt: '请解释这段文字',
+          context: requestBody.context,
+          enabledTools: ['get_book_toc'],
+        }),
+      })
+      expect(response.status).toBe(400)
+    })
+
+    it('streams local context chat without touching server books, threads, or tools', async () => {
+      vi.mocked(getActiveBook).mockClear()
+      vi.mocked(getBookChapters).mockClear()
+      vi.mocked(prepareAiThread).mockClear()
+      const fetchMock = vi.mocked(fetch)
+      fetchMock.mockResolvedValueOnce(new Response(
+        'data: {"choices":[{"delta":{"content":"这是[1]本地解释"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":8}}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ))
+
+      const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/local-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: '请解释：{SELTEXT}',
+          context: {
+            ...requestBody.context,
+            chapterReferences: [{ chapterIndex: 2, chapterTitle: '第三章', text: '第三章原文片段' }],
+          },
+          history: [
+            { role: 'user', content: '上一轮问题' },
+            { role: 'assistant', content: '上一轮回答' },
+          ],
+          assistantMode: '助理',
+          assistantModeId: 'assistant',
+        }),
+      })
+
+      expect(response.status).toBe(200)
+      const sse = await response.text()
+      expect(sse).toContain('event: meta')
+      expect(sse).toContain('event: delta')
+      expect(sse).toContain('event: done')
+      expect(sse).toContain('"content":"这是本地解释"')
+      expect(sse).toContain('"citations":[]')
+      expect(getActiveBook).not.toHaveBeenCalled()
+      expect(getBookChapters).not.toHaveBeenCalled()
+      expect(prepareAiThread).not.toHaveBeenCalled()
+      const upstreamBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { tools?: unknown; messages?: Array<{ role: string; content: string }> }
+      expect(upstreamBody.tools).toBeUndefined()
+      expect(upstreamBody.messages?.some((m) => m.content.includes('第三章原文片段'))).toBe(true)
+      expect(upstreamBody.messages?.some((m) => m.content.includes('上一轮问题'))).toBe(true)
     })
   })
 

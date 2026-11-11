@@ -9,6 +9,7 @@ All notable changes to Bookdock are documented here.
 - Migrate device books to your personal server library via **Upload** in the card or list context menu. Migration performs a duplicate check and transfers the book file, cover, metadata, shelf/category/tag placement, read status, progress/coverage, annotations (including idea images), private review, reading records, reader settings, and replacement rules in a single transaction before removing the local device copy, blocking while active or unsettled reading timers exist.
 - Cache readable server books in the browser via **Cache** in the card or list context menu for fast local rendering and offline reading/writing. The menu button tracks progress with an inline ring (**Caching** → **Clear cache**), highlights server content updates with a one-time reader notice and **Update cache**, queues offline progress, annotation edits (with images), and timed reading captures, and syncs queued changes automatically upon reconnection or returning to the page.
 - Support selecting and dropping multiple ZIP packages at once when adding personal metadata sources in Settings → Integrations, with per-package previews, sequential installation progress, and partial-failure retention.
+- Support AI assistant conversations for device books saved in the browser: signed-in users can open the reader AI panel or ask about selections from the selection toolbar, quick commands, and idea overlay without uploading the book file. Conversations persist per book in the browser and stream responses through your configured server AI service (server-side book and annotation tools are omitted in device-book chat).
 
 ### Changed
 
@@ -18,6 +19,8 @@ All notable changes to Bookdock are documented here.
 - The Add Source dialog in Settings → Integrations remembers the last used installation mode (GitHub repository or ZIP package) and keeps the dropzone fixed above the queued file list.
 - Reading Archive Management now supports scoped deletion (**All** / **Time** / **Notes**) alongside import and export for both server and device books: clearing **Time** removes reading sessions, rounds, statistics, and coverage progress while keeping notes and reviews; deleting **Notes** removes highlights, bookmarks, ideas, and reviews (including shared items) while keeping reading time; and **All** clears both. Book files, reading positions, and read statuses are preserved, archive snapshots and import bindings are cleaned up only when no time or notes remain, the detail view only exits when the archive becomes empty, and archive/personal-data copy across the management dialog and book removal prompts is unified around reading time and notes. Book deletion/uncollection with **Also clear my personal data** enabled now removes your shared ideas and reviews for that book as well (leaving it unchecked retains them as before).
 - Unified preference persistence in the Reading Archive Management dialog: in addition to the existing import source, channel, and sort memory, the dialog now remembers the last used top-level tab, import scope, export scope/format (automatically narrowing incompatible formats without overwriting your saved preference), and delete scope, with safe fallbacks for global and WeRead Skill modes.
+- Refined the built-in AI assistant mode prompt and server core prompt to be more concise and direct, and dynamically omit tool-calling and citation-marker instructions when no read-only tools are active (such as device-book chats or chats with all tools disabled).
+- Aligned the AI mode add/edit modal with the reader modal layout and button hierarchy: gave the bottom-left **Restore Defaults** and **Delete** actions consistent bordered buttons with icons, inserted prompt variables at the current cursor position, changed **Restore Defaults** to reset the draft fields directly without a confirmation prompt (hiding the button when already at the default values), and disabled **Save** when no changes have been made.
 
 ### Fixed
 
@@ -1125,6 +1128,7 @@ All notable changes to Bookdock are documented here.
 - 本机书籍卡片与列表行菜单新增 **「上传」**，支持将其一键迁移至服务器私人书库：先执行服务端查重并展示上传进度圆环，再在单次事务中完整迁移书籍文件、封面、元数据、书架／分类／标签归属、阅读状态与进度覆盖、笔记与想法配图、个人书评、阅读记录、阅读器偏好与文本替换规则，确认成功后删除本机副本；若当前存在未结束或待结算的阅读计时则会先提醒结算并拦截迁移。
 - 服务器可读书籍卡片与列表行菜单新增 **「缓存」** 离线缓存能力：点击后原地切换为带进度圆环的 **「缓存中」**，完成后转为 **「清除缓存」**；已缓存书籍支持本地快速打开与断网下的阅读、进度保存、笔记增删改（含带图想法）及阅读计时，并在联网或回到页面时自动同步待传记录；当服务端内容产生新版本时，在线打开阅读器将弹出一次性更新提醒，菜单按钮自动切换为 **「更新缓存」**。
 - 「设置 → 集成」添加个人元数据源时支持一次性多选或拖入多个 ZIP 扩展包，逐包展示图标与名称预览、安装状态，并在部分安装失败时保留失败项以便重试或移除。
+- 本机书籍支持 AI 阅读助手对话：已登录用户在浏览器中阅读未上传的本机书籍时，也可直接通过侧边栏 AI 面板、划词工具栏、快捷指令与想法浮层发起提问，无需先把书籍上传到服务器；对话记录按书籍保存在本机浏览器中，通过服务端已配置的 AI 服务流式回复（本机书籍对话不启用服务端书籍／笔记检索工具）。
 
 #### 优化
 
@@ -1134,6 +1138,8 @@ All notable changes to Bookdock are documented here.
 - 「设置 → 集成」的「添加来源」弹窗会记住上次使用的安装方式（GitHub 仓库或 ZIP 扩展包），并将拖放投递区固定在已选包列表上方。
 - 「阅读档案管理」的删除功能现对齐导入与导出，支持按 **全部 / 时长 / 笔记** 三种范围清理单本书的档案数据（服务端与本机书籍同步支持）：删「时长」仅清空阅读时长、轮次、统计与覆盖进度；删「笔记」清除划线、书签、想法与书评并保留时长；删「全部」则一并清空。操作始终保留书库书籍文件、阅读位置与阅读状态；仅当不再剩余任何时长或笔记时才移除档案快照与导入绑定并退出当前详情页，并同步统一了档案管理与删书清理确认中的文案表达。此外，书架删书或移出收藏时若勾选「同时清理个人数据」，现在也会一并删除该书下自己发布的共享想法与书评（不勾选则继续保留）。
 - 统一补全「阅读档案管理」弹窗的选项记忆：在原有导入来源、渠道与排序记忆的基础上，现一并记住上次使用的顶层标签页、导入范围、导出范围与格式（切换范围导致格式不兼容时自动适配展示而不覆盖原偏好）以及删除范围，并在全局入口或微信读书 Skill 模式下安全回退。
+- 精简默认「助理」人设与核心系统提示词，减少无工具上下文下的冗余拒答，并在未启用任何只读工具（如本机书籍对话或关闭全部工具）时自动省略工具调用与 `[1]` / `[2]` 引用角标规则。
+- 统一阅读器内 AI 模式「添加／编辑模式」弹窗的界面规范与交互细节：左下角「恢复默认」与「删除」改用带图标的统一样式按钮，提示词变量支持在光标处插入；「恢复默认」改为仅当草稿偏离默认值时显示，点击后直接回填默认值而不弹出二次确认框（需点击「保存」生效），并在未修改内容或必填项为空时禁用「保存」。
 
 #### 修复
 

@@ -1,5 +1,5 @@
 import { acceptsReadingTimerClaim, categoryTemplatePath, clientBookRefSchema, settingsUpdateSchema, clientReplacementSchema, replacementCreateSchema, replacementUpdateSchema, clientNoteImageSchema, CONTENT_DRAFT_TTL_MS, IDEA_IMAGE_MAX_COUNT, clientBookKey, clientBookSchema, clientPublicationReplacementSchema, clientCatalogAttributesSchema, clientCatalogPreferencesSchema, clientManualTimerSnapshotSchema, clientNoteSchema, clientOrganizationSchema, clientReadingCaptureGroupSchema, clientReadingCaptureSchema, clientReadingEntrySchema, clientReadingCoverageIntervalsSchema, clientReadingGroupEntrySchema, clientReadingSessionSchema, clientReadingSessionCommandSchema, clientReadingLedgerClearSchema, clientReadingSessionUpdateSchema, clientReadingRoundsSchema, clientReadingStateSchema, clientReadingTimerDraftSchema, clientReviewSchema, localDraftEnvelopeSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, mergeTimeFragments, readingTimerClaimSchema, sameClientBook, subtractTimeFragments, viewSettingsSchema } from '@bookdock/shared'
-import type { ArchiveDeleteRes, TrashSettings, ClientReplacement, TextReplacementRes, ReplacementCreateReq, ReplacementUpdateReq, ClientNoteImage, ClientBook, ClientTxtPublication, LocalEditorDraftEnvelope, ClientPublicationReplacement, EditorTxtSaveRes, ClientReadingLedgerClear, ClientVaultReadingSnapshot, ClientBookNotesSnapshot, ClientBookRef, ClientCatalogAttributes, ClientCatalogPreferences, ClientManualTimerSnapshot, ClientNote, ClientOrganization, ClientReadingCapture, ClientReadingCaptureGroup, ClientReadingEntry, ClientReadingBookSnapshot, ClientReadingGroupEntry, ClientReadingLedger, ClientReadingSession, ClientReadingSessionCommand, ClientReadingSessionUpdate, ClientReadingRounds, ClientReadingRoundAction, ClientReadingState, ClientReadingTimerDraft, ClientReview, ClientReviewInput, ReadingTimerClaimInput, ReadingTimerLease, ReadStatus } from '@bookdock/shared'
+import type { AiMessageRes, AiThreadDetailRes, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, ArchiveDeleteRes, TrashSettings, ClientReplacement, TextReplacementRes, ReplacementCreateReq, ReplacementUpdateReq, ClientNoteImage, ClientBook, ClientTxtPublication, LocalEditorDraftEnvelope, ClientPublicationReplacement, EditorTxtSaveRes, ClientReadingLedgerClear, ClientVaultReadingSnapshot, ClientBookNotesSnapshot, ClientBookRef, ClientCatalogAttributes, ClientCatalogPreferences, ClientManualTimerSnapshot, ClientNote, ClientOrganization, ClientReadingCapture, ClientReadingCaptureGroup, ClientReadingEntry, ClientReadingBookSnapshot, ClientReadingGroupEntry, ClientReadingLedger, ClientReadingSession, ClientReadingSessionCommand, ClientReadingSessionUpdate, ClientReadingRounds, ClientReadingRoundAction, ClientReadingState, ClientReadingTimerDraft, ClientReview, ClientReviewInput, ReadingTimerClaimInput, ReadingTimerLease, ReadStatus } from '@bookdock/shared'
 
 import { createCoverThumbnail } from './cover-thumbnail'
 import { preparePublicationRelocationInWorker } from './epub-editor-worker'
@@ -1933,6 +1933,7 @@ export class LocalLibraryRepository {
   await request(tx.objectStore('states').delete(key(ref)))
   await request(tx.objectStore('settings').delete(key(ref)))
   await request(tx.objectStore('settings').delete(JSON.stringify(['reading-rounds', ...clientBookKey(ref)])))
+  await request(tx.objectStore('settings').delete(JSON.stringify(['ai-threads', ...clientBookKey(ref)])))
   const vaultId = ref.scope.kind === 'local' ? ref.scope.vaultId : ''
   const capturePrefixes = ['reading-pending', 'reading-pending-group', 'reading-draft', 'reading-manual', 'upload-migration'].map((tag) => `${JSON.stringify([tag, vaultId, ref.bookId]).slice(0, -1)},`)
   for (const entry of await request(tx.objectStore('settings').getAllKeys())) if (typeof entry === 'string' && capturePrefixes.some((prefix) => entry.startsWith(prefix))) await request(tx.objectStore('settings').delete(entry))
@@ -2099,6 +2100,132 @@ export class LocalLibraryRepository {
       }
     }
     return { ...vaultStats, browserUsage }
+  }
+
+  private aiThreadsKey(ref: ClientBookRef) {
+    return JSON.stringify(['ai-threads', ...clientBookKey(ref)])
+  }
+
+  private normalizeAiThreadList(raw: unknown): AiThreadDetailRes[] {
+    if (!Array.isArray(raw)) return []
+    return raw.filter((item): item is AiThreadDetailRes => Boolean(item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string' && Array.isArray((item as { messages?: unknown }).messages)))
+  }
+
+  private toAiThreadSummary(thread: AiThreadDetailRes): AiThreadRes {
+    return {
+      id: thread.id,
+      bookId: thread.bookId,
+      title: thread.title,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      messageCount: thread.messages.length,
+      settings: thread.settings,
+    }
+  }
+
+  async listAiThreads(ref: ClientBookRef): Promise<AiThreadRes[]> {
+    this.assertLocal(ref)
+    return this.transaction(['books', 'settings'], 'readonly', async (tx) => {
+      await this.requireBook(tx, ref)
+      const threads = this.normalizeAiThreadList(await request(tx.objectStore('settings').get(this.aiThreadsKey(ref))))
+      return threads
+        .slice()
+        .sort((left, right) => right.updatedAt - left.updatedAt || right.id.localeCompare(left.id))
+        .map((thread) => this.toAiThreadSummary(thread))
+    })
+  }
+
+  async getAiThread(ref: ClientBookRef, threadId: string): Promise<AiThreadDetailRes> {
+    this.assertLocal(ref)
+    return this.transaction(['books', 'settings'], 'readonly', async (tx) => {
+      await this.requireBook(tx, ref)
+      const threads = this.normalizeAiThreadList(await request(tx.objectStore('settings').get(this.aiThreadsKey(ref))))
+      const thread = threads.find((item) => item.id === threadId)
+      if (!thread) throw new LocalLibraryError('unavailable-content', 'AI thread not found')
+      return thread
+    })
+  }
+
+  async saveAiThreadTurn(
+    ref: ClientBookRef,
+    input: {
+      threadId?: string
+      title?: string
+      settings: AiThreadSettings
+      replaceMessageCount?: number
+      userMessage: Omit<AiMessageRes, 'threadId'>
+      assistantMessage: Omit<AiMessageRes, 'threadId'>
+    },
+  ): Promise<AiThreadDetailRes> {
+    this.assertLocal(ref)
+    return this.transaction(['books', 'settings'], 'readwrite', async (tx) => {
+      await this.requireBook(tx, ref)
+      const storeKey = this.aiThreadsKey(ref)
+      const threads = this.normalizeAiThreadList(await request(tx.objectStore('settings').get(storeKey)))
+      const now = Date.now()
+      const existingIndex = input.threadId ? threads.findIndex((item) => item.id === input.threadId) : -1
+      const existing = existingIndex >= 0 ? threads[existingIndex] : undefined
+      const id = existing?.id ?? input.threadId ?? localRecordId()
+      const baseMessages = existing
+        ? (input.replaceMessageCount && input.replaceMessageCount > 0
+          ? existing.messages.slice(0, Math.max(0, existing.messages.length - input.replaceMessageCount))
+          : existing.messages)
+        : []
+      const userMessage: AiMessageRes = { ...input.userMessage, threadId: id }
+      const assistantMessage: AiMessageRes = { ...input.assistantMessage, threadId: id }
+      const derivedTitle = input.title?.trim().slice(0, 100) || userMessage.content.trim().replace(/\s+/g, ' ').slice(0, 100) || '新对话'
+      const updated: AiThreadDetailRes = {
+        id,
+        bookId: ref.bookId,
+        title: existing?.title || derivedTitle,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        messageCount: baseMessages.length + 2,
+        settings: input.settings,
+        messages: [...baseMessages, userMessage, assistantMessage],
+        generation: null,
+      }
+      const next = existingIndex >= 0
+        ? threads.map((item, index) => (index === existingIndex ? updated : item))
+        : [updated, ...threads]
+      const bounded = next
+        .slice()
+        .sort((left, right) => right.updatedAt - left.updatedAt || right.id.localeCompare(left.id))
+        .slice(0, 50)
+      await request(tx.objectStore('settings').put(bounded, storeKey))
+      return updated
+    }, undefined, false)
+  }
+
+  async updateAiThread(ref: ClientBookRef, threadId: string, body: AiThreadUpdateReq): Promise<AiThreadRes> {
+    this.assertLocal(ref)
+    return this.transaction(['books', 'settings'], 'readwrite', async (tx) => {
+      await this.requireBook(tx, ref)
+      const storeKey = this.aiThreadsKey(ref)
+      const threads = this.normalizeAiThreadList(await request(tx.objectStore('settings').get(storeKey)))
+      const target = threads.find((item) => item.id === threadId)
+      if (!target) throw new LocalLibraryError('unavailable-content', 'AI thread not found')
+      const nextTitle = body.title !== undefined ? body.title.trim().slice(0, 100) : target.title
+      if (!nextTitle) throw new LocalLibraryError('invalid-input', 'AI thread title is required')
+      const updated: AiThreadDetailRes = {
+        ...target,
+        title: nextTitle,
+        settings: body.settings ?? target.settings,
+        updatedAt: Date.now(),
+      }
+      await request(tx.objectStore('settings').put(threads.map((item) => (item.id === threadId ? updated : item)), storeKey))
+      return this.toAiThreadSummary(updated)
+    }, undefined, false)
+  }
+
+  async deleteAiThread(ref: ClientBookRef, threadId: string): Promise<void> {
+    this.assertLocal(ref)
+    await this.transaction(['books', 'settings'], 'readwrite', async (tx) => {
+      await this.requireBook(tx, ref)
+      const storeKey = this.aiThreadsKey(ref)
+      const threads = this.normalizeAiThreadList(await request(tx.objectStore('settings').get(storeKey)))
+      await request(tx.objectStore('settings').put(threads.filter((item) => item.id !== threadId), storeKey))
+    }, undefined, false)
   }
 
   async close(): Promise<void> {

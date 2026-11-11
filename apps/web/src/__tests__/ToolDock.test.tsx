@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ToolDock } from '../features/reader/components/ToolDock'
+import { LocalReaderContext, type LocalReaderSession } from '../features/reading-data/reader-source-context'
 
 describe('ToolDock', () => {
   it('renders the navigation tabs plus the lock button', () => {
@@ -17,6 +18,17 @@ describe('ToolDock', () => {
     expect(screen.getByTitle('固定工具栏')).toBeInTheDocument()
     expect(screen.queryByTitle('搜索')).toBeNull()
     expect(screen.queryByTitle('书签')).toBeNull()
+  })
+
+  it('keeps the AI assistant tab available for device-local books', () => {
+    const local = { namespace: 'local:device:b1', bookId: 'b1' } as LocalReaderSession
+    render(
+      <LocalReaderContext.Provider value={local}>
+        <ToolDock activeNavTab="toc" sidebarOpen={true} locked={false} onNavTab={vi.fn()} onToggleLock={vi.fn()} />
+      </LocalReaderContext.Provider>
+    )
+
+    expect(screen.getByTitle('AI 助手')).toBeInTheDocument()
   })
 
   it('highlights the active tab when sidebar is open', () => {

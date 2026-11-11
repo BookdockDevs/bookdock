@@ -6,11 +6,12 @@ import type { AnnotationUpdateReq, BookDetailRes } from '@bookdock/shared'
 import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT_PROMPT_CHARS, AI_TOOL_NAMES, getAiPromptVariables, isAiEmbeddingModel, sanitizeAiCitationMarkers } from '@bookdock/shared'
 import type { AiAssistantMode, AiChapterReference, AiChatReq, AiCitation, AiContextReceipt, AiConversationSettings, AiHistoryMessage, AiMessageEventRes, AiMessageRes, AiReadingScope, AiRetryRecipe, AiStatusRes, AiThreadRes, AiToolName } from '@bookdock/shared'
 
-import { apiGet, apiPost, apiStreamAiChat } from '@/api/client'
-import { AI_THREADS_KEY, useAiMessageRevisions, useAiThread, useAiThreads, useDeleteAiThread, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiProfile, useUpdateAiThread } from '@/api/hooks/useAi'
+import { apiGet, apiPost, apiStreamAiChat, apiStreamAiLocalChat } from '@/api/client'
+import { aiThreadDetailKey, aiThreadsScopeKey, useAiMessageRevisions, useAiThread, useAiThreads, useDeleteAiThread, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiProfile, useUpdateAiThread } from '@/api/hooks/useAi'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
 import Modal from '@/components/ui/Modal'
+import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
 import { preloadAiBrandIcons } from '@/lib/aiBrandIcons'
@@ -66,6 +67,8 @@ interface AssistantModeForm {
   id: string | null
   name: string
   prompt: string
+  initialName: string
+  initialPrompt: string
 }
 
 interface ChapterReferenceNode {
@@ -213,6 +216,26 @@ function MoreIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
+    </svg>
+  )
+}
+
+function RestoreDefaultsIcon() {
+  return (
+    <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m9 14-5-5 5-5" />
+      <path d="M4 9h10.5A5.5 5.5 0 1 1 9 19H8" />
+    </svg>
+  )
+}
+
+function DeleteIcon() {
+  return (
+    <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M10 11v6M14 11v6" />
     </svg>
   )
 }
@@ -495,10 +518,13 @@ interface AiPanelProps {
 
 export default function AiPanel({ bookId, initialScrollTop, open = true, onScrollPositionChange }: AiPanelProps) {
   const _ = useTranslation()
+  const local = useLocalReader()
   const user = useAuthStore((s) => s.user)
+  const accountAvailable = Boolean(user)
   const memoryUserId = user?.id ?? 'anonymous'
+  const memoryBookId = local?.namespace ?? bookId
   const initialMemoryRef = useRef<AiPanelMemory | null>(null)
-  if (initialMemoryRef.current === null) initialMemoryRef.current = readAiPanelMemory(memoryUserId, bookId)
+  if (initialMemoryRef.current === null) initialMemoryRef.current = readAiPanelMemory(memoryUserId, memoryBookId)
   const initialMemory = initialMemoryRef.current
   const showError = (error: unknown, fallback = 'reader.aiRequestFailed') => notify.error(getUserErrorNotification(error, fallback))
   const queryClient = useQueryClient()
@@ -532,7 +558,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
  const [assistantModeMenuOpen, setAssistantModeMenuOpen] = useState(false)
  const [assistantModeForm, setAssistantModeForm] = useState<AssistantModeForm | null>(null)
   const [assistantModeDeleteTarget, setAssistantModeDeleteTarget] = useState<AiAssistantMode | null>(null)
-  const [assistantModeRestoreOpen, setAssistantModeRestoreOpen] = useState(false)
  const [assistantModes, setAssistantModes] = useState<AiAssistantMode[]>([DEFAULT_ASSISTANT_MODE])
   const [selectedAssistantModeId, setSelectedAssistantModeId] = useState(DEFAULT_ASSISTANT_MODE.id)
   const [selectedChapterReferences, setSelectedChapterReferences] = useState<number[]>(initialMemory.chapterReferences)
@@ -572,6 +597,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const moreButtonRef = useRef<HTMLButtonElement>(null)
   const composerFormRef = useRef<HTMLFormElement>(null)
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const modePromptTextareaRef = useRef<HTMLTextAreaElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const messagesContentRef = useRef<HTMLDivElement>(null)
   const initialScrollRestoredRef = useRef(false)
@@ -592,7 +618,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const threadQuery = useAiThread(threadId, { enabled: !streaming && rememberedThreadExists })
   const latestMessage = messages.at(-1)
   const latestRevisionMessageId = !streaming && latestMessage?.role === 'assistant' && latestMessage.content.trim() && latestMessage.revisionGroupId ? latestMessage.id : null
-  const revisionsQuery = useAiMessageRevisions(threadId, latestRevisionMessageId, { enabled: Boolean(latestRevisionMessageId) })
+  const revisionsQuery = useAiMessageRevisions(threadId, latestRevisionMessageId, { enabled: !local && Boolean(latestRevisionMessageId) })
   const updateAiConfig = useUpdateAiConfig()
   const updateAiProfile = useUpdateAiProfile()
   const selectRevisionMutation = useSelectAiMessageRevision()
@@ -605,6 +631,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const statusQuery = useQuery({
     queryKey: ['ai-status'],
     queryFn: () => apiGet<{ data: AiStatusRes }>('/ai/status'),
+    enabled: accountAvailable,
   })
 
   useEffect(() => () => {
@@ -612,7 +639,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     streamingTextStore.clear()
   }, [streamingTextStore])
   useEffect(() => {
-    const memory = readAiPanelMemory(memoryUserId, bookId)
+    const memory = readAiPanelMemory(memoryUserId, memoryBookId)
     conversationSettingsHydratedRef.current = false
     skipMemoryWriteRef.current = true
     requestGenerationRef.current += 1
@@ -648,7 +675,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     hasPendingLatestRef.current = false
     setIsAtLatest(true)
     setHasPendingLatest(false)
-  }, [bookId, memoryUserId, streamingTextStore])
+  }, [memoryBookId, memoryUserId, streamingTextStore])
   useEffect(() => {
     const threads = threadsQuery.data?.data
     if (streaming || threadsQuery.isFetching || !threadId || !Array.isArray(threads) || threads.some((thread) => thread.id === threadId)) return
@@ -703,12 +730,19 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     if (recipe && lastMessage && previousMessage) {
       const assistantModePrompt = recipe.assistantModePrompt
         ?? (recipe.assistantMode === DEFAULT_ASSISTANT_MODE.name ? DEFAULT_ASSISTANT_MODE.prompt : undefined)
+      const localHistory: AiHistoryMessage[] = local
+        ? restoredMessages.slice(0, -2).map((current) => ({
+            role: current.role,
+            content: current.content,
+            ...(current.role === 'user' && current.retry?.context ? { context: current.retry.context } : {}),
+          })).filter((current) => current.content.trim())
+        : []
       setRetryRequest({
         threadId,
         regenerate: true,
         prompt: previousMessage.content,
         context: recipe.context,
-        history: [],
+        history: localHistory,
         enabledTools: [...recipe.enabledTools],
         readingScope: recipe.readingScope,
         assistantModeId: recipe.assistantModeId ?? threadQuery.data.data.settings?.assistantModeId ?? DEFAULT_ASSISTANT_MODE.id,
@@ -728,24 +762,36 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     })
     if (threadQuery.data.data.settings) {
       conversationSettingsHydratedRef.current = true
-      setReadingScope(threadQuery.data.data.settings.readingScope)
-      setEnabledTools(threadQuery.data.data.settings.enabledTools)
+      if (!local) {
+        setReadingScope(threadQuery.data.data.settings.readingScope)
+        setEnabledTools(threadQuery.data.data.settings.enabledTools)
+      }
       setSelectedAssistantModeId(threadQuery.data.data.settings.assistantModeId ?? DEFAULT_ASSISTANT_MODE.id)
     }
-  }, [annotationsQuery.data, streaming, threadId, threadQuery.data])
+  }, [annotationsQuery.data, local, streaming, threadId, threadQuery.data])
   useEffect(() => {
     const savedSettings = threadQuery.data?.data.settings
     if (streaming || !threadId || threadQuery.data?.data.id !== threadId || !savedSettings) return
-    const toolsMatch = savedSettings.enabledTools.length === enabledTools.length && savedSettings.enabledTools.every((name, index) => name === enabledTools[index])
+    const toolsMatch = local || (savedSettings.enabledTools.length === enabledTools.length && savedSettings.enabledTools.every((name, index) => name === enabledTools[index]))
+    const scopeMatch = local || savedSettings.readingScope === readingScope
     const modeMatch = (savedSettings.assistantModeId ?? DEFAULT_ASSISTANT_MODE.id) === selectedAssistantModeId
-    if (savedSettings.readingScope === readingScope && toolsMatch && modeMatch) return
+    if (scopeMatch && toolsMatch && modeMatch) return
     const timer = window.setTimeout(() => {
-      updateThreadSettings({ id: threadId, body: { settings: { readingScope, enabledTools, assistantModeId: selectedAssistantModeId } } }, {
+      updateThreadSettings({
+        id: threadId,
+        body: {
+          settings: {
+            readingScope: local ? savedSettings.readingScope : readingScope,
+            enabledTools: local ? savedSettings.enabledTools : enabledTools,
+            assistantModeId: selectedAssistantModeId,
+          },
+        },
+      }, {
         onError: (error) => notify.error(getUserErrorNotification(error, 'reader.aiConversationSettingsFailed')),
       })
     }, 250)
     return () => window.clearTimeout(timer)
-  }, [enabledTools, readingScope, selectedAssistantModeId, streaming, threadId, threadQuery.data, updateThreadSettings])
+  }, [enabledTools, local, readingScope, selectedAssistantModeId, streaming, threadId, threadQuery.data, updateThreadSettings])
   useEffect(() => {
     const memory: AiPanelMemory = {
       activeThreadId: threadId,
@@ -756,10 +802,10 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
       skipMemoryWriteRef.current = false
       return
     }
-    memorySnapshotRef.current = { userId: memoryUserId, bookId, memory }
-    const timer = window.setTimeout(() => writeAiPanelMemory(memoryUserId, bookId, memory), 200)
+    memorySnapshotRef.current = { userId: memoryUserId, bookId: memoryBookId, memory }
+    const timer = window.setTimeout(() => writeAiPanelMemory(memoryUserId, memoryBookId, memory), 200)
     return () => window.clearTimeout(timer)
-  }, [bookId, memoryUserId, prompt, selectedChapterReferences, threadId])
+  }, [memoryBookId, memoryUserId, prompt, selectedChapterReferences, threadId])
   useEffect(() => () => {
     const snapshot = memorySnapshotRef.current
     if (snapshot) writeAiPanelMemory(snapshot.userId, snapshot.bookId, snapshot.memory)
@@ -942,7 +988,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const chapterTitle = aiContext?.chapterTitle ?? activeSelection?.chapterTitle ?? currentChapter
   const chapterHref = aiContext?.chapterHref ?? currentChapterHref
   const chapterIndex = aiContext?.chapterIndex ?? activeSelection?.chapterIndex ?? currentChapterIndex ?? -1
-  const modelReady = Boolean(statusQuery.data?.data.enabled)
+  const modelReady = accountAvailable && Boolean(statusQuery.data?.data.enabled)
   const modelLabel = modelReady ? statusQuery.data?.data.model ?? _('reader.aiCurrentModel') : _('reader.aiSelectModel')
   const modelOptions = useMemo(() => {
     const models = (statusQuery.data?.data.models ?? []).filter((model) => !isAiEmbeddingModel(model))
@@ -1130,6 +1176,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   }
 
   function rememberLatestConversationSettings(patch: Partial<AiConversationSettings>) {
+    if (!accountAvailable) return
     const nextSettings: AiConversationSettings = {
       readingScope,
       enabledTools: [...enabledTools],
@@ -1182,15 +1229,51 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
  function openAssistantModeForm(mode?: AiAssistantMode) {
    if (updateAiConfig.isPending) return
    setAssistantModeMenuOpen(false)
-    setAssistantModeForm(mode ? { id: mode.id, name: mode.name, prompt: mode.prompt } : { id: null, name: '', prompt: '' })
+   setAssistantModeForm(
+     mode
+       ? { id: mode.id, name: mode.name, prompt: mode.prompt, initialName: mode.name, initialPrompt: mode.prompt }
+       : { id: null, name: '', prompt: '', initialName: '', initialPrompt: '' },
+   )
  }
+
+  const assistantModeDraftName = assistantModeForm?.name.trim() ?? ''
+  const assistantModeDraftPrompt = assistantModeForm?.prompt.trim() ?? ''
+  const isDefaultAssistantModeDraft = Boolean(
+    assistantModeForm?.id === DEFAULT_ASSISTANT_MODE.id
+    && assistantModeDraftName === DEFAULT_ASSISTANT_MODE.name
+    && assistantModeDraftPrompt === DEFAULT_ASSISTANT_MODE.prompt,
+  )
+  const hasAssistantModeChanges = Boolean(
+    assistantModeForm && (
+      assistantModeForm.id === null
+        ? assistantModeDraftName && assistantModeDraftPrompt
+        : assistantModeDraftName !== assistantModeForm.initialName.trim() || assistantModeDraftPrompt !== assistantModeForm.initialPrompt.trim()
+    ),
+  )
+
+  function insertModeVariable(variable: string) {
+    if (!assistantModeForm || updateAiConfig.isPending) return
+    const el = modePromptTextareaRef.current
+    const start = el?.selectionStart ?? assistantModeForm.prompt.length
+    const end = el?.selectionEnd ?? assistantModeForm.prompt.length
+    const prefix = assistantModeForm.prompt.slice(0, start)
+    const suffix = assistantModeForm.prompt.slice(end)
+    const nextPrompt = `${prefix}${variable}${suffix}`.slice(0, 2_000)
+    setAssistantModeForm({ ...assistantModeForm, prompt: nextPrompt })
+    const caret = Math.min(prefix.length + variable.length, nextPrompt.length)
+    window.requestAnimationFrame(() => {
+      modePromptTextareaRef.current?.focus()
+      modePromptTextareaRef.current?.setSelectionRange(caret, caret)
+    })
+  }
 
  function submitAssistantMode() {
    if (!assistantModeForm || updateAiConfig.isPending) return
    const name = assistantModeForm.name.trim()
    const prompt = assistantModeForm.prompt.trim()
-   if (!name || !prompt) return
+   if (!name || !prompt || !hasAssistantModeChanges) return
     const isEditingDefault = assistantModeForm.id === DEFAULT_ASSISTANT_MODE.id
+    const isRestoringDefault = isEditingDefault && name === DEFAULT_ASSISTANT_MODE.name && prompt === DEFAULT_ASSISTANT_MODE.prompt
     const id = assistantModeForm.id ?? `custom-${Date.now().toString(36)}`
     const nextModes = isEditingDefault
       ? assistantModes.filter((mode) => !mode.builtIn)
@@ -1199,40 +1282,31 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         : [...assistantModes.filter((mode) => !mode.builtIn), { id, name, prompt, builtIn: false }]
    updateAiConfig.mutate({
      modes: nextModes.filter((mode) => !mode.builtIn).map(({ id: modeId, name: modeName, prompt: modePrompt }) => ({ id: modeId, name: modeName, prompt: modePrompt })),
-     ...(isEditingDefault ? { defaultAssistantMode: { id: DEFAULT_ASSISTANT_MODE.id, name, prompt } } : {}),
+     ...(isEditingDefault ? { defaultAssistantMode: isRestoringDefault ? null : { id: DEFAULT_ASSISTANT_MODE.id, name, prompt } } : {}),
    }, {
      onSuccess: (response) => {
        setAssistantModes(response.data.modes)
        if (!assistantModeForm.id || assistantModeForm.id === selectedAssistantModeId) setSelectedAssistantModeId(id)
        setAssistantModeForm(null)
-       notify.success({ key: assistantModeForm.id ? 'reader.aiModeUpdated' : 'reader.aiModeAdded' })
+       notify.success({ key: isRestoringDefault ? 'reader.aiModeRestored' : assistantModeForm.id ? 'reader.aiModeUpdated' : 'reader.aiModeAdded' })
      },
      onError: (error) => showError(error),
    })
  }
 
-  function requestRestoreAssistantMode() {
+  function restoreAssistantModeDraft() {
     if (assistantModeForm?.id !== DEFAULT_ASSISTANT_MODE.id || updateAiConfig.isPending) return
-    setAssistantModeRestoreOpen(true)
+    setAssistantModeForm({
+      ...assistantModeForm,
+      name: DEFAULT_ASSISTANT_MODE.name,
+      prompt: DEFAULT_ASSISTANT_MODE.prompt,
+    })
   }
 
   function requestDeleteAssistantMode() {
     if (!assistantModeForm?.id || updateAiConfig.isPending) return
     const mode = assistantModes.find((candidate) => candidate.id === assistantModeForm.id && !candidate.builtIn)
     if (mode) setAssistantModeDeleteTarget(mode)
-  }
-
-  function confirmRestoreAssistantMode() {
-    if (!assistantModeRestoreOpen || updateAiConfig.isPending) return
-    updateAiConfig.mutate({ defaultAssistantMode: null }, {
-      onSuccess: (response) => {
-        setAssistantModes(response.data.modes)
-        setAssistantModeRestoreOpen(false)
-        setAssistantModeForm(null)
-        notify.success({ key: 'reader.aiModeRestored' })
-      },
-      onError: (error) => showError(error),
-    })
   }
 
   function confirmDeleteAssistantMode() {
@@ -1304,7 +1378,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     const selectedText = request.context.selection.trim()
     const ideaTarget = selectedText && request.context.cfiRange !== 'selection'
       ? {
-          revisionId: queryClient.getQueryData<{ data: BookDetailRes }>(['book', bookId])?.data.revisionId,
+          revisionId: local ? local.content?.contentId : queryClient.getQueryData<{ data: BookDetailRes }>(['book', bookId])?.data.revisionId,
           cfiRange: request.context.cfiRange,
           text: selectedText.slice(0, 500),
           ...(request.context.chapterTitle ? { chapter: request.context.chapterTitle } : {}),
@@ -1324,44 +1398,63 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     abortRef.current = controller
     activeRunIdRef.current = null
     let activeThreadId = request.threadId
+    let receiptSnapshot: AiContextReceipt | null = null
+    let finalAssistantContent = ''
+    let streamCompleted = false
+
+    const streamHandlers = {
+      onMeta: (event: { requestId: string; runId?: string; threadId?: string; model?: string; receipt: AiContextReceipt }) => {
+        if (requestGenerationRef.current !== requestGeneration) return
+        if (event.runId) activeRunIdRef.current = event.runId
+        receiptSnapshot = event.receipt
+        updateAssistant(assistantId, (message) => ({ ...message, context: event.receipt }))
+        if (event.threadId) {
+          activeThreadId = event.threadId
+          setThreadId(event.threadId)
+        }
+      },
+      onDelta: (delta: string) => {
+        if (requestGenerationRef.current !== requestGeneration) return
+        streamingTextStore.append(assistantId, delta)
+      },
+      onDone: (event: { content: string; citations: AiCitation[] }) => {
+        if (requestGenerationRef.current !== requestGeneration) return
+        streamCompleted = true
+        finalAssistantContent = event.content
+        streamingTextStore.set(assistantId, event.content)
+        updateAssistant(assistantId, (message) => ({ ...message, content: event.content, citations: event.citations }))
+      },
+      onTool: (event: { name: string; phase: 'start' | 'result'; chapterIndex?: number }) => {
+        if (requestGenerationRef.current !== requestGeneration) return
+        if (event.phase === 'start') {
+            setToolStatus(event.name === 'get_book_toc'
+              ? _('reader.aiToolReadingToc')
+              : event.name === 'search_book'
+                ? _('reader.aiToolSearchingBook')
+                : event.name === 'list_annotations'
+                  ? _('reader.aiToolListingAnnotations')
+                  : event.name === 'search_annotations'
+                    ? _('reader.aiToolSearchingAnnotations')
+                    : typeof event.chapterIndex === 'number' ? _('reader.aiToolReadingChapter', { n: event.chapterIndex + 1 }) : _('reader.aiToolReadingText'))
+        } else {
+          setToolStatus(null)
+        }
+      },
+    }
 
     try {
-      await apiStreamAiChat({ bookId, ...request, ...(request.threadId ? { history: undefined } : {}) }, {
-        onMeta: (event) => {
-          if (requestGenerationRef.current !== requestGeneration) return
-          if (event.runId) activeRunIdRef.current = event.runId
-          updateAssistant(assistantId, (message) => ({ ...message, context: event.receipt }))
-          if (event.threadId) {
-            activeThreadId = event.threadId
-            setThreadId(event.threadId)
-          }
-        },
-        onDelta: (delta) => {
-          if (requestGenerationRef.current !== requestGeneration) return
-          streamingTextStore.append(assistantId, delta)
-        },
-        onDone: (event) => {
-          if (requestGenerationRef.current !== requestGeneration) return
-          streamingTextStore.set(assistantId, event.content)
-          updateAssistant(assistantId, (message) => ({ ...message, content: event.content, citations: event.citations }))
-        },
-        onTool: (event) => {
-          if (requestGenerationRef.current !== requestGeneration) return
-          if (event.phase === 'start') {
-              setToolStatus(event.name === 'get_book_toc'
-                ? _('reader.aiToolReadingToc')
-                : event.name === 'search_book'
-                  ? _('reader.aiToolSearchingBook')
-                  : event.name === 'list_annotations'
-                    ? _('reader.aiToolListingAnnotations')
-                    : event.name === 'search_annotations'
-                      ? _('reader.aiToolSearchingAnnotations')
-                      : typeof event.chapterIndex === 'number' ? _('reader.aiToolReadingChapter', { n: event.chapterIndex + 1 }) : _('reader.aiToolReadingText'))
-          } else {
-            setToolStatus(null)
-          }
-        },
-      }, controller.signal)
+      if (local) {
+        await apiStreamAiLocalChat({
+          prompt: request.prompt,
+          context: request.context,
+          ...(request.history.length > 0 ? { history: request.history } : {}),
+          assistantModeId: request.assistantModeId,
+          ...(request.assistantMode ? { assistantMode: request.assistantMode } : {}),
+          ...(request.assistantModePrompt ? { assistantModePrompt: request.assistantModePrompt } : {}),
+        }, streamHandlers, controller.signal)
+      } else {
+        await apiStreamAiChat({ bookId, ...request, ...(request.threadId ? { history: undefined } : {}) }, streamHandlers, controller.signal)
+      }
       if (requestGenerationRef.current === requestGeneration) setRetryRequest(activeThreadId ? { ...request, threadId: activeThreadId, regenerate: true } : request)
     } catch (error) {
       if (requestGenerationRef.current !== requestGeneration) return
@@ -1383,13 +1476,59 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         streamingTextStore.flush(assistantId)
         const streamedText = streamingTextStore.getText(assistantId)
         setMessages((current) => current.map((message) => message.id === assistantId && !message.content && streamedText ? { ...message, content: streamedText } : message))
+        if (local) {
+          const persistedContent = finalAssistantContent || streamedText
+          if (persistedContent.trim() && (streamCompleted || controller.signal.aborted)) {
+            const now = Date.now()
+            try {
+              const saved = await local.saveAiThreadTurn({
+                ...(activeThreadId ? { threadId: activeThreadId } : {}),
+                settings: { readingScope: 'to_here', enabledTools: [], assistantModeId: request.assistantModeId },
+                ...(replaceMessageCount > 0 ? { replaceMessageCount } : {}),
+                userMessage: {
+                  id: userMessage.id,
+                  role: 'user',
+                  revisionGroupId: null,
+                  revision: 0,
+                  content: userMessage.content,
+                  context: receiptSnapshot,
+                  retry: userMessage.retry ?? null,
+                  citations: [],
+                  events: [],
+                  createdAt: now,
+                  aborted: false,
+                },
+                assistantMessage: {
+                  id: assistantId,
+                  role: 'assistant',
+                  revisionGroupId: null,
+                  revision: 0,
+                  content: persistedContent,
+                  context: receiptSnapshot,
+                  retry: null,
+                  citations: [],
+                  events: [],
+                  createdAt: now,
+                  aborted: Boolean(controller.signal.aborted && !streamCompleted),
+                },
+              })
+              activeThreadId = saved.data.id
+              if (requestGenerationRef.current === requestGeneration) {
+                setThreadId(saved.data.id)
+                setRetryRequest((prev) => prev ? { ...prev, threadId: saved.data.id, regenerate: true } : prev)
+              }
+            } catch {
+              // Keep the current in-memory turn visible even if local persistence fails.
+            }
+          }
+        }
         abortRef.current = null
         activeRunIdRef.current = null
         setToolStatus(null)
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, bookId] }),
+          queryClient.invalidateQueries({ queryKey: aiThreadsScopeKey(bookId, local?.namespace) }),
           activeThreadId
-            ? queryClient.invalidateQueries({ queryKey: [...AI_THREADS_KEY, 'detail', activeThreadId] })
+            ? queryClient.invalidateQueries({ queryKey: aiThreadDetailKey(activeThreadId, local?.namespace) })
             : Promise.resolve(),
         ]).catch(() => undefined)
         if (requestGenerationRef.current === requestGeneration) {
@@ -1404,7 +1543,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     if (!modelReady || !template || streaming || preparingReferences) return
     const promptVariables = getAiPromptVariables(template)
     const selectedParagraph = aiContext?.paragraphText?.trim() || activeSelection?.paragraphText?.trim() || currentParagraph
-    if (readingScope !== 'full_book' && chapterIndex >= 0 && selectedChapterReferences.some((referenceIndex) => referenceIndex > chapterIndex)) {
+    if (!local && readingScope !== 'full_book' && chapterIndex >= 0 && selectedChapterReferences.some((referenceIndex) => referenceIndex > chapterIndex)) {
       notify.warning({ key: 'reader.aiFutureChapterWarning' })
     }
     const history: AiHistoryMessage[] = messages.map((message) => ({
@@ -1484,7 +1623,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   async function stop() {
     const runId = activeRunIdRef.current
     const controller = abortRef.current
-    if (runId) {
+    if (!local && runId) {
       try {
         await apiPost(`/ai/runs/${encodeURIComponent(runId)}/cancel`)
       } catch {
@@ -1660,22 +1799,22 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                 <button type="button" role="menuitemradio" aria-checked={mode.id === selectedAssistantMode.id} onClick={() => selectAssistantMode(mode)} className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--bd-read-primary)]">
                   <span className="min-w-0 flex-1 truncate">{assistantModeLabel(mode)}</span>
                 </button>
-                <button type="button" role="menuitem" aria-label={`${_('reader.aiEditMode')} ${assistantModeLabel(mode)}`} title={_('reader.aiEditMode')} onClick={(event) => { event.stopPropagation(); openAssistantModeForm(mode) }} className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-black/5 hover:text-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)] dark:hover:bg-white/10">
+                {accountAvailable && <button type="button" role="menuitem" aria-label={`${_('reader.aiEditMode')} ${assistantModeLabel(mode)}`} title={_('reader.aiEditMode')} onClick={(event) => { event.stopPropagation(); openAssistantModeForm(mode) }} className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--bd-read-sub)] transition-colors hover:bg-black/5 hover:text-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)] dark:hover:bg-white/10">
                   {mode.id === selectedAssistantMode.id ? <><span className="group-hover/mode-row:hidden group-focus-within/mode-row:hidden"><CheckIcon /></span><span className="hidden group-hover/mode-row:inline-flex group-focus-within/mode-row:inline-flex"><EditIcon /></span></> : <EditIcon />}
-                </button>
+                </button>}
               </div>)}
-              <div className="mt-1 border-t border-[var(--bd-read-accent)] pt-1">
+              {accountAvailable && <div className="mt-1 border-t border-[var(--bd-read-accent)] pt-1">
                 <button type="button" role="menuitem" onClick={() => openAssistantModeForm()} className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-sm text-[var(--bd-read-primary)] transition-colors hover:bg-stone-500/15">
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
                   <span>{_('reader.aiAddMode')}</span>
                 </button>
-              </div>
+              </div>}
             </div>
           )}
         </div>
-        <button type="button" onClick={cycleReadingScope} aria-label={_('reader.aiReadingScopeToggle', { scope: readingScopeLabel(readingScope, _) })} title={_('reader.aiReadingScopeCurrent', { scope: readingScopeLabel(readingScope, _) })} className={`ml-2 flex h-7 w-7 items-center justify-center rounded-lg transition-all active:scale-95 hover:bg-stone-500/10 @max-[240px]/ai-panel:ml-1 ${readingScope === 'full_book' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'text-[var(--bd-read-sub)] hover:text-current'}`}>
+        {!local && <button type="button" onClick={cycleReadingScope} aria-label={_('reader.aiReadingScopeToggle', { scope: readingScopeLabel(readingScope, _) })} title={_('reader.aiReadingScopeCurrent', { scope: readingScopeLabel(readingScope, _) })} className={`ml-2 flex h-7 w-7 items-center justify-center rounded-lg transition-all active:scale-95 hover:bg-stone-500/10 @max-[240px]/ai-panel:ml-1 ${readingScope === 'full_book' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'text-[var(--bd-read-sub)] hover:text-current'}`}>
           <ReadingScopeIcon scope={readingScope} />
-        </button>
+        </button>}
         <div className="ml-auto flex items-center gap-2 text-[var(--bd-read-sub)] @max-[240px]/ai-panel:gap-1">
           <button type="button" onClick={startNewChat} disabled={streaming} aria-label={_('reader.aiNew')} title={_('reader.aiNew')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-40">
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
@@ -1807,9 +1946,9 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
               </div>
             </div>
           ) : (
-            <div className="flex h-full flex-col items-center justify-center pb-16 text-center">
+            <div className="flex h-full flex-col items-center justify-center px-4 pb-16 text-center">
               <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-stone-500/10 text-[var(--bd-read-sub)]"><AiChatIcon /></div>
-              <p className="text-base font-normal text-current">{_('reader.aiStartChat')}</p>
+              <p className="text-base font-normal text-current">{accountAvailable ? _('reader.aiStartChat') : _('reader.aiAccountRequired')}</p>
             </div>
           )}
           {messages.length > 0 && (!isAtLatest || hasPendingLatest) && <button type="button" onClick={scrollToLatest} aria-label={_('reader.aiBackToLatest')} title={hasPendingLatest ? _('reader.aiViewNewAnswer') : _('reader.aiBackToLatest')} className="absolute bottom-3 left-1/2 flex h-8 -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-2.5 text-xs text-[var(--bd-read-sub)] shadow-md transition-colors hover:bg-[color-mix(in_srgb,var(--bd-read-bg)_85%,var(--bd-read-text))] hover:text-current">
@@ -1839,10 +1978,10 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                     </div></li>
                   })}
                 </ul>}
-                {readingScope !== 'full_book' && chapterIndex >= 0 && selectedChapterReferences.some((referenceIndex) => referenceIndex > chapterIndex) && <p className="border-t border-[var(--bd-read-accent)] px-3 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">{_('reader.aiFutureChapterAttachmentHint')}</p>}
+                {!local && readingScope !== 'full_book' && chapterIndex >= 0 && selectedChapterReferences.some((referenceIndex) => referenceIndex > chapterIndex) && <p className="border-t border-[var(--bd-read-accent)] px-3 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">{_('reader.aiFutureChapterAttachmentHint')}</p>}
               </aside>
             )}
-            {toolsOpen && (
+            {!local && toolsOpen && (
               <aside ref={toolsRef} data-testid="ai-tools-menu" aria-label={_('reader.aiTools')} className="absolute bottom-full left-0 z-30 mb-2 w-full overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] shadow-xl">
                 <h3 className="border-b border-[var(--bd-read-accent)] px-3 py-3 text-sm font-medium text-current">{_('reader.aiTools')}</h3>
                 <ul className="divide-y divide-[var(--bd-read-accent)]/60 px-1.5 py-1">
@@ -1872,6 +2011,11 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                   })}
                 </ul>
               </aside>
+            )}
+            {!accountAvailable && messages.length > 0 && (
+              <p data-testid="ai-account-required-banner" className="mb-2 rounded-lg border border-[var(--bd-read-accent)] bg-stone-500/5 px-2.5 py-1.5 text-xs text-[var(--bd-read-sub)]">
+                {_('reader.aiAccountRequired')}
+              </p>
             )}
             <div className="rounded-xl border border-stone-300/80 bg-stone-500/5 px-3 pb-1.5 pt-2 shadow-sm @max-[280px]/composer:px-2 dark:border-stone-700/80">
               {(selection || selectedChapterReferences.length > 0) && <div className={`${ATTACHMENT_SCROLLBAR_CLASSES} mb-2 max-h-28 overflow-y-auto overscroll-contain`}>
@@ -1905,9 +2049,9 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                   <button ref={attachmentButtonRef} type="button" onClick={() => { setAttachmentOpen((open) => !open); setToolsOpen(false); setMoreOpen(false); setQuickCommandMenuOpen(false); setAssistantModeMenuOpen(false); setModelMenuOpen(false) }} aria-label={_('reader.aiAddChapterReference')} aria-haspopup="dialog" aria-expanded={attachmentOpen} title={_('reader.aiAddChapterReference')} className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-stone-500/10 hover:text-current ${attachmentOpen ? 'bg-stone-500/10' : ''}`}>
                     <AttachmentIcon />
                   </button>
-                  <button ref={toolsButtonRef} type="button" onClick={() => { setToolsOpen((open) => !open); setAttachmentOpen(false); setMoreOpen(false); setQuickCommandMenuOpen(false); setAssistantModeMenuOpen(false); setModelMenuOpen(false) }} aria-label={_('reader.aiTools')} aria-haspopup="dialog" aria-expanded={toolsOpen} title={_('reader.aiTools')} className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-stone-500/10 hover:text-current ${toolsOpen ? 'bg-stone-500/10' : ''}`}>
+                  {!local && <button ref={toolsButtonRef} type="button" onClick={() => { setToolsOpen((open) => !open); setAttachmentOpen(false); setMoreOpen(false); setQuickCommandMenuOpen(false); setAssistantModeMenuOpen(false); setModelMenuOpen(false) }} aria-label={_('reader.aiTools')} aria-haspopup="dialog" aria-expanded={toolsOpen} title={_('reader.aiTools')} className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-stone-500/10 hover:text-current ${toolsOpen ? 'bg-stone-500/10' : ''}`}>
                     <ToolsIcon />
-                  </button>
+                  </button>}
                 </div>
                 <div className="flex min-w-0 flex-1 items-center gap-1 @max-[240px]/composer:order-first @max-[240px]/composer:mb-1 @max-[240px]/composer:w-full @max-[240px]/composer:basis-full @max-[240px]/composer:gap-0.5">
                   <div ref={modelMenuRef} className="relative min-w-0 max-w-48 flex-1 @max-[240px]/composer:max-w-none">
@@ -2022,55 +2166,117 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
           )}
         </aside>
       )}
-      {assistantModeForm && <Modal title={assistantModeForm.id ? _('reader.aiEditMode') : _('reader.aiAddMode')} variant="reader" onClose={() => setAssistantModeForm(null)}>
-        <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); submitAssistantMode() }}>
-          <div className="flex flex-col gap-1 text-xs text-[var(--bd-read-sub)]">
-            <div className="flex items-center justify-between">
-              <label htmlFor="ai-mode-name" className="cursor-pointer">{_('reader.aiModeName')}</label>
-              <span className="text-[10px] tabular-nums text-[var(--bd-read-sub)]/70">{assistantModeForm.name.length}/80</span>
-            </div>
-            <input id="ai-mode-name" required autoFocus maxLength={80} value={assistantModeForm.name} onChange={(event) => setAssistantModeForm({ ...assistantModeForm, name: event.target.value })} placeholder={_('reader.aiModeNamePlaceholder')} className="h-10 rounded-lg border border-[var(--bd-read-accent)] bg-transparent px-3 text-sm text-current outline-none focus:border-[var(--bd-read-primary)]" />
-          </div>
-          <div className="flex flex-col gap-1 text-xs text-[var(--bd-read-sub)]">
-            <div className="flex items-center justify-between">
-              <label htmlFor="ai-mode-prompt" className="cursor-pointer">{_('reader.aiModePrompt')}</label>
-              <span className="text-[10px] tabular-nums text-[var(--bd-read-sub)]/70">{assistantModeForm.prompt.length}/2000</span>
-            </div>
-            <textarea id="ai-mode-prompt" required maxLength={2_000} rows={6} value={assistantModeForm.prompt} onChange={(event) => setAssistantModeForm({ ...assistantModeForm, prompt: event.target.value })} placeholder={_('reader.aiModePromptPlaceholder')} className="resize-y rounded-lg border border-[var(--bd-read-accent)] bg-transparent px-3 py-2 text-sm leading-5 text-current outline-none focus:border-[var(--bd-read-primary)]" />
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {['{SELTEXT}', '{CHAPTER}', '{SELPARA}'].map((placeholder) => (
+      {assistantModeForm && (
+        <Modal
+          title={assistantModeForm.id ? _('reader.aiEditMode') : _('reader.aiAddMode')}
+          variant="reader"
+          onClose={() => { if (!updateAiConfig.isPending) setAssistantModeForm(null) }}
+          footer={
+            <div className="flex w-full items-center justify-between gap-2">
+              {assistantModeForm.id === DEFAULT_ASSISTANT_MODE.id && !isDefaultAssistantModeDraft ? (
                 <button
-                  key={placeholder}
                   type="button"
-                  onClick={() => {
-                    setAssistantModeForm({
-                      ...assistantModeForm,
-                      prompt: `${assistantModeForm.prompt}${assistantModeForm.prompt.endsWith(' ') || assistantModeForm.prompt.length === 0 ? '' : ' '}${placeholder}`,
-                    })
-                  }}
-                  className="inline-flex items-center rounded-md border border-[var(--bd-read-accent)] bg-stone-500/5 px-2 py-0.5 font-mono text-[11px] text-[var(--bd-read-sub)] transition-colors hover:border-[var(--bd-read-primary)]/40 hover:bg-[var(--bd-read-primary)]/10 hover:text-[var(--bd-read-primary)] active:scale-95"
+                  onClick={restoreAssistantModeDraft}
+                  disabled={updateAiConfig.isPending}
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-[var(--bd-read-accent)] bg-stone-500/[0.04] px-3 text-xs font-medium text-[var(--bd-read-sub)] transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-[var(--bd-read-text)] disabled:pointer-events-none disabled:opacity-40"
                 >
-                  {placeholder}
+                  <RestoreDefaultsIcon />
+                  <span>{_('reader.aiRestoreDefault')}</span>
                 </button>
-              ))}
+              ) : assistantModeForm.id && assistantModeForm.id !== DEFAULT_ASSISTANT_MODE.id ? (
+                <button
+                  type="button"
+                  onClick={requestDeleteAssistantMode}
+                  disabled={updateAiConfig.isPending}
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/[0.06] px-3 text-xs font-medium text-red-600 transition-colors hover:border-red-500/50 hover:bg-red-500/12 hover:text-red-700 disabled:pointer-events-none disabled:opacity-40 dark:text-red-400 dark:hover:border-red-400/50 dark:hover:text-red-300"
+                >
+                  <DeleteIcon />
+                  <span>{_('reader.aiDelete')}</span>
+                </button>
+              ) : <span />}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAssistantModeForm(null)}
+                  disabled={updateAiConfig.isPending}
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-[var(--bd-read-accent)] px-3 text-xs font-medium text-[var(--bd-read-sub)] transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-[var(--bd-read-text)] disabled:pointer-events-none disabled:opacity-40"
+                >
+                  {_('reader.aiCancel')}
+                </button>
+                <button
+                  type="submit"
+                  form="ai-mode-form"
+                  disabled={!assistantModeDraftName || !assistantModeDraftPrompt || !hasAssistantModeChanges || updateAiConfig.isPending}
+                  className="inline-flex h-8 items-center justify-center rounded-lg bg-[var(--bd-read-text)] px-3.5 text-xs font-medium text-[var(--bd-read-bg)] shadow-xs transition-all hover:opacity-85 active:scale-[0.985] disabled:pointer-events-none disabled:opacity-40"
+                >
+                  {_('reader.aiSave')}
+                </button>
+              </div>
             </div>
-          </div>
-          <div className="flex items-center justify-between gap-2 border-t border-[var(--bd-read-accent)] pt-4">
-            {assistantModeForm.id === DEFAULT_ASSISTANT_MODE.id
-              ? <button type="button" onClick={requestRestoreAssistantMode} disabled={updateAiConfig.isPending} className="rounded-lg border border-[var(--bd-read-accent)] px-4 py-2 text-sm text-[var(--bd-read-primary)] transition-colors hover:bg-[var(--bd-read-page-bg)] disabled:cursor-not-allowed disabled:opacity-50">{_('reader.aiRestoreDefault')}</button>
-              : assistantModeForm.id ? <button type="button" onClick={requestDeleteAssistantMode} disabled={updateAiConfig.isPending} className="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-2 text-sm text-red-700 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300">{_('reader.aiDelete')}</button> : <span />}
-           <div className="flex gap-2">
-              <button type="button" onClick={() => setAssistantModeForm(null)} className="rounded-lg border border-[var(--bd-read-accent)] px-4 py-2 text-sm text-[var(--bd-read-sub)] transition-colors hover:bg-[var(--bd-read-page-bg)]">{_('reader.aiCancel')}</button>
-              <button type="submit" disabled={!assistantModeForm.name.trim() || !assistantModeForm.prompt.trim() || updateAiConfig.isPending} className="rounded-lg bg-[var(--bd-read-primary)] px-4 py-2 text-sm text-[var(--bd-read-bg)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40">{_('reader.aiSave')}</button>
+          }
+        >
+          <form id="ai-mode-form" noValidate className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); submitAssistantMode() }}>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1 text-xs font-medium text-[var(--bd-read-sub)]">
+                  <label htmlFor="ai-mode-name" className="cursor-pointer">{_('reader.aiModeName')}</label>
+                  <span aria-hidden="true" className="text-red-500">*</span>
+                </div>
+                <span className="text-[11px] tabular-nums text-[var(--bd-read-sub)]/75">{assistantModeForm.name.length}/80</span>
+              </div>
+              <input
+                id="ai-mode-name"
+                aria-required="true"
+                autoFocus
+                maxLength={80}
+                value={assistantModeForm.name}
+                disabled={updateAiConfig.isPending}
+                onChange={(event) => setAssistantModeForm({ ...assistantModeForm, name: event.target.value })}
+                placeholder={_('reader.aiModeNamePlaceholder')}
+                className="h-9 w-full rounded-lg border border-[var(--bd-read-accent)] bg-stone-500/[0.03] px-3 text-sm text-[var(--bd-read-text)] outline-none transition-colors placeholder:text-[var(--bd-read-sub)]/60 focus:border-[var(--bd-read-text)]/50 disabled:cursor-not-allowed disabled:opacity-50"
+              />
             </div>
-          </div>
-        </form>
-      </Modal>}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1 text-xs font-medium text-[var(--bd-read-sub)]">
+                  <label htmlFor="ai-mode-prompt" className="cursor-pointer">{_('reader.aiModePrompt')}</label>
+                  <span aria-hidden="true" className="text-red-500">*</span>
+                </div>
+                <span className="text-[11px] tabular-nums text-[var(--bd-read-sub)]/75">{assistantModeForm.prompt.length}/2000</span>
+              </div>
+              <textarea
+                ref={modePromptTextareaRef}
+                id="ai-mode-prompt"
+                aria-required="true"
+                maxLength={2_000}
+                rows={6}
+                value={assistantModeForm.prompt}
+                disabled={updateAiConfig.isPending}
+                onChange={(event) => setAssistantModeForm({ ...assistantModeForm, prompt: event.target.value })}
+                placeholder={_('reader.aiModePromptPlaceholder')}
+                className={`${READ_SCROLLBAR_CLASSES} w-full resize-none overflow-y-auto overscroll-contain rounded-lg border border-[var(--bd-read-accent)] bg-stone-500/[0.03] px-3 py-2 text-sm leading-relaxed text-[var(--bd-read-text)] outline-none transition-colors placeholder:text-[var(--bd-read-sub)]/60 focus:border-[var(--bd-read-text)]/50 disabled:cursor-not-allowed disabled:opacity-50`}
+              />
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                {['{SELTEXT}', '{SELPARA}', '{CHAPTER}'].map((placeholder) => (
+                  <button
+                    key={placeholder}
+                    type="button"
+                    disabled={updateAiConfig.isPending}
+                    onClick={() => insertModeVariable(placeholder)}
+                    className="inline-flex items-center rounded-md border border-[var(--bd-read-accent)] bg-stone-500/[0.04] px-2 py-1 font-mono text-[11px] text-[var(--bd-read-sub)] transition-colors hover:border-[var(--bd-read-primary)]/40 hover:bg-[var(--bd-read-primary)]/10 hover:text-[var(--bd-read-primary)] active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    {placeholder}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </form>
+        </Modal>
+      )}
       {ideaSaveTarget && !ideaComposer.data && createPortal(<button onClick={() => void ideaComposer.refetch()} className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-stone-100 p-3 text-sm text-stone-700">{ideaComposer.isError ? '想法设置加载失败，点击重试' : '加载想法设置…'}</button>, document.body)}
-      {ideaSaveTarget && ideaComposer.data && createPortal(<NoteEditorPopup bookVersionId={bookId} initialNote={ideaSaveTarget.content.trim()} saving={createAnnotation.isPending} initialVisibility={ideaComposer.data.data.defaultVisibility} visibilityEligible={ideaComposer.data.data.eligible} sourceReadable={ideaComposer.data.data.sourceReadable} onSave={(note, files) => void saveAssistantAsIdea(ideaSaveTarget, note, undefined, files)} onSaveVisibility={(note, visibility, files) => void saveAssistantAsIdea(ideaSaveTarget, note, visibility, files)} onClose={() => { if (!createAnnotation.isPending) setIdeaSaveTarget(null) }} />, document.body)}
+      {ideaSaveTarget && ideaComposer.data && createPortal(<NoteEditorPopup bookVersionId={local ? undefined : bookId} initialNote={ideaSaveTarget.content.trim()} saving={createAnnotation.isPending} initialVisibility={ideaComposer.data.data.defaultVisibility} visibilityEligible={ideaComposer.data.data.eligible} sourceReadable={ideaComposer.data.data.sourceReadable} onSave={(note, files) => void saveAssistantAsIdea(ideaSaveTarget, note, undefined, files)} onSaveVisibility={(note, visibility, files) => void saveAssistantAsIdea(ideaSaveTarget, note, visibility, files)} onClose={() => { if (!createAnnotation.isPending) setIdeaSaveTarget(null) }} />, document.body)}
       {deleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiDeleteConfirm', { name: deleteTarget.title })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setDeleteTarget(null)} />}
       {assistantModeDeleteTarget && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('reader.aiModeDeleteConfirm', { name: assistantModeDeleteTarget.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDeleteAssistantMode} onClose={() => setAssistantModeDeleteTarget(null)} />}
-      {assistantModeRestoreOpen && <ConfirmDialog title={_('settings.confirmRestoreTitle')} message={_('reader.aiRestoreDefaultConfirm')} confirmLabel={_('settings.confirmRestoreAction')} confirmVariant="primary" onConfirm={confirmRestoreAssistantMode} onClose={() => setAssistantModeRestoreOpen(false)} />}
     </div>
   )
 }
