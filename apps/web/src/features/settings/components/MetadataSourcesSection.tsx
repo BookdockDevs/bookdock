@@ -9,6 +9,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import PasswordInput from '@/components/ui/PasswordInput'
 import MetadataProviderIcon from '@/components/ui/MetadataProviderIcon'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -618,26 +619,22 @@ export default function MetadataSourcesSection() {
           }
         >
           <div className="space-y-4">
-            <div role="group" className="grid grid-cols-2 gap-1 rounded-xl bg-stone-100 p-1 dark:bg-stone-800/80">
-              {(['github', 'zip'] as const).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  aria-pressed={mode === item}
-                  disabled={installing}
-                  onClick={() => selectMode(item)}
-                  className={cn(
-                    'flex items-center justify-center gap-2 rounded-lg py-1.5 text-xs font-medium transition-all duration-150 disabled:opacity-50',
-                    mode === item
-                      ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100'
-                      : 'text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200'
-                  )}
-                >
-                  {item === 'github' ? <GitHubIcon className="size-3.5" /> : <ZipIcon className="size-3.5" />}
-                  <span>{_(item === 'github' ? 'metadataLookup.sourceModeGitHub' : 'metadataLookup.sourceModeZip')}</span>
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              fullWidth
+              size="md"
+              pending={installing}
+              value={mode}
+              onChange={selectMode}
+              options={(['github', 'zip'] as const).map((item) => ({
+                value: item,
+                label: (
+                  <>
+                    {item === 'github' ? <GitHubIcon className="size-3.5" /> : <ZipIcon className="size-3.5" />}
+                    <span>{_(item === 'github' ? 'metadataLookup.sourceModeGitHub' : 'metadataLookup.sourceModeZip')}</span>
+                  </>
+                ),
+              }))}
+            />
 
             {mode === 'github' ? (
               <div className="space-y-2">

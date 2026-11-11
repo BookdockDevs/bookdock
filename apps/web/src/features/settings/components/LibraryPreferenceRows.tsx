@@ -1,5 +1,7 @@
 import { LIBRARY_SORT_MODES, type LibrarySortMode, type RecentlyReadStyle, type SidebarModule } from '@bookdock/shared'
 
+import SegmentedControl from '@/components/ui/SegmentedControl'
+import Toggle from '@/components/ui/Toggle'
 import TaxonomyIcon from '@/features/library/components/TaxonomyIcon'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
@@ -35,35 +37,32 @@ interface SegRowProps {
 }
 
 function SegRow({ label, hint, options, onSelect }: SegRowProps) {
+  const activeValue = options.find((opt) => opt.active)?.value
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
       <div className="min-w-0">
         <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
         <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
       </div>
-      <div className="flex flex-wrap items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={label}>
-        {options.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            aria-pressed={opt.active}
-            onClick={() => onSelect(opt.value)}
-            className={cn(
-              'flex h-7 items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium transition-all',
-              opt.active
-                ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-            )}
-          >
-            {opt.label}
-            {opt.active && opt.dir && (
-              <span className="text-stone-400 dark:text-stone-500" aria-hidden>
-                {opt.dir === 'asc' ? '↑' : '↓'}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        wrap
+        ariaLabel={label}
+        value={activeValue}
+        onChange={onSelect}
+        options={options.map((opt) => ({
+          value: opt.value,
+          label: (
+            <>
+              <span>{opt.label}</span>
+              {opt.active && opt.dir && (
+                <span className="text-stone-400 dark:text-stone-500" aria-hidden>
+                  {opt.dir === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </>
+          ),
+        }))}
+      />
     </div>
   )
 }
@@ -82,24 +81,7 @@ function ToggleRow({ label, hint, checked, onChange }: ToggleRowProps) {
         <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
         <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={cn(
-          'relative h-5 w-9 shrink-0 rounded-full transition-colors focus:outline-hidden',
-          checked ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-200 dark:bg-stone-700',
-        )}
-      >
-        <span
-          className={cn(
-            'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-xs transition-transform dark:bg-stone-900',
-            checked && 'translate-x-4',
-          )}
-        />
-      </button>
+      <Toggle checked={checked} onChange={onChange} ariaLabel={label} />
     </div>
   )
 }
@@ -125,34 +107,25 @@ function MultiPillRow({ label, hint, options, onToggle }: MultiPillRowProps) {
         <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
         <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
       </div>
-      <div
-        className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800"
-        role="group"
-        aria-label={label}
-      >
-        {options.map((opt) => (
-          <button
-            key={opt.key}
-            type="button"
-            role="checkbox"
-            aria-checked={opt.active}
-            onClick={() => onToggle(opt.key)}
-            className={cn(
-              'flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-all select-none',
-              opt.active
-                ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                : 'text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300',
-            )}
-          >
-            <TaxonomyIcon
-              kind={opt.iconKind}
-              size={13}
-              className={cn('shrink-0 transition-opacity', opt.active ? 'opacity-80' : 'opacity-40')}
-            />
-            <span>{opt.label}</span>
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        multiple
+        ariaLabel={label}
+        value={options.filter((opt) => opt.active).map((opt) => opt.key)}
+        onChange={onToggle}
+        options={options.map((opt) => ({
+          value: opt.key,
+          label: (
+            <>
+              <TaxonomyIcon
+                kind={opt.iconKind}
+                size={13}
+                className={cn('shrink-0 transition-opacity', opt.active ? 'opacity-80' : 'opacity-40')}
+              />
+              <span>{opt.label}</span>
+            </>
+          ),
+        }))}
+      />
     </div>
   )
 }

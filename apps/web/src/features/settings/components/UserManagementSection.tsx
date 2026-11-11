@@ -4,12 +4,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, sanitizeUsername } from '@bookdock/shared'
 import type { AdminUserRes, LibraryListItem, LibraryMemberEntry, MembershipRole, UpdateUserReq } from '@bookdock/shared'
 
+import { ApiError } from '@/api/client'
 import Avatar from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import Modal from '@/components/ui/Modal'
 import PasswordInput from '@/components/ui/PasswordInput'
 import { validatePasswordInputs } from '@/components/ui/password-input-validation'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useAdminUsers, useCreateUser, useDeleteUser, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
@@ -131,7 +134,7 @@ function LibrarySelectDropdown({
         aria-haspopup="listbox"
         aria-expanded={open}
         className={cn(
-          'inline-flex h-8 items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 text-xs font-medium text-stone-800 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-50/50 dark:border-stone-700 dark:bg-stone-800/90 dark:text-stone-100 dark:hover:border-stone-600',
+          'inline-flex h-8 items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 text-xs font-medium text-stone-800 shadow-2xs transition-colors hover:border-stone-300 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800/90 dark:text-stone-100 dark:hover:border-stone-600 dark:hover:bg-stone-700/80',
           open && 'border-stone-300 ring-2 ring-stone-200/50 dark:border-stone-600 dark:ring-stone-700/50',
         )}
       >
@@ -155,7 +158,7 @@ function LibrarySelectDropdown({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1.5 min-w-[180px] max-w-[260px] overflow-hidden rounded-xl border border-stone-200 bg-white/95 p-1 shadow-lg backdrop-blur-md dark:border-stone-800 dark:bg-stone-900/95 animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute right-0 top-full z-40 mt-1.5 min-w-full w-max max-w-[260px] overflow-hidden rounded-xl border border-stone-200 bg-white/95 p-1 shadow-lg backdrop-blur-md dark:border-stone-800 dark:bg-stone-900/95 animate-in fade-in zoom-in-95 duration-100">
           <div className="max-h-56 overflow-y-auto space-y-0.5">
             {libraries.map((lib) => {
               const isSelected = lib.id === selectedLibrary?.id
@@ -224,32 +227,14 @@ export default function UserManagementSection({
       action={
         <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-2.5">
           {!lockTab && (
-            <div className="flex h-8 items-center rounded-xl bg-stone-100 p-0.5 dark:bg-stone-800">
-              <button
-                type="button"
-                onClick={() => onContextChange('instance', activeLibraryId)}
-                className={cn(
-                  'flex h-7 items-center rounded-lg px-2.5 text-xs font-medium transition-all',
-                  tab === 'instance'
-                    ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-900 dark:text-stone-100'
-                    : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200',
-                )}
-              >
-                {_('admin.userTabInstance')}
-              </button>
-              <button
-                type="button"
-                onClick={() => onContextChange('library', activeLibraryId)}
-                className={cn(
-                  'flex h-7 items-center rounded-lg px-2.5 text-xs font-medium transition-all',
-                  tab === 'library'
-                    ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-900 dark:text-stone-100'
-                    : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200',
-                )}
-              >
-                {_('admin.userTabLibrary')}
-              </button>
-            </div>
+            <SegmentedControl
+              value={tab}
+              onChange={(nextTab) => onContextChange(nextTab, activeLibraryId)}
+              options={[
+                { value: 'instance', label: _('admin.userTabInstance') },
+                { value: 'library', label: _('admin.userTabLibrary') },
+              ]}
+            />
           )}
 
           {!lockTab && (tab === 'instance' || (tab === 'library' && sharedLibraries.length > 0)) && (
@@ -644,12 +629,15 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
   if (!user) return null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={() => { if (!submittingRef.current) onClose() }}
+    <Modal
+      title={_('admin.resetPassword')}
+      size="sm"
+      centered
+      onClose={() => { if (!submittingRef.current) onClose() }}
     >
       <form
         noValidate
+        className="flex flex-col gap-4"
         onSubmit={async (e) => {
           e.preventDefault()
           if (!validatePasswordInputs(e)) return
@@ -661,56 +649,36 @@ function ResetPasswordDialog({ user, onClose, onSubmit }: {
           catch (err) { setError(getUserErrorMessage(err, _, 'auth.errors.userUpdateFailed')) }
           finally { submittingRef.current = false; setSubmitting(false) }
         }}
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 shadow-xl sm:max-h-none sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-900"
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">
-            {_('admin.resetPassword')}
-          </h2>
-          <button
-            type="button"
-            onClick={() => { if (!submittingRef.current) onClose() }}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
-            aria-label={_('library.cancel')}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <p className="mb-3 text-xs text-stone-500 dark:text-stone-400">{_('admin.resetPasswordFor', { name: user.username })}</p>
-        <div className="mb-4">
+        <p className="text-xs text-stone-500 dark:text-stone-400">{_('admin.resetPasswordFor', { name: user.username })}</p>
+        <div>
           <label className="mb-1.5 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="reset-user-password">
             {_('auth.newPassword')}
           </label>
-          <div className="relative">
-            <PasswordInput
-              id="reset-user-password"
-              autoComplete="new-password"
-              minLength={AUTH_PASSWORD_MIN_LENGTH}
-              maxLength={AUTH_PASSWORD_MAX_LENGTH}
-              disabled={submitting}
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); setError(null) }}
-              required
-              aria-label={_('auth.newPassword')}
-              placeholder={_('auth.newPassword')}
-              className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
-            />
-          </div>
+          <PasswordInput
+            id="reset-user-password"
+            autoFocus
+            autoComplete="new-password"
+            minLength={AUTH_PASSWORD_MIN_LENGTH}
+            maxLength={AUTH_PASSWORD_MAX_LENGTH}
+            disabled={submitting}
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); setError(null) }}
+            required
+            className="h-9 w-full rounded-xl border border-stone-200 bg-white pl-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-500"
+          />
         </div>
-        {error && <p role="alert" className="mb-3 text-xs text-red-600 dark:text-red-400">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={() => { if (!submittingRef.current) onClose() }}>
+        {error && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" size="sm" variant="secondary" onClick={() => { if (!submittingRef.current) onClose() }}>
             {_('library.cancel')}
           </Button>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" size="sm" disabled={submitting}>
             {_(submitting ? 'passwordInput.saving' : 'library.save')}
           </Button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }
 
@@ -722,128 +690,128 @@ function CreateUserDialog({ onClose, onSubmit }: {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [usernameError, setUsernameError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    setUsernameError(null)
+    setFormError(null)
+
     const name = sanitizeUsername(username)
     if (!name) {
-      setError(_('auth.errors.usernameRequired'))
+      setUsernameError(_('auth.errors.usernameRequired'))
       return
     }
     if (!validatePasswordInputs(e)) return
     if (submittingRef.current) return
     submittingRef.current = true
     setSubmitting(true)
-    setError(null)
-    try { await onSubmit(name, password) }
-    catch (err) { setError(getUserErrorMessage(err, _, 'admin.createUserFailed')) }
-    finally { submittingRef.current = false; setSubmitting(false) }
+    try {
+      await onSubmit(name, password)
+    } catch (err) {
+      const msg = getUserErrorMessage(err, _, 'admin.createUserFailed')
+      if (err instanceof ApiError && err.code === 'USERNAME_TAKEN') {
+        setUsernameError(msg)
+      } else {
+        setFormError(msg)
+      }
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={() => { if (!submittingRef.current) onClose() }}
+    <Modal
+      title={_('admin.createUser')}
+      size="sm"
+      centered
+      onClose={() => { if (!submittingRef.current) onClose() }}
     >
-      <form
-        noValidate onSubmit={submit}
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto rounded-t-2xl border border-stone-200 bg-white p-5 shadow-xl sm:max-h-none sm:rounded-2xl sm:p-6 dark:border-stone-800 dark:bg-stone-900"
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">
-            {_('admin.createUser')}
-          </h2>
-          <button
-            type="button"
-            onClick={() => { if (!submittingRef.current) onClose() }}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
-            aria-label={_('library.cancel')}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
+      <form noValidate onSubmit={submit} className="flex flex-col gap-4">
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="new-user-username">
+            {_('auth.username')}
+          </label>
+          <input
+            id="new-user-username"
+            type="text"
+            autoFocus
+            value={username}
+            onChange={(e) => {
+              setUsername(e.target.value)
+              setUsernameError(null)
+              setFormError(null)
+            }}
+            disabled={submitting}
+            required
+            maxLength={AUTH_REGISTER_USERNAME_MAX_LENGTH}
+            autoComplete="off"
+            aria-invalid={usernameError ? true : undefined}
+            aria-describedby={usernameError ? 'new-user-username-error' : undefined}
+            className={cn(
+              'h-9 w-full rounded-xl border bg-white px-3 text-sm text-stone-800 outline-none transition-colors dark:bg-stone-900 dark:text-stone-100',
+              usernameError
+                ? 'border-red-500/80 dark:border-red-500/70'
+                : 'border-stone-200 focus:border-stone-400 dark:border-stone-700 dark:focus:border-stone-500',
+            )}
+          />
+          {usernameError && (
+            <p id="new-user-username-error" role="alert" className="mt-1.5 text-xs text-red-600 dark:text-red-400">
+              {usernameError}
+            </p>
+          )}
         </div>
 
-        <div className="space-y-3 mb-5">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="new-user-username">
-              {_('auth.username')}
-            </label>
-            <input
-              id="new-user-username"
-              type="text"
-              value={username}
-              onChange={(e) => { setUsername(e.target.value); setError(null) }}
-              disabled={submitting}
-              required
-              maxLength={AUTH_REGISTER_USERNAME_MAX_LENGTH}
-              aria-label={_('auth.username')}
-              placeholder={_('auth.username')}
-              autoComplete="off"
-              className="h-10 w-full rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="new-user-password">
-              {_('auth.newPassword')}
-            </label>
-            <div className="relative">
-              <PasswordInput
-                id="new-user-password"
-                minLength={AUTH_PASSWORD_MIN_LENGTH}
-                maxLength={AUTH_PASSWORD_MAX_LENGTH}
-                disabled={submitting}
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setError(null) }}
-                required
-                aria-label={_('auth.newPassword')}
-                placeholder={_('auth.newPassword')}
-                autoComplete="new-password"
-                className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="new-user-confirm">
-              {_('auth.confirmPassword')}
-            </label>
-            <div className="relative">
-              <PasswordInput
-                id="new-user-confirm"
-                matches={password}
-                maxLength={AUTH_PASSWORD_MAX_LENGTH}
-                disabled={submitting}
-                value={confirm}
-                onChange={(e) => { setConfirm(e.target.value); setError(null) }}
-                required
-                aria-label={_('auth.confirmPassword')}
-                placeholder={_('auth.confirmPassword')}
-                autoComplete="new-password"
-                className="h-10 w-full rounded-xl border border-stone-200 bg-white pl-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
-              />
-            </div>
-          </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="new-user-password">
+            {_('auth.password')}
+          </label>
+          <PasswordInput
+            id="new-user-password"
+            minLength={AUTH_PASSWORD_MIN_LENGTH}
+            maxLength={AUTH_PASSWORD_MAX_LENGTH}
+            disabled={submitting}
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); setFormError(null) }}
+            required
+            autoComplete="new-password"
+            className="h-9 w-full rounded-xl border border-stone-200 bg-white pl-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-500"
+          />
         </div>
 
-        {error && <p role="alert" className="mb-4 text-xs text-red-600 dark:text-red-400">{error}</p>}
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="new-user-confirm">
+            {_('auth.confirmPassword')}
+          </label>
+          <PasswordInput
+            id="new-user-confirm"
+            matches={password}
+            maxLength={AUTH_PASSWORD_MAX_LENGTH}
+            disabled={submitting}
+            value={confirm}
+            onChange={(e) => { setConfirm(e.target.value); setFormError(null) }}
+            required
+            autoComplete="new-password"
+            className="h-9 w-full rounded-xl border border-stone-200 bg-white pl-3 text-sm text-stone-800 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-500"
+          />
+        </div>
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={() => { if (!submittingRef.current) onClose() }}>
+        {formError && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{formError}</p>}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" size="sm" variant="secondary" onClick={() => { if (!submittingRef.current) onClose() }}>
             {_('library.cancel')}
           </Button>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" size="sm" disabled={submitting}>
             {_(submitting ? 'passwordInput.creating' : 'library.create')}
           </Button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }
 

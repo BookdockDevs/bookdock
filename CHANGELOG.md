@@ -12,8 +12,17 @@ All notable changes to Bookdock are documented here.
 ### Changed
 
 - Unified the login, registration, and initial setup pages with a shared card layout, brand icon, softer background, dark-mode styling, and consistent inline field errors. Registration requires an invite code in Invite only mode and accepts one optionally in Open mode.
+- Login, registration, and initial setup now use a matching card skeleton while their pages load.
+- Unified segmented selectors across settings, including language, default add destination, library display and sorting, registration and invite options, upload and trash limits, access-token expiry, font and dictionary visibility, replacement rules, AI retrieval, metadata-source installation, storage cache limits, and user-management tabs. Library preference switches also use the shared toggle styling.
+- Grouped "Upload books" and "Create libraries" into a single Member permissions row with independent multi-select options, while keeping Guest access separate. Closing registration hides invite management without deleting existing invites; reopening registration shows it again.
+- Aligned account creation and password-reset dialogs with the shared modal layout and form styling, added initial field focus, and placed missing or taken username errors beside the username field. Refined the library selector's dropdown width and dark-mode hover styling in user management.
+- Refined My Libraries with more room for library names, non-wrapping column headings and badges, and neutral role styling. Library creation and management now share consistent visibility cards, with clearer hover states in light and dark modes.
 - Simplified empty-state messages and aligned their presentation across settings, including access tokens, external storage, replacement rules, and library member management.
 - Registration invite attempts reserve rate-limit slots before password hashing, reject invalid codes without hashing, and roll back invite usage when account creation fails. Login and invite rate limiting can identify visitors behind trusted reverse proxies through the new `TRUSTED_PROXIES` IP/CIDR setting (default `127.0.0.1,::1`; `none` disables forwarding-header trust). Docker deployments behind a reverse proxy must configure the proxy address seen by the server to keep visitors' limits separate.
+
+### Fixed
+
+- Saving settings no longer dims segmented selectors temporarily, including registration options when changing member permissions or guest access. Saving still blocks repeat clicks, while options unavailable due to permissions or other restrictions remain dimmed.
 
 ## [0.8.1] - 2026-11-12
 
@@ -1148,8 +1157,17 @@ All notable changes to Bookdock are documented here.
 #### 优化
 
 - 统一登录、注册与首次初始化页面的卡片布局、品牌图标、柔和背景及深色模式样式，表单字段校验采用一致的内联错误提示；仅邀请码模式下邀请码必填，开放注册时选填。
+- 登录、注册与首次初始化页面加载时使用与正式页面布局相配的卡片骨架屏。
+- 统一设置页的分段选择控件样式，覆盖语言、默认添加位置、书库展示与排序、注册策略与邀请码选项、上传及回收站限制、访问令牌有效期、字体与词典可见范围、文本替换规则、AI 检索、元数据源安装、存储缓存上限及用户管理标签页；书库偏好开关同步采用统一样式。
+- 将「上传书籍」「创建书库」整合为「成员权限」一行，可分别多选控制，游客访问仍保留独立开关。关闭注册时隐藏邀请码管理，已有邀请码保留，重新开放注册后恢复显示。
+- 统一新建用户与重置密码弹窗的布局和表单样式，打开时自动聚焦首个输入框，用户名为空或已被占用时在对应字段下方显示错误；同时优化用户管理中书库选择菜单的宽度与深色模式悬停样式。
+- 优化「我的书库」表格列宽，为书库名称留出更多空间，表头与可见性、角色标识保持单行，角色标识改用中性色样式；统一新建与管理书库弹窗中的可见性选项卡片，并优化浅色、深色模式下的悬停反馈。
 - 精简并统一设置页的空状态文案与展示，包括访问令牌、外部存储、文本替换规则及书库成员管理。
 - 注册邀请码尝试在密码计算前预占限流额度，无效码无需计算密码哈希，建号失败时回滚邀请码使用次数。登录与邀请码限流新增可信代理配置 `TRUSTED_PROXIES`，支持按 IP／网段识别反向代理后的真实访客（默认 `127.0.0.1,::1`，设为 `none` 则不信任转发头）；通过反向代理访问 Docker 实例时，需配置服务器实际看到的代理地址，避免不同访客共用限流额度。
+
+#### 修复
+
+- 修复设置保存期间分段选择控件短暂变淡的问题，包括修改成员权限或游客访问时注册策略跟随闪烁；保存中仍阻止重复点击，因权限或其他限制而不可用的选项继续置灰。
 
 ### [0.8.1] - 2026-11-12
 

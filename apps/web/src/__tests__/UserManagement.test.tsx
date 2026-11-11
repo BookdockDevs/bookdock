@@ -215,23 +215,23 @@ describe('UserManagementSection', () => {
     })
 
     it('creates a user with a validated form', () => {
-      const { container } = render(<UserManagementSection />)
+      render(<UserManagementSection />)
       fireEvent.click(screen.getByRole('button', { name: '新建用户' }))
-      const form = container.querySelector('form')!
+      const form = screen.getByRole('dialog').querySelector('form')!
 
       // Validation runs before any request.
       fireEvent.submit(form)
       expect(screen.getByText('请输入用户名')).toBeInTheDocument()
       expect(createUser).not.toHaveBeenCalled()
 
-      fireEvent.change(screen.getByPlaceholderText('用户名'), { target: { value: 'dave' } })
-      fireEvent.change(screen.getByPlaceholderText('新密码'), { target: { value: 'password123' } })
-      fireEvent.change(screen.getByPlaceholderText('确认密码'), { target: { value: 'mismatch' } })
+      fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'dave' } })
+      fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'password123' } })
+      fireEvent.change(screen.getByLabelText('确认密码'), { target: { value: 'mismatch' } })
       fireEvent.submit(form)
       expect(screen.getByText('两次输入的密码不一致')).toBeInTheDocument()
       expect(createUser).not.toHaveBeenCalled()
 
-      fireEvent.change(screen.getByPlaceholderText('确认密码'), { target: { value: 'password123' } })
+      fireEvent.change(screen.getByLabelText('确认密码'), { target: { value: 'password123' } })
       fireEvent.submit(form)
       expect(createUser).toHaveBeenCalledWith(
         { username: 'dave', password: 'password123' },
@@ -241,19 +241,19 @@ describe('UserManagementSection', () => {
 
 
     it('keeps failed account creation open and prevents duplicate submissions while saving', async () => {
-      const { container } = render(<UserManagementSection />)
+      render(<UserManagementSection />)
       fireEvent.click(screen.getByRole('button', { name: '新建用户' }))
-      fireEvent.change(screen.getByPlaceholderText('用户名'), { target: { value: 'dave' } })
-      fireEvent.change(screen.getByPlaceholderText('新密码'), { target: { value: 'password123' } })
-      fireEvent.change(screen.getByPlaceholderText('确认密码'), { target: { value: 'password123' } })
-      const form = container.querySelector('form')!
+      fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'dave' } })
+      fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'password123' } })
+      fireEvent.change(screen.getByLabelText('确认密码'), { target: { value: 'password123' } })
+      const form = screen.getByRole('dialog').querySelector('form')!
       fireEvent.submit(form)
       fireEvent.submit(form)
       expect(createUser).toHaveBeenCalledTimes(1)
       expect(screen.getByRole('button', { name: '创建中…' })).toBeDisabled()
       const options = createUser.mock.calls[0][1]
       await act(async () => { options.onError(new TypeError('Offline')) })
-      expect(screen.getByPlaceholderText('新密码')).toHaveValue('password123')
+      expect(screen.getByLabelText('密码')).toHaveValue('password123')
       expect(screen.getByRole('alert')).toBeInTheDocument()
       fireEvent.submit(form)
       expect(createUser).toHaveBeenCalledTimes(2)
@@ -263,12 +263,12 @@ describe('UserManagementSection', () => {
       render(<UserManagementSection />)
       fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
       fireEvent.click(screen.getByRole('button', { name: '重置密码' }))
-      fireEvent.change(screen.getByPlaceholderText('新密码'), { target: { value: 'password123' } })
+      fireEvent.change(screen.getByLabelText('新密码'), { target: { value: 'password123' } })
       fireEvent.click(screen.getByRole('button', { name: '显示密码' }))
       fireEvent.click(screen.getByRole('button', { name: '保存' }))
       const options = mutateUser.mock.calls[0][1]
       await act(async () => { options.onError(new TypeError('Offline')) })
-      expect(screen.getByPlaceholderText('新密码')).toHaveValue('password123')
+      expect(screen.getByLabelText('新密码')).toHaveValue('password123')
       expect(screen.getByRole('alert')).toBeInTheDocument()
       fireEvent.click(screen.getAllByRole('button', { name: '取消' })[0])
       // Advance beyond the context menu's click-gesture suppression window.
@@ -276,8 +276,8 @@ describe('UserManagementSection', () => {
       fireEvent.click(within(screen.getByText('carol').closest('tr')!).getByLabelText('更多操作'))
       now.mockRestore()
       fireEvent.click(screen.getByRole('button', { name: '重置密码' }))
-      expect(screen.getByPlaceholderText('新密码')).toHaveValue('')
-      expect(screen.getByPlaceholderText('新密码')).toHaveAttribute('type', 'password')
+      expect(screen.getByLabelText('新密码')).toHaveValue('')
+      expect(screen.getByLabelText('新密码')).toHaveAttribute('type', 'password')
     })
 
     it('confirms and deletes a plain member', () => {

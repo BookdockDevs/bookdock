@@ -7,10 +7,10 @@ import type { AccessToken, AccessTokenDuration, AccessTokenPermission, AccessTok
 import { apiPatch } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { cn } from '@/lib/utils'
 
 import AccessTokenPermissionSelector from './AccessTokenPermissionSelector'
 
@@ -78,35 +78,18 @@ export default function AccessTokenEditDialog({ token, onClose, onUpdated }: Acc
           <span className="text-xs font-medium text-stone-600 dark:text-stone-300">
             {_('settings.tokensEditExpiry')}
           </span>
-          <div className="inline-flex w-fit flex-wrap items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group">
-            <button
-              type="button"
-              onClick={() => setExpiresIn('')}
-              className={cn(
-                'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                expiresIn === ''
-                  ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100'
-                  : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200',
-              )}
-            >
-              {_('settings.tokensEditExpiryKeep')}
-            </button>
-            {ACCESS_TOKEN_DURATIONS.map((duration) => (
-              <button
-                key={duration}
-                type="button"
-                onClick={() => setExpiresIn(duration)}
-                className={cn(
-                  'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                  expiresIn === duration
-                    ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100'
-                    : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200',
-                )}
-              >
-                {_(DURATION_LABEL_KEYS[duration])}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            wrap
+            value={expiresIn}
+            onChange={setExpiresIn}
+            options={[
+              { value: '' as const, label: _('settings.tokensEditExpiryKeep') },
+              ...ACCESS_TOKEN_DURATIONS.map((duration) => ({
+                value: duration,
+                label: _(DURATION_LABEL_KEYS[duration]),
+              })),
+            ]}
+          />
         </div>
 
         <div className="flex justify-end gap-2 pt-2">

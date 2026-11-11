@@ -2372,6 +2372,10 @@
   },
   "admin": {
     "instanceSettings": "Access Control",
+    "memberPermissions": "Member permissions",
+    "memberPermissionsHint": "Choose which features regular members can use.",
+    "memberPermissionUpload": "Upload books",
+    "memberPermissionCreateLibrary": "Create libraries",
     "registrationMode": "Registration mode",
     "registrationModeClosed": "Closed",
     "registrationModeInvite": "Invite only",

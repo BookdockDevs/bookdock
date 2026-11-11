@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useCreateInstanceInvite, useDeleteInstanceInvite, useInstanceInvites } from '@/features/auth/hooks'
 import { useLibraries } from '@/features/library/hooks'
@@ -540,34 +541,16 @@ export default function InstanceInvitesSection() {
                 {_('admin.inviteMaxUses')}
               </span>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex h-9 items-center gap-0.5 rounded-lg bg-stone-100 p-1 dark:bg-stone-800" role="group">
-                  <button
-                    type="button"
-                    aria-pressed={usesUnlimited}
-                    onClick={() => setUsesUnlimited(true)}
-                    className={cn(
-                      'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                      usesUnlimited
-                        ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200',
-                    )}
-                  >
-                    {_('admin.inviteUsesUnlimited')}
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={!usesUnlimited}
-                    onClick={() => setUsesUnlimited(false)}
-                    className={cn(
-                      'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                      !usesUnlimited
-                        ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200',
-                    )}
-                  >
-                    {_('admin.inviteUsesLimited')}
-                  </button>
-                </div>
+                <SegmentedControl
+                  size="md"
+                  ariaLabel={_('admin.inviteMaxUses')}
+                  value={usesUnlimited ? 'unlimited' : 'limited'}
+                  onChange={(mode) => setUsesUnlimited(mode === 'unlimited')}
+                  options={[
+                    { value: 'unlimited', label: _('admin.inviteUsesUnlimited') },
+                    { value: 'limited', label: _('admin.inviteUsesLimited') },
+                  ]}
+                />
 
                 {!usesUnlimited && (
                   <>
@@ -591,34 +574,16 @@ export default function InstanceInvitesSection() {
                 {_('admin.inviteExpiresIn')}
               </span>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex h-9 items-center gap-0.5 rounded-lg bg-stone-100 p-1 dark:bg-stone-800" role="group">
-                  <button
-                    type="button"
-                    aria-pressed={expiresUnlimited}
-                    onClick={() => setExpiresUnlimited(true)}
-                    className={cn(
-                      'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                      expiresUnlimited
-                        ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200',
-                    )}
-                  >
-                    {_('admin.inviteExpiresUnlimited')}
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={!expiresUnlimited}
-                    onClick={() => setExpiresUnlimited(false)}
-                    className={cn(
-                      'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                      !expiresUnlimited
-                        ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200',
-                    )}
-                  >
-                    {_('admin.inviteExpiresLimited')}
-                  </button>
-                </div>
+                <SegmentedControl
+                  size="md"
+                  ariaLabel={_('admin.inviteExpiresIn')}
+                  value={expiresUnlimited ? 'unlimited' : 'limited'}
+                  onChange={(mode) => setExpiresUnlimited(mode === 'unlimited')}
+                  options={[
+                    { value: 'unlimited', label: _('admin.inviteExpiresUnlimited') },
+                    { value: 'limited', label: _('admin.inviteExpiresLimited') },
+                  ]}
+                />
 
                 {!expiresUnlimited && (
                   <>
@@ -631,30 +596,18 @@ export default function InstanceInvitesSection() {
                       increaseLabel={`${_('admin.inviteExpiresIn')} +`}
                       onChange={setExpiresValue}
                     />
-                    <div className="inline-flex h-9 items-center gap-0.5 rounded-lg bg-stone-100 p-1 dark:bg-stone-800" role="group">
-                      {([
-                        ['days', 'admin.inviteUnitDays'],
-                        ['hours', 'admin.inviteUnitHours'],
-                      ] as const).map(([unit, key]) => (
-                        <button
-                          key={unit}
-                          type="button"
-                          aria-pressed={expiryUnit === unit}
-                          onClick={() => {
-                            setExpiryUnit(unit)
-                            setExpiresValue((prev) => (prev ? String(clampPositiveInt(prev, MAX_EXPIRY_VALUE[unit], 7)) : prev))
-                          }}
-                          className={cn(
-                            'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                            expiryUnit === unit
-                              ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100'
-                              : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200',
-                          )}
-                        >
-                          {_(key)}
-                        </button>
-                      ))}
-                    </div>
+                    <SegmentedControl
+                      size="md"
+                      value={expiryUnit}
+                      onChange={(unit) => {
+                        setExpiryUnit(unit)
+                        setExpiresValue((prev) => (prev ? String(clampPositiveInt(prev, MAX_EXPIRY_VALUE[unit], 7)) : prev))
+                      }}
+                      options={[
+                        { value: 'days', label: _('admin.inviteUnitDays') },
+                        { value: 'hours', label: _('admin.inviteUnitHours') },
+                      ]}
+                    />
                   </>
                 )}
               </div>

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 
-import { cn } from '@/lib/utils'
-import i18n from '@/i18n/i18n'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import { useTranslation } from '@/hooks/useTranslation'
+import i18n from '@/i18n/i18n'
 
 const LANG_OPTIONS = [
   { value: 'zh-CN', label: '中文', title: '简体中文' },
@@ -22,28 +22,15 @@ export default function LanguageSwitcher() {
         <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.language')}</p>
         <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.languageHint')}</p>
       </div>
-      <div className="inline-flex items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.language')}>
-        {LANG_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            title={opt.title}
-            aria-pressed={currentLang === opt.value}
-            onClick={() => {
-              void i18n.changeLanguage(opt.value)
-              setLang(opt.value)
-            }}
-            className={cn(
-              'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all',
-              currentLang === opt.value
-                ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-            )}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        ariaLabel={_('settings.language')}
+        value={currentLang}
+        onChange={(value) => {
+          void i18n.changeLanguage(value)
+          setLang(value)
+        }}
+        options={LANG_OPTIONS}
+      />
     </div>
   )
 }

@@ -117,11 +117,11 @@ export default function LibraryManagementSection() {
             <table className="w-full min-w-[34rem] text-left text-sm sm:min-w-full">
               <thead>
                 <tr className="border-b border-stone-100 bg-stone-50/50 text-xs text-stone-400 dark:border-stone-800 dark:bg-stone-800/40">
-                  <th className="w-[30%] py-2.5 pl-4 pr-3 font-medium sm:pl-6">{_('library.libraryName')}</th>
-                  <th className="w-[18%] py-2.5 px-3 font-medium">{_('library.libraryVisibility')}</th>
-                  <th className="w-[16%] py-2.5 px-3 font-medium">{_('library.memberRole')}</th>
-                  <th className="w-[14%] py-2.5 px-3 text-right font-medium">{_('library.memberCountLabel')}</th>
-                  <th className="w-[14%] py-2.5 px-3 text-right font-medium">{_('library.workCountLabel')}</th>
+                  <th className="w-[36%] py-2.5 pl-4 pr-3 font-medium sm:pl-6">{_('library.libraryName')}</th>
+                  <th className="w-[17%] whitespace-nowrap py-2.5 px-3 font-medium">{_('library.libraryVisibility')}</th>
+                  <th className="w-[15%] whitespace-nowrap py-2.5 px-3 font-medium">{_('library.memberRole')}</th>
+                  <th className="w-[12%] whitespace-nowrap py-2.5 px-3 text-right font-medium">{_('library.memberCountLabel')}</th>
+                  <th className="w-[12%] whitespace-nowrap py-2.5 px-3 text-right font-medium">{_('library.workCountLabel')}</th>
                   <th className="w-10 py-2.5 pl-3 pr-4 text-right sm:pr-6" />
                 </tr>
               </thead>
@@ -216,7 +216,7 @@ function VisibilityBadge({ visibility }: { visibility?: string | null }) {
   const v = visibility ?? 'private'
   if (v === 'public') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
           <line x1="2" y1="12" x2="22" y2="12" />
@@ -228,7 +228,7 @@ function VisibilityBadge({ visibility }: { visibility?: string | null }) {
   }
   if (v === 'password') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="7.5" cy="15.5" r="5.5" />
           <path d="m21 2-9.6 9.6" />
@@ -239,7 +239,7 @@ function VisibilityBadge({ visibility }: { visibility?: string | null }) {
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-stone-100 px-1.5 py-0.5 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
         <path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -283,12 +283,12 @@ function LibraryRow({ library, hidden, onEnter, onManage, onLeave, onDelete, onT
       <td className="py-3 px-3">
         <span
           className={cn(
-            'inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium',
+            'inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-medium',
             library.relation === 'owner'
-              ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+              ? 'bg-stone-200/80 text-stone-800 dark:bg-stone-700/80 dark:text-stone-100'
               : library.relation === 'admin'
-                ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
-                : 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400',
+                ? 'bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300'
+                : 'text-stone-500 dark:text-stone-400',
           )}
         >
           {library.relation === 'owner' ? _('library.relationOwner') : library.relation === 'admin' ? _('library.relationAdmin') : _('library.relationMember')}

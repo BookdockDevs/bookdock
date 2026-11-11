@@ -58,6 +58,7 @@ export default function Settings() {
     refetch: refetchLibraries,
   } = useLibraries({ enabled: Boolean(user) })
   const { data: instanceData } = useInstanceInfo({ enabled: !local })
+  const registrationMode = instanceData?.data.registrationMode ?? (instanceData?.data.allowRegistration ? 'open' : 'closed')
   const userUploadAllowed = instanceData?.data.allowUserUpload !== false
   // Unified shelf: anonymous visitors with vault access still get the
   // device-level library preferences on the common settings surface.
@@ -405,7 +406,7 @@ export default function Settings() {
           {canAccessAdmin && visitedSections.has('admin') && (
             <div className={active === 'admin' ? 'flex flex-col gap-6' : 'hidden'}>
               {isOwner && <InstanceSettingsSection />}
-              {isOwner && <InstanceInvitesSection />}
+              {isOwner && registrationMode !== 'closed' && <InstanceInvitesSection />}
               {isOwner && <StorageBackendSection active={active === 'admin'} />}
               <UserManagementSection
                 tab={!isOwner ? 'library' : search.userTab ?? 'instance'}

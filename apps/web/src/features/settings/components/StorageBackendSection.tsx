@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification, isAccessRevocationError } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -816,45 +817,22 @@ function StorageConfigModal({ config, connections, onClose }: StorageConfigModal
           {/* Cache size limit segmented control */}
           <SettingsFormField label={_('settings.storageBackendCacheMaxMb')} error={cacheError}>
             <div className={cn('flex flex-wrap items-center gap-2', isLocal && 'opacity-50 pointer-events-none')}>
-              <div
-                className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800"
-                role="group"
-              >
-                {CACHE_CAPS.map((cap) => (
-                  <button
-                    key={cap}
-                    type="button"
-                    disabled={isLocal}
-                    aria-pressed={!isCustomCache && cacheMaxMb === cap}
-                    onClick={() => {
-                      setCacheMaxMb(cap)
-                      setIsCustomCache(false)
-                    }}
-                    className={cn(
-                      'flex h-7 items-center justify-center rounded-md px-2.5 text-xs font-medium transition-all cursor-pointer',
-                      !isCustomCache && cacheMaxMb === cap
-                        ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-                    )}
-                  >
-                    {`${cap / 1024} GB`}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  disabled={isLocal}
-                  aria-pressed={isCustomCache}
-                  onClick={() => setIsCustomCache(true)}
-                  className={cn(
-                    'flex h-7 items-center justify-center rounded-md px-2.5 text-xs font-medium transition-all cursor-pointer',
-                    isCustomCache
-                      ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                      : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-                  )}
-                >
-                  {_('settings.storagePresetCustom')}
-                </button>
-              </div>
+              <SegmentedControl
+                disabled={isLocal}
+                value={isCustomCache ? 'custom' : String(cacheMaxMb)}
+                onChange={(val) => {
+                  if (val === 'custom') {
+                    setIsCustomCache(true)
+                  } else {
+                    setCacheMaxMb(Number(val))
+                    setIsCustomCache(false)
+                  }
+                }}
+                options={[
+                  ...CACHE_CAPS.map((cap) => ({ value: String(cap), label: `${cap / 1024} GB` })),
+                  { value: 'custom', label: _('settings.storagePresetCustom') },
+                ]}
+              />
 
               {isCustomCache && (
                 <div className="flex items-center gap-1">

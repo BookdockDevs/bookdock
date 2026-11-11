@@ -13,10 +13,10 @@ import { apiPut } from '@/api/client'
 import { fetchSettings, writeStoredSettings } from '@/lib/settings-cache'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
-import { cn } from '@/lib/utils'
 import { notify } from '@/lib/notifications'
 
 import SettingsCard from './SettingsCard'
@@ -136,50 +136,26 @@ export default function TrashSettingsRow() {
                 <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashAutoClean')}</p>
                 <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashAutoCleanHint')}</p>
               </div>
-              <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashAutoClean')}>
-                {AUTO_CLEAN_DAYS.map((days) => (
-                  <button
-                    key={days}
-                    type="button"
-                    aria-pressed={current === days}
-                    disabled={mutation.isPending}
-                    onClick={() => mutation.mutate({ autoCleanDays: days })}
-                    className={cn(
-                      'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
-                      current === days
-                        ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-                    )}
-                  >
-                    {_(LABEL_KEYS[days])}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                ariaLabel={_('settings.trashAutoClean')}
+                value={String(current)}
+                pending={mutation.isPending}
+                onChange={(value) => mutation.mutate({ autoCleanDays: Number(value) as (typeof AUTO_CLEAN_DAYS)[number] })}
+                options={AUTO_CLEAN_DAYS.map((days) => ({ value: String(days), label: _(LABEL_KEYS[days]) }))}
+              />
             </div>
             <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trashCap')}</p>
                 <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashCapHint')}</p>
               </div>
-              <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.trashCap')}>
-                {TRASH_CAPS.map((cap) => (
-                  <button
-                    key={cap}
-                    type="button"
-                    aria-pressed={currentCap === cap}
-                    disabled={mutation.isPending}
-                    onClick={() => mutation.mutate({ maxTrashBytes: cap })}
-                    className={cn(
-                      'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
-                      currentCap === cap
-                        ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-                    )}
-                  >
-                    {_(CAP_LABEL_KEYS[cap])}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                ariaLabel={_('settings.trashCap')}
+                value={String(currentCap)}
+                pending={mutation.isPending}
+                onChange={(value) => mutation.mutate({ maxTrashBytes: Number(value) })}
+                options={TRASH_CAPS.map((cap) => ({ value: String(cap), label: _(CAP_LABEL_KEYS[cap]) }))}
+              />
             </div>
           </>
           )

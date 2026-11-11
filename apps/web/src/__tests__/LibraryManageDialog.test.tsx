@@ -74,7 +74,7 @@ describe('LibraryManageDialog', () => {
   it('shows the resolved upload wording, never a raw i18n key', () => {
     renderDialog()
     expect(screen.getByText('允许上传文件')).toBeInTheDocument()
-    expect(screen.getByText('关闭后普通成员无法上传文件')).toBeInTheDocument()
+    expect(screen.getByText('允许成员上传书籍文件')).toBeInTheDocument()
     expect(screen.queryByText(/settings\.allowUserUpload|admin\.allowUserUpload/)).toBeNull()
   })
 

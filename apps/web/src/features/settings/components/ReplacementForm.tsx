@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { compileReplacementRegex, type TextReplacementRes, type ReplacementCreateReq, type ReplacementUpdateReq } from '@bookdock/shared'
 
 import { useCreateReplacement, useReplacements, useUpdateReplacement } from '@/api/hooks/useReplacements'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -216,29 +217,19 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
     <form onSubmit={handleSubmit} noValidate className={settingsFormClass}>
       {showScope && (
         <div className="space-y-1.5">
-          <div className="flex rounded-xl bg-stone-100 p-1 dark:bg-stone-800" role="group" aria-label={_('settings.fontsScope')}>
-            {SCOPES.map(({ value, key }) => {
-              const selected = scope === value
-              const disabled = saving || (value === 'point' ? !pointAvailable : value === 'book' && !bookId)
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => setScope(value)}
-                  aria-pressed={selected}
-                  className={cn(
-                    'flex h-9 flex-1 items-center justify-center rounded-lg px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-                    selected
-                      ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                      : 'text-stone-500 hover:bg-stone-200 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100',
-                  )}
-                >
-                  {_(key)}
-                </button>
-              )
-            })}
-          </div>
+          <SegmentedControl
+            ariaLabel={_('settings.fontsScope')}
+            fullWidth
+            size="md"
+            pending={saving}
+            value={scope}
+            onChange={setScope}
+            options={SCOPES.map(({ value, key }) => ({
+              value,
+              label: _(key),
+              disabled: value === 'point' ? !pointAvailable : value === 'book' && !bookId,
+            }))}
+          />
           {!pointAvailable && selection && (
             <p className="text-xs text-amber-600 dark:text-amber-400">{_('annotation.replaceHereUnavailable')}</p>
           )}
@@ -399,28 +390,14 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
             <span className="block text-xs font-medium text-stone-500 dark:text-stone-400">
               {_('settings.replacementsApplyTo')}
             </span>
-            <div className="flex rounded-xl bg-stone-200/60 p-1 dark:bg-stone-900/60" role="group" aria-label={_('settings.replacementsApplyTo')}>
-              {APPLY_TO.map(({ value, key }) => {
-                const selected = applyTo === value
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    disabled={saving}
-                    onClick={() => setApplyTo(value)}
-                    aria-pressed={selected}
-                    className={cn(
-                      'flex h-8 flex-1 items-center justify-center rounded-lg px-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-                      selected
-                        ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-500 hover:bg-stone-200 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100',
-                    )}
-                  >
-                    {_(key)}
-                  </button>
-                )
-              })}
-            </div>
+            <SegmentedControl
+              ariaLabel={_('settings.replacementsApplyTo')}
+              fullWidth
+              pending={saving}
+              value={applyTo}
+              onChange={setApplyTo}
+              options={APPLY_TO.map(({ value, key }) => ({ value, label: _(key) }))}
+            />
           </div>
 
           <div className="flex flex-col gap-1 pt-0.5">

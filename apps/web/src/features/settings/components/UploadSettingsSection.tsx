@@ -1,10 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query'
 
-import { useInstanceInfo, useUpdateInstance } from '@/features/auth/hooks'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SegmentedControl from '@/components/ui/SegmentedControl'
+import { useInstanceInfo, useUpdateInstance } from '@/features/auth/hooks'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
-import { cn } from '@/lib/utils'
 import { notify } from '@/lib/notifications'
 
 const UPLOAD_CAPS = [104857600, 524288000, 1073741824, 2147483648, 5368709120] as const
@@ -29,11 +29,11 @@ export default function UploadSettingsSection() {
   const instance = instanceQuery.data?.data
   if (!instance) return null
 
-  const current = instance.uploadMaxBytes
+  const current = instance.uploadMaxBytes != null ? String(instance.uploadMaxBytes) : null
 
-  function save(cap: number) {
+  function save(capValue: string) {
     updateInstance.mutate(
-      { uploadMaxBytes: cap },
+      { uploadMaxBytes: Number(capValue) },
       {
         // The upload dialog pre-checks against GET /settings, so refresh it too.
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
@@ -49,25 +49,13 @@ export default function UploadSettingsSection() {
           <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.uploadCap')}</p>
           <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.uploadCapHint')}</p>
         </div>
-        <div className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800" role="group" aria-label={_('settings.uploadCap')}>
-          {UPLOAD_CAPS.map((cap) => (
-            <button
-              key={cap}
-              type="button"
-              aria-pressed={current === cap}
-              disabled={updateInstance.isPending}
-              onClick={() => save(cap)}
-              className={cn(
-                'flex h-7 items-center justify-center rounded-md px-3 text-xs font-medium transition-all disabled:opacity-60',
-                current === cap
-                  ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                  : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200',
-              )}
-            >
-              {_(CAP_LABEL_KEYS[cap])}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          ariaLabel={_('settings.uploadCap')}
+          value={current}
+          pending={updateInstance.isPending}
+          onChange={save}
+          options={UPLOAD_CAPS.map((cap) => ({ value: String(cap), label: _(CAP_LABEL_KEYS[cap]) }))}
+        />
       </div>
     </div>
   )

@@ -13,6 +13,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import PasswordInput from '@/components/ui/PasswordInput'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -453,10 +454,19 @@ export default function AiSettingsSection({ id }: { id?: string }) {
           <div className="border-t border-stone-100 pt-4 dark:border-stone-800">
             <div className="flex flex-col gap-2 text-xs text-stone-600 dark:text-stone-300">
               <span id="ai-retrieval-mode-label">{_('settings.aiRetrievalMode')}</span>
-              <div role="radiogroup" aria-labelledby="ai-retrieval-mode-label" className="flex rounded-xl border border-stone-200 bg-stone-50 p-1 dark:border-stone-700 dark:bg-stone-800/60">
-                <button type="button" role="radio" aria-checked={embeddingMode === 'lexical'} onClick={() => changeEmbeddingMode('lexical')} disabled={updateConfig.isPending} className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${embeddingMode === 'lexical' ? 'bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900' : 'text-stone-500 hover:bg-white hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100'}`}>{_('settings.aiLexicalRetrieval')}</button>
-                <button type="button" role="radio" aria-checked={embeddingMode === 'semantic'} onClick={() => changeEmbeddingMode('semantic')} disabled={updateConfig.isPending} className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${embeddingMode === 'semantic' ? 'bg-stone-900 text-white shadow-sm dark:bg-stone-100 dark:text-stone-900' : 'text-stone-500 hover:bg-white hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100'}`}>{_('settings.aiSemanticRetrieval')}</button>
-              </div>
+              <SegmentedControl
+                role="radiogroup"
+                ariaLabelledBy="ai-retrieval-mode-label"
+                fullWidth
+                size="md"
+                value={embeddingMode}
+                pending={updateConfig.isPending}
+                onChange={changeEmbeddingMode}
+                options={[
+                  { value: 'lexical', label: _('settings.aiLexicalRetrieval') },
+                  { value: 'semantic', label: _('settings.aiSemanticRetrieval') },
+                ]}
+              />
             </div>
             {embeddingMode === 'semantic' && (
               <label className="mt-3 flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">

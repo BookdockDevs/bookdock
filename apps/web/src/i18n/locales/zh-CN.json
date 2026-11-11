@@ -2362,6 +2362,10 @@
   },
   "admin": {
     "instanceSettings": "访问控制",
+    "memberPermissions": "成员权限",
+    "memberPermissionsHint": "设置普通成员可使用的功能",
+    "memberPermissionUpload": "上传书籍",
+    "memberPermissionCreateLibrary": "创建书库",
     "registrationMode": "注册策略",
     "registrationModeClosed": "关闭",
     "registrationModeInvite": "仅邀请码",

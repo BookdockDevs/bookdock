@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { createMemoryHistory, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { RegistrationMode } from '@bookdock/shared'
+
 import Settings from '@/features/settings/Settings'
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import i18n from '@/i18n/i18n'
@@ -10,13 +12,18 @@ import { rootRoute } from '@/routes/__root'
 import { settingsRoute } from '@/routes/settings'
 import { useAuthStore } from '@/stores/auth.store'
 
+const instanceInfo = vi.hoisted(() => ({
+  registrationMode: 'closed' as RegistrationMode | undefined,
+  allowRegistration: false,
+}))
+
 vi.mock('@/routes/__root', async () => {
   const { createRootRoute } = await import('@tanstack/react-router')
   return { rootRoute: createRootRoute() }
 })
 
 vi.mock('@/features/auth/hooks', () => ({
-  useInstanceInfo: () => ({ data: { data: {} } }),
+  useInstanceInfo: () => ({ data: { data: instanceInfo } }),
   useAdminUsers: () => ({ data: { data: [
     { id: 'owner', username: 'Alice', role: 'owner', disabled: false, bookCount: 0, createdAt: 1, ownedLibraries: [] },
     { id: 'reader', username: 'Bob', role: 'member', disabled: false, bookCount: 0, createdAt: 1, ownedLibraries: [] },
@@ -42,7 +49,7 @@ vi.mock('@/features/library/hooks', () => ({
 }))
 
 vi.mock('@/features/settings/components/InstanceSettingsSection', () => ({ default: () => null }))
-vi.mock('@/features/settings/components/InstanceInvitesSection', () => ({ default: () => null }))
+vi.mock('@/features/settings/components/InstanceInvitesSection', () => ({ default: () => <div>Instance invite management</div> }))
 vi.mock('@/features/settings/components/StorageBackendSection', () => ({ default: () => null }))
 vi.mock('@/features/settings/components/DeviceStorageSection', () => ({ default: () => null }))
 vi.mock('@/features/settings/components/LibraryManagementSection', () => ({ default: () => null }))
@@ -80,6 +87,8 @@ beforeAll(() => { document.head.append(visibilityStyles) })
 afterAll(() => { visibilityStyles.remove() })
 
 beforeEach(async () => {
+  instanceInfo.registrationMode = 'closed'
+  instanceInfo.allowRegistration = false
   await i18n.changeLanguage('zh-CN')
   useAuthStore.getState().setAuth({ id: 'owner', username: 'Alice', role: 'owner' })
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
@@ -91,6 +100,38 @@ afterEach(() => {
 })
 
 describe('settings URL navigation', () => {
+  it.each(['closed', 'invite', 'open'] as const)('shows invite management only when registration is enabled (%s)', async (mode) => {
+    instanceInfo.registrationMode = mode
+    const history = createMemoryHistory({ initialEntries: ['/settings?section=admin'] })
+    const router = buildRouter(history)
+    await router.load()
+    render(<RouterProvider router={router} />)
+
+    if (mode === 'closed') {
+      expect(await screen.findByRole('button', { name: '实例用户' })).toBeVisible()
+      expect(screen.queryByText('Instance invite management')).not.toBeInTheDocument()
+    } else {
+      expect(await screen.findByText('Instance invite management')).toBeVisible()
+    }
+  })
+
+  it('hides invite management after closing registration and shows it again when reenabled', async () => {
+    instanceInfo.registrationMode = 'invite'
+    const history = createMemoryHistory({ initialEntries: ['/settings?section=admin'] })
+    const router = buildRouter(history)
+    await router.load()
+    render(<RouterProvider router={router} />)
+    expect(await screen.findByText('Instance invite management')).toBeVisible()
+
+    instanceInfo.registrationMode = 'closed'
+    await act(async () => { await router.navigate({ to: '/settings', search: { section: 'admin', userTab: 'library' } }) })
+    expect(screen.queryByText('Instance invite management')).not.toBeInTheDocument()
+
+    instanceInfo.registrationMode = 'open'
+    await act(async () => { await router.navigate({ to: '/settings', search: { section: 'admin', userTab: 'instance' } }) })
+    expect(await screen.findByText('Instance invite management')).toBeVisible()
+  })
+
   it.each(['instance', 'library'] as const)('restores the %s user context after profile return and refresh', async (tab) => {
     const history = createMemoryHistory({ initialEntries: ['/'] })
     const router = buildRouter(history)

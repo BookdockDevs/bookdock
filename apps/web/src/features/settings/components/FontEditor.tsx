@@ -5,11 +5,11 @@ import type { FontScope } from '@bookdock/shared'
 import { useUpdateFontScope } from '@/api/hooks/useFonts'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import type { FontOption } from '@/features/reader/fonts'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 
 interface FontEditorProps {
@@ -66,28 +66,19 @@ export default function FontEditor({ font, isOwner, onClose }: FontEditorProps) 
         {uploaded && (
           <fieldset className="space-y-1.5">
             <legend className="text-xs text-stone-400 dark:text-stone-500">{_('settings.fontsScope')}</legend>
-            <div className="flex rounded-xl bg-stone-100 p-1 dark:bg-stone-800" role="group" aria-label={_('settings.fontsScope')}>
-              {(['user', 'instance'] as FontScope[]).map((value) => {
-                const selected = scope === value
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setScope(value)}
-                    disabled={!isOwner || saving}
-                    aria-pressed={selected}
-                    className={cn(
-                      'flex h-9 flex-1 items-center justify-center rounded-lg px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-                      selected
-                        ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
-                        : 'text-stone-500 hover:bg-stone-200 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-100',
-                    )}
-                  >
-                    {_(value === 'user' ? 'settings.fontsScopeUser' : 'settings.fontsScopeInstance')}
-                  </button>
-                )
-              })}
-            </div>
+            <SegmentedControl
+              ariaLabel={_('settings.fontsScope')}
+              fullWidth
+              size="md"
+              disabled={!isOwner}
+              pending={saving}
+              value={scope}
+              onChange={setScope}
+              options={(['user', 'instance'] as FontScope[]).map((value) => ({
+                value,
+                label: _(value === 'user' ? 'settings.fontsScopeUser' : 'settings.fontsScopeInstance'),
+              }))}
+            />
             {!isOwner && <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{_('settings.fontsScopeOwnerHint')}</p>}
           </fieldset>
         )}

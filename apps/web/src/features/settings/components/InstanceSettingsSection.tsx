@@ -1,6 +1,7 @@
 import { REGISTRATION_MODES, type RegistrationMode } from '@bookdock/shared'
 
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -75,64 +76,63 @@ export default function InstanceSettingsSection() {
           <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('admin.registrationMode')}</p>
           <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{modeHints[registrationMode]}</p>
         </div>
-        <div
+        <SegmentedControl
           role="radiogroup"
-          aria-label={_('admin.registrationMode')}
-          className="inline-flex shrink-0 rounded-xl border border-stone-200 bg-stone-50 p-0.5 dark:border-stone-700 dark:bg-stone-800/60"
-        >
-          {REGISTRATION_MODES.map((mode) => {
-            const active = registrationMode === mode
-            return (
-              <button
-                key={mode}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                disabled={updateInstance.isPending}
-                onClick={() => setRegistrationMode(mode)}
-                className={cn(
-                  'rounded-lg px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50',
-                  active
-                    ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-700 dark:text-stone-100'
-                    : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200',
-                )}
-              >
-                {modeLabels[mode]}
-              </button>
-            )
-          })}
-        </div>
+          ariaLabel={_('admin.registrationMode')}
+          value={registrationMode}
+          pending={updateInstance.isPending}
+          onChange={setRegistrationMode}
+          options={REGISTRATION_MODES.map((mode) => ({ value: mode, label: modeLabels[mode] }))}
+        />
       </div>
       <ToggleRow
         label={_('admin.allowGuestAccess')}
         hint={_('admin.allowGuestAccessHint')}
         checked={instance.allowGuestAccess}
-        disabled={updateInstance.isPending}
+        pending={updateInstance.isPending}
         onChange={(v) => toggle('allowGuestAccess', v)}
       />
-      <ToggleRow
-        label={_('admin.allowUserCreateLibrary')}
-        hint={_('admin.allowUserCreateLibraryHint')}
-        checked={instance.allowUserCreateLibrary !== false}
-        disabled={updateInstance.isPending}
-        onChange={(v) => toggle('allowUserCreateLibrary', v)}
-      />
-      <ToggleRow
-        label={_('admin.allowUserUpload')}
-        hint={_('admin.allowUserUploadHint')}
-        checked={instance.allowUserUpload !== false}
-        disabled={updateInstance.isPending}
-        onChange={(v) => toggle('allowUserUpload', v)}
-      />
+      <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p id="member-permissions-label" className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('admin.memberPermissions')}</p>
+          <p id="member-permissions-hint" className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('admin.memberPermissionsHint')}</p>
+        </div>
+        <div role="group" aria-labelledby="member-permissions-label" aria-describedby="member-permissions-hint" aria-busy={updateInstance.isPending} className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
+          {([
+            ['allowUserUpload', 'admin.memberPermissionUpload'],
+            ['allowUserCreateLibrary', 'admin.memberPermissionCreateLibrary'],
+          ] as const).map(([key, label]) => {
+            const checked = instance[key] !== false
+            return (
+              <button
+                key={key}
+                type="button"
+                role="checkbox"
+                aria-checked={checked}
+                disabled={updateInstance.isPending}
+                onClick={() => toggle(key, !checked)}
+                className={cn(
+                  'flex h-7 items-center justify-center rounded-md px-2.5 text-xs font-medium transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 disabled:cursor-not-allowed',
+                  checked
+                    ? 'bg-white text-stone-900 shadow-sm dark:bg-stone-700 dark:text-stone-100'
+                    : 'text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300',
+                )}
+              >
+                {_(label)}
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </SettingsCard>
   )
 }
 
-function ToggleRow({ label, hint, checked, disabled, onChange }: {
+function ToggleRow({ label, hint, checked, pending, onChange }: {
   label: string
   hint: string
   checked: boolean
-  disabled?: boolean
+  pending?: boolean
   onChange: (value: boolean) => void
 }) {
   return (
@@ -146,9 +146,10 @@ function ToggleRow({ label, hint, checked, disabled, onChange }: {
         role="switch"
         aria-checked={checked}
         aria-label={label}
-        disabled={disabled}
+        disabled={pending}
+        aria-busy={pending}
         onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${checked ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700'}`}
+        className={cn('relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed', checked ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700')}
       >
         <span
           className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform dark:bg-stone-900 ${checked ? 'translate-x-5' : ''}`}
