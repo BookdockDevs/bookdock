@@ -2,6 +2,19 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Choose Closed, Invite only, or Open registration in Settings → Administration. The login page offers the matching registration entry and a guest-browsing button when guest access is enabled.
+- Instance owners can create registration invite codes with a random 6-character code or a custom 4–64-character code supporting Chinese characters, letters, digits, `-`, and `_`. Invites support notes, usage limits, expiration, copying codes or registration links, and deletion to stop further use. Each invite can automatically add new accounts to multiple shared libraries the creator owns or administers; registration links prefill the code, and successful registration opens the first joined library unless a pending library invitation takes priority.
+
+### Changed
+
+- Unified the login, registration, and initial setup pages with a shared card layout, brand icon, softer background, dark-mode styling, and consistent inline field errors. Registration requires an invite code in Invite only mode and accepts one optionally in Open mode.
+- Simplified empty-state messages and aligned their presentation across settings, including access tokens, external storage, replacement rules, and library member management.
+- Registration invite attempts reserve rate-limit slots before password hashing, reject invalid codes without hashing, and roll back invite usage when account creation fails. Login and invite rate limiting can identify visitors behind trusted reverse proxies through the new `TRUSTED_PROXIES` IP/CIDR setting (default `127.0.0.1,::1`; `none` disables forwarding-header trust). Docker deployments behind a reverse proxy must configure the proxy address seen by the server to keep visitors' limits separate.
+
 ## [0.8.1] - 2026-11-12
 
 ### Added
@@ -1124,6 +1137,19 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [待发布]
+
+#### 新增
+
+- 「设置 → 系统管理」支持选择「关闭注册／仅邀请码／开放注册」三种注册策略；登录页显示相应的注册入口，允许游客访问时提供「以访客身份浏览」按钮。
+- 实例所有者可创建注册邀请码，默认生成 6 位随机码，也可自定义 4–64 位汉字、字母、数字、`-` 和 `_` 组成的口令，支持备注、使用次数上限、有效期、复制邀请码或注册链接，以及删除邀请码以停止后续使用。一个邀请码可绑定多个创建者拥有或管理的共享书库，注册后自动加入；注册链接自动填入邀请码，注册成功后进入首个加入的书库，已有待处理书库邀请时优先返回邀请页。
+
+#### 优化
+
+- 统一登录、注册与首次初始化页面的卡片布局、品牌图标、柔和背景及深色模式样式，表单字段校验采用一致的内联错误提示；仅邀请码模式下邀请码必填，开放注册时选填。
+- 精简并统一设置页的空状态文案与展示，包括访问令牌、外部存储、文本替换规则及书库成员管理。
+- 注册邀请码尝试在密码计算前预占限流额度，无效码无需计算密码哈希，建号失败时回滚邀请码使用次数。登录与邀请码限流新增可信代理配置 `TRUSTED_PROXIES`，支持按 IP／网段识别反向代理后的真实访客（默认 `127.0.0.1,::1`，设为 `none` 则不信任转发头）；通过反向代理访问 Docker 实例时，需配置服务器实际看到的代理地址，避免不同访客共用限流额度。
 
 ### [0.8.1] - 2026-11-12
 

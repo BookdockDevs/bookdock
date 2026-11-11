@@ -49,7 +49,7 @@ describe('ReplacementsSettingsSection', () => {
   it('shows the empty hint when there are no rules', () => {
     render(<ReplacementsSettingsSection />)
 
-    expect(screen.getByText(/还没有替换规则/)).toBeInTheDocument()
+    expect(screen.getByText('暂无替换规则')).toBeInTheDocument()
     expect(screen.queryByText('· 0')).not.toBeInTheDocument()
   })
 
@@ -196,7 +196,7 @@ describe('ReplacementsSettingsSection', () => {
 
     // the mocked mutation never fires onSuccess — cancel closes the modal
     fireEvent.click(screen.getByText('取消'))
-    expect(screen.getByText(/还没有替换规则/)).toBeInTheDocument()
+    expect(screen.getByText('暂无替换规则')).toBeInTheDocument()
   })
 
   it('blocks an invalid regex inline', () => {

@@ -42,6 +42,7 @@ vi.mock('@/features/library/hooks', () => ({
 }))
 
 vi.mock('@/features/settings/components/InstanceSettingsSection', () => ({ default: () => null }))
+vi.mock('@/features/settings/components/InstanceInvitesSection', () => ({ default: () => null }))
 vi.mock('@/features/settings/components/StorageBackendSection', () => ({ default: () => null }))
 vi.mock('@/features/settings/components/DeviceStorageSection', () => ({ default: () => null }))
 vi.mock('@/features/settings/components/LibraryManagementSection', () => ({ default: () => null }))

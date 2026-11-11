@@ -779,10 +779,13 @@ export interface ManagedUser extends LibraryUser {
   disabled: boolean
 }
 
+import type { RegistrationMode } from './constants'
+
 /** Single-row instance record; PK representation follows the Drizzle schema. */
 export interface Instance {
   id: string
   ownerUserId: string
+  registrationMode: RegistrationMode
   allowRegistration: boolean
   allowGuestAccess: boolean
   uploadMaxBytes: number

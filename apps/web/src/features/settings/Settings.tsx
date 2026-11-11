@@ -15,6 +15,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
 import { cn } from '@/lib/utils'
 
+import InstanceInvitesSection from './components/InstanceInvitesSection'
 import InstanceSettingsSection from './components/InstanceSettingsSection'
 import StorageBackendSection from './components/StorageBackendSection'
 import DeviceStorageSection from './components/DeviceStorageSection'
@@ -404,6 +405,7 @@ export default function Settings() {
           {canAccessAdmin && visitedSections.has('admin') && (
             <div className={active === 'admin' ? 'flex flex-col gap-6' : 'hidden'}>
               {isOwner && <InstanceSettingsSection />}
+              {isOwner && <InstanceInvitesSection />}
               {isOwner && <StorageBackendSection active={active === 'admin'} />}
               <UserManagementSection
                 tab={!isOwner ? 'library' : search.userTab ?? 'instance'}

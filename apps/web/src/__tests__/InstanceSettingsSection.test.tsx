@@ -47,4 +47,12 @@ describe('InstanceSettingsSection', () => {
     expect(mutate).toHaveBeenCalledWith({ allowUserCreateLibrary: false }, expect.anything())
     expect(mutate).toHaveBeenCalledWith({ allowUserUpload: false }, expect.anything())
   })
+
+  it('updates registrationMode via the 3-state selector', () => {
+    const mutate = mockSection({ registrationMode: 'closed', allowRegistration: false, allowGuestAccess: false })
+
+    render(<InstanceSettingsSection />)
+    fireEvent.click(screen.getByRole('radio', { name: '仅邀请码' }))
+    expect(mutate).toHaveBeenCalledWith({ registrationMode: 'invite' }, expect.anything())
+  })
 })

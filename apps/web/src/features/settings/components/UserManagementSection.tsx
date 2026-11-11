@@ -10,6 +10,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import PasswordInput from '@/components/ui/PasswordInput'
 import { validatePasswordInputs } from '@/components/ui/password-input-validation'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useAdminUsers, useCreateUser, useDeleteUser, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
 import { useContextMenu } from '@/features/library/components/use-context-menu'
@@ -900,8 +901,8 @@ function LibraryMembersView({
 
   if (!hasManageableLibraries) {
     return (
-      <div className="p-8 text-center text-xs text-stone-400 dark:text-stone-500">
-        {_('admin.noManageableLibraries')}
+      <div className="p-4 sm:p-6">
+        <SettingsEmptyState>{_('admin.noManageableLibraries')}</SettingsEmptyState>
       </div>
     )
   }

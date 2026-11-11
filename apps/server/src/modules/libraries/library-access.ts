@@ -612,3 +612,60 @@ export async function assertLibraryBrowsable(actorId: string, libraryId: string)
   }
   return library
 }
+
+/**
+ * Instance-invite binding gate: only shared libraries where the creator holds
+ * Owner or Admin standing may be attached at invite creation time.
+ */
+export function assertBindableSharedLibrary(actorId: string, libraryId: string): { id: string; name: string } {
+  const db = getDb()
+  const library = db.select().from(libraries).where(eq(libraries.id, libraryId)).get()
+  if (!library) throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  if (library.type !== 'shared') {
+    if (library.userId === actorId) {
+      throw new AppError('VALIDATION_ERROR', 'Only shared libraries can be bound to an invite')
+    }
+    throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
+  }
+  if (library.userId === actorId) return { id: library.id, name: library.name }
+  const membership = db.select({ role: libraryMemberships.role }).from(libraryMemberships)
+    .where(and(eq(libraryMemberships.libraryId, libraryId), eq(libraryMemberships.userId, actorId))).get()
+  if (membership?.role !== 'admin') {
+    throw new AppError('FORBIDDEN', 'Only library owners and admins can bind this library')
+  }
+  return { id: library.id, name: library.name }
+}
+
+/**
+ * Best-effort target attachment during invite redemption: if the bound library
+ * was deleted after the invite was issued, registration still succeeds without
+ * joining; genuine DB errors continue to propagate and abort the transaction.
+ */
+export function attachMemberToSharedLibraryInTx(
+  tx: Pick<ReturnType<typeof getDb>, 'select' | 'insert'>,
+  userId: string,
+  libraryId: string,
+  now: number,
+): { id: string; name: string } | null {
+  const library = tx
+    .select({ id: libraries.id, name: libraries.name, type: libraries.type, userId: libraries.userId })
+    .from(libraries)
+    .where(eq(libraries.id, libraryId))
+    .get()
+  if (!library || library.type !== 'shared') return null
+  if (library.userId !== userId) {
+    const existing = tx.select({ id: libraryMemberships.id }).from(libraryMemberships)
+      .where(and(eq(libraryMemberships.libraryId, library.id), eq(libraryMemberships.userId, userId))).get()
+    if (!existing) {
+      tx.insert(libraryMemberships).values({
+        id: createId('lbm'),
+        libraryId: library.id,
+        userId,
+        role: 'member',
+        createdAt: now,
+        updatedAt: now,
+      }).run()
+    }
+  }
+  return { id: library.id, name: library.name }
+}

@@ -58,7 +58,7 @@ beforeEach(async () => {
   for (const method of [apiGet, apiPost, apiPut, apiPatch, apiDelete, apiUpload]) vi.mocked(method).mockReset()
   // The vault gate reads instance guest policy; seeding keeps the offline
   // assertions (zero API traffic) meaningful while the gate stays satisfied.
-  queryClient.setQueryData(INSTANCE_QUERY_KEY, { data: { initialized: true, allowRegistration: false, allowGuestAccess: true, uploadMaxBytes: 104857600 } })
+  queryClient.setQueryData(INSTANCE_QUERY_KEY, { data: { initialized: true, registrationMode: 'closed', allowRegistration: false, allowGuestAccess: true, uploadMaxBytes: 104857600 } })
   // The unified routes run the session probe; seed a guest /auth/me so the
   // zero-traffic offline assertions stay meaningful.
   queryClient.setQueryData(ME_QUERY_KEY, { data: { user: null, guest: true } })
@@ -229,7 +229,7 @@ describe('the existing library screen with local authority', () => {
     await waitFor(async () => expect((await repository.getBook(ref)).title).toBe('Edited device book'))
     expect(queryClient.getQueryData(['books', 'detail', book.ref.bookId])).toEqual(remote)
     cleanup(); queryClient.clear()
-    queryClient.setQueryData(INSTANCE_QUERY_KEY, { data: { initialized: true, allowRegistration: false, allowGuestAccess: true, uploadMaxBytes: 104857600 } })
+    queryClient.setQueryData(INSTANCE_QUERY_KEY, { data: { initialized: true, registrationMode: 'closed', allowRegistration: false, allowGuestAccess: true, uploadMaxBytes: 104857600 } })
   // The unified routes run the session probe; seed a guest /auth/me so the
   // zero-traffic offline assertions stay meaningful.
   queryClient.setQueryData(ME_QUERY_KEY, { data: { user: null, guest: true } })

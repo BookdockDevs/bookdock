@@ -178,9 +178,7 @@ export default function StorageConnectionsSection() {
             ))}
           </div>
         ) : connections.length === 0 ? (
-          <SettingsEmptyState>
-            {_('settings.storageConnectionsEmpty') || '暂无外部存储'}
-          </SettingsEmptyState>
+          <SettingsEmptyState>{_('settings.storageConnectionsEmpty')}</SettingsEmptyState>
         ) : (
           <div className="space-y-2.5">
             {connections.map((conn) => {

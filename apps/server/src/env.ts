@@ -8,6 +8,7 @@ import { config as loadDotenv } from 'dotenv'
 import { aiProviderSchema } from '@bookdock/shared'
 
 import { log, setLogLevel } from './lib/logger'
+import { parseTrustedProxies } from './lib/trusted-proxy'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '..', '..', '..')
@@ -24,6 +25,14 @@ const envSchema = z.object({
   AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5242880),
   PERSONAL_SOURCE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
   AUTH_RPM: z.coerce.number().int().min(1).max(120).default(5),
+  TRUSTED_PROXIES: z.string().default('127.0.0.1,::1').refine((value) => {
+    try {
+      parseTrustedProxies(value)
+      return true
+    } catch {
+      return false
+    }
+  }, 'Invalid TRUSTED_PROXIES list'),
   // Set by the container launcher for one boot; absent in dev, which disables
   // the internal version route.
   BOOKDOCK_LAUNCHER_NONCE: z.string().min(8).optional(),

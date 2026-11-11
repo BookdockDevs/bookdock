@@ -222,7 +222,7 @@ describe('auth module', () => {
     it('reports initialized=false without an instance row', async () => {
       const info = getInstanceInfo()
       expect(info).toEqual({
-        initialized: false, allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: config.uploadMaxBytes,
+        initialized: false, registrationMode: 'closed', allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: config.uploadMaxBytes,
         allowUserCreateLibrary: true, allowUserUpload: true,
       })
     })

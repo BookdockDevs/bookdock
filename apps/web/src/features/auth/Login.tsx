@@ -9,6 +9,13 @@ import { validatePasswordInputs } from '@/components/ui/password-input-validatio
 import { libraryInviteParam, PENDING_INVITE_KEY } from '@/features/library/invite-link'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
+
+import AuthCardShell, {
+  authAlertClassName,
+  authFieldErrorClassName,
+  authInputClassName,
+  authLabelClassName,
+} from './AuthCardShell'
 import { authErrorKey } from './errors'
 import { useInstanceInfo, useLogin } from './hooks'
 import { clearReaderTarget, pendingReaderTarget } from './reader-return'
@@ -20,26 +27,25 @@ export default function Login() {
   const isLegadoLogin = new URLSearchParams(window.location.search).get('legado') === '1'
   const login = useLogin()
   const { data: instanceData } = useInstanceInfo()
-  const allowRegistration = instanceData?.data.allowRegistration ?? false
+  const registrationMode = instanceData?.data.registrationMode ?? (instanceData?.data.allowRegistration ? 'open' : 'closed')
+  const allowGuestAccess = Boolean(instanceData?.data.allowGuestAccess) && !isLegadoLogin
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [errorField, setErrorField] = useState<'username' | null>(null)
+  const [usernameError, setUsernameError] = useState<string | null>(null)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (login.isPending) return
     setError(null)
-    setErrorField(null)
+    setUsernameError(null)
     const normalizedUsername = username.trim()
     if (!normalizedUsername) {
-      setError(_('auth.errors.usernameRequired'))
-      setErrorField('username')
+      setUsernameError(_('auth.errors.usernameRequired'))
       return
     }
     if (normalizedUsername.length > AUTH_USERNAME_MAX_LENGTH) {
-      setError(_('auth.errors.usernameTooLong'))
-      setErrorField('username')
+      setUsernameError(_('auth.errors.usernameTooLong'))
       return
     }
     if (!validatePasswordInputs(e)) return
@@ -63,16 +69,42 @@ export default function Login() {
     }
   }
 
+  const hasFooter = registrationMode !== 'closed' || allowGuestAccess
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-stone-50 p-4 dark:bg-stone-950 sm:p-0">
-      <form
-        onSubmit={handleSubmit}
-        noValidate
-        className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-stone-200 bg-white p-6 shadow-sm sm:max-h-none sm:overflow-visible sm:p-8 dark:border-stone-800 dark:bg-stone-900"
-      >
-        <h1 className="mb-6 text-center text-2xl font-bold">{_('auth.title')}</h1>
+    <AuthCardShell
+      title={_('auth.title')}
+      subtitle={_('auth.signInSubtitle')}
+      footer={hasFooter ? (
+        <div className="space-y-3">
+          {registrationMode !== 'closed' && (
+            <p className="text-sm text-stone-500 dark:text-stone-400">
+              <span>{_('auth.noAccountYet')} </span>
+              <Link
+                to="/register"
+                className="font-medium text-stone-900 underline underline-offset-4 hover:text-stone-700 dark:text-stone-100 dark:hover:text-stone-300"
+              >
+                {_(registrationMode === 'invite' ? 'auth.registerWithInvite' : 'auth.registerAccount')}
+              </Link>
+            </p>
+          )}
+          {allowGuestAccess && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="w-full"
+              onClick={() => navigate({ to: '/' })}
+            >
+              {_('auth.continueAsGuest')}
+            </Button>
+          )}
+        </div>
+      ) : undefined}
+    >
+      <form onSubmit={handleSubmit} noValidate>
         <div className="mb-4">
-          <label htmlFor="username" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">{_('auth.username')}</label>
+          <label htmlFor="username" className={authLabelClassName}>{_('auth.username')}</label>
           <input
             id="username"
             type="text"
@@ -80,18 +112,23 @@ export default function Login() {
             onChange={(e) => {
               setUsername(e.target.value)
               setError(null)
-              setErrorField(null)
+              setUsernameError(null)
             }}
             required
             maxLength={AUTH_USERNAME_MAX_LENGTH}
             autoComplete="username"
-            aria-invalid={errorField === 'username'}
-            aria-describedby={error ? 'login-error' : undefined}
-            className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 aria-invalid:border-red-400 dark:border-stone-800 dark:bg-stone-900 dark:aria-invalid:border-red-500"
+            aria-invalid={Boolean(usernameError)}
+            aria-describedby={usernameError ? 'login-username-error' : error ? 'login-error' : undefined}
+            className={authInputClassName}
           />
+          {usernameError && (
+            <p id="login-username-error" role="alert" className={authFieldErrorClassName}>
+              {usernameError}
+            </p>
+          )}
         </div>
         <div className="mb-6">
-          <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">{_('auth.password')}</label>
+          <label htmlFor="password" className={authLabelClassName}>{_('auth.password')}</label>
           <PasswordInput
             disabled={login.isPending}
             id="password"
@@ -99,25 +136,23 @@ export default function Login() {
             onChange={(e) => {
               setPassword(e.target.value)
               setError(null)
-              setErrorField(null)
             }}
             required
             maxLength={AUTH_PASSWORD_MAX_LENGTH}
             autoComplete="current-password"
             aria-describedby={error ? 'login-error' : undefined}
-            className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-stone-400 dark:border-stone-800 dark:bg-stone-900"
+            className={authInputClassName}
           />
         </div>
-        {error && <p id="login-error" role="alert" aria-live="polite" className="mb-4 text-sm text-red-600">{error}</p>}
-        <Button type="submit" className="w-full" disabled={login.isPending}>{_(login.isPending ? 'passwordInput.signingIn' : 'auth.signIn')}</Button>
-        {allowRegistration && (
-          <p className="mt-4 text-center text-sm text-stone-500">
-            <Link to="/register" className="text-stone-700 underline underline-offset-2 hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100">
-              {_('auth.registerAccount')}
-            </Link>
+        {error && (
+          <p id="login-error" role="alert" aria-live="polite" className={authAlertClassName}>
+            {error}
           </p>
         )}
+        <Button type="submit" className="w-full" disabled={login.isPending}>
+          {_(login.isPending ? 'passwordInput.signingIn' : 'auth.signIn')}
+        </Button>
       </form>
-    </div>
+    </AuthCardShell>
   )
 }

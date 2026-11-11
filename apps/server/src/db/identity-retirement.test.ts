@@ -102,9 +102,12 @@ function makeLegacyIdentity() {
     DROP TABLE IF EXISTS activity_events;
     DROP TABLE IF EXISTS content_revision_maps;
     DROP TABLE IF EXISTS personal_metadata_sources;
+    DROP TABLE IF EXISTS instance_invite_libraries;
+    DROP TABLE IF EXISTS instance_invites;
     `);
     revertReadingImportsSchema(db.$client);
     db.$client.exec(`
+    ALTER TABLE instance DROP COLUMN registration_mode;
     ALTER TABLE book_states DROP COLUMN progress_revision_id;
     ALTER TABLE book_states DROP COLUMN coverage_revision_id;
     ALTER TABLE bookmarks DROP COLUMN relocation;

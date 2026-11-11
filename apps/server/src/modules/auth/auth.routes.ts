@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 
 import {
   changePasswordSchema,
+  createInstanceInviteSchema,
   deleteAccountSchema,
   loginSchema,
   registerSchema,
@@ -20,9 +21,12 @@ import { requireOwner } from '../../middleware/auth.guard'
 import {
   changePassword,
   changeUsername,
+  createInstanceInvite,
+  deleteInstanceInvite,
   updateBio,
   getInstanceInfo,
   isSetupRequired,
+  listInstanceInvites,
   login,
   register,
   revokeSession,
@@ -30,7 +34,14 @@ import {
   updateInstanceSettings,
   updateTimezone,
 } from './auth.service'
-import { assertLoginAllowed, clearLoginFailures, createLoginRateLimitKey, recordLoginFailure } from './auth.rate-limit'
+import {
+  assertLoginAllowed,
+  clearLoginFailures,
+  createLoginRateLimitKey,
+  recordLoginFailure,
+  releaseInviteAttempt,
+  reserveInviteAttempt,
+} from './auth.rate-limit'
 import { clearSessionCookie, readSessionToken, setSessionCookie } from './session-cookie'
 
 const authRoutes = new Hono()
@@ -64,15 +75,52 @@ authRoutes.post('/setup', async (c) => {
   return c.json({ data: { user: result.user } })
 })
 
+authRoutes.get('/invites', requireOwner(), (c) => {
+  const user = c.get('user')!
+  return c.json({ data: listInstanceInvites(user.id) })
+})
+
+authRoutes.post('/invites', requireOwner(), async (c) => {
+  const user = c.get('user')!
+  const body = await c.req.json().catch(() => null)
+  const parsed = createInstanceInviteSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  return c.json({ data: createInstanceInvite(user.id, parsed.data) }, 201)
+})
+
+authRoutes.delete('/invites/:id', requireOwner(), (c) => {
+  const user = c.get('user')!
+  return c.json({ data: deleteInstanceInvite(user.id, c.req.param('id')) })
+})
+
 authRoutes.post('/register', async (c) => {
   const body = await c.req.json().catch(() => null)
   const parsed = registerSchema.safeParse(body)
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  const result = await register(parsed.data.username, parsed.data.password)
+  // Reserve synchronously before any await (including scrypt hashing) so
+  // concurrent invite guesses cannot bypass AUTH_RPM.
+  const reservation = parsed.data.inviteCode !== undefined ? reserveInviteAttempt(c) : null
+  let result
+  try {
+    result = await register(parsed.data.username, parsed.data.password, parsed.data.inviteCode)
+    if (reservation) releaseInviteAttempt(reservation)
+  } catch (err) {
+    if (reservation && !(err instanceof AppError && err.code === 'INVITE_CODE_INVALID')) {
+      releaseInviteAttempt(reservation)
+    }
+    throw err
+  }
   setSessionCookie(c, result.token)
-  return c.json({ data: { user: result.user } })
+  return c.json({
+    data: {
+      user: result.user,
+      ...(result.joinedLibraries && result.joinedLibraries.length > 0 ? { joinedLibraries: result.joinedLibraries } : {}),
+    },
+  })
 })
 
 authRoutes.post('/login', async (c) => {

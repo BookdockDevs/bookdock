@@ -21,3 +21,7 @@ export function libraryInviteParam(token: string): `+${string}` {
 export function buildLibraryInviteLink(token: string): string {
   return `${window.location.origin}/library/${libraryInviteParam(token)}`
 }
+
+export function buildInstanceInviteLink(code: string): string {
+  return `${window.location.origin}/register?invite=${encodeURIComponent(code)}`
+}

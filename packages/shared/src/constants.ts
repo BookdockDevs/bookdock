@@ -45,6 +45,24 @@ export const AUTH_PASSWORD_MAX_LENGTH = 128
 export const AUTH_USERNAME_MAX_LENGTH = 32
 export const AUTH_REGISTER_USERNAME_MAX_LENGTH = 32
 
+export const REGISTRATION_MODES = ['closed', 'invite', 'open'] as const
+export type RegistrationMode = (typeof REGISTRATION_MODES)[number]
+
+export const INSTANCE_INVITE_CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+export const INSTANCE_INVITE_RANDOM_LENGTH = 6
+export const INSTANCE_INVITE_CODE_MIN_LENGTH = 4
+export const INSTANCE_INVITE_CODE_MAX_LENGTH = 64
+export const INSTANCE_INVITE_LABEL_MAX_LENGTH = 100
+export const INSTANCE_INVITE_CODE_PATTERN = /^[\p{Script=Han}A-Za-z0-9_-]{4,64}$/u
+
+export function normalizeInstanceInviteCode(code: string): string {
+  return code.trim().toUpperCase()
+}
+
+export function isValidInstanceInviteCode(code: string): boolean {
+  return INSTANCE_INVITE_CODE_PATTERN.test(normalizeInstanceInviteCode(code))
+}
+
 // Zero-width, bidi-control and C0/C1 characters have no legitimate use in a
 // username — they only enable display spoofing (e.g. RTL "trojan source").
 // eslint-disable-next-line no-control-regex, no-misleading-character-class

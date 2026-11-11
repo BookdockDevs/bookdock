@@ -1,7 +1,10 @@
+import { REGISTRATION_MODES, type RegistrationMode } from '@bookdock/shared'
+
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { cn } from '@/lib/utils'
 import { useInstanceInfo, useUpdateInstance } from '@/features/auth/hooks'
 import SettingsCard from './SettingsCard'
 
@@ -32,11 +35,32 @@ export default function InstanceSettingsSection() {
   }
   if (!instance) return null
 
-  function toggle(key: 'allowRegistration' | 'allowGuestAccess' | 'allowUserCreateLibrary' | 'allowUserUpload', value: boolean) {
+  const registrationMode: RegistrationMode = instance.registrationMode ?? (instance.allowRegistration ? 'open' : 'closed')
+
+  function toggle(key: 'allowGuestAccess' | 'allowUserCreateLibrary' | 'allowUserUpload', value: boolean) {
     updateInstance.mutate(
       { [key]: value },
       { onError: (error) => notify.error(getUserErrorNotification(error, 'settings.instanceSettingsUpdateFailed')) },
     )
+  }
+
+  function setRegistrationMode(mode: RegistrationMode) {
+    if (mode === registrationMode) return
+    updateInstance.mutate(
+      { registrationMode: mode },
+      { onError: (error) => notify.error(getUserErrorNotification(error, 'settings.instanceSettingsUpdateFailed')) },
+    )
+  }
+
+  const modeLabels: Record<RegistrationMode, string> = {
+    closed: _('admin.registrationModeClosed'),
+    invite: _('admin.registrationModeInvite'),
+    open: _('admin.registrationModeOpen'),
+  }
+  const modeHints: Record<RegistrationMode, string> = {
+    closed: _('admin.registrationModeClosedHint'),
+    invite: _('admin.registrationModeInviteHint'),
+    open: _('admin.registrationModeOpenHint'),
   }
 
   return (
@@ -46,13 +70,39 @@ export default function InstanceSettingsSection() {
       title={_('admin.instanceSettings')}
       bodyClassName="divide-y divide-stone-100 dark:divide-stone-800/80"
     >
-      <ToggleRow
-        label={_('admin.allowRegistration')}
-        hint={_('admin.allowRegistrationHint')}
-        checked={instance.allowRegistration}
-        disabled={updateInstance.isPending}
-        onChange={(v) => toggle('allowRegistration', v)}
-      />
+      <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('admin.registrationMode')}</p>
+          <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{modeHints[registrationMode]}</p>
+        </div>
+        <div
+          role="radiogroup"
+          aria-label={_('admin.registrationMode')}
+          className="inline-flex shrink-0 rounded-xl border border-stone-200 bg-stone-50 p-0.5 dark:border-stone-700 dark:bg-stone-800/60"
+        >
+          {REGISTRATION_MODES.map((mode) => {
+            const active = registrationMode === mode
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                disabled={updateInstance.isPending}
+                onClick={() => setRegistrationMode(mode)}
+                className={cn(
+                  'rounded-lg px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50',
+                  active
+                    ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-700 dark:text-stone-100'
+                    : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200',
+                )}
+              >
+                {modeLabels[mode]}
+              </button>
+            )
+          })}
+        </div>
+      </div>
       <ToggleRow
         label={_('admin.allowGuestAccess')}
         hint={_('admin.allowGuestAccessHint')}

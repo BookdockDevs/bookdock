@@ -39,7 +39,15 @@ function renderRoot(queryClient = new QueryClient({ defaultOptions: { queries: {
   )
 }
 
-const INITIALIZED: InstanceInfoRes = { initialized: true, allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: 104857600 }
+const INITIALIZED: InstanceInfoRes = {
+  initialized: true,
+  registrationMode: 'closed',
+  allowRegistration: false,
+  allowGuestAccess: false,
+  uploadMaxBytes: 104857600,
+  allowUserCreateLibrary: true,
+  allowUserUpload: true,
+}
 
 describe('RootComponent guard', () => {
   beforeEach(() => {
@@ -197,6 +205,15 @@ describe('RootComponent guard', () => {
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith({ to: '/login' })
     })
+  })
+
+  it('allows /register in invite registration mode even without open registration', async () => {
+    currentPath = '/register'
+    mockApi({ instance: { ...INITIALIZED, registrationMode: 'invite', allowRegistration: false } })
+    renderRoot()
+
+    await waitFor(() => expect(screen.getByTestId('outlet')).toBeInTheDocument())
+    expect(navigateMock).not.toHaveBeenCalledWith({ to: '/login' })
   })
 
   it('shows a retryable error when instance information cannot be loaded', async () => {

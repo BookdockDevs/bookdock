@@ -12,6 +12,7 @@ export const config = Object.freeze({
   avatarMaxBytes: env.AVATAR_UPLOAD_MAX_BYTES,
   personalSourceMaxBytes: env.PERSONAL_SOURCE_UPLOAD_MAX_BYTES,
   authRpm: env.AUTH_RPM,
+  trustedProxies: env.TRUSTED_PROXIES,
   launcherNonce: env.BOOKDOCK_LAUNCHER_NONCE,
   storageDriver: env.STORAGE_DRIVER,
   logLevel: env.LOG_LEVEL,

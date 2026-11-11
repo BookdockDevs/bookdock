@@ -18,10 +18,27 @@ vi.mock('@/features/auth/hooks', () => ({
   useInstanceInfo: vi.fn(),
 }))
 
-function mockHooks({ mutateAsync, allowRegistration = false }: { mutateAsync: ReturnType<typeof vi.fn>; allowRegistration?: boolean }) {
+function mockHooks({
+  mutateAsync,
+  allowRegistration = false,
+  registrationMode,
+  allowGuestAccess = false,
+}: {
+  mutateAsync: ReturnType<typeof vi.fn>
+  allowRegistration?: boolean
+  registrationMode?: 'closed' | 'invite' | 'open'
+  allowGuestAccess?: boolean
+}) {
   ;(useLogin as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
   ;(useInstanceInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { data: { initialized: true, allowRegistration, allowGuestAccess: false } },
+    data: {
+      data: {
+        initialized: true,
+        registrationMode: registrationMode ?? (allowRegistration ? 'open' : 'closed'),
+        allowRegistration,
+        allowGuestAccess,
+      },
+    },
   })
 }
 
@@ -148,5 +165,19 @@ describe('Login', () => {
     mockHooks({ mutateAsync: vi.fn(), allowRegistration: false })
     render(<Login />)
     expect(screen.queryByText('auth.registerAccount')).not.toBeInTheDocument()
+    expect(screen.queryByText('auth.registerWithInvite')).not.toBeInTheDocument()
+  })
+
+  it('shows invite registration link when registration mode is invite', () => {
+    mockHooks({ mutateAsync: vi.fn(), registrationMode: 'invite', allowRegistration: false })
+    render(<Login />)
+    expect(screen.getByText('auth.registerWithInvite')).toBeInTheDocument()
+  })
+
+  it('offers guest shortcut when allowGuestAccess is enabled and navigates home on click', () => {
+    mockHooks({ mutateAsync: vi.fn(), allowGuestAccess: true })
+    render(<Login />)
+    fireEvent.click(screen.getByRole('button', { name: 'auth.continueAsGuest' }))
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/' })
   })
 })

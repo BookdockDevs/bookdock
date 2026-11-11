@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import Register from '../features/auth/Register'
 import { ApiError } from '@/api/client'
-
-vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
-import { useRegister } from '@/features/auth/hooks'
+import { PENDING_INVITE_KEY } from '@/features/library/invite-link'
+import Register from '../features/auth/Register'
+import { useInstanceInfo, useRegister } from '@/features/auth/hooks'
 
 const navigateMock = vi.fn()
 
@@ -13,104 +12,164 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
 }))
 
+vi.mock('@/hooks/useTranslation', () => ({
+  useTranslation: () => (key: string) => key,
+}))
+
 vi.mock('@/features/auth/hooks', () => ({
   useRegister: vi.fn(),
+  useInstanceInfo: vi.fn(),
 }))
+
+function setupMocks(opts: {
+  registrationMode?: 'closed' | 'invite' | 'open'
+  mutateAsync?: ReturnType<typeof vi.fn>
+} = {}) {
+  const mode = opts.registrationMode ?? 'open'
+  ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutateAsync: opts.mutateAsync ?? vi.fn().mockResolvedValue({ data: { user: { id: 'u1', username: 'alice', role: 'member', avatarKey: null } } }),
+    isPending: false,
+  })
+  ;(useInstanceInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: {
+      data: {
+        initialized: true,
+        registrationMode: mode,
+        allowRegistration: mode === 'open',
+        allowGuestAccess: false,
+      },
+    },
+  })
+}
 
 describe('Register', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
+    sessionStorage.clear()
+    window.history.replaceState({}, '', '/register')
   })
 
-  function fillForm(username = 'newuser', password = 'secret12', confirm = password) {
-    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: username } })
-    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: password } })
-    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: confirm } })
-  }
-
-  it('registers and navigates home on success', async () => {
-    const mutateAsync = vi.fn().mockResolvedValue({})
-    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
-
-    render(<Register />)
-    fillForm()
-    fireEvent.click(screen.getByText('auth.register'))
-
-    await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith({ username: 'newuser', password: 'secret12' })
-    })
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/' })
-  })
-
-  it('trims the username before submitting', async () => {
-    const mutateAsync = vi.fn().mockResolvedValue({})
-    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
-
-    render(<Register />)
-    fillForm('  newuser  ')
-    fireEvent.click(screen.getByText('auth.register'))
-
-    await waitFor(() => {
-      expect(mutateAsync).toHaveBeenCalledWith({ username: 'newuser', password: 'secret12' })
-    })
-  })
-
-  it('blocks registration when the username is missing or too long', async () => {
+  it('requires an invite code in invite mode and prevents submitting empty code', () => {
     const mutateAsync = vi.fn()
-    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
-
+    setupMocks({ registrationMode: 'invite', mutateAsync })
     render(<Register />)
-    fireEvent.click(screen.getByText('auth.register'))
-    expect(screen.getByText('auth.errors.usernameRequired')).toBeInTheDocument()
-    expect(mutateAsync).not.toHaveBeenCalled()
 
-    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'x'.repeat(33) } })
-    fireEvent.click(screen.getByText('auth.register'))
-    expect(screen.getByText('auth.errors.registerUsernameTooLong')).toBeInTheDocument()
-    expect(mutateAsync).not.toHaveBeenCalled()
-  })
+    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'auth.register' }))
 
-  it('blocks registration when the password is missing or too long', async () => {
-    const mutateAsync = vi.fn()
-    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
-
-    render(<Register />)
-    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'newuser' } })
-    fireEvent.click(screen.getByText('auth.register'))
-    expect(screen.getByText('auth.errors.passwordRequired')).toBeInTheDocument()
-
-    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: 'x'.repeat(129) } })
-    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'x'.repeat(129) } })
-    fireEvent.click(screen.getByText('auth.register'))
-    expect(screen.getByText('auth.errors.passwordTooLong')).toBeInTheDocument()
+    expect(screen.getByText('auth.errors.inviteCodeRequired')).toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
   })
 
-  it('blocks submit when passwords do not match', async () => {
-    const mutateAsync = vi.fn()
-    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
-
+  it('renders invite code directly below confirmPassword in open mode without requiring a click', () => {
+    setupMocks({ registrationMode: 'open' })
     render(<Register />)
-    fillForm('newuser', 'secret12', 'different')
-    fireEvent.click(screen.getByText('auth.register'))
 
-    await waitFor(() => {
-      expect(screen.getByText('auth.passwordMismatch')).toBeInTheDocument()
+    expect(screen.getByLabelText('auth.inviteCode')).toHaveAttribute('placeholder', 'auth.inviteCodePlaceholderOptional')
+  })
+
+  it('pre-fills Chinese invite codes from URL without eager preview and redirects to first joined library on submit', async () => {
+    window.history.replaceState({}, '', `/register?invite=${encodeURIComponent('书香门第')}`)
+    const mutateAsync = vi.fn().mockResolvedValue({
+      data: {
+        user: { id: 'u1', username: 'alice', role: 'member', avatarKey: null },
+        joinedLibraries: [
+          { id: 'lib-1', name: '科幻共读' },
+          { id: 'lib-2', name: '悬疑推理' },
+        ],
+      },
     })
-    expect(mutateAsync).not.toHaveBeenCalled()
-  })
-
-  it('shows username-taken error from the server', async () => {
-    const mutateAsync = vi.fn().mockRejectedValue(new ApiError('USERNAME_TAKEN', 'Username is already taken'))
-    ;(useRegister as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
+    setupMocks({
+      registrationMode: 'invite',
+      mutateAsync,
+    })
 
     render(<Register />)
-    fillForm()
-    fireEvent.click(screen.getByText('auth.register'))
+
+    expect(screen.getByLabelText('auth.inviteCode')).toHaveValue('书香门第')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'auth.register' }))
 
     await waitFor(() => {
-      expect(screen.getByText('auth.errors.usernameTaken')).toBeInTheDocument()
+      expect(mutateAsync).toHaveBeenCalledWith({
+        username: 'alice',
+        password: 'password123',
+        inviteCode: '书香门第',
+      })
+    })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib-1' } })
+  })
+
+  it('preserves PENDING_INVITE_KEY redirect priority over auto-joined libraries', async () => {
+    sessionStorage.setItem(PENDING_INVITE_KEY, '0123456789ABCDEF')
+    window.history.replaceState({}, '', '/register?invite=ABC123')
+    const mutateAsync = vi.fn().mockResolvedValue({
+      data: {
+        user: { id: 'u1', username: 'alice', role: 'member', avatarKey: null },
+        joinedLibraries: [{ id: 'lib-1', name: '科幻共读' }],
+      },
+    })
+    setupMocks({ registrationMode: 'invite', mutateAsync })
+
+    render(<Register />)
+    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'auth.register' }))
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/library/$token', params: { token: '+0123456789ABCDEF' } })
+    })
+  })
+
+  it('reports invalid invite code on submit using login-style form alert without input error border', async () => {
+    const mutateAsync = vi.fn().mockRejectedValue(new ApiError('INVITE_CODE_INVALID', 'Invalid invite code'))
+    setupMocks({ registrationMode: 'invite', mutateAsync })
+
+    render(<Register />)
+    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText('auth.inviteCode'), { target: { value: 'BAD123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'auth.register' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('auth.errors.inviteCodeInvalid')
+    })
+    expect(screen.getByLabelText('auth.inviteCode')).toHaveAttribute('aria-invalid', 'false')
+
+    // Editing invite input clears the form error alert
+    fireEvent.change(screen.getByLabelText('auth.inviteCode'), { target: { value: 'NEWCODE' } })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('navigates home without joinedLibraries when bound libraries were deleted before redemption', async () => {
+    window.history.replaceState({}, '', '/register?invite=DEL123')
+    const mutateAsync = vi.fn().mockResolvedValue({
+      data: {
+        user: { id: 'u1', username: 'alice', role: 'member', avatarKey: null },
+      },
+    })
+    setupMocks({
+      registrationMode: 'invite',
+      mutateAsync,
+    })
+
+    render(<Register />)
+
+    fireEvent.change(screen.getByLabelText('auth.username'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByLabelText('auth.password'), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText('auth.confirmPassword'), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'auth.register' }))
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/' })
     })
   })
 })

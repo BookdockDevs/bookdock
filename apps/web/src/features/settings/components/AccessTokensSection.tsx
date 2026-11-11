@@ -95,10 +95,7 @@ export default function AccessTokensSection() {
             ))}
           </div>
         ) : tokens.length === 0 ? (
-          <SettingsEmptyState>
-            <p className="font-medium text-stone-700 dark:text-stone-300">{_('settings.tokensEmpty')}</p>
-            <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{_('settings.tokensEmptyDesc')}</p>
-          </SettingsEmptyState>
+          <SettingsEmptyState>{_('settings.tokensEmpty')}</SettingsEmptyState>
         ) : (
           <div className="flex flex-col gap-3 pt-1">
             {tokens.map((token) => {

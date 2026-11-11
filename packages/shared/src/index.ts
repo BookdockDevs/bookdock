@@ -1,10 +1,51 @@
-export type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, SortField, ReadStatus } from './constants'
+export type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, RegistrationMode, SortField, ReadStatus } from './constants'
 export { metadataConfigUpdateSchema, metadataConnectionTestSchema, metadataCoverSchema, metadataDetailSchema, metadataProviderSchema, metadataProviderIdSchema, metadataSearchSchema, parsePersonalProvider, personalProviderPattern } from './metadata-lookup'
 export type { MetadataCandidate, MetadataConfiguration, MetadataProvider, MetadataProviderId, MetadataSearchResponse, WeReadSearchScope } from './metadata-lookup'
 export { personalMetadataCandidateSchema, personalMetadataFieldsSchema, personalSourceGitHubInstallSchema, personalMetadataSourceManifestSchema } from './personal-metadata-source'
 export type { PersonalMetadataCandidate, PersonalMetadataFields, PersonalMetadataSourceManifest, PersonalMetadataSourceView } from './personal-metadata-source'
 export { BOOKDOCK_BUILD_INFO } from './build-info'
-export { ANNOTATION_MAX_TEXT_LENGTH, BOOKMARK_CONTEXT_MAX_LENGTH, AI_CORE_SYSTEM_PROMPT, AI_CORE_TOOL_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, BOOK_FORMATS, CONTENT_EDITOR_MAX_ITEMS, CONTENT_EDITOR_MAX_REQUEST_BYTES, CONTENT_EDITOR_MAX_TEXT_CHARS, COVER_PALETTE_IDS, compareReleaseVersions, normalizeAiToolName, normalizeUsername, parseReleaseVersion, READ_STATUSES, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername, SORT_FIELDS } from './constants'
+export {
+  ANNOTATION_MAX_TEXT_LENGTH,
+  BOOKMARK_CONTEXT_MAX_LENGTH,
+  AI_CORE_SYSTEM_PROMPT,
+  AI_CORE_TOOL_SYSTEM_PROMPT,
+  AI_DEFAULT_ASSISTANT_MODE_PROMPT,
+  AI_DEFAULT_READING_SCOPE,
+  AI_MAX_ASSISTANT_MODES,
+  AI_MAX_CHAT_PROMPT_CHARS,
+  AI_MAX_CHAPTER_REFERENCES,
+  AI_MAX_CONTEXT_CHARS,
+  AI_MAX_INDEX_CORPUS_CHARS,
+  AI_READING_SCOPES,
+  AI_TOOL_NAMES,
+  AUTH_PASSWORD_MAX_LENGTH,
+  AUTH_PASSWORD_MIN_LENGTH,
+  AUTH_REGISTER_USERNAME_MAX_LENGTH,
+  AUTH_USERNAME_MAX_LENGTH,
+  BOOK_FORMATS,
+  CONTENT_EDITOR_MAX_ITEMS,
+  CONTENT_EDITOR_MAX_REQUEST_BYTES,
+  CONTENT_EDITOR_MAX_TEXT_CHARS,
+  COVER_PALETTE_IDS,
+  INSTANCE_INVITE_CODE_ALPHABET,
+  INSTANCE_INVITE_CODE_MAX_LENGTH,
+  INSTANCE_INVITE_CODE_MIN_LENGTH,
+  INSTANCE_INVITE_CODE_PATTERN,
+  INSTANCE_INVITE_LABEL_MAX_LENGTH,
+  INSTANCE_INVITE_RANDOM_LENGTH,
+  REGISTRATION_MODES,
+  compareReleaseVersions,
+  isValidInstanceInviteCode,
+  normalizeAiToolName,
+  normalizeInstanceInviteCode,
+  normalizeUsername,
+  parseReleaseVersion,
+  READ_STATUSES,
+  PAGINATION,
+  RELEASE_VERSION_PATTERN,
+  sanitizeUsername,
+  SORT_FIELDS,
+} from './constants'
 export { UPDATE_PHASES, LIBRARY_SORT_MODES, BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, RECENTLY_READ_STYLES, SELECTION_TOOLBAR_ACTION_KEYS, DEFAULT_SELECTION_TOOLBAR_ORDER, SIDEBAR_MODULES } from './contract'
 export type { SelectionToolbarActionKey } from './contract'
 export type { SidebarModule } from './contract'
@@ -85,6 +126,10 @@ export type {
   UpdateInstanceReq,
   RegisterReq,
   RegisterRes,
+  InstanceInviteStatus,
+  InstanceInviteLibraryRef,
+  InstanceInviteRes,
+  CreateInstanceInviteReq,
   ChangePasswordReq,
   AdminUserRes,
   UpdateUserReq,
@@ -305,7 +350,10 @@ export {
   editorEpubSaveSchema,
   setupSchema,
   setupRequiredSchema,
+  registrationModeSchema,
+  instanceInviteCodeSchema,
   registerSchema,
+  createInstanceInviteSchema,
   changePasswordSchema,
   updateUsernameSchema,
   updateBioSchema,

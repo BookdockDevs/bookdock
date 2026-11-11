@@ -127,7 +127,8 @@ function RemoteRootComponent() {
       navigate({ to: '/login' })
       return
     }
-    if (pathname === '/register' && !instance.allowRegistration) {
+    const registrationMode = instance.registrationMode ?? (instance.allowRegistration ? 'open' : 'closed')
+    if (pathname === '/register' && registrationMode === 'closed') {
       navigate({ to: '/login' })
       return
     }
@@ -208,8 +209,9 @@ function RemoteRootComponent() {
     if (!instance.initialized) {
       ready = pathname === '/setup'
     } else if (isPublic) {
+      const registrationMode = instance.registrationMode ?? (instance.allowRegistration ? 'open' : 'closed')
       ready = pathname !== '/setup'
-        && !(pathname === '/register' && !instance.allowRegistration)
+        && !(pathname === '/register' && registrationMode === 'closed')
         && !(pathname === '/login' && (meQuery.isPending || meQuery.isFetching || (meQuery.data && meQuery.data.data.guest !== true)))
     } else if (meQuery.isPending || meQuery.isFetching) {
       ready = false

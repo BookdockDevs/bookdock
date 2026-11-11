@@ -17,6 +17,7 @@ export const BOOK_STATE_PROGRESS_TAG = '0051_book_state_progress'
 // 0058/0059 synthetic timestamps are owned by the personal-source ledger
 // reconciler; reading imports take the next slot after that band.
 export const READING_IMPORTS_TAG = '0060_reading_imports'
+export const INSTANCE_INVITES_TAG = '0061_instance_invites'
 
 /** Guarded revert of 0060_reading_imports for legacy-fixture tests that reset
  * the migration watermark and re-run the chain from an earlier point. Every
@@ -209,7 +210,7 @@ export function migrateBeforeBookRetirementIncluding(
   includeTags: string[],
 ) {
   // Older partial fixtures lack book_reviews, so stage only the archive/annotation portion there.
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG])
   migrateWithTagFilter(
     db,
     options,

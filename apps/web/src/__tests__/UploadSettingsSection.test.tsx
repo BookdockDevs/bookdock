@@ -25,7 +25,15 @@ function renderSection(uploadMaxBytes: number) {
   vi.mocked(apiPatch).mockClear()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClient.setQueryData(['auth', 'instance'], {
-    data: { initialized: true, allowRegistration: false, allowGuestAccess: false, uploadMaxBytes } satisfies InstanceInfoRes,
+    data: {
+      initialized: true,
+      registrationMode: 'closed',
+      allowRegistration: false,
+      allowGuestAccess: false,
+      uploadMaxBytes,
+      allowUserCreateLibrary: true,
+      allowUserUpload: true,
+    } satisfies InstanceInfoRes,
   })
   return render(
     <QueryClientProvider client={queryClient}>

@@ -5,7 +5,9 @@ import type {
   AccountRes,
   AdminUserRes,
   ChangePasswordReq,
+  CreateInstanceInviteReq,
   InstanceInfoRes,
+  InstanceInviteRes,
   LoginReq,
   LoginRes,
   RegisterReq,
@@ -23,6 +25,7 @@ import { invalidateActivityQueries } from '@/features/activity/hooks'
 export const INSTANCE_QUERY_KEY = ['auth', 'instance'] as const
 export const ME_QUERY_KEY = ['auth', 'me'] as const
 export const ADMIN_USERS_QUERY_KEY = ['admin', 'users'] as const
+export const INSTANCE_INVITES_QUERY_KEY = ['admin', 'invites'] as const
 
 export function useInstanceInfo(options: { enabled?: boolean } = {}) {
   return useQuery({
@@ -54,6 +57,39 @@ export function useRegister() {
     onSuccess: async (res) => {
       setAuth(res.data.user)
       await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
+      if (res.data.joinedLibraries && res.data.joinedLibraries.length > 0) {
+        await queryClient.invalidateQueries({ queryKey: ['libraries'] })
+      }
+    },
+  })
+}
+
+export function useInstanceInvites(enabled = true) {
+  return useQuery({
+    queryKey: INSTANCE_INVITES_QUERY_KEY,
+    queryFn: () => apiGet<{ data: InstanceInviteRes[] }>('/auth/invites'),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
+  })
+}
+
+export function useCreateInstanceInvite() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateInstanceInviteReq) => apiPost<{ data: InstanceInviteRes }>('/auth/invites', body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: INSTANCE_INVITES_QUERY_KEY })
+    },
+  })
+}
+
+export function useDeleteInstanceInvite() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => apiDelete<{ data: { id: string } }>(`/auth/invites/${id}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: INSTANCE_INVITES_QUERY_KEY })
     },
   })
 }

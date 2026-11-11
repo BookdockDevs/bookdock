@@ -414,6 +414,13 @@
       "when": 1793800000000,
       "tag": "0060_reading_imports",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1793900000000,
+      "tag": "0061_instance_invites",
+      "breakpoints": true
     }
   ]
 }

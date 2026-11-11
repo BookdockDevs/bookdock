@@ -795,6 +795,7 @@ export const libraryBookTags = sqliteTable('library_book_tags', {
 export const instance = sqliteTable('instance', {
   id: text('id').primaryKey(),
   ownerUserId: text('owner_user_id').notNull().references(() => users.id),
+  registrationMode: text('registration_mode', { enum: ['closed', 'invite', 'open'] }),
   allowRegistration: integer('allow_registration', { mode: 'boolean' }).notNull().default(false),
   allowGuestAccess: integer('allow_guest_access', { mode: 'boolean' }).notNull().default(false),
   uploadMaxBytes: integer('upload_max_bytes'),
@@ -812,6 +813,30 @@ export const instance = sqliteTable('instance', {
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 })
+
+export const instanceInvites = sqliteTable('instance_invites', {
+  id: text('id').primaryKey(),
+  code: text('code').notNull(),
+  label: text('label').notNull().default(''),
+  createdByUserId: text('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  maxUses: integer('max_uses'),
+  usedCount: integer('used_count').notNull().default(0),
+  expiresAt: integer('expires_at'),
+  revokedAt: integer('revoked_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  codeUnique: uniqueIndex('instance_invites_code_unique').on(table.code),
+  createdIdx: index('instance_invites_created_idx').on(table.createdAt),
+}))
+
+export const instanceInviteLibraries = sqliteTable('instance_invite_libraries', {
+  inviteId: text('invite_id').notNull().references(() => instanceInvites.id, { onDelete: 'cascade' }),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.inviteId, table.libraryId] }),
+  libraryIdx: index('instance_invite_libraries_library_idx').on(table.libraryId),
+}))
 
 export const storageTransferTasks = sqliteTable('storage_transfer_tasks', {
   id: text('id').primaryKey(),

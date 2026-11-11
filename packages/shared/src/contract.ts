@@ -1,6 +1,6 @@
 import type { AccessTokenDuration, AccessTokenPermission } from './access-tokens'
 import type { ContentFile } from './content-file'
-import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus } from './constants'
+import type { AiReadingScope, AiToolName, BookFormat, CoverPaletteId, ReadStatus, RegistrationMode } from './constants'
 import type { ErrorCode } from './errors'
 import type { BookSourceInfo, HiddenReason, HiddenVia, LibraryVersionKind } from './library'
 import type { AnnotationStyle, AnnotationType, TocRulePattern, ReplacementMatchType, ReplacementScope, ViewSettings } from './domain'
@@ -287,6 +287,8 @@ export interface AccountRes {
 
 export interface InstanceInfoRes {
   initialized: boolean
+  registrationMode: RegistrationMode
+  /** Derived from `registrationMode === 'open'` for read compatibility. */
   allowRegistration: boolean
   allowGuestAccess: boolean
   uploadMaxBytes: number
@@ -295,6 +297,8 @@ export interface InstanceInfoRes {
 }
 
 export interface UpdateInstanceReq {
+  registrationMode?: RegistrationMode
+  /** Legacy alias mapped into `registrationMode` (`true` -> `'open'`, `false` -> `'closed'`). */
   allowRegistration?: boolean
   allowGuestAccess?: boolean
   uploadMaxBytes?: number
@@ -305,6 +309,7 @@ export interface UpdateInstanceReq {
 export interface RegisterReq {
   username: string
   password: string
+  inviteCode?: string
 }
 
 export interface RegisterRes {
@@ -315,6 +320,37 @@ export interface RegisterRes {
     avatarKey: string | null
     privateLibraryId?: string
   }
+  joinedLibraries?: {
+    id: string
+    name: string
+  }[]
+}
+
+export type InstanceInviteStatus = 'active' | 'exhausted' | 'expired'
+
+export interface InstanceInviteLibraryRef {
+  id: string
+  name: string
+}
+
+export interface InstanceInviteRes {
+  id: string
+  code: string
+  label: string
+  autoJoinLibraries: InstanceInviteLibraryRef[]
+  maxUses: number | null
+  usedCount: number
+  expiresAt: number | null
+  createdAt: number
+  status: InstanceInviteStatus
+}
+
+export interface CreateInstanceInviteReq {
+  code?: string
+  label?: string
+  autoJoinLibraryIds?: string[]
+  maxUses?: number | null
+  expiresAt?: number | null
 }
 
 export interface ChangePasswordReq {

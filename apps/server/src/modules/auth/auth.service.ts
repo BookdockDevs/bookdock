@@ -1,18 +1,35 @@
-import { and, eq, lt } from 'drizzle-orm'
-import { ensurePrivateLibrary } from '../libraries/library-access'
+import { randomInt } from 'node:crypto'
 
-import { normalizeUsername } from '@bookdock/shared'
+import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm'
 
-import type { AccountRes, InstanceInfoRes, UpdateInstanceReq } from '@bookdock/shared'
+import {
+  INSTANCE_INVITE_CODE_ALPHABET,
+  INSTANCE_INVITE_RANDOM_LENGTH,
+  isValidInstanceInviteCode,
+  normalizeInstanceInviteCode,
+  normalizeUsername,
+} from '@bookdock/shared'
+
+import type {
+  AccountRes,
+  CreateInstanceInviteReq,
+  InstanceInfoRes,
+  InstanceInviteLibraryRef,
+  InstanceInviteRes,
+  InstanceInviteStatus,
+  RegistrationMode,
+  UpdateInstanceReq,
+} from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { instance, libraries, sessions, users } from '../../db/schema'
+import { instance, instanceInviteLibraries, instanceInvites, libraries, sessions, users } from '../../db/schema'
 import { config } from '../../config'
-import { AppError } from '../../middleware/error'
+import { AppError, isUniqueViolation } from '../../middleware/error'
 import { invalidateUserCache } from '../../middleware/auth.guard'
 import { createId } from '../../lib/id'
 import { hashPassword, verifyPassword } from '../../lib/password'
 import { generateSessionToken, hashSessionToken } from '../../lib/token'
+import { assertBindableSharedLibrary, attachMemberToSharedLibraryInTx, ensurePrivateLibrary } from '../libraries/library-access'
 
 /** Single-row id of the deployment record; also used by the Phase 2 seed. */
 export const INSTANCE_ID = 'instance'
@@ -26,6 +43,7 @@ export const SESSION_COOKIE_MAX_AGE = 30 * 24 * 60 * 60
 const INSTANCE_CACHE_TTL = 5_000
 
 export interface InstanceSettings {
+  registrationMode: RegistrationMode
   allowRegistration: boolean
   allowGuestAccess: boolean
   /** Owner-set upload cap override; undefined = follow the UPLOAD_MAX_BYTES env default */
@@ -34,6 +52,13 @@ export interface InstanceSettings {
   allowUserCreateLibrary: boolean
   /** Ordinary members may upload files to their private library; the instance owner always bypasses */
   allowUserUpload: boolean
+}
+
+function resolveRegistrationMode(row?: { registrationMode?: string | null; allowRegistration?: boolean } | null): RegistrationMode {
+  if (row?.registrationMode === 'closed' || row?.registrationMode === 'invite' || row?.registrationMode === 'open') {
+    return row.registrationMode
+  }
+  return row?.allowRegistration === true ? 'open' : 'closed'
 }
 
 export interface SessionIdentity {
@@ -56,7 +81,7 @@ function isUsernameUniqueConstraint(err: unknown) {
 // handles. New rows persist usernameNormalized (backfilled for old rows in
 // Phase 2); the scan below stays as the pre-insert check and the UNIQUE
 // constraints as the race backstop.
-function findUsernameCollision(db: ReturnType<typeof getDb>, username: string, exceptId?: string) {
+function findUsernameCollision(db: Pick<ReturnType<typeof getDb>, 'select'>, username: string, exceptId?: string) {
   const norm = normalizeUsername(username)
   return db
     .select({ id: users.id, username: users.username })
@@ -101,8 +126,10 @@ export function getInstanceSettings(): InstanceSettings {
   }
   const db = getDb()
   const row = db.select().from(instance).where(eq(instance.id, INSTANCE_ID)).get()
+  const registrationMode = resolveRegistrationMode(row)
   const value: InstanceSettings = {
-    allowRegistration: row?.allowRegistration === true,
+    registrationMode,
+    allowRegistration: registrationMode === 'open',
     allowGuestAccess: row?.allowGuestAccess === true,
     uploadMaxBytes: typeof row?.uploadMaxBytes === 'number' && row.uploadMaxBytes > 0 ? row.uploadMaxBytes : undefined,
     // Absent on pre-0029 rows (and in tests seeding the row by hand): an
@@ -129,7 +156,15 @@ export function updateInstanceSettings(patch: UpdateInstanceReq): InstanceInfoRe
   const row = db.select({ id: instance.id }).from(instance).where(eq(instance.id, INSTANCE_ID)).get()
   if (!row) throw new AppError('FORBIDDEN', 'Instance is not initialized')
   const updates: Partial<typeof instance.$inferInsert> = { updatedAt: Date.now() }
-  if (patch.allowRegistration !== undefined) updates.allowRegistration = patch.allowRegistration
+  const nextRegistrationMode = patch.registrationMode !== undefined
+    ? patch.registrationMode
+    : patch.allowRegistration !== undefined
+      ? (patch.allowRegistration ? 'open' : 'closed')
+      : undefined
+  if (nextRegistrationMode !== undefined) {
+    updates.registrationMode = nextRegistrationMode
+    updates.allowRegistration = nextRegistrationMode === 'open'
+  }
   if (patch.allowGuestAccess !== undefined) updates.allowGuestAccess = patch.allowGuestAccess
   if (patch.uploadMaxBytes !== undefined) updates.uploadMaxBytes = patch.uploadMaxBytes
   if (patch.allowUserCreateLibrary !== undefined) updates.allowUserCreateLibrary = patch.allowUserCreateLibrary
@@ -262,18 +297,224 @@ export async function login(username: string, password: string) {
   return { token, user: toAuthPayload(user) }
 }
 
-export async function register(username: string, password: string) {
-  if (!getInstanceSettings().allowRegistration) {
+function resolveInviteStatus(
+  row: { expiresAt: number | null; maxUses: number | null; usedCount: number },
+  now: number,
+): InstanceInviteStatus {
+  if (row.expiresAt !== null && row.expiresAt <= now) return 'expired'
+  if (row.maxUses !== null && row.usedCount >= row.maxUses) return 'exhausted'
+  return 'active'
+}
+
+function toInstanceInviteRes(
+  row: typeof instanceInvites.$inferSelect,
+  autoJoinLibraries: InstanceInviteLibraryRef[],
+  now: number,
+): InstanceInviteRes {
+  return {
+    id: row.id,
+    code: row.code,
+    label: row.label,
+    autoJoinLibraries,
+    maxUses: row.maxUses ?? null,
+    usedCount: row.usedCount,
+    expiresAt: row.expiresAt ?? null,
+    createdAt: row.createdAt,
+    status: resolveInviteStatus(row, now),
+  }
+}
+
+function loadInviteLibrariesMap(
+  db: Pick<ReturnType<typeof getDb>, 'select'>,
+  inviteIds: string[],
+): Map<string, InstanceInviteLibraryRef[]> {
+  const map = new Map<string, InstanceInviteLibraryRef[]>()
+  if (inviteIds.length === 0) return map
+  const rows = db
+    .select({
+      inviteId: instanceInviteLibraries.inviteId,
+      libraryId: libraries.id,
+      libraryName: libraries.name,
+      libraryType: libraries.type,
+    })
+    .from(instanceInviteLibraries)
+    .innerJoin(libraries, eq(instanceInviteLibraries.libraryId, libraries.id))
+    .where(inArray(instanceInviteLibraries.inviteId, inviteIds))
+    .all()
+  for (const row of rows) {
+    if (row.libraryType !== 'shared') continue
+    const list = map.get(row.inviteId) ?? []
+    list.push({ id: row.libraryId, name: row.libraryName })
+    map.set(row.inviteId, list)
+  }
+  return map
+}
+
+function generateInstanceInviteCode(): string {
+  let code = ''
+  for (let i = 0; i < INSTANCE_INVITE_RANDOM_LENGTH; i += 1) {
+    code += INSTANCE_INVITE_CODE_ALPHABET[randomInt(INSTANCE_INVITE_CODE_ALPHABET.length)]
+  }
+  return code
+}
+
+export function listInstanceInvites(actorId: string): InstanceInviteRes[] {
+  if (!isInstanceOwner(actorId)) throw new AppError('FORBIDDEN', 'Owner only')
+  const db = getDb()
+  const now = Date.now()
+  const rows = db
+    .select()
+    .from(instanceInvites)
+    .where(isNull(instanceInvites.revokedAt))
+    .orderBy(desc(instanceInvites.createdAt))
+    .all()
+  const librariesByInvite = loadInviteLibrariesMap(db, rows.map((r) => r.id))
+  return rows.map((row) => toInstanceInviteRes(row, librariesByInvite.get(row.id) ?? [], now))
+}
+
+export function createInstanceInvite(actorId: string, req: CreateInstanceInviteReq): InstanceInviteRes {
+  if (!isInstanceOwner(actorId)) throw new AppError('FORBIDDEN', 'Owner only')
+  const db = getDb()
+  const now = Date.now()
+  if (req.expiresAt != null && req.expiresAt <= now) {
+    throw new AppError('VALIDATION_ERROR', 'Expiration time must be in the future')
+  }
+  const uniqueLibraryIds = [...new Set(req.autoJoinLibraryIds ?? [])]
+  const boundLibraries = uniqueLibraryIds.map((libraryId) => assertBindableSharedLibrary(actorId, libraryId))
+  const label = req.label?.trim() ?? ''
+  const maxUses = req.maxUses ?? null
+  const expiresAt = req.expiresAt ?? null
+
+  const insertWithCode = (code: string): InstanceInviteRes => {
+    const id = createId('inv')
+    const created = db.transaction((tx) => {
+      tx.insert(instanceInvites).values({
+        id,
+        code,
+        label,
+        createdByUserId: actorId,
+        maxUses,
+        usedCount: 0,
+        expiresAt,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      }).run()
+      if (boundLibraries.length > 0) {
+        tx.insert(instanceInviteLibraries).values(
+          boundLibraries.map((lib) => ({ inviteId: id, libraryId: lib.id })),
+        ).run()
+      }
+      const row = tx.select().from(instanceInvites).where(eq(instanceInvites.id, id)).get()
+      if (!row) throw new AppError('INTERNAL_ERROR', 'Failed to create invite')
+      return row
+    })
+    return toInstanceInviteRes(created, boundLibraries, now)
+  }
+
+  if (req.code) {
+    try {
+      return insertWithCode(normalizeInstanceInviteCode(req.code))
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw new AppError('INVITE_CODE_TAKEN', 'Invite code already exists')
+      }
+      throw err
+    }
+  }
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      return insertWithCode(generateInstanceInviteCode())
+    } catch (err) {
+      if (isUniqueViolation(err)) continue
+      throw err
+    }
+  }
+  throw new AppError('INTERNAL_ERROR', 'Failed to allocate unique invite code')
+}
+
+export function deleteInstanceInvite(actorId: string, inviteId: string): { id: string } {
+  if (!isInstanceOwner(actorId)) throw new AppError('FORBIDDEN', 'Owner only')
+  const db = getDb()
+  const existing = db.select({ id: instanceInvites.id }).from(instanceInvites).where(eq(instanceInvites.id, inviteId)).get()
+  if (!existing) throw new AppError('INVITE_NOT_FOUND', 'Invite not found')
+  db.delete(instanceInvites).where(eq(instanceInvites.id, inviteId)).run()
+  return { id: existing.id }
+}
+
+export async function register(username: string, password: string, rawInviteCode?: string) {
+  const preSettings = getInstanceSettings()
+  if (preSettings.registrationMode === 'closed') {
     throw new AppError('REGISTRATION_DISABLED', 'Registration is disabled')
   }
+  const inviteCode = rawInviteCode ? normalizeInstanceInviteCode(rawInviteCode) : undefined
+  if (preSettings.registrationMode === 'invite' && !inviteCode) {
+    throw new AppError('INVITE_CODE_REQUIRED', 'Invite code is required')
+  }
+  if (inviteCode && !isValidInstanceInviteCode(inviteCode)) {
+    throw new AppError('INVITE_CODE_INVALID', 'Invalid or expired invite code')
+  }
   const db = getDb()
+  if (inviteCode) {
+    const preNow = Date.now()
+    const activeInvite = db
+      .select({ id: instanceInvites.id })
+      .from(instanceInvites)
+      .where(and(
+        eq(instanceInvites.code, inviteCode),
+        isNull(instanceInvites.revokedAt),
+        or(isNull(instanceInvites.expiresAt), gt(instanceInvites.expiresAt, preNow)),
+        or(isNull(instanceInvites.maxUses), lt(instanceInvites.usedCount, instanceInvites.maxUses)),
+      ))
+      .get()
+    if (!activeInvite) {
+      throw new AppError('INVITE_CODE_INVALID', 'Invalid or expired invite code')
+    }
+  }
   if (findUsernameCollision(db, username)) {
     throw new AppError('USERNAME_TAKEN', 'Username is already taken')
   }
   const id = createId('user')
-  const now = Date.now()
   const hash = await hashPassword(password)
-  db.transaction((tx) => {
+  const joinedLibraries = db.transaction((tx) => {
+    const now = Date.now()
+    const instRow = tx.select({
+      registrationMode: instance.registrationMode,
+      allowRegistration: instance.allowRegistration,
+    }).from(instance).where(eq(instance.id, INSTANCE_ID)).get()
+    const txMode = resolveRegistrationMode(instRow)
+    if (txMode === 'closed') {
+      throw new AppError('REGISTRATION_DISABLED', 'Registration is disabled')
+    }
+    if (txMode === 'invite' && !inviteCode) {
+      throw new AppError('INVITE_CODE_REQUIRED', 'Invite code is required')
+    }
+
+    let consumedInviteId: string | null = null
+    if (inviteCode) {
+      const consumed = tx.update(instanceInvites)
+        .set({
+          usedCount: sql`${instanceInvites.usedCount} + 1`,
+          updatedAt: now,
+        })
+        .where(and(
+          eq(instanceInvites.code, inviteCode),
+          isNull(instanceInvites.revokedAt),
+          or(isNull(instanceInvites.expiresAt), gt(instanceInvites.expiresAt, now)),
+          or(isNull(instanceInvites.maxUses), lt(instanceInvites.usedCount, instanceInvites.maxUses)),
+        ))
+        .returning({ id: instanceInvites.id })
+        .get()
+      if (!consumed) {
+        throw new AppError('INVITE_CODE_INVALID', 'Invalid or expired invite code')
+      }
+      consumedInviteId = consumed.id
+    }
+
+    if (findUsernameCollision(tx, username)) {
+      throw new AppError('USERNAME_TAKEN', 'Username is already taken')
+    }
     try {
       tx.insert(users).values({
         id,
@@ -288,11 +529,27 @@ export async function register(username: string, password: string) {
       throw err
     }
     createPrivateLibrary(tx, id)
+    if (!consumedInviteId) return []
+    const targetLibraries = tx
+      .select({ libraryId: instanceInviteLibraries.libraryId })
+      .from(instanceInviteLibraries)
+      .where(eq(instanceInviteLibraries.inviteId, consumedInviteId))
+      .all()
+    const joined: InstanceInviteLibraryRef[] = []
+    for (const target of targetLibraries) {
+      const attached = attachMemberToSharedLibraryInTx(tx, id, target.libraryId, now)
+      if (attached) joined.push(attached)
+    }
+    return joined
   })
   const user = db.select().from(users).where(eq(users.id, id)).get()
   if (!user) throw new AppError('INTERNAL_ERROR', 'Failed to create user')
   const { token } = createSession(user.id)
-  return { token, user: toAuthPayload(user) }
+  return {
+    token,
+    user: toAuthPayload(user),
+    ...(joinedLibraries.length > 0 ? { joinedLibraries } : {}),
+  }
 }
 
 export async function changePassword(userId: string, oldPassword: string, newPassword: string) {
@@ -390,7 +647,7 @@ export async function setupUser(username: string, password: string) {
     createPrivateLibrary(tx, id)
     tx.insert(instance).values({
       id: INSTANCE_ID, ownerUserId: id,
-      allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: null,
+      registrationMode: 'closed', allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: null,
       createdAt: now, updatedAt: now,
     }).run()
     const created = tx.select().from(users).where(eq(users.id, id)).get()

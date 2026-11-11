@@ -4,7 +4,33 @@ import { isOrderedReadingRange, readingRangeShape } from './reading-range'
 
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
 import { BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, LIBRARY_SORT_MODES, RECENTLY_READ_STYLES, SELECTION_TOOLBAR_ACTION_KEYS, SIDEBAR_MODULES } from './contract'
-import { ANNOTATION_MAX_TEXT_LENGTH, BOOKMARK_CONTEXT_MAX_LENGTH, AI_MAX_ASSISTANT_MODES, AI_MAX_CHAT_PROMPT_CHARS, AI_MAX_CHAPTER_REFERENCES, AI_MAX_CONTEXT_CHARS, AI_MAX_INDEX_CORPUS_CHARS, AI_READING_SCOPES, AI_TOOL_NAMES, AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, AUTH_REGISTER_USERNAME_MAX_LENGTH, AUTH_USERNAME_MAX_LENGTH, CONTENT_EDITOR_MAX_ITEMS, CONTENT_EDITOR_MAX_TEXT_CHARS, COVER_PALETTE_IDS, PAGINATION, RELEASE_VERSION_PATTERN, sanitizeUsername } from './constants'
+import {
+  ANNOTATION_MAX_TEXT_LENGTH,
+  BOOKMARK_CONTEXT_MAX_LENGTH,
+  AI_MAX_ASSISTANT_MODES,
+  AI_MAX_CHAT_PROMPT_CHARS,
+  AI_MAX_CHAPTER_REFERENCES,
+  AI_MAX_CONTEXT_CHARS,
+  AI_MAX_INDEX_CORPUS_CHARS,
+  AI_READING_SCOPES,
+  AI_TOOL_NAMES,
+  AUTH_PASSWORD_MAX_LENGTH,
+  AUTH_PASSWORD_MIN_LENGTH,
+  AUTH_REGISTER_USERNAME_MAX_LENGTH,
+  AUTH_USERNAME_MAX_LENGTH,
+  CONTENT_EDITOR_MAX_ITEMS,
+  CONTENT_EDITOR_MAX_TEXT_CHARS,
+  COVER_PALETTE_IDS,
+  INSTANCE_INVITE_CODE_MAX_LENGTH,
+  INSTANCE_INVITE_CODE_MIN_LENGTH,
+  INSTANCE_INVITE_CODE_PATTERN,
+  INSTANCE_INVITE_LABEL_MAX_LENGTH,
+  normalizeInstanceInviteCode,
+  PAGINATION,
+  REGISTRATION_MODES,
+  RELEASE_VERSION_PATTERN,
+  sanitizeUsername,
+} from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
 import { authorListSchema } from './library'
 import { contentFileAssociationSchema } from './content-file'
@@ -721,9 +747,37 @@ export const setupRequiredSchema = z.object({
   required: z.boolean(),
 })
 
+export const registrationModeSchema = z.enum(REGISTRATION_MODES)
+
+export const instanceInviteCodeSchema = z.string()
+  .transform(normalizeInstanceInviteCode)
+  .pipe(
+    z.string()
+      .min(INSTANCE_INVITE_CODE_MIN_LENGTH)
+      .max(INSTANCE_INVITE_CODE_MAX_LENGTH)
+      .regex(INSTANCE_INVITE_CODE_PATTERN, 'Invalid invite code format'),
+  )
+
 export const registerSchema = z.object({
   username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH)),
   password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH),
+  inviteCode: z.string().max(128).optional().transform((value) => {
+    if (typeof value !== 'string') return undefined
+    const normalized = normalizeInstanceInviteCode(value)
+    return normalized.length > 0 ? normalized : undefined
+  }),
+})
+
+export const createInstanceInviteSchema = z.object({
+  code: z.string().optional().transform((value) => {
+    if (typeof value !== 'string') return undefined
+    const normalized = normalizeInstanceInviteCode(value)
+    return normalized.length > 0 ? normalized : undefined
+  }).pipe(instanceInviteCodeSchema.optional()),
+  label: z.string().trim().max(INSTANCE_INVITE_LABEL_MAX_LENGTH).optional(),
+  autoJoinLibraryIds: z.array(z.string().trim().min(1).max(128)).max(50).optional(),
+  maxUses: z.number().int().min(1).max(1_000_000).nullable().optional(),
+  expiresAt: z.number().int().positive().nullable().optional(),
 })
 
 export const changePasswordSchema = z.object({
@@ -763,6 +817,7 @@ export const updateTimezoneSchema = z.object({
 })
 
 export const updateInstanceSchema = z.object({
+  registrationMode: registrationModeSchema.optional(),
   allowRegistration: z.boolean().optional(),
   allowGuestAccess: z.boolean().optional(),
   // Effective book-upload cap in bytes. Range keeps the value sane (below 5MB
@@ -770,7 +825,14 @@ export const updateInstanceSchema = z.object({
   uploadMaxBytes: z.number().int().min(5 * 1024 * 1024).max(10 * 1024 * 1024 * 1024).optional(),
   allowUserCreateLibrary: z.boolean().optional(),
   allowUserUpload: z.boolean().optional(),
-})
+}).refine(
+  (value) => !(
+    value.registrationMode !== undefined
+    && value.allowRegistration !== undefined
+    && (value.registrationMode === 'open') !== value.allowRegistration
+  ),
+  { message: 'registrationMode and allowRegistration conflict' },
+)
 
 export const updateUserSchema = z.object({
   disabled: z.boolean().optional(),
