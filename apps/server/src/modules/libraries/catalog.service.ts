@@ -25,7 +25,7 @@ import { getStorage } from '../../storage'
 import { getParser } from '../../formats/registry'
 import { blobKey, coverThumbnailKey, detectImageExtension, generateCoverThumbnail } from '../../lib/cover'
 import { sha256 } from '../../lib/hash'
-import { assertLibraryBrowsable, deleteOrphanedBookVersions, getLibraryTrashSettings, getOwnsSourceVersionIds, getMaintainableVersionLinkIds as getMaintainableLinkIds, isLibraryManager, isLibraryTrashEnabled, requireLibraryManager, requireLibraryOwner, assertCanContribute, resolveContributorRelation } from './library-access'
+import { assertLibraryBrowsable, deleteOrphanedBookVersions, getLibraryTrashSettings, getOwnsSourceVersionIds, getMaintainableVersionLinkIds as getMaintainableLinkIds, isLibraryManager, isLibraryTrashEnabled, requireLibraryManager, requireLibraryOwner, assertCanContribute, assertMutableContent, resolveContributorRelation } from './library-access'
 import {
   isWorkEffectivelyHidden,
   classifyWorkHidden,
@@ -243,7 +243,7 @@ function getCollectedVersionIds(actorId: string, versionIds: string[]) {
 function getMaintainableVersionLinkIds(
   actorId: string,
   libraryId: string,
-  links: Array<{ id: string; userId: string | null }>,
+  links: Array<{ id: string; userId: string | null; kind: string }>,
 ): Set<string> {
   if (links.length === 0) return new Set<string>()
   const db = getDb()
@@ -1186,6 +1186,7 @@ export async function resetCatalogVersionMetadata(
   await requireLibraryManager(actorId, libraryId)
   getWork(libraryId, libraryBookId)
   const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
+  assertMutableContent(link.kind)
   const latestRevision = db.select().from(contentRevisions)
     .where(eq(contentRevisions.bookVersionId, link.bookVersionId))
     .orderBy(desc(contentRevisions.revisionNo)).all().at(0)

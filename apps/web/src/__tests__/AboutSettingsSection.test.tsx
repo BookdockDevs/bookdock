@@ -7,6 +7,7 @@ import type { SystemInfoRes, SystemUpdateCheckRes, UpdateStatusRes } from '@book
 import { ApiError, apiDelete, apiGet, apiPost } from '@/api/client'
 import AboutSettingsSection from '@/features/settings/components/AboutSettingsSection'
 import i18n from '@/i18n/i18n'
+import { useAuthStore } from '@/stores/auth.store'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/api/client')>()
@@ -45,6 +46,30 @@ describe('AboutSettingsSection in-app update', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     vi.clearAllMocks()
+    useAuthStore.setState({ user: { id: 'owner', username: 'owner', role: 'owner' } })
+  })
+
+  it.each(['member', null])('keeps About visible without update controls or requests for %s', async (role) => {
+    useAuthStore.setState({ user: role ? { id: 'member', username: 'member', role } : null })
+    renderSection([{ phase: 'download', outcome: 'active', currentVersion: CURRENT, targetVersion: TARGET }])
+
+    expect(screen.getByRole('button', { name: `v${CURRENT}` })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /项目地址/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '检查更新' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '立即更新' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看更新状态' })).not.toBeInTheDocument()
+    expect(screen.queryByText(i18n.t('settings.aboutUpdateAvailable', { version: TARGET }))).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(vi.mocked(apiGet).mock.calls.every(([path]) => path === '/system/info')).toBe(true)
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(apiDelete).not.toHaveBeenCalled()
+  })
+
+  it('allows the owner to check for updates', async () => {
+    renderSection([])
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }))
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/system/update-check'))
+    expect(apiGet).toHaveBeenCalledWith('/system/update/status')
   })
 
   it('shows the 4-step pipeline before starting and reports the applied version', async () => {

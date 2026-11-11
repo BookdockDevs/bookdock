@@ -121,7 +121,9 @@ function extractToken(authHeader: string | undefined, cookieToken: string | unde
 function rejectGuestMutation(c: Context): Response | null {
   const user = c.get('user')
   const isGuest = !user
-  if (isGuest && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
+  const readerRead = c.req.method === 'POST' && c.req.query('reader') === '1'
+    && /^\/api\/v1\/books\/[^/]+\/reader\/(?:search|texts)$/.test(c.req.path)
+  if (isGuest && !readerRead && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions are read-only' } }, 403)
   }
   return null

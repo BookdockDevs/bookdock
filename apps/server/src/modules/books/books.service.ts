@@ -648,6 +648,14 @@ export async function cleanupStagedCover(coverKey: string): Promise<void> {
   }
 }
 
+export async function assertBookUploadAllowed(userId: string, libraryId?: string): Promise<void> {
+  if (libraryId) {
+    const library = await assertCanContribute(userId, libraryId)
+    if (library.type === 'shared') return
+  }
+  assertUserUploadAllowed(userId)
+}
+
 export async function uploadBook(
   userId: string,
   file: File,
@@ -808,7 +816,7 @@ export async function uploadCatalogBook(
 ) {
   const db = getDb()
   // Owner/admin only by default; members when the library opened uploads.
-  await assertCanContribute(userId, libraryId)
+  await assertBookUploadAllowed(userId, libraryId)
   const libraryType = db.select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()?.type
   const tagIds = [...new Set(opts?.tagIds ?? [])]
   if (opts?.shelfId) {
@@ -841,11 +849,12 @@ export async function uploadCatalogBook(
     if (!target) throw new AppError('LIBRARY_BOOK_NOT_FOUND')
   }
 
+  const canManageExistingWorkTags = tagIds.length > 0 && await isLibraryManager(userId, libraryId)
   const versionId = createId('book')
   const buffer = Buffer.from(await file.arrayBuffer())
   const duplicate = findPersonalVersionByBlob(libraryId, blobKey(sha256(buffer), '.epub'), file.name.toLowerCase().endsWith('.txt') ? 'txt' : 'epub')
   if (duplicate) {
-    if (tagIds.length > 0) {
+    if (canManageExistingWorkTags) {
       db.insert(libraryBookTags)
         .values(tagIds.map((tagId) => ({ libraryBookId: duplicate.libraryBookId, tagId })))
         .onConflictDoNothing()
@@ -911,7 +920,7 @@ export async function uploadCatalogBook(
               operationId: opts?.operationId, occurredAt: now,
             })
       }
-      if (tagIds.length > 0) {
+      if (tagIds.length > 0 && (!targetLibraryBookId || canManageExistingWorkTags)) {
         tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
       }
       if (opts?.categoryId) {

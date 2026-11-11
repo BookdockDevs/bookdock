@@ -23,6 +23,12 @@ All notable changes to Bookdock are documented here.
 ### Fixed
 
 - Saving settings no longer dims segmented selectors temporarily, including registration options when changing member permissions or guest access. Saving still blocks repeat clicks, while options unavailable due to permissions or other restrictions remain dimmed.
+- Prevent collected shared books from modifying their source content through private-library maintenance endpoints, including append, chapter splitting, TXT/EPUB editor saves, and metadata restoration. Collected entries remain read-only references.
+- Enforce the private-library upload switch consistently for direct uploads, explicit library targets, external clients, and cloud imports, while retaining the instance owner's upload access.
+- Keep existing-work tag changes restricted to library owners and admins when uploading duplicate files or adding versions. Ordinary members can still assign tags to new works.
+- Allow cloud imports into shared libraries independently of the private-library upload switch, checking the target library's contributor permissions before downloading files.
+- Restore guest full-book search and batch text loading for readable books while continuing to enforce current library visibility, guest readability, and content revision checks.
+- Restrict update checks, update controls, and update-status requests in About to the instance owner. Ordinary members can still view version and project information, and update checks are also protected on the server.
 
 ## [0.8.1] - 2026-11-12
 
@@ -1168,6 +1174,12 @@ All notable changes to Bookdock are documented here.
 #### 修复
 
 - 修复设置保存期间分段选择控件短暂变淡的问题，包括修改成员权限或游客访问时注册策略跟随闪烁；保存中仍阻止重复点击，因权限或其他限制而不可用的选项继续置灰。
+- 修复通过私库中的收藏条目维护共享源正文的问题，覆盖追加正文、重新分章、TXT／EPUB 编辑保存及元数据恢复；收藏条目始终保持只读引用。
+- 统一私库上传开关在直接上传、指定书库上传、外部客户端及网盘导入中的权限检查，实例所有者仍可上传。
+- 修复重复上传文件或新增版本时可绕过已有作品标签权限的问题；已有作品的标签仍由书库所有者和管理员管理，普通成员仍可为新建作品选择标签。
+- 修复私库上传开关误拦截共享书库网盘导入的问题；共享书库按自身投稿权限独立授权，并在下载文件前检查目标书库权限。
+- 恢复访客对可读书籍的全文搜索和批量正文加载，同时继续检查当前书库可见性、访客可读权限及内容版本。
+- 将「关于」中的检查更新、更新操作和更新状态请求限制为实例所有者，并补齐检查更新接口的后端权限；普通成员仍可查看版本和项目信息。
 
 ### [0.8.1] - 2026-11-12
 

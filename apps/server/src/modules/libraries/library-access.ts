@@ -496,8 +496,9 @@ export function canContributeToVersion(
   actorId: string,
   library: ContributorLibrary,
   relation: ContributorRelation,
-  link: { userId: string | null } | null,
+  link: { userId: string | null; kind: string } | null,
 ): boolean {
+  if (link?.kind === 'shared') return false
   if (!canContributeToLibrary(actorId, library, relation)) return false
   if (relation === 'owner' || relation === 'admin') return true
   return link === null || link.userId === actorId
@@ -511,7 +512,7 @@ export function getMaintainableVersionLinkIds(
   actorId: string,
   library: ContributorLibrary,
   relation: ContributorRelation,
-  links: Array<{ id: string; userId: string | null }>,
+  links: Array<{ id: string; userId: string | null; kind: string }>,
 ): Set<string> {
   const maintainable = new Set<string>()
   for (const link of links) {
@@ -520,7 +521,7 @@ export function getMaintainableVersionLinkIds(
   return maintainable
 }
 
-export async function assertCanContribute(actorId: string, libraryId: string, versionLinkId?: string): Promise<void> {
+export async function assertCanContribute(actorId: string, libraryId: string, versionLinkId?: string): Promise<typeof libraries.$inferSelect> {
   const db = getDb()
   const library = db.select().from(libraries).where(eq(libraries.id, libraryId)).get()
   if (!library) throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')
@@ -535,10 +536,12 @@ export async function assertCanContribute(actorId: string, libraryId: string, ve
         .where(and(eq(libraryMemberships.libraryId, libraryId), eq(libraryMemberships.userId, actorId))).get()?.role
   const relation = resolveContributorRelation(library.userId, actorId, memberRole)
   const link = versionLinkId
-    ? db.select({ userId: libraryBookVersions.userId }).from(libraryBookVersions)
+    ? db.select({ userId: libraryBookVersions.userId, kind: libraryBookVersions.kind }).from(libraryBookVersions)
         .where(and(eq(libraryBookVersions.id, versionLinkId), eq(libraryBookVersions.libraryId, libraryId))).get() ?? null
     : null
-  if (canContributeToVersion(actorId, library, relation, link)) return
+  if (versionLinkId && !link) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+  if (link) assertMutableContent(link.kind)
+  if (canContributeToVersion(actorId, library, relation, link)) return library
   // One verdict, two refusals: a closed lane reads as "this library is not
   // yours to curate", a member reaching someone else's version reads only as
   // "that version is not yours".

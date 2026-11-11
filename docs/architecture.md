@@ -946,6 +946,25 @@ basis change.
 
 ### Shared-library publishing boundary
 
+Content maintenance is authorized against both the library relation and the
+version link kind. A collected `kind: shared` entry is read-only even in the
+reader's own private library; library-scoped append, TOC, editor and metadata
+restoration endpoints cannot use it to revise the shared source. Missing version
+links are rejected rather than treated as new-upload permission checks.
+
+The instance `allowUserUpload` switch governs uploads into private libraries
+only. Explicit private targets, implicit private uploads and cloud imports use
+the same policy; the instance owner bypasses it. Shared-library uploads and
+cloud imports follow the target library's contributor permissions independently.
+Uploads do not grant metadata rights over existing works: merging tags into an
+existing work, whether adding a version or reusing a duplicate, requires
+library-manager permission. A member may still assign tags to a new work.
+
+Anonymous sessions remain read-only. The POST reader search and text-batch
+endpoints are read operations, explicitly allowed through the mutation guard
+only with `reader=1`; they still enforce the current guest, library, listing,
+visibility and revision checks before serving content.
+
 Publishing is a snapshot action, not a transfer. An owner or admin of a shared
 library may publish one private A entry from their own private library. The
 private entry remains intact, while the target library receives a new
@@ -1805,7 +1824,7 @@ A private work may carry `meta.pendingUserDataDeletion`, set when the owner move
 | Prefix | Module | Key endpoints |
 |---|---|---|
 | `/api/v1/health` | — | `GET /` |
-| `/api/v1/system` | system | `GET /info` `GET /update-check` (behind the auth guard; build/version links plus a cached GitHub latest-release check), `GET /update/status` `POST /update` (owner-only, in-app update per ADR-25) |
+| `/api/v1/system` | system | `GET /info` (behind the auth guard; build/version links), `GET /update-check` (owner-only cached GitHub latest-release check), `GET /update/status` `POST /update` (owner-only, in-app update per ADR-25). About remains available to members; update controls and status queries are owner-only. |
 | `/api/v1/auth` | auth | `GET /instance` `PATCH /instance`(owner) `GET /invites`(owner) `POST /invites`(owner) `POST /invites/:id/revoke`(owner) `GET /invites/preview`(public, non-consuming, rate-limited) `POST /login` `POST /logout` `POST /setup` `GET /setup-required` `POST /register` `POST /password` `POST /username` `GET /me` `DELETE /account`(self-delete, password re-verified) |
 | `/api/v1/legado` | books / Legado adapter | `GET /source.json` and `GET /login` (public source definition/login bridge); `POST /access-key` (authenticated generation/rotation); `GET /search` `GET /explore/config` `GET /explore/all` `GET /explore/libraries/:id` `GET /explore/libraries/:id/categories/:categoryId` `GET /explore/libraries/:id/tags/:tagId` `GET /books/:id` `GET /books/:id/cover` `GET`+`HEAD /books/:id/resource` (audio/video honor byte ranges; images return full resources) `GET /books/:id/chapters` `GET /books/:id/chapters/:index` (authenticated or scoped-key, read-only projections for Reading/Legado; search and discovery take `scope=joined\|private`) |
 | `/api/v1/ext` | ext / external automation API | `GET /libraries` (each row carries its role, write access, `memberCount`, `workCount` and full shelf/category/tag taxonomy) `GET /books` `GET /books/:versionId` `GET`+`HEAD /books/:versionId/file` `POST /books` (optional `libraryId`, `categoryId`, and private `shelfId`) `DELETE /books/:versionId` (token-permissioned: one permission per endpoint; list spans the private and joined shared libraries) |

@@ -21,8 +21,8 @@ import { S3Client } from '../../lib/s3'
 import { WebDavClient } from '../../lib/webdav'
 import { AppError } from '../../middleware/error'
 import { resetStorage } from '../../storage'
-import { assertUserUploadAllowed, getInstanceSettings } from '../auth/auth.service'
-import { uploadBook, uploadCatalogBook } from '../books/books.service'
+import { getInstanceSettings } from '../auth/auth.service'
+import { assertBookUploadAllowed, uploadBook, uploadCatalogBook } from '../books/books.service'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
 import { decryptPassword, encryptPassword } from './webdav.service'
 
@@ -299,7 +299,7 @@ export async function importStorageConnectionBooks(
   id: string,
   req: WebDavImportReq,
 ): Promise<WebDavImportRes> {
-  assertUserUploadAllowed(userId)
+  await assertBookUploadAllowed(userId, req.libraryId)
 
   const client = getRemoteClientForConnection(userId, id)
   const instance = getInstanceSettings()

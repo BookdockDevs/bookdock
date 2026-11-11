@@ -70,12 +70,13 @@ export default function AboutSettingsSection() {
   const { data, isPending, isError, isFetching, refetch } = useSystemInfo()
   const updateCheck = useSystemUpdateCheck()
   const user = useAuthStore((s) => s.user)
+  const isOwner = user?.role === 'owner'
   const [updateTarget, setUpdateTarget] = useState<string | null>(null)
   const [updateStartedAt, setUpdateStartedAt] = useState(0)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [copiedVersion, setCopiedVersion] = useState(false)
   const [copiedDiagnostics, setCopiedDiagnostics] = useState(false)
-  const updateStatus = useSystemUpdateStatus()
+  const updateStatus = useSystemUpdateStatus(isOwner)
   const startUpdate = useStartSystemUpdate()
   const cancelUpdate = useCancelSystemUpdate()
 
@@ -218,31 +219,33 @@ export default function AboutSettingsSection() {
                 )}
               </button>
 
-              <button
-                type="button"
-                onClick={() => void updateCheck.refetch()}
-                disabled={updateCheck.isFetching}
-                className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-white px-3 py-1 text-xs font-medium text-stone-600 shadow-2xs transition-all hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:cursor-wait disabled:opacity-60 dark:border-stone-700/80 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
-              >
-                {updateCheck.isFetching ? (
-                  <svg className="h-3 w-3 animate-spin text-stone-500" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 text-stone-400">
-                    <path d="M21 2v6h-6" />
-                    <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-                    <path d="M3 22v-6h6" />
-                    <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-                  </svg>
-                )}
-                <span>{updateCheck.isFetching ? _('settings.aboutCheckingUpdate') : _('settings.aboutCheckUpdate')}</span>
-              </button>
+              {isOwner && (
+                <button
+                  type="button"
+                  onClick={() => void updateCheck.refetch()}
+                  disabled={updateCheck.isFetching}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-stone-200/80 bg-white px-3 py-1 text-xs font-medium text-stone-600 shadow-2xs transition-all hover:bg-stone-50 hover:text-stone-900 active:scale-95 disabled:cursor-wait disabled:opacity-60 dark:border-stone-700/80 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 dark:hover:text-stone-100"
+                >
+                  {updateCheck.isFetching ? (
+                    <svg className="h-3 w-3 animate-spin text-stone-500" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 text-stone-400">
+                      <path d="M21 2v6h-6" />
+                      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                      <path d="M3 22v-6h6" />
+                      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                    </svg>
+                  )}
+                  <span>{updateCheck.isFetching ? _('settings.aboutCheckingUpdate') : _('settings.aboutCheckUpdate')}</span>
+                </button>
+              )}
             </div>
 
             {/* Update Check Feedback */}
-            {update && (
+            {isOwner && update && (
               <div className="mt-4 flex justify-center">
                 {update.status === 'up-to-date' && (
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-stone-100/80 px-3 py-1 text-xs font-medium text-stone-600 ring-1 ring-stone-200/60 dark:bg-stone-800/80 dark:text-stone-300 dark:ring-stone-700/60">
@@ -393,24 +396,26 @@ export default function AboutSettingsSection() {
             </button>
           </div>
 
-          <SystemUpdateDialog
-            isOpen={isModalOpen}
-            onClose={handleCloseUpdateDialog}
-            currentVersion={info.version}
-            targetVersion={taskTarget ?? ''}
-            publishedAt={update?.publishedAt}
-            status={status}
-            statusUnavailable={updateStatus.isError}
-            statusRefreshing={updateStatus.isFetching}
-            isCancelling={cancelUpdate.isPending}
-            cancelError={cancelUpdate.isError}
-            isStarting={startUpdate.isPending}
-            startErrorKey={startError?.key}
-            updateStartedAt={updateStartedAt}
-            onStartUpdate={handleStartUpdate}
-            onRetry={handleRetryUpdate}
-            onCancel={() => status?.progressId && cancelUpdate.mutate(status.progressId)}
-          />
+          {isOwner && (
+            <SystemUpdateDialog
+              isOpen={isModalOpen}
+              onClose={handleCloseUpdateDialog}
+              currentVersion={info.version}
+              targetVersion={taskTarget ?? ''}
+              publishedAt={update?.publishedAt}
+              status={status}
+              statusUnavailable={updateStatus.isError}
+              statusRefreshing={updateStatus.isFetching}
+              isCancelling={cancelUpdate.isPending}
+              cancelError={cancelUpdate.isError}
+              isStarting={startUpdate.isPending}
+              startErrorKey={startError?.key}
+              updateStartedAt={updateStartedAt}
+              onStartUpdate={handleStartUpdate}
+              onRetry={handleRetryUpdate}
+              onCancel={() => status?.progressId && cancelUpdate.mutate(status.progressId)}
+            />
+          )}
         </>
       )}
     </section>

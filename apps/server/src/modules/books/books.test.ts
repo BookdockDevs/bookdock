@@ -2282,7 +2282,7 @@ describe('editor TXT save', () => {
     const versionLinkId = createId('lbv')
     db.insert(schema.libraries).values({ id: libraryId, userId: ownerId, type: 'shared', name: 'Shared', description: '', visibility: 'public', allowMemberUpload: true, createdAt: now, updatedAt: now }).run()
     db.insert(schema.libraryBooks).values({ id: libraryBookId, libraryId, userId: ownerId, title: 'Shared', author: '', createdAt: now, updatedAt: now }).run()
-    db.insert(schema.libraryBookVersions).values({ id: versionLinkId, libraryId, libraryBookId, bookVersionId: book.id, userId: otherId, kind: 'shared', status: 'published', createdAt: now, updatedAt: now }).run()
+    db.insert(schema.libraryBookVersions).values({ id: versionLinkId, libraryId, libraryBookId, bookVersionId: book.id, userId: otherId, kind: 'personal', status: 'published', createdAt: now, updatedAt: now }).run()
     db.insert(schema.libraryMemberships).values({ id: createId('lbm'), libraryId, userId: otherId, role: 'member', createdAt: now, updatedAt: now }).run()
     const target = { libraryId, libraryBookId, versionLinkId }
     await expect(getEditorAccess(otherId, book.id, target)).resolves.toHaveProperty('revisionId')

@@ -17,8 +17,8 @@ import { createId } from '../../lib/id'
 import { encryptPassword, decryptPassword } from '../../lib/secrets'
 import { WebDavClient } from '../../lib/webdav'
 import { AppError } from '../../middleware/error'
-import { assertUserUploadAllowed, getInstanceSettings } from '../auth/auth.service'
-import { uploadBook, uploadCatalogBook } from '../books/books.service'
+import { getInstanceSettings } from '../auth/auth.service'
+import { assertBookUploadAllowed, uploadBook, uploadCatalogBook } from '../books/books.service'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
 
 const WEBDAV_SETTINGS_KEY = 'webdav'
@@ -133,8 +133,7 @@ export async function listWebDavFiles(userId: string, path = '/'): Promise<WebDa
 }
 
 export async function importWebDavBooks(userId: string, req: WebDavImportReq): Promise<WebDavImportRes> {
-  // Hard upload gate
-  assertUserUploadAllowed(userId)
+  await assertBookUploadAllowed(userId, req.libraryId)
 
   const client = getClientForUser(userId)
   const instance = getInstanceSettings()
