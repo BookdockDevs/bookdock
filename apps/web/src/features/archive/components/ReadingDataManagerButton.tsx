@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { ArchiveDataExport, ClientReadingLedgerClear, ReadingImportScope } from '@bookdock/shared'
+import type { ArchiveDataExport, ArchiveDeleteRes, ClientReadingLedgerClear, ReadingImportScope } from '@bookdock/shared'
 
 import { deviceCatalogOperations } from '@/features/local-library/catalog'
 import { localRecordId } from '@/features/local-library/id'
@@ -28,6 +28,7 @@ import {
   type ArchiveExportFormat,
 } from '../lib/data-export-file'
 import ImportLocatorDialog from './ImportLocatorDialog'
+import { readSavedChoice, writeSavedChoice } from './archive-helpers'
 import { useLocalArchiveBook } from '../hooks'
 import ReadingImportDialog from './ReadingImportDialog'
 
@@ -39,6 +40,57 @@ interface ReadingDataManagerButtonProps {
 }
 
 type ManagerTab = 'import' | 'export' | 'manage'
+
+const MANAGER_TAB_STORAGE_KEY = 'bd-reading-data-manager-tab'
+const EXPORT_SCOPE_STORAGE_KEY = 'bd-reading-data-export-scope'
+const EXPORT_FORMAT_STORAGE_KEY = 'bd-reading-data-export-format'
+const DELETE_SCOPE_STORAGE_KEY = 'bd-reading-data-delete-scope'
+
+const MANAGER_TABS: readonly ManagerTab[] = ['import', 'export', 'manage']
+const READING_SCOPES: readonly ReadingImportScope[] = ['all', 'time', 'notes']
+const EXPORT_FORMATS: readonly ArchiveExportFormat[] = ['json', 'markdown', 'text', 'csv']
+
+const DELETE_COPY_BY_SCOPE: Record<ReadingImportScope, {
+  titleKey: string
+  titleFallback: string
+  descKey: string
+  descFallback: string
+  actionKey: string
+  actionFallback: string
+  confirmKey: string
+  confirmFallback: string
+}> = {
+  all: {
+    titleKey: 'readingData.deleteAllTitle',
+    titleFallback: '删除本书阅读档案',
+    descKey: 'readingData.deleteAllDesc',
+    descFallback: '永久删除此档案的时长、统计与全部笔记，书库书籍与阅读位置会保留。',
+    actionKey: 'readingData.deleteAllAction',
+    actionFallback: '删除档案',
+    confirmKey: 'readingData.deleteAllConfirm',
+    confirmFallback: '确定永久删除此档案的全部阅读时长、统计与笔记吗？书库书籍与阅读位置会保留，此操作无法撤销。',
+  },
+  time: {
+    titleKey: 'readingData.deleteTimeTitle',
+    titleFallback: '删除本书阅读时长',
+    descKey: 'readingData.deleteTimeDesc',
+    descFallback: '永久删除此档案的时长、轮次与统计数据，笔记与阅读位置会保留。',
+    actionKey: 'readingData.deleteTimeAction',
+    actionFallback: '删除时长',
+    confirmKey: 'readingData.deleteTimeConfirm',
+    confirmFallback: '确定永久删除此档案的阅读时长、轮次与统计数据吗？笔记与阅读位置会保留，此操作无法撤销。',
+  },
+  notes: {
+    titleKey: 'readingData.deleteNotesTitle',
+    titleFallback: '删除本书阅读笔记',
+    descKey: 'readingData.deleteNotesDesc',
+    descFallback: '永久删除此档案的笔记数据，阅读时长与阅读位置会保留。',
+    actionKey: 'readingData.deleteNotesAction',
+    actionFallback: '删除笔记',
+    confirmKey: 'readingData.deleteNotesConfirm',
+    confirmFallback: '确定永久删除此档案的全部笔记吗？阅读时长与阅读位置会保留，此操作无法撤销。',
+  },
+}
 
 function download(name: string, content: string, type: string) {
   const url = URL.createObjectURL(new Blob([content], { type }))
@@ -65,18 +117,24 @@ export default function ReadingDataManagerButton({
   const account = useAuthStore((state) => state.user)
   const username = account?.username
   const [modalOpen, setModalOpen] = useState(false)
-  // The vault answers whether the selected book is on this device, so the
-  // opening tab follows that answer until the reader picks one.
-  const [chosenTab, setChosenTab] = useState<ManagerTab | null>(null)
-  const activeTab = chosenTab ?? (device ? 'manage' : 'import')
+  // The vault answers whether the selected book is on this device, so device
+  // books always open on 'manage'; otherwise restore the reader's last tab.
+  const [chosenTab, setChosenTab] = useState<ManagerTab | null>(() => readSavedChoice(MANAGER_TAB_STORAGE_KEY, MANAGER_TABS))
+  const rawTab = chosenTab ?? 'import'
+  const activeTab: ManagerTab = device
+    ? 'manage'
+    : (!bookId && rawTab === 'manage')
+      ? 'import'
+      : rawTab
   const [isImportSubpage, setIsImportSubpage] = useState(false)
   const [importSubpageTitle, setImportSubpageTitle] = useState<string | null>(null)
   const [importBackAction, setImportBackAction] = useState<(() => void) | null>(null)
   const [importSubpageActions, setImportSubpageActions] = useState<React.ReactNode | null>(null)
 
   // 导出相关状态
-  const [exportScope, setExportScope] = useState<ReadingImportScope>('all')
-  const [exportFormat, setExportFormat] = useState<ArchiveExportFormat>('json')
+  const [exportScope, setExportScope] = useState<ReadingImportScope>(() => readSavedChoice(EXPORT_SCOPE_STORAGE_KEY, READING_SCOPES, 'all'))
+  const [rawExportFormat, setRawExportFormat] = useState<ArchiveExportFormat>(() => readSavedChoice(EXPORT_FORMAT_STORAGE_KEY, EXPORT_FORMATS, 'json'))
+  const exportFormat = narrowArchiveExportFormat(exportScope, rawExportFormat)
   const [exportBusy, setExportBusy] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
 
@@ -85,6 +143,7 @@ export default function ReadingDataManagerButton({
   const [locatorSubpageTitle, setLocatorSubpageTitle] = useState<string | null>(null)
   const [locatorBackAction, setLocatorBackAction] = useState<(() => void) | null>(null)
   const [locatorFooter, setLocatorFooter] = useState<React.ReactNode | null>(null)
+  const [deleteScope, setDeleteScope] = useState<ReadingImportScope>(() => readSavedChoice(DELETE_SCOPE_STORAGE_KEY, READING_SCOPES, 'all'))
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [deleteConfirmBusy, setDeleteConfirmBusy] = useState(false)
   const [clearCommand, setClearCommand] = useState<ClientReadingLedgerClear | null>(null)
@@ -108,7 +167,8 @@ export default function ReadingDataManagerButton({
     },
     networkMode: 'always', enabled: Boolean(device && modalOpen && bookId), staleTime: 0,
   })
-  const deleteTitle = _('readingData.deleteArchive')
+  const deleteCopy = DELETE_COPY_BY_SCOPE[deleteScope]
+  const deleteTitle = _(deleteCopy.titleKey, { defaultValue: deleteCopy.titleFallback })
 
 
   const isSubpage = (!device && activeTab === 'import' && isImportSubpage) || (activeTab === 'manage' && isLocatorSubpage)
@@ -155,7 +215,17 @@ export default function ReadingDataManagerButton({
 
   function selectExportScope(next: ReadingImportScope) {
     setExportScope(next)
-    setExportFormat((current) => narrowArchiveExportFormat(next, current))
+    writeSavedChoice(EXPORT_SCOPE_STORAGE_KEY, next)
+  }
+
+  function selectExportFormat(next: ArchiveExportFormat) {
+    setRawExportFormat(next)
+    writeSavedChoice(EXPORT_FORMAT_STORAGE_KEY, next)
+  }
+
+  function selectDeleteScope(next: ReadingImportScope) {
+    setDeleteScope(next)
+    writeSavedChoice(DELETE_SCOPE_STORAGE_KEY, next)
   }
 
   async function handleExport() {
@@ -179,9 +249,13 @@ export default function ReadingDataManagerButton({
     }
   }
 
+  function selectTab(next: ManagerTab) {
+    setChosenTab(next)
+    writeSavedChoice(MANAGER_TAB_STORAGE_KEY, next)
+  }
+
   function handleClose() {
     setModalOpen(false)
-    setChosenTab(null)
     setIsImportSubpage(false)
     setImportSubpageTitle(null)
     setImportBackAction(null)
@@ -211,7 +285,10 @@ export default function ReadingDataManagerButton({
         aria-label={title}
         title={title}
         onClick={() => {
-          setChosenTab(null)
+          setChosenTab(readSavedChoice(MANAGER_TAB_STORAGE_KEY, MANAGER_TABS))
+          setExportScope(readSavedChoice(EXPORT_SCOPE_STORAGE_KEY, READING_SCOPES, 'all'))
+          setRawExportFormat(readSavedChoice(EXPORT_FORMAT_STORAGE_KEY, EXPORT_FORMATS, 'json'))
+          setDeleteScope(readSavedChoice(DELETE_SCOPE_STORAGE_KEY, READING_SCOPES, 'all'))
           setModalOpen(true)
         }}
         className={cn(
@@ -260,7 +337,7 @@ export default function ReadingDataManagerButton({
                   type="button"
                   role="tab"
                   aria-selected={activeTab === 'import'}
-                  onClick={() => setChosenTab('import')}
+                  onClick={() => selectTab('import')}
                   className={cn(
                     'cursor-pointer rounded-lg py-1.5 text-xs font-semibold transition-all',
                     activeTab === 'import'
@@ -274,7 +351,7 @@ export default function ReadingDataManagerButton({
                   type="button"
                   role="tab"
                   aria-selected={activeTab === 'export'}
-                  onClick={() => setChosenTab('export')}
+                  onClick={() => selectTab('export')}
                   className={cn(
                     'cursor-pointer rounded-lg py-1.5 text-xs font-semibold transition-all',
                     activeTab === 'export'
@@ -289,7 +366,7 @@ export default function ReadingDataManagerButton({
                     type="button"
                     role="tab"
                     aria-selected={activeTab === 'manage'}
-                    onClick={() => setChosenTab('manage')}
+                    onClick={() => selectTab('manage')}
                     className={cn(
                       'cursor-pointer rounded-lg py-1.5 text-xs font-semibold transition-all',
                       activeTab === 'manage'
@@ -373,7 +450,7 @@ export default function ReadingDataManagerButton({
                           type="button"
                           role="radio"
                           aria-checked={exportFormat === value}
-                          onClick={() => setExportFormat(value)}
+                          onClick={() => selectExportFormat(value)}
                           className={cn(
                             'cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-all',
                             exportFormat === value
@@ -437,7 +514,7 @@ export default function ReadingDataManagerButton({
                         {_('readingImport.locatorTitle', { defaultValue: '关联书籍' })}
                       </p>
                       <p className="mt-0.5 text-[11px] leading-relaxed text-stone-500 dark:text-stone-400">
-                        {_('readingImport.locatorHint', { defaultValue: '将此档案的笔记、书评与时长关联到书库中的书籍。' })}
+                        {_('readingImport.locatorHint', { defaultValue: '将此档案的阅读时长与笔记关联到书库中的书籍。' })}
                       </p>
                     </div>
                     <Button
@@ -452,31 +529,68 @@ export default function ReadingDataManagerButton({
 
                   {device && clearPreview.isError && <QueryErrorState isRetrying={clearPreview.isFetching} onRetry={() => void clearPreview.refetch()} />}
 
-                  {/* 2. 危险操作卡片 */}
-                  <div className="flex items-center justify-between gap-3 rounded-xl border border-red-200/60 bg-red-50/20 p-3.5 dark:border-red-950/40 dark:bg-red-950/10">
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-red-600 dark:text-red-400">
-                        {deleteTitle}
-                      </p>
-                      <p className="mt-0.5 text-[11px] leading-relaxed text-stone-500 dark:text-stone-400">
-                        {_('readingData.deleteArchiveDesc')}
-                      </p>
+                  {/* 2. 危险操作卡片（对齐导出的 全部 / 时长 / 笔记 三种范围） */}
+                  <div className="flex flex-col gap-3 rounded-xl border border-red-200/60 bg-red-50/20 p-3.5 dark:border-red-950/40 dark:bg-red-950/10">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-semibold text-red-600 dark:text-red-400">
+                        {_('readingData.deleteArchive', { defaultValue: '删除本书阅读档案' })}
+                      </span>
+                      <div
+                        role="radiogroup"
+                        aria-label={_('readingData.deleteScopeLabel', { defaultValue: '删除范围' })}
+                        className="inline-flex rounded-lg bg-red-100/70 p-0.5 dark:bg-red-950/50"
+                      >
+                        {([
+                          ['all', 'readingData.scopeAll', '全部'],
+                          ['time', 'readingData.scopeTime', '时长'],
+                          ['notes', 'readingData.scopeNotes', '笔记'],
+                        ] as const).map(([key, labelKey, fallback]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            role="radio"
+                            aria-checked={deleteScope === key}
+                            onClick={() => selectDeleteScope(key)}
+                            className={cn(
+                              'cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-all',
+                              deleteScope === key
+                                ? 'bg-white text-red-700 shadow-2xs dark:bg-stone-800 dark:text-red-300'
+                                : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200',
+                            )}
+                          >
+                            {_(labelKey, { defaultValue: fallback })}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      disabled={deleteConfirmBusy || Boolean(device && !clearPreview.isSuccess)}
-                      onClick={() => {
-                        if (device) {
-                          if (!bookId || clearPreview.data === undefined) return
-                          setClearCommand({ book: { scope: device.scope, bookId }, expectedVersion: clearPreview.data, requestId: localRecordId() })
-                        }
-                        setDeleteConfirmOpen(true)
-                      }}
-                      className="shrink-0 cursor-pointer"
-                    >
-                      {device ? deleteTitle : _('reader.sessionDelete', { defaultValue: '删除档案' })}
-                    </Button>
+
+                    <div className="h-px w-full bg-red-200/50 dark:bg-red-950/50" />
+
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="min-w-0 text-[11px] leading-relaxed text-stone-500 dark:text-stone-400">
+                        {_(deleteCopy.descKey, { defaultValue: deleteCopy.descFallback })}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={deleteConfirmBusy || Boolean(device && deleteScope !== 'notes' && !clearPreview.isSuccess)}
+                        onClick={() => {
+                          if (device) {
+                            if (!bookId || (deleteScope !== 'notes' && clearPreview.data === undefined)) return
+                            setClearCommand({
+                              book: { scope: device.scope, bookId },
+                              expectedVersion: clearPreview.data ?? 0,
+                              requestId: localRecordId(),
+                              scope: deleteScope,
+                            })
+                          }
+                          setDeleteConfirmOpen(true)
+                        }}
+                        className="shrink-0 cursor-pointer"
+                      >
+                        {_(deleteCopy.actionKey, { defaultValue: deleteCopy.actionFallback })}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )
@@ -489,8 +603,8 @@ export default function ReadingDataManagerButton({
       {deleteConfirmOpen && (
         <ConfirmDialog
           title={deleteTitle}
-          message={_('readingData.deleteArchiveConfirm')}
-          confirmLabel={device ? deleteTitle : _('reader.sessionDelete')}
+          message={_(deleteCopy.confirmKey, { defaultValue: deleteCopy.confirmFallback })}
+          confirmLabel={_(deleteCopy.actionKey, { defaultValue: deleteCopy.actionFallback })}
           errorFallback="reader.sessionActionFailed"
           confirmDisabled={deleteConfirmBusy}
           onClose={() => {
@@ -502,21 +616,37 @@ export default function ReadingDataManagerButton({
             try {
               if (device) {
                 if (!clearCommand) return
-                await device.clearReadingLedger(clearCommand)
+                const result = await device.clearBookArchive(clearCommand)
                 if (activeScope.current !== scope) return
-                void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.some((part) => typeof part === 'string' && part.startsWith('device:') && part.includes(JSON.stringify(device.scope))) })
-                setDeleteConfirmOpen(false); setClearCommand(null); handleClose()
+                const deviceScopeKey = JSON.stringify(device.scope)
+                void queryClient.invalidateQueries({
+                  predicate: (query) => query.queryKey.some((part) => typeof part === 'string' && (part.startsWith('device:') || part.startsWith('local:')) && part.includes(deviceScopeKey)),
+                })
+                void queryClient.invalidateQueries({ queryKey: ['archive'] })
+                void queryClient.invalidateQueries({ queryKey: ['local-library'] })
+                setDeleteConfirmOpen(false)
+                setClearCommand(null)
+                handleClose()
+                if (!result.remaining) onBookDeleted?.()
                 return
               }
-              await apiDelete(`/reading-records/book/${encodeURIComponent(bookId)}/ledger`)
+              const result = await apiDelete<{ data?: ArchiveDeleteRes }>(`/archive/books/${encodeURIComponent(bookId)}?scope=${deleteScope}`)
               if (activeScope.current !== scope) return
               void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
               void queryClient.invalidateQueries({ queryKey: ['archive'] })
               void queryClient.invalidateQueries({ queryKey: ['progress', bookId] })
               void queryClient.invalidateQueries({ queryKey: ['book', bookId] })
+              if (deleteScope !== 'time') {
+                void queryClient.invalidateQueries({ queryKey: ['annotations'] })
+                void queryClient.invalidateQueries({ queryKey: ['note-archive'] })
+                void queryClient.invalidateQueries({ queryKey: ['reader-ideas', bookId] })
+                void queryClient.invalidateQueries({ queryKey: ['idea-discussion'] })
+                void queryClient.invalidateQueries({ queryKey: ['reviews'] })
+                void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+              }
               setDeleteConfirmOpen(false)
               handleClose()
-              onBookDeleted?.()
+              if (result?.data?.remaining === false) onBookDeleted?.()
             } catch (error) {
               if (device && activeScope.current === scope) void clearPreview.refetch()
               throw error

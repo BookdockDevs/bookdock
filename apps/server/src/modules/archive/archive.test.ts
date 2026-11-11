@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { and, eq } from 'drizzle-orm'
@@ -6,7 +6,10 @@ import { and, eq } from 'drizzle-orm'
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
-import { exportNotes, getBookDetail, getOverview, listBooks } from './archive.service'
+import * as storage from '../../storage'
+import type { StorageDriver } from '../../storage/driver'
+import archiveRoutes from './archive.routes'
+import { deleteBookArchive, exportNotes, getBookDetail, getOverview, listBooks } from './archive.service'
 
 type TestDb = ReturnType<typeof drizzle<typeof schema>>
 
@@ -572,5 +575,227 @@ describe('archive service', () => {
     expect(all.books).toHaveLength(0)
     const single = await exportNotes(ownerId, bookOne)
     expect(single.books).toHaveLength(0)
+  })
+})
+
+describe('archive scoped deletion', () => {
+  let db: TestDb
+  const ownerId = 'user-del-owner'
+  const sharedLibraryId = 'lib-shared-del'
+  const sharedWorkId = 'work-shared-del'
+  const sharedListingId = 'listing-shared-del'
+  const bookId = 'book-del-1'
+
+  beforeEach(async () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    db = drizzle(sqlite, { schema })
+    await client.runDatabaseMigrations(db)
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    db.insert(schema.users).values({ id: ownerId, username: 'owner', createdAt: 1 }).run()
+    seedVersion(db, ownerId, bookId, 'Book One', 'Author A')
+    db.insert(schema.libraries).values({ id: sharedLibraryId, userId: ownerId, type: 'shared', name: 'Shared', visibility: 'shared', createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.libraryBooks).values({ id: sharedWorkId, libraryId: sharedLibraryId, userId: ownerId, title: 'Shared Book', author: 'Author A', createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.libraryBookVersions).values({ id: sharedListingId, libraryId: sharedLibraryId, libraryBookId: sharedWorkId, bookVersionId: bookId, kind: 'shared', createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.bookStates).values({
+      userId: ownerId, bookVersionId: bookId, cfi: 'epubcfi(/6/4!/4/2:0)', percent: 45,
+      readFraction: 0.45, readStatus: 'reading', progressData: { intervals: [[0, 0.45]] }, updatedAt: 100,
+    }).run()
+    db.insert(schema.readingArchives).values({
+      userId: ownerId, bookVersionId: bookId, title: 'Book One', author: 'Author A', format: 'epub',
+      legacyIntervals: [[0, 0.2]], legacyDaily: [{ date: '2026-10-01', durationSeconds: 120 }],
+      createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.readingImportBindings).values({
+      id: 'bind-1', userId: ownerId, source: 'weread', accountKey: 'vid:1', bookKey: 'src-1',
+      mode: 'mounted', targetBookVersionId: bookId, createdAt: 1, updatedAt: 1,
+    }).run()
+    db.insert(schema.readingRounds).values({
+      id: 'round-1', userId: ownerId, bookVersionId: bookId, ordinal: 1, status: 'reading', startedAt: 10, updatedAt: 10,
+    }).run()
+    db.insert(schema.readingSessions).values({
+      id: 'sess-1', userId: ownerId, bookId, roundId: 'round-1', source: 'auto', date: '2026-10-02',
+      durationSeconds: 300, createdAt: 10,
+    }).run()
+    db.insert(schema.readingRecords).values({
+      id: 'rec-1', userId: ownerId, bookId, date: '2026-10-02', durationSeconds: 300, createdAt: 10, updatedAt: 10,
+    }).run()
+    db.insert(schema.readingDurationFacts).values({
+      id: 'fact-1', userId: ownerId, bookVersionId: bookId, granularity: 'book_day', date: '2026-10-03',
+      durationSeconds: 180, aggregationRole: 'additive', source: 'weread', sourceNamespace: 'vid:1',
+      sourceRecordKey: 'k1', observedAt: 1,
+    }).run()
+    seedHighlight(db, ownerId, bookId, 100)
+    seedBookmark(db, ownerId, bookId, 110)
+    db.insert(schema.ideas).values({
+      id: 'idea-shared', userId: ownerId, bookVersionId: bookId, cfiRange: 'cfi-idea', text: 'q', note: 'shared note',
+      visibility: 'shared', sharedLibraryId, sourceLibraryBookVersionId: sharedListingId,
+      createdAt: 120, updatedAt: 120, deletedAt: null,
+    }).run()
+    db.insert(schema.bookReviews).values({
+      id: 'rev-shared', userId: ownerId, sourceLibraryId: sharedLibraryId, sourceLibraryBookId: sharedWorkId,
+      readBookVersionId: bookId, ratingHalves: 9, title: 'Great', body: 'Shared review',
+      visibility: 'shared', createdAt: 130, updatedAt: 130,
+    }).run()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('clears only reading time when scope is time and keeps notes, reviews, and reading position', async () => {
+    const res = await deleteBookArchive(ownerId, bookId, 'time')
+    expect(res).toEqual({ ok: true, remaining: true })
+    expect(db.select().from(schema.readingSessions).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingRecords).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingRounds).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingDurationFacts).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingArchives).all()).toHaveLength(1)
+    expect(db.select().from(schema.readingImportBindings).all()).toHaveLength(1)
+    expect(db.select().from(schema.highlights).all()).toHaveLength(1)
+    expect(db.select().from(schema.bookmarks).all()).toHaveLength(1)
+    expect(db.select().from(schema.ideas).all()).toHaveLength(1)
+    expect(db.select().from(schema.bookReviews).all()).toHaveLength(1)
+    expect(db.select().from(schema.bookStates).get()).toMatchObject({
+      cfi: 'epubcfi(/6/4!/4/2:0)',
+      readStatus: 'reading',
+      readFraction: 0,
+      progressData: { intervals: [] },
+    })
+  })
+
+  it('clears notes and shared/private reviews when scope is notes while keeping reading time', async () => {
+    const res = await deleteBookArchive(ownerId, bookId, 'notes')
+    expect(res).toEqual({ ok: true, remaining: true })
+    expect(db.select().from(schema.highlights).all()).toHaveLength(0)
+    expect(db.select().from(schema.bookmarks).all()).toHaveLength(0)
+    expect(db.select().from(schema.ideas).all()).toHaveLength(0)
+    expect(db.select().from(schema.bookReviews).all()).toHaveLength(0)
+    expect(db.select().from(schema.activityEvents).all().map((row) => row.eventType)).toEqual(['idea.deleted', 'review.deleted'])
+    expect(db.select().from(schema.readingSessions).all()).toHaveLength(1)
+    expect(db.select().from(schema.readingArchives).all()).toHaveLength(1)
+    expect(db.select().from(schema.readingImportBindings).all()).toHaveLength(1)
+    expect(db.select().from(schema.bookStates).get()).toMatchObject({
+      cfi: 'epubcfi(/6/4!/4/2:0)',
+      readStatus: 'reading',
+      readFraction: 0.45,
+    })
+
+    const thenTime = await deleteBookArchive(ownerId, bookId, 'time')
+    expect(thenTime).toEqual({ ok: true, remaining: false })
+    expect(db.select().from(schema.readingArchives).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingImportBindings).all()).toHaveLength(0)
+  })
+
+  it('removes archive snapshot and bindings when notes are deleted on a notes-only book', async () => {
+    db.delete(schema.readingSessions).run()
+    db.delete(schema.readingRecords).run()
+    db.delete(schema.readingRounds).run()
+    db.delete(schema.readingDurationFacts).run()
+    db.update(schema.readingArchives).set({ legacyIntervals: [], legacyDaily: [] }).run()
+
+    const res = await deleteBookArchive(ownerId, bookId, 'notes')
+    expect(res).toEqual({ ok: true, remaining: false })
+    expect(db.select().from(schema.readingArchives).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingImportBindings).all()).toHaveLength(0)
+  })
+
+  it('deletes both time and notes when scope is all while preserving reader position and readStatus', async () => {
+    const res = await deleteBookArchive(ownerId, bookId, 'all')
+    expect(res).toEqual({ ok: true, remaining: false })
+    expect(db.select().from(schema.readingSessions).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingRecords).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingRounds).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingDurationFacts).all()).toHaveLength(0)
+    expect(db.select().from(schema.highlights).all()).toHaveLength(0)
+    expect(db.select().from(schema.bookmarks).all()).toHaveLength(0)
+    expect(db.select().from(schema.ideas).all()).toHaveLength(0)
+    expect(db.select().from(schema.bookReviews).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingArchives).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingImportBindings).all()).toHaveLength(0)
+    expect(db.select().from(schema.bookStates).get()).toMatchObject({
+      cfi: 'epubcfi(/6/4!/4/2:0)',
+      readStatus: 'reading',
+      readFraction: 0,
+      progressData: { intervals: [] },
+    })
+  })
+
+  it('validates scope query parameter on DELETE /books/:bookVersionId route', async () => {
+    const { Hono } = await import('hono')
+    const { errorHandler } = await import('../../middleware/error')
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('*', async (c, next) => {
+      c.set('user', { id: ownerId } as never)
+      return next()
+    })
+    app.route('/', archiveRoutes)
+
+    const invalid = await app.request(`/books/${bookId}?scope=bad`, { method: 'DELETE' })
+    expect(invalid.status).toBe(400)
+
+    const valid = await app.request(`/books/${bookId}?scope=time`, { method: 'DELETE' })
+    expect(valid.status).toBe(200)
+    expect(await valid.json()).toEqual({ data: { ok: true, remaining: true } })
+  })
+
+  it('isolates archive deletion per user and returns BOOK_NOT_FOUND when archive is missing', async () => {
+    const otherId = 'user-del-other'
+    db.insert(schema.users).values({ id: otherId, username: 'other', createdAt: 1 }).run()
+    db.insert(schema.readingArchives).values({
+      userId: otherId, bookVersionId: bookId, title: 'Other Book', author: '', createdAt: 1, updatedAt: 1,
+    }).run()
+    seedHighlight(db, otherId, bookId, 200)
+
+    await expect(deleteBookArchive(ownerId, 'non-existent-book', 'all')).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
+
+    const res = await deleteBookArchive(ownerId, bookId, 'all')
+    expect(res).toEqual({ ok: true, remaining: false })
+    expect(db.select().from(schema.readingArchives).all()).toHaveLength(1)
+    expect(db.select().from(schema.readingArchives).all()[0]?.userId).toBe(otherId)
+    expect(db.select().from(schema.highlights).all()).toHaveLength(1)
+    expect(db.select().from(schema.highlights).all()[0]?.userId).toBe(otherId)
+  })
+
+  it('removes time-only archive snapshots, bindings, and unreferenced covers on scope=time, and targets only deleted content blobs on scope=notes', async () => {
+    const files = new Map<string, Buffer>([
+      ['covers/archive.cover.jpg', Buffer.from('cover')],
+      ['covers/archive.thumb.webp', Buffer.from('thumb')],
+      ['content/deleted-idea.png', Buffer.from('img')],
+      ['content/other-user.png', Buffer.from('other')],
+    ])
+    vi.spyOn(storage, 'getStorage').mockReturnValue({
+      exists: async (key: string) => files.has(key),
+      delete: async (key: string) => { files.delete(key) },
+    } as unknown as StorageDriver)
+
+    db.insert(schema.blobs).values([
+      { key: 'covers/archive.cover.jpg', kind: 'cover', size: 5, createdAt: 1 },
+      { key: 'content/deleted-idea.png', kind: 'content', size: 3, createdAt: 1 },
+      { key: 'content/other-user.png', kind: 'content', size: 5, createdAt: 1 },
+    ]).run()
+    db.insert(schema.contentFiles).values({
+      id: 'cf-1', userId: ownerId, domain: 'idea', kind: 'image', draftId: 'd-1',
+      bookVersionId: bookId, ideaId: 'idea-shared', blobKey: 'content/deleted-idea.png',
+      name: 'a.png', mimeType: 'image/png', size: 3, sortOrder: 0, ready: true, createdAt: 1,
+    }).run()
+    db.update(schema.readingArchives).set({ coverKey: 'covers/archive.cover.jpg' })
+      .where(and(eq(schema.readingArchives.userId, ownerId), eq(schema.readingArchives.bookVersionId, bookId))).run()
+
+    // Deleting notes cascades contentFiles and removes only the deleted idea's content blob.
+    const notesRes = await deleteBookArchive(ownerId, bookId, 'notes')
+    expect(notesRes).toEqual({ ok: true, remaining: true })
+    expect(db.select().from(schema.contentFiles).all()).toHaveLength(0)
+    expect(files.has('content/deleted-idea.png')).toBe(false)
+    expect(files.has('content/other-user.png')).toBe(true)
+
+    // Deleting time on the now notes-free archive removes the archive, binding, and unreferenced cover + thumbnail.
+    const timeRes = await deleteBookArchive(ownerId, bookId, 'time')
+    expect(timeRes).toEqual({ ok: true, remaining: false })
+    expect(db.select().from(schema.readingArchives).all()).toHaveLength(0)
+    expect(db.select().from(schema.readingImportBindings).all()).toHaveLength(0)
+    expect(files.has('covers/archive.cover.jpg')).toBe(false)
+    expect(files.has('covers/archive.thumb.webp')).toBe(false)
   })
 })

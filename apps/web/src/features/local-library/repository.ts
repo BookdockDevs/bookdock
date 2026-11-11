@@ -1,5 +1,5 @@
 import { acceptsReadingTimerClaim, categoryTemplatePath, clientBookRefSchema, settingsUpdateSchema, clientReplacementSchema, replacementCreateSchema, replacementUpdateSchema, clientNoteImageSchema, CONTENT_DRAFT_TTL_MS, IDEA_IMAGE_MAX_COUNT, clientBookKey, clientBookSchema, clientPublicationReplacementSchema, clientCatalogAttributesSchema, clientCatalogPreferencesSchema, clientManualTimerSnapshotSchema, clientNoteSchema, clientOrganizationSchema, clientReadingCaptureGroupSchema, clientReadingCaptureSchema, clientReadingEntrySchema, clientReadingCoverageIntervalsSchema, clientReadingGroupEntrySchema, clientReadingSessionSchema, clientReadingSessionCommandSchema, clientReadingLedgerClearSchema, clientReadingSessionUpdateSchema, clientReadingRoundsSchema, clientReadingStateSchema, clientReadingTimerDraftSchema, clientReviewSchema, localDraftEnvelopeSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, mergeTimeFragments, readingTimerClaimSchema, sameClientBook, subtractTimeFragments, viewSettingsSchema } from '@bookdock/shared'
-import type { TrashSettings, ClientReplacement, TextReplacementRes, ReplacementCreateReq, ReplacementUpdateReq, ClientNoteImage, ClientBook, ClientTxtPublication, LocalEditorDraftEnvelope, ClientPublicationReplacement, EditorTxtSaveRes, ClientReadingLedgerClear, ClientVaultReadingSnapshot, ClientBookNotesSnapshot, ClientBookRef, ClientCatalogAttributes, ClientCatalogPreferences, ClientManualTimerSnapshot, ClientNote, ClientOrganization, ClientReadingCapture, ClientReadingCaptureGroup, ClientReadingEntry, ClientReadingBookSnapshot, ClientReadingGroupEntry, ClientReadingLedger, ClientReadingSession, ClientReadingSessionCommand, ClientReadingSessionUpdate, ClientReadingRounds, ClientReadingRoundAction, ClientReadingState, ClientReadingTimerDraft, ClientReview, ClientReviewInput, ReadingTimerClaimInput, ReadingTimerLease, ReadStatus } from '@bookdock/shared'
+import type { ArchiveDeleteRes, TrashSettings, ClientReplacement, TextReplacementRes, ReplacementCreateReq, ReplacementUpdateReq, ClientNoteImage, ClientBook, ClientTxtPublication, LocalEditorDraftEnvelope, ClientPublicationReplacement, EditorTxtSaveRes, ClientReadingLedgerClear, ClientVaultReadingSnapshot, ClientBookNotesSnapshot, ClientBookRef, ClientCatalogAttributes, ClientCatalogPreferences, ClientManualTimerSnapshot, ClientNote, ClientOrganization, ClientReadingCapture, ClientReadingCaptureGroup, ClientReadingEntry, ClientReadingBookSnapshot, ClientReadingGroupEntry, ClientReadingLedger, ClientReadingSession, ClientReadingSessionCommand, ClientReadingSessionUpdate, ClientReadingRounds, ClientReadingRoundAction, ClientReadingState, ClientReadingTimerDraft, ClientReview, ClientReviewInput, ReadingTimerClaimInput, ReadingTimerLease, ReadStatus } from '@bookdock/shared'
 
 import { createCoverThumbnail } from './cover-thumbnail'
 import { preparePublicationRelocationInWorker } from './epub-editor-worker'
@@ -1680,35 +1680,68 @@ export class LocalLibraryRepository {
     })
   }
 
-  async clearReadingLedger(input: ClientReadingLedgerClear): Promise<void> {
+  async clearReadingLedger(input: Omit<ClientReadingLedgerClear, 'scope'>): Promise<void> {
+    await this.clearBookArchive({ ...input, scope: 'time' })
+  }
+
+  async clearBookArchive(input: ClientReadingLedgerClear): Promise<ArchiveDeleteRes> {
     const command = clientReadingLedgerClearSchema.parse(input)
+    const scope = command.scope ?? 'time'
     const { book } = command
     this.assertLocal(book)
     const vaultId = book.scope.kind === 'local' ? book.scope.vaultId : ''
     const fingerprint = await readingWriteFingerprint(command)
     const receiptKey = JSON.stringify(['reading-ledger-clear', vaultId, command.requestId])
-    await this.transaction(['books', 'states', 'settings', 'reading-sessions', 'reading-receipts'], 'readwrite', async (tx) => {
+    return this.transaction(['books', 'states', 'settings', 'reading-sessions', 'reading-receipts', 'notes', 'reviews', 'deleted', 'files'], 'readwrite', async (tx) => {
       await this.requireBook(tx, book)
       const receipts = tx.objectStore('reading-receipts')
       const receipt = await request<{ fingerprint: string } | undefined>(receipts.get(receiptKey))
+      const hasRemaining = async () => {
+        const remainingSessions = await request<ClientReadingSession[]>(tx.objectStore('reading-sessions').index('book').getAll([vaultId, book.bookId]))
+        const remainingNotes = await request<ClientNote[]>(tx.objectStore('notes').index('book').getAll([vaultId, book.bookId]))
+        const remainingReview = await request<ClientReview | undefined>(tx.objectStore('reviews').get(key(book)))
+        return remainingSessions.length > 0 || remainingNotes.length > 0 || Boolean(remainingReview)
+      }
       if (receipt) {
         if (receipt.fingerprint !== fingerprint) throw new LocalLibraryError('conflict', 'Reading clear command identity was already used')
-        return
+        return { ok: true, remaining: await hasRemaining() }
       }
-      const snapshot = await this.readingBookSnapshotInTx(tx, book)
-      if (snapshot.ledger.version !== command.expectedVersion) throw new LocalLibraryError('conflict', 'Reading history changed in another view')
-      const settings = tx.objectStore('settings')
-      const lease = await request<ReadingTimerLease | undefined>(settings.get(JSON.stringify(['reading-timer-lease', vaultId])))
-      if (lease && lease.expiresAt > Date.now()) throw new LocalLibraryError('pending-reading', 'Stop active reading timers before clearing history')
-      const prefixes = ['reading-pending', 'reading-pending-group', 'reading-draft', 'reading-manual'].map((kind) => `${JSON.stringify([kind, vaultId, book.bookId]).slice(0, -1)},`)
-      if ((await request(settings.getAllKeys())).some((entry) => typeof entry === 'string' && prefixes.some((prefix) => entry.startsWith(prefix)))) throw new LocalLibraryError('pending-reading', 'Settle pending reading captures before clearing history')
-      for (const session of snapshot.ledger.sessions) await request(tx.objectStore('reading-sessions').delete(noteKey(book, session.id)))
-      await request(settings.delete(JSON.stringify(['reading-rounds', ...clientBookKey(book)])))
-      const preferences = await request<Record<string, unknown> | undefined>(settings.get(key(book)))
-      if (preferences) await request(settings.put({ ...preferences, coverageIntervals: [] }, key(book)))
-      if (snapshot.state) await request(tx.objectStore('states').put({ ...snapshot.state, coverage: null, version: snapshot.state.version + 1, updatedAt: Date.now() }, key(book)))
+
+      if (scope !== 'notes') {
+        const snapshot = await this.readingBookSnapshotInTx(tx, book)
+        if (snapshot.ledger.version !== command.expectedVersion) throw new LocalLibraryError('conflict', 'Reading history changed in another view')
+        const settings = tx.objectStore('settings')
+        const lease = await request<ReadingTimerLease | undefined>(settings.get(JSON.stringify(['reading-timer-lease', vaultId])))
+        if (lease && lease.expiresAt > Date.now()) throw new LocalLibraryError('pending-reading', 'Stop active reading timers before clearing history')
+        const prefixes = ['reading-pending', 'reading-pending-group', 'reading-draft', 'reading-manual'].map((kind) => `${JSON.stringify([kind, vaultId, book.bookId]).slice(0, -1)},`)
+        if ((await request(settings.getAllKeys())).some((entry) => typeof entry === 'string' && prefixes.some((prefix) => entry.startsWith(prefix)))) throw new LocalLibraryError('pending-reading', 'Settle pending reading captures before clearing history')
+        for (const session of snapshot.ledger.sessions) await request(tx.objectStore('reading-sessions').delete(noteKey(book, session.id)))
+        await request(settings.delete(JSON.stringify(['reading-rounds', ...clientBookKey(book)])))
+        const preferences = await request<Record<string, unknown> | undefined>(settings.get(key(book)))
+        if (preferences) await request(settings.put({ ...preferences, coverageIntervals: [] }, key(book)))
+        if (snapshot.state) await request(tx.objectStore('states').put({ ...snapshot.state, coverage: null, version: snapshot.state.version + 1, updatedAt: Date.now() }, key(book)))
+        await this.advanceReadingVersion(tx, vaultId)
+      }
+
+      if (scope !== 'time') {
+        const notesStore = tx.objectStore('notes')
+        const deletedStore = tx.objectStore('deleted')
+        const filesStore = tx.objectStore('files')
+        const storedNotes = await request<ClientNote[]>(notesStore.index('book').getAll([vaultId, book.bookId]))
+        for (const note of storedNotes) {
+          if (note.kind === 'idea') {
+            for (const image of note.images ?? []) {
+              await request(filesStore.delete(JSON.stringify(['note-image', ...clientBookKey(book), image.id])))
+            }
+          }
+          await request(notesStore.delete(noteKey(book, note.id)))
+          await request(deletedStore.put(true, `note:${noteKey(book, note.id)}`))
+        }
+        await request(tx.objectStore('reviews').delete(key(book)))
+      }
+
       await request(receipts.put({ fingerprint }, receiptKey))
-      await this.advanceReadingVersion(tx, vaultId)
+      return { ok: true, remaining: await hasRemaining() }
     })
   }
 

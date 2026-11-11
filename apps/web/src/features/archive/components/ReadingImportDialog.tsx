@@ -24,6 +24,7 @@ import { getUserErrorMessage } from '@/lib/error-message'
 import { useToastStore } from '@/stores/toast.store'
 import { cn } from '@/lib/utils'
 
+import { readSavedChoice, writeSavedChoice } from './archive-helpers'
 import SortMenu from './SortMenu'
 import WereadWebLoginControls from './WereadWebLoginControls'
 
@@ -67,26 +68,11 @@ function readSortPreference(channel: string): SortPreference {
 
 const SOURCE_STORAGE_KEY = 'bd-reading-import-source'
 const WEREAD_CHANNEL_STORAGE_KEY = 'bd-reading-import-weread-channel'
+const IMPORT_SCOPE_STORAGE_KEY = 'bd-reading-import-scope'
 
-function getSavedSource(): ReadingImportSource {
-  try {
-    const saved = localStorage.getItem(SOURCE_STORAGE_KEY)
-    if (saved === 'weread' || saved === 'legado') return saved
-  } catch {
-    // ignore
-  }
-  return 'weread'
-}
-
-function getSavedWereadChannel(): WereadChannel {
-  try {
-    const saved = localStorage.getItem(WEREAD_CHANNEL_STORAGE_KEY)
-    if (saved === 'skill' || saved === 'web') return saved
-  } catch {
-    // ignore
-  }
-  return 'skill'
-}
+const IMPORT_SOURCES: readonly ReadingImportSource[] = ['weread', 'legado']
+const WEREAD_CHANNELS: readonly WereadChannel[] = ['skill', 'web']
+const IMPORT_SCOPES: readonly ReadingImportScope[] = ['all', 'time', 'notes']
 
 const FILTERS: Array<{ value: BookFilter; labelKey: string; fallback: string }> = [
   { value: 'all', labelKey: 'readingImport.filterAll', fallback: '全部' },
@@ -195,14 +181,14 @@ export default function ReadingImportDialog({
     queryFn: () => apiGet<{ data: MetadataConfiguration }>('/integrations/metadata-lookup/config'),
     staleTime: 60_000,
   })
-  const [source, setSource] = useState<ReadingImportSource>(getSavedSource)
-  const [wereadChannel, setWereadChannel] = useState<WereadChannel>(getSavedWereadChannel)
+  const [source, setSource] = useState<ReadingImportSource>(() => readSavedChoice(SOURCE_STORAGE_KEY, IMPORT_SOURCES, 'weread'))
+  const [wereadChannel, setWereadChannel] = useState<WereadChannel>(() => readSavedChoice(WEREAD_CHANNEL_STORAGE_KEY, WEREAD_CHANNELS, 'skill'))
   const isSkillNotConfigured =
     source === 'weread' &&
     wereadChannel === 'skill' &&
     configQuery.isSuccess &&
     !configQuery.data?.data?.weread
-  const [scope, setScope] = useState<ReadingImportScope>('all')
+  const [scope, setScope] = useState<ReadingImportScope>(() => readSavedChoice(IMPORT_SCOPE_STORAGE_KEY, IMPORT_SCOPES, 'all'))
   const [file, setFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -244,11 +230,7 @@ export default function ReadingImportDialog({
   function switchSource(next: ReadingImportSource) {
     listRequest.current++
     setSource(next)
-    try {
-      localStorage.setItem(SOURCE_STORAGE_KEY, next)
-    } catch {
-      // ignore
-    }
+    writeSavedChoice(SOURCE_STORAGE_KEY, next)
     setList(null)
     setListError(null)
     resetPreview()
@@ -258,14 +240,9 @@ export default function ReadingImportDialog({
   function switchWereadChannel(next: WereadChannel) {
     listRequest.current++
     setWereadChannel(next)
-    try {
-      localStorage.setItem(WEREAD_CHANNEL_STORAGE_KEY, next)
-    } catch {
-      // ignore
-    }
+    writeSavedChoice(WEREAD_CHANNEL_STORAGE_KEY, next)
     setList(null)
     setListError(null)
-    if (next === 'skill') setScope('all')
     resetPreview()
     setError(null)
   }
@@ -570,14 +547,15 @@ export default function ReadingImportDialog({
   const isPreviewPage = items.length > 0
   const isSubpage = isPreviewPage
 
+  const activeScope = source === 'weread' && wereadChannel === 'skill' ? 'all' : scope
   const selectedSummary = useMemo(() => {
     if (picked.length === 0) return null
     const parts: string[] = [`已选 ${picked.length} 本`]
-    if (scope !== 'time' && totals.notes > 0) parts.push(`笔记 ${totals.notes}`)
-    if (scope !== 'time' && totals.reviews > 0) parts.push(`书评 ${totals.reviews}`)
-    if (scope !== 'notes' && totals.durationFacts > 0) parts.push(`时长 ${totals.durationFacts}`)
+    if (activeScope !== 'time' && totals.notes > 0) parts.push(`笔记 ${totals.notes}`)
+    if (activeScope !== 'time' && totals.reviews > 0) parts.push(`书评 ${totals.reviews}`)
+    if (activeScope !== 'notes' && totals.durationFacts > 0) parts.push(`时长 ${totals.durationFacts}`)
     return parts.join(' · ')
-  }, [picked.length, totals.notes, totals.reviews, totals.durationFacts, scope])
+  }, [picked.length, totals.notes, totals.reviews, totals.durationFacts, activeScope])
 
   const subpageTitle = isPreviewPage
     ? (source === 'weread'
@@ -606,6 +584,7 @@ export default function ReadingImportDialog({
             onClick={() => {
               if (value === scope) return
               setScope(value)
+              writeSavedChoice(IMPORT_SCOPE_STORAGE_KEY, value)
               setPreview(null)
               if (source === 'legado' && file) {
                 void runPreviewRef.current(value)

@@ -305,3 +305,8 @@ export const readingImportApplyReqSchema = z.object({
 export const importTargetBookReqSchema = z.object({
   targetBookVersionId: z.string().min(1).max(128),
 })
+
+export interface ArchiveDeleteRes {
+  ok: boolean
+  remaining: boolean
+}

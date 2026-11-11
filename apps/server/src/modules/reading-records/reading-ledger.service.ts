@@ -1052,22 +1052,45 @@ export function releaseReadingTimer(userId: string, deviceId: string, activityAt
   )).run()
 }
 
+export function clearReadingLedgerInTx(tx: Db, userId: string, bookId: string) {
+  tx.update(readingWriteReceipts).set({ status: 'deleted' }).where(and(
+    eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.bookVersionId, bookId),
+  )).run()
+  tx.delete(readingSessions).where(sessionWhere(userId, bookId)).run()
+  tx.delete(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId))).run()
+  tx.delete(readingContributions).where(and(eq(readingContributions.userId, userId), eq(readingContributions.bookVersionId, bookId))).run()
+  tx.delete(readingHourlyStats).where(and(eq(readingHourlyStats.userId, userId), eq(readingHourlyStats.bookVersionId, bookId))).run()
+  tx.delete(readingRoundStats).where(and(eq(readingRoundStats.userId, userId), eq(readingRoundStats.bookVersionId, bookId))).run()
+  tx.delete(readingBookStats).where(and(eq(readingBookStats.userId, userId), eq(readingBookStats.bookVersionId, bookId))).run()
+  tx.delete(readingProjectionStates).where(and(eq(readingProjectionStates.userId, userId), eq(readingProjectionStates.bookVersionId, bookId))).run()
+  tx.delete(readingRounds).where(roundWhere(userId, bookId)).run()
+  tx.delete(readingDurationFacts).where(and(eq(readingDurationFacts.userId, userId), eq(readingDurationFacts.bookVersionId, bookId))).run()
+  tx.update(readingArchives).set({
+    legacyIntervals: [], legacyDaily: [], legacyWordCount: null, legacyRevisionId: null,
+  }).where(archiveWhere(userId, bookId)).run()
+  const state = tx.select().from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
+  if (state) tx.update(bookStates).set({ readFraction: 0, ...(state.progressData ? { progressData: { ...state.progressData, intervals: [] } } : {}) })
+    .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
+}
+
+export function hasReadingTimeInTx(tx: Db, userId: string, bookId: string): boolean {
+  if (tx.select({ id: readingSessions.id }).from(readingSessions).where(sessionWhere(userId, bookId)).get()) return true
+  if (tx.select({ id: readingRecords.id }).from(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId))).get()) return true
+  if (tx.select({ id: readingRounds.id }).from(readingRounds).where(roundWhere(userId, bookId)).get()) return true
+  if (tx.select({ id: readingDurationFacts.id }).from(readingDurationFacts).where(and(eq(readingDurationFacts.userId, userId), eq(readingDurationFacts.bookVersionId, bookId))).get()) return true
+  const archive = tx.select({
+    legacyIntervals: readingArchives.legacyIntervals,
+    legacyDaily: readingArchives.legacyDaily,
+  }).from(readingArchives).where(archiveWhere(userId, bookId)).get()
+  return Boolean(archive && (archive.legacyIntervals.length > 0 || archive.legacyDaily.length > 0))
+}
+
 export function deleteReadingArchive(userId: string, bookId: string) {
   const db = getDb()
   ownArchive(db, userId, bookId)
   db.transaction((tx) => {
-    tx.update(readingWriteReceipts).set({ status: 'deleted' }).where(and(
-      eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.bookVersionId, bookId),
-    )).run()
-    tx.delete(readingSessions).where(sessionWhere(userId, bookId)).run()
-    tx.delete(readingRecords).where(and(eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId))).run()
-    tx.delete(readingContributions).where(and(eq(readingContributions.userId, userId), eq(readingContributions.bookVersionId, bookId))).run()
-    tx.delete(readingHourlyStats).where(and(eq(readingHourlyStats.userId, userId), eq(readingHourlyStats.bookVersionId, bookId))).run()
-    tx.delete(readingRoundStats).where(and(eq(readingRoundStats.userId, userId), eq(readingRoundStats.bookVersionId, bookId))).run()
-    tx.delete(readingBookStats).where(and(eq(readingBookStats.userId, userId), eq(readingBookStats.bookVersionId, bookId))).run()
-    tx.delete(readingProjectionStates).where(and(eq(readingProjectionStates.userId, userId), eq(readingProjectionStates.bookVersionId, bookId))).run()
-    tx.delete(readingRounds).where(roundWhere(userId, bookId)).run()
-    tx.delete(readingDurationFacts).where(and(eq(readingDurationFacts.userId, userId), eq(readingDurationFacts.bookVersionId, bookId))).run()
+    const dbTx = tx as unknown as Db
+    clearReadingLedgerInTx(dbTx, userId, bookId)
     const hasNotes = tx.get(sql`SELECT 1 FROM highlights WHERE user_id = ${userId} AND book_version_id = ${bookId} AND deleted_at IS NULL
       UNION ALL SELECT 1 FROM bookmarks WHERE user_id = ${userId} AND book_version_id = ${bookId} AND deleted_at IS NULL
       UNION ALL SELECT 1 FROM ideas WHERE user_id = ${userId} AND book_version_id = ${bookId} AND deleted_at IS NULL
@@ -1077,7 +1100,7 @@ export function deleteReadingArchive(userId: string, bookId: string) {
         legacyIntervals: [], legacyDaily: [], legacyWordCount: null, legacyRevisionId: null,
       })
         .where(archiveWhere(userId, bookId)).run()
-      rebuildReadingProjection(tx as unknown as Db, userId, bookId)
+      rebuildReadingProjection(dbTx, userId, bookId)
     } else {
       tx.delete(readingArchives).where(archiveWhere(userId, bookId)).run()
       // The archive identity is gone, so its binding must go too; a dangling
@@ -1087,8 +1110,5 @@ export function deleteReadingArchive(userId: string, bookId: string) {
         eq(readingImportBindings.targetBookVersionId, bookId),
       )).run()
     }
-    const state = tx.select().from(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
-    if (state) tx.update(bookStates).set({ readFraction: 0, ...(state.progressData ? { progressData: { ...state.progressData, intervals: [] } } : {}) })
-      .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).run()
   })
 }

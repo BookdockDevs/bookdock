@@ -11,3 +11,23 @@ export function readStatusLabel(readStatus: ArchiveBookItem['readStatus'] | unde
   if (!readStatus) return ''
   return t(`library.readStatus${readStatus[0].toUpperCase()}${readStatus.slice(1)}`)
 }
+
+export function readSavedChoice<T extends string>(key: string, allowed: readonly T[]): T | null
+export function readSavedChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T
+export function readSavedChoice<T extends string>(key: string, allowed: readonly T[], fallback?: T): T | null {
+  try {
+    const saved = localStorage.getItem(key)
+    if (saved !== null && (allowed as readonly string[]).includes(saved)) return saved as T
+  } catch {
+    // Ignore unavailable storage.
+  }
+  return fallback ?? null
+}
+
+export function writeSavedChoice(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Ignore unavailable storage.
+  }
+}

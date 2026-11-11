@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import type { ClientBook, ClientNote, ClientOrganization, ClientReadingState, ClientReview } from './client-reading'
 import { clientBookRefSchema, clientContentRefSchema, sameClientBook } from './client-reading'
+import { readingImportScopeSchema } from './reading-import'
 import { readingTimeFragmentBoundsSchema } from './reading-ledger'
 import { readingRecordCreateSchema, readingRecordFieldsSchema, readingSessionUpdateFieldsSchema, isOrderedReadingSessionUpdate } from './schema'
 
@@ -170,7 +171,10 @@ export const clientReadingSessionCommandSchema = z.object({
 export type ClientReadingSessionCommand = z.infer<typeof clientReadingSessionCommandSchema>
 
 export const clientReadingLedgerClearSchema = z.object({
-  book: clientBookRefSchema, requestId: z.string().min(1).max(100), expectedVersion: z.number().int().nonnegative(),
+  book: clientBookRefSchema,
+  requestId: z.string().min(1).max(100),
+  expectedVersion: z.number().int().nonnegative(),
+  scope: readingImportScopeSchema.optional(),
 }).strict()
 export type ClientReadingLedgerClear = z.infer<typeof clientReadingLedgerClearSchema>
 

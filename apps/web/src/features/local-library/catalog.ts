@@ -51,7 +51,8 @@ export function localCatalogOperations(scope: Extract<ClientDataScope, { kind: '
       if (!await repository.hasPublication(ref)) throw new LocalLibraryError('unavailable-content', 'Publication source is unavailable')
       return { data: { revisionId: revision } }
     },
-    clearReadingLedger(command: ClientReadingLedgerClear) { assertSourceBook(scope, command.book); return repository.clearReadingLedger(command) },
+    clearReadingLedger(command: Omit<ClientReadingLedgerClear, 'scope'>) { assertSourceBook(scope, command.book); return repository.clearReadingLedger(command) },
+    clearBookArchive(command: ClientReadingLedgerClear) { assertSourceBook(scope, command.book); return repository.clearBookArchive(command) },
     readReadingSnapshot: () => repository.readVaultReadingSnapshot(scope.vaultId),
     async getReadingProjection(range?: ReadingRange, today?: string) { return projectLocalVaultReading(await repository.readVaultReadingSnapshot(scope.vaultId), range, today) },
     async getArchiveOverview(range?: ReadingRange) { return projectLocalArchive(await repository.readVaultReadingSnapshot(scope.vaultId), range).overview },

@@ -32,6 +32,7 @@ const book = (id: string): ClientBook => ({ ref: ref(id), content: { book: ref(i
 let repository: LocalLibraryRepository
 let client: QueryClient
 beforeEach(async () => {
+  localStorage.clear()
   vi.stubGlobal('indexedDB', new IDBFactory()); vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('Blob', NativeBlob)
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Local aggregate queries must not use HTTP') }))
   onlineManager.setOnline(false)
@@ -86,23 +87,72 @@ describe('vault archive and reading projections', () => {
     expect((await repository.readReadingBookSnapshot(first)).ledger.sessions).toHaveLength(1)
   })
 
+  it('supports scoped local archive clearing for notes and all while keeping reader position and status', async () => {
+    const first = ref('First')
+    const position = { content: { book: first, contentId: 'revision' }, schemaVersion: 1 as const, kind: 'epub-cfi' as const, value: 'epubcfi(/6/4!/4/2:0)' }
+    await repository.saveState({ book: first, readStatus: 'finished', position, fraction: 1, coverage: { content: position.content, fraction: 1, available: true }, lastReadAt: 1, updatedAt: 1, version: 0 }, 0, [[0, 1]])
+    await repository.saveNote({ id: 'note-1', book: first, kind: 'highlight', color: 'yellow', style: 'highlight', text: 'Quote', chapter: null, locator: null, createdAt: 1, updatedAt: 1, version: 0 }, 0)
+    await repository.saveReview(first, { ratingHalves: 8, title: 'Review', body: 'Body', bodyFormat: 'markdown' })
+
+    const before = await repository.readReadingBookSnapshot(first)
+    const notesOnly = await repository.clearBookArchive({ book: first, requestId: 'clear-notes', expectedVersion: before.ledger.version, scope: 'notes' })
+    expect(notesOnly).toEqual({ ok: true, remaining: true })
+    expect(await repository.listNotes(first)).toEqual([])
+    expect(await repository.getReview(first)).toBeNull()
+    expect((await repository.readReadingBookSnapshot(first)).ledger.sessions).toHaveLength(1)
+
+    await repository.saveNote({ id: 'note-2', book: first, kind: 'idea', body: 'Thought', text: 'Q2', chapter: null, locator: null, createdAt: 2, updatedAt: 2, version: 0 }, 0)
+    await repository.saveReview(first, { ratingHalves: 10, title: 'R2', body: 'B2', bodyFormat: 'markdown' })
+    const allRes = await repository.clearBookArchive({ book: first, requestId: 'clear-all', expectedVersion: before.ledger.version, scope: 'all' })
+    expect(allRes).toEqual({ ok: true, remaining: false })
+    const afterAll = await repository.readReadingBookSnapshot(first)
+    expect(afterAll.ledger.sessions).toEqual([])
+    expect(afterAll.rounds.rounds).toEqual([])
+    expect(afterAll.state).toMatchObject({ position, fraction: 1, readStatus: 'finished', coverage: null })
+    expect(await repository.listNotes(first)).toEqual([])
+    expect(await repository.getReview(first)).toBeNull()
+  })
+
   it('exposes supported local history clearing through the existing manager without remote transfer or association', async () => {
-    render(<ReadingDataManagerButton bookId="First" bookTitle="First" />, { wrapper })
+    const onBookDeleted = vi.fn()
+    render(<ReadingDataManagerButton bookId="First" bookTitle="First" onBookDeleted={onBookDeleted} />, { wrapper })
     fireEvent.click(screen.getByRole('button', { name: 'readingData.archiveManagement' }))
     // The manager opens on the tab the selected book supports, and the vault
     // answers that asynchronously: a device book offers clearing only.
-    const clear = await screen.findByRole('button', { name: 'readingData.deleteArchive' })
+    const timeRadio = await screen.findByRole('radio', { name: 'readingData.scopeTime' })
     expect(screen.queryByRole('tab', { name: 'readingData.tabImport' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'readingData.tabExport' })).not.toBeInTheDocument()
     expect(screen.queryByText('readingImport.locatorTitle')).not.toBeInTheDocument()
+    fireEvent.click(timeRadio)
+    const clear = await screen.findByRole('button', { name: 'readingData.deleteTimeAction' })
     await waitFor(() => expect(clear).toBeEnabled())
     fireEvent.click(clear)
     const confirmation = await screen.findByRole('alertdialog')
-    expect(within(confirmation).getByText('readingData.deleteArchiveConfirm')).toBeInTheDocument()
-    fireEvent.click(within(confirmation).getByRole('button', { name: 'readingData.deleteArchive' }))
+    expect(within(confirmation).getByText('readingData.deleteTimeConfirm')).toBeInTheDocument()
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'readingData.deleteTimeAction' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect((await repository.readReadingBookSnapshot(ref('First'))).ledger.sessions).toEqual([])
     expect((await repository.readReadingBookSnapshot(ref('Second'))).ledger.sessions).toHaveLength(1)
+    expect(onBookDeleted).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps local reading time and stays on book when clearing notes only via the manager', async () => {
+    await repository.saveNote({ id: 'n-keep', book: ref('First'), kind: 'highlight', color: 'yellow', style: 'highlight', text: 'Quote', chapter: null, locator: null, createdAt: 1, updatedAt: 1, version: 0 }, 0)
+    const onBookDeleted = vi.fn()
+    render(<ReadingDataManagerButton bookId="First" bookTitle="First" onBookDeleted={onBookDeleted} />, { wrapper })
+    fireEvent.click(screen.getByRole('button', { name: 'readingData.archiveManagement' }))
+
+    const notesRadio = await screen.findByRole('radio', { name: 'readingData.scopeNotes' })
+    fireEvent.click(notesRadio)
+    const clear = await screen.findByRole('button', { name: 'readingData.deleteNotesAction' })
+    fireEvent.click(clear)
+    const confirmation = await screen.findByRole('alertdialog')
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'readingData.deleteNotesAction' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+
+    expect(await repository.listNotes(ref('First'))).toEqual([])
+    expect((await repository.readReadingBookSnapshot(ref('First'))).ledger.sessions).toHaveLength(1)
+    expect(onBookDeleted).not.toHaveBeenCalled()
   })
 
   it('keeps the confirmation version when another view changes reading facts', async () => {
@@ -110,7 +160,7 @@ describe('vault archive and reading projections', () => {
     fireEvent.click(screen.getByRole('button', { name: 'readingData.archiveManagement' }))
     // The manager opens on the tab the selected book supports, and the vault
     // answers that asynchronously.
-    const clear = await screen.findByRole('button', { name: 'readingData.deleteArchive' })
+    const clear = await screen.findByRole('button', { name: 'readingData.deleteAllAction' })
     await waitFor(() => expect(clear).toBeEnabled())
     fireEvent.click(clear)
     const confirmation = await screen.findByRole('alertdialog')
@@ -118,7 +168,7 @@ describe('vault archive and reading projections', () => {
       await repository.addReadingEntry({ capture: { book: ref('First'), requestId: 'newer', source: 'retroactive', date: '2026-11-07', startedAt: null, durationSeconds: 90 }, finished: false })
       await client.invalidateQueries({ queryKey: ['reading-records'] })
     })
-    fireEvent.click(within(confirmation).getByRole('button', { name: 'readingData.deleteArchive' }))
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'readingData.deleteAllAction' }))
     await within(confirmation).findByText('localLibrary.recordConflict')
     expect((await repository.readReadingBookSnapshot(ref('First'))).ledger.sessions).toHaveLength(2)
     expect(screen.getByRole('alertdialog')).toBeInTheDocument()

@@ -11,6 +11,7 @@ import {
   type ArchiveBooksQuery,
   type ArchiveCounts,
   type ArchiveDataExport,
+  type ArchiveDeleteRes,
   type ArchiveOverview,
   type NotesExport,
   type NotesExportBook,
@@ -21,6 +22,7 @@ import {
   type ReadingRange,
 } from '@bookdock/shared'
 
+import { blobKeyReferenced, deleteBlobRowIfUnreferenced } from '../../db/blob-refs'
 import { getDb } from '../../db/client'
 import {
   bookmarks,
@@ -35,12 +37,16 @@ import {
   libraryBookVersions,
   libraryTags,
   readingArchives,
+  readingImportBindings,
   readingRecords,
   readingSessions,
 } from '../../db/schema'
+import { cleanContentBlobKeys } from '../../lib/content-file-lifecycle'
+import { deleteOwnedIdeasInTx, deleteOwnedReviewsInTx } from '../../lib/personal-book-archive'
 import { AppError } from '../../middleware/error'
 import { readingTimestampBounds } from '../../lib/reading-range'
 import { aggregateDurationFacts, countReadingDays, getDurationFacts } from '../reading-records/duration-facts'
+import { clearReadingLedgerInTx, hasReadingTimeInTx, rebuildReadingProjection } from '../reading-records/reading-ledger.service'
 import { coverThumbnailKey } from '../../lib/cover'
 import { getStorage } from '../../storage'
 import { toRes } from '../annotations/annotations.service'
@@ -945,4 +951,101 @@ export async function exportArchiveData(userId: string, scope: ReadingImportScop
     }
   }
   return result
+}
+
+function hasLiveNotesOrReviewsInTx(
+  tx: ReturnType<typeof getDb>,
+  userId: string,
+  bookVersionId: string,
+): boolean {
+  if (tx.select({ id: highlights.id }).from(highlights).where(and(
+    eq(highlights.userId, userId), eq(highlights.bookVersionId, bookVersionId), isNull(highlights.deletedAt),
+  )).get()) return true
+  if (tx.select({ id: bookmarks.id }).from(bookmarks).where(and(
+    eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, bookVersionId), isNull(bookmarks.deletedAt),
+  )).get()) return true
+  if (tx.select({ id: ideas.id }).from(ideas).where(and(
+    eq(ideas.userId, userId), eq(ideas.bookVersionId, bookVersionId), isNull(ideas.deletedAt),
+  )).get()) return true
+  const attributedReviews = reviewVersions(userId, reviewRowsForVersion(userId, bookVersionId)).get(bookVersionId) ?? []
+  return attributedReviews.length > 0
+}
+
+export async function deleteBookArchive(
+  userId: string,
+  bookVersionId: string,
+  scope: ReadingImportScope,
+): Promise<ArchiveDeleteRes> {
+  const db = getDb()
+  if (pendingBookDataDeletionVersionIds(db, userId).includes(bookVersionId)) throw new AppError('BOOK_NOT_FOUND')
+
+  const archive = db.select().from(readingArchives).where(and(
+    eq(readingArchives.userId, userId),
+    eq(readingArchives.bookVersionId, bookVersionId),
+  )).get()
+  const exists = Boolean(archive)
+    || hasReadingTimeInTx(db, userId, bookVersionId)
+    || hasLiveNotesOrReviewsInTx(db, userId, bookVersionId)
+  if (!exists) throw new AppError('BOOK_NOT_FOUND')
+
+  const now = Date.now()
+  let deletedCoverKey: string | null = null
+  const deletedContentBlobKeys: string[] = []
+  let remaining = false
+
+  db.transaction((rawTx) => {
+    const tx = rawTx as unknown as ReturnType<typeof getDb>
+    if (scope === 'time' || scope === 'all') {
+      clearReadingLedgerInTx(tx, userId, bookVersionId)
+    }
+
+    if (scope === 'notes' || scope === 'all') {
+      deletedContentBlobKeys.push(...deleteOwnedIdeasInTx(rawTx, userId, [bookVersionId], now))
+      tx.delete(highlights).where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, bookVersionId))).run()
+      tx.delete(bookmarks).where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, bookVersionId))).run()
+
+      const attributedReviews = reviewVersions(userId, reviewRowsForVersion(userId, bookVersionId)).get(bookVersionId) ?? []
+      deletedContentBlobKeys.push(...deleteOwnedReviewsInTx(rawTx, userId, attributedReviews, now))
+    }
+
+    const hasRemainingNotes = hasLiveNotesOrReviewsInTx(tx, userId, bookVersionId)
+    const hasRemainingTime = hasReadingTimeInTx(tx, userId, bookVersionId)
+
+    if (hasRemainingNotes || hasRemainingTime) {
+      if (scope === 'time' && archive) {
+        tx.update(readingArchives).set({
+          legacyIntervals: [], legacyDaily: [], legacyWordCount: null, legacyRevisionId: null,
+        }).where(and(
+          eq(readingArchives.userId, userId),
+          eq(readingArchives.bookVersionId, bookVersionId),
+        )).run()
+        rebuildReadingProjection(tx, userId, bookVersionId)
+      }
+      remaining = true
+    } else {
+      if (archive) {
+        deletedCoverKey = archive.coverKey
+        tx.delete(readingArchives).where(and(
+          eq(readingArchives.userId, userId),
+          eq(readingArchives.bookVersionId, bookVersionId),
+        )).run()
+      }
+      tx.delete(readingImportBindings).where(and(
+        eq(readingImportBindings.userId, userId),
+        eq(readingImportBindings.targetBookVersionId, bookVersionId),
+      )).run()
+      remaining = false
+    }
+  })
+
+  if (deletedContentBlobKeys.length > 0) await cleanContentBlobKeys(deletedContentBlobKeys)
+  if (deletedCoverKey && !blobKeyReferenced(deletedCoverKey)) {
+    const storage = getStorage()
+    if (await storage.exists(deletedCoverKey)) await storage.delete(deletedCoverKey)
+    const thumbKey = coverThumbnailKey(deletedCoverKey)
+    if (await storage.exists(thumbKey)) await storage.delete(thumbKey)
+    deleteBlobRowIfUnreferenced(deletedCoverKey)
+  }
+
+  return { ok: true, remaining }
 }

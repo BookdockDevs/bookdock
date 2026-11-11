@@ -3,7 +3,17 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { BookFormat } from '@bookdock/shared'
 
 import type { getDb } from '../db/client'
-import { bookReviews, bookVersions, libraryBooks, libraryBookVersions, readingArchives, readingImportBindings } from '../db/schema'
+import {
+  bookReviews,
+  bookVersions,
+  contentFiles,
+  ideas,
+  libraryBooks,
+  libraryBookVersions,
+  readingArchives,
+  readingImportBindings,
+} from '../db/schema'
+import { recordActivityEvent } from './activity-events'
 
 type Db = ReturnType<typeof getDb>
 
@@ -20,6 +30,10 @@ interface PersonalBookSnapshot {
  */
 function hasTable(db: Db, table: string): boolean {
   return (db.all<{ n: number }>(sql`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ${table}`)[0]?.n ?? 0) > 0
+}
+
+function hasColumn(db: Db, table: string, column: string): boolean {
+  return db.all<{ name: string }>(sql.raw(`PRAGMA table_info("${table}")`)).some((row) => row.name === column)
 }
 
 export function savePersonalBookSnapshot(db: Db, userId: string, bookVersionId: string, book: PersonalBookSnapshot) {
@@ -90,4 +104,132 @@ export function capturePrivateArchiveSnapshots(db: Db, versionIds: string[]) {
     }
     savePersonalBookSnapshot(db, card.userId, card.versionId, card)
   }
+}
+
+export interface OwnedReviewDeleteRow {
+  id: string
+  userId: string
+  visibility: 'private' | 'shared'
+  sourceLibraryId: string | null
+  sourceLibraryBookId: string | null
+  readBookVersionId: string | null
+  title?: string | null
+}
+
+export function deleteOwnedIdeasInTx(
+  rawTx: unknown,
+  userId: string,
+  versionIds: string[],
+  now = Date.now(),
+): string[] {
+  if (versionIds.length === 0) return []
+  const tx = rawTx as Db
+  const ownedIdeas = tx.select({
+    id: ideas.id,
+    userId: ideas.userId,
+    bookVersionId: ideas.bookVersionId,
+    visibility: ideas.visibility,
+    sharedLibraryId: ideas.sharedLibraryId,
+    sourceLibraryBookVersionId: ideas.sourceLibraryBookVersionId,
+    deletedAt: ideas.deletedAt,
+  }).from(ideas).where(and(
+    eq(ideas.userId, userId),
+    inArray(ideas.bookVersionId, versionIds),
+  )).all()
+  if (ownedIdeas.length === 0) return []
+
+  const ideaIds = ownedIdeas.map((row) => row.id)
+  const blobKeys = hasTable(tx, 'content_files')
+    ? tx.select({ blobKey: contentFiles.blobKey }).from(contentFiles)
+      .where(inArray(contentFiles.ideaId, ideaIds)).all().map((row) => row.blobKey)
+    : []
+
+  if (hasTable(tx, 'activity_events')) {
+    for (const row of ownedIdeas) {
+      if (row.deletedAt === null && row.visibility === 'shared' && row.sharedLibraryId && row.sourceLibraryBookVersionId) {
+        const listing = tx.select({ libraryBookId: libraryBookVersions.libraryBookId }).from(libraryBookVersions).where(and(
+          eq(libraryBookVersions.id, row.sourceLibraryBookVersionId),
+          eq(libraryBookVersions.libraryId, row.sharedLibraryId),
+        )).get()
+        const work = listing ? tx.select({ title: libraryBooks.title }).from(libraryBooks).where(and(
+          eq(libraryBooks.id, listing.libraryBookId),
+          eq(libraryBooks.libraryId, row.sharedLibraryId),
+        )).get() : null
+        if (listing && work) {
+          recordActivityEvent(rawTx as Parameters<typeof recordActivityEvent>[0], {
+            idempotencyKey: `idea.deleted:${row.id}`,
+            eventType: 'idea.deleted',
+            audience: 'manager',
+            libraryId: row.sharedLibraryId,
+            actorUserId: userId,
+            targetKind: 'idea',
+            targetId: row.id,
+            workId: listing.libraryBookId,
+            versionId: row.bookVersionId,
+            occurredAt: now,
+            snapshotWorkTitle: work.title,
+            snapshotAuthorId: row.userId,
+          })
+        }
+      }
+    }
+  }
+
+  tx.delete(ideas).where(and(eq(ideas.userId, userId), inArray(ideas.id, ideaIds))).run()
+  return blobKeys
+}
+
+export function deleteOwnedReviewsInTx(
+  rawTx: unknown,
+  userId: string,
+  reviewRows: OwnedReviewDeleteRow[],
+  now = Date.now(),
+): string[] {
+  if (reviewRows.length === 0) return []
+  const tx = rawTx as Db
+  const reviewIds = reviewRows.map((row) => row.id)
+  const blobKeys = hasTable(tx, 'content_files')
+    ? tx.select({ blobKey: contentFiles.blobKey }).from(contentFiles)
+      .where(inArray(contentFiles.reviewId, reviewIds)).all().map((row) => row.blobKey)
+    : []
+
+  if (hasTable(tx, 'activity_events')) {
+    const canReadReviewTitle = hasColumn(tx, 'book_reviews', 'title')
+    for (const row of reviewRows) {
+      if (row.visibility === 'shared' && row.sourceLibraryId && row.sourceLibraryBookId) {
+        const workRow = tx.select({ title: libraryBooks.title }).from(libraryBooks).where(and(
+          eq(libraryBooks.id, row.sourceLibraryBookId),
+          eq(libraryBooks.libraryId, row.sourceLibraryId),
+        )).get()
+        if (workRow) {
+          const objectLabel = row.title !== undefined
+            ? row.title
+            : (canReadReviewTitle
+                ? tx.select({ title: bookReviews.title }).from(bookReviews).where(eq(bookReviews.id, row.id)).get()?.title ?? null
+                : null)
+          recordActivityEvent(rawTx as Parameters<typeof recordActivityEvent>[0], {
+            idempotencyKey: `review.deleted:${row.id}`,
+            eventType: 'review.deleted',
+            audience: 'manager',
+            libraryId: row.sourceLibraryId,
+            actorUserId: userId,
+            targetKind: 'review',
+            targetId: row.id,
+            workId: row.sourceLibraryBookId,
+            versionId: row.readBookVersionId,
+            occurredAt: now,
+            snapshotWorkTitle: workRow.title,
+            snapshotObjectLabel: objectLabel,
+            snapshotAuthorId: row.userId,
+          })
+        }
+      }
+    }
+  }
+
+  tx.delete(bookReviews).where(and(
+    eq(bookReviews.userId, userId),
+    inArray(bookReviews.id, reviewIds),
+  )).run()
+  return blobKeys
 }

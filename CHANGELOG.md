@@ -16,11 +16,14 @@ All notable changes to Bookdock are documented here.
 - Book cards and list rows keep their hover highlight, overflow button, pin indicator, and device badge visible while their context menu is open; the device badge now follows the same narrow-screen visibility rule as the menu button.
 - Password and secret inputs hide the visibility toggle while empty, suppress required validation errors when blurring an untouched empty field, and hide Edge's duplicate native password reveal button; the login username input also shows invalid border styling consistently.
 - The Add Source dialog in Settings → Integrations remembers the last used installation mode (GitHub repository or ZIP package) and keeps the dropzone fixed above the queued file list.
+- Reading Archive Management now supports scoped deletion (**All** / **Time** / **Notes**) alongside import and export for both server and device books: clearing **Time** removes reading sessions, rounds, statistics, and coverage progress while keeping notes and reviews; deleting **Notes** removes highlights, bookmarks, ideas, and reviews (including shared items) while keeping reading time; and **All** clears both. Book files, reading positions, and read statuses are preserved, archive snapshots and import bindings are cleaned up only when no time or notes remain, the detail view only exits when the archive becomes empty, and archive/personal-data copy across the management dialog and book removal prompts is unified around reading time and notes. Book deletion/uncollection with **Also clear my personal data** enabled now removes your shared ideas and reviews for that book as well (leaving it unchecked retains them as before).
+- Unified preference persistence in the Reading Archive Management dialog: in addition to the existing import source, channel, and sort memory, the dialog now remembers the last used top-level tab, import scope, export scope/format (automatically narrowing incompatible formats without overwriting your saved preference), and delete scope, with safe fallbacks for global and WeRead Skill modes.
 
 ### Fixed
 
 - Fixed dark-mode styling regressions caused by invalid `stone-750` / `stone-850` Tailwind classes on secondary buttons (white-on-white hover state), unchecked checkboxes, taxonomy charts, and empty year-heatmap cells.
 - Fixed a brief white flash when refreshing the app in dark mode by applying the initial theme class, color scheme, background color, and boot loading indicator in `index.html` before React mounts.
+- Fixed the frosted-glass background on the copy/download cover buttons in the book detail header lagging behind the icons when hovering over the cover, by separating the gradient scrim from the button container and sliding the buttons in without an intermediate `opacity` transition blocking `backdrop-filter`.
 
 ## [0.8.0] - 2026-11-11
 
@@ -1129,11 +1132,14 @@ All notable changes to Bookdock are documented here.
 - 打开书籍卡片或列表行的右键／更多菜单时，保持卡片浮起、行高亮、菜单按钮、置顶标与本机书籍标识可见；本机标识同步对齐菜单按钮在窄屏下的默认显示规则。
 - 密码与密钥输入框在未输入内容时隐藏显示／隐藏眼睛图标，仅聚焦空框并移开焦点时不再误报必填错误，屏蔽 Edge 浏览器自带的重复密码显示按钮，并为登录页用户名补齐校验错误边框样式。
 - 「设置 → 集成」的「添加来源」弹窗会记住上次使用的安装方式（GitHub 仓库或 ZIP 扩展包），并将拖放投递区固定在已选包列表上方。
+- 「阅读档案管理」的删除功能现对齐导入与导出，支持按 **全部 / 时长 / 笔记** 三种范围清理单本书的档案数据（服务端与本机书籍同步支持）：删「时长」仅清空阅读时长、轮次、统计与覆盖进度；删「笔记」清除划线、书签、想法与书评并保留时长；删「全部」则一并清空。操作始终保留书库书籍文件、阅读位置与阅读状态；仅当不再剩余任何时长或笔记时才移除档案快照与导入绑定并退出当前详情页，并同步统一了档案管理与删书清理确认中的文案表达。此外，书架删书或移出收藏时若勾选「同时清理个人数据」，现在也会一并删除该书下自己发布的共享想法与书评（不勾选则继续保留）。
+- 统一补全「阅读档案管理」弹窗的选项记忆：在原有导入来源、渠道与排序记忆的基础上，现一并记住上次使用的顶层标签页、导入范围、导出范围与格式（切换范围导致格式不兼容时自动适配展示而不覆盖原偏好）以及删除范围，并在全局入口或微信读书 Skill 模式下安全回退。
 
 #### 修复
 
 - 修复多处使用不存在的 Tailwind `stone-750` / `stone-850` 色阶导致的夜间主题异常，包括次要按钮悬停变白字看不清、未勾选复选框底色发白、统计分布图与年度热力图空格子在深色下显示亮色背景的问题。
 - 修复深色模式下刷新页面瞬间闪现白屏再进入加载页的问题，在 React 挂载前通过 `index.html` 同步应用主题类名、配色方案、首屏背景色与启动加载图标。
+- 修复书籍详情页鼠标悬停封面时，复制与下载封面图标先出现、毛玻璃模糊背景延后一瞬间才显示的问题：将底部渐变遮罩与按钮栏拆分为独立图层，改用位移滑入且不再对 `backdrop-filter` 的父容器执行 `opacity` 过渡。
 
 ### [0.8.0] - 2026-11-11
 

@@ -211,17 +211,27 @@ describe('idea source authorization and discussion', () => {
     expect(db.select().from(schema.ideas).where(eq(schema.ideas.id, idea.id)).get()?.visibility).toBe('shared')
   })
 
-  it('retains original-source discussion after leaving and removing B, including personal-data cleanup', async () => {
+  it('retains original-source discussion when removing B without personal cleanup, and deletes shared discussion when deleteUserData is true', async () => {
     const idea = await createAnnotation('author', 'version', request)
     await createIdeaComment('member', idea.id, { body: 'survives' })
     db.insert(schema.libraryMemberships).values({ id: 'author-membership', libraryId: 'source', userId: 'author', role: 'member', createdAt: now, updatedAt: now }).run()
     db.delete(schema.libraryMemberships).where(eq(schema.libraryMemberships.id, 'author-membership')).run()
     expect((await getIdeaDiscussion('outsider', idea.id)).comments).toHaveLength(1)
-    await deleteBook('author', 'version', { deleteUserData: true })
+    await deleteBook('author', 'version')
     expect((await getIdeaDiscussion('member', idea.id)).comments[0].body).toBe('survives')
     expect(await ideaComposerContext('author', 'version')).toMatchObject({ eligible: false })
     await updateAnnotation('author', idea.id, { note: 'still editable with source read access' })
     expect((await getIdeaDiscussion('member', idea.id)).idea.annotation.note).toBe('still editable with source read access')
+
+    // Re-collect B and delete with deleteUserData: true -> removes shared idea and discussion too.
+    db.insert(schema.libraryBooks).values({ id: 'b-recollect', libraryId: 'private', userId: 'author', title: 'B', author: '', createdAt: now, updatedAt: now }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: 'b-recollect-link', libraryId: 'private', libraryBookId: 'b-recollect', bookVersionId: 'version',
+      kind: 'shared', sourceLibraryId: 'source', sourceLibraryBookVersionId: 'listing', createdAt: now, updatedAt: now,
+    }).run()
+    await deleteBook('author', 'version', { deleteUserData: true })
+    await expect(getIdeaDiscussion('member', idea.id)).rejects.toMatchObject({ code: 'ANNOTATION_NOT_FOUND' })
+    expect(db.select().from(schema.ideaComments).all()).toEqual([])
   })
 
   it('leaves source-bound discussion on its original version when B becomes local C', async () => {

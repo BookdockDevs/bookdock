@@ -402,4 +402,30 @@ describe('ReadingImportDialog', () => {
     expect(localStorage.getItem('bd-reading-import-source')).toBe('legado')
     second.unmount()
   })
+
+  it('persists and restores import scope from localStorage without applying it to Skill channel', async () => {
+    localStorage.setItem('bd-reading-import-source', 'legado')
+    localStorage.setItem('bd-reading-import-scope', 'notes')
+    vi.mocked(apiUpload).mockResolvedValue({ data: { ...preview, source: 'legado' } })
+    const file = new File([new Uint8Array([1, 2, 3])], 'legado.zip', { type: 'application/zip' })
+
+    const { unmount } = render(<ReadingImportDialog onClose={vi.fn()} />)
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.preview' }))
+    await waitFor(() => expect(apiUpload).toHaveBeenCalledWith('/reading-imports/legado/preview?scope=notes', file))
+    expect(screen.getByRole('radio', { name: 'readingImport.scopeNotes' })).toBeChecked()
+
+    fireEvent.click(screen.getByRole('radio', { name: 'readingImport.scopeTime' }))
+    expect(localStorage.getItem('bd-reading-import-scope')).toBe('time')
+    unmount()
+
+    // Switching to WeRead Skill still requests unscoped 'all' and keeps saved 'time'
+    localStorage.setItem('bd-reading-import-source', 'weread')
+    localStorage.setItem('bd-reading-import-weread-channel', 'skill')
+    vi.mocked(apiPost).mockResolvedValueOnce({ data: list })
+    render(<ReadingImportDialog onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'readingImport.preview' }))
+    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/reading-imports/weread/books', { channel: 'skill', scope: 'all' }))
+    expect(localStorage.getItem('bd-reading-import-scope')).toBe('time')
+  })
 })

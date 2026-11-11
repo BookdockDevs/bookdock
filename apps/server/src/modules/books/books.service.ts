@@ -9,7 +9,7 @@ import {
   blobs, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
   libraryMemberships, users as usersTable, tocRules, shelves,
-  highlights, ideas, bookmarks, aiThreads, textReplacements,
+  highlights, bookmarks, aiThreads, textReplacements,
   readingArchives, readingDurationFacts, readingImportBindings, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingWriteReceipts, bookReviews,
 } from '../../db/schema'
 import { getStorage } from '../../storage'
@@ -38,7 +38,8 @@ import { sha256 } from '../../lib/hash'
 import { normalizeBookTitle } from '../../lib/book-title'
 import { countWords } from '../../lib/word-count'
 import { readingCompatibleRevisions } from '../../lib/reading-coverage'
-import { capturePrivateArchiveSnapshots } from '../../lib/personal-book-archive'
+import { cleanContentBlobKeys } from '../../lib/content-file-lifecycle'
+import { capturePrivateArchiveSnapshots, deleteOwnedIdeasInTx, deleteOwnedReviewsInTx } from '../../lib/personal-book-archive'
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey, detectImageExtension, blobKey, generateCoverThumbnail } from '../../lib/cover'
 import { log } from '../../lib/logger'
@@ -3864,8 +3865,24 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
   const work = db.select().from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()!
   const deleteUserData = opts?.deleteUserData === true || (work.deletedAt !== null && work.meta.pendingUserDataDeletion === true)
 
-  const versionIds = db.select({ id: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
-    .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all().map((row) => row.id)
+  const privateLinks = db.select().from(libraryBookVersions)
+    .where(eq(libraryBookVersions.libraryBookId, libraryBookId)).all()
+  const versionIds = privateLinks.map((row) => row.bookVersionId)
+  const sourceWorkKeys = new Map<string, { libraryId: string; libraryBookId: string }>()
+  for (const link of privateLinks) {
+    if (!link.sourceLibraryId || !link.sourceLibraryBookVersionId) continue
+    const sourceLink = db.select({ libraryBookId: libraryBookVersions.libraryBookId }).from(libraryBookVersions)
+      .where(and(
+        eq(libraryBookVersions.id, link.sourceLibraryBookVersionId),
+        eq(libraryBookVersions.libraryId, link.sourceLibraryId),
+      )).get()
+    if (sourceLink) {
+      sourceWorkKeys.set(`${link.sourceLibraryId}:${sourceLink.libraryBookId}`, {
+        libraryId: link.sourceLibraryId,
+        libraryBookId: sourceLink.libraryBookId,
+      })
+    }
+  }
   capturePrivateArchiveSnapshots(db, versionIds)
   const revisionKeys = versionIds.length > 0
     ? db.select({ blobKey: contentRevisions.blobKey }).from(contentRevisions)
@@ -3886,15 +3903,34 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
   // version with any remaining library entry is kept, and only a version no
   // library lists anymore goes with its revisions (dependents cascade).
   const removedVersionIds: string[] = []
+  const deletedContentBlobKeys: string[] = []
+  const now = Date.now()
   db.transaction((tx) => {
     if (deleteUserData) {
-      tx.delete(bookReviews).where(and(eq(bookReviews.userId, userId), isNull(bookReviews.sourceLibraryId),
-        or(eq(bookReviews.privateLibraryBookId, libraryBookId), inArray(bookReviews.readBookVersionId, versionIds)))).run()
+      const reviewTargets = [
+        eq(bookReviews.privateLibraryBookId, libraryBookId),
+        ...(versionIds.length > 0 ? [inArray(bookReviews.readBookVersionId, versionIds)] : []),
+        ...[...sourceWorkKeys.values()].map((workKey) =>
+          and(eq(bookReviews.sourceLibraryId, workKey.libraryId), eq(bookReviews.sourceLibraryBookId, workKey.libraryBookId))!),
+      ]
+      const reviewsToDelete = tx.select({
+        id: bookReviews.id,
+        userId: bookReviews.userId,
+        visibility: bookReviews.visibility,
+        sourceLibraryId: bookReviews.sourceLibraryId,
+        sourceLibraryBookId: bookReviews.sourceLibraryBookId,
+        readBookVersionId: bookReviews.readBookVersionId,
+      }).from(bookReviews).where(and(
+        eq(bookReviews.userId, userId),
+        or(...reviewTargets),
+      )).all()
+      deletedContentBlobKeys.push(...deleteOwnedReviewsInTx(tx, userId, reviewsToDelete, now))
     }
     tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
     if (deleteUserData) {
+      deletedContentBlobKeys.push(...deleteOwnedIdeasInTx(tx, userId, versionIds, now))
       for (const versionId of versionIds) {
         tx.update(readingWriteReceipts).set({ status: 'deleted' }).where(and(eq(readingWriteReceipts.userId, userId), eq(readingWriteReceipts.bookVersionId, versionId))).run()
         tx.delete(readingSessions).where(and(eq(readingSessions.userId, userId), eq(readingSessions.bookId, versionId))).run()
@@ -3916,7 +3952,6 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
         // re-importing the same book double-counts them.
         tx.delete(readingDurationFacts).where(and(eq(readingDurationFacts.userId, userId), eq(readingDurationFacts.bookVersionId, versionId))).run()
         tx.delete(highlights).where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, versionId))).run()
-        tx.delete(ideas).where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, versionId), isNull(ideas.sharedLibraryId), isNull(ideas.sourceLibraryBookVersionId))).run()
         tx.delete(bookmarks).where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, versionId))).run()
         tx.delete(bookStates).where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, versionId))).run()
         tx.delete(aiThreads).where(and(eq(aiThreads.userId, userId), or(eq(aiThreads.bookVersionId, versionId), eq(aiThreads.bookId, versionId)))).run()
@@ -3983,6 +4018,7 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
       db.delete(blobs).where(eq(blobs.key, coverKey)).run()
     }
   }
+  if (deletedContentBlobKeys.length > 0) await cleanContentBlobKeys(deletedContentBlobKeys)
   return book
 }
 

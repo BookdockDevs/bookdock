@@ -19,6 +19,19 @@ export async function withContentBlob<T>(key: string, operation: () => Promise<T
   finally { if (blobOperations.get(key) === current) blobOperations.delete(key) }
 }
 
+export async function cleanContentBlobKeys(keys: Iterable<string>) {
+  for (const key of new Set(keys)) {
+    if (!key) continue
+    await withContentBlob(key, async () => {
+      if (blobKeyReferenced(key)) return
+      try {
+        await getStorage().delete(key)
+        deleteBlobRowIfUnreferenced(key)
+      } catch (error) { log('warn', 'content_files.cleanup.failed', { error }) }
+    })
+  }
+}
+
 export async function cleanContentBlobs() {
   const db = getDb()
   let cursor = ''

@@ -661,10 +661,10 @@ describe('book reviews', () => {
     expect(db.select().from(schema.bookReviewLikes).all()).toEqual([])
   })
 
-  it('retains source reviews after uncollect, version delete, trash and restore', async () => {
+  it('retains source reviews after uncollect without cleanup, version delete, trash and restore, and deletes them when deleteUserData is true', async () => {
     const review = await createReview('author', { bookVersionId: 'v1', rating: 4, visibility: 'shared' })
     await createReviewComment('member', review.id, { body: 'survives' })
-    await deleteBook('author', 'v1', { deleteUserData: true })
+    await deleteBook('author', 'v1')
     expect((await myReviews('author')).entries.map((entry) => entry.review.id)).toEqual([review.id])
     expect((await getReviewDiscussion('member', review.id)).comments).toHaveLength(1)
     expect((await getReviewBookContext('author', 'v2')).own?.id).toBe(review.id)
@@ -685,6 +685,12 @@ describe('book reviews', () => {
     await updateReview('author', review.id, { visibility: 'shared' })
     expect((await getReviewDiscussion('member', review.id)).comments).toHaveLength(1)
     expect((await getReviewWorkContext('member', 'source', 'w1')).summary).toMatchObject({ count: 1 })
+
+    // Removing the remaining collected card with deleteUserData: true deletes the author's shared review too.
+    await deleteBook('author', 'v2', { deleteUserData: true })
+    expect((await myReviews('author')).entries).toEqual([])
+    expect(db.select().from(schema.bookReviewComments).all()).toEqual([])
+    expect((await getReviewWorkContext('member', 'source', 'w1')).summary).toMatchObject({ count: 0 })
   })
 
   it('leaves source reviews in place on fork and lets the local copy start its own private review', async () => {
