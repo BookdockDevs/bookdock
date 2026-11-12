@@ -2,51 +2,55 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.2] - 2026-11-13
+
+### Highlights
+
+- Choose Closed, Invite only, or Open registration, and use invite codes to bring new members into shared libraries.
+- AI replies continue in the background, with passage-level citations and more precise book searches.
 
 ### Added
 
-- Choose Closed, Invite only, or Open registration in Settings → Administration. The login page offers the matching registration entry and a guest-browsing button when guest access is enabled.
-- Instance owners can create registration invite codes with a random 6-character code or a custom 4–64-character code supporting Chinese characters, letters, digits, `-`, and `_`. Invites support notes, usage limits, expiration, copying codes or registration links, and deletion to stop further use. Each invite can automatically add new accounts to multiple shared libraries the creator owns or administers; registration links prefill the code, and successful registration opens the first joined library unless a pending library invitation takes priority.
-- AI replies keep running on the server after you leave the reader, switch conversations, or close the tab. Reopening the book restores in-progress output or the finished answer, device-book answers update the original saved message, new conversation and history controls stay usable during generation, and asking a second question while one is running explains that another AI task is in progress. A server restart marks unfinished requests as interrupted instead of silently retrying them.
+- Choose Closed, Invite only, or Open registration in Settings → Administration. Invite codes are required in Invite only mode and optional in Open mode; the login page shows the matching registration entry and offers guest browsing when enabled.
+- Instance owners can create registration invites with a random 6-character code or a custom 4–64-character code containing Chinese characters, letters, digits, `-`, and `_`. Invites support notes, usage limits, expiration, copying codes or registration links, and deletion to stop further use. Each invite can automatically add new accounts to multiple shared libraries the creator owns or administers. Registration links prefill the code, and successful registration opens the first joined library unless a pending library invitation takes priority.
+- AI replies continue on the server after leaving the reader, switching conversations, or closing the tab. Reopening the book restores the current output or completed answer, including replies saved to the original device-book conversation. New conversations and history remain accessible during generation; a second question shows that a task is still running. A server restart marks unfinished requests as interrupted without automatically retrying them.
 
 ### Changed
 
-- Unified the login, registration, and initial setup pages with a shared card layout, brand icon, softer background, dark-mode styling, and consistent inline field errors. Registration requires an invite code in Invite only mode and accepts one optionally in Open mode.
-- Login, registration, and initial setup now use a matching card skeleton while their pages load.
-- Unified segmented selectors across settings, including language, default add destination, library display and sorting, registration and invite options, upload and trash limits, access-token expiry, font and dictionary visibility, replacement rules, metadata-source installation, storage cache limits, and user-management tabs. Library preference switches also use the shared toggle styling.
-- Grouped "Upload books" and "Create libraries" into a single Member permissions row with independent multi-select options, while keeping Guest access separate. Closing registration hides invite management without deleting existing invites; reopening registration shows it again.
-- Aligned account creation and password-reset dialogs with the shared modal layout and form styling, added initial field focus, and placed missing or taken username errors beside the username field. Refined the library selector's dropdown width and dark-mode hover styling in user management.
-- Refined My Libraries with more room for library names, non-wrapping column headings and badges, and neutral role styling. Library creation and management now share consistent visibility cards, with clearer hover states in light and dark modes.
-- Simplified empty-state messages and aligned their presentation across settings, including access tokens, external storage, replacement rules, and library member management.
-- Registration invite attempts reserve rate-limit slots before password hashing, reject invalid codes without hashing, and roll back invite usage when account creation fails. Login and invite rate limiting can identify visitors behind trusted reverse proxies through the new `TRUSTED_PROXIES` IP/CIDR setting (default `127.0.0.1,::1`; `none` disables forwarding-header trust). Docker deployments behind a reverse proxy must configure the proxy address seen by the server to keep visitors' limits separate.
-- AI search can be limited to a single chapter or a chapter range inside the permitted reading range, so checking the middle or later part of a book no longer rescans the opening chapters.
-- AI replies cite individual passages instead of chapter starts: each attached selection, paragraph, or chapter is numbered separately, and jumping verifies the quote against the current text, warning when it changed or is ambiguous. Code blocks and ordinary numeric brackets are left alone, stored replies with legacy `[n]` markers are re-numbered when reopened, device-book conversations keep their full visible history while sending only bounded recent turns, and switching account, book, or conversation cancels pending chapter attachments.
-- AI note tools filter by chapter and type before limiting results, tool output stays complete JSON within its budget, and long tables of contents continue on demand instead of stopping at 200 chapters.
-- AI search ranks by exact phrase plus required and alternative terms occurring in the same passage, merges overlapping hits, and returns excerpts around the hit.
-- AI conversations allow up to 12 tool rounds and 24 calls with a 36,000-character combined source budget, and reaching a limit requests a final answer from the gathered evidence instead of failing the request.
+- AI replies cite individual passages, with separate source numbers for selections and passages from attached or retrieved chapters. Citation jumps check the quote against the current text and warn when it has changed or matches multiple locations. Legacy `[n]` citations are renumbered when reopened, while code blocks and ordinary numeric brackets remain unchanged.
+- AI search supports a single chapter or chapter range within the permitted reading range. Results prioritize exact phrases and required or alternative terms found in the same passage, merge overlapping matches, and include surrounding text.
+- AI tools filter notes by chapter and type before limiting results, return complete JSON within the output budget, and read long tables of contents on demand beyond the first 200 chapters.
+- AI conversations support up to 12 tool rounds, 24 tool calls, and a combined source budget of 36,000 characters. Reaching a limit prompts a final answer from the evidence already gathered.
+- Device-book conversations keep their full visible history while sending only bounded recent turns to the AI service. Switching accounts, books, or conversations cancels pending chapter attachments.
+- Unified login, registration, and initial setup with matching card layouts, loading skeletons, brand icons, softer backgrounds, dark-mode styling, and inline field errors.
+- Unified segmented selectors and library preference toggles across settings, covering display and sorting, registration, permissions, resource visibility, limits, and installation options. Simplified empty states for access tokens, external storage, replacement rules, and library members.
+- Grouped "Upload books" and "Create libraries" into a single Member permissions row with independent options, while keeping Guest access separate. Closing registration hides invite management and preserves existing invites for reopening.
+- Aligned account creation and password-reset dialogs with the shared form layout, added initial field focus and inline username errors, and refined the library selector in user management.
+- Gave library names more room in My Libraries, kept headings and badges on one line, and adopted neutral role badges. Library creation and management now share consistent visibility cards with clearer hover feedback in light and dark modes.
+- Registration invite validation now reserves rate-limit slots before password hashing, rejects invalid codes without hashing, and restores invite usage if account creation fails. Login and invite rate limits can distinguish visitors behind trusted reverse proxies using `TRUSTED_PROXIES`.
 
 ### Removed
 
-- Retired the unused AI index pipeline: `GET /retrieval/status`, `POST /retrieval/index`, `POST /retrieval/index/cancel`, `DELETE /retrieval/index`, the index and embedding fields in the AI config and status responses, the retrieval-mode and embedding-model controls in Settings → AI, and the reader corpus export API. Book search scans source text on demand and stores no index.
+- Removed the unused AI index pipeline, including index management APIs, index and embedding fields in AI configuration and status, retrieval-mode and embedding-model settings, and the reader corpus export API. Book search scans source text on demand without storing an index.
 
 ### Fixed
 
-- Saving settings no longer dims segmented selectors temporarily, including registration options when changing member permissions or guest access. Saving still blocks repeat clicks, while options unavailable due to permissions or other restrictions remain dimmed.
-- Prevent collected shared books from modifying their source content through private-library maintenance endpoints, including append, chapter splitting, TXT/EPUB editor saves, and metadata restoration. Collected entries remain read-only references.
-- Enforce the private-library upload switch consistently for direct uploads, explicit library targets, external clients, and cloud imports, while retaining the instance owner's upload access.
-- Keep existing-work tag changes restricted to library owners and admins when uploading duplicate files or adding versions. Ordinary members can still assign tags to new works.
-- Allow cloud imports into shared libraries independently of the private-library upload switch, checking the target library's contributor permissions before downloading files.
-- Restore guest full-book search and batch text loading for readable books while continuing to enforce current library visibility, guest readability, and content revision checks.
-- Restrict update checks, update controls, and update-status requests in About to the instance owner. Ordinary members can still view version and project information, and update checks are also protected on the server.
-- Large-book AI searches reuse one archive and table of contents per scan instead of re-parsing the EPUB for every chapter.
-- Chapter attachments and chapter reads return separately numbered passages, so references to the middle or end of a chapter land on that text; TOC metadata is never citable, and unsupported citation markers are stripped.
-- Final-answer requests to OpenAI-compatible gateways disable tool selection, and a model that keeps requesting tools after the limit reports the cause rather than a failed request.
-- Tool-call signatures from Gemini survive OpenAI-compatible gateways, and missing or repeated call IDs stay uniquely paired with their results across rounds.
-- Failed AI requests show the provider status and a sanitized diagnostic, with separate timeout and rate-limit messages.
-- Full-book search in a cached server book queries the server for the cached revision instead of scanning only the chapters already loaded.
-- A device-book reply that fails or is stopped stays in the conversation with its error instead of disappearing with the draft turn.
-- Deleting a conversation stops the AI task still running in it.
+- Fixed chapter citations jumping to the chapter start instead of the quoted passage. Chapter attachments and reads now number passages separately; table-of-contents metadata cannot be cited, and unsupported citation markers are removed.
+- Fixed repeated EPUB parsing during large-book AI searches by reusing the archive and table of contents within each scan.
+- Fixed full-book search in cached server books scanning only loaded chapters; it now queries the server for the cached content revision.
+- Fixed final-answer requests to OpenAI-compatible gateways allowing further tool calls. If the model still requests tools after reaching the limit, the response explains the cause instead of reporting a generic request failure.
+- Fixed Gemini tool-call signatures being lost through OpenAI-compatible gateways, and kept tool results correctly paired when call IDs are missing or repeated.
+- Failed AI requests now show the provider status and a sanitized diagnostic, with distinct timeout and rate-limit messages. Failed or stopped device-book replies remain in the conversation with their error, and deleting a conversation stops its running AI task.
+- Fixed segmented selectors briefly dimming while settings are saved, including registration options when changing member permissions or guest access. Repeated clicks remain blocked during saving, and unavailable options retain their disabled styling.
+- Fixed collected shared books allowing changes to source content through private-library maintenance actions, including appending text, chapter splitting, TXT/EPUB editor saves, and metadata restoration. Collected entries remain read-only references.
+- Fixed inconsistent private-library upload checks across direct uploads, explicit library targets, external clients, and cloud imports, while preserving the instance owner's upload access. Cloud imports into shared libraries follow the target library's contributor permissions independently, with access checked before downloading.
+- Fixed duplicate uploads and new-version uploads bypassing tag permissions for existing works. Only library owners and admins can change those tags; ordinary members can still choose tags for new works.
+- Restored guest full-book search and batch text loading for readable books, with current library visibility, guest-readability, and content-revision checks.
+- Restricted update checks, update controls, and update-status requests in About to the instance owner, with server-side authorization for update checks. Ordinary members can still view version and project information.
+
+### Upgrade notes
+
+- If your instance runs behind a reverse proxy, set `TRUSTED_PROXIES` to the proxy IP addresses or CIDR ranges seen by the server so visitors receive separate login and invite rate limits. The default is `127.0.0.1,::1`; set it to `none` to disable trust in forwarding headers. Docker deployments must configure the proxy address as seen from inside the container.
 
 ## [0.8.1] - 2026-11-12
 
@@ -1171,51 +1175,55 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [待发布]
+### [0.8.2] - 2026-11-13
+
+#### 亮点
+
+- 支持关闭注册、仅邀请码与开放注册三种策略，通过邀请码引导新成员加入共享书库。
+- AI 回复支持后台生成，引用定位到原文片段，书内搜索更精准。
 
 #### 新增
 
-- 「设置 → 系统管理」支持选择「关闭注册／仅邀请码／开放注册」三种注册策略；登录页显示相应的注册入口，允许游客访问时提供「以访客身份浏览」按钮。
-- 实例所有者可创建注册邀请码，默认生成 6 位随机码，也可自定义 4–64 位汉字、字母、数字、`-` 和 `_` 组成的口令，支持备注、使用次数上限、有效期、复制邀请码或注册链接，以及删除邀请码以停止后续使用。一个邀请码可绑定多个创建者拥有或管理的共享书库，注册后自动加入；注册链接自动填入邀请码，注册成功后进入首个加入的书库，已有待处理书库邀请时优先返回邀请页。
-- AI 回复改为在服务端后台生成：离开阅读器、切换对话或关闭页面都不会中断已接受的任务，重新打开书籍可恢复生成中的内容或完整回答，本机书籍的结果写回原消息；生成时仍可新建对话、查看历史，已有任务进行中时再次提问会说明当前任务尚未完成。服务重启会把未完成的请求标记为已中断，不会静默重跑。
+- 「设置 → 系统管理」支持选择「关闭注册／仅邀请码／开放注册」三种注册策略。仅邀请码模式下邀请码必填，开放注册时选填；登录页显示相应的注册入口，允许游客访问时提供「以访客身份浏览」按钮。
+- 实例所有者可创建注册邀请码，默认生成 6 位随机码，也可自定义由 4–64 位汉字、字母、数字、`-` 和 `_` 组成的口令，支持备注、使用次数上限、有效期、复制邀请码或注册链接，以及删除后停止使用。一个邀请码可绑定多个创建者拥有或管理的共享书库，注册后自动加入；注册链接自动填入邀请码，注册成功后进入首个加入的书库，已有待处理书库邀请时优先返回邀请页。
+- AI 回复支持在服务端后台生成，离开阅读器、切换对话或关闭页面后仍会继续，重新打开书籍可恢复生成中的内容或完整回答，本机书籍的回复也会保存到原对话。生成期间仍可新建对话、查看历史，再次提问时会提示已有任务进行中；服务重启后，未完成的请求标记为已中断，不自动重试。
 
 #### 优化
 
-- 统一登录、注册与首次初始化页面的卡片布局、品牌图标、柔和背景及深色模式样式，表单字段校验采用一致的内联错误提示；仅邀请码模式下邀请码必填，开放注册时选填。
-- 登录、注册与首次初始化页面加载时使用与正式页面布局相配的卡片骨架屏。
-- 统一设置页的分段选择控件样式，覆盖语言、默认添加位置、书库展示与排序、注册策略与邀请码选项、上传及回收站限制、访问令牌有效期、字体与词典可见范围、文本替换规则、元数据源安装、存储缓存上限及用户管理标签页；书库偏好开关同步采用统一样式。
-- 将「上传书籍」「创建书库」整合为「成员权限」一行，可分别多选控制，游客访问仍保留独立开关。关闭注册时隐藏邀请码管理，已有邀请码保留，重新开放注册后恢复显示。
-- 统一新建用户与重置密码弹窗的布局和表单样式，打开时自动聚焦首个输入框，用户名为空或已被占用时在对应字段下方显示错误；同时优化用户管理中书库选择菜单的宽度与深色模式悬停样式。
-- 优化「我的书库」表格列宽，为书库名称留出更多空间，表头与可见性、角色标识保持单行，角色标识改用中性色样式；统一新建与管理书库弹窗中的可见性选项卡片，并优化浅色、深色模式下的悬停反馈。
-- 精简并统一设置页的空状态文案与展示，包括访问令牌、外部存储、文本替换规则及书库成员管理。
-- 注册邀请码尝试在密码计算前预占限流额度，无效码无需计算密码哈希，建号失败时回滚邀请码使用次数。登录与邀请码限流新增可信代理配置 `TRUSTED_PROXIES`，支持按 IP／网段识别反向代理后的真实访客（默认 `127.0.0.1,::1`，设为 `none` 则不信任转发头）；通过反向代理访问 Docker 实例时，需配置服务器实际看到的代理地址，避免不同访客共用限流额度。
-- AI 搜索可限定单章或章节区间，且始终落在允许阅读的范围内，核对中后期内容时不必反复扫描开头章节。
-- AI 回复改为按原文片段引用：附带的选区、段落、章节各自独立编号，跳转前在当前正文中校验原文，正文变更或片段重复时给出提示。代码与普通数字方括号保持原样，旧回复中的 `[n]` 打开时按现有来源重新编号；本机对话保留完整可见记录，只发送有界的近期问答；切换账号、书籍或会话会取消待发送的章节附件。
-- AI 笔记工具先按章节与类型过滤再限制数量；工具结果在预算内保持完整结构；长目录按需继续读取，不再固定截断在 200 章。
-- AI 查书按完整短语与「必须词＋任选词」在同一段内的命中排序，合并重叠片段，并给出命中处前后文。
-- AI 对话允许 12 轮、24 次工具调用与 36,000 字累计原文预算，达到上限时改为用已有证据收尾作答，而不是直接报错。
+- AI 回复按原文片段引用，选区及附带、读取章节中的各段原文分别编号；点击引用时校验当前正文，原文变更或存在多处匹配时给出提示。旧回复中的 `[n]` 引用在打开时重新编号，代码块与普通数字方括号保持原样。
+- AI 搜索支持在允许阅读的范围内限定单章或章节区间，优先匹配完整短语及同一段落中的必选词、任选词，合并重叠结果，并展示命中位置的前后文。
+- AI 工具先按章节与类型筛选笔记，再限制返回数量；工具结果在输出预算内保持完整 JSON，长目录可按需继续读取，不再截断于前 200 章。
+- AI 对话支持最多 12 轮、24 次工具调用，累计原文预算为 36,000 字符；达到上限时使用已获取的内容完成回答。
+- 本机书籍对话保留完整可见历史，仅向 AI 服务发送有长度限制的近期问答；切换账号、书籍或对话时取消待发送的章节附件。
+- 统一登录、注册与首次初始化页面的卡片布局、加载骨架屏、品牌图标、柔和背景、深色模式样式及字段内联错误提示。
+- 统一设置页的分段选择控件与书库偏好开关样式，覆盖展示与排序、注册策略、权限、资源可见范围、各类限制及安装选项；精简访问令牌、外部存储、文本替换规则及书库成员管理的空状态。
+- 将「上传书籍」「创建书库」整合为「成员权限」一行，可分别开关，游客访问保留独立控制。关闭注册时隐藏邀请码管理并保留已有邀请码，重新开放后恢复显示。
+- 统一新建用户与重置密码弹窗的表单布局，打开时自动聚焦首个输入框，用户名错误在对应字段下方显示，并优化用户管理中的书库选择菜单。
+- 「我的书库」为书库名称留出更多空间，表头与标识保持单行，角色标识采用中性色；新建与管理书库共用一致的可见性选项卡片，并改善浅色、深色模式下的悬停反馈。
+- 注册邀请码校验在密码哈希计算前预占限流额度，无效码直接拒绝，建号失败时恢复邀请码使用次数；登录与邀请码限流支持通过 `TRUSTED_PROXIES` 区分可信反向代理后的访客。
 
 #### 移除
 
-- 移除未启用的 AI 索引链路：`GET /retrieval/status`、`POST /retrieval/index`、`POST /retrieval/index/cancel`、`DELETE /retrieval/index`，AI 配置与状态中的索引／Embedding 字段，「设置 → AI」中的检索方式与 Embedding 模型选项，以及阅读器的语料导出接口。书内搜索按需扫描原文，不建立持久索引。
+- 移除未启用的 AI 索引链路，包括索引管理接口、AI 配置与状态中的索引和 Embedding 字段、检索方式与 Embedding 模型设置，以及阅读器语料导出接口。书内搜索按需扫描原文，不保存索引。
 
 #### 修复
 
-- 修复设置保存期间分段选择控件短暂变淡的问题，包括修改成员权限或游客访问时注册策略跟随闪烁；保存中仍阻止重复点击，因权限或其他限制而不可用的选项继续置灰。
-- 修复通过私库中的收藏条目维护共享源正文的问题，覆盖追加正文、重新分章、TXT／EPUB 编辑保存及元数据恢复；收藏条目始终保持只读引用。
-- 统一私库上传开关在直接上传、指定书库上传、外部客户端及网盘导入中的权限检查，实例所有者仍可上传。
-- 修复重复上传文件或新增版本时可绕过已有作品标签权限的问题；已有作品的标签仍由书库所有者和管理员管理，普通成员仍可为新建作品选择标签。
-- 修复私库上传开关误拦截共享书库网盘导入的问题；共享书库按自身投稿权限独立授权，并在下载文件前检查目标书库权限。
-- 恢复访客对可读书籍的全文搜索和批量正文加载，同时继续检查当前书库可见性、访客可读权限及内容版本。
-- 将「关于」中的检查更新、更新操作和更新状态请求限制为实例所有者，并补齐检查更新接口的后端权限；普通成员仍可查看版本和项目信息。
-- 大型 EPUB 的 AI 搜索在单次扫描内复用归档与目录，不再逐章重复解析整本书。
-- 章节附件与章节读取按原文片段分配独立编号，章中、章末内容可引用到对应位置；目录元数据不生成引用，无来源的引用标记会被清理。
-- OpenAI 兼容网关的收尾请求禁用工具调用；模型达到上限后仍要求调用时说明原因，而不是报请求失败。
-- 通过 OpenAI 兼容网关调用 Gemini 时保留工具调用签名，缺失或重复的调用 ID 仍能与结果正确配对。
-- AI 请求失败时展示上游状态与脱敏摘要，并区分超时与限流。
-- 打开已缓存的服务器书籍时，全文搜索改为按缓存版本查询服务端，不再只搜索已加载的章节。
-- 本机书籍的回答失败或被停止后仍保留在对话中并附上错误信息，不再随草稿一起丢弃。
-- 删除对话时会停止该对话中仍在生成的 AI 任务。
+- 修复章节引用跳到章首而非对应原文的问题，章节附件与章节读取分别为原文片段编号；目录信息不再作为引用来源，无有效来源的引用标记会被清理。
+- 修复大型 EPUB 的 AI 搜索逐章重复解析整本书的问题，单次扫描复用归档与目录。
+- 修复已缓存服务器书籍的全文搜索仅覆盖已加载章节的问题，改为按缓存的内容版本查询服务端。
+- 修复 OpenAI 兼容网关的收尾请求仍允许工具调用的问题；模型达到上限后若继续请求工具，会说明原因，不再仅显示通用的请求失败提示。
+- 修复通过 OpenAI 兼容网关调用 Gemini 时丢失工具调用签名的问题，并在调用 ID 缺失或重复时保持结果正确配对。
+- AI 请求失败时显示上游状态与脱敏错误摘要，区分超时和限流；本机书籍中失败或被停止的回复保留在对话中并附上错误信息，删除对话时同步停止仍在生成的 AI 任务。
+- 修复设置保存期间分段选择控件短暂变淡的问题，包括修改成员权限或游客访问时注册策略跟随闪烁；保存期间仍阻止重复点击，不可用的选项保持禁用样式。
+- 修复通过私库收藏条目修改共享源内容的问题，覆盖追加正文、重新分章、TXT／EPUB 编辑保存及元数据恢复；收藏条目保持只读引用。
+- 修复直接上传、指定书库上传、外部客户端及网盘导入中的私库上传权限检查不一致问题，实例所有者仍可上传；共享书库网盘导入独立遵循目标书库的投稿权限，并在下载前完成检查。
+- 修复重复上传或新增版本时绕过已有作品标签权限的问题；已有作品的标签仅由书库所有者和管理员修改，普通成员仍可为新建作品选择标签。
+- 恢复访客对可读书籍的全文搜索和批量正文加载，同时检查当前书库可见性、访客可读权限及内容版本。
+- 将「关于」中的检查更新、更新操作和更新状态请求限制为实例所有者，并补齐检查更新的服务端权限校验；普通成员仍可查看版本与项目信息。
+
+#### 升级说明
+
+- 使用反向代理时，请将 `TRUSTED_PROXIES` 配置为服务器实际看到的代理 IP 或 CIDR 网段，使不同访客分别计算登录与邀请码限流额度。默认值为 `127.0.0.1,::1`，设为 `none` 则不信任转发头；Docker 部署需填写容器内实际看到的代理地址。
 
 ### [0.8.1] - 2026-11-12
 

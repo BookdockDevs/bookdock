@@ -11,7 +11,7 @@ import { INSTANCE_INVITE_CODE_ALPHABET } from '@bookdock/shared'
 
 import * as client from '../../db/client'
 import * as schema from '../../db/schema'
-import { migrateBeforeBookRetirement, migrateTestBaseWithStorage, migrateWithTagFilter } from '../../db/migration-stage'
+import { INSTANCE_INVITES_TAG, migrateBeforeBookRetirement, migrateTestBaseWithStorage, migrateWithTagFilter, migrationTagWhen } from '../../db/migration-stage'
 import { createId } from '../../lib/id'
 import * as passwordLib from '../../lib/password'
 import { generateSessionToken, hashSessionToken } from '../../lib/token'
@@ -486,7 +486,7 @@ describe('instance invites and registration modes', () => {
     const freshDb = drizzle(sqlite, { schema })
     await client.runDatabaseMigrations(freshDb)
     const ledger = sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at').all()
-    expect(ledger.at(-1)).toMatchObject({ created_at: 1793900000000 })
+    expect(ledger).toContainEqual(expect.objectContaining({ created_at: migrationTagWhen(migrationsFolder, INSTANCE_INVITES_TAG) }))
     expect((sqlite.pragma('table_info(instance_invites)') as Array<{ name: string }>).map((column) => column.name))
       .not.toContain('auto_join_library_id')
     expect(freshDb.select().from(schema.instanceInviteLibraries).all()).toEqual([])
@@ -519,7 +519,7 @@ describe('instance invites and registration modes', () => {
     expect((sqlite.pragma('table_info(instance_invites)') as Array<{ name: string }>).map((column) => column.name))
       .not.toContain('auto_join_library_id')
     const ledger = sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at').all()
-    expect(ledger.at(-1)).toMatchObject({ created_at: 1793900000000 })
+    expect(ledger).toContainEqual(expect.objectContaining({ created_at: migrationTagWhen(migrationsFolder, INSTANCE_INVITES_TAG) }))
     await client.runDatabaseMigrations(upgradeDb)
     expect(sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at').all()).toEqual(ledger)
     expect(sqlite.pragma('foreign_key_check')).toEqual([])

@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { runDatabaseMigrations } from './client'
-import { revertReadingImportsSchema } from './migration-stage'
+import { revertInstanceAndAiJobsSchema, revertReadingImportsSchema } from './migration-stage'
 import * as schema from './schema'
 import { recordActivityEvent } from '../lib/activity-events'
 
@@ -75,6 +75,7 @@ describe('activity migration', () => {
       DROP TABLE IF EXISTS personal_metadata_sources;
       `);
       revertReadingImportsSchema(sqlite);
+      revertInstanceAndAiJobsSchema(sqlite);
       sqlite.exec(`
       DELETE FROM __drizzle_migrations WHERE created_at >= 1793300000000;
     `)

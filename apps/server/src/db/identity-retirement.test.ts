@@ -104,6 +104,7 @@ function makeLegacyIdentity() {
     DROP TABLE IF EXISTS personal_metadata_sources;
     DROP TABLE IF EXISTS instance_invite_libraries;
     DROP TABLE IF EXISTS instance_invites;
+    DROP TABLE IF EXISTS ai_chat_jobs;
     `);
     revertReadingImportsSchema(db.$client);
     db.$client.exec(`

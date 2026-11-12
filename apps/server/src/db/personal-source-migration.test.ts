@@ -8,7 +8,7 @@ import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { expect, it } from 'vitest'
 
 import { runDatabaseMigrations } from './client'
-import { revertReadingImportsSchema } from './migration-stage'
+import { revertInstanceAndAiJobsSchema, revertReadingImportsSchema } from './migration-stage'
 import { reconcilePersonalSourceMigration } from './personal-source-migration'
 import * as schema from './schema'
 
@@ -42,6 +42,7 @@ it.each([0, 1, 2, 3])('preserves installed sources from historical state %i', as
     const hasDetail = state >= 2
     if (!hasDetail) sqlite.exec('ALTER TABLE personal_metadata_sources DROP COLUMN has_detail')
     revertReadingImportsSchema(sqlite)
+    revertInstanceAndAiJobsSchema(sqlite)
     sqlite.prepare('DELETE FROM __drizzle_migrations WHERE created_at >= ?').run(sourceWhen)
     sqlite.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)').run(sourceHashes[state % 2], sourceWhen)
     if (hasDetail) sqlite.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)').run(detailHashes[state % 2], detailWhen)
