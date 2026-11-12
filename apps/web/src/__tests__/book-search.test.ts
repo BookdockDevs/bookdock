@@ -31,6 +31,11 @@ describe('extractChapterText', () => {
     expect(extractChapterText(doc).text).toBe('上一段加粗 下一段')
   })
 
+  it('inserts a single virtual space across <br/> line breaks inside a block', () => {
+    const doc = parseXhtml(`${XHTML_HEAD}<h2><span>第一章</span><br/><span>享受母穴</span></h2><p><br/>正文<br/><br/>第二行<br/></p>${XHTML_TAIL}`)
+    expect(extractChapterText(doc).text).toBe('第一章 享受母穴 正文 第二行')
+  })
+
   it('excludes script and style subtrees', () => {
     const doc = parseXhtml(
       `${XHTML_HEAD}<style>.a{color:red}</style><p>正文</p><script>var x = 1;</script>${XHTML_TAIL}`,

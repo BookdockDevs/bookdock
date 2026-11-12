@@ -126,12 +126,12 @@ describe('AI session service', () => {
 
     expect(getAiThread('user-1', thread.id).messages.at(-1)).toMatchObject({
       role: 'assistant',
-      content: '依据第二章作答[1]，无效依据。',
+      content: '依据第二章作答【1】，无效依据[3]。',
       citations: [{ id: 'chunk-2' }],
     })
     expect(prepareAiThread('user-1', 'book-1', thread.id, '后续问题').history).toEqual([
       { role: 'user', content: '问题' },
-      { role: 'assistant', content: '依据第二章作答[1]，无效依据。' },
+      { role: 'assistant', content: '依据第二章作答【1】，无效依据[3]。' },
     ])
   })
 

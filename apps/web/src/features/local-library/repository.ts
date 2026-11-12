@@ -2197,6 +2197,22 @@ export class LocalLibraryRepository {
     }, undefined, false)
   }
 
+  async applyAiThreadResult(ref: ClientBookRef, threadId: string, messageId: string, result: Pick<AiMessageRes, 'content' | 'context' | 'citations' | 'aborted'>): Promise<boolean> {
+    this.assertLocal(ref)
+    return this.transaction(['books', 'settings'], 'readwrite', async (tx) => {
+      await this.requireBook(tx, ref)
+      const key = this.aiThreadsKey(ref)
+      const threads = this.normalizeAiThreadList(await request(tx.objectStore('settings').get(key)))
+      const thread = threads.find((item) => item.id === threadId)
+      const message = thread?.messages.find((item) => item.id === messageId && item.role === 'assistant')
+      if (!thread || !message) return false
+      Object.assign(message, result)
+      thread.updatedAt = Date.now()
+      await request(tx.objectStore('settings').put(threads, key))
+      return true
+    }, undefined, false)
+  }
+
   async updateAiThread(ref: ClientBookRef, threadId: string, body: AiThreadUpdateReq): Promise<AiThreadRes> {
     this.assertLocal(ref)
     return this.transaction(['books', 'settings'], 'readwrite', async (tx) => {

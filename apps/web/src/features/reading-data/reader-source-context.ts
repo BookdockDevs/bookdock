@@ -44,6 +44,7 @@ export interface LocalReaderSession {
   listAiThreads(): Promise<{ data: AiThreadRes[] }>
   getAiThread(threadId: string): Promise<{ data: AiThreadDetailRes }>
   saveAiThreadTurn(input: LocalAiTurnInput): Promise<{ data: AiThreadDetailRes }>
+  applyAiThreadResult(threadId: string, messageId: string, result: Pick<AiMessageRes, 'content' | 'context' | 'citations' | 'aborted'>): Promise<boolean>
   updateAiThread(threadId: string, body: AiThreadUpdateReq): Promise<{ data: AiThreadRes }>
   deleteAiThread(threadId: string): Promise<void>
 }

@@ -827,12 +827,26 @@ export async function loadEpubResource(buffer: Buffer, resourcePath: string): Pr
   }
 }
 
+/** Reuse one archive and TOC when scanning multiple chapters in the same request. */
+export async function createEpubChapterTextReader(buffer: Buffer) {
+  const parsed = await parseEpubBuffer(buffer)
+  const zip = await JSZip.loadAsync(buffer)
+  const findFile = createArchiveFileLookup(zip)
+  return {
+    chapters: parsed.chapters,
+    async readChapterText(chapterIndex: number): Promise<string> {
+      const chapter = parsed.chapters[chapterIndex]
+      const file = chapter ? findFile(chapter.content) : null
+      if (!file) return ''
+      const doc = new DOMParser().parseFromString(await readArchiveText(file), 'application/xml')
+      const body = firstElement(doc.getElementsByTagName('body')) ?? doc.documentElement
+      return body ? normalizeReadingText(collectReadingText(body)) : ''
+    },
+  }
+}
+
 export async function extractEpubChapterText(buffer: Buffer, chapterIndex: number): Promise<string> {
-  const chapter = await loadEpubChapterMarkup(buffer, chapterIndex)
-  if (!chapter) return ''
-  const doc = new DOMParser().parseFromString(chapter.markup, 'application/xml')
-  const body = firstElement(doc.getElementsByTagName('body')) ?? doc.documentElement
-  return body ? normalizeReadingText(collectReadingText(body)) : ''
+  return (await createEpubChapterTextReader(buffer)).readChapterText(chapterIndex)
 }
 
 /** Read each spine document once; navigation entries are not book content. */

@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { AiConfigRes, AiConfigTestReq, AiConnectionTestRes, AiMessageRevisionRes, AiModelDiscoveryReq, AiModelRes, AiConfigUpdateReq, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiProviderRes, AiThreadDetailRes, AiThreadRes, AiThreadUpdateReq } from '@bookdock/shared'
+import type { AiChatJobRes, AiConfigRes, AiConfigTestReq, AiConnectionTestRes, AiMessageRevisionRes, AiModelDiscoveryReq, AiModelRes, AiConfigUpdateReq, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiProviderRes, AiThreadDetailRes, AiThreadRes, AiThreadUpdateReq } from '@bookdock/shared'
 
 import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { assertSessionEpoch, getSessionEpoch } from '@/lib/session-scope'
+import { useTranslation } from '@/hooks/useTranslation'
+import { getUserErrorMessage } from '@/lib/error-message'
 import { useAuthStore } from '@/stores/auth.store'
 
-import { apiDelete, apiGet, apiPatch, apiPost } from '../client'
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from '../client'
 
 export const AI_CONFIG_KEY = ['ai', 'config'] as const
 export const aiConfigKey = (accountId: string | null) => [...AI_CONFIG_KEY, 'account', accountId] as const
@@ -69,6 +71,48 @@ export function useAiThread(threadId: string | null, options?: { enabled?: boole
     networkMode: local ? 'always' : 'online',
     queryFn: () => local ? local.getAiThread(threadId!) : apiGet<{ data: AiThreadDetailRes }>(`/ai/threads/${threadId}`),
     enabled: (options?.enabled ?? true) && Boolean(threadId),
+  })
+}
+
+export const aiJobsKey = (accountId: string, kind: 'book' | 'local', scopeKey: string) => ['ai', 'jobs', accountId, kind, scopeKey] as const
+
+export function useAiJobs(bookId: string) {
+  const local = useLocalReader()
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
+  const queryClient = useQueryClient()
+  const translate = useTranslation()
+  const kind = local ? 'local' : 'book'
+  const scopeKey = local?.namespace ?? bookId
+  const queryKey = aiJobsKey(accountId ?? '', kind, scopeKey)
+  return useQuery({
+    queryKey,
+    queryFn: async ({ signal }) => {
+      const epoch = getSessionEpoch()
+      const previous = queryClient.getQueryData<{ data: AiChatJobRes[] }>(queryKey)
+      const response = await apiGet<{ data: AiChatJobRes[] }>(`/ai/jobs?kind=${kind}&scopeKey=${encodeURIComponent(scopeKey)}`, signal)
+      assertSessionEpoch(epoch)
+      signal.throwIfAborted()
+      if (!Array.isArray(response.data)) throw new ApiError('AI_PROVIDER_ERROR', 'Invalid AI job response')
+      for (const job of response.data) {
+        if (previous?.data.find((item) => item.id === job.id)?.updatedAt === job.updatedAt) continue
+        if (local && job.threadId) {
+          const error = job.error ? getUserErrorMessage(new ApiError(job.error.code, job.error.message), translate, 'reader.aiRequestFailed') : ''
+          await local.applyAiThreadResult(job.threadId, job.clientRequestId, {
+            content: job.content + (error ? `\n\n${translate('reader.aiRequestFailedWithMessage', { message: error })}` : ''),
+            context: job.receipt, citations: job.citations, aborted: job.state !== 'running' && job.state !== 'completed',
+          })
+          assertSessionEpoch(epoch)
+          if (job.state !== 'running') await apiPost(`/ai/jobs/${encodeURIComponent(job.id)}/acknowledge`)
+        }
+        if (job.threadId) void queryClient.invalidateQueries({ queryKey: aiThreadDetailKey(job.threadId, local?.namespace) })
+        void queryClient.invalidateQueries({ queryKey: aiThreadsScopeKey(bookId, local?.namespace) })
+      }
+      return response
+    },
+    enabled: Boolean(accountId),
+    refetchInterval: (query) => query.state.data?.data.some((job) => job.state === 'running') ? 500 : false,
+    refetchOnMount: 'always',
+    retry: false,
   })
 }
 

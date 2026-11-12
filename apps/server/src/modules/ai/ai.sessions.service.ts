@@ -106,7 +106,7 @@ function normalizeAiMessage(row: typeof aiMessages.$inferSelect) {
   if (row.role !== 'assistant') return row
   const normalized = row.aborted === 1
     ? normalizeAiCitationMarkers(row.content, [])
-    : normalizeAiCitationMarkers(row.content, row.citations ?? [])
+    : normalizeAiCitationMarkers(row.content, row.citations ?? [], true)
   return { ...row, content: normalized.content, citations: normalized.citations.length ? normalized.citations : null }
 }
 

@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
-import type { ReadingTimeFragment, ReadingCoverageInterval, AccessTokenPermission, ActivityAudience, ActivityEventType, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
+import type { ReadingTimeFragment, ReadingCoverageInterval, AiChatJobRes, AccessTokenPermission, ActivityAudience, ActivityEventType, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
 import type { ProgressFileData } from '../lib/progress-file'
 
 export const users = sqliteTable('users', {
@@ -1215,4 +1215,22 @@ export const personalMetadataSources = sqliteTable('personal_metadata_sources', 
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   userSourceUnique: uniqueIndex('personal_metadata_sources_user_source_unique').on(table.userId, table.sourceId),
+}))
+
+export const aiChatJobs = sqliteTable('ai_chat_jobs', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  kind: text('kind', { enum: ['book', 'local'] }).notNull(),
+  scopeKey: text('scope_key').notNull(),
+  clientRequestId: text('client_request_id').notNull(),
+  threadId: text('thread_id'),
+  state: text('state', { enum: ['running', 'completed', 'failed', 'cancelled', 'interrupted'] }).notNull(),
+  snapshot: text('snapshot', { mode: 'json' }).notNull().$type<AiChatJobRes>(),
+  acknowledgedAt: integer('acknowledged_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  scopeIdx: index('ai_chat_jobs_user_scope_idx').on(table.userId, table.kind, table.scopeKey),
+  requestUnique: uniqueIndex('ai_chat_jobs_user_request_unique').on(table.userId, table.clientRequestId),
+  activeUnique: uniqueIndex('ai_chat_jobs_active_user_unique').on(table.userId).where(sql`${table.state} = 'running'`),
 }))

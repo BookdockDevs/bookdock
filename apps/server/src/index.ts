@@ -1,3 +1,4 @@
+import { interruptStaleAiChatJobs } from './modules/ai/ai.jobs.service'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 
@@ -42,6 +43,7 @@ async function start() {
   try {
     await runMigrations()
     log('info', 'database.migration.completed', { durationMs: Date.now() - migrationStartedAt })
+    interruptStaleAiChatJobs()
     const interruptedRuns = interruptStaleAiGenerationRuns()
     if (interruptedRuns > 0) log('info', 'ai.generation.stale_runs_interrupted', { meta: { count: interruptedRuns } })
     recoverZombieTransferTasks()

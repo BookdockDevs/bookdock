@@ -140,7 +140,7 @@ describe('local reader adapter behavior', () => {
         content: '本地 AI 解释',
         context: null,
         retry: null,
-        citations: [],
+        citations: [{ id: 'direct:selection', chapterIndex: 0, chapterId: 'direct:0', chapterTitle: 'First', startOffset: 0, endOffset: 2, excerpt: '原文', quote: '原文', textBasis: 'reader' }],
         events: [],
         createdAt: 1001,
         aborted: false,
@@ -148,12 +148,22 @@ describe('local reader adapter behavior', () => {
     })
     expect((await session.listAiThreads()).data).toHaveLength(1)
     expect((await session.getAiThread(saved.data.id)).data.messages).toHaveLength(2)
+    expect((await session.getAiThread(saved.data.id)).data.messages[1]!.citations).toEqual([expect.objectContaining({ id: 'direct:selection', quote: '原文', textBasis: 'reader' })])
 
     await session.updateAiThread(saved.data.id, { title: '重命名对话' })
     const reopened = await openLocalReaderSession(ref)
     expect((await reopened.listAiThreads()).data[0]?.title).toBe('重命名对话')
 
+    const result = { content: 'Finished in the background', context: null, citations: [], aborted: false }
+    expect(await reopened.applyAiThreadResult(saved.data.id, 'a-1', result)).toBe(true)
+    expect(await reopened.applyAiThreadResult(saved.data.id, 'a-1', result)).toBe(true)
+    const completed = await reopened.getAiThread(saved.data.id)
+    expect(completed.data.messages).toHaveLength(2)
+    expect(completed.data.messages[1]?.content).toBe(result.content)
+
     await reopened.deleteAiThread(saved.data.id)
+    expect((await reopened.listAiThreads()).data).toHaveLength(0)
+    expect(await reopened.applyAiThreadResult(saved.data.id, 'a-1', result)).toBe(false)
     expect((await reopened.listAiThreads()).data).toHaveLength(0)
 
     await reopened.saveAiThreadTurn({

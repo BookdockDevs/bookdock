@@ -11,7 +11,8 @@ import {
   AI_MAX_CHAT_PROMPT_CHARS,
   AI_MAX_CHAPTER_REFERENCES,
   AI_MAX_CONTEXT_CHARS,
-  AI_MAX_INDEX_CORPUS_CHARS,
+  AI_MAX_HISTORY_MESSAGES,
+  AI_MAX_HISTORY_MESSAGE_CHARS,
   AI_READING_SCOPES,
   AI_TOOL_NAMES,
   AUTH_PASSWORD_MAX_LENGTH,
@@ -318,6 +319,7 @@ const aiContextSchema = z.object({
   visibleTextVersion: z.string().trim().min(1).max(200).optional(),
   chapterReferences: z.array(z.object({
     chapterIndex: z.number().int().min(0).max(1_000_000),
+    chapterHref: z.string().max(2000).optional(),
     chapterTitle: z.string().max(500).optional(),
     text: z.string().trim().min(1).max(AI_MAX_CONTEXT_CHARS),
   }).strict()).max(AI_MAX_CHAPTER_REFERENCES).optional(),
@@ -325,7 +327,7 @@ const aiContextSchema = z.object({
 
 const aiHistoryMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
-  content: z.string().trim().min(1).max(8000),
+  content: z.string().trim().min(1).max(AI_MAX_HISTORY_MESSAGE_CHARS),
   context: aiContextSchema.optional(),
 }).strict()
 
@@ -344,7 +346,7 @@ export const aiChatSchema = z.object({
   editMessageId: z.string().trim().min(1).max(100).optional(),
   prompt: z.string().trim().min(1).max(AI_MAX_CHAT_PROMPT_CHARS),
   context: aiContextSchema,
-  history: z.array(aiHistoryMessageSchema).max(12).optional(),
+  history: z.array(aiHistoryMessageSchema).max(AI_MAX_HISTORY_MESSAGES).optional(),
   assistantModePrompt: z.string().trim().max(2_000).optional(),
   assistantMode: z.string().trim().max(80).optional(),
   assistantModeId: z.string().trim().min(1).max(100).optional(),
@@ -355,11 +357,20 @@ export const aiChatSchema = z.object({
 export const aiLocalChatSchema = z.object({
   prompt: z.string().trim().min(1).max(AI_MAX_CHAT_PROMPT_CHARS),
   context: aiContextSchema,
-  history: z.array(aiHistoryMessageSchema).max(12).optional(),
+  history: z.array(aiHistoryMessageSchema).max(AI_MAX_HISTORY_MESSAGES).optional(),
   assistantModePrompt: z.string().trim().max(2_000).optional(),
   assistantMode: z.string().trim().max(80).optional(),
   assistantModeId: z.string().trim().min(1).max(100).optional(),
 }).strict()
+
+export const aiChatJobCreateSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('book'), clientRequestId: z.string().min(1).max(100), request: aiChatSchema }).strict(),
+  z.object({ kind: z.literal('local'), clientRequestId: z.string().min(1).max(100), scopeKey: z.string().min(1).max(300), threadId: z.string().min(1).max(100), request: aiLocalChatSchema }).strict(),
+])
+
+export const aiChatJobListSchema = z.object({
+  kind: z.enum(['book', 'local']), scopeKey: z.string().min(1).max(300),
+})
 
 const aiThreadTitleSchema = z.string().trim().min(1).max(100)
 
@@ -383,48 +394,17 @@ export const aiGenerationRunIdSchema = z.string().trim().min(1).max(100)
 
 export const aiMessageIdSchema = z.string().trim().min(1).max(100)
 
-export const aiIndexStatusSchema = z.object({
-  bookId: z.string().trim().min(1).max(200),
-}).strict()
-
-export const aiIndexSchema = z.object({
-  bookId: z.string().trim().min(1).max(200),
-  force: z.boolean().optional(),
-  visibleTextVersion: z.string().trim().min(1).max(200).optional(),
-  chapters: z.array(z.object({
-    chapterIndex: z.number().int().min(0).max(1_000_000),
-    text: z.string().max(1_000_000),
-  }).strict()).max(10_000).optional(),
-}).strict().superRefine((value, context) => {
-  if (value.chapters && !value.visibleTextVersion) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['visibleTextVersion'], message: 'visibleTextVersion is required with chapters' })
-  }
-  if (value.visibleTextVersion && !value.chapters) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['chapters'], message: 'chapters are required with visibleTextVersion' })
-  }
-  if (value.chapters) {
-    const totalChars = value.chapters.reduce((total, chapter) => total + chapter.text.length, 0)
-    if (totalChars > AI_MAX_INDEX_CORPUS_CHARS) {
-      context.addIssue({ code: z.ZodIssueCode.custom, path: ['chapters'], message: 'transformed corpus is too large' })
-    }
-    const indexes = new Set<number>()
-    for (const chapter of value.chapters) {
-      if (indexes.has(chapter.chapterIndex)) {
-        context.addIssue({ code: z.ZodIssueCode.custom, path: ['chapters'], message: 'chapter indexes must be unique' })
-        break
-      }
-      indexes.add(chapter.chapterIndex)
-    }
-  }
-})
-
 export const aiSearchSchema = z.object({
   bookId: z.string().trim().min(1).max(200),
-  query: z.string().trim().min(1).max(500),
+  query: z.string().trim().min(1).max(500).optional(),
+  requiredTerms: z.array(z.string().trim().min(1).max(100)).max(8).optional(),
+  anyTerms: z.array(z.string().trim().min(1).max(100)).max(8).optional(),
   limit: z.coerce.number().int().min(1).max(10).default(5),
   minChapterIndex: z.coerce.number().int().min(0).max(1_000_000).optional(),
   maxChapterIndex: z.coerce.number().int().min(-1).max(1_000_000).optional(),
-}).strict()
+}).strict().refine((value) => Boolean(value.query || value.requiredTerms?.length || value.anyTerms?.length), {
+  message: 'Provide a query or at least one search term',
+})
 
 const aiBaseUrlSchema = z.string().trim().min(1).max(2048).url().refine((value) => /^https?:\/\//i.test(value), 'Only HTTP(S) URLs are supported')
 
@@ -477,8 +457,6 @@ export const aiProviderSchema = z.enum([
 
 export const aiConfigUpdateSchema = z.object({
   activeProfileId: z.string().trim().max(100).nullable().optional(),
-  embeddingProfileId: z.string().trim().max(100).nullable().optional(),
-  embeddingModel: z.string().trim().min(1).max(200).nullable().optional(),
   prompts: z.array(aiPromptTemplateSchema).max(24).nullable().optional(),
   modes: z.array(aiAssistantModeSchema).max(AI_MAX_ASSISTANT_MODES).nullable().optional(),
   defaultAssistantMode: aiAssistantModeSchema.nullable().optional(),

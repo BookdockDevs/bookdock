@@ -1,6 +1,40 @@
 const createSVGElement = tag =>
     document.createElementNS('http://www.w3.org/2000/svg', tag)
 
+const mergeLineRects = (rects, vertical = false) => {
+    const merged = []
+    for (const rect of rects) {
+        if (rect.width <= 0 || rect.height <= 0) continue
+        const prev = merged[merged.length - 1]
+        const sameLine = prev && (vertical
+            ? Math.abs(prev.left - rect.left) <= 2
+              && Math.abs((prev.left + prev.width) - (rect.left + rect.width)) <= 2
+              && rect.top <= prev.top + prev.height + 2
+              && rect.top + rect.height >= prev.top - 2
+            : Math.abs(prev.top - rect.top) <= 2
+              && Math.abs((prev.top + prev.height) - (rect.top + rect.height)) <= 2
+              && rect.left <= prev.left + prev.width + 2
+              && rect.left + rect.width >= prev.left - 2)
+        if (sameLine) {
+            const left = Math.min(prev.left, rect.left)
+            const top = Math.min(prev.top, rect.top)
+            const right = Math.max(prev.left + prev.width, rect.left + rect.width)
+            const bottom = Math.max(prev.top + prev.height, rect.top + rect.height)
+            merged[merged.length - 1] = { left, top, right, bottom, width: right - left, height: bottom - top }
+        } else {
+            merged.push({
+                left: rect.left,
+                top: rect.top,
+                right: rect.left + rect.width,
+                bottom: rect.top + rect.height,
+                width: rect.width,
+                height: rect.height,
+            })
+        }
+    }
+    return merged
+}
+
 let overlayerCounter = 0
 
 export class Overlayer {
@@ -370,7 +404,8 @@ export class Overlayer {
         }
         g.style.mixBlendMode = blendMode ?? 'var(--overlayer-highlight-blend-mode, normal)'
 
-        for (const [index, { left, top, height, width }] of rects.entries()) {
+        const mergedRects = mergeLineRects(rects, vertical)
+        for (const [index, { left, top, height, width }] of mergedRects.entries()) {
             if (pen && width > 0 && height > 0) {
                 const el = createSVGElement('path')
                 const length = vertical ? height : width
@@ -394,7 +429,7 @@ export class Overlayer {
                 continue
             }
             const isFirst = index === 0
-            const isLast = index === rects.length - 1
+            const isLast = index === mergedRects.length - 1
 
             let x, y, w, h
 

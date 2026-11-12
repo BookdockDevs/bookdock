@@ -1,4 +1,6 @@
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+
+import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 import { getDb } from '../../db/client'
 import { publishedContentFiles, syncContentFiles } from '../../db/content-files'
@@ -10,7 +12,7 @@ import { issueUndoReceipt } from '../../lib/undo'
 import { savePersonalBookSnapshot } from '../../lib/personal-book-archive'
 import { cleanContentBlobs } from '../../lib/content-file-lifecycle'
 import { assertReadableBook, getBook } from '../books/books.service'
-import type { AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq, ContentFile } from '@bookdock/shared'
+import type { AnnotationCreateReq, AnnotationQueryScope, AnnotationRes, AnnotationUpdateReq, ContentFile } from '@bookdock/shared'
 import { assertIdeaSource, IDEA_VISIBILITY_KEY, ideaComposerContext, ideaRevision, privateIdeaLink, readableIdea } from './idea-access'
 
 export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
@@ -65,20 +67,35 @@ export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
   }
 }
 
-export async function listAnnotations(userId: string, bookId: string) {
+function scopedChapter(scope: AnnotationQueryScope | undefined, type: AnnotationRes['type'], href: AnySQLiteColumn, title: AnySQLiteColumn) {
+  if (!scope) return undefined
+  if (scope.type && scope.type !== type) return sql`0`
+  const path = sql`CASE WHEN instr(${href}, '#') > 0 THEN substr(${href}, 1, instr(${href}, '#') - 1) ELSE ${href} END`
+  return or(
+    scope.chapterHrefs.length ? inArray(path, scope.chapterHrefs) : sql`0`,
+    and(or(isNull(href), eq(href, '')), scope.chapterTitles.length ? inArray(title, scope.chapterTitles) : sql`0`),
+  )
+}
+
+function scopedLocation(scope: AnnotationQueryScope | undefined, revisionId: AnySQLiteColumn, relocation: AnySQLiteColumn, currentRevisionId: string | null) {
+  if (!scope) return undefined
+  return and(or(isNull(relocation), ne(relocation, 'unresolved')), or(isNull(revisionId), currentRevisionId ? eq(revisionId, currentRevisionId) : sql`0`))
+}
+
+export async function listAnnotations(userId: string, bookId: string, scope?: AnnotationQueryScope) {
   const db = getDb()
+  const currentRevisionId = ideaRevision(userId, bookId)?.id ?? null
   const [hl, bm, ideaRows] = await Promise.all([
     db.select().from(highlights)
-      .where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, bookId), isNull(highlights.deletedAt)))
-      .orderBy(desc(highlights.createdAt), desc(highlights.id)).all(),
+      .where(and(eq(highlights.userId, userId), eq(highlights.bookVersionId, bookId), isNull(highlights.deletedAt), scopedChapter(scope, 'highlight', highlights.chapterHref, highlights.chapter), scopedLocation(scope, highlights.revisionId, highlights.relocation, currentRevisionId)))
+      .orderBy(desc(scope ? highlights.updatedAt : highlights.createdAt), desc(highlights.id)).limit(scope?.limit ?? -1).all(),
     db.select().from(bookmarks)
-      .where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, bookId), isNull(bookmarks.deletedAt)))
-      .orderBy(desc(bookmarks.createdAt), desc(bookmarks.id)).all(),
+      .where(and(eq(bookmarks.userId, userId), eq(bookmarks.bookVersionId, bookId), isNull(bookmarks.deletedAt), scopedChapter(scope, 'bookmark', bookmarks.chapterHref, bookmarks.chapter), scopedLocation(scope, bookmarks.revisionId, bookmarks.relocation, currentRevisionId)))
+      .orderBy(desc(scope ? bookmarks.updatedAt : bookmarks.createdAt), desc(bookmarks.id)).limit(scope?.limit ?? -1).all(),
     db.select().from(ideas)
-      .where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, bookId), isNull(ideas.deletedAt)))
-      .orderBy(desc(ideas.createdAt), desc(ideas.id)).all(),
+      .where(and(eq(ideas.userId, userId), eq(ideas.bookVersionId, bookId), isNull(ideas.deletedAt), scopedChapter(scope, 'note', ideas.chapterHref, ideas.chapter), scopedLocation(scope, ideas.revisionId, ideas.relocation, currentRevisionId)))
+      .orderBy(desc(scope ? ideas.updatedAt : ideas.createdAt), desc(ideas.id)).limit(scope?.limit ?? -1).all(),
   ])
-  const currentRevisionId = ideaRevision(userId, bookId)?.id ?? null
   const ideaIds = ideaRows.map((row) => row.id)
   const likes = ideaIds.length
     ? db.select({ ideaId: ideaLikes.ideaId, userId: ideaLikes.userId })
@@ -125,28 +142,31 @@ export async function listAnnotations(userId: string, bookId: string) {
   ]
 }
 
-export async function searchAnnotations(userId: string, bookId: string, query: string, limit = 8) {
+export async function searchAnnotations(userId: string, bookId: string, query: string, limit = 8, scope?: AnnotationQueryScope) {
   const normalized = query.trim().slice(0, 200)
   if (!normalized) return []
   const db = getDb()
+  const currentRevisionId = ideaRevision(userId, bookId)?.id ?? null
   const hl = db.select().from(highlights)
     .where(and(
       eq(highlights.userId, userId),
       eq(highlights.bookVersionId, bookId),
       isNull(highlights.deletedAt),
+      scopedChapter(scope, 'highlight', highlights.chapterHref, highlights.chapter), scopedLocation(scope, highlights.revisionId, highlights.relocation, currentRevisionId),
       sql`(
         instr(lower(${highlights.text}), lower(${normalized})) > 0
         OR instr(lower(coalesce(${highlights.chapter}, '')), lower(${normalized})) > 0
       )`,
     ))
     .orderBy(desc(highlights.updatedAt), desc(highlights.id))
-    .limit(Math.min(Math.max(limit, 1), 20))
+    .limit(Math.min(Math.max(scope?.limit ?? limit, 1), 20))
     .all()
   const bm = db.select().from(bookmarks)
     .where(and(
       eq(bookmarks.userId, userId),
       eq(bookmarks.bookVersionId, bookId),
       isNull(bookmarks.deletedAt),
+      scopedChapter(scope, 'bookmark', bookmarks.chapterHref, bookmarks.chapter), scopedLocation(scope, bookmarks.revisionId, bookmarks.relocation, currentRevisionId),
       sql`(
         instr(lower(coalesce(${bookmarks.title}, '')), lower(${normalized})) > 0
         OR instr(lower(coalesce(${bookmarks.chapter}, '')), lower(${normalized})) > 0
@@ -154,13 +174,14 @@ export async function searchAnnotations(userId: string, bookId: string, query: s
       )`,
     ))
     .orderBy(desc(bookmarks.updatedAt), desc(bookmarks.id))
-    .limit(Math.min(Math.max(limit, 1), 20))
+    .limit(Math.min(Math.max(scope?.limit ?? limit, 1), 20))
     .all()
   const ideaRows = db.select().from(ideas)
     .where(and(
       eq(ideas.userId, userId),
       eq(ideas.bookVersionId, bookId),
       isNull(ideas.deletedAt),
+      scopedChapter(scope, 'note', ideas.chapterHref, ideas.chapter), scopedLocation(scope, ideas.revisionId, ideas.relocation, currentRevisionId),
       sql`(
         instr(lower(${ideas.text}), lower(${normalized})) > 0
         OR instr(lower(coalesce(${ideas.note}, '')), lower(${normalized})) > 0
@@ -168,12 +189,12 @@ export async function searchAnnotations(userId: string, bookId: string, query: s
       )`,
     ))
     .orderBy(desc(ideas.updatedAt), desc(ideas.id))
-    .limit(Math.min(Math.max(limit, 1), 20))
+    .limit(Math.min(Math.max(scope?.limit ?? limit, 1), 20))
     .all()
   return [
-    ...hl.map((row) => toRes('highlight', row)),
-    ...bm.map((row) => toRes('bookmark', row)),
-    ...ideaRows.map((row) => toRes('idea', row)),
+    ...hl.map((row) => ({ ...toRes('highlight', row), locationAvailable: row.relocation !== 'unresolved' && (!row.revisionId || row.revisionId === currentRevisionId) })),
+    ...bm.map((row) => ({ ...toRes('bookmark', row), locationAvailable: row.relocation !== 'unresolved' && (!row.revisionId || row.revisionId === currentRevisionId) })),
+    ...ideaRows.map((row) => ({ ...toRes('idea', row), locationAvailable: row.relocation !== 'unresolved' && (!row.revisionId || row.revisionId === currentRevisionId) })),
   ]
 }
 

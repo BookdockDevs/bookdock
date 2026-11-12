@@ -62,7 +62,7 @@ describe('AI generation run service', () => {
 
     const finished = finalizeAiGenerationRun('user-1', run.id, {
       state: 'completed',
-      text: '最终回答[1]',
+      text: '最终回答[[cite:1]]',
       events: [{ type: 'tool', name: 'search_book', phase: 'result', resultChars: 12 }],
       usage: { inputTokens: 10, outputTokens: 4 },
       citations: [{ id: 'citation-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 0, endOffset: 4, excerpt: '正文' }],
@@ -87,9 +87,9 @@ describe('AI generation run service', () => {
       },
     })
 
-    expect(finished).toMatchObject({ state: 'completed', targetMessageId: 'assistant-1', checkpointText: '最终回答[1]', checkpointSeq: 1, diagnostics: { provider: 'openai', providerRequestCount: 2, retrievalSelectedResults: 2 } })
+    expect(finished).toMatchObject({ state: 'completed', targetMessageId: 'assistant-1', checkpointText: '最终回答【1】', checkpointSeq: 1, diagnostics: { provider: 'openai', providerRequestCount: 2, retrievalSelectedResults: 2 } })
     const assistant = db.select().from(aiMessages).all().find((message) => message.id === 'assistant-1')
-    expect(assistant).toMatchObject({ content: '最终回答[1]', aborted: 0, citations: [{ id: 'citation-1' }] })
+    expect(assistant).toMatchObject({ content: '最终回答【1】', aborted: 0, citations: [{ id: 'citation-1' }] })
     expect(db.select().from(aiMessageEvents).all()).toEqual([
       expect.objectContaining({ messageId: 'assistant-1', sequence: 0, type: 'tool', phase: 'result', name: 'search_book', resultChars: 12 }),
       expect.objectContaining({ messageId: 'assistant-1', sequence: 1, type: 'citation', citationId: 'citation-1' }),
@@ -106,15 +106,15 @@ describe('AI generation run service', () => {
 
     const finished = finalizeAiGenerationRun('user-1', run.id, {
       state: 'completed',
-      text: '有效依据[2]，无效依据[3]，链接[1](https://example.com)。',
+      text: '有效依据[[cite:2]]，无效依据[[cite:3]]，链接[1](https://example.com)。',
       events: [],
       usage: null,
       citations,
     })
 
-    expect(finished.checkpointText).toBe('有效依据[1]，无效依据，链接[1](https://example.com)。')
+    expect(finished.checkpointText).toBe('有效依据【1】，无效依据，链接[1](https://example.com)。')
     expect(db.select().from(aiMessages).all().find((message) => message.id === finished.targetMessageId)).toMatchObject({
-      content: '有效依据[1]，无效依据，链接[1](https://example.com)。',
+      content: '有效依据【1】，无效依据，链接[1](https://example.com)。',
       citations: [{ id: 'citation-2' }],
     })
   })

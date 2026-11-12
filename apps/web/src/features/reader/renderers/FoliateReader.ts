@@ -10,7 +10,6 @@ import {
 } from '@zip.js/zip.js'
 
 import type {
-  AiIndexCorpus,
   BookReader,
   ChineseConversion,
   ContinuousScroll,
@@ -44,18 +43,19 @@ import { MediaOverlaySection, type MediaOverlayCue } from '../lib/media-overlay'
 import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../lib/text-replacements'
 import { NavigationPending, type NavigationTarget } from '../lib/navigation-pending'
 import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
-import { canFallbackReaderContent, consumePreparedReaderContentText, fetchReaderManifest, ReaderContentError, ReaderContentSession } from '../lib/reader-content-client'
+import { canFallbackReaderContent, consumePreparedReaderContentText, fetchReaderManifest, fetchReaderSearch, ReaderContentError, ReaderContentSession } from '../lib/reader-content-client'
 import { chapterIndexAtFraction, sectionFractionBoundaries } from '../lib/progress-model'
 import { forwardTextPaths } from '../lib/forward-text-paths'
 import { getSelectionGeometry } from '../lib/selection-geometry'
 import { ttsBoundaryRange } from '../lib/tts-text-range'
 import { waitForReaderFonts } from '../lib/reader-font-ready'
-import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, readerSearchEventSchema, type BookFormat, type ReaderManifestEntry } from '@bookdock/shared'
+import { BOOKMARK_CONTEXT_MAX_LENGTH, applyTitleReplacements, readerSearchEventSchema, type BookFormat, type ReaderManifestEntry, type ReaderSearchRequest } from '@bookdock/shared'
 
 import {
   createExcerptBuilder,
   extractChapterText,
   findMatchesSafely,
+  findUniqueQuoteRange,
   getChapterText,
   mapMatchTextsToOffsets,
   offsetsToRange,
@@ -91,9 +91,9 @@ function ttsTextHash(text: string): string {
   return (hash >>> 0).toString(36)
 }
 
-function readerTextVersion(conversion: ChineseConversion, replacements: TextReplacementRule[]): string {
+function readerTextVersion(conversion: ChineseConversion, replacements: TextReplacementRule[], sourceVersion: string): string {
   let hash = 2166136261
-  const value = JSON.stringify({ conversion, replacements })
+  const value = JSON.stringify({ conversion, replacements, sourceVersion })
   for (let index = 0; index < value.length; index++) {
     hash ^= value.charCodeAt(index)
     hash = Math.imul(hash, 16777619)
@@ -3100,6 +3100,7 @@ export class FoliateReader implements BookReader {
           this.emitRevisionNavigation(target, resolvedTarget?.sectionIndex, resolvedTarget?.chapterNavigation)
           return
         }
+        if (target?.startsWith('ai-quote:')) throw error
         console.warn('[FoliateReader] navigation failed:', error)
         if (intent === this.navigationIntent) {
           this.emit('navigateError', {
@@ -3199,6 +3200,56 @@ export class FoliateReader implements BookReader {
         })
       }
       return false
+    }
+
+    if (target.startsWith('ai-quote:')) {
+      const citation = JSON.parse(decodeURIComponent(target.slice('ai-quote:'.length))) as {
+        chapterIndex: number; quote: string; sourceCfi?: string; revisionId?: string; chapterHref?: string; textBasis?: string; visibleTextVersion?: string
+      }
+      if (!Number.isSafeInteger(citation.chapterIndex) || citation.chapterIndex < 0 || !citation.quote || citation.quote.length > 1000) throw new Error('Invalid AI source')
+      if (citation.revisionId && this.contentSession?.manifest.revisionId && citation.revisionId !== this.contentSession.manifest.revisionId) throw new Error('AI source revision has changed')
+      if (citation.textBasis === 'reader' && citation.visibleTextVersion && citation.visibleTextVersion !== this.getAiCorpusVersion()) throw new Error('AI source text has changed')
+      let sectionIndex = this.aiCorpusSectionIndices()[citation.chapterIndex]
+      if (citation.chapterHref) {
+        const matches = (this.book?.sections ?? []).flatMap((section: { id?: string }, index: number) =>
+          section.id && normalizeBookHref(section.id) === normalizeBookHref(citation.chapterHref!) ? [index] : [])
+        if (matches.length !== 1) throw new Error('AI source chapter is unavailable')
+        sectionIndex = matches[0]
+      }
+      if (sectionIndex === undefined || !this.book || !renderer) throw new Error('AI source chapter is unavailable')
+      const readingVersion = this.getAiCorpusVersion()
+      let quote = citation.quote
+      if (citation.textBasis !== 'reader') {
+        const escaped = quote.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        let markup = `<html><body><p>${escaped}</p></body></html>`
+        if (this.replacements.length) markup = await applyReplacementsWithWorker(markup, this.replacements, 'text/html')
+        if (this.conversion !== 'off') markup = await convertChinese(markup, this.conversion)
+        quote = extractChapterText(new DOMParser().parseFromString(markup, 'text/html')).text
+      }
+      if (citation.sourceCfi?.startsWith('epubcfi(')) {
+        const resolved = this.book.resolveCFI?.(citation.sourceCfi)
+        if (!resolved || resolved.index !== sectionIndex) throw new Error('AI source anchor has changed')
+        return renderer.goTo({ index: sectionIndex, anchor: (doc: Document) => {
+          if (this.getAiCorpusVersion() !== readingVersion) throw new Error('AI source text has changed')
+          const range = resolved.anchor(doc) as Range | null
+          if (!range || !range.toString().replace(/\s+/g, '').startsWith(quote.replace(/\s+/g, ''))) throw new Error('AI source anchor has changed')
+          this.setActiveSearchRange(sectionIndex!, range)
+          this.scheduleActiveSearchHighlightClear(4000)
+          return range
+        } })
+      }
+      const chapter = await getChapterText(this.book, sectionIndex, { chineseConversion: this.conversion, replacements: this.replacements })
+      if (this.destroyed || this.getAiCorpusVersion() !== readingVersion || !chapter || !findUniqueQuoteRange(chapter.text, quote)) throw new Error('AI source is missing or ambiguous')
+      return renderer.goTo({ index: sectionIndex, anchor: (doc: Document) => {
+        if (this.getAiCorpusVersion() !== readingVersion) throw new Error('AI source text has changed')
+        const prepared = prepareSearchDocument(doc)
+        const hit = findUniqueQuoteRange(prepared.text, quote)
+        const range = hit ? prepared.toRange(hit.start, hit.end) : null
+        if (!range) throw new Error('AI source is missing or ambiguous')
+        this.setActiveSearchRange(sectionIndex!, range)
+        this.scheduleActiveSearchHighlightClear(4000)
+        return range
+      } })
     }
 
     // search-hit-chapter:{chapterIndex}:{start}:{end} — AI citation target.
@@ -4405,8 +4456,11 @@ export class FoliateReader implements BookReader {
     const book = this.book
     const conversion = this.conversion
     const replacements = [...this.replacements]
-    if (opts?.scope !== 'chapter' && this.contentSession && typeof navigator !== 'undefined' && navigator.onLine) {
-      const results = await this.searchOnline(q, opts, onProgress, controller)
+    const [contentPath, contentQuery = ''] = this.url.split('?', 2)
+    const serverRevisionId = this.contentSession?.manifest.revisionId
+      ?? (/^\/api\/v1\/books\/[^/]+\/file$/.test(contentPath) ? new URLSearchParams(contentQuery).get('revisionId') : null)
+    if (opts?.scope !== 'chapter' && serverRevisionId && typeof navigator !== 'undefined' && navigator.onLine) {
+      const results = await this.searchOnline(q, opts, onProgress, controller, serverRevisionId)
       if (this.searchAbort === controller) this.searchAbort = null
       return results
     }
@@ -4604,9 +4658,9 @@ export class FoliateReader implements BookReader {
     opts: SearchOptions | undefined,
     onProgress: ((results: SearchResult[], progress: number | null, status?: SearchStatus) => void) | undefined,
     controller: AbortController,
+    revisionId: string,
   ): Promise<SearchResult[]> {
     const session = this.contentSession
-    if (!session) return []
     const results: SearchResult[] = []
     const bySection = new Map<number, SearchMatch[]>()
     const textsBySection = new Map<number, string[]>()
@@ -4614,13 +4668,16 @@ export class FoliateReader implements BookReader {
     let status: SearchStatus = { truncated: false, incomplete: false }
     let terminal = false
     try {
-      const response = await session.search({
-          query,
-          mode: opts?.mode ?? 'contains',
-          matchCase: opts?.matchCase ?? false,
-          chineseConversion: this.conversion,
-          replacements: this.replacements,
-      }, controller.signal)
+      const request: Omit<ReaderSearchRequest, 'revisionId'> = {
+        query,
+        mode: opts?.mode ?? 'contains',
+        matchCase: opts?.matchCase ?? false,
+        chineseConversion: this.conversion,
+        replacements: this.replacements,
+      }
+      const response = await (session
+        ? session.search(request, controller.signal)
+        : fetchReaderSearch(this.url, revisionId, request, controller.signal))
       if (!response.ok || !response.body) throw new Error(`Reader search failed (${response.status})`)
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
@@ -4633,7 +4690,7 @@ export class FoliateReader implements BookReader {
         for (const line of lines) {
           if (!line) continue
           const parsed = readerSearchEventSchema.safeParse(JSON.parse(line))
-          if (!parsed.success || parsed.data.revisionId !== session.manifest.revisionId) throw new Error('Invalid reader search response')
+          if (!parsed.success || parsed.data.revisionId !== revisionId) throw new Error('Invalid reader search response')
           const event = parsed.data
           progress = event.total ? event.scanned / event.total : 1
           if (event.type === 'batch') {
@@ -4859,25 +4916,7 @@ export class FoliateReader implements BookReader {
   }
 
   getAiCorpusVersion(): string {
-    return readerTextVersion(this.conversion, this.replacements)
-  }
-
-  async getAiCorpus(signal?: AbortSignal): Promise<AiIndexCorpus> {
-    const book = this.book
-    if (!book) throw new Error('Reader is not ready')
-    const indices = this.aiCorpusSectionIndices()
-    const chapters = []
-    for (const [chapterIndex, sectionIndex] of indices.entries()) {
-      if (signal?.aborted || this.destroyed) throw new DOMException('The reader corpus request was aborted', 'AbortError')
-      const chapterText = await getChapterText(book, sectionIndex, {
-        chineseConversion: this.conversion,
-        replacements: this.replacements,
-      })
-      if (signal?.aborted || this.destroyed) throw new DOMException('The reader corpus request was aborted', 'AbortError')
-      if (!chapterText) throw new Error('Reader chapter content is not available')
-      chapters.push({ chapterIndex, text: chapterText.text })
-    }
-    return { visibleTextVersion: this.getAiCorpusVersion(), chapters }
+    return readerTextVersion(this.conversion, this.replacements, this.contentSession?.manifest.revisionId ?? this.url)
   }
 
   async getAiChapterText(chapterIndex: number, signal?: AbortSignal): Promise<string> {
@@ -4889,7 +4928,7 @@ export class FoliateReader implements BookReader {
     const chapterText = await getChapterText(book, sectionIndex, {
       chineseConversion: this.conversion,
       replacements: this.replacements,
-    })
+    }, undefined, signal)
     if (signal?.aborted || this.destroyed) throw new DOMException('The reader chapter request was aborted', 'AbortError')
     if (!chapterText) throw new Error('Reader chapter content is not available')
     return chapterText.text

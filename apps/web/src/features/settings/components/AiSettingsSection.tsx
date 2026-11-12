@@ -13,7 +13,6 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import PasswordInput from '@/components/ui/PasswordInput'
 import QueryErrorState from '@/components/ui/QueryErrorState'
-import SegmentedControl from '@/components/ui/SegmentedControl'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -40,7 +39,6 @@ interface AiFormState {
   apiKey: string
 }
 
-type AiRetrievalMode = 'lexical' | 'semantic'
 
 interface AiPromptFormState {
   id?: string
@@ -151,19 +149,11 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   const [modelsLoadedFingerprint, setModelsLoadedFingerprint] = useState('')
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [testingModel, setTestingModel] = useState<string | null>(null)
-  const [embeddingMode, setEmbeddingMode] = useState<AiRetrievalMode>('lexical')
   const formRef = useRef<AiFormState | null>(null)
   const providers = providersData?.data ?? FALLBACK_PROVIDERS
   const config = data?.data
   const isOwner = user?.role === 'owner'
   const profiles = useMemo(() => config?.profiles ?? [], [config?.profiles])
-  const embeddingOptions = useMemo(() => profiles.flatMap((profile) => profile.embeddingModels.map((model) => ({
-    key: `${profile.id}::${model.id}`,
-    profileId: profile.id,
-    profileName: profile.name || providers.find((item) => item.id === profile.provider)?.name || profile.provider,
-    model,
-  }))), [profiles, providers])
-  const embeddingSelectionKey = config?.embeddingProfileId && config.embeddingModel ? `${config.embeddingProfileId}::${config.embeddingModel}` : ''
   const selectableProviders = useMemo(() => providers, [providers])
   const selectedProvider = form ? providers.find((provider) => provider.id === form.provider) : undefined
   const formProviders = useMemo(() => {
@@ -179,10 +169,6 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   const defaultPrompts = useMemo(() => defaultPromptTemplates(_), [_])
   const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.aiOperationFailed'))
   formRef.current = form
-
-  useEffect(() => {
-    setEmbeddingMode(config?.embeddingProfileId && config.embeddingModel ? 'semantic' : 'lexical')
-  }, [config?.embeddingProfileId, config?.embeddingModel])
 
   useDismissiblePopup(providerMenuOpen, providerMenuRef, () => setProviderMenuOpen(false))
 
@@ -303,23 +289,6 @@ export default function AiSettingsSection({ id }: { id?: string }) {
 
   function openModelPicker() {
     setModelPickerOpen(true)
-  }
-
-  function changeEmbeddingMode(mode: AiRetrievalMode) {
-    setEmbeddingMode(mode)
-    if (mode === 'semantic') return
-    updateConfig.mutate({ embeddingProfileId: null, embeddingModel: null }, {
-      onError: (error) => {
-        setEmbeddingMode('semantic')
-        showError(error)
-      },
-    })
-  }
-
-  function selectEmbeddingModel(selection: string) {
-    const option = embeddingOptions.find((item) => item.key === selection)
-    if (!option) return
-    updateConfig.mutate({ embeddingProfileId: option.profileId, embeddingModel: option.model.id }, { onError: showError })
   }
 
   function confirmDelete() {
@@ -447,48 +416,6 @@ export default function AiSettingsSection({ id }: { id?: string }) {
                 </div>
               </div>
             ))}
-          </div>
-        )}
-
-        {!isGuest && config && profiles.length > 0 && (
-          <div className="border-t border-stone-100 pt-4 dark:border-stone-800">
-            <div className="flex flex-col gap-2 text-xs text-stone-600 dark:text-stone-300">
-              <span id="ai-retrieval-mode-label">{_('settings.aiRetrievalMode')}</span>
-              <SegmentedControl
-                role="radiogroup"
-                ariaLabelledBy="ai-retrieval-mode-label"
-                fullWidth
-                size="md"
-                value={embeddingMode}
-                pending={updateConfig.isPending}
-                onChange={changeEmbeddingMode}
-                options={[
-                  { value: 'lexical', label: _('settings.aiLexicalRetrieval') },
-                  { value: 'semantic', label: _('settings.aiSemanticRetrieval') },
-                ]}
-              />
-            </div>
-            {embeddingMode === 'semantic' && (
-              <label className="mt-3 flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
-                <span>{_('settings.aiEmbeddingModel')}</span>
-                <select aria-label={_('settings.aiEmbeddingModel')} value={embeddingSelectionKey} onChange={(event) => selectEmbeddingModel(event.target.value)} disabled={updateConfig.isPending || embeddingOptions.length === 0} className="h-9 rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 disabled:opacity-50 dark:border-stone-700">
-                  <option value="">{embeddingOptions.length ? _('settings.aiEmbeddingSelectModel') : _('settings.aiEmbeddingNoModels')}</option>
-                  {profiles.map((profile) => {
-                    const options = embeddingOptions.filter((item) => item.profileId === profile.id)
-                    if (!options.length) return null
-                    return (
-                      <optgroup key={profile.id} label={options[0]!.profileName}>
-                        {options.map((option) => (
-                          <option key={option.key} value={option.key}>
-                            {option.model.name}{option.model.name !== option.model.id ? ` · ${option.model.id}` : ''}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )
-                  })}
-                </select>
-              </label>
-            )}
           </div>
         )}
 
@@ -700,7 +627,7 @@ function AiPromptTemplates({ prompts, update }: { prompts: AiPromptTemplate[]; u
     setPendingDelete(null)
   }
 
-  return <section className="mt-6 border-t border-stone-100 pt-5 dark:border-stone-800">
+  return <section className="border-t border-stone-100 pt-3 dark:border-stone-800">
     <div className="mb-3 flex items-start justify-between gap-3">
       <div className="min-w-0">
         <h3 className="flex items-baseline gap-1 text-sm font-medium">

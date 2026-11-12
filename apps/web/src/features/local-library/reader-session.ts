@@ -206,6 +206,7 @@ export async function openLocalReaderSession(ref: ClientBookRef, recordsOnly = f
     async listAiThreads() { return { data: await repository.listAiThreads(ref) } },
     async getAiThread(threadId) { return { data: await repository.getAiThread(ref, threadId) } },
     async saveAiThreadTurn(input) { return { data: await repository.saveAiThreadTurn(ref, input) } },
+    async applyAiThreadResult(threadId, messageId, result) { return repository.applyAiThreadResult(ref, threadId, messageId, result) },
     async updateAiThread(threadId, body) { return { data: await repository.updateAiThread(ref, threadId, body) } },
     async deleteAiThread(threadId) { await repository.deleteAiThread(ref, threadId) },
   }

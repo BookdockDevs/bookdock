@@ -15,7 +15,8 @@ export {
   AI_MAX_CHAT_PROMPT_CHARS,
   AI_MAX_CHAPTER_REFERENCES,
   AI_MAX_CONTEXT_CHARS,
-  AI_MAX_INDEX_CORPUS_CHARS,
+  AI_MAX_HISTORY_MESSAGES,
+  AI_MAX_HISTORY_MESSAGE_CHARS,
   AI_READING_SCOPES,
   AI_TOOL_NAMES,
   AUTH_PASSWORD_MAX_LENGTH,
@@ -49,7 +50,7 @@ export {
 export { UPDATE_PHASES, LIBRARY_SORT_MODES, BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, RECENTLY_READ_STYLES, SELECTION_TOOLBAR_ACTION_KEYS, DEFAULT_SELECTION_TOOLBAR_ORDER, SIDEBAR_MODULES } from './contract'
 export type { SelectionToolbarActionKey } from './contract'
 export type { SidebarModule } from './contract'
-export { normalizeAiCitationMarkers, sanitizeAiCitationMarkers } from './ai-citations'
+export { boundAiHistory, createAiContextCitations, normalizeAiCitationMarkers, sanitizeAiCitationMarkers } from './ai-citations'
 export { buildTxtEditorSource, normalizeTxtEditorContent, DEFAULT_TXT_TOC_PATTERNS, fallbackTxtChapters, normalizeTxtText, pickTxtTocRule, predictTxtContinuationStart, scanTxtChapterBoundaries } from './txt-chapter-tools'
 export type { TxtChapterBoundary, TxtTocPattern } from './txt-chapter-tools'
 export { expandAiPrompt, getAiPromptVariables } from './ai-prompts'
@@ -195,11 +196,6 @@ export type {
   AiThreadCreateReq,
   AiThreadUpdateReq,
   AiThreadListReq,
-  AiIndexStatus,
-  AiEmbeddingStatus,
-  AiIndexChapter,
-  AiIndexReq,
-  AiIndexRes,
   AiSearchReq,
   AiSearchResultRes,
   AiSearchRes,
@@ -265,6 +261,7 @@ export type {
   AnnotationCreateReq,
   AnnotationUpdateReq,
   AnnotationRes,
+  AnnotationQueryScope,
   ReplacementCreateReq,
   ReplacementUpdateReq,
   ReplacementOverrideReq,
@@ -323,8 +320,6 @@ export {
   aiThreadListSchema,
   aiGenerationRunIdSchema,
   aiMessageIdSchema,
-  aiIndexStatusSchema,
-  aiIndexSchema,
   aiSearchSchema,
   aiConfigUpdateSchema,
   aiModelDiscoverySchema,
@@ -628,3 +623,10 @@ export {
   type LocalBookImportSession,
 } from './local-book-transfer'
 export { cleanAuthor, normalizeBookTitle, splitAuthors } from './book-title'
+
+export { txtChapterHref } from './txt-publication'
+
+export type { AiChatJobRes, AiChatJobCreateReq } from './contract'
+export { aiChatJobCreateSchema, aiChatJobListSchema } from './schema'
+
+export { createAiPassageCitations } from './ai-citations'

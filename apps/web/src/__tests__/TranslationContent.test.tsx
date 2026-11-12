@@ -18,7 +18,7 @@ const firstPreferences: TranslationPreferences = { ...preferences, channel: { ki
 const config: AiConfigRes = {
   activeProfileId: 'second', profiles: [firstProfile, { ...firstProfile, id: 'second', name: 'Second AI', model: 'second-model', models: [{ id: 'second-model', name: 'second-model' }] }], provider: 'openai', baseUrl: 'https://example.test', model: 'second-model', models: [],
   prompts: [], modes: [], lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: [], assistantModeId: 'assistant' },
-  embeddingProfileId: null, embeddingProvider: null, embeddingModel: null, embeddingModels: [], embeddingConfigured: false,
+
   apiKeyConfigured: true, configuredByUser: true,
 }
 

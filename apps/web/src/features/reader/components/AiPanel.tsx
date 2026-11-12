@@ -3,11 +3,11 @@ import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { AnnotationUpdateReq, BookDetailRes } from '@bookdock/shared'
 
-import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT_PROMPT_CHARS, AI_TOOL_NAMES, getAiPromptVariables, isAiEmbeddingModel, sanitizeAiCitationMarkers } from '@bookdock/shared'
+import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT_PROMPT_CHARS, AI_TOOL_NAMES, boundAiHistory, createAiContextCitations, getAiPromptVariables, isAiEmbeddingModel, normalizeAiCitationMarkers, sanitizeAiCitationMarkers } from '@bookdock/shared'
 import type { AiAssistantMode, AiChapterReference, AiChatReq, AiCitation, AiContextReceipt, AiConversationSettings, AiHistoryMessage, AiMessageEventRes, AiMessageRes, AiReadingScope, AiRetryRecipe, AiStatusRes, AiThreadRes, AiToolName } from '@bookdock/shared'
 
-import { apiGet, apiPost, apiStreamAiChat, apiStreamAiLocalChat } from '@/api/client'
-import { aiThreadDetailKey, aiThreadsScopeKey, useAiMessageRevisions, useAiThread, useAiThreads, useDeleteAiThread, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiProfile, useUpdateAiThread } from '@/api/hooks/useAi'
+import { ApiError, apiGet, apiPost, apiStreamAiChat, apiStreamAiLocalChat } from '@/api/client'
+import { aiJobsKey, aiThreadDetailKey, aiThreadsScopeKey, useAiJobs, useAiMessageRevisions, useAiThread, useAiThreads, useDeleteAiThread, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiProfile, useUpdateAiThread } from '@/api/hooks/useAi'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
 import Modal from '@/components/ui/Modal'
@@ -18,7 +18,7 @@ import { preloadAiBrandIcons } from '@/lib/aiBrandIcons'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { formatDate, formatDateTime, formatTime } from '@/lib/format-date'
 import { notify } from '@/lib/notifications'
-import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
+import { getAuthSessionRevision, getUserDisplayName, useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
 
 import { useReaderApi } from '../hooks/useReaderApi'
@@ -110,15 +110,16 @@ function messageId() {
 }
 
 function fromPersistedMessage(message: AiMessageRes): AiMessage {
+  const normalized = message.role === 'assistant' ? normalizeAiCitationMarkers(message.content, message.citations ?? [], true) : null
   return {
     id: message.id,
     role: message.role,
     revisionGroupId: message.revisionGroupId,
     revision: message.revision,
-    content: message.content,
+    content: normalized?.content ?? message.content,
     context: message.context,
     aborted: message.aborted,
-    citations: message.citations ?? [],
+    citations: normalized?.citations ?? message.citations ?? [],
     events: message.events ?? [],
     retry: message.retry ?? null,
     savedAsIdea: false,
@@ -241,17 +242,17 @@ function DeleteIcon() {
 }
 
 function renderInline(value: string, citations: AiCitation[] = [], onCitationClick?: (citation: AiCitation) => void, citationLabel: (citationNumber: string) => string = (citationNumber) => `Citation ${citationNumber}`): ReactNode[] {
-  const tokenPattern = /(\[[^\]]+\]\(https?:\/\/[^)\s]+\)|\[\d+\]|【\d+】|`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\*[^*\n]+\*|_[^_\n]+_)/g
+  const tokenPattern = /(\[[^\]]+\]\(https?:\/\/[^)\s]+\)|【\d+】|`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\*[^*\n]+\*|_[^_\n]+_)/g
   const parts = sanitizeAiCitationMarkers(value, citations.length).split(tokenPattern)
   return parts.map((part, index) => {
     if (!part) return null
-    const previousCitationNumber = parts[index - 1]?.match(/^\[(\d+)\]$/)?.[1] ?? parts[index - 1]?.match(/^【(\d+)】$/)?.[1]
+    const previousCitationNumber = parts[index - 1]?.match(/^【(\d+)】$/)?.[1]
     if (previousCitationNumber && citations[Number(previousCitationNumber) - 1] && LEADING_CLOSING_PUNCTUATION.test(part)) return null
     const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/)
     if (link) {
       return <a key={index} href={link[2]} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2">{link[1]}</a>
     }
-    const citationNumber = part.match(/^\[(\d+)\]$/)?.[1] ?? part.match(/^【(\d+)】$/)?.[1]
+    const citationNumber = part.match(/^【(\d+)】$/)?.[1]
     if (citationNumber) {
       const citation = citations[Number(citationNumber) - 1]
       if (citation) {
@@ -550,7 +551,10 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const [renameThreadId, setRenameThreadId] = useState<string | null>(null)
   const [renameTitle, setRenameTitle] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<AiThreadRes | null>(null)
-  const [streaming, setStreaming] = useState(false)
+  const [streamingRequest, setStreaming] = useState(false)
+  const jobsQuery = useAiJobs(bookId)
+  const currentJob = Array.isArray(jobsQuery.data?.data) ? jobsQuery.data.data.find((job) => job.threadId === threadId) : undefined
+  const streaming = streamingRequest || currentJob?.state === 'running'
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [modelMenuPosition, setModelMenuPosition] = useState<{ left: number; bottom: number } | null>(null)
   const [quickCommandMenuOpen, setQuickCommandMenuOpen] = useState(false)
@@ -580,6 +584,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const abortRef = useRef<AbortController | null>(null)
   const streamingTextStore = useRef(new StreamingTextStore()).current
   const activeRunIdRef = useRef<string | null>(null)
+  const activeJobIdRef = useRef<string | null>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const modelButtonRef = useRef<HTMLButtonElement>(null)
   const modelMenuPopupRef = useRef<HTMLDivElement>(null)
@@ -606,6 +611,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const [isAtLatest, setIsAtLatest] = useState(true)
   const [hasPendingLatest, setHasPendingLatest] = useState(false)
   const copiedMessageTimerRef = useRef<number | null>(null)
+  const referenceAbortRef = useRef<AbortController | null>(null)
   const requestGenerationRef = useRef(0)
   const sendRef = useRef<(promptOverride?: string) => Promise<void>>(async () => undefined)
   const skipMemoryWriteRef = useRef(true)
@@ -615,7 +621,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
 
   const threadsQuery = useAiThreads(bookId)
   const rememberedThreadExists = Boolean(threadId && Array.isArray(threadsQuery.data?.data) && threadsQuery.data.data.some((thread) => thread.id === threadId))
-  const threadQuery = useAiThread(threadId, { enabled: !streaming && rememberedThreadExists })
+  const threadQuery = useAiThread(threadId, { enabled: !streamingRequest && rememberedThreadExists })
   const latestMessage = messages.at(-1)
   const latestRevisionMessageId = !streaming && latestMessage?.role === 'assistant' && latestMessage.content.trim() && latestMessage.revisionGroupId ? latestMessage.id : null
   const revisionsQuery = useAiMessageRevisions(threadId, latestRevisionMessageId, { enabled: !local && Boolean(latestRevisionMessageId) })
@@ -635,6 +641,8 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   })
 
   useEffect(() => () => {
+    requestGenerationRef.current += 1
+    referenceAbortRef.current?.abort()
     abortRef.current?.abort()
     streamingTextStore.clear()
   }, [streamingTextStore])
@@ -643,6 +651,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     conversationSettingsHydratedRef.current = false
     skipMemoryWriteRef.current = true
     requestGenerationRef.current += 1
+    referenceAbortRef.current?.abort()
     abortRef.current?.abort()
     abortRef.current = null
     activeRunIdRef.current = null
@@ -692,7 +701,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     })
   }, [chaptersQuery.data])
   useEffect(() => {
-    if (streaming || !threadId || threadQuery.data?.data.id !== threadId) return
+    if (streamingRequest || !threadId || threadQuery.data?.data.id !== threadId) return
     const restoredMessages = threadQuery.data.data.messages.map(fromPersistedMessage)
     const generation = threadQuery.data.data.generation
     if (generation?.checkpointText.trim() && !restoredMessages.some((message) => message.id === generation.targetMessageId)) {
@@ -705,6 +714,21 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         citations: [],
         savedAsIdea: false,
       })
+    }
+    if (currentJob && currentJob.threadId === threadId) {
+      const targetId = local ? currentJob.clientRequestId : generation?.targetMessageId
+      let assistant = targetId ? restoredMessages.find((message) => message.id === targetId) : undefined
+      if (!assistant && currentJob.state === 'running') {
+        assistant = { id: targetId ?? `job-${currentJob.id}`, role: 'assistant', content: '', context: null, citations: [], aborted: false, savedAsIdea: false }
+        restoredMessages.push(assistant)
+      }
+      if (assistant) {
+        const error = currentJob.error ? getUserErrorMessage(new ApiError(currentJob.error.code, currentJob.error.message), _, 'reader.aiRequestFailed') : ''
+        assistant.content = currentJob.content + (error ? `\n\n${_('reader.aiRequestFailedWithMessage', { message: error })}` : '')
+        assistant.citations = currentJob.citations
+        assistant.context = currentJob.receipt
+        assistant.aborted = currentJob.state !== 'running' && currentJob.state !== 'completed'
+      }
     }
     const annotations = Array.isArray(annotationsQuery.data?.data) ? annotationsQuery.data.data : []
     for (let index = 1; index < restoredMessages.length; index += 1) {
@@ -768,7 +792,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
       }
       setSelectedAssistantModeId(threadQuery.data.data.settings.assistantModeId ?? DEFAULT_ASSISTANT_MODE.id)
     }
-  }, [annotationsQuery.data, local, streaming, threadId, threadQuery.data])
+  }, [_, annotationsQuery.data, currentJob, local, streamingRequest, threadId, threadQuery.data])
   useEffect(() => {
     const savedSettings = threadQuery.data?.data.settings
     if (streaming || !threadId || threadQuery.data?.data.id !== threadId || !savedSettings) return
@@ -1114,8 +1138,21 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     void runRequest(request, 2)
   }
 
+  function detachObservation() {
+    requestGenerationRef.current += 1
+    abortRef.current?.abort()
+    abortRef.current = null
+    activeJobIdRef.current = null
+    activeRunIdRef.current = null
+    streamingTextStore.clear()
+    setStreaming(false)
+  }
+
   function startNewChat() {
-    if (streaming) return
+    detachObservation()
+    requestGenerationRef.current += 1
+    referenceAbortRef.current?.abort()
+    setPreparingReferences(false)
     const settings = latestConversationSettingsRef.current
     conversationSettingsHydratedRef.current = true
     setThreadId(null)
@@ -1144,13 +1181,16 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   }
 
   function selectThread(id: string) {
-    if (streaming) return
+    detachObservation()
     if (id === threadId) {
       if (threadQuery.data?.data.id === id) setMessages(threadQuery.data.data.messages.map(fromPersistedMessage))
       else void threadQuery.refetch()
       setHistoryOpen(false)
       return
     }
+    requestGenerationRef.current += 1
+    referenceAbortRef.current?.abort()
+    setPreparingReferences(false)
     setThreadId(id)
     setMessages([])
     setPrompt('')
@@ -1342,9 +1382,14 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     })
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deleteTarget || deleteThread.isPending) return
     const target = deleteTarget
+    const job = Array.isArray(jobsQuery.data?.data) ? jobsQuery.data.data.find((item) => item.threadId === target.id && item.state === 'running') : undefined
+    if (local && job) {
+      try { await apiPost(`/ai/jobs/${encodeURIComponent(job.id)}/cancel`) }
+      catch (error) { showError(error); return }
+    }
     deleteThread.mutate({ id: target.id, bookId }, {
       onSuccess: () => {
         if (threadId === target.id) startNewChat()
@@ -1400,9 +1445,17 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     let activeThreadId = request.threadId
     let receiptSnapshot: AiContextReceipt | null = null
     let finalAssistantContent = ''
+    let finalCitations: AiCitation[] = []
     let streamCompleted = false
+    let failureMessage = ''
 
     const streamHandlers = {
+      onAccepted: (event: { id: string; threadId: string | null }) => {
+        void queryClient.invalidateQueries({ queryKey: aiJobsKey(memoryUserId, local ? 'local' : 'book', memoryBookId) })
+        if (requestGenerationRef.current !== requestGeneration) return
+        activeJobIdRef.current = event.id
+        if (event.threadId) { activeThreadId = event.threadId; setThreadId(event.threadId) }
+      },
       onMeta: (event: { requestId: string; runId?: string; threadId?: string; model?: string; receipt: AiContextReceipt }) => {
         if (requestGenerationRef.current !== requestGeneration) return
         if (event.runId) activeRunIdRef.current = event.runId
@@ -1421,6 +1474,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         if (requestGenerationRef.current !== requestGeneration) return
         streamCompleted = true
         finalAssistantContent = event.content
+        finalCitations = event.citations
         streamingTextStore.set(assistantId, event.content)
         updateAssistant(assistantId, (message) => ({ ...message, content: event.content, citations: event.citations }))
       },
@@ -1444,16 +1498,27 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
 
     try {
       if (local) {
+        const now = Date.now()
+        const saved = await local.saveAiThreadTurn({
+          ...(activeThreadId ? { threadId: activeThreadId } : {}),
+          settings: { readingScope: 'to_here', enabledTools: [], assistantModeId: request.assistantModeId },
+          ...(replaceMessageCount > 0 ? { replaceMessageCount } : {}),
+          userMessage: { id: userMessage.id, role: 'user', revisionGroupId: null, revision: 0, content: userMessage.content, context: null, retry: userMessage.retry ?? null, citations: [], events: [], createdAt: now, aborted: false },
+          assistantMessage: { id: assistantId, role: 'assistant', revisionGroupId: null, revision: 0, content: '', context: null, retry: null, citations: [], events: [], createdAt: now + 1, aborted: false },
+        })
+        activeThreadId = saved.data.id
+        if (requestGenerationRef.current === requestGeneration) setThreadId(activeThreadId)
+        controller.signal.throwIfAborted()
         await apiStreamAiLocalChat({
           prompt: request.prompt,
           context: request.context,
-          ...(request.history.length > 0 ? { history: request.history } : {}),
+          ...(request.history.length > 0 ? { history: boundAiHistory(request.history) } : {}),
           assistantModeId: request.assistantModeId,
           ...(request.assistantMode ? { assistantMode: request.assistantMode } : {}),
           ...(request.assistantModePrompt ? { assistantModePrompt: request.assistantModePrompt } : {}),
-        }, streamHandlers, controller.signal)
+        }, streamHandlers, controller.signal, { clientRequestId: assistantId, scopeKey: local.namespace, threadId: activeThreadId })
       } else {
-        await apiStreamAiChat({ bookId, ...request, ...(request.threadId ? { history: undefined } : {}) }, streamHandlers, controller.signal)
+        await apiStreamAiChat({ bookId, ...request, ...(request.threadId ? { history: undefined } : {}) }, streamHandlers, controller.signal, { clientRequestId: assistantId })
       }
       if (requestGenerationRef.current === requestGeneration) setRetryRequest(activeThreadId ? { ...request, threadId: activeThreadId, regenerate: true } : request)
     } catch (error) {
@@ -1461,6 +1526,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
       setRetryRequest(activeThreadId ? { ...request, threadId: activeThreadId, regenerate: true } : request)
       if (!controller.signal.aborted) {
         const message = getUserErrorMessage(error, _, 'reader.aiRequestFailed')
+        failureMessage = _('reader.aiRequestFailedWithMessage', { message })
         updateAssistant(assistantId, (current) => {
           const content = streamingTextStore.getText(assistantId) || current.content
           return { ...current, content: content ? `${content}\n\n${_('reader.aiRequestFailedWithMessage', { message })}` : _('reader.aiRequestFailedWithMessage', { message }) }
@@ -1472,56 +1538,19 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         })
       }
     } finally {
+      void queryClient.invalidateQueries({ queryKey: aiJobsKey(memoryUserId, local ? 'local' : 'book', memoryBookId) })
+      void queryClient.invalidateQueries({ queryKey: aiThreadsScopeKey(bookId, local?.namespace) })
       if (requestGenerationRef.current === requestGeneration) {
         streamingTextStore.flush(assistantId)
         const streamedText = streamingTextStore.getText(assistantId)
         setMessages((current) => current.map((message) => message.id === assistantId && !message.content && streamedText ? { ...message, content: streamedText } : message))
-        if (local) {
-          const persistedContent = finalAssistantContent || streamedText
-          if (persistedContent.trim() && (streamCompleted || controller.signal.aborted)) {
-            const now = Date.now()
-            try {
-              const saved = await local.saveAiThreadTurn({
-                ...(activeThreadId ? { threadId: activeThreadId } : {}),
-                settings: { readingScope: 'to_here', enabledTools: [], assistantModeId: request.assistantModeId },
-                ...(replaceMessageCount > 0 ? { replaceMessageCount } : {}),
-                userMessage: {
-                  id: userMessage.id,
-                  role: 'user',
-                  revisionGroupId: null,
-                  revision: 0,
-                  content: userMessage.content,
-                  context: receiptSnapshot,
-                  retry: userMessage.retry ?? null,
-                  citations: [],
-                  events: [],
-                  createdAt: now,
-                  aborted: false,
-                },
-                assistantMessage: {
-                  id: assistantId,
-                  role: 'assistant',
-                  revisionGroupId: null,
-                  revision: 0,
-                  content: persistedContent,
-                  context: receiptSnapshot,
-                  retry: null,
-                  citations: [],
-                  events: [],
-                  createdAt: now,
-                  aborted: Boolean(controller.signal.aborted && !streamCompleted),
-                },
-              })
-              activeThreadId = saved.data.id
-              if (requestGenerationRef.current === requestGeneration) {
-                setThreadId(saved.data.id)
-                setRetryRequest((prev) => prev ? { ...prev, threadId: saved.data.id, regenerate: true } : prev)
-              }
-            } catch {
-              // Keep the current in-memory turn visible even if local persistence fails.
-            }
-          }
+        if (local && activeThreadId && (streamCompleted || controller.signal.aborted || failureMessage)) {
+          await local.applyAiThreadResult(activeThreadId, assistantId, {
+            content: (finalAssistantContent || streamedText) + (failureMessage ? `\n\n${failureMessage}` : ''), context: receiptSnapshot,
+            citations: streamCompleted ? finalCitations : [], aborted: Boolean(controller.signal.aborted && !streamCompleted),
+          }).catch(() => undefined)
         }
+        void queryClient.invalidateQueries({ queryKey: aiJobsKey(memoryUserId, local ? 'local' : 'book', memoryBookId) })
         abortRef.current = null
         activeRunIdRef.current = null
         setToolStatus(null)
@@ -1541,6 +1570,8 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   async function send(promptOverride?: string) {
     const template = (promptOverride ?? prompt).trim()
     if (!modelReady || !template || streaming || preparingReferences) return
+    const generation = requestGenerationRef.current
+    const authRevision = getAuthSessionRevision()
     const promptVariables = getAiPromptVariables(template)
     const selectedParagraph = aiContext?.paragraphText?.trim() || activeSelection?.paragraphText?.trim() || currentParagraph
     if (!local && readingScope !== 'full_book' && chapterIndex >= 0 && selectedChapterReferences.some((referenceIndex) => referenceIndex > chapterIndex)) {
@@ -1559,24 +1590,34 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         notify.error({ key: 'reader.aiReaderNotReady' })
         return
       }
+      const controller = new AbortController()
+      referenceAbortRef.current?.abort()
+      referenceAbortRef.current = controller
       setPreparingReferences(true)
       try {
         const references = await Promise.all([...referenceIndexes].map(async (referenceIndex) => ({
           chapterIndex: referenceIndex,
           chapterTitle: chapters[referenceIndex]?.title,
-          text: await renderer.getAiChapterText(referenceIndex),
+          ...(chapters[referenceIndex]?.href ? { chapterHref: chapters[referenceIndex]!.href } : {}),
+          text: await renderer.getAiChapterText(referenceIndex, controller.signal),
         })))
+        if (controller.signal.aborted || requestGenerationRef.current !== generation) return
         chapterReferences = references.map((reference) => ({
           ...reference,
           ...(reference.chapterTitle ? { chapterTitle: reference.chapterTitle } : {}),
         }))
       } catch (error) {
+        if (controller.signal.aborted || requestGenerationRef.current !== generation || getAuthSessionRevision() !== authRevision) return
         if (!(error instanceof Error && error.name === 'AbortError')) showError(error, 'reader.aiQuoteChapterFailed')
         return
       } finally {
-        setPreparingReferences(false)
+        if (referenceAbortRef.current === controller) {
+          referenceAbortRef.current = null
+          setPreparingReferences(false)
+        }
       }
     }
+    if (requestGenerationRef.current !== generation || getAuthSessionRevision() !== authRevision) return
     if (template.length > AI_MAX_CHAT_PROMPT_CHARS) {
       notify.error({ key: 'reader.aiPromptTooLong' })
       return
@@ -1621,6 +1662,13 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   }, [aiPendingCommand, modelReady, setAiPendingCommand, statusQuery.isPending, streaming])
 
   async function stop() {
+    const jobId = activeJobIdRef.current ?? (currentJob?.state === 'running' ? currentJob.id : null)
+    if (jobId) {
+      try { await apiPost(`/ai/jobs/${encodeURIComponent(jobId)}/cancel`) } catch (error) { showError(error); return }
+      void jobsQuery.refetch()
+      abortRef.current?.abort()
+      return
+    }
     const runId = activeRunIdRef.current
     const controller = abortRef.current
     if (!local && runId) {
@@ -1720,23 +1768,30 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   }
 
 
-  function jumpToCitation(citation: AiCitation) {
-    if (!renderer) return
-    const target = citation.sourceCfi ?? `search-hit-chapter:${citation.chapterIndex}:${citation.startOffset}:${citation.endOffset}`
-    try {
-      void Promise.resolve(renderer.display(target)).catch(() => undefined)
-    } catch {
-    }
-    if (isTouch || !toolbarLocked) setSidebarOpen(false)
+  function citationTarget(citation: AiCitation): string {
+    if (citation.sourceCfi && !citation.quote) return citation.sourceCfi
+    return `ai-quote:${encodeURIComponent(JSON.stringify({
+      chapterIndex: citation.chapterIndex, quote: citation.quote ?? citation.excerpt.replace(/^…|…$/g, ''),
+      textBasis: citation.textBasis ?? 'source',
+      ...(citation.sourceCfi ? { sourceCfi: citation.sourceCfi } : {}),
+      ...(citation.chapterHref ? { chapterHref: citation.chapterHref } : {}),
+      ...(citation.visibleTextVersion ? { visibleTextVersion: citation.visibleTextVersion } : {}),
+      ...(citation.revisionId ? { revisionId: citation.revisionId } : {}),
+    }))}`
   }
 
-  function jumpToQuote(target: string) {
+  function jumpToCitation(citation: AiCitation) {
+    return jumpToQuote(citationTarget(citation))
+  }
+
+  async function jumpToQuote(target: string) {
     if (!renderer) return
     try {
-      void Promise.resolve(renderer.display(target)).catch(() => undefined)
+      await renderer.display(target)
+      if (isTouch || !toolbarLocked) setSidebarOpen(false)
     } catch {
+      notify.warning({ key: 'reader.aiCitationUnavailable' })
     }
-    if (isTouch || !toolbarLocked) setSidebarOpen(false)
   }
 
   function applyQuickCommand(command: AiQuickCommand) {
@@ -1816,10 +1871,10 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
           <ReadingScopeIcon scope={readingScope} />
         </button>}
         <div className="ml-auto flex items-center gap-2 text-[var(--bd-read-sub)] @max-[240px]/ai-panel:gap-1">
-          <button type="button" onClick={startNewChat} disabled={streaming} aria-label={_('reader.aiNew')} title={_('reader.aiNew')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={startNewChat} aria-label={_('reader.aiNew')} title={_('reader.aiNew')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-40">
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
           </button>
-          <button ref={historyButtonRef} type="button" onClick={() => { if (!streaming) { setAttachmentOpen(false); setToolsOpen(false); setMoreOpen(false); setHistoryOpen((open) => !open) } }} disabled={streaming} aria-label={_('reader.aiHistory')} title={_('reader.aiHistory')} aria-expanded={historyOpen} className={`flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-40 ${historyOpen ? 'bg-stone-500/10 text-current' : ''}`}>
+          <button ref={historyButtonRef} type="button" onClick={() => { setAttachmentOpen(false); setToolsOpen(false); setMoreOpen(false); setHistoryOpen((open) => !open) }} aria-label={_('reader.aiHistory')} title={_('reader.aiHistory')} aria-expanded={historyOpen} className={`flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-40 ${historyOpen ? 'bg-stone-500/10 text-current' : ''}`}>
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6" /><path d="M3.5 5v4h4M12 7v5l3 2" /></svg>
           </button>
           <button ref={moreButtonRef} type="button" onClick={() => { setHistoryOpen(false); setModelMenuOpen(false); setAttachmentOpen(false); setToolsOpen(false); setMoreOpen(!moreOpen) }} aria-label={_('reader.aiMore')} title={_('reader.aiMore')} aria-expanded={moreOpen} className={`flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/10 hover:text-current ${moreOpen ? 'bg-stone-500/10 text-current' : ''}`}>
@@ -1836,17 +1891,18 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
             {messages.map((message, index) => {
               const quoteContext = message.role === 'user' ? message.retry?.context : null
               const quoteChapterTitle = quoteContext?.chapterTitle || (quoteContext && chapters[quoteContext.chapterIndex]?.title) || ''
-              const quoteTarget = quoteContext && quoteContext.cfiRange !== 'selection' ? quoteContext.cfiRange : quoteContext ? `chapter:${quoteContext.chapterIndex}` : ''
-              const quoteEntries = quoteContext ? [
-                ...(quoteContext.selection.trim() ? [{ id: 'selection', label: `${quoteChapterTitle || _('reader.aiCurrentChapter')} · ${_('reader.aiSelectedText')}`, text: quoteContext.selection.trim(), target: quoteTarget }] : []),
-                ...(quoteContext.paragraph?.trim() ? [{ id: 'paragraph', label: `${quoteChapterTitle || _('reader.aiCurrentChapter')} · ${_('reader.aiSelectedParagraph')}`, text: quoteContext.paragraph.trim(), target: quoteTarget }] : []),
-                ...(quoteContext.chapterReferences ?? []).map((reference) => ({
-                  id: `chapter-${reference.chapterIndex}`,
-                  label: reference.chapterTitle || chapters[reference.chapterIndex]?.title || _('reader.aiChapterNumber', { n: reference.chapterIndex + 1 }),
-                  text: reference.text.trim(),
-                  target: `chapter:${reference.chapterIndex}`,
-                })),
-              ] : []
+              const quoteSources = new Map<string, AiCitation>()
+              if (quoteContext) for (const citation of createAiContextCitations(quoteContext)) {
+                const key = citation.id.replace(/:\d+:\d+$/, '')
+                if (!quoteSources.has(key)) quoteSources.set(key, citation)
+              }
+              const quoteEntries = quoteContext ? [...quoteSources].map(([key, citation]) => {
+                const id = key === 'direct:selection' ? 'selection' : key === 'direct:paragraph' ? 'paragraph' : `chapter-${citation.chapterIndex}`
+                const label = id === 'selection' ? `${quoteChapterTitle || _('reader.aiCurrentChapter')} · ${_('reader.aiSelectedText')}`
+                  : id === 'paragraph' ? `${quoteChapterTitle || _('reader.aiCurrentChapter')} · ${_('reader.aiSelectedParagraph')}`
+                    : citation.chapterTitle || chapters[citation.chapterIndex]?.title || _('reader.aiChapterNumber', { n: citation.chapterIndex + 1 })
+                return { id, label, text: id === 'selection' ? quoteContext.selection.trim() : id === 'paragraph' ? quoteContext.paragraph!.trim() : citation.excerpt, target: citationTarget(citation) }
+              }) : []
               const singleQuote = quoteEntries.length === 1 ? quoteEntries[0] : null
               const hasBasis = message.role === 'assistant' && message.citations.length > 0
               const quoteOpen = openQuoteId === message.id

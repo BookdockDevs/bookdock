@@ -25,6 +25,17 @@ describe('getUserErrorMessage', () => {
     expect(getUserErrorMessage(new TypeError('Failed to fetch'), translate)).toBe('errors.network')
   })
 
+  it('preserves provider diagnostics and distinguishes timeout and rate limits', () => {
+    const message = 'AI provider returned HTTP 400: Invalid tool signature'
+    expect(getUserErrorNotification(new ApiError('AI_PROVIDER_ERROR', message))).toEqual({
+      key: 'reader.aiProviderError', params: { message },
+    })
+    expect(getUserErrorMessage(new ApiError('AI_PROVIDER_ERROR', message), (_key, params) => String(params?.message))).toBe(message)
+    expect(getUserErrorMessage(new ApiError('AI_TOOL_LIMIT_EXCEEDED', 'Internal protocol error'), translate)).toBe('reader.aiToolLimitExceeded')
+    expect(getUserErrorMessage(new ApiError('AI_TIMEOUT', 'internal message'), translate)).toBe('reader.aiTimeout')
+    expect(getUserErrorMessage(new ApiError('AI_RATE_LIMITED', 'internal message'), translate)).toBe('reader.aiRateLimited')
+  })
+
   it('does not expose unknown error messages', () => {
     expect(getUserErrorMessage(new Error('database details'), translate)).toBe('errors.operationFailed')
   })
@@ -37,7 +48,7 @@ describe('getUserErrorMessage', () => {
   })
 
   it('keeps a caller-provided fallback for unmapped errors', () => {
-    expect(getUserErrorNotification(new ApiError('AI_TIMEOUT', 'internal message'), 'reader.aiRequestFailed')).toEqual({ key: 'reader.aiRequestFailed' })
+    expect(getUserErrorNotification(new ApiError('UNKNOWN_API_ERROR', 'internal message'), 'reader.aiRequestFailed')).toEqual({ key: 'reader.aiRequestFailed' })
   })
 })
 

@@ -40,6 +40,18 @@ describe('foliate overlayer compatibility', () => {
     expect(group.style.opacity).toBe('var(--overlayer-highlight-opacity, .3)')
   })
 
+  it('merges contiguous inline rects on the same line to avoid stroke seams', () => {
+    const inlineSplitRects = [
+      { left: 10, top: 20, right: 60, bottom: 40, width: 50, height: 20 },
+      { left: 60, top: 20, right: 90, bottom: 40, width: 30, height: 20 },
+      { left: 90, top: 20, right: 150, bottom: 40, width: 60, height: 20 },
+      { left: 10, top: 45, right: 80, bottom: 65, width: 70, height: 20 },
+    ]
+    const group = Overlayer.highlight(inlineSplitRects, { color: '#f59e0b', stroke: '#d97706' })
+
+    expect(group.childElementCount).toBe(2)
+  })
+
   it('preserves Bookdock idea annotations as dashed underlines', () => {
     const group = Overlayer.dashedUnderline(rects, { color: 'purple' })
 

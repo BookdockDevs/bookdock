@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { clearLocalEpubCache, evictLocalEpubCacheByPrefix, localEpubProvider } from './local-epub-provider'
 import { remoteBookProvider } from './book-provider'
+import { FoliateReader } from '../renderers/FoliateReader'
 
 function engine(entries: { filename: string; uncompressedSize: number; getData?: ReturnType<typeof vi.fn> }[]) {
   const close = vi.fn()
@@ -17,6 +18,23 @@ function engine(entries: { filename: string; uncompressedSize: number; getData?:
 }
 
 describe('reader book providers', () => {
+  it.each(['local:book-1', 'remote-cache:account:book-1:rev-1'])('searches complete EPUB chapters through %s', async (identity) => {
+    const read = vi.fn().mockResolvedValue('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>未来的春天</p></body></html>')
+    const test = engine([{ filename: 'chapter.xhtml', uncompressedSize: 100, getData: read }])
+    const lease = await localEpubProvider(identity, new Blob()).open(test.foliate, new AbortController().signal)
+    lease.book.sections = [{ id: 'chapter.xhtml' }]
+    const reader = new FoliateReader(identity)
+    Object.assign(reader, { book: lease.book, view: { renderer: { getContents: () => [] } } })
+    const progress = vi.fn()
+    expect(await reader.search('未来', undefined, progress)).toHaveLength(1)
+    expect(progress.mock.lastCall?.[2]).toMatchObject({ incomplete: false })
+    const cancelled = new AbortController()
+    cancelled.abort()
+    await expect(lease.book.loadSectionText('chapter.xhtml', cancelled.signal)).rejects.toThrow()
+    expect(await lease.book.loadSectionText('chapter.xhtml')).toContain('未来')
+    lease.release()
+  })
+
   it('retains existing remote book identity and refuses a cancelled open', async () => {
     const book = { sections: [] }
     const provider = remoteBookProvider('remote', async () => book)

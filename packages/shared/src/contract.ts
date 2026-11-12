@@ -832,7 +832,7 @@ export interface AiContextReq {
   before?: string
   /** Reader-visible paragraph containing the selection or current reading position. */
   paragraph?: string
-  /** Reader transformation fingerprint used to keep book tools on visible text. */
+  /** Reader transformation fingerprint for explicit visible-text attachments. */
   visibleTextVersion?: string
   /** Explicit Reader-visible chapter text attached by the user to this request. */
   chapterReferences?: AiChapterReference[]
@@ -842,6 +842,7 @@ export interface AiChapterReference {
   chapterIndex: number
   chapterTitle?: string
   text: string
+  chapterHref?: string
 }
 
 export interface AiHistoryMessage {
@@ -1002,6 +1003,12 @@ export interface AiCitation {
   excerpt: string
   sourceType?: 'book' | 'annotation'
   sourceCfi?: string
+  /** Exact bounded source text, verified before resolving a live reader range. */
+  quote?: string
+  textBasis?: 'source' | 'reader'
+  chapterHref?: string
+  visibleTextVersion?: string
+  revisionId?: string
 }
 
 export interface AiMessageRes {
@@ -1075,44 +1082,11 @@ export interface AiThreadListReq {
   limit?: number
 }
 
-export type AiIndexStatus = 'not_indexed' | 'indexing' | 'ready' | 'failed' | 'stale'
-
-export type AiEmbeddingStatus = 'not_indexed' | 'indexing' | 'ready' | 'failed' | 'unavailable'
-
-export interface AiIndexChapter {
-  /** Server chapter position; text is produced by the visible Reader pipeline. */
-  chapterIndex: number
-  text: string
-}
-
-export interface AiIndexReq {
-  bookId: string
-  force?: boolean
-  /** Reader transformation fingerprint; omitted by server-only source fallback. */
-  visibleTextVersion?: string
-  /** Complete transformed corpus for an explicit Reader-triggered build. */
-  chapters?: AiIndexChapter[]
-}
-
-export interface AiIndexRes {
-  bookId: string
-  /** Opaque source fingerprint used to decide whether a derived index is stale. */
-  sourceVersion?: string
-  status: AiIndexStatus
-  embeddingStatus: AiEmbeddingStatus
-  embeddingProvider?: AiProvider
-  embeddingModel?: string
-  embeddingDim?: number
-  /** Current user-visible build progress, from 0 to 100. */
-  progress: number
-  chunkCount: number
-  updatedAt: number | null
-  error?: string
-}
-
 export interface AiSearchReq {
   bookId: string
-  query: string
+  query?: string
+  requiredTerms?: string[]
+  anyTerms?: string[]
   limit?: number
   minChapterIndex?: number
   maxChapterIndex?: number
@@ -1125,7 +1099,7 @@ export interface AiSearchResultRes extends AiCitation {
 export interface AiSearchRes {
   status: 'ready' | 'empty'
   results: AiSearchResultRes[]
-  reason?: 'visible_index_unavailable'
+  truncated?: boolean
   diagnostics?: AiRetrievalDiagnostics
 }
 
@@ -1137,11 +1111,6 @@ export interface AiStatusRes {
   prompts: AiPromptTemplate[]
   modes: AiAssistantMode[]
   lastUsedConversationSettings: AiConversationSettings
-  embeddingProfileId: string | null
-  embeddingProvider: AiProvider | null
-  embeddingModel: string | null
-  embeddingModels: AiModelRes[]
-  embeddingConfigured: boolean
   activeProfileId: string | null
 }
 
@@ -1155,11 +1124,6 @@ export interface AiConfigRes {
   prompts: AiPromptTemplate[]
   modes: AiAssistantMode[]
   lastUsedConversationSettings: AiConversationSettings
-  embeddingProfileId: string | null
-  embeddingProvider: AiProvider | null
-  embeddingModel: string | null
-  embeddingModels: AiModelRes[]
-  embeddingConfigured: boolean
   apiKeyConfigured: boolean
   configuredByUser: boolean
 }
@@ -1167,10 +1131,6 @@ export interface AiConfigRes {
 export interface AiConfigUpdateReq {
   /** Switches the active profile without changing its fields. */
   activeProfileId?: string | null
-  /** Explicitly selects the profile used by the selected embedding model; null disables semantic retrieval. */
-  embeddingProfileId?: string | null
-  /** Explicitly selects an embedding model from that profile; null disables semantic retrieval. */
-  embeddingModel?: string | null
   /** Replaces the user's bounded quick-prompt template list; null restores defaults. */
   prompts?: AiPromptTemplateInput[] | null
   /** Replaces the bounded user-authored assistant mode list; null clears custom modes. */
@@ -2034,6 +1994,13 @@ export type AnnotationUpdateReq = {
   text?: string
 }
 
+export interface AnnotationQueryScope {
+  type?: AnnotationRes['type']
+  chapterHrefs: string[]
+  chapterTitles: string[]
+  limit: number
+}
+
 export interface AnnotationRes {
   /** Web local-repository concurrency version; absent on server responses. */
   clientVersion?: number
@@ -2070,3 +2037,25 @@ export interface AnnotationRes {
   commentCount?: number
   liked?: boolean
 }
+
+
+export interface AiChatJobRes {
+  id: string
+  kind: 'book' | 'local'
+  scopeKey: string
+  clientRequestId: string
+  threadId: string | null
+  runId: string | null
+  state: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  content: string
+  citations: AiCitation[]
+  receipt: AiContextReceipt | null
+  tool: { name: string; phase: 'start' | 'result'; chapterIndex?: number } | null
+  error: { code: string; message: string } | null
+  createdAt: number
+  updatedAt: number
+}
+
+export type AiChatJobCreateReq =
+  | { kind: 'book'; clientRequestId: string; request: AiChatReq }
+  | { kind: 'local'; clientRequestId: string; scopeKey: string; threadId: string; request: AiLocalChatReq }

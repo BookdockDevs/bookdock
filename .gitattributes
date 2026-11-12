@@ -1,0 +1,4 @@
+# Migration SQL is hashed by content, so it must keep LF everywhere.
+# Windows checkouts with core.autocrlf=true would otherwise rewrite these
+# files to CRLF and change the recorded migration hashes.
+*.sql text eol=lf

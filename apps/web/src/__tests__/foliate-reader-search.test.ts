@@ -17,6 +17,72 @@ function makeReader(load: (href: string) => Promise<string | null>, sections = [
 }
 
 describe('reader search lifecycle', () => {
+  it('uses revision-pinned server search for an online cached book without a content session', async () => {
+    const load = vi.fn(async () => markup('local fallback must not run'))
+    const reader = makeReader(load, ['a'])
+    Object.assign(reader, { url: '/api/v1/books/cached-book/file?reader=1&revisionId=cached-rev&showHidden=1' })
+    const events = [
+      { type: 'batch', revisionId: 'cached-rev', scanned: 1, total: 1, hits: [{ sectionIndex: 0, start: 0, end: 2, excerpt: { pre: '', match: '未来', post: '' } }] },
+      { type: 'terminal', revisionId: 'cached-rev', scanned: 1, total: 1, status: 'complete' },
+    ]
+    const fetchMock = vi.fn().mockResolvedValue(new Response(events.map((event) => JSON.stringify(event)).join('\n') + '\n'))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('navigator', { onLine: true })
+    try {
+      const progress = vi.fn()
+      expect(await reader.search('未来', undefined, progress)).toHaveLength(1)
+      expect(load).not.toHaveBeenCalled()
+      const [url, init] = fetchMock.mock.calls[0]!
+      expect(url).toBe('/api/v1/books/cached-book/reader/search?reader=1&revisionId=cached-rev&showHidden=1')
+      expect(JSON.parse(init.body)).toMatchObject({ revisionId: 'cached-rev', query: '未来' })
+      expect(init.signal).toBeInstanceOf(AbortSignal)
+      expect(progress.mock.lastCall?.[2]).toMatchObject({ incomplete: false })
+      expect(progress.mock.lastCall?.[2].offline).not.toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it.each(['wrong-revision', 'forbidden'])('rejects %s server responses without scanning cached chapters', async (failure) => {
+    const load = vi.fn(async () => markup('未来'))
+    const reader = makeReader(load, ['a'])
+    Object.assign(reader, { url: '/api/v1/books/cached-book/file?revisionId=cached-rev' })
+    const response = failure === 'forbidden'
+      ? new Response('', { status: 403 })
+      : new Response(JSON.stringify({ type: 'terminal', revisionId: 'another-rev', scanned: 1, total: 1, status: 'complete' }) + '\n')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+    vi.stubGlobal('navigator', { onLine: true })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const progress = vi.fn()
+      expect(await reader.search('未来', undefined, progress)).toEqual([])
+      expect(load).not.toHaveBeenCalled()
+      expect(progress.mock.lastCall?.[2]).toMatchObject({ incomplete: true, partial: true })
+      expect(progress.mock.lastCall?.[2].offline).not.toBe(true)
+    } finally {
+      warn.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('searches cached chapters offline and keeps current-chapter search local while online', async () => {
+    const reader = makeReader(async () => markup('未来'), ['a'])
+    Object.assign(reader, { url: '/api/v1/books/cached-book/file?revisionId=cached-rev' })
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('navigator', { onLine: false })
+    try {
+      const progress = vi.fn()
+      expect(await reader.search('未来', undefined, progress)).toHaveLength(1)
+      expect(progress.mock.lastCall?.[2]).toMatchObject({ incomplete: false, offline: true })
+      vi.stubGlobal('navigator', { onLine: true })
+      expect(await reader.search('未来', { scope: 'chapter' })).toHaveLength(1)
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('keeps spine order and detects truncation across a chapter boundary', async () => {
     const load = vi.fn(async (href: string) => markup(href === 'a' ? 'x'.repeat(2000) : 'x'))
     const reader = makeReader(load)
@@ -192,4 +258,28 @@ describe('reader search lifecycle', () => {
       clock.mockRestore()
     }
   })
+  it('verifies AI source quotes against live paragraph text instead of server offsets', async () => {
+    const html = '<html xmlns="http://www.w3.org/1999/xhtml"><body><h2><span>第一章</span><br/><span>享受母穴</span></h2><p>甲</p><p>乙丙丁</p></body></html>'
+    const reader = makeReader(async () => html, ['a'])
+    let selected = ''
+    const goTo = vi.fn(async ({ anchor }: { anchor: (doc: Document) => Range }) => {
+      selected = anchor(new DOMParser().parseFromString(html, 'text/html')).toString()
+    })
+    Object.assign(reader, { view: { renderer: { getContents: () => [], goTo } }, setActiveSearchRange: vi.fn(), scheduleActiveSearchHighlightClear: vi.fn() })
+    await reader.display(`ai-quote:${encodeURIComponent(JSON.stringify({ chapterIndex: 0, quote: '第一章\n享受母穴\n\n甲\n\n乙', textBasis: 'source' }))}`)
+    expect(selected).toBe('第一章享受母穴甲乙')
+    expect(goTo).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects changed and ambiguous AI quotes without navigating', async () => {
+    const reader = makeReader(async () => markup('重复 重复'), ['a'])
+    const goTo = vi.fn()
+    Object.assign(reader, { view: { renderer: { getContents: () => [], goTo } } })
+    for (const quote of ['不存在', '重复']) {
+      await expect(reader.display(`ai-quote:${encodeURIComponent(JSON.stringify({ chapterIndex: 0, quote, textBasis: 'source' }))}`)).rejects.toThrow('missing or ambiguous')
+    }
+    await expect(reader.display(`ai-quote:${encodeURIComponent(JSON.stringify({ chapterIndex: 0, quote: '重复', textBasis: 'reader', visibleTextVersion: 'old-version' }))}`)).rejects.toThrow('text has changed')
+    expect(goTo).not.toHaveBeenCalled()
+  })
+
 })

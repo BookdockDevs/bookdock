@@ -6,7 +6,12 @@ export { getErrorKeyByCode } from './error-keys'
 
 export function getUserErrorNotification(error: unknown, fallback = 'errors.operationFailed'): ToastMessage {
   if (error instanceof TypeError) return { key: 'errors.network' }
-  if (error instanceof ApiError) return { key: ERROR_KEYS[error.code] ?? fallback }
+  if (error instanceof ApiError) {
+    if (error.code === 'AI_PROVIDER_ERROR' && error.message.trim()) {
+      return { key: 'reader.aiProviderError', params: { message: error.message } }
+    }
+    return { key: ERROR_KEYS[error.code] ?? fallback }
+  }
   if (error instanceof Error && 'category' in error) {
     if (error.category === 'pending-reading') return { key: 'localLibrary.pendingReading' }
     if (error.category === 'conflict') return { key: 'localLibrary.recordConflict' }
@@ -18,10 +23,11 @@ export function getUserErrorNotification(error: unknown, fallback = 'errors.oper
 
 export function getUserErrorMessage(
   error: unknown,
-  translate: (key: string) => string,
+  translate: (key: string, params?: Record<string, string | number>) => string,
   fallback = 'errors.operationFailed',
 ): string {
-  return translate(getUserErrorNotification(error, fallback).key)
+  const notification = getUserErrorNotification(error, fallback)
+  return translate(notification.key, notification.params)
 }
 
 /**

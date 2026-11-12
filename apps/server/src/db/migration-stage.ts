@@ -210,7 +210,7 @@ export function migrateBeforeBookRetirementIncluding(
   includeTags: string[],
 ) {
   // Older partial fixtures lack book_reviews, so stage only the archive/annotation portion there.
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, '0062_ai_chat_jobs'])
   migrateWithTagFilter(
     db,
     options,

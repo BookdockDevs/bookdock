@@ -1,4 +1,8 @@
 export const ERROR_KEYS: Record<string, string> = {
+  AI_TOOL_LIMIT_EXCEEDED: 'reader.aiToolLimitExceeded',
+  AI_BUSY: 'reader.aiBusy',
+  AI_TIMEOUT: 'reader.aiTimeout',
+  AI_RATE_LIMITED: 'reader.aiRateLimited',
   DICTIONARY_NOT_FOUND: 'errors.notFound',
   DICTIONARY_INVALID: 'dictionary.invalidDictionary',
   DICTIONARY_BUSY: 'dictionary.busy',

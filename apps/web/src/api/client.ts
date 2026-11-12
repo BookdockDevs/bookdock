@@ -1,4 +1,4 @@
-import type { AiChatReq, AiCitation, AiContextReceipt, AiLocalChatReq } from '@bookdock/shared'
+import type { AiChatJobCreateReq, AiChatJobRes, AiChatReq, AiCitation, AiContextReceipt, AiLocalChatReq } from '@bookdock/shared'
 
 import { DEFAULT_UNDO_QUERY_KEYS, publishUndoOpportunity } from '@/lib/undo'
 import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
@@ -254,6 +254,7 @@ export async function apiUpload<T>(path: string, file: File | FormData, method: 
 }
 
 export interface AiStreamHandlers {
+  onAccepted?: (event: { id: string; threadId: string | null }) => void
   onMeta?: (event: { requestId: string; runId?: string; threadId?: string; model?: string; receipt: AiContextReceipt }) => void
   onDelta?: (text: string) => void
   onUsage?: (event: { inputTokens?: number; outputTokens?: number }) => void
@@ -261,103 +262,55 @@ export interface AiStreamHandlers {
   onDone?: (event: { content: string; citations: AiCitation[] }) => void
 }
 
-async function streamAiSse(path: string, body: unknown, handlers: AiStreamHandlers, signal?: AbortSignal): Promise<void> {
+interface AiChatJobContext {
+  clientRequestId: string
+  scopeKey?: string
+  threadId?: string
+}
+
+async function observeAiJob(body: AiChatJobCreateReq, handlers: AiStreamHandlers, signal?: AbortSignal): Promise<void> {
   const revision = getAuthSessionRevision()
   const controller = new AbortController()
   const unsubscribe = useAuthStore.subscribe(() => { if (getAuthSessionRevision() !== revision) controller.abort() })
-  const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
+  const observationSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify(body),
-      signal: requestSignal,
-    })
-    if (!res.ok) {
-      if (res.status === 401) handleUnauthorized(path, revision)
-      throw await parseError(res)
-    }
-    if (!res.body) throw new ApiError('AI_PROVIDER_ERROR', 'AI stream is empty')
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let blocksSinceYield = 0
-
-    const consume = (block: string) => {
-      const lines = block.split(/\r?\n/)
-      const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
-      const data = lines.filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('\n')
-      if (!event || !data) return
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(data)
-      } catch {
-        throw new ApiError('AI_PROVIDER_ERROR', 'AI stream returned invalid data')
-      }
-      if (event === 'meta' && parsed && typeof parsed === 'object' && 'receipt' in parsed) {
-        const value = parsed as { requestId?: unknown; runId?: unknown; threadId?: unknown; model?: unknown; receipt: AiContextReceipt }
-        if (typeof value.requestId === 'string') handlers.onMeta?.({ requestId: value.requestId, runId: typeof value.runId === 'string' ? value.runId : undefined, threadId: typeof value.threadId === 'string' ? value.threadId : undefined, model: typeof value.model === 'string' ? value.model : undefined, receipt: value.receipt })
-      } else if (event === 'delta' && parsed && typeof parsed === 'object' && typeof (parsed as { text?: unknown }).text === 'string') {
-        handlers.onDelta?.((parsed as { text: string }).text)
-      } else if (event === 'usage' && parsed && typeof parsed === 'object') {
-        handlers.onUsage?.(parsed as { inputTokens?: number; outputTokens?: number })
-      } else if (event === 'tool' && parsed && typeof parsed === 'object') {
-        const value = parsed as { name?: unknown; phase?: unknown; chapterIndex?: unknown; resultChars?: unknown; citations?: unknown }
-        if (typeof value.name === 'string' && (value.phase === 'start' || value.phase === 'result')) {
-          const citations = Array.isArray(value.citations) ? value.citations.flatMap((item) => {
-            const citation = parseAiCitation(item)
-            return citation ? [citation] : []
-          }) : []
-          handlers.onTool?.({
-            name: value.name,
-            phase: value.phase,
-            ...(typeof value.chapterIndex === 'number' ? { chapterIndex: value.chapterIndex } : {}),
-            ...(typeof value.resultChars === 'number' ? { resultChars: value.resultChars } : {}),
-            ...(citations.length > 0 ? { citations } : {}),
-          })
-        }
-      } else if (event === 'done' && parsed && typeof parsed === 'object') {
-        const value = parsed as { content?: unknown; citations?: unknown }
-        const citations = Array.isArray(value.citations) ? value.citations.flatMap((item) => {
-          const citation = parseAiCitation(item)
-          return citation ? [citation] : []
-        }) : []
-        handlers.onDone?.({ content: typeof value.content === 'string' ? value.content : '', citations })
-      } else if (event === 'error') {
-        const value = parsed as { code?: unknown; message?: unknown }
-        throw new ApiError(typeof value.code === 'string' ? value.code : 'AI_PROVIDER_ERROR', typeof value.message === 'string' ? value.message : 'AI provider stream failed')
-      }
-    }
-
+    let job = (await apiPost<{ data: AiChatJobRes }>('/ai/jobs', body, observationSignal)).data
+    observationSignal.throwIfAborted()
+    handlers.onAccepted?.({ id: job.id, threadId: job.threadId })
+    let content = ''
+    let lastTool = ''
     while (true) {
-      const { done, value } = await reader.read()
-      buffer += decoder.decode(value, { stream: !done })
-      let separator = buffer.indexOf('\n\n')
-      while (separator >= 0) {
-        consume(buffer.slice(0, separator))
-        buffer = buffer.slice(separator + 2)
-        separator = buffer.indexOf('\n\n')
-        blocksSinceYield += 1
-        if (blocksSinceYield >= 8) {
-          // A proxy can deliver many SSE frames in one read; yield so the
-          // streaming message scheduler and browser paint can run between bursts.
-          blocksSinceYield = 0
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
-        }
+      observationSignal.throwIfAborted()
+      if (job.receipt) handlers.onMeta?.({ requestId: job.id, ...(job.runId ? { runId: job.runId } : {}), ...(job.kind === 'book' && job.threadId ? { threadId: job.threadId } : {}), receipt: job.receipt })
+      if (job.content.startsWith(content) && job.content.length > content.length) handlers.onDelta?.(job.content.slice(content.length))
+      content = job.content
+      const tool = JSON.stringify(job.tool)
+      if (job.tool && tool !== lastTool) handlers.onTool?.(job.tool)
+      lastTool = tool
+      if (job.state === 'completed') {
+        handlers.onDone?.({ content: job.content, citations: job.citations.map(parseAiCitation).filter((citation): citation is AiCitation => citation !== null) })
+        return
       }
-      if (done) break
+      if (job.state === 'cancelled') throw new DOMException('AI generation cancelled', 'AbortError')
+      if (job.state !== 'running') throw new ApiError(job.error?.code ?? 'AI_PROVIDER_ERROR', job.error?.message ?? 'AI generation was interrupted')
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => { clearTimeout(timer); observationSignal.removeEventListener('abort', abort); reject(new DOMException('AI observation detached', 'AbortError')) }
+        const timer = setTimeout(() => { observationSignal.removeEventListener('abort', abort); resolve() }, 500)
+        observationSignal.addEventListener('abort', abort, { once: true })
+        if (observationSignal.aborted) abort()
+      })
+      job = (await apiGet<{ data: AiChatJobRes }>(`/ai/jobs/${encodeURIComponent(job.id)}`, observationSignal)).data
     }
-    if (buffer.trim()) consume(buffer)
   } finally {
     unsubscribe()
   }
 }
 
-export async function apiStreamAiChat(body: AiChatReq, handlers: AiStreamHandlers, signal?: AbortSignal): Promise<void> {
-  return streamAiSse('/ai/chat', body, handlers, signal)
+export async function apiStreamAiChat(body: AiChatReq, handlers: AiStreamHandlers, signal?: AbortSignal, context?: AiChatJobContext): Promise<void> {
+  return observeAiJob({ kind: 'book', clientRequestId: context?.clientRequestId ?? crypto.randomUUID(), request: body }, handlers, signal)
 }
 
-export async function apiStreamAiLocalChat(body: AiLocalChatReq, handlers: AiStreamHandlers, signal?: AbortSignal): Promise<void> {
-  return streamAiSse('/ai/local-chat', body, handlers, signal)
+export async function apiStreamAiLocalChat(body: AiLocalChatReq, handlers: AiStreamHandlers, signal?: AbortSignal, context?: AiChatJobContext): Promise<void> {
+  if (!context?.scopeKey || !context.threadId) throw new ApiError('VALIDATION_ERROR', 'Local AI job requires a saved conversation')
+  return observeAiJob({ kind: 'local', clientRequestId: context.clientRequestId, scopeKey: context.scopeKey, threadId: context.threadId, request: body }, handlers, signal)
 }

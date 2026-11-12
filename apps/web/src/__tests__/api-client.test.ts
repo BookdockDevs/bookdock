@@ -137,82 +137,40 @@ describe('undo receipt response session boundary', () => {
   })
 })
 
-describe('AI stream client', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
+describe('AI background job client', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
 
-  it('keeps valid citations and drops malformed citation payloads', async () => {
+  const job = { id: 'job-1', kind: 'book', scopeKey: 'book-1', clientRequestId: 'answer-1', threadId: 'thread-1', runId: 'run-1', state: 'completed', content: 'Answer.', citations: [], receipt: null, tool: null, error: null, createdAt: 1, updatedAt: 2 }
+
+  it('submits a job and preserves only valid final citations', async () => {
     const excerpt = 'x'.repeat(300)
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response([
-      'event: tool',
-      `data: ${JSON.stringify({
-        name: 'search_book',
-        phase: 'result',
-        citations: [
-          {
-            id: 'chunk-1',
-            chapterIndex: 0,
-            chapterId: 'ch-0',
-            chapterTitle: '第一章',
-            startOffset: 4,
-            endOffset: 18,
-            excerpt,
-            sourceType: 'book',
-          },
-          { id: 'missing-chapter' },
-          {
-            id: 'reversed-range',
-            chapterIndex: 0,
-            chapterId: 'ch-0',
-            chapterTitle: '第一章',
-            startOffset: 20,
-            endOffset: 10,
-            excerpt: '无效范围',
-          },
-        ],
-      })}`,
-      '',
-    ].join('\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
-
-    const onTool = vi.fn()
-    await apiStreamAiChat(requestBody, { onTool })
-
-    expect(onTool).toHaveBeenCalledWith({
-      name: 'search_book',
-      phase: 'result',
-      citations: [{
-        id: 'chunk-1',
-        chapterIndex: 0,
-        chapterId: 'ch-0',
-        chapterTitle: '第一章',
-        startOffset: 4,
-        endOffset: 18,
-        excerpt: excerpt.slice(0, 240),
-        sourceType: 'book',
-      }],
-    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { ...job, citations: [
+      { id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: 'First', startOffset: 4, endOffset: 18, excerpt, sourceType: 'book' },
+      { id: 'missing-chapter' },
+      { id: 'reversed', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: 'First', startOffset: 20, endOffset: 10, excerpt: 'Invalid' },
+    ] } })))
+    vi.stubGlobal('fetch', fetchMock)
+    const onDone = vi.fn()
+    const onAccepted = vi.fn()
+    await apiStreamAiChat(requestBody, { onDone, onAccepted })
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('/ai/jobs')
+    expect(onAccepted).toHaveBeenCalledWith({ id: 'job-1', threadId: 'thread-1' })
+    expect(onDone).toHaveBeenCalledWith({ content: 'Answer.', citations: [
+      { id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: 'First', startOffset: 4, endOffset: 18, excerpt: excerpt.slice(0, 240), sourceType: 'book' },
+    ] })
   })
 
-  it('parses the final normalized answer and citations from the done event', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response([
-      'event: done',
-      `data: ${JSON.stringify({
-        content: '回答[1]，链接[2](https://example.com)。',
-        citations: [
-          { id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 4, endOffset: 18, excerpt: '正文', sourceType: 'book' },
-          { id: 'malformed' },
-        ],
-      })}`,
-      '',
-    ].join('\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+  it('detaches an observer without posting a cancellation', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { ...job, state: 'running' } })))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(apiStreamAiChat(requestBody, { onAccepted: () => controller.abort() }, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]![0])).not.toContain('/cancel')
+  })
 
-    const onDone = vi.fn()
-    await apiStreamAiChat(requestBody, { onDone })
-
-    expect(onDone).toHaveBeenCalledWith({
-      content: '回答[1]，链接[2](https://example.com)。',
-      citations: [{ id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 4, endOffset: 18, excerpt: '正文', sourceType: 'book' }],
-    })
+  it('surfaces persisted provider errors instead of treating an HTTP-successful poll as completion', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { ...job, state: 'failed', error: { code: 'AI_PROVIDER_ERROR', message: 'HTTP 400: Invalid signature' } } }))))
+    await expect(apiStreamAiChat(requestBody, {})).rejects.toMatchObject({ code: 'AI_PROVIDER_ERROR', message: 'HTTP 400: Invalid signature' })
   })
 })

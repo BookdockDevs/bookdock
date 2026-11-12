@@ -352,6 +352,17 @@ export async function fetchReaderManifest(contentUrl: string, signal?: AbortSign
   return { manifest: parsed.data, epoch, accountScope }
 }
 
+export function fetchReaderSearch(contentUrl: string, revisionId: string, request: Omit<ReaderSearchRequest, 'revisionId'>, signal: AbortSignal): Promise<Response> {
+  const [pathPart, query = ''] = contentUrl.split('?', 2)
+  const params = new URLSearchParams(query)
+  params.set('revisionId', revisionId)
+  return fetch(`${pathPart.replace(/\/file$/, '/reader/search')}?${params}`, {
+    method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+    body: JSON.stringify({ ...request, revisionId }),
+  })
+}
+
 export async function fetchLatestReaderManifest(contentUrl: string, signal?: AbortSignal) {
   const [pathPart, query = ''] = contentUrl.split('?', 2)
   if (!pathPart) throw new ReaderContentError('READER_ENTRY_FAILED', 'Reader content URL is invalid')
@@ -550,11 +561,7 @@ export class ReaderContentSession {
 
   async search(request: Omit<ReaderSearchRequest, 'revisionId'>, signal: AbortSignal): Promise<Response> {
     this.assertReadable()
-    const response = await fetch(this.searchUrl(), {
-      method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,
-      headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
-      body: JSON.stringify({ ...request, revisionId: this.manifest.revisionId }),
-    })
+    const response = await fetchReaderSearch(this.contentUrl, this.manifest.revisionId, request, signal)
     this.assertReadable()
     return response
   }

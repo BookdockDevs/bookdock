@@ -1,11 +1,13 @@
 import { Hono } from 'hono'
 
-import { aiChatSchema, aiConfigTestSchema, aiConfigUpdateSchema, aiGenerationRunIdSchema, aiIndexSchema, aiIndexStatusSchema, aiLocalChatSchema, aiMessageIdSchema, aiModelDiscoverySchema, aiProfileCreateSchema, aiProfileUpdateSchema, aiSearchSchema, aiThreadCreateSchema, aiThreadListSchema, aiThreadUpdateSchema, type AiConfigRes, type AiConnectionTestRes, type AiGenerationRunRes, type AiIndexRes, type AiMessageRevisionRes, type AiModelRes, type AiProfileRes, type AiProviderRes, type AiSearchRes, type AiStatusRes, type AiThreadDetailRes, type AiThreadRes } from '@bookdock/shared'
+import { aiChatJobCreateSchema, aiChatJobListSchema, aiChatSchema, aiConfigTestSchema, aiConfigUpdateSchema, aiGenerationRunIdSchema, aiLocalChatSchema, aiMessageIdSchema, aiModelDiscoverySchema, aiProfileCreateSchema, aiProfileUpdateSchema, aiSearchSchema, aiThreadCreateSchema, aiThreadListSchema, aiThreadUpdateSchema, type AiConfigRes, type AiConnectionTestRes, type AiGenerationRunRes, type AiMessageRevisionRes, type AiModelRes, type AiProfileRes, type AiProviderRes, type AiSearchRes, type AiStatusRes, type AiThreadDetailRes, type AiThreadRes } from '@bookdock/shared'
 
-import { cancelAiChatRun, createAiChatStream, createAiLocalChatStream, createAiProfile, deleteAiProfile, embedAiTexts, getAiConfig, getAiSearchChapterLimit, getAiStatus, isAiEmbeddingConfigured, listAiModels, listAiProviders, testAiConfig, testAiConfigDraft, updateAiConfig, updateAiProfile } from './ai.service'
+import { cancelAiChatRun, createAiChatStream, createAiLocalChatStream, createAiProfile, deleteAiProfile, getAiConfig, getAiSearchChapterLimit, getAiStatus, listAiModels, listAiProviders, testAiConfig, testAiConfigDraft, updateAiConfig, updateAiProfile } from './ai.service'
 import { createAiThread, deleteAiThread, getAiThread, listAiMessageRevisions, listAiThreads, selectAiMessageRevision, updateAiThread } from './ai.sessions.service'
-import { cancelAiBookIndex, clearAiBookIndex, getAiIndexStatus, indexAiBook, searchAiBook } from './ai.retrieval.service'
+import { searchAiBook } from './ai.retrieval.service'
 import { getAiGenerationRun } from './ai.runs.service'
+
+import { acknowledgeAiChatJob, cancelAiChatJob, cancelAiThreadJobs, createAiChatJob, getAiChatJob, listAiChatJobs } from './ai.jobs.service'
 
 const aiRoutes = new Hono()
 
@@ -150,6 +152,8 @@ aiRoutes.patch('/threads/:id', async (c) => {
 aiRoutes.delete('/threads/:id', (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  getAiThread(user.id, c.req.param('id'))
+  cancelAiThreadJobs(user.id, c.req.param('id'))
   deleteAiThread(user.id, c.req.param('id'))
   return c.json({ data: null })
 })
@@ -174,51 +178,6 @@ aiRoutes.post('/runs/:id/cancel', (c) => {
   return c.json({ data: cancelAiChatRun(user.id, parsed.data) } satisfies { data: AiGenerationRunRes })
 })
 
-aiRoutes.get('/retrieval/status', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = aiIndexStatusSchema.safeParse({ bookId: c.req.query('bookId') })
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI index status request', details: parsed.error.flatten() } }, 400)
-  }
-  return c.json({ data: await getAiIndexStatus(user.id, parsed.data.bookId) } satisfies { data: AiIndexRes })
-})
-
-aiRoutes.post('/retrieval/index', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = aiIndexSchema.safeParse(await c.req.json().catch(() => null))
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI index request', details: parsed.error.flatten() } }, 400)
-  }
-  return c.json({ data: await indexAiBook(user.id, parsed.data, {
-    signal: c.req.raw.signal,
-    ...(isAiEmbeddingConfigured(user.id, user.role) ? { embedder: (texts, signal, kind) => embedAiTexts(user.id, texts, signal, kind, user.role) } : {}),
-  }) } satisfies { data: AiIndexRes })
-})
-
-aiRoutes.post('/retrieval/index/cancel', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = aiIndexSchema.safeParse(await c.req.json().catch(() => null))
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI index request', details: parsed.error.flatten() } }, 400)
-  }
-  await cancelAiBookIndex(user.id, parsed.data.bookId)
-  return c.json({ data: await getAiIndexStatus(user.id, parsed.data.bookId) } satisfies { data: AiIndexRes })
-})
-
-aiRoutes.delete('/retrieval/index', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = aiIndexStatusSchema.safeParse({ bookId: c.req.query('bookId') })
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI index status request', details: parsed.error.flatten() } }, 400)
-  }
-  await clearAiBookIndex(user.id, parsed.data.bookId)
-  return c.json({ data: null })
-})
-
 aiRoutes.post('/retrieval/search', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
@@ -232,8 +191,42 @@ aiRoutes.post('/retrieval/search', async (c) => {
     : Math.min(parsed.data.maxChapterIndex, serverMaxChapterIndex)
   return c.json({ data: await searchAiBook(user.id, { ...parsed.data, maxChapterIndex }, {
     signal: c.req.raw.signal,
-    ...(isAiEmbeddingConfigured(user.id, user.role) ? { embedder: (texts, signal, kind) => embedAiTexts(user.id, texts, signal, kind, user.role) } : {}),
   }) } satisfies { data: AiSearchRes })
+})
+
+aiRoutes.post('/jobs', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = aiChatJobCreateSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI job', details: parsed.error.flatten() } }, 400)
+  return c.json({ data: await createAiChatJob(user.id, user.role, parsed.data) }, 202)
+})
+
+aiRoutes.get('/jobs', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = aiChatJobListSchema.safeParse(c.req.query())
+  if (!parsed.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI job scope' } }, 400)
+  return c.json({ data: await listAiChatJobs(user.id, parsed.data.kind, parsed.data.scopeKey) })
+})
+
+aiRoutes.get('/jobs/:id', (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  return c.json({ data: getAiChatJob(user.id, c.req.param('id')) })
+})
+
+aiRoutes.post('/jobs/:id/cancel', (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  return c.json({ data: cancelAiChatJob(user.id, c.req.param('id')) })
+})
+
+aiRoutes.post('/jobs/:id/acknowledge', (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  acknowledgeAiChatJob(user.id, c.req.param('id'))
+  return c.json({ data: null })
 })
 
 aiRoutes.post('/chat', async (c) => {

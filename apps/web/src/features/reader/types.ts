@@ -1,5 +1,3 @@
-import type { AiIndexChapter } from '@bookdock/shared'
-
 import type { TextReplacementRule } from './lib/text-replacements'
 import type { MediaOverlayCue } from './lib/media-overlay'
 
@@ -117,11 +115,6 @@ export interface SelectionGeometry {
   columnBounds?: PopupRect
   backward: boolean
   focusX: number
-}
-
-export interface AiIndexCorpus {
-  visibleTextVersion: string
-  chapters: AiIndexChapter[]
 }
 
 export interface TtsSegment {
@@ -279,11 +272,10 @@ export interface BookReader {
   getSnippet(cfi: string, maxLength?: number): string
   /** Read the visible paragraph at the current reading position. */
   getCurrentParagraphText(maxLength?: number): string
-  /** Build the same transformed plain-text corpus used by the visible reader. */
-  getAiCorpus(signal?: AbortSignal): Promise<AiIndexCorpus>
   /** Read one transformed chapter for an explicit AI composer reference. */
   getAiChapterText(chapterIndex: number, signal?: AbortSignal): Promise<string>
   /** Stable fingerprint for the current visible text replacement and conversion settings. */
+  /** Fingerprint the content revision and visible text transformations. */
   getAiCorpusVersion(): string
   /**
    * Match counts per pattern rule across the whole book ("N 处" badges).

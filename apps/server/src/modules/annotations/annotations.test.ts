@@ -421,4 +421,18 @@ describe('annotations service', () => {
     expect(listed).not.toContain(idea.id)
   })
 
+  it('applies chapter and type scope before limiting matching notes', async () => {
+    const early = await createAnnotation(ownerId, bookId, { type: 'highlight', cfiRange: 'early', text: 'needle', chapter: 'Repeated', chapterHref: 'OEBPS/early.xhtml#part' })
+    for (let index = 0; index < 25; index++) {
+      await createAnnotation(ownerId, bookId, { type: 'highlight', cfiRange: `later-${index}`, text: 'needle', chapter: 'Repeated', chapterHref: 'OEBPS/later.xhtml' })
+    }
+    const stale = await createAnnotation(ownerId, bookId, { type: 'highlight', cfiRange: 'unresolved', text: 'needle', chapter: 'Repeated', chapterHref: 'OEBPS/early.xhtml' })
+    db.update(schema.highlights).set({ relocation: 'unresolved' }).where(eq(schema.highlights.id, stale.id)).run()
+    const scope = { type: 'highlight' as const, chapterHrefs: ['OEBPS/early.xhtml'], chapterTitles: [], limit: 1 }
+    expect((await searchAnnotations(ownerId, bookId, 'needle', 1, scope)).map((item) => item.id)).toEqual([early.id])
+    expect((await listAnnotations(ownerId, bookId, scope)).map((item) => item.id)).toEqual([early.id])
+    expect(await searchAnnotations(otherId, bookId, 'needle', 1, scope)).toEqual([])
+    expect(await searchAnnotations(ownerId, bookId, 'needle', 1, { ...scope, type: 'note' })).toEqual([])
+  })
+
 })

@@ -105,13 +105,27 @@ function collectSearchText(doc: Document): ExtractedSearchText {
   const nodes: SearchTextNode[] = []
   let text = ''
   let previousBlock: Element | null = null
+  let pendingBreak = false
   if (!doc.body) return { text, nodeLengths, nodes }
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) =>
-      isContentTextNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+    acceptNode: (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        return isContentTextNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+      }
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const tag = (node as Element).localName.toLowerCase()
+        if (tag === 'script' || tag === 'style' || tag === 'noscript') return NodeFilter.FILTER_REJECT
+        return tag === 'br' ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+      }
+      return NodeFilter.FILTER_SKIP
+    },
   })
   let node: Node | null
   while ((node = walker.nextNode())) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      if (nodes.length > 0) pendingBreak = true
+      continue
+    }
     const textNode = node as Text
     const value = textNode.textContent ?? ''
     const block = searchBlockAncestor(textNode)
@@ -119,7 +133,8 @@ function collectSearchText(doc: Document): ExtractedSearchText {
     // would create a second separator next to the virtual paragraph space.
     if (!value || (!block && /^[\t\n\r ]*$/.test(value))) continue
     nodeLengths.push(value.length)
-    if (nodes.length > 0 && block !== previousBlock) text += ' '
+    if (nodes.length > 0 && (block !== previousBlock || pendingBreak)) text += ' '
+    pendingBreak = false
     const start = text.length
     text += value
     nodes.push({ node: textNode, start, end: text.length })
@@ -286,6 +301,28 @@ export function prepareSearchDocument(doc: Document): {
       return range
     },
   }
+}
+
+export function findUniqueQuoteRange(text: string, quote: string): TextOffsetRange | null {
+  const normalize = (value: string) => value.replace(/\s+/g, ' ').trim()
+  const needle = normalize(quote)
+  if (!needle) return null
+  let normalized = ''
+  const starts: number[] = []
+  const ends: number[] = []
+  for (let index = 0; index < text.length; index++) {
+    const whitespace = /\s/.test(text[index]!)
+    if (whitespace && normalized.endsWith(' ')) {
+      ends[ends.length - 1] = index + 1
+      continue
+    }
+    normalized += whitespace ? ' ' : text[index]
+    starts.push(index)
+    ends.push(index + 1)
+  }
+  const found = normalized.indexOf(needle)
+  if (found < 0 || normalized.indexOf(needle, found + 1) >= 0) return null
+  return { start: starts[found]!, end: ends[found + needle.length - 1]! }
 }
 
 export function offsetsToRange(doc: Document, start: number, end: number): Range | null {

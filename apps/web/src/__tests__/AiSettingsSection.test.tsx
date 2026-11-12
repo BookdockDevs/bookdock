@@ -31,11 +31,6 @@ describe('AiSettingsSection', () => {
         profiles: [{ id: 'profile-1', name: '本地配置', provider: 'openai', baseUrl: 'http://localhost:11434/v1', model: 'qwen3:8b', models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 1, updatedAt: 1 }],
         activeProfileId: 'profile-1',
         modes: [],
-        embeddingProfileId: null,
-        embeddingProvider: null,
-        embeddingModel: null,
-        embeddingModels: [],
-        embeddingConfigured: false,
         apiKeyConfigured: false,
         configuredByUser: true,
       } },
@@ -189,7 +184,7 @@ describe('AiSettingsSection', () => {
       { id: 'profile-b', name: '配置 B', provider: 'openai' as const, baseUrl: 'http://localhost:11434/v1', model: 'model-b', models: [{ id: 'model-b', name: 'model-b' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 2, updatedAt: 2 },
     ]
     vi.mocked(useAiConfig).mockReturnValue({
-      data: { data: { provider: 'openai', baseUrl: profiles[0]!.baseUrl, model: profiles[0]!.model, models: profiles[0]!.models, profiles, activeProfileId: 'profile-a', prompts: [], modes: [], embeddingProfileId: null, embeddingProvider: null, embeddingModel: null, embeddingModels: [], embeddingConfigured: false, apiKeyConfigured: false, configuredByUser: true } },
+      data: { data: { provider: 'openai', baseUrl: profiles[0]!.baseUrl, model: profiles[0]!.model, models: profiles[0]!.models, profiles, activeProfileId: 'profile-a', prompts: [], modes: [],  apiKeyConfigured: false, configuredByUser: true } },
       isLoading: false,
     } as ReturnType<typeof useAiConfig>)
     const fetchMutate = vi.fn()
@@ -211,7 +206,7 @@ describe('AiSettingsSection', () => {
     expect(screen.queryByText('Stale model')).toBeNull()
   })
 
-  it('switches to semantic retrieval and selects an added embedding model', () => {
+  it('hides retired retrieval controls even when profiles contain embedding models', () => {
     useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'owner' } })
     const mutate = vi.fn()
     const profiles = [
@@ -219,21 +214,16 @@ describe('AiSettingsSection', () => {
       { id: 'embedding-profile', name: '本地 Embedding', provider: 'ollama' as const, baseUrl: 'http://localhost:11434', model: 'llama3.2', models: [{ id: 'llama3.2', name: 'llama3.2' }], embeddingModel: 'nomic-embed-text', embeddingModels: [{ id: 'nomic-embed-text', name: 'nomic-embed-text' }], apiKeyConfigured: false, createdAt: 2, updatedAt: 2 },
     ]
     vi.mocked(useAiConfig).mockReturnValue({
-      data: { data: { provider: 'openai', baseUrl: 'http://chat.test/v1', model: 'chat-model', models: profiles[0]!.models, profiles, activeProfileId: 'chat-profile', prompts: [], modes: [], embeddingProfileId: null, embeddingProvider: null, embeddingModel: null, embeddingModels: [], embeddingConfigured: false, apiKeyConfigured: false, configuredByUser: true } },
+      data: { data: { provider: 'openai', baseUrl: 'http://chat.test/v1', model: 'chat-model', models: profiles[0]!.models, profiles, activeProfileId: 'chat-profile', prompts: [], modes: [],  apiKeyConfigured: false, configuredByUser: true } },
       isLoading: false,
     } as ReturnType<typeof useAiConfig>)
     vi.mocked(useUpdateAiConfig).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useUpdateAiConfig>)
 
     render(<AiSettingsSection />)
-    const lexical = screen.getByRole('radio', { name: '词法检索' })
-    expect(lexical).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByRole('radio', { name: '词法检索' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: '语义检索' })).toBeNull()
     expect(screen.queryByLabelText('Embedding 模型')).toBeNull()
-    fireEvent.click(screen.getByRole('radio', { name: '语义检索' }))
-    expect(screen.getByRole('radio', { name: '语义检索' })).toHaveAttribute('aria-checked', 'true')
-    const select = screen.getByLabelText('Embedding 模型')
-    fireEvent.change(select, { target: { value: 'embedding-profile::nomic-embed-text' } })
-
-    expect(mutate).toHaveBeenCalledWith({ embeddingProfileId: 'embedding-profile', embeddingModel: 'nomic-embed-text' }, expect.objectContaining({ onError: expect.any(Function) }))
+    expect(mutate).not.toHaveBeenCalled()
     expect(screen.getAllByText('Chat 服务').length).toBeGreaterThan(0)
   })
 
@@ -266,11 +256,6 @@ describe('AiSettingsSection', () => {
         activeProfileId: 'profile-1',
         prompts: [],
         modes: [],
-        embeddingProfileId: null,
-        embeddingProvider: null,
-        embeddingModel: null,
-        embeddingModels: [],
-        embeddingConfigured: false,
         apiKeyConfigured: false,
         configuredByUser: true,
       } },

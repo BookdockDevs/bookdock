@@ -40,6 +40,10 @@ function chapterFilename(index: number): string {
   return `chapter-${String(index + 1).padStart(4, '0')}.xhtml`
 }
 
+export function txtChapterHref(index: number): string {
+  return `OEBPS/${chapterFilename(index)}`
+}
+
 function buildChapterXhtml(title: string, content: string): string {
   const paragraphs = content
     .split('\n\n')
@@ -202,7 +206,7 @@ export function* buildTxtEpubEntries(
 </container>` }
   const chapterFiles = chapters.map((_, index) => chapterFilename(index))
   for (let i = 0; i < chapters.length; i++) {
-    yield { path: `OEBPS/${chapterFiles[i]}`, data: buildChapterXhtml(chapters[i]!.title, contentFor(i)) }
+    yield { path: txtChapterHref(i), data: buildChapterXhtml(chapters[i]!.title, contentFor(i)) }
   }
   if (cover) yield { path: `OEBPS/cover.${cover.ext}`, data: cover.data }
   yield { path: 'OEBPS/style.css', data: STYLE_CSS }

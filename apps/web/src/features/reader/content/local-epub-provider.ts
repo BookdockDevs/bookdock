@@ -69,16 +69,20 @@ async function openLocalEpubArchive(
       if (total > MAX_TOTAL_BYTES) throw new Error('EPUB exceeds the extraction limit')
       map.set(path, entry)
     }
-    const read = async (name: string, writer: any) => {
+    const read = async (name: string, writer: any, consumerSignal?: AbortSignal) => {
       signal?.throwIfAborted()
+      consumerSignal?.throwIfAborted()
       if (released || isClosed()) throw new Error('EPUB content session is closed')
       const entry = map.get(name)
       if (!entry) return null
-      const readSignal = signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
-        : AbortSignal.timeout(30_000)
+      const readSignal = AbortSignal.any([
+        AbortSignal.timeout(30_000),
+        ...(signal ? [signal] : []),
+        ...(consumerSignal ? [consumerSignal] : []),
+      ])
       const result = await entry.getData(writer, { signal: readSignal, checkSignature: true })
       signal?.throwIfAborted()
+      consumerSignal?.throwIfAborted()
       return result
     }
     book = await new foliate.EPUB({
@@ -94,6 +98,7 @@ async function openLocalEpubArchive(
       detail.data = Promise.resolve(detail.data).then((source) => typeof source === 'string' ? securePublicationMarkup(source, detail.type) : source)
     })
     book.publicationMarkupSecured = true
+    book.loadSectionText = (name: string, searchSignal?: AbortSignal) => read(name, new foliate.TextWriter(), searchSignal)
     book.contentSource = 'local'
     return { book, releaseArchive }
   } catch (error) {

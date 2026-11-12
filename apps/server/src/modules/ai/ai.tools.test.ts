@@ -82,25 +82,25 @@ describe('AI read-only tools', () => {
   })
 
   it('restricts the table of contents and chapter reads to the current-chapter interval', async () => {
-    const toc = await executeAiTool('user-1', 'book-1', { id: 'call-current-toc', name: 'get_book_toc', arguments: '{}' }, new AbortController().signal, 1, undefined, undefined, 1)
+    const toc = await executeAiTool('user-1', 'book-1', { id: 'call-current-toc', name: 'get_book_toc', arguments: '{}' }, new AbortController().signal, 1, 1)
     expect(JSON.parse(toc.content).chapters).toEqual([{ index: 1, id: 'ch-1', title: '第一章', level: 1, wordCount: 20 }])
 
-    const blocked = await executeAiTool('user-1', 'book-1', { id: 'call-current-chapter', name: 'get_chapter_content', arguments: '{"chapterIndex":0}' }, new AbortController().signal, 1, undefined, undefined, 1)
+    const blocked = await executeAiTool('user-1', 'book-1', { id: 'call-current-chapter', name: 'get_chapter_content', arguments: '{"chapterIndex":0}' }, new AbortController().signal, 1, 1)
     expect(blocked.content).toContain('outside the current reading boundary')
     expect(getBookChapterContent).not.toHaveBeenCalled()
   })
 
   it('bounds one chapter result and never accepts a negative index', async () => {
     const execution = await executeAiTool('user-1', 'book-1', { id: 'call-2', name: 'get_chapter_content', arguments: '{"chapterIndex":1}' }, new AbortController().signal)
-    const value = JSON.parse(execution.content) as { content: string; truncated: boolean; chapterIndex: number }
+    const value = JSON.parse(execution.content) as { passages: Array<{ text: string; startOffset: number; endOffset: number }>; truncated: boolean; chapterIndex: number; endOffset: number }
 
     expect(value).toMatchObject({ chapterIndex: 1, truncated: true })
-    expect(value.content.length).toBe(AI_TOOL_MAX_CHAPTER_CHARS)
+    expect(value.endOffset).toBeLessThanOrEqual(AI_TOOL_MAX_CHAPTER_CHARS)
+    expect(value.passages.length).toBeGreaterThan(1)
     expect(execution.resultChars).toBeLessThanOrEqual(AI_TOOL_MAX_RESULT_CHARS)
-    expect(execution.sourceChars).toBe(AI_TOOL_MAX_CHAPTER_CHARS)
-    expect(execution.citations).toEqual([expect.objectContaining({
-      id: 'chapter:1', chapterIndex: 1, chapterId: 'ch-1', chapterTitle: '第一章', startOffset: 0, endOffset: AI_TOOL_MAX_CHAPTER_CHARS,
-    })])
+    expect(execution.sourceChars).toBe(value.endOffset)
+    expect(execution.citations!.every((citation) => citation.quote!.length <= 600)).toBe(true)
+    expect(execution.citations!.at(-1)!.endOffset).toBe(value.endOffset)
     expect(getBookChapterContent).toHaveBeenCalledWith('user-1', 'book-1', 1)
 
     const invalid = await executeAiTool('user-1', 'book-1', { id: 'call-3', name: 'get_chapter_content', arguments: '{"chapterIndex":-1}' }, new AbortController().signal)
@@ -144,17 +144,61 @@ describe('AI read-only tools', () => {
   it('searches through the bounded retrieval tool and forwards the spoiler boundary', async () => {
     const execution = await executeAiTool('user-1', 'book-1', { id: 'call-6', name: 'search_book', arguments: '{"query":"命中段落"}' }, new AbortController().signal, 3)
 
-    expect(searchAiBook).toHaveBeenCalledWith('user-1', { bookId: 'book-1', query: '命中段落', limit: 5, maxChapterIndex: 3 }, expect.objectContaining({ embedder: undefined }))
+    expect(searchAiBook).toHaveBeenCalledWith('user-1', { bookId: 'book-1', query: '命中段落', limit: 5, maxChapterIndex: 3 }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(JSON.parse(execution.content)).toEqual({ query: '命中段落', results: [{ id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '序章', startOffset: 10, endOffset: 30, excerpt: '命中段落', score: 2 }], truncated: false })
     expect(execution.citations).toEqual([{ id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '序章', startOffset: 10, endOffset: 30, excerpt: '命中段落' }])
     expect(execution.sourceChars).toBe('命中段落'.length)
   })
 
-  it('keeps Reader tool reads on the exact visible index version', async () => {
-    await executeAiTool('user-1', 'book-1', { id: 'call-visible-search', name: 'search_book', arguments: '{"query":"命中段落"}' }, new AbortController().signal, 3, undefined, 'reader-test')
-    expect(searchAiBook).toHaveBeenCalledWith('user-1', { bookId: 'book-1', query: '命中段落', limit: 5, maxChapterIndex: 3 }, expect.objectContaining({ visibleTextVersion: 'reader-test' }))
+  it.each([
+    { bounds: { minChapterIndex: 2, maxChapterIndex: 2 }, serverMin: 0, serverMax: 8, min: 2, max: 2 },
+    { bounds: { minChapterIndex: 0, maxChapterIndex: 100 }, serverMin: 3, serverMax: 6, min: 3, max: 6 },
+    { bounds: { maxChapterIndex: 4 }, serverMin: 3, serverMax: 6, min: 3, max: 4 },
+    { bounds: { minChapterIndex: 5 }, serverMin: 0, serverMax: -1, min: 5, max: -1 },
+    { bounds: { maxChapterIndex: 4 }, serverMin: 0, serverMax: -1, min: 0, max: 4 },
+  ])('intersects explicit search ranges with the server boundary: $bounds', async ({ bounds, serverMin, serverMax, min, max }) => {
+    searchAiBook.mockResolvedValueOnce({ status: 'empty', results: [] })
+    const execution = await executeAiTool('user-1', 'book-1', {
+      id: 'range-search', name: 'search_book', arguments: JSON.stringify({ query: 'character', ...bounds }),
+    }, new AbortController().signal, serverMax, serverMin)
+    expect(searchAiBook).toHaveBeenCalledWith('user-1', {
+      bookId: 'book-1', query: 'character', limit: 5, maxChapterIndex: max, ...(min > 0 ? { minChapterIndex: min } : {}),
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(JSON.parse(execution.content).searchRange).toEqual({ minChapterIndex: min, ...(max >= 0 ? { maxChapterIndex: max } : {}) })
+  })
 
-    const chapterExecution = await executeAiTool('user-1', 'book-1', { id: 'call-visible-chapter', name: 'get_chapter_content', arguments: '{"chapterIndex":1}' }, new AbortController().signal, 3, undefined, 'reader-test')
+  it.each([
+    { minChapterIndex: -1 }, { maxChapterIndex: -1 }, { minChapterIndex: 1.5 },
+    { minChapterIndex: '1' }, { maxChapterIndex: null }, { maxChapterIndex: 1000001 },
+    { minChapterIndex: 4, maxChapterIndex: 2 },
+  ])('rejects malformed search ranges without accessing the book: %j', async (bounds) => {
+    const execution = await executeAiTool('user-1', 'book-1', {
+      id: 'invalid-range', name: 'search_book', arguments: JSON.stringify({ query: 'character', ...bounds }),
+    }, new AbortController().signal)
+    expect(execution.content).toContain('Invalid chapter range')
+    expect(searchAiBook).not.toHaveBeenCalled()
+    expect(getActiveBook).not.toHaveBeenCalled()
+  })
+
+  it.each([{ minChapterIndex: 7 }, { maxChapterIndex: 1 }])('rejects a search interval disjoint from the allowed range: %j', async (bounds) => {
+    const execution = await executeAiTool('user-1', 'book-1', {
+      id: 'hidden-range', name: 'search_book', arguments: JSON.stringify({ query: 'character', ...bounds }),
+    }, new AbortController().signal, 6, 2)
+    expect(execution.content).toContain('outside the current reading boundary')
+    expect(searchAiBook).not.toHaveBeenCalled()
+  })
+
+  it('declares chapter range parameters in the model-facing search schema', () => {
+    expect(getAiToolDefinition('search_book')?.parameters).toMatchObject({ properties: {
+      minChapterIndex: { type: 'integer', minimum: 0 }, maxChapterIndex: { type: 'integer', minimum: 0 },
+    } })
+  })
+
+  it('uses server source text without obsolete visible-index options', async () => {
+    await executeAiTool('user-1', 'book-1', { id: 'call-visible-search', name: 'search_book', arguments: '{"query":"命中段落"}' }, new AbortController().signal, 3)
+    expect(searchAiBook).toHaveBeenCalledWith('user-1', { bookId: 'book-1', query: '命中段落', limit: 5, maxChapterIndex: 3 }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+
+    const chapterExecution = await executeAiTool('user-1', 'book-1', { id: 'call-visible-chapter', name: 'get_chapter_content', arguments: '{"chapterIndex":1}' }, new AbortController().signal, 3)
     expect(JSON.parse(chapterExecution.content)).toMatchObject({ chapterIndex: 1, chapterTitle: '第一章' })
     expect(getBookChapterContent).toHaveBeenCalledWith('user-1', 'book-1', 1)
   })
@@ -162,7 +206,7 @@ describe('AI read-only tools', () => {
   it('searches only visible notes and turns them into direct-CFI citations', async () => {
     const execution = await executeAiTool('user-1', 'book-1', { id: 'call-7', name: 'search_annotations', arguments: '{"query":"想法"}' }, new AbortController().signal, 1)
 
-    expect(searchAnnotations).toHaveBeenCalledWith('user-1', 'book-1', '想法', 20)
+    expect(searchAnnotations).toHaveBeenCalledWith('user-1', 'book-1', '想法', 13, expect.objectContaining({ chapterTitles: ['序章', '第一章'], limit: 13 }))
     expect(JSON.parse(execution.content)).toEqual({
       query: '想法',
       results: [{ id: 'anno-1', type: 'note', chapter: '第一章', text: '标注正文', note: '我的想法', cfi: 'epubcfi(/6/4!/2)' }],
@@ -175,7 +219,7 @@ describe('AI read-only tools', () => {
   })
 
   it('lists current chapter annotations with optional type filters', async () => {
-    const execution = await executeAiTool('user-1', 'book-1', { id: 'call-8', name: 'list_annotations', arguments: '{}' }, new AbortController().signal, 1, undefined, undefined, 0, 1)
+    const execution = await executeAiTool('user-1', 'book-1', { id: 'call-8', name: 'list_annotations', arguments: '{}' }, new AbortController().signal, 1, 0, 1)
     expect(JSON.parse(execution.content)).toEqual({
       chapterIndex: 1,
       results: [{ id: 'anno-1', type: 'note', chapter: '第一章', text: '标注正文', note: '我的想法', cfi: 'epubcfi(/6/4!/2)' }],
@@ -185,7 +229,71 @@ describe('AI read-only tools', () => {
     expect(execution.resultChars).toBeLessThanOrEqual(AI_TOOL_MAX_RESULT_CHARS)
     expect(AI_TOOL_MAX_ANNOTATION_RESULTS).toBeGreaterThan(0)
 
-    const filtered = await executeAiTool('user-1', 'book-1', { id: 'call-9', name: 'list_annotations', arguments: '{"type":"highlight"}' }, new AbortController().signal, 1, undefined, undefined, 0, 1)
+    const filtered = await executeAiTool('user-1', 'book-1', { id: 'call-9', name: 'list_annotations', arguments: '{"type":"highlight"}' }, new AbortController().signal, 1, 0, 1)
     expect(JSON.parse(filtered.content).results).toEqual([])
   })
+  it('reads a bounded range beyond the chapter prefix and cites its actual offsets', async () => {
+    const execution = await executeAiTool('user-1', 'book-1', {
+      id: 'range', name: 'get_chapter_content', arguments: JSON.stringify({ chapterIndex: 1, startOffset: 10010, maxChars: 100 }),
+    }, new AbortController().signal, 1)
+    const value = JSON.parse(execution.content)
+    expect(value).toMatchObject({ startOffset: 10010, endOffset: 10110, truncated: true })
+    expect(value.passages[0].text).toHaveLength(100)
+    expect(execution.citations![0]).toMatchObject({ startOffset: 10010, endOffset: 10110 })
+  })
+
+  it('rejects malformed ranges before reading content', async () => {
+    for (const range of [{ startOffset: null }, { maxChars: null }, { startOffset: -1 }, { startOffset: 1.5 }, { maxChars: 10001 }, { maxChars: 0 }]) {
+      const execution = await executeAiTool('user-1', 'book-1', {
+        id: 'bad-range', name: 'get_chapter_content', arguments: JSON.stringify({ chapterIndex: 1, ...range }),
+      }, new AbortController().signal, 1)
+      expect(execution.content).toContain('Invalid chapter range')
+    }
+    expect(getBookChapterContent).not.toHaveBeenCalled()
+  })
+
+  it('passes keyword conditions to retrieval and rejects invalid lists', async () => {
+    const args = { requiredTerms: ['林舟', '陈默'], anyTerms: ['隐瞒'] }
+    await executeAiTool('user-1', 'book-1', { id: 'terms', name: 'search_book', arguments: JSON.stringify(args) }, new AbortController().signal, 1, 1)
+    expect(searchAiBook).toHaveBeenCalledWith('user-1', expect.objectContaining({ ...args, minChapterIndex: 1, maxChapterIndex: 1 }), expect.anything())
+    searchAiBook.mockClear()
+    const invalid = await executeAiTool('user-1', 'book-1', { id: 'bad', name: 'search_book', arguments: '{"requiredTerms":"name"}' }, new AbortController().signal)
+    expect(invalid.content).toContain('Invalid query')
+    expect(searchAiBook).not.toHaveBeenCalled()
+  })
+
+  it('keeps escaped chapter output valid JSON with matching source bounds', async () => {
+    const text = ('"\\\n').repeat(4000)
+    getBookChapterContent.mockResolvedValueOnce({ id: 'ch-1', index: 1, title: 'First', content: text })
+    const result = await executeAiTool('user-1', 'book-1', { id: 'escaped', name: 'get_chapter_content', arguments: '{"chapterIndex":1}' }, new AbortController().signal)
+    const value = JSON.parse(result.content)
+    expect(result.content.length).toBeLessThanOrEqual(AI_TOOL_MAX_RESULT_CHARS)
+    expect(value.truncated).toBe(true)
+    expect(value.passages.every((passage: { text: string; startOffset: number; endOffset: number }) => passage.text === text.slice(passage.startOffset, passage.endOffset))).toBe(true)
+    expect(result.sourceChars).toBe(value.endOffset)
+    expect(result.citations!.at(-1)!.endOffset).toBe(value.endOffset)
+  })
+
+  it('does not impose a 200-chapter TOC page and continues only at the output budget', async () => {
+    getBookChapters.mockResolvedValue(Array.from({ length: 205 }, (_, index) => ({ id: String(index), title: '', level: 1 })))
+    const full = await executeAiTool('user-1', 'book-1', { id: 'toc-full', name: 'get_book_toc', arguments: '{}' }, new AbortController().signal)
+    expect(JSON.parse(full.content).chapters).toHaveLength(205)
+    expect(JSON.parse(full.content).nextChapterIndex).toBeUndefined()
+    getBookChapters.mockResolvedValue(Array.from({ length: 1000 }, (_, index) => ({ id: String(index), title: '章节'.repeat(40), level: 1 })))
+    const first = JSON.parse((await executeAiTool('user-1', 'book-1', { id: 'toc-long', name: 'get_book_toc', arguments: '{}' }, new AbortController().signal)).content)
+    expect(first.nextChapterIndex).toBe(first.chapters.length)
+    const next = JSON.parse((await executeAiTool('user-1', 'book-1', { id: 'toc-next', name: 'get_book_toc', arguments: JSON.stringify({ startChapterIndex: first.nextChapterIndex }) }, new AbortController().signal)).content)
+    expect(next.chapters[0].index).toBe(first.nextChapterIndex)
+    const blocked = await executeAiTool('user-1', 'book-1', { id: 'toc-blocked', name: 'get_book_toc', arguments: '{"startChapterIndex":9}' }, new AbortController().signal, 3)
+    expect(blocked.content).toContain('outside the reading boundary')
+  })
+
+  it('does not assign ambiguous title-only notes to the last matching chapter', async () => {
+    getBookChapters.mockResolvedValue([{ id: 'a', title: 'Repeated', level: 1 }, { id: 'b', title: 'Repeated', level: 1 }])
+    listAnnotations.mockResolvedValue([{ id: 'ambiguous', type: 'note', chapter: 'Repeated', text: 'note', note: null, updatedAt: 1 }])
+    const result = await executeAiTool('user-1', 'book-1', { id: 'repeated', name: 'list_annotations', arguments: '{}' }, new AbortController().signal, 1, 0, 1)
+    expect(JSON.parse(result.content).results).toEqual([])
+    expect(listAnnotations).toHaveBeenCalledWith('user-1', 'book-1', expect.objectContaining({ chapterTitles: [] }))
+  })
+
 })

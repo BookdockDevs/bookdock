@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 
 import { and, eq } from 'drizzle-orm'
 
-import { AI_CORE_SYSTEM_PROMPT, AI_CORE_TOOL_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CONTEXT_CHARS, AI_TOOL_NAMES, expandAiPrompt, getAiModelCapabilityFlags, getAiPromptVariables, isAiEmbeddingModel, normalizeAiCitationMarkers, normalizeAiToolName } from '@bookdock/shared'
+import { AI_CORE_SYSTEM_PROMPT, AI_CORE_TOOL_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CONTEXT_CHARS, AI_TOOL_NAMES, createAiContextCitations, expandAiPrompt, getAiModelCapabilityFlags, getAiPromptVariables, isAiEmbeddingModel, normalizeAiCitationMarkers, normalizeAiToolName } from '@bookdock/shared'
 import type { AiAssistantMode, AiAssistantModeInput, AiChatReq, AiCitation, AiConfigRes, AiConfigTestReq, AiConfigUpdateReq, AiConnectionTestRes, AiContextPlan, AiContextReceipt, AiContextTruncationReason, AiConversationSettings, AiGenerationDiagnostics, AiGenerationUsage, AiHistoryMessage, AiLocalChatReq, AiModelCapabilities, AiModelDiscoveryReq, AiModelKind, AiModelRes, AiNormalizedEvent, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiPromptTemplate, AiPromptTemplateInput, AiPromptVariable, AiProvider, AiProviderRes, AiProtocol, AiReadingScope, AiRetryRecipe, AiStatusRes, AiToolName } from '@bookdock/shared'
 
 import { config } from '../../config'
@@ -16,7 +16,6 @@ import { getProgress } from '../progress/progress.service'
 import { AI_TOOL_MAX_CALLS, AI_TOOL_MAX_CONCURRENCY, AI_TOOL_MAX_STEPS, AI_TOOL_MAX_RESULT_CHARS, AI_TOOL_MAX_TOTAL_RESULT_CHARS, AI_TOOLS, createAiToolBudgetExecution, createAiToolDisabledExecution, createAiToolRepeatedExecution, executeAiToolWithPolicy, getAiToolDefinition, isAiToolEnabled, type AiToolCall, type AiToolDefinition, type AiToolExecution } from './ai.tools'
 import { createAiCheckpointWriter, finalizeAiGenerationRun, setAiGenerationTargetMessage, startAiGenerationRun, transitionAiGenerationRun, cancelAiGenerationRun as cancelStoredAiGenerationRun, getAiGenerationRun } from './ai.runs.service'
 import { createAiAssistantDraft, prepareAiThread, saveAiMessage, updateAiMessageContext } from './ai.sessions.service'
-import type { AiEmbeddingBatch, AiEmbeddingKind } from './ai.retrieval.service'
 
 const MAX_PROVIDER_INPUT_CHARS = AI_MAX_CONTEXT_CHARS
 const MAX_MODEL_OPTIONS = 200
@@ -63,8 +62,6 @@ const DEFAULT_LAST_USED_CONVERSATION_SETTINGS: AiConversationSettings = {
 interface StoredAiConfig {
   profiles?: StoredAiProfile[] | null
   activeProfileId?: string | null
-  embeddingProfileId?: string | null
-  embeddingModel?: string | null
   prompts?: AiPromptTemplateInput[] | null
   modes?: AiAssistantModeInput[] | null
   defaultAssistantMode?: AiAssistantModeInput | null
@@ -357,26 +354,6 @@ function effectiveConfig(userId: string): EffectiveAiConfig {
   }
 }
 
-function embeddingConfig(userId: string): { profileId: string | null; ai: EffectiveAiConfig | null; models: AiModelRes[] } {
-  const stored = storedConfig(userId)
-  const profiles = storedProfiles(stored.value)
-  const availableModels = normalizeModels(profiles.flatMap(profileEmbeddingModels))
-  const requestedId = typeof stored.value.embeddingProfileId === 'string' ? stored.value.embeddingProfileId.trim() : ''
-  if (!requestedId) return { profileId: null, ai: null, models: availableModels }
-  const profile = profiles.find((item) => item.id === requestedId)
-  if (!profile) return { profileId: requestedId, ai: null, models: availableModels }
-  const models = profileModels(profile)
-  const requestedModel = typeof stored.value.embeddingModel === 'string' ? stored.value.embeddingModel.trim() : ''
-  const selectedModel = requestedModel && models.some((model) => model.id === requestedModel && isAiEmbeddingModel(model)) ? requestedModel : null
-  if (!selectedModel) return { profileId: profile.id, ai: null, models: embeddingModelsFor(models) }
-  const profileConfig = profileEffectiveConfig(profile)
-  return {
-    profileId: profile.id,
-    ai: { ...profileConfig, model: selectedModel },
-    models: embeddingModelsFor(models, selectedModel),
-  }
-}
-
 function configured(ai: EffectiveAiConfig) {
   return Boolean(ai.baseUrl && ai.model && (!requiresApiKey(ai) || ai.apiKey))
 }
@@ -396,11 +373,6 @@ function memberBaseUrlAllowed(provider: AiProvider, baseUrl: string | null | und
 function assertBaseUrlAllowed(role: string, ai: EffectiveAiConfig) {
   if (role !== 'member' || !ai.configuredByUser || memberBaseUrlAllowed(ai.provider, ai.baseUrl)) return
   throw new AppError('AI_NOT_ALLOWED', 'Members can only use the default provider endpoint')
-}
-
-export function isAiEmbeddingConfigured(userId: string, role: string) {
-  const embedding = embeddingConfig(userId)
-  return Boolean(embedding.ai && embedding.ai.protocol !== 'anthropic' && configured(embedding.ai) && (role !== 'member' || !embedding.ai.configuredByUser || memberBaseUrlAllowed(embedding.ai.provider, embedding.ai.baseUrl)))
 }
 
 function assertDraftBaseUrlAllowed(role: string, provider: AiProvider, baseUrl: string | null | undefined) {
@@ -430,7 +402,6 @@ function requiresApiKey(ai: EffectiveAiConfig) {
 export function getAiStatus(userId: string, role: string): AiStatusRes {
   const ai = effectiveConfig(userId)
   const stored = storedConfig(userId)
-  const embedding = embeddingConfig(userId)
   const profiles = storedProfiles(stored.value)
   const activeProfile = activeStoredProfile(stored.value, profiles)
   const models = activeProfile ? profileModels(activeProfile) : []
@@ -443,11 +414,6 @@ export function getAiStatus(userId: string, role: string): AiStatusRes {
     prompts: storedPrompts(stored.value).filter((prompt) => prompt.enabled),
     modes: storedAssistantModes(stored.value),
     lastUsedConversationSettings: storedLastUsedConversationSettings(stored.value),
-    embeddingProfileId: embedding.profileId,
-    embeddingProvider: embedding.ai?.provider ?? null,
-    embeddingModel: embedding.ai?.model ?? null,
-    embeddingModels: embedding.models,
-    embeddingConfigured: Boolean(embedding.ai && embedding.ai.protocol !== 'anthropic' && configured(embedding.ai)),
     activeProfileId: activeProfile?.id ?? null,
   }
 }
@@ -455,7 +421,6 @@ export function getAiStatus(userId: string, role: string): AiStatusRes {
 export function getAiConfig(userId: string): AiConfigRes {
   const ai = effectiveConfig(userId)
   const stored = storedConfig(userId)
-  const embedding = embeddingConfig(userId)
   const profiles = storedProfiles(stored.value)
   const activeProfile = activeStoredProfile(stored.value, profiles)
   const models = activeProfile ? profileModels(activeProfile) : []
@@ -470,11 +435,6 @@ export function getAiConfig(userId: string): AiConfigRes {
     prompts: storedPrompts(stored.value),
     modes: storedAssistantModes(stored.value),
     lastUsedConversationSettings: storedLastUsedConversationSettings(stored.value),
-    embeddingProfileId: embedding.profileId,
-    embeddingProvider: embedding.ai?.provider ?? null,
-    embeddingModel: embedding.ai?.model ?? null,
-    embeddingModels: embedding.models,
-    embeddingConfigured: Boolean(embedding.ai && embedding.ai.protocol !== 'anthropic' && configured(embedding.ai)),
     apiKeyConfigured: Boolean(ai.apiKey),
     configuredByUser: ai.configuredByUser,
   }
@@ -489,24 +449,11 @@ export function updateAiConfig(userId: string, input: AiConfigUpdateReq): AiConf
   const value: StoredAiConfig = {
     profiles,
     activeProfileId: activeId,
-    embeddingProfileId: existing.value.embeddingProfileId,
-    embeddingModel: existing.value.embeddingModel,
     prompts: existing.value.prompts,
     modes: existing.value.modes,
     defaultAssistantMode: existing.value.defaultAssistantMode,
     lastUsedConversationSettings: existing.value.lastUsedConversationSettings,
   }
-  const embeddingSelectionChanged = Object.hasOwn(input, 'embeddingProfileId') || Object.hasOwn(input, 'embeddingModel')
-  const embeddingId = Object.hasOwn(input, 'embeddingProfileId') ? input.embeddingProfileId?.trim() || null : (existing.value.embeddingProfileId?.trim() || null)
-  const embeddingModel = Object.hasOwn(input, 'embeddingProfileId') && !embeddingId
-    ? null
-    : Object.hasOwn(input, 'embeddingModel') ? input.embeddingModel?.trim() || null : (existing.value.embeddingModel?.trim() || null)
-  const embeddingProfile = embeddingId ? profiles.find((profile) => profile.id === embeddingId) : undefined
-  if (embeddingId && !embeddingProfile) throw new AppError('AI_PROFILE_NOT_FOUND', 'AI embedding profile not found')
-  const validEmbeddingSelection = Boolean(embeddingProfile && embeddingModel && profileModels(embeddingProfile).some((model) => model.id === embeddingModel && isAiEmbeddingModel(model)))
-  if (embeddingSelectionChanged && ((embeddingId && !validEmbeddingSelection) || (!embeddingId && embeddingModel))) throw new AppError('VALIDATION_ERROR', 'AI embedding model not found')
-  value.embeddingProfileId = validEmbeddingSelection ? embeddingId : null
-  value.embeddingModel = validEmbeddingSelection ? embeddingModel : null
   if (Object.hasOwn(input, 'prompts')) value.prompts = input.prompts === null ? storedPromptInputs(defaultAiPrompts()) : storedPromptInputs(normalizePromptTemplates(input.prompts))
   if (Object.hasOwn(input, 'modes')) value.modes = input.modes === null ? [] : storedAssistantModeInputs(normalizeAssistantModes(input.modes))
   if (Object.hasOwn(input, 'defaultAssistantMode')) {
@@ -610,8 +557,7 @@ export function deleteAiProfile(userId: string, role: string, profileId: string)
   if (!profiles.some((profile) => profile.id === profileId)) throw new AppError('AI_PROFILE_NOT_FOUND', 'AI profile not found')
   const nextProfiles = profiles.filter((profile) => profile.id !== profileId)
   const nextActive = nextProfiles.find((profile) => profile.id === existing.value.activeProfileId)?.id ?? nextProfiles[0]?.id ?? null
-  const nextEmbedding = nextProfiles.find((profile) => profile.id === existing.value.embeddingProfileId)?.id ?? null
-  writeStoredConfig(userId, existing, { ...existing.value, profiles: nextProfiles, activeProfileId: nextActive, embeddingProfileId: nextEmbedding, embeddingModel: nextEmbedding ? existing.value.embeddingModel : null })
+  writeStoredConfig(userId, existing, { ...existing.value, profiles: nextProfiles, activeProfileId: nextActive })
 }
 
 function normalizeModels(models: readonly AiModelRes[] | null | undefined): AiModelRes[] {
@@ -655,11 +601,17 @@ function escapeXml(value: string) {
     .replaceAll("'", '&apos;')
 }
 
-function promptValues(context: AiChatReq['context']) {
+function promptValues(context: AiChatReq['context'], withPassages = false) {
+  const sources = withPassages ? createAiContextCitations(context) : []
+  const render = (prefix: string, text: string | undefined) => {
+    const passages = sources.flatMap((citation, index) => citation.id === prefix || citation.id.startsWith(`${prefix}:`)
+      ? [{ citation, number: index + 1 }] : [])
+    return passages.length < 2 ? text : passages.map(({ citation, number }) => `<passage source_id="${escapeXml(citation.id)}" citation="${number}">${escapeXml(citation.quote!)}</passage>`).join('\n')
+  }
   return {
-    selectedText: context.selection,
-    selectedParagraph: context.paragraph,
-    chapterText: context.chapterReferences?.find((reference) => reference.chapterIndex === context.chapterIndex)?.text,
+    selectedText: render('direct:selection', context.selection) ?? '',
+    selectedParagraph: render('direct:paragraph', context.paragraph),
+    chapterText: render(`direct:chapter:${context.chapterIndex}`, context.chapterReferences?.find((reference) => reference.chapterIndex === context.chapterIndex)?.text),
   }
 }
 
@@ -675,7 +627,7 @@ function consumedPromptVariables(prompt: string, context: AiChatReq['context']):
   })
 }
 
-function buildContext(context: AiChatReq['context'], consumedVariables: readonly AiPromptVariable[] = []): { content: string; receipt: AiContextReceipt } {
+function buildContext(context: AiChatReq['context'], consumedVariables: readonly AiPromptVariable[] = [], includeManifest = true): { content: string; receipt: AiContextReceipt } {
   const selection = context.selection.trim()
   const before = context.before?.trim() ?? ''
   const paragraph = context.paragraph?.trim() ?? ''
@@ -692,23 +644,27 @@ function buildContext(context: AiChatReq['context'], consumedVariables: readonly
   }
 
   const chapterTitle = context.chapterTitle?.trim() || null
+  const sources = createAiContextCitations(context)
+  const renderPassages = (prefix: string) => sources.flatMap((citation, index) => citation.id === prefix || citation.id.startsWith(`${prefix}:`)
+    ? [includeManifest ? `<passage source_id="${escapeXml(citation.id)}" citation="${index + 1}">${escapeXml(citation.quote!)}</passage>` : escapeXml(citation.quote!)] : []).join('\n')
   const sourceEntries = [
     before ? `<before>${escapeXml(before)}</before>` : '',
-    paragraph && !consumed.has('SELPARA') ? `<paragraph>${escapeXml(paragraph)}</paragraph>` : '',
-    !consumed.has('SELTEXT') && selection ? `<selection>${escapeXml(selection)}</selection>` : '',
+    paragraph && !consumed.has('SELPARA') ? `<paragraph>${renderPassages('direct:paragraph')}</paragraph>` : '',
+    !consumed.has('SELTEXT') && selection ? `<selection>${renderPassages('direct:selection')}</selection>` : '',
   ].filter(Boolean).join('\n')
   const source = sourceEntries
     ? `<source chapter="${escapeXml(chapterTitle ?? '未知章节')}" chapter_index="${context.chapterIndex}" cfi="${escapeXml(context.cfiRange)}">\n${sourceEntries}\n</source>`
     : ''
+  const manifest = sources.map((source, index) => `${index + 1}=${source.id}`).join(', ')
   const references = chapterReferences.filter((reference) => !(consumed.has('CHAPTER') && reference.chapterIndex === context.chapterIndex)).map((reference) => [
     `<chapter_reference chapter="${escapeXml(reference.chapterTitle?.trim() || '未知章节')}" chapter_index="${reference.chapterIndex}">`,
-    `<content>${escapeXml(reference.text.trim())}</content>`,
+    `<content>${renderPassages(`direct:chapter:${reference.chapterIndex}`)}</content>`,
     '</chapter_reference>',
   ].join('\n'))
 
   return {
-    content: source || references.length > 0
-      ? `<book_context trust="untrusted">\n${source}${references.length ? `\n${references.join('\n')}` : ''}\n</book_context>`
+    content: sources.length > 0 || source || references.length > 0
+      ? `${includeManifest && manifest ? `Citation manifest (use [[cite:n]] only for these sources): ${manifest}\n` : ''}<book_context trust="untrusted">\n${source}${references.length ? `\n${references.join('\n')}` : ''}\n</book_context>`
       : '',
     receipt: {
       selectionChars: selection.length,
@@ -826,26 +782,9 @@ function prepareProviderMessages(messages: ConversationMessage[], tools: readonl
     for (let index = 0; index < boundedMessages.length && boundedChars > MAX_PROVIDER_INPUT_CHARS; index += 1) {
       const message = boundedMessages[index]
       if (!message || message.role !== 'tool' || !message.content) continue
-      let low = 0
-      let high = message.content.length
-      let best = 0
-      while (low <= high) {
-        const candidateLength = Math.floor((low + high) / 2)
-        const candidateMessages = boundedMessages.slice()
-        candidateMessages[index] = { ...message, content: message.content.slice(0, candidateLength) }
-        const candidateChars = providerInputChars(candidateMessages, tools)
-        if (candidateChars <= MAX_PROVIDER_INPUT_CHARS) {
-          best = candidateLength
-          low = candidateLength + 1
-        } else {
-          high = candidateLength - 1
-        }
-      }
-      if (best < message.content.length) {
-        toolResultTrimmedChars += message.content.length - best
-        boundedMessages[index] = { ...message, content: message.content.slice(0, best) }
-        boundedChars = providerInputChars(boundedMessages, tools)
-      }
+      toolResultTrimmedChars += message.content.length
+      boundedMessages[index] = { ...message, content: 'Tool output omitted because the provider input budget is exhausted. Use other supplied sources or explain the missing evidence.' }
+      boundedChars = providerInputChars(boundedMessages, tools)
     }
   }
 
@@ -861,7 +800,7 @@ function buildMessages(input: Pick<AiChatReq, 'prompt' | 'context' | 'history' |
       continue
     }
     try {
-      const historicalContext = buildContext(message.context, consumedPromptVariables(message.content, message.context)).content
+      const historicalContext = buildContext(message.context, consumedPromptVariables(message.content, message.context), false).content
       const historicalPrompt = expandAiPrompt(message.content, promptValues(message.context))
       history.push({ role: 'user', content: historicalContext ? `${historicalContext}\n\n用户问题：\n${historicalPrompt}` : `用户问题：\n${historicalPrompt}` })
     } catch (error) {
@@ -876,7 +815,7 @@ function buildMessages(input: Pick<AiChatReq, 'prompt' | 'context' | 'history' |
     : ''
   const systemContent = [modeInstruction, coreSystemPrompt].filter(Boolean).join('\n\n')
   const systemMessages: ChatMessage[] = [{ role: 'system', content: systemContent }]
-  const currentPrompt = expandAiPrompt(input.prompt, promptValues(input.context))
+  const currentPrompt = expandAiPrompt(input.prompt, promptValues(input.context, true))
   const currentMessage = { role: 'user' as const, content: context ? `${context}\n\n用户问题：\n${currentPrompt.trim()}` : `用户问题：\n${currentPrompt.trim()}` }
   const fixedChars = systemMessages.reduce((total, message) => total + message.content.length, 0) + currentMessage.content.length
   const historyBudget = Math.max(0, MAX_PROVIDER_INPUT_CHARS - fixedChars)
@@ -1224,39 +1163,6 @@ function parseEmbeddingResponse(value: unknown, protocol: AiProtocol): number[][
   })
 }
 
-export async function embedAiTexts(userId: string, texts: string[], signal: AbortSignal, kind: AiEmbeddingKind, role = 'member'): Promise<AiEmbeddingBatch> {
-  const embedding = embeddingConfig(userId)
-  if (!embedding.ai) throw new AppError('AI_NOT_CONFIGURED', 'AI embedding model is not configured')
-  const ai = embedding.ai
-  assertBaseUrlAllowed(role, ai)
-  if (ai.protocol === 'anthropic') throw new AppError('AI_PROVIDER_ERROR', 'This AI provider does not support embeddings')
-  assertProviderRequestable(ai, false)
-  const model = ai.model
-  if (!model) throw new AppError('AI_NOT_CONFIGURED', 'AI embedding model is required')
-  const body = ai.protocol === 'ollama'
-    ? { model, input: texts }
-    : ai.protocol === 'gemini'
-      ? {
-        requests: texts.map((text) => ({
-          model: `models/${model}`,
-          content: { parts: [{ text }] },
-          taskType: kind === 'query' ? 'RETRIEVAL_QUERY' : 'RETRIEVAL_DOCUMENT',
-        })),
-      }
-      : { model, input: texts }
-  const response = await fetchProvider(embeddingsEndpoint(ai, model), {
-    method: 'POST',
-    headers: { ...providerHeaders(ai), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }, signal)
-  if (!response.ok) throw await providerResponseError(response)
-  const vectors = parseEmbeddingResponse(await response.json().catch(() => null), ai.protocol)
-  if (vectors.length !== texts.length || vectors.some((vector) => vector.length === 0 || vector.some((value) => !Number.isFinite(value)))) {
-    throw new AppError('AI_PROVIDER_ERROR', 'AI provider returned invalid embeddings')
-  }
-  return { provider: ai.provider, model, vectors }
-}
-
 export async function listAiModels(userId: string, role: string, input: AiModelDiscoveryReq, signal: AbortSignal): Promise<AiModelRes[]> {
   const ai = draftConfig(userId, input)
   assertDraftBaseUrlAllowed(role, ai.provider, ai.baseUrl)
@@ -1362,6 +1268,7 @@ function buildUpstreamRequest(ai: EffectiveAiConfig, messages: ConversationMessa
           id: call.id,
           type: 'function',
           function: { name: call.name, arguments: call.arguments },
+          ...(ai.protocol === 'openai-compatible' && call.thoughtSignature ? { extra_content: { google: { thought_signature: call.thoughtSignature } } } : {}),
         })),
       }
     }
@@ -1477,7 +1384,7 @@ function buildUpstreamRequest(ai: EffectiveAiConfig, messages: ConversationMessa
       'Content-Type': 'application/json',
       ...(ai.apiKey ? { Authorization: `Bearer ${ai.apiKey}` } : {}),
     },
-    body: JSON.stringify({ model: ai.model, messages: openAiMessages, stream: true, ...(openAiTools ? { tools: openAiTools } : {}), max_tokens: config.aiMaxOutputTokens }),
+    body: JSON.stringify({ model: ai.model, messages: openAiMessages, stream: true, ...(openAiTools ? { tools: openAiTools } : {}), ...(tools?.length === 0 ? { tool_choice: 'none' } : {}), max_tokens: config.aiMaxOutputTokens }),
   }
 }
 
@@ -1690,7 +1597,7 @@ function parseUpstreamEvent(raw: string, protocol: AiProtocol): ParsedUpstreamEv
 }
 
 function mergeToolCall(calls: Map<number, AiToolCall>, delta: ToolCallDelta) {
-  const current = calls.get(delta.index) ?? { id: delta.id ?? `tool-${delta.index}`, name: delta.name ?? '', arguments: '' }
+  const current = calls.get(delta.index) ?? { id: delta.id || createId('call'), name: delta.name ?? '', arguments: '' }
   if (delta.id) current.id = delta.id
   if (delta.name) current.name = delta.name
   if (delta.thoughtSignature) current.thoughtSignature = delta.thoughtSignature
@@ -1720,8 +1627,16 @@ async function consumeUpstreamResponse(
   let pendingThoughtSignature: string | undefined
   const consume = (raw: string) => {
     if (signal.aborted) throw new DOMException('The AI request was aborted', 'AbortError')
-    let status: { choices?: Array<{ finish_reason?: string }>; stop_reason?: string; delta?: { stop_reason?: string }; message?: { stop_reason?: string }; done?: boolean; done_reason?: string; candidates?: Array<{ finishReason?: string }>; response?: { candidates?: Array<{ finishReason?: string }> } }
+    let status: { error?: unknown; type?: string; choices?: Array<{ finish_reason?: string }>; stop_reason?: string; delta?: { stop_reason?: string }; message?: { stop_reason?: string }; done?: boolean; done_reason?: string; candidates?: Array<{ finishReason?: string }>; response?: { candidates?: Array<{ finishReason?: string }> } }
     try { status = JSON.parse(raw) ?? {} } catch { return }
+    if (status.error || status.type === 'error') {
+      const candidate = typeof status.error === 'string' ? status.error
+        : status.error && typeof status.error === 'object' && 'message' in status.error ? status.error.message : undefined
+      const diagnostic = typeof candidate === 'string' ? sanitizeProviderDiagnostic(candidate) : undefined
+      throw new AppError('AI_PROVIDER_ERROR', `AI provider stream error${diagnostic ? `: ${diagnostic}` : ''}`, {
+        ...(diagnostic ? { providerMessage: diagnostic } : {}),
+      })
+    }
     if (status.choices?.some((choice) => choice.finish_reason === 'stop')
       || status.stop_reason === 'end_turn' || status.delta?.stop_reason === 'end_turn' || status.message?.stop_reason === 'end_turn'
       || (status.done === true && status.done_reason !== 'length')
@@ -1941,7 +1856,6 @@ export async function translateAiSelectedText(
 export async function createAiChatStream(userId: string, role: string, input: AiChatReq, requestSignal: AbortSignal): Promise<AiChatStream> {
   const ai = effectiveConfig(userId)
   assertAvailable(role, ai)
-  const embeddingConfigured = isAiEmbeddingConfigured(userId, role)
   const requestController = reserveAiRequest(userId)
   const startedAt = Date.now()
   const diagnostics: AiGenerationDiagnostics = {
@@ -2108,7 +2022,8 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
       let status: 'completed' | 'failed' | 'cancelled' | 'interrupted' = 'completed'
       let reason: 'user_cancelled' | 'client_disconnected' | 'stream_disconnected' | 'timeout' | 'provider_error' | null = null
       let assistantContent = ''
-      const citations: AiCitation[] = []
+      const citations: AiCitation[] = createAiContextCitations(input.context)
+      const availableCitationIds = new Set(citations.map((citation) => citation.id))
       const events: AiNormalizedEvent[] = []
       let inputTokens = 0
       let outputTokens = 0
@@ -2118,6 +2033,8 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
       let toolCalls = 0
       let toolResultChars = 0
       let toolResultBudgetExhausted = false
+      let toolsClosed = availableTools.length === 0
+      const usedToolCallIds = new Set<string>()
       let previousToolFingerprint: string | undefined
       let repeatedToolStreak = 0
       let finalized = false
@@ -2165,16 +2082,24 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
             },
           )
           if (attempt.toolCalls.length === 0) break
-          if (toolSteps >= AI_TOOL_MAX_STEPS || toolCalls + attempt.toolCalls.length > AI_TOOL_MAX_CALLS) {
-            throw new Error('AI tool budget exceeded')
+          if (ai.protocol === 'openai-compatible') {
+            for (const call of attempt.toolCalls) {
+              // Gateways can synthesize the same ID in different rounds or parallel calls.
+              if (!call.id.trim() || usedToolCallIds.has(call.id)) call.id = createId('call')
+              usedToolCallIds.add(call.id)
+            }
           }
+          if (toolsClosed) {
+            throw new AppError(toolSteps > 0 ? 'AI_TOOL_LIMIT_EXCEEDED' : 'AI_PROVIDER_ERROR', 'AI provider requested tools after tool use was closed', { retryable: false })
+          }
+          const acceptedCalls = Math.min(attempt.toolCalls.length, AI_TOOL_MAX_CALLS - toolCalls)
           toolSteps += 1
-          toolCalls += attempt.toolCalls.length
+          toolCalls += acceptedCalls
           diagnostics.toolSteps = toolSteps
           diagnostics.toolCalls = toolCalls
           transitionAiGenerationRun(userId, runId, 'streaming', 'waiting_tool')
           const results: Array<{ call: AiToolCall; content: string }> = []
-          const plannedCalls: Array<{ call: AiToolCall; repeatedStreak: number }> = []
+          const plannedCalls: Array<{ call: AiToolCall; repeatedStreak: number; withinBudget: boolean }> = []
           for (const call of attempt.toolCalls) {
             const toolFingerprint = `${call.name}:${call.arguments.trim()}`
             repeatedToolStreak = toolFingerprint === previousToolFingerprint ? repeatedToolStreak + 1 : 1
@@ -2189,15 +2114,16 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
             })))
             events.push({ type: 'tool', name: call.name, phase: 'start', ...(typeof requestedChapterIndex === 'number' ? { chapterIndex: requestedChapterIndex } : {}) })
             scheduleCheckpoint()
-            plannedCalls.push({ call, repeatedStreak: repeatedToolStreak })
+            plannedCalls.push({ call, repeatedStreak: repeatedToolStreak, withinBudget: plannedCalls.length < acceptedCalls })
           }
 
-          const executePlannedCall = (planned: { call: AiToolCall; repeatedStreak: number }) => {
+          const executePlannedCall = (planned: { call: AiToolCall; repeatedStreak: number; withinBudget: boolean }) => {
             const definition = getAiToolDefinition(planned.call.name)
+            if (!planned.withinBudget) return Promise.resolve(createAiToolBudgetExecution(planned.call, AI_TOOL_MAX_RESULT_CHARS, 'Tool call budget exhausted; answer using the sources already provided.'))
             if (toolResultBudgetExhausted) return Promise.resolve(createAiToolBudgetExecution(planned.call, 0))
             if (planned.repeatedStreak >= 3) return Promise.resolve(createAiToolRepeatedExecution(planned.call, planned.repeatedStreak))
             if (!definition || !definition.readOnly || !isAiToolEnabled(planned.call.name, enabledToolNames)) return Promise.resolve(createAiToolDisabledExecution(planned.call))
-            return executeAiToolWithPolicy(userId, input.bookId, planned.call, signal, maxSearchChapterIndex, embeddingConfigured ? (texts, embedSignal, kind) => embedAiTexts(userId, texts, embedSignal, kind, role) : undefined, input.context.visibleTextVersion, minSearchChapterIndex, boundary.currentChapterIndex)
+            return executeAiToolWithPolicy(userId, input.bookId, planned.call, signal, maxSearchChapterIndex, minSearchChapterIndex, boundary.currentChapterIndex)
           }
 
           const executions: AiToolExecution[] = []
@@ -2210,7 +2136,7 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
               plannedIndex += 1
               continue
             }
-            const batch: Array<{ call: AiToolCall; repeatedStreak: number }> = []
+            const batch: Array<{ call: AiToolCall; repeatedStreak: number; withinBudget: boolean }> = []
             while (plannedIndex < plannedCalls.length && batch.length < AI_TOOL_MAX_CONCURRENCY) {
               const planned = plannedCalls[plannedIndex]
               if (!getAiToolDefinition(planned.call.name)?.parallelSafe) break
@@ -2235,7 +2161,7 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
               diagnostics.retrievalSelectedResults += execution.retrieval.selectedCount
               if (execution.retrieval.embeddingFallbackReason) diagnostics.retrievalFallbacks += 1
             }
-            if (remainingResultChars <= 0 || boundedExecution.resultChars !== execution.resultChars) toolResultBudgetExhausted = true
+            if (toolResultChars >= AI_TOOL_MAX_TOTAL_RESULT_CHARS || boundedExecution.resultChars !== execution.resultChars) toolResultBudgetExhausted = true
             controller.enqueue(encoder.encode(sseEvent('tool', {
               name: call.name,
               phase: 'result',
@@ -2265,13 +2191,24 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
             results.push({
               call,
               content: citationManifest
-                ? `Citation manifest (only these numbers may be used as [n] markers): ${citationManifest}\n\n${boundedExecution.content}`
+                ? `Citation manifest (only these numbers may be used as [[cite:n]] markers): ${citationManifest}\n\n${boundedExecution.content}`
                 : boundedExecution.content,
             })
           }
-          const nextTools = toolResultBudgetExhausted ? [] : availableTools
+          toolsClosed = toolResultBudgetExhausted || toolSteps >= AI_TOOL_MAX_STEPS || toolCalls >= AI_TOOL_MAX_CALLS
+          if (toolsClosed) {
+            results[results.length - 1]!.content += '\n\nTool use is now closed. Answer the original user question using the evidence already supplied and its citation manifest. State any missing evidence clearly. Do not request further tools.'
+          }
+          const nextTools = toolsClosed ? [] : availableTools
           const preparedToolRound = prepareProviderMessages(appendToolRound(currentMessages, attempt, results), nextTools)
           currentMessages = preparedToolRound.messages
+          for (const execution of executions) {
+            const sent = currentMessages.slice().reverse().find((message) => message.role === 'tool' && message.toolCallId === execution.call.id)
+            for (const citation of execution.citations ?? []) {
+              const number = citations.findIndex((item) => item.id === citation.id) + 1
+              if (sent?.content.includes(`${number}=${citation.id}`)) availableCitationIds.add(citation.id)
+            }
+          }
           if (receipt.contextPlan) {
             const contextPlan = mergePreparedContextPlan(receipt.contextPlan, preparedToolRound)
             receipt = { ...receipt, contextPlan }
@@ -2284,7 +2221,7 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
           transitionAiGenerationRun(userId, runId, 'waiting_tool', 'streaming')
         }
         checkpointWriter.close()
-        const normalized = normalizeAiCitationMarkers(assistantContent, citations)
+        const normalized = normalizeAiCitationMarkers(assistantContent, citations.map((citation) => availableCitationIds.has(citation.id) ? citation : undefined))
         finalizeAiGenerationRun(userId, runId, { state: 'completed', text: normalized.content, events, usage: usage(), citations: normalized.citations, diagnostics: runDiagnostics() })
         finalized = true
         controller.enqueue(encoder.encode(sseEvent('done', { content: normalized.content, citations: normalized.citations })))
@@ -2295,12 +2232,13 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
         const disconnected = requestSignal.aborted || (requestController.signal.aborted && !cancelled)
         status = cancelled ? 'cancelled' : disconnected ? 'interrupted' : 'failed'
         reason = cancelled ? 'user_cancelled' : requestSignal.aborted ? 'client_disconnected' : requestController.signal.aborted ? 'stream_disconnected' : timedOut ? 'timeout' : 'provider_error'
+        const errorCode = timedOut ? 'AI_TIMEOUT' : error instanceof AppError && error.code === 'AI_TOOL_LIMIT_EXCEEDED' ? 'AI_TOOL_LIMIT_EXCEEDED' : 'AI_PROVIDER_ERROR'
         checkpointWriter.close()
         try {
           finalizeAiGenerationRun(userId, runId, {
             state: status,
             reason,
-            errorCode: timedOut && !cancelled ? 'AI_TIMEOUT' : !cancelled && !disconnected ? 'AI_PROVIDER_ERROR' : null,
+            errorCode: !cancelled && !disconnected ? errorCode : null,
             errorMessage: error instanceof Error ? error.message : null,
             text: assistantContent,
             events,
@@ -2314,9 +2252,9 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
           log('warn', 'ai.generation.finalize_failed', { requestId, actorRole: role === 'owner' ? 'owner' : 'member', error: persistenceError })
         }
         if (status === 'failed') {
-          const providerError = error instanceof AppError && error.code === 'AI_PROVIDER_ERROR'
+          const providerError = error instanceof AppError && (error.code === 'AI_PROVIDER_ERROR' || error.code === 'AI_TOOL_LIMIT_EXCEEDED')
           controller.enqueue(encoder.encode(sseEvent('error', {
-            code: timedOut ? 'AI_TIMEOUT' : 'AI_PROVIDER_ERROR',
+            code: errorCode,
             message: timedOut ? 'AI request timed out' : providerError ? error.message : 'AI provider stream failed',
             retryable: isRetryableAiError(error),
           })))
@@ -2462,8 +2400,8 @@ export async function createAiLocalChatStream(
             controller.enqueue(encoder.encode(sseEvent('usage', usage)))
           },
         )
-        const normalized = normalizeAiCitationMarkers(assistantContent, [])
-        controller.enqueue(encoder.encode(sseEvent('done', { content: normalized.content, citations: [] })))
+        const normalized = normalizeAiCitationMarkers(assistantContent, createAiContextCitations(input.context))
+        controller.enqueue(encoder.encode(sseEvent('done', { content: normalized.content, citations: normalized.citations })))
       } catch (error) {
         const timedOut = timeoutController.signal.aborted
         const disconnected = requestSignal.aborted || requestController.signal.aborted
