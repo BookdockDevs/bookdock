@@ -2022,6 +2022,17 @@ export class FoliateReader implements BookReader {
   private activeSelectionInfo: SelectionInfo | null = null
   private selectionPositionFrame = 0
   private selectionPositionRenderer: EventTarget | null = null
+  private selectionScrollFollower: (() => void) | null = null
+  private selectionScrollRange: Range | null = null
+  private readonly refreshSelectionScroll = () => {
+    if (this.readingMode !== 'scroll' || !this.selectionScrollFollower) {
+      this.refreshSelectionPosition()
+      return
+    }
+    // Native scroll events already arrive at rendering cadence; another RAF
+    // would delay the toolbar relative to the browser's scrolling content.
+    this.selectionScrollFollower()
+  }
   private readonly refreshSelectionPosition = () => {
     if (this.selectionPositionFrame || (!this.activeSelectionRange && !this.lastClickedAnnotation)) return
     this.selectionPositionFrame = requestAnimationFrame(() => {
@@ -4302,12 +4313,34 @@ export class FoliateReader implements BookReader {
   clearSelection() {
     const wasActive = this.selectionActive || Boolean(this.lastClickedAnnotation)
     this.lastClickedAnnotation = null
+    this.selectionScrollRange = null
     this.deselect()
     if (wasActive) this.emit('selected', null)
   }
 
   refreshSelectionPositionNow() {
     this.refreshSelectionPosition()
+  }
+
+  followSelectionScroll(callback: (deltaY: number, visible: boolean) => void) {
+    const range = (this.selectionActive ? this.activeSelectionRange : this.lastClickedAnnotation?.range) ?? this.selectionScrollRange
+    const doc = range?.startContainer.ownerDocument
+    const initial = range && doc ? this.popupRect(doc, range) : undefined
+    if (!range || !doc || !initial) return () => {}
+    this.selectionScrollRange = range
+    const update = () => {
+      const rect = this.popupRect(doc, range)
+      const viewport = this.container?.getBoundingClientRect()
+      const visible = Boolean(range.startContainer.isConnected && rect && viewport
+        && rect.left + rect.width > viewport.left && rect.left < viewport.right
+        && rect.top + rect.height > viewport.top && rect.top < viewport.bottom)
+      callback(rect ? rect.top - initial.top : 0, visible)
+    }
+    this.selectionScrollFollower = update
+    update()
+    return () => {
+      if (this.selectionScrollFollower === update) this.selectionScrollFollower = null
+    }
   }
 
   setAnnotations(annotations: ReaderAnnotation[]) {
@@ -5012,10 +5045,10 @@ export class FoliateReader implements BookReader {
       const positionRenderer = this.view?.renderer as (EventTarget & { addEventListener: EventTarget['addEventListener']; removeEventListener: EventTarget['removeEventListener'] }) | undefined
       if (positionRenderer !== this.selectionPositionRenderer) {
         if (typeof this.selectionPositionRenderer?.removeEventListener === 'function') {
-          this.selectionPositionRenderer.removeEventListener('scroll', this.refreshSelectionPosition)
+          this.selectionPositionRenderer.removeEventListener('scroll', this.refreshSelectionScroll)
         }
         if (typeof positionRenderer?.addEventListener === 'function') {
-          positionRenderer.addEventListener('scroll', this.refreshSelectionPosition, { passive: true } as AddEventListenerOptions)
+          positionRenderer.addEventListener('scroll', this.refreshSelectionScroll, { passive: true } as AddEventListenerOptions)
           this.selectionPositionRenderer = positionRenderer
         } else {
           this.selectionPositionRenderer = null
@@ -5235,7 +5268,9 @@ export class FoliateReader implements BookReader {
     this.resizeObserver = null
     window.removeEventListener('resize', this.refreshSelectionPosition)
     window.visualViewport?.removeEventListener('resize', this.refreshSelectionPosition)
-    this.selectionPositionRenderer?.removeEventListener('scroll', this.refreshSelectionPosition)
+    this.selectionPositionRenderer?.removeEventListener('scroll', this.refreshSelectionScroll)
+    this.selectionScrollFollower = null
+    this.selectionScrollRange = null
     this.selectionPositionRenderer = null
     if (this.selectionPositionFrame) cancelAnimationFrame(this.selectionPositionFrame)
     this.selectionPositionFrame = 0

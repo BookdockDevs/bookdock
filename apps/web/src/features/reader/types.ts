@@ -287,6 +287,8 @@ export interface BookReader {
   /** Collapse any in-content text selection (e.g. after a toolbar action) */
   clearSelection(): void
   refreshSelectionPositionNow?(): void
+  /** Follow an open toolbar without publishing per-frame selection state. */
+  followSelectionScroll?(callback: (deltaY: number, visible: boolean) => void): () => void
   /** Remove all search result highlights from the page */
   clearSearch(): void
   /** Clear the DOM selection without emitting events — keeps React toolbar state */

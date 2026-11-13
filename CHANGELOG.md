@@ -36,6 +36,7 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- The reader's selection toolbar now follows scrolling text directly while keeping its horizontal position and opening direction stable, preventing jerky tracking and repeated jumps across multi-paragraph selections. The action and style bars stay together at viewport edges, hide when the selection leaves the reading area, and return when it becomes visible again. Smooth scrolling keeps the toolbar updated, and notes, translation and dictionary popups open from the selection's current position.
 - Saving in the content workbench now refreshes the book detail and chapter list it reads, so a saved edit no longer strands the editor on its content-load error page and the reader no longer paints the previous table of contents when the book is reopened.
 - A successful save or an explicit draft discard now reliably removes the local draft, instead of leaving a pre-save draft that a later visit reported as never saved; local autosave also stops claiming another tab is editing after the workbench re-checks edit permission.
 - Editing or scraping a shared catalog version no longer leaves catalog cards showing the old work title, and removing the default version's cover no longer falls back to a stale work cover.
@@ -1254,6 +1255,7 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 阅读器选区工具气泡改为直接跟随正文滚动，并保持横向位置与弹出方向稳定，修复跟随时的不连贯感及多段选区滚动中反复跳位的问题。操作条与样式条在阅读区边缘保持整组可见，选区离开阅读区后隐藏、滚回后恢复；平滑滚动期间持续跟随，打开笔记、翻译或词典浮层时使用选区的当前位置。
 - 编辑工作台保存成功后会同步刷新它所读取的书籍详情与章节列表，保存后不再停留在「正文读取失败」错误页，重新打开书籍时阅读器也不会先渲染上一版目录。
 - 正式保存成功或手动放弃草稿后会可靠删除本地草稿，不再残留保存前的草稿、导致下次进入时被提示「此草稿尚未正式保存」；重新检查编辑权限后，本地自动暂存也不会再误报另有标签页正在编辑。
 - 修复编辑或刮削共享书库版本后书城卡片仍显示旧书名的问题；移除默认版本封面后也不再回退到过期的作品封面。

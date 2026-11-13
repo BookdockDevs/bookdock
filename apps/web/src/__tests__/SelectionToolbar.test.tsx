@@ -79,6 +79,33 @@ afterEach(() => {
 })
 
 describe('SelectionToolbar', () => {
+  it('follows scroll without publishing selection state and hands utilities the live position', () => {
+    useUiStore.setState({ readingMode: 'scroll' })
+    setSelection()
+    const snapshot = useReaderState.getState().selection!
+    let follow: (deltaY: number, visible: boolean) => void = () => {}
+    const stop = vi.fn()
+    const followSelectionScroll = vi.fn((callback: typeof follow) => { follow = callback; return stop })
+    const view = render(<RendererContext.Provider value={{ renderer: { followSelectionScroll, clearSelection: vi.fn() } as never }}>
+      <SelectionToolbar bookId="b1" />
+    </RendererContext.Provider>)
+    const toolbar = screen.getByTitle('annotation.copy').closest('[data-reader-selection-toolbar]') as HTMLElement
+    const left = toolbar.style.left
+    act(() => follow(-20, true))
+    expect(toolbar.style.transform).toBe('translateY(-20px)')
+    expect(toolbar.style.left).toBe(left)
+    expect(useReaderState.getState().selection).toBe(snapshot)
+    act(() => follow(-800, false))
+    expect(toolbar.style.visibility).toBe('hidden')
+    act(() => follow(-30, true))
+    expect(toolbar.style.visibility).toBe('')
+    expect(toolbar.style.transform).toBe('translateY(-30px)')
+    fireEvent.click(screen.getByTitle('translation.title'))
+    expect(useReaderState.getState().translationTarget?.rect?.top).toBe(RECT.top - 30)
+    expect(stop).toHaveBeenCalled()
+    view.unmount()
+  })
+
   it.each(['dictionary', 'translation'])('keeps %s available for local selection without treating it as a remote book', (utility) => {
     setSelection()
     const snapshot = useReaderState.getState().selection

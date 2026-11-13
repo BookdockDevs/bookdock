@@ -1689,7 +1689,7 @@ export class Paginator extends HTMLElement {
                 }
                 this.#snapLockPosition = null
             }
-            if (!this.#isAnimating) this.dispatchEvent(new Event('scroll'))
+            if (this.scrolled || !this.#isAnimating) this.dispatchEvent(new Event('scroll'))
             if (this.scrolled) {
                 const position = this.#renderedStart
                 const previous = this.#lastScrollPosition

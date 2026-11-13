@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocalReader } from '../../reading-data/reader-source-context'
 import type { AnnotationRes, AnnotationStyle, AnnotationUpdateReq, SelectionToolbarActionKey } from '@bookdock/shared'
 import { DEFAULT_SELECTION_TOOLBAR_ORDER } from '@bookdock/shared'
@@ -11,6 +11,8 @@ import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
 import { useReaderState } from '../state/reader-state'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { clearReaderSelection } from '../lib/reader-selection'
+import type { SelectionInfo } from '../types'
+import { toolbarScrollOffset, translateSelection } from './selection-toolbar-scroll'
 import { useAiQuickCommands, type AiQuickCommand } from '../hooks/useAiQuickCommands'
 import { useTtsSession } from '../hooks/useTtsSession'
 import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
@@ -50,6 +52,8 @@ interface SelectionToolbarProps {
 export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: SelectionToolbarProps) {
   const _ = useTranslation()
   const selection = useReaderState((s) => s.selection)
+  const readingMode = useUiStore((s) => s.readingMode)
+  const liveSelection = useRef<{ source: SelectionInfo; value: SelectionInfo; deltaY: number; visible: boolean } | null>(null)
   const setAiContext = useReaderState((s) => s.setAiContext)
   const setAiPendingCommand = useReaderState((s) => s.setAiPendingCommand)
   const currentChapter = useReaderState((s) => s.currentChapter)
@@ -166,10 +170,60 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
     return () => observer.disconnect()
   }, [selection?.cfiRange, hasStyleBar, noteEditing])
 
+  const bar = useMemo(() => popupPosition(selection?.rect, barSize.width, barSize.height,
+    hasStyleBar ? styleSize.height + 8 : 0, selection?.geometry, styleSize.width),
+  [selection, barSize, hasStyleBar, styleSize])
+
+  useLayoutEffect(() => {
+    const elements = [barRef.current, styleRef.current].filter((element): element is HTMLDivElement => Boolean(element))
+    if (!selection || !barRef.current || noteEditing || target?.type === 'note'
+      || readingMode !== 'scroll' || !renderer?.followSelectionScroll) return
+    const snapshot = liveSelection.current?.source === selection
+      ? translateSelection(liveSelection.current.value, liveSelection.current.deltaY, liveSelection.current.visible) : selection
+    const position = popupPosition(snapshot.rect, barSize.width, barSize.height,
+      hasStyleBar ? styleSize.height + 8 : 0, snapshot.geometry, styleSize.width)
+    const top = hasStyleBar ? Math.min(position.top, position.styleTop) : position.top
+    const bottom = hasStyleBar
+      ? Math.max(position.top + barSize.height, position.styleTop + styleSize.height)
+      : position.top + barSize.height
+    const visual = window.visualViewport
+    const boundsTop = Math.max(snapshot.geometry?.bounds.top ?? 0, visual?.offsetTop ?? 0) + 8
+    const boundsBottom = Math.min(snapshot.geometry
+      ? snapshot.geometry.bounds.top + snapshot.geometry.bounds.height : window.innerHeight,
+    (visual?.offsetTop ?? 0) + (visual?.height ?? window.innerHeight)) - 8
+    barRef.current.style.left = `${position.left}px`
+    barRef.current.style.top = `${position.top}px`
+    if (styleRef.current) {
+      styleRef.current.style.left = `${position.styleLeft}px`
+      styleRef.current.style.top = `${position.styleTop}px`
+    }
+    const stop = renderer.followSelectionScroll((deltaY, visible) => {
+      liveSelection.current = { source: selection, value: snapshot, deltaY, visible }
+      const offset = toolbarScrollOffset(deltaY, top, bottom, boundsTop, boundsBottom)
+      for (const element of elements) {
+        element.style.transform = `translateY(${offset}px)`
+        element.style.visibility = visible ? '' : 'hidden'
+      }
+      if (deltaY && aiMenuRef.current) setAiMenuAnchor(null)
+    })
+    return () => {
+      stop()
+      for (const element of elements) {
+        element.style.transform = ''
+        element.style.visibility = ''
+      }
+    }
+  }, [selection, renderer, readingMode, noteEditing, target?.type, barSize, styleSize, hasStyleBar])
+
   if (!selection || (selection.visible === false && !noteEditing)) return null
 
   function close() {
     clearReaderSelection(renderer)
+  }
+
+  function currentSelection() {
+    const live = liveSelection.current
+    return live?.source === selection ? translateSelection(live.value, live.deltaY, live.visible) : selection
   }
 
   async function highlight() {
@@ -247,6 +301,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
 
   function createNote() {
     if (!selection) return
+    useReaderState.getState().setSelection(currentSelection())
     setNoteDraft(true)
     // Keep the native selection until the editor closes; clearing it here emits
     // selectionchange and unmounts this toolbar before the popup can render.
@@ -400,9 +455,6 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
     })
   }
 
-  const bar = popupPosition(selection.rect, barSize.width, barSize.height,
-    hasStyleBar ? styleSize.height + 8 : 0, selection.geometry, styleSize.width)
-
   if (noteEditing) {
     if (!composer.data) return <button onClick={() => void composer.refetch()} className="fixed bottom-6 left-1/2 z-[70] rounded-lg bg-stone-100 p-3 text-sm text-stone-700">{composer.isError ? '想法设置加载失败，点击重试' : '加载想法设置…'}</button>
     return (
@@ -522,12 +574,12 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
     copy: { key: 'copy', label: _('annotation.copy'), icon: <CopyIcon />, danger: false, onClick: copyText },
     dictionary: { key: 'dictionary', label: _('dictionary.title'), icon: <DictionaryIcon />, danger: false, onClick: () => {
       if (!selection) return
-      setDictionaryTarget(selection)
+      setDictionaryTarget(currentSelection())
       close()
     } },
     translate: { key: 'translate', label: _('translation.title'), icon: <TranslateIcon size={18} />, danger: false, onClick: () => {
       if (!selection) return
-      setTranslationTarget(selection)
+      setTranslationTarget(currentSelection())
       close()
     } },
     search: { key: 'search', label: _('reader.search'), icon: <SearchIcon />, danger: false, onClick: searchSelection },
