@@ -143,7 +143,10 @@ export default function BookCoverImage({ book, size = 'md', showFormat = true, c
       )}
 
       {/* Keep the placeholder visible while the artwork is loading; its text is
-          hidden after load so transparent covers do not show duplicate titles. */}
+          hidden after load so transparent covers do not show duplicate titles.
+          text-transparent keeps the img's alt text (visible while the browser
+          re-decodes a cached cover after a remount) from flashing at the
+          top-left corner of the box. */}
       {hasCover && (
         <img
           ref={(img) => {
@@ -156,7 +159,7 @@ export default function BookCoverImage({ book, size = 'md', showFormat = true, c
           decoding={isLocalBlob ? 'sync' : 'async'}
           onLoad={markLoaded}
           className={cn(
-            'absolute inset-0 block h-full w-full',
+            'absolute inset-0 block h-full w-full text-transparent',
             isCached || isLocalBlob ? undefined : 'transition-opacity duration-300',
             loaded ? 'opacity-100' : 'opacity-0',
             coverFit === 'full'

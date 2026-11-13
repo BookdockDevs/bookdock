@@ -50,6 +50,8 @@ All notable changes to Bookdock are documented here.
 - The description box and the metadata inputs no longer end in a dead strip on the right: the inset that keeps text clear of the restore-from-file icon is now applied only when that icon is offered, instead of reserving 48px in every field. The right-click single-field editor follows the same rule.
 - SmartMenu-based menus and the translation channel picker now follow their trigger while pages, sidebars and dialogs scroll, recalculate placement using their measured size, and close when the trigger is unmounted or fully clipped. Scrolling inside a menu preserves it. Reader image menus and other independent popovers are unchanged.
 - Touching outside a menu now dismisses it on pointer down. Clicking the trigger again or elsewhere on the same card retains the existing dismissal behavior.
+- Collapsing the reader's book search (back to TOC, the magnifier toggle or Escape) now hides the match highlights in the text together with the result capsule, instead of leaving orphaned highlights painted on every chapter you turn. Reopening the search bar restores the highlights instantly from the cached matches without re-searching, so the round trip keeps everything the query had.
+- Book covers no longer flash the raw book title in the top-left corner of the cover frame: when a shelf remounts and the browser briefly re-decodes a cached image, the image's alt text used to paint as visible text while the designed placeholder stayed hidden behind it. The alt text now stays invisible on screen - screen readers still announce it - in both the library cover and the statistics cover, so the placeholder remains in charge until the artwork paints.
 
 ## [0.8.2] - 2026-11-13
 
@@ -1272,6 +1274,8 @@ All notable changes to Bookdock are documented here.
 - 简介输入框与各元数据输入框右侧不再留出一条用不了的空白：原本为「恢复文件值」图标固定预留的 48px 内边距，现在只在真的提供该图标时才生效；右键单字段编辑弹窗同步修复。
 - 基于 SmartMenu 的菜单与翻译渠道选择器现在随页面、侧栏和弹窗滚动跟随触发元素，按菜单实测尺寸重新定位，并在触发元素卸载或被完全裁剪时关闭。菜单内部滚动保持展开。阅读器图片菜单与其他独立浮层不在本次范围内。
 - 在菜单外触摸现在于按下时关闭菜单。再次点击触发按钮或点击同一卡片的其他位置仍沿用原有关闭行为。
+- 收起阅读器的书籍搜索（返回目录、放大镜切换或 Esc）时，正文中的匹配高亮现在随结果胶囊一起隐藏，不再在翻到的每一章上留下孤零零的高亮；重新打开搜索栏时，高亮依据缓存的匹配结果立即恢复，无需重新搜索，往返一次不丢失任何东西。
+- 书籍封面不再在封面框左上角闪现书名原文：书架重挂载、浏览器短暂重新解码缓存图片的间隙里，图片的 alt 文本会被当作可见文字绘制，而设计好的占位封面此时反而被藏住。现在库内封面与统计页封面的 alt 文本在屏上保持不可见——屏幕阅读器仍会朗读——占位封面在图片真正绘制出来之前始终负责显示。
 
 ### [0.8.2] - 2026-11-13
 

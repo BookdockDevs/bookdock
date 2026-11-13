@@ -55,6 +55,9 @@ describe('BookCover', () => {
   it('renders immediately with opacity-100 when remounting a previously loaded cover', () => {
     render(<BookCover book={{ ...baseBook, title: 'Cached Cover', coverKey: 'covers/book-1.jpg' }} />)
     expect(screen.getByRole('img')).toHaveClass('opacity-100')
+    // Before the browser re-decodes the cached artwork, it paints the img's alt
+    // text in the corner of the box; it must never be visible.
+    expect(screen.getByRole('img')).toHaveClass('text-transparent')
   })
 
   it('renders an explicitly supplied cover source', () => {

@@ -2099,6 +2099,9 @@ export class FoliateReader implements BookReader {
   private searchMatchTexts = new Map<number, string[]>()
   // Search-highlight annotation values currently handed to the view, per section
   private drawnSearchValues = new Map<number, string[]>()
+  // Whether drawn highlights should be visible; matches stay cached while the
+  // search bar is collapsed so reopening restores them without re-searching
+  private searchHighlightsVisible = true
   private activeSearchTarget: { index: number; start: number; end: number } | null = null
   private activeSearchValue: string | null = null
   private activeSearchClearTimer: ReturnType<typeof setTimeout> | null = null
@@ -2773,7 +2776,7 @@ export class FoliateReader implements BookReader {
         }
         // …and any pending search highlights for that section
         const matches = this.searchMatchOffsets.get(index)
-        if (matches?.length) this.drawSearchHighlights(index, matches)
+        if (this.searchHighlightsVisible && matches?.length) this.drawSearchHighlights(index, matches)
       })
       view.addEventListener('stabilized', () => {
         const reapply = new Set<string>()
@@ -4858,17 +4861,41 @@ export class FoliateReader implements BookReader {
     }
   }
 
-  private clearSearchHighlights() {
+  // Remove drawn highlight annotations (including the active one) but keep the
+  // cached matches so the highlights can be restored on `setSearchHighlightsVisible(true)`
+  private hideSearchHighlights() {
     this.clearActiveSearchHighlight()
-    this.activeSearchTarget = null
     for (const values of this.drawnSearchValues.values()) {
       for (const value of values) {
         Promise.resolve(this.view?.deleteAnnotation?.({ value })).catch(() => {})
       }
     }
     this.drawnSearchValues.clear()
+  }
+
+  private clearSearchHighlights() {
+    this.hideSearchHighlights()
+    this.activeSearchTarget = null
     this.searchMatchOffsets.clear()
     this.searchMatchTexts.clear()
+  }
+
+  setSearchHighlightsVisible(visible: boolean) {
+    if (visible === this.searchHighlightsVisible) return
+    this.searchHighlightsVisible = visible
+    if (!visible) {
+      this.hideSearchHighlights()
+      return
+    }
+    try {
+      const contents = (this.view?.renderer?.getContents?.() ?? []) as Array<{ index: number }>
+      for (const content of contents) {
+        const matches = this.searchMatchOffsets.get(content.index)
+        if (matches?.length) this.drawSearchHighlights(content.index, matches)
+      }
+    } catch {
+      // highlight drawing is best-effort
+    }
   }
 
   clearSearch() {
@@ -4876,6 +4903,7 @@ export class FoliateReader implements BookReader {
     this.searchGen++
     this.searchAbort?.abort()
     this.searchAbort = null
+    this.searchHighlightsVisible = true
     this.clearSearchHighlights()
     try { this.view?.clearSearch?.() } catch { /* view may be partially initialized */ }
   }

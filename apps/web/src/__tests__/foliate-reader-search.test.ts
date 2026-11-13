@@ -226,6 +226,52 @@ describe('reader search lifecycle', () => {
     expect(walk).toHaveBeenCalledTimes(1)
   })
 
+  it('hides highlights on collapse, keeps the matches, and redraws on restore', async () => {
+    const doc = new DOMParser().parseFromString(markup('x'.repeat(5)), 'application/xhtml+xml')
+    const addAnnotation = vi.fn(async () => {})
+    const deleteAnnotation = vi.fn(async () => {})
+    const reader = makeReader(async () => markup('x'.repeat(5)), ['a'])
+    Object.assign(reader, { view: {
+      renderer: { getContents: () => [{ index: 0, doc }] },
+      getCFI: (_index: number, range: Range) => `epubcfi(/6/2!/4/2:${range.startOffset})`,
+      addAnnotation,
+      deleteAnnotation,
+    } })
+    await reader.search('x')
+    expect(addAnnotation).toHaveBeenCalledTimes(5)
+
+    reader.setSearchHighlightsVisible(false)
+    expect(deleteAnnotation).toHaveBeenCalledTimes(5)
+    expect((reader as any).drawnSearchValues.size).toBe(0)
+    expect((reader as any).searchMatchOffsets.get(0)).toHaveLength(5)
+    expect((reader as any).searchMatchTexts.get(0)).toHaveLength(5)
+
+    // restoring redraws the cached matches for the currently rendered section
+    addAnnotation.mockClear()
+    reader.setSearchHighlightsVisible(true)
+    expect(addAnnotation).toHaveBeenCalledTimes(5)
+  })
+
+  it('resets highlight visibility on clearSearch so hidden matches cannot resurface', async () => {
+    const doc = new DOMParser().parseFromString(markup('x'.repeat(5)), 'application/xhtml+xml')
+    const reader = makeReader(async () => markup('x'.repeat(5)), ['a'])
+    const addAnnotation = vi.fn(async () => {})
+    Object.assign(reader, { view: {
+      renderer: { getContents: () => [{ index: 0, doc }] },
+      getCFI: (_index: number, range: Range) => `epubcfi(/6/2!/4/2:${range.startOffset})`,
+      addAnnotation,
+    } })
+    await reader.search('x')
+    reader.setSearchHighlightsVisible(false)
+    reader.clearSearch()
+
+    expect((reader as any).searchHighlightsVisible).toBe(true)
+    expect((reader as any).searchMatchOffsets.size).toBe(0)
+    addAnnotation.mockClear()
+    reader.setSearchHighlightsVisible(true)
+    expect(addAnnotation).not.toHaveBeenCalled()
+  })
+
   it('does not treat unavailable regex execution as a completed no-match result', async () => {
     vi.stubGlobal('Worker', undefined)
     try {

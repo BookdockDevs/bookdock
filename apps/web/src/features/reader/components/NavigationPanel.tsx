@@ -494,6 +494,12 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   /** Book-search mode: results overlay the TOC list while the bar is open with a query */
   const searchActive = searchExpanded && query.trim().length > 0
 
+  // Highlights follow the search bar's visibility: collapsing hides them while
+  // the cached matches survive, so reopening restores the highlights instantly
+  useEffect(() => {
+    renderer?.setSearchHighlightsVisible(searchExpanded)
+  }, [searchExpanded, renderer])
+
   useEffect(() => {
     const toggleSearch = () => setSearchExpanded((expanded) => !expanded)
     window.addEventListener('bd-reader-search', toggleSearch)
@@ -1505,9 +1511,6 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                   <p role="status" className="px-1 text-xs text-[var(--bd-read-sub)]">
                     {_('reader.searchTruncated', { count: searchResults.length })}
                   </p>
-                )}
-                {searchStatus.offline && (
-                  <p role="status" className="px-1 text-xs text-[var(--bd-read-sub)]">{_('reader.searchOffline')}</p>
                 )}
                 {searchStatus.incomplete && (
                   <p role="status" className="px-1 text-xs text-[var(--bd-read-sub)]">

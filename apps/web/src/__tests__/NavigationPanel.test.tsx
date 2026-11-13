@@ -15,6 +15,7 @@ vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), warning: vi.
 
 const display = vi.fn()
 const clearSearch = vi.fn()
+const setSearchHighlightsVisible = vi.fn()
 
 vi.mock('../features/reader/hooks/useReaderApi', () => ({
   useReaderApi: vi.fn(),
@@ -67,10 +68,11 @@ describe('NavigationPanel', () => {
       const height = row ? 32 : 400
       return { top, bottom: top + height, left: 0, right: 300, width: 300, height, x: 0, y: top, toJSON: () => ({}) } as DOMRect
     })
-    vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, clearSearch } })
+    vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, clearSearch, setSearchHighlightsVisible } })
     vi.mocked(useAnnotations).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useAnnotations>)
     window.localStorage.removeItem('bd-notes-display-types')
     display.mockClear()
+    setSearchHighlightsVisible.mockClear()
     deleteMutate.mockClear()
     updateMutate.mockClear()
     useReaderState.setState({
@@ -625,7 +627,7 @@ describe('NavigationPanel', () => {
 
     beforeEach(() => {
       search.mockClear()
-      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search, clearSearch } })
+      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search, clearSearch, setSearchHighlightsVisible } })
       useReaderState.setState({
         tocItems: [
           { label: '第一章 开篇', href: 'chapter:0' },
@@ -706,6 +708,25 @@ describe('NavigationPanel', () => {
       expect(search).toHaveBeenCalledTimes(1)
     })
 
+    it('hides content highlights when the search bar collapses and restores them on reopen', async () => {
+      clearSearch.mockClear()
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+
+      // back to TOC hides the pill and the content highlights, but keeps the matches
+      fireEvent.click(screen.getByTitle('reader.backToToc'))
+      expect(screen.queryByTestId('search-nav-capsule')).toBeNull()
+      expect(setSearchHighlightsVisible).toHaveBeenLastCalledWith(false)
+      expect(clearSearch).not.toHaveBeenCalled()
+
+      // reopening the search bar restores the highlights without re-searching
+      fireEvent.click(screen.getByTitle('reader.search'))
+      expect(setSearchHighlightsVisible).toHaveBeenLastCalledWith(true)
+      expect(search).toHaveBeenCalledTimes(1)
+    })
+
     it('keeps the results and the pointer when the panel is closed and reopened', async () => {
       const { rerender } = render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('reader.search'))
@@ -769,7 +790,7 @@ describe('NavigationPanel', () => {
           })
         },
       )
-      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search: streamingSearch, clearSearch } })
+      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search: streamingSearch, clearSearch, setSearchHighlightsVisible } })
       render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('reader.search'))
       fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
@@ -798,7 +819,7 @@ describe('NavigationPanel', () => {
         onProgress?.([], 0.5, status)
         return []
       })
-      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search: statusSearch, clearSearch } })
+      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search: statusSearch, clearSearch, setSearchHighlightsVisible } })
       render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('reader.search'))
       fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: 'x' } })
@@ -825,7 +846,7 @@ describe('NavigationPanel', () => {
     it('cancels an in-flight search when the input is emptied with the keyboard', async () => {
       let resolve!: (results: SearchResult[]) => void
       const pendingSearch = vi.fn(() => new Promise<SearchResult[]>((done) => { resolve = done }))
-      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search: pendingSearch, clearSearch } })
+      vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, search: pendingSearch, clearSearch, setSearchHighlightsVisible } })
       render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('reader.search'))
       const input = screen.getByPlaceholderText('reader.searchPlaceholder')

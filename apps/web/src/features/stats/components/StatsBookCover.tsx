@@ -18,7 +18,7 @@ export default function StatsBookCover({ item }: StatsBookCoverProps) {
       <img
         src={`/api/v1/books/${item.bookId}/cover?v=${encodeURIComponent(item.coverKey)}`}
         alt={item.title}
-        className="h-14 w-10 shrink-0 rounded-lg border border-stone-200/70 object-cover dark:border-stone-800/60"
+        className="h-14 w-10 shrink-0 rounded-lg border border-stone-200/70 object-cover text-transparent dark:border-stone-800/60"
         onError={() => setError(true)}
         decoding="async"
         loading="lazy"
