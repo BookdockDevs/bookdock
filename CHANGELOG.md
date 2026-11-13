@@ -14,6 +14,7 @@ All notable changes to Bookdock are documented here.
 - Saving in the content workbench now refreshes the book detail and chapter list it reads, so a saved edit no longer strands the editor on its content-load error page and the reader no longer paints the previous table of contents when the book is reopened.
 - A successful save or an explicit draft discard now reliably removes the local draft, instead of leaving a pre-save draft that a later visit reported as never saved; local autosave also stops claiming another tab is editing after the workbench re-checks edit permission.
 - The reader's bottom bar no longer collapses while the pointer travels from the progress strip up to a companion capsule: a revealed footer keeps a taller keep-alive band covering the gap and the capsules, and hiding waits longer, so moving back within the grace period cancels it. Moving off a control onto the bar itself (its background is pass-through, so only buttons and the slider take the pointer) no longer starts a hide either.
+- Hovering the selection bubble no longer summons the reader's top or bottom bar while a selection is active: the bubble is clamped to the viewport edge and overlaps the hover band, so it now counts as selection UI and leaves the chrome alone, matching what the same pointer position does over the page.
 
 ## [0.8.2] - 2026-11-13
 
@@ -1200,6 +1201,7 @@ All notable changes to Bookdock are documented here.
 - 编辑工作台保存成功后会同步刷新它所读取的书籍详情与章节列表，保存后不再停留在「正文读取失败」错误页，重新打开书籍时阅读器也不会先渲染上一版目录。
 - 正式保存成功或手动放弃草稿后会可靠删除本地草稿，不再残留保存前的草稿、导致下次进入时被提示「此草稿尚未正式保存」；重新检查编辑权限后，本地自动暂存也不会再误报另有标签页正在编辑。
 - 阅读器底栏不再在鼠标从进度条移向伴随胶囊的途中收起：底栏浮现后「保持」判定区更高、覆盖空档与胶囊，收起前的宽限时间也更长，宽限内移回即取消收起。鼠标从底栏上的控件移到条形本身的空白处（条形背景不拦截指针，只有按钮和滑块响应），也同样不会再触发收起。
+- 选区气泡在屏时，鼠标移到气泡上不再唤出阅读器顶栏／底栏：气泡会被钳到视口边缘并与感应带重叠，现在按「选区浮层」处理、不参与感应，与同一位置移到正文上的表现一致。
 
 ### [0.8.2] - 2026-11-13
 

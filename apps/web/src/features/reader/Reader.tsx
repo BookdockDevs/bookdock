@@ -288,7 +288,13 @@ export default function Reader() {
         clearChromeSummon()
         return
       }
-      if (buttons || hasSelection || window.getSelection()?.type === 'Range') return
+      // A selection bubble floats over the reading area and, when the selection
+      // sits near an edge, is clamped inside the summon band. Moves over it are
+      // parent-document moves, where the iframe selection is invisible — the
+      // frame path above already ignores those, so the bubble must be ignored
+      // too instead of summoning the chrome the geometry happens to cover.
+      const overSelectionUi = target instanceof Element && Boolean(target.closest('[data-reader-selection-toolbar]'))
+      if (buttons || hasSelection || overSelectionUi || window.getSelection()?.type === 'Range') return
       const canvas = document.querySelector('[data-reader-canvas]')
       const rect = canvas?.getBoundingClientRect()
       const insideCanvas = rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
