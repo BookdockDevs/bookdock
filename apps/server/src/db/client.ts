@@ -314,6 +314,14 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
   repairReadingLedgerSchema(db)
   const { migrateCategoryShelfSeparation } = await import('../modules/libraries/category-shelf-migration')
   migrateCategoryShelfSeparation(db)
+  // Runs on every database shape (not just legacy ones): shared works written
+  // before the work row became a pure projection keep their metadata only on
+  // the work row, and the read path no longer falls back onto it.
+  const { backfillWorkProjection, dropWorkLevelBookmeta } = await import('../modules/libraries/work-projection-migration')
+  backfillWorkProjection(db)
+  // The work-level publication meta has no editor any more, so a leftover value
+  // would be unreachable yet still shadow the parsed file. Drop it once.
+  dropWorkLevelBookmeta(db)
   const { importProgressFiles } = await import('../modules/progress/progress-migration')
   await importProgressFiles(db)
 }

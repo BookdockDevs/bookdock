@@ -240,7 +240,6 @@ describe('library permission boundaries', () => {
     for (const [suffix, method, body] of [
       ['/append', 'POST', { text: '\n第二章\nInjected text' }],
       ['/re-toc', 'POST', {}],
-      ['/reset-metadata', 'POST', {}],
       [`/content/${original.bookVersionId}/editor-content`, 'PUT', { baseRevisionId: revision.id, chapters: [{ id: 'ch1', title: 'Injected', content: 'Injected', level: 0 }] }],
       [`/content/${original.bookVersionId}/editor-epub-content`, 'PUT', { baseRevisionId: revision.id, documents: [], tocEntries: [], spineOrder: [] }],
     ] as const) {

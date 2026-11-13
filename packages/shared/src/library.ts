@@ -214,7 +214,7 @@ export interface LibraryBookVersion {
   /** B only: the single source shared library/version this reference is bound to. */
   sourceLibraryId: string | null
   sourceLibraryBookVersionId: string | null
-  /** B only: pinned revision; never follows the source automatically. */
+  /** B only: pinned revision; content writes advance every holder's pin together. */
   pinnedRevisionId: string | null
   createdAt: number
   updatedAt: number
@@ -525,7 +525,12 @@ export const catalogBookUpdateSchema = z.object({
 
 export type CatalogBookUpdateReq = z.infer<typeof catalogBookUpdateSchema>
 
-/** Version overrides: null clears an override and restores inheritance. */
+/**
+ * Version metadata. A shared catalog's work row is a projection of the default
+ * version, so a version's values are the source rather than an override layer;
+ * `null` there simply means "no value". Private libraries still read `null` as
+ * "inherit the work row", which stays their source of truth.
+ */
 export const catalogVersionUpdateSchema = z.object({
   name: z.string().trim().max(120).optional(),
   title: z.string().trim().min(1).max(300).nullable().optional(),
@@ -534,10 +539,11 @@ export const catalogVersionUpdateSchema = z.object({
   description: z.string().max(4000).nullable().optional(),
   status: libraryVersionStatusSchema.optional(),
   /**
-   * Version-level publication metadata overrides (publisher, language, ISBN,
-   * subjects, series). Replaces the whole override object; null clears it
-   * back to inheriting the work default. Null values inside the object mask
-   * individual inherited fields; they are omitted from effective metadata.
+   * Version-level publication metadata (publisher, language, ISBN, subjects,
+   * series). Replaces the whole object. In a shared catalog this is simply the
+   * version's own metadata — the work row only mirrors the default version, so
+   * there is no lower layer to fall back to. Private libraries keep the
+   * version-over-work-over-parsed precedence, where a null masks a field.
    */
   meta: z.record(z.string(), z.unknown()).nullable().optional(),
 })
@@ -686,11 +692,6 @@ export interface ForkLocalRes {
   bookVersionId: string
 }
 
-/**
- * Source-follow state for a private B. `readable` mirrors the read gate;
- * `hasUpdate` is true only while the source is readable and its latest
- * revision differs from the pin. Null for A/C rows.
- */
 // ------------------------------------------------------- Reading data
 
 /**

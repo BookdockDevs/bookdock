@@ -884,11 +884,11 @@ export async function uploadCatalogBook(
       if (upload.coverKey && upload.coverSize !== null) {
         tx.insert(blobs).values({ key: upload.coverKey, size: upload.coverSize, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
       }
+      // Explicit author input wins; otherwise the parsed upload stands.
+      const workAuthors = opts?.authors !== undefined || opts?.author !== undefined
+        ? normalizeAuthors({ author: opts?.author, authors: opts?.authors })
+        : { author: upload.author, authors: upload.authors }
       if (!targetLibraryBookId) {
-        // Explicit author input wins; otherwise the parsed upload stands.
-        const workAuthors = opts?.authors !== undefined || opts?.author !== undefined
-          ? normalizeAuthors({ author: opts?.author, authors: opts?.authors })
-          : { author: upload.author, authors: upload.authors }
         tx.insert(libraryBooks).values({
           id: libraryBookId, libraryId, userId, shelfId: opts?.shelfId ?? null, categoryId: opts?.categoryId ?? null,
           title: opts?.title ?? upload.title, author: workAuthors.author, authors: workAuthors.authors,
@@ -905,6 +905,19 @@ export async function uploadCatalogBook(
         coverKey: targetLibraryBookId ? upload.coverKey : null,
         createdAt: now, updatedAt: now,
       }).run()
+      if (libraryType === 'shared' && !targetLibraryBookId) {
+        // A shared work row is only a projection of its default version, so
+        // the version must own the values the row was just seeded with —
+        // otherwise the first projection would erase them (cover included).
+        // Private libraries keep the work row as the source and stay null.
+        tx.update(libraryBookVersions).set({
+          title: opts?.title ?? upload.title,
+          author: workAuthors.author,
+          authors: workAuthors.authors,
+          description: upload.description,
+          coverKey: upload.coverKey,
+        }).where(eq(libraryBookVersions.id, linkId)).run()
+      }
       if (libraryType === 'shared') {
         recordActivityEvent(tx, targetLibraryBookId
           ? {
@@ -3981,7 +3994,10 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
         tx.update(libraryBookVersions).set({ pinnedRevisionId: null })
           .where(eq(libraryBookVersions.pinnedRevisionId, row.id)).run()
       }
-      // Content-bound states, highlights and AI rows follow via cascade.
+      // book_states, AI threads and replacement rules follow via FK cascade.
+      // Highlights, bookmarks and ideas intentionally keep plain-text version
+      // ids (no content cascade) so personal notes survive source deletion;
+      // only the explicit deleteUserData branch above removes them.
       tx.delete(bookVersions).where(eq(bookVersions.id, versionId)).run()
       removedVersionIds.push(versionId)
     }

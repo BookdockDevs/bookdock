@@ -172,6 +172,14 @@ export async function publishPrivateBook(
       kind: 'personal',
       status: 'published',
       userId: actorId,
+      // The version row is the source of truth for a shared work's metadata;
+      // the work row is only its projection. Publishing must therefore seed
+      // the version too, or the first projection would have nothing to copy.
+      title: sourceTitle,
+      author: sourceAuthor,
+      authors: sourceAuthors,
+      description: sourceDescription,
+      coverKey: sourceCoverKey,
       // Source base for push/collect-dedup decisions: the private version and
       // revision this snapshot was taken from. Plain text, survives deletion.
       sourceBaseVersionId: opts.bookId,

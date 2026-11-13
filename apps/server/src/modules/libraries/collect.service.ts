@@ -137,9 +137,10 @@ export async function addToPrivateLibrary(
       .where(eq(libraryBookTags.libraryBookId, sourceWork.id)).all().map((row) => row.name)
     : []
 
-  // (7.3) Pin the revision published right now — the latest, not the first.
-  // B never follows a later revision on its own, and the private read path
-  // resolves this pin.
+  // (7.3) Seed the pin at the current (newest) revision. Every content write
+  // advances all B pins in the same transaction, so a collected card always
+  // reads the newest revision; book_states.read_revision_id is what separates
+  // readers who have seen it from those who have not.
   const revision = db.select().from(contentRevisions)
     .where(eq(contentRevisions.bookVersionId, link.bookVersionId))
     .orderBy(desc(contentRevisions.revisionNo)).get()

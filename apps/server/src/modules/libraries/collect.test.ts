@@ -23,7 +23,7 @@ import { TxtParser } from '../../formats/txt'
 import { assertReadableBookSync, getActiveBook, getBook, getBookShelf, reTocBook, appendCityVersionContent, appendTxtBookContent, pushPrivateToVersion, resetBookMetadata, updateBook, uploadBook, deleteBook, updateBookCover, removeBookCover, attachOwnsSource, attachPublishedTo } from '../books/books.service'
 import { uploadCatalogBook } from '../books/books.service'
 import { addMember, createLibrary, deleteLibrary, removeMember, updateLibrary } from './libraries.service'
-import { deleteCatalogBook, updateCatalogVersion, getCatalogBook, resetCatalogVersionMetadata } from './catalog.service'
+import { deleteCatalogBook, updateCatalogVersion, getCatalogBook } from './catalog.service'
 import { publishPrivateBook } from './publish.service'
 import { addToPrivateLibrary, describeCollectSource } from './collect.service'
 import { sourceStillReadable } from './library-access'
@@ -429,15 +429,17 @@ describe('add-to-private (7.x)', () => {
   it('still refuses after a same-bytes revision, and never reports a cleared verdict', async () => {
     const source = await uploadBook(ownerId, txtFile('第一章\n原稿'))
     const pub = await publishPrivateBook(ownerId, libraryId, { bookId: source.book.id })
-    // A metadata reset on the city version appends a revision that reuses the
-    // very same blob. Nothing about the content changed, so this must not count
-    // as "the city moved on" — that reading both unblocks a duplicate collect of
-    // the book the caller still holds and leaves `diverged` permanently true.
-    registerParser({
-      match: (fileName) => fileName.toLowerCase().endsWith('.epub'),
-      parse: async () => ({ meta: { title: 'Re-parsed', bookmeta: { publisher: 'Reset Press' } }, chapters: [] }),
-    })
-    await resetCatalogVersionMetadata(ownerId, libraryId, pub.libraryBookId, pub.versionLinkId)
+    // A derived-metadata change appends a revision that reuses the very same
+    // blob. Nothing about the content changed, so this must not count as "the
+    // city moved on" — that reading both unblocks a duplicate collect of the
+    // book the caller still holds and leaves `diverged` permanently true.
+    const pinned = db.select().from(schema.contentRevisions)
+      .where(eq(schema.contentRevisions.bookVersionId, pub.bookVersionId)).all().at(0)!
+    db.insert(schema.contentRevisions).values({
+      id: createId('rev'), bookVersionId: pub.bookVersionId, revisionNo: pinned.revisionNo + 1,
+      blobKey: pinned.blobKey, size: pinned.size, wordCount: pinned.wordCount,
+      chapterCount: pinned.chapterCount, meta: pinned.meta, createdAt: Date.now(),
+    }).run()
     const revisions = db.select().from(schema.contentRevisions)
       .where(eq(schema.contentRevisions.bookVersionId, pub.bookVersionId)).all()
     expect(revisions).toHaveLength(2)

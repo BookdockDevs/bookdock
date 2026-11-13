@@ -14,7 +14,7 @@ import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
-import { registerParser, getParser } from '../../formats/registry'
+import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
 import { EpubParser } from '../../formats/epub'
 import { appendCityVersionContent, appendTxtBookContent, getVersionTocState, previewCityToc, pushPrivateToVersion, reTocCityVersion, uploadBook, uploadCatalogBook } from '../books/books.service'
@@ -40,7 +40,6 @@ import {
   permanentDeleteCatalogBook,
   removeCatalogBookCover,
   removeCatalogVersionCover,
-  resetCatalogVersionMetadata,
   updateCatalogBook,
   updateCatalogBookCover,
   updateCatalogVersion,
@@ -538,10 +537,12 @@ describe('shared library catalog', () => {
     // would be a false positive, not inheritance.
     expect((await listCatalogBooks(ownerId, libraryId, { author: '默认作者' })).total).toBe(0)
     expect((await listCatalogBooks(ownerId, libraryId, { author: '甲' })).total).toBe(1)
-    // Search sees what readers see: the version override, not just the work.
+    // A shared work row is a projection of the default version, so its
+    // displayed title follows the lead version's override.
     expect((await listCatalogBooks(ownerId, libraryId, { search: '甲标题' })).items.map((b) => b.title))
-      .toEqual(['作品'])
-    expect((await listCatalogBooks(ownerId, libraryId, { search: '作品' })).total).toBe(1)
+      .toEqual(['甲标题'])
+    // The original work title is gone once the projection follows the lead.
+    expect((await listCatalogBooks(ownerId, libraryId, { search: '作品' })).total).toBe(0)
     expect((await listCatalogBooks(ownerId, libraryId, { search: '查无此文' })).total).toBe(0)
   })
 
@@ -559,10 +560,11 @@ describe('shared library catalog', () => {
     expect(updated.effective.authors).toEqual(['丙', '丁'])
     expect((await listCatalogBooks(memberId, libraryId, { author: '丁' })).total).toBe(1)
     expect((await listCatalogBooks(memberId, libraryId, { author: '甲' })).total).toBe(0)
-    // Null clears the override back to the work default.
+    // Null clears the override back to the (projected) work default: the
+    // shared work row now mirrors the lead version's effective authors.
     const cleared = await updateCatalogVersion(ownerId, libraryId, work.libraryBookId, work.versionLinkId!, { authors: null })
     expect(cleared.authors).toBeNull()
-    expect(cleared.effective.authors).toEqual(['甲', '乙'])
+    expect(cleared.effective.authors).toEqual(['丙', '丁'])
   })
 
   /**
@@ -730,21 +732,27 @@ describe('shared library catalog', () => {
     expect(grouped.effective.title).toBe('second')
   })
 
-  it('inherits work metadata unless a version overrides it', async () => {
+  it('keeps metadata on the version and projects it onto the work row', async () => {
     const created = await uploadCatalogBook(libraryId, ownerId, txtFile('novel.txt', '第一章\n正文'), { title: '作品名' })
     const book = await getCatalogBook(ownerId, libraryId, created.libraryBookId)
-    expect(book.versions[0]).toMatchObject({ title: null, effective: { title: '作品名' } })
+    // The version owns the values; the work row is only their projection.
+    expect(book.versions[0]).toMatchObject({ title: '作品名', effective: { title: '作品名' } })
+    expect(book.title).toBe('作品名')
 
     await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, { title: '版本名' })
-    const overridden = await getCatalogBook(ownerId, libraryId, created.libraryBookId)
-    expect(overridden.versions[0]).toMatchObject({ title: '版本名', effective: { title: '版本名' } })
+    const renamed = await getCatalogBook(ownerId, libraryId, created.libraryBookId)
+    expect(renamed.versions[0]).toMatchObject({ title: '版本名', effective: { title: '版本名' } })
+    // Cards read versions[0], so the projection carries the version's title.
+    expect(renamed.title).toBe('版本名')
 
-    // Work defaults move every inheriting version with them...
-    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { title: '新作品名' })
-    expect((await getCatalogBook(ownerId, libraryId, created.libraryBookId)).versions[0].effective.title).toBe('版本名')
-    // ...and clearing the override restores inheritance instead of copying.
-    await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, { title: null })
-    expect((await getCatalogBook(ownerId, libraryId, created.libraryBookId)).versions[0].effective.title).toBe('新作品名')
+    // Renaming "the work" edits the default version, not a second layer, and
+    // the projection follows it instead of waiting for the next write.
+    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { title: '新作品名', description: '新简介' })
+    const workRenamed = await getCatalogBook(ownerId, libraryId, created.libraryBookId)
+    expect(workRenamed.versions[0]).toMatchObject({
+      title: '新作品名', description: '新简介', effective: { title: '新作品名', description: '新简介' },
+    })
+    expect(workRenamed).toMatchObject({ title: '新作品名', description: '新简介' })
   })
 
   it('publishes and unlists versions without deleting them', async () => {
@@ -914,15 +922,19 @@ describe('shared library catalog', () => {
     expect(links.filter((link) => link.status === 'unlisted')).toHaveLength(1)
   })
 
-  it('merges work meta over the revision bookmeta, manager-only', async () => {
+  it('redirects a work meta patch to the default version, manager-only', async () => {
     const created = await uploadCatalogBook(libraryId, ownerId, txtFile('m.txt', '第一章\n甲'), { title: 'Meta' })
     await updateCatalogBook(ownerId, libraryId, created.libraryBookId, {
       meta: { publisher: 'City Press', language: 'zh' },
     })
-    expect((await getCatalogBook(ownerId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
-      .toMatchObject({ publisher: 'City Press', language: 'zh' })
-    // Work meta replaces wholesale (like tagIds): unmentioned keys drop, and
-    // members read the merged result without writing it.
+    const updated = await getCatalogBook(ownerId, libraryId, created.libraryBookId)
+    // The work row is a projection: the patch lands on the lead version, and
+    // the work-level view is that version's overrides rather than a copy.
+    expect(updated.versions[0].meta).toMatchObject({ publisher: 'City Press', language: 'zh' })
+    expect(updated.meta).toMatchObject({ publisher: 'City Press', language: 'zh' })
+    expect(updated.versions[0].effective.bookmeta).toMatchObject({ publisher: 'City Press', language: 'zh' })
+    // Replaces wholesale (like tagIds): unmentioned keys drop, and members read
+    // the merged result without writing it.
     await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { meta: { publisher: 'Other Press' } })
     expect((await getCatalogBook(memberId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
       .toMatchObject({ publisher: 'Other Press' })
@@ -958,7 +970,7 @@ describe('shared library catalog', () => {
 
   it('masks inherited publication metadata with explicit null keys on all read projections', async () => {
     const created = await uploadCatalogBook(libraryId, ownerId, txtFile('empty.txt', '第一章\n正文'), { title: 'Work', author: 'Work Author' })
-    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { description: 'Work description', meta: { publisher: 'Work Press', seriesIndex: 5 } })
+    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { description: 'Work description' })
     await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, {
       authors: [], description: '', meta: { publisher: null, seriesIndex: null, identifier: 'keep' },
     })
@@ -967,31 +979,35 @@ describe('shared library catalog', () => {
     expect(version.effective.description).toBe('')
     expect(version.effective.bookmeta).toEqual({ identifier: 'keep' })
     expect(version.meta).toEqual({ publisher: null, seriesIndex: null, identifier: 'keep' })
-    expect(version.inherited).toMatchObject({ title: 'Work', authors: ['Work Author'], description: 'Work description', bookmeta: { publisher: 'Work Press', seriesIndex: 5 } })
+    // Scalars still mirror the projected work row, but publication metadata has
+    // no work-level layer: the only thing beneath the override is the file.
+    expect(version.inherited).toMatchObject({ title: 'Work', authors: [], description: '', bookmeta: {} })
     expect((await listLibraryVersionEntries(memberId, libraryId, {})).items[0].bookmeta).toEqual({ identifier: 'keep' })
     expect((await getLibraryVersionPublication(memberId, created.bookVersionId!))?.bookmeta).toEqual({ identifier: 'keep' })
     await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, { meta: {} })
-    expect((await getCatalogBook(memberId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta.publisher).toBe('Work Press')
+    expect((await getCatalogBook(memberId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta).toEqual({})
   })
 
-  it('merges version meta over work meta and the revision bookmeta', async () => {
+  it('merges version meta over the parsed bookmeta and ignores a leftover work layer', async () => {
     const created = await uploadCatalogBook(libraryId, ownerId, txtFile('v.txt', '第一章\n甲'), { title: 'Edition' })
-    await updateCatalogBook(ownerId, libraryId, created.libraryBookId, {
-      meta: { publisher: 'Work Press', language: 'zh' },
-    })
+    // A value from the retired work-defaults model: no editor can reach it any
+    // more, so reading it would show a publisher nobody could change or clear.
+    db.update(schema.libraryBooks).set({ meta: { publisher: 'Stale Press', language: 'zh' } })
+      .where(eq(schema.libraryBooks.id, created.libraryBookId)).run()
     await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, {
       meta: { publisher: 'Edition Press' },
     })
-    expect((await getCatalogBook(ownerId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
-      .toMatchObject({ publisher: 'Edition Press', language: 'zh' })
-    // Raw layers ride along for editors; display reads `effective`.
     const layered = await getCatalogBook(ownerId, libraryId, created.libraryBookId)
-    expect(layered.meta).toMatchObject({ publisher: 'Work Press', language: 'zh' })
+    expect(layered.versions[0].effective.bookmeta).toMatchObject({ publisher: 'Edition Press' })
+    expect(layered.versions[0].effective.bookmeta).not.toHaveProperty('language')
+    // Raw layers ride along for editors; display reads `effective`.
+    expect(layered.meta).toMatchObject({ publisher: 'Edition Press' })
     expect(layered.versions[0].meta).toMatchObject({ publisher: 'Edition Press' })
-    // Null clears the version override back to the work default.
+    // Null clears the version override back to the file, never to the work row.
     await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, { meta: null })
-    expect((await getCatalogBook(ownerId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
-      .toMatchObject({ publisher: 'Work Press', language: 'zh' })
+    const cleared = await getCatalogBook(ownerId, libraryId, created.libraryBookId)
+    expect(cleared.versions[0].effective.bookmeta).not.toHaveProperty('publisher')
+    expect(cleared.versions[0].inherited.bookmeta).not.toHaveProperty('publisher')
     await expect(updateCatalogVersion(memberId, libraryId, created.libraryBookId, created.versionLinkId!, { meta: {} }))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
@@ -1020,96 +1036,12 @@ describe('shared library catalog', () => {
       ownerId, libraryId, created.libraryBookId, created.versionLinkId!,
       new File(['not an image'], 'cover.bin', { type: 'application/octet-stream' }),
     )).rejects.toMatchObject({ code: 'UNSUPPORTED_FORMAT' })
-    // Clearing the version cover reveals the work cover underneath.
+    // Clearing the version cover clears the projected work cover too.
     const removed = await removeCatalogVersionCover(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
     expect(removed.coverKey).toBeNull()
-    expect(removed.effective.coverKey).toBe(workCovered.coverKey)
+    expect(removed.effective.coverKey).toBeNull()
     await expect(removeCatalogVersionCover(memberId, libraryId, created.libraryBookId, created.versionLinkId!))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
-  })
-
-  it('resets version overrides and restores the parsed bookmeta', async () => {
-    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('r.txt', '第一章\n甲'), { title: 'Reset Me' })
-    await updateCatalogVersion(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, {
-      title: 'Edited Title', author: 'Edited Author', description: 'Edited desc', meta: { publisher: 'Edited Press' },
-    })
-    await updateCatalogVersionCover(
-      ownerId, libraryId, created.libraryBookId, created.versionLinkId!,
-      new File([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'cover.png', { type: 'image/png' }),
-    )
-    // Pollute the revision bookmeta to prove the reset re-parses from the file.
-    const revision = db.select().from(schema.contentRevisions)
-      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all().at(0)!
-    db.update(schema.contentRevisions)
-      .set({ meta: { ...((revision.meta ?? {}) as Record<string, unknown>), bookmeta: { publisher: 'Bogus' } } })
-      .where(eq(schema.contentRevisions.id, revision.id)).run()
-    // Stored content is EPUB bytes (TXT is converted at upload), so the
-    // reset re-parses through an EPUB parser like the runtime does.
-    registerParser({
-      match: (fileName) => fileName.toLowerCase().endsWith('.epub'),
-      parse: async () => ({
-        meta: { title: 'Parsed', bookmeta: { publisher: 'Parsed Press' } },
-        chapters: [],
-      }),
-    })
-    const reset = await resetCatalogVersionMetadata(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
-    const version = reset.versions[0]!
-    expect(version.title).toBeNull()
-    expect(version.author).toBeNull()
-    expect(version.description).toBeNull()
-    expect(version.coverKey).toBeNull()
-    expect(version.effective.title).toBe('Reset Me')
-    expect(version.effective.bookmeta).toMatchObject({ publisher: 'Parsed Press' })
-    expect(version.effective.bookmeta).not.toMatchObject({ publisher: 'Bogus' })
-    expect(version.effective.fileName).toBe('r.txt')
-    await expect(resetCatalogVersionMetadata(memberId, libraryId, created.libraryBookId, created.versionLinkId!))
-      .rejects.toMatchObject({ code: 'FORBIDDEN' })
-  })
-
-  it('appends a version revision instead of overwriting when the catalog parse differs', async () => {
-    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('s.txt', '第一章\n甲'), { title: 'Twin' })
-    const stored = db.select().from(schema.contentRevisions)
-      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
-    expect(stored).toHaveLength(1)
-    db.update(schema.contentRevisions)
-      .set({ meta: { ...((stored[0]!.meta ?? {}) as Record<string, unknown>), bookmeta: { publisher: 'Bogus' } } })
-      .where(eq(schema.contentRevisions.id, stored[0]!.id)).run()
-    registerParser({
-      match: (fileName) => fileName.toLowerCase().endsWith('.epub'),
-      parse: async () => ({
-        meta: { title: 'Parsed', bookmeta: { publisher: 'Parsed Press' } },
-        chapters: [],
-      }),
-    })
-    await resetCatalogVersionMetadata(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
-    const rows = db.select().from(schema.contentRevisions)
-      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
-      .sort((a, b) => a.revisionNo - b.revisionNo)
-    expect(rows).toHaveLength(2)
-    expect(rows[1]!.blobKey).toBe(rows[0]!.blobKey)
-    expect((rows[0]!.meta as Record<string, unknown>).bookmeta).toMatchObject({ publisher: 'Bogus' })
-    expect((rows[1]!.meta as Record<string, unknown>).bookmeta).toMatchObject({ publisher: 'Parsed Press' })
-  })
-
-  it('creates no version revision when the catalog parse is identical', async () => {
-    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('t.txt', '第一章\n甲'), { title: 'Twin Same' })
-    const stored = db.select().from(schema.contentRevisions)
-      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all().at(0)!
-    // Echo the winning parser: store exactly what the reset parse returns, so
-    // the reset is a guaranteed no-op regardless of parser registration order.
-    const parser = getParser(stored.blobKey, '')!
-    const parsed = await parser.parse(await storage.getStorage().get(stored.blobKey))
-    const parsedBookmeta = parsed.meta.bookmeta ?? {}
-    db.update(schema.contentRevisions)
-      .set({ meta: { ...((stored.meta ?? {}) as Record<string, unknown>), bookmeta: parsedBookmeta } })
-      .where(eq(schema.contentRevisions.id, stored.id)).run()
-    await resetCatalogVersionMetadata(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
-    const rows = db.select().from(schema.contentRevisions)
-      .where(eq(schema.contentRevisions.bookVersionId, created.bookVersionId)).all()
-    expect(rows).toHaveLength(1)
-    expect(db.select().from(schema.activityEvents)
-      .where(eq(schema.activityEvents.workId, created.libraryBookId)).all()
-      .filter((event) => event.eventType === 'revision.published')).toHaveLength(0)
   })
 
   it('pushes the linked private draft to its city version', async () => {
@@ -1169,6 +1101,10 @@ describe('shared library catalog', () => {
     // A version's declared format is part of its content identity and readers
     // branch on it, so a push may only refresh a same-format version — and one
     // work can legitimately hold both formats side by side.
+    registerParser({
+      match: (fileName) => fileName.endsWith('.epub'),
+      parse: async () => ({ meta: { title: 'Other' }, chapters: [] }),
+    })
     const draft = await uploadBook(ownerId, txtFile('draft.txt', '第一章\n原稿'))
     const pub = await publishPrivateBook(ownerId, libraryId, { bookId: draft.book.id })
     const epubDraft = await uploadBook(ownerId, new File([new Uint8Array([80, 75, 3, 4])], 'other.epub', { type: 'application/epub+zip' }))
@@ -1695,5 +1631,113 @@ describe('shared library catalog', () => {
       { sourceLibraryId: bRow.sourceLibraryId, sourceLibraryBookVersionId: bRow.sourceLibraryBookVersionId },
       { userId: memberId },
     )).toMatchObject({ readable: false, sourceLibraryId: libraryId, sourceLibraryBookVersionId: source.versionLinkId })
+  })
+
+  it('applies category recommendations in a shared catalog from single and batch writes', async () => {
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('rec-1.txt', '第一章\n甲'), { title: 'Rec One' })
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('rec-2.txt', '第一章\n乙'), { title: 'Rec Two' })
+
+    const single = await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { categoryTemplateKey: 'fiction.science-fiction' })
+    expect(single.categoryId).not.toBeNull()
+    const recommended = db.select().from(schema.libraryCategories)
+      .where(eq(schema.libraryCategories.id, single.categoryId!)).get()!
+    expect(recommended.name).toBe('科幻小说')
+    expect(db.select().from(schema.libraryCategories)
+      .where(eq(schema.libraryCategories.name, '小说')).all()).toHaveLength(1)
+
+    await organizeCatalogBatch(ownerId, libraryId, {
+      ids: [second.libraryBookId], categoryTemplateKey: 'literature.poetry', addTagIds: [], removeTagIds: [],
+    })
+    const batched = await getCatalogBook(ownerId, libraryId, second.libraryBookId)
+    expect(batched.categoryId).not.toBeNull()
+    const batchLeaf = db.select().from(schema.libraryCategories)
+      .where(eq(schema.libraryCategories.id, batched.categoryId!)).get()!
+    expect(batchLeaf.name).toBe('诗歌')
+    // The batch shelf restriction is unchanged: still private libraries only.
+    await expect(organizeCatalogBatch(ownerId, libraryId, {
+      ids: [second.libraryBookId], shelfId: 'shelf_missing', addTagIds: [], removeTagIds: [],
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+
+  it('projects the default version metadata onto the shared work row, but not a non-default version', async () => {
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('proj-a.txt', '第一章\n甲'), { title: 'Base Title', author: 'Base Author' })
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('proj-b.txt', '第一章\n乙'), { libraryBookId: first.libraryBookId })
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { defaultVersionLinkId: first.versionLinkId! })
+
+    await updateCatalogVersion(ownerId, libraryId, first.libraryBookId, first.versionLinkId!, {
+      title: 'Lead Title', authors: ['Lead One', 'Lead Two'], description: 'Lead description',
+    })
+    const projected = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, first.libraryBookId)).get()!
+    expect(projected.title).toBe('Lead Title')
+    expect(projected.author).toBe('Lead One')
+    expect(projected.authors).toEqual(['Lead One', 'Lead Two'])
+    expect(projected.description).toBe('Lead description')
+
+    await updateCatalogVersion(ownerId, libraryId, first.libraryBookId, second.versionLinkId!, {
+      title: 'Other Title', author: 'Other Author', description: 'Other description',
+    })
+    const unchanged = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, first.libraryBookId)).get()!
+    expect(unchanged.title).toBe('Lead Title')
+    expect(unchanged.author).toBe('Lead One')
+    expect(unchanged.authors).toEqual(['Lead One', 'Lead Two'])
+    expect(unchanged.description).toBe('Lead description')
+  })
+
+  it('re-projects the work row when the default display version changes', async () => {
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('switch-a.txt', '第一章\n甲'), { title: 'Old Title', author: 'Old Author' })
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('switch-b.txt', '第一章\n乙'), { libraryBookId: first.libraryBookId })
+    await updateCatalogVersion(ownerId, libraryId, first.libraryBookId, second.versionLinkId!, {
+      title: 'New Default Title', authors: ['New Author'], description: 'New default description',
+    })
+    // The oldest version leads until the pointer is switched.
+    expect((await getCatalogBook(ownerId, libraryId, first.libraryBookId)).title).toBe('Old Title')
+
+    await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { defaultVersionLinkId: second.versionLinkId! })
+    const switched = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, first.libraryBookId)).get()!
+    expect(switched.title).toBe('New Default Title')
+    expect(switched.author).toBe('New Author')
+    expect(switched.authors).toEqual(['New Author'])
+    expect(switched.description).toBe('New default description')
+  })
+
+  it('clears the projected work cover when the default version cover is removed', async () => {
+    const created = await uploadCatalogBook(libraryId, ownerId, txtFile('cover-proj.txt', '第一章\n甲'), { title: 'Cover Projection' })
+    const versionPng = new File(
+      [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x03])],
+      'projection-cover.png', { type: 'image/png' },
+    )
+    await updateCatalogVersionCover(ownerId, libraryId, created.libraryBookId, created.versionLinkId!, versionPng)
+    const covered = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, created.libraryBookId)).get()!
+    expect(covered.coverKey).toMatch(/\.cover\.png$/)
+
+    await removeCatalogVersionCover(ownerId, libraryId, created.libraryBookId, created.versionLinkId!)
+    const cleared = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, created.libraryBookId)).get()!
+    expect(cleared.coverKey).toBeNull()
+    expect((await getCatalogBook(ownerId, libraryId, created.libraryBookId)).versions[0].effective.coverKey).toBeNull()
+  })
+
+  it('leaves private-library work rows untouched by the shared projection', async () => {
+    const privateLibraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: privateLibraryId, userId: ownerId, type: 'private', name: 'Mine',
+      description: '', visibility: null, createdAt: 1, updatedAt: 1,
+    }).run()
+    const created = await uploadCatalogBook(privateLibraryId, ownerId, txtFile('private-proj.txt', '第一章\n甲'), {
+      title: 'Private Work', author: 'Private Author',
+    })
+    const before = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, created.libraryBookId)).get()!
+
+    await updateCatalogVersion(ownerId, privateLibraryId, created.libraryBookId, created.versionLinkId!, {
+      title: 'Version Override', author: 'Version Author', description: 'Version description',
+    })
+    const after = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, created.libraryBookId)).get()!
+    expect(after.title).toBe(before.title)
+    expect(after.author).toBe(before.author)
+    expect(after.authors).toEqual(before.authors)
+    expect(after.description).toBe(before.description)
+    expect(after.coverKey).toBe(before.coverKey)
+    // The version override still resolves through the effective merge.
+    expect((await getCatalogBook(ownerId, privateLibraryId, created.libraryBookId)).versions[0].effective.title)
+      .toBe('Version Override')
   })
 })

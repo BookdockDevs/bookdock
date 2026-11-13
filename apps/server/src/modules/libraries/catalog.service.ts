@@ -20,12 +20,10 @@ import { AppError } from '../../middleware/error'
 import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
 import { issueUndoReceipt } from '../../lib/undo'
-import { readingCompatibleRevisions } from '../../lib/reading-coverage'
 import { getStorage } from '../../storage'
-import { getParser } from '../../formats/registry'
 import { blobKey, coverThumbnailKey, detectImageExtension, generateCoverThumbnail } from '../../lib/cover'
 import { sha256 } from '../../lib/hash'
-import { assertLibraryBrowsable, deleteOrphanedBookVersions, getLibraryTrashSettings, getOwnsSourceVersionIds, getMaintainableVersionLinkIds as getMaintainableLinkIds, isLibraryManager, isLibraryTrashEnabled, requireLibraryManager, requireLibraryOwner, assertCanContribute, assertMutableContent, resolveContributorRelation } from './library-access'
+import { assertLibraryBrowsable, deleteOrphanedBookVersions, getLibraryTrashSettings, getOwnsSourceVersionIds, getMaintainableVersionLinkIds as getMaintainableLinkIds, isLibraryManager, isLibraryTrashEnabled, requireLibraryManager, requireLibraryOwner, assertCanContribute, resolveContributorRelation } from './library-access'
 import {
   isWorkEffectivelyHidden,
   classifyWorkHidden,
@@ -78,12 +76,108 @@ function effectiveBookmeta(...layers: object[]): Record<string, unknown> {
   return Object.fromEntries(Object.entries(Object.assign({}, ...layers)).filter(([, value]) => value !== null))
 }
 
+/**
+ * Publication metadata layers for one version: parsed file, then the version's
+ * own overrides.
+ *
+ * Shared catalogs have no work-level layer. The work row is only a projection
+ * of the default version, and nothing writes its `meta` any more (every editor
+ * goes through `updateCatalogVersion`), so reading it back would fold the
+ * projection in as a stale middle layer: clearing a version override would
+ * reveal an old work value that the UI can neither show nor delete.
+ *
+ * Private libraries keep the work level: there it is the book's own meta (toc
+ * rules, chapters, deletion flags), not a publication layer.
+ */
+function resolveBookmeta(
+  shared: boolean,
+  revisionBookmeta: object | undefined,
+  workMeta: object | null,
+  versionMeta: object | null,
+): Record<string, unknown> {
+  return shared
+    ? effectiveBookmeta(revisionBookmeta ?? {}, versionMeta ?? {})
+    : effectiveBookmeta(revisionBookmeta ?? {}, workMeta ?? {}, versionMeta ?? {})
+}
+
 function getWork(libraryId: string, libraryBookId: string) {
   const db = getDb()
   const work = db.select().from(libraryBooks)
     .where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
   if (!work) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
   return work
+}
+
+function isSharedLibrary(db: Pick<ReturnType<typeof getDb>, 'select'>, libraryId: string) {
+  return db.select({ type: libraries.type }).from(libraries)
+    .where(eq(libraries.id, libraryId)).get()?.type === 'shared'
+}
+
+/** The version the work row is projected from: the pointer, else the oldest. */
+function resolveLeadLink(
+  db: Pick<ReturnType<typeof getDb>, 'select'>,
+  libraryId: string,
+  libraryBookId: string,
+) {
+  const work = db.select({ defaultVersionLinkId: libraryBooks.defaultVersionLinkId }).from(libraryBooks)
+    .where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
+  if (!work) return undefined
+  const links = db.select().from(libraryBookVersions)
+    .where(eq(libraryBookVersions.libraryBookId, libraryBookId))
+    .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
+  if (links.length === 0) return undefined
+  return (work.defaultVersionLinkId
+    ? links.find((link) => link.id === work.defaultVersionLinkId)
+    : undefined) ?? links[0]
+}
+
+/**
+ * Shared catalogs keep these scalars as a projection of the default version:
+ * the work row's title/author/authors/description/coverKey mirror the lead
+ * version's values, so it is not a metadata layer at all — editing the work is
+ * editing the default version. Private libraries keep the work row as the
+ * source of truth and are left untouched.
+ *
+ * The copy is one-way. Nothing here reads the current work row back into the
+ * projection (except the NOT NULL text columns, which cannot be nulled); that
+ * fallback would make the row an input to itself and let a stale value survive
+ * a lead switch or a cover removal.
+ *
+ * Accepts either the db or an open write transaction; it never opens a
+ * transaction and never awaits, so callers run it inside the same transaction
+ * as the version-row write it reflects.
+ */
+function syncWorkProjection(
+  db: Pick<ReturnType<typeof getDb>, 'select' | 'update'>,
+  libraryId: string,
+  libraryBookId: string,
+) {
+  const work = db.select().from(libraryBooks)
+    .where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
+  if (!work) return
+  const library = db.select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()
+  if (library?.type !== 'shared') return
+  const links = db.select().from(libraryBookVersions)
+    .where(eq(libraryBookVersions.libraryBookId, libraryBookId))
+    .orderBy(libraryBookVersions.createdAt, libraryBookVersions.id).all()
+  if (links.length === 0) return
+  const lead = (work.defaultVersionLinkId
+    ? links.find((link) => link.id === work.defaultVersionLinkId)
+    : undefined) ?? links[0]!
+  db.update(libraryBooks).set({
+    // Pure copy: the work row never feeds the projection. Reading it here
+    // would fold the previous projection back in, so a lead switch to a
+    // version without its own cover would resurrect the old lead's artwork.
+    // The three text columns are NOT NULL, so a version that has never been
+    // written keeps the current value instead of breaking the update; the
+    // startup backfill fills them in before the first write.
+    title: lead.title ?? work.title,
+    author: lead.author ?? work.author,
+    authors: lead.authors ?? work.authors ?? [],
+    description: lead.description ?? work.description,
+    coverKey: lead.coverKey,
+    updatedAt: Date.now(),
+  }).where(eq(libraryBooks.id, libraryBookId)).run()
 }
 
 /**
@@ -101,6 +195,10 @@ function toCatalogVersion(
   collectedVersionIds?: ReadonlySet<string>,
   ownsSourceVersionIds?: ReadonlySet<string>,
   maintainableVersionLinkIds?: ReadonlySet<string>,
+  // Shared catalogs project the work row from the default version, so a
+  // version's own null cover means "no cover" rather than "inherit". Private
+  // libraries keep the work row as the source and do inherit it.
+  workRowIsProjection = false,
 ): CatalogVersion {
   const version = facts.versions.get(link.bookVersionId)
   const revision = facts.revisions.get(link.bookVersionId)
@@ -126,19 +224,21 @@ function toCatalogVersion(
     // resolved value is never written back onto the version row.
     inherited: {
       title: work.title, authors: work.authors ?? [], description: work.description,
-      bookmeta: effectiveBookmeta(revisionMeta.bookmeta ?? {}, work.meta ?? {}),
+      // With no work-level layer, the only thing a version inherits is the
+      // parsed file — the same value a cleared override falls back to.
+      bookmeta: resolveBookmeta(workRowIsProjection, revisionMeta.bookmeta, work.meta, null),
     },
     effective: {
       title: link.title ?? work.title,
       author: link.author ?? work.author,
       authors: link.authors ?? work.authors ?? [],
       description: link.description ?? work.description,
-      coverKey: link.coverKey ?? work.coverKey,
+      coverKey: workRowIsProjection ? link.coverKey : (link.coverKey ?? work.coverKey),
       coverPaletteKey: typeof revisionMeta.coverPaletteKey === 'string' ? revisionMeta.coverPaletteKey : null,
-      // Version wins over work wins over parsed file: a version with its own
-      // publication metadata is a distinct edition, and clearing an override
-      // layer reveals the one beneath it.
-      bookmeta: effectiveBookmeta(revisionMeta.bookmeta ?? {}, work.meta ?? {}, link.meta ?? {}),
+      // Version wins over the parsed file: a version with its own publication
+      // metadata is a distinct edition, and clearing an override reveals the
+      // file's value (shared) or the work-level one (private).
+      bookmeta: resolveBookmeta(workRowIsProjection, revisionMeta.bookmeta, work.meta, link.meta),
       fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
     },
     collected: collectedVersionIds?.has(link.bookVersionId) ?? false,
@@ -163,17 +263,20 @@ function toCatalogVersion(
 function toCatalogBook(
   work: typeof libraryBooks.$inferSelect,
   links: typeof libraryBookVersions.$inferSelect[],
-  tags: CatalogBookTag[] = [],
-  facts?: { versions: Map<string, typeof bookVersions.$inferSelect>; revisions: Map<string, typeof contentRevisions.$inferSelect> },
-  collectedVersionIds?: ReadonlySet<string>,
-  ownsSourceVersionIds?: ReadonlySet<string>,
-  maintainableVersionLinkIds?: ReadonlySet<string>,
+  tags: CatalogBookTag[],
+  facts: { versions: Map<string, typeof bookVersions.$inferSelect>; revisions: Map<string, typeof contentRevisions.$inferSelect> },
+  collectedVersionIds: ReadonlySet<string>,
+  ownsSourceVersionIds: ReadonlySet<string> | undefined,
+  maintainableVersionLinkIds: ReadonlySet<string>,
   // Managers receive hidden rows; members only ever see visible works, so
   // their effective flag stays false without paying for a taxonomy load.
-  managerView = false,
+  managerView: boolean,
   // List paths preload one taxonomy for the page and pass it down; single-work
   // reads leave it absent and pay for one load here instead.
-  taxonomy?: LibraryHiddenTaxonomy,
+  taxonomy: LibraryHiddenTaxonomy | undefined,
+  // Decides whether a version's null cover means "no cover" (shared: the work
+  // row is only a projection) or "inherit the work cover" (private).
+  libraryType: 'shared' | 'private',
 ): CatalogBook {
   const resolved = facts ?? { versions: new Map(), revisions: new Map() }
   // Default display version leads: cards, rows and the detail dialog read
@@ -192,13 +295,16 @@ function toCatalogBook(
     id: work.id,
     libraryId: work.libraryId,
     categoryId: work.categoryId,
+    // Shared catalogs keep these scalars as a projection of the default
+    // version; private libraries keep them as editable work defaults.
     title: work.title,
     author: work.author,
     authors: work.authors ?? [],
     description: work.description,
     coverKey: work.coverKey,
-    // Raw override layer for editors; consumers read each version's `effective`.
-    meta: (work.meta ?? {}) as Record<string, unknown>,
+    // The default version's overrides in a shared catalog (the work row is only
+    // its projection); a private library's own work-level meta.
+    meta: ((libraryType === 'shared' ? ordered[0]?.meta : work.meta) ?? {}) as Record<string, unknown>,
     // Work-level hide; members never receive hidden works (filtered above),
     // managers receive them badged.
     hidden: work.hidden,
@@ -210,7 +316,10 @@ function toCatalogBook(
     defaultVersionLinkId: work.defaultVersionLinkId ?? null,
     deletedAt: work.deletedAt ?? null,
     tags,
-    versions: ordered.map((link) => toCatalogVersion(work, link, resolved, collectedVersionIds, ownsSourceVersionIds, maintainableVersionLinkIds)),
+    versions: ordered.map((link) => toCatalogVersion(
+      work, link, resolved, collectedVersionIds, ownsSourceVersionIds, maintainableVersionLinkIds,
+      libraryType === 'shared',
+    )),
     createdAt: work.createdAt,
     updatedAt: work.updatedAt,
   }
@@ -412,6 +521,7 @@ export async function listCatalogBooks(
         new Set(workLinks.map((link) => link.id)),
         true,
         pageTaxonomy,
+        'shared',
       )
     })
     return { items, total, page, pageSize }
@@ -502,6 +612,7 @@ export async function listCatalogBooks(
       maintainableLinkIds,
       includeUnlisted,
       pageTaxonomy,
+      'shared',
     )),
     total,
     page,
@@ -568,6 +679,8 @@ export async function listLibraryVersionEntries(
   const db = getDb()
   await assertLibraryBrowsable(actorId, libraryId)
   const manager = await isLibraryManager(actorId, libraryId)
+  // One lookup decides both the cover fallback and the bookmeta layers below.
+  const shared = isSharedLibrary(db, libraryId)
   const page = Math.max(1, params.page ?? 1)
   const pageSize = Math.min(100, Math.max(1, params.pageSize ?? CATALOG_PAGE_SIZE))
   // Latest-revision meta, so description/series/cover palette follow the
@@ -623,7 +736,12 @@ export async function listLibraryVersionEntries(
     versionDescription: libraryBookVersions.description,
     format: bookVersions.format,
     size: bookVersions.size,
-    coverKey: sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
+    // A shared version's cover is its own: the work cover is only the default
+    // version's projection, so falling back onto it would lend the lead's
+    // artwork to a sibling edition. Private libraries still inherit it.
+    coverKey: shared
+      ? sql<string | null>`${libraryBookVersions.coverKey}`
+      : sql<string | null>`coalesce(${libraryBookVersions.coverKey}, ${libraryBooks.coverKey})`,
     categoryId: libraryBooks.categoryId,
     categoryName: libraryCategories.name,
     shelfName: shelves.name,
@@ -713,9 +831,9 @@ export async function listLibraryVersionEntries(
         shelfName: row.shelfName ?? null,
         tags: tagNames.get(row.libraryBookId) ?? [],
         // Merged in JS, the same way toCatalogVersion does it: SQLite's
-        // json_patch applies one patch at a time, and the three layers live in
+        // json_patch applies one patch at a time, and the layers live in
         // different tables anyway.
-        bookmeta: effectiveBookmeta(revisionMeta.bookmeta ?? {}, row.workMeta ?? {}, row.versionMeta ?? {}),
+        bookmeta: resolveBookmeta(shared, revisionMeta.bookmeta, row.workMeta, row.versionMeta),
         fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
         kind: row.kind,
         hidden: row.hidden,
@@ -755,6 +873,7 @@ export async function getLibraryVersionPublication(
       if (err instanceof AppError) continue
       throw err
     }
+    const shared = isSharedLibrary(db, candidate.libraryId)
     const row = db.select({
       versionName: libraryBookVersions.name,
       versionTitle: libraryBookVersions.title,
@@ -808,8 +927,8 @@ export async function getLibraryVersionPublication(
       categoryName: row.categoryName ?? null,
       tags: tagNames,
       description: row.versionDescription ?? row.workDescription,
-      // Same version-over-work-over-parsed merge the listing applies.
-      bookmeta: effectiveBookmeta(revisionMeta.bookmeta ?? {}, row.workMeta ?? {}, row.versionMeta ?? {}),
+      // Same version-over-file merge the listing applies.
+      bookmeta: resolveBookmeta(shared, revisionMeta.bookmeta, row.workMeta, row.versionMeta),
       fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
     }
   }
@@ -819,6 +938,10 @@ export async function getLibraryVersionPublication(
 export async function getCatalogBook(actorId: string, libraryId: string, libraryBookId: string) {
   const db = getDb()
   await assertLibraryBrowsable(actorId, libraryId)
+  // One cheap lookup decides whether a version's null cover means "none"
+  // (shared) or "inherit the work cover" (private).
+  const libraryType = db.select({ type: libraries.type }).from(libraries)
+    .where(eq(libraries.id, libraryId)).get()?.type ?? 'private'
   const includeUnlisted = await isLibraryManager(actorId, libraryId)
   const work = getWork(libraryId, libraryBookId)
   // Trash binds every relation in the normal read: trashed works surface only
@@ -845,29 +968,54 @@ export async function getCatalogBook(actorId: string, libraryId: string, library
     ownsSourceVersionIds,
     maintainableLinkIds,
     includeUnlisted,
+    undefined,
+    libraryType,
   )
 }
 
-/** Work-level defaults (5.3). Every version that inherits them follows along. */
+/**
+ * Work-level fields. In a shared catalog the work row is a projection of the
+ * default version, so a "work" rename is a rename of that version — anything
+ * written straight onto the row would be discarded by the next projection.
+ * Private libraries keep the work row as the editable source.
+ */
 export async function updateCatalogBook(actorId: string, libraryId: string, libraryBookId: string, patch: CatalogBookUpdateReq) {
   const db = getDb()
   await requireLibraryManager(actorId, libraryId)
   const work = getWork(libraryId, libraryBookId)
+  const projected = isSharedLibrary(db, libraryId)
   if (patch.categoryId !== undefined && patch.categoryTemplateKey !== undefined) {
     throw new AppError('VALIDATION_ERROR', 'Choose an existing category or a recommendation')
   }
   const templatePath = patch.categoryTemplateKey ? categoryTemplatePath(patch.categoryTemplateKey) : undefined
   if (patch.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
-  if (templatePath && db.select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()?.type !== 'private') {
-    throw new AppError('VALIDATION_ERROR', 'Category recommendations are only available in private libraries')
-  }
   const updates: Partial<typeof libraryBooks.$inferInsert> = { updatedAt: Date.now() }
-  if (patch.title !== undefined) updates.title = patch.title
-  if (patch.author !== undefined) updates.author = patch.author
-  if (patch.description !== undefined) updates.description = patch.description
+  // Redirected to the default version when the row is a projection.
+  const leadPatch: Partial<typeof libraryBookVersions.$inferInsert> = {}
+  const fieldTarget: {
+    title?: string | null
+    author?: string | null
+    authors?: string[] | null
+    description?: string | null
+  } = projected ? leadPatch : updates
+  if (patch.title !== undefined) fieldTarget.title = patch.title
+  if (patch.author !== undefined) fieldTarget.author = patch.author
+  if (patch.description !== undefined) fieldTarget.description = patch.description
+  if (patch.authors !== undefined) {
+    // Same mirror rule as the version editor: the list wins, and the scalar
+    // follows its first element.
+    fieldTarget.authors = patch.authors
+    fieldTarget.author = patch.authors[0] ?? ''
+  }
   if (patch.hidden !== undefined) updates.hidden = patch.hidden
   if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? Date.now() : null
-  if (patch.meta !== undefined) updates.meta = patch.meta
+  // Same rule as the scalars above: in a shared catalog the work patch targets
+  // the default version, because the work row's meta is nobody's source. A
+  // private library keeps editing its own work-level meta.
+  if (patch.meta !== undefined) {
+    if (projected) leadPatch.meta = patch.meta
+    else updates.meta = patch.meta
+  }
   if (patch.defaultVersionLinkId !== undefined) {
     // The default must be a version of this work: getVersionLink scopes the
     // lookup to this library and work, so a foreign id reads as NOT_FOUND
@@ -890,6 +1038,18 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
   db.transaction((tx) => {
     if (templatePath) updates.categoryId = resolveOrCreateCategoryPath(tx, libraryId, actorId, templatePath)
     tx.update(libraryBooks).set(updates).where(eq(libraryBooks.id, work.id)).run()
+    // Work fields belong to the default version in a shared catalog, so they
+    // are written there and then projected back onto the row.
+    const wroteLead = Object.keys(leadPatch).length > 0
+    if (wroteLead) {
+      const lead = resolveLeadLink(tx, libraryId, work.id)
+      if (!lead) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+      tx.update(libraryBookVersions).set({ ...leadPatch, updatedAt: Date.now() })
+        .where(eq(libraryBookVersions.id, lead.id)).run()
+    }
+    // A new default version changes the lead, so re-project the work row from
+    // the (now updated) pointer instead of keeping the old edition's values.
+    if (patch.defaultVersionLinkId !== undefined || wroteLead) syncWorkProjection(tx, libraryId, work.id)
     if (patch.categoryId !== undefined || templatePath) {
       const nextCategoryId = updates.categoryId ?? null
       for (const categoryId of new Set([work.categoryId, nextCategoryId])) {
@@ -968,7 +1128,6 @@ export async function organizeCatalogBatch(actorId: string, libraryId: string, i
   }
   const templatePath = input.categoryTemplateKey ? categoryTemplatePath(input.categoryTemplateKey) : undefined
   if (input.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
-  if (templatePath && libraryType !== 'private') throw new AppError('VALIDATION_ERROR', 'Category recommendations are only available in private libraries')
   if (input.shelfId !== undefined && libraryType !== 'private') throw new AppError('VALIDATION_ERROR', 'Shelves are only available in private libraries')
   if (input.shelfId && !db.select({ id: shelves.id }).from(shelves)
     .where(and(eq(shelves.id, input.shelfId), eq(shelves.libraryId, libraryId))).get()) throw new AppError('SHELF_NOT_FOUND')
@@ -1016,8 +1175,11 @@ export async function organizeCatalogBatch(actorId: string, libraryId: string, i
 }
 
 /**
- * Work cover management: the work row owns its coverKey and versions inherit
- * it through the null-override rule, so one write re-covers every version.
+ * Legacy work-cover endpoints, kept for API compatibility. In shared catalogs
+ * the work row is only a projection, so "the work's cover" means the default
+ * version's cover and these write the lead link (anything else would be
+ * discarded by the next projection). Private libraries still own the work
+ * cover, and versions with a null coverKey inherit it there.
  * Manager-only like every other catalog write; mirrors the private-book cover
  * flow (5MB cap, content-hash key, derived thumbnail).
  */
@@ -1025,6 +1187,9 @@ export async function updateCatalogBookCover(actorId: string, libraryId: string,
   const db = getDb()
   await requireLibraryManager(actorId, libraryId)
   const work = getWork(libraryId, libraryBookId)
+  const projected = isSharedLibrary(db, libraryId)
+  const lead = projected ? resolveLeadLink(db, libraryId, libraryBookId) : undefined
+  if (projected && !lead) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
   const buffer = Buffer.from(await file.arrayBuffer())
   if (buffer.length > 5 * 1024 * 1024) throw new AppError('UPLOAD_TOO_LARGE')
   const ext = detectImageExtension(buffer)
@@ -1038,8 +1203,16 @@ export async function updateCatalogBookCover(actorId: string, libraryId: string,
   }
   const now = Date.now()
   try {
-    db.insert(blobs).values({ key: coverKey, size: buffer.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
-    db.update(libraryBooks).set({ coverKey, updatedAt: now }).where(eq(libraryBooks.id, work.id)).run()
+    db.transaction((tx) => {
+      tx.insert(blobs).values({ key: coverKey, size: buffer.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+      if (projected && lead) {
+        tx.update(libraryBookVersions).set({ coverKey, updatedAt: now })
+          .where(eq(libraryBookVersions.id, lead.id)).run()
+        syncWorkProjection(tx, libraryId, libraryBookId)
+      } else {
+        tx.update(libraryBooks).set({ coverKey, updatedAt: now }).where(eq(libraryBooks.id, work.id)).run()
+      }
+    })
   } catch (err) {
     for (const key of [coverKey, coverThumbnailKey(coverKey)]) {
       if (await storage.exists(key)) await storage.delete(key)
@@ -1053,14 +1226,26 @@ export async function removeCatalogBookCover(actorId: string, libraryId: string,
   const db = getDb()
   await requireLibraryManager(actorId, libraryId)
   const work = getWork(libraryId, libraryBookId)
+  if (isSharedLibrary(db, libraryId)) {
+    const lead = resolveLeadLink(db, libraryId, libraryBookId)
+    if (!lead) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+    db.transaction((tx) => {
+      tx.update(libraryBookVersions).set({ coverKey: null, updatedAt: Date.now() })
+        .where(eq(libraryBookVersions.id, lead.id)).run()
+      syncWorkProjection(tx, libraryId, libraryBookId)
+    })
+    return getCatalogBook(actorId, libraryId, work.id)
+  }
   db.update(libraryBooks).set({ coverKey: null, updatedAt: Date.now() }).where(eq(libraryBooks.id, work.id)).run()
   return getCatalogBook(actorId, libraryId, work.id)
 }
 
 /**
- * Version-level management (5.3/5.4): overrides and publish state. Setting a
- * field to null removes the override so the work default applies again; a
- * version is always addressable inside its own library only.
+ * Version-level management (5.3/5.4): overrides and publish state. A null
+ * override still falls back onto the work row, which shared catalogs keep as a
+ * projection of the default version rather than a second editable default;
+ * editors therefore write explicit values instead of a "follow work" action.
+ * A version is always addressable inside its own library only.
  */
 export async function updateCatalogVersion(
   actorId: string,
@@ -1096,11 +1281,12 @@ export async function updateCatalogVersion(
   }
   if (patch.description !== undefined) updates.description = patch.description
   if (patch.status !== undefined) updates.status = patch.status
-  // Version meta replaces wholesale like the work meta; null clears the
-  // override back to inheriting the work default.
+  // Version meta replaces wholesale; an editor writes null for a cleared
+  // publication field so it masks the lower layers instead of inheriting them.
   if (patch.meta !== undefined) updates.meta = patch.meta ?? {}
   db.transaction((tx) => {
     tx.update(libraryBookVersions).set(updates).where(eq(libraryBookVersions.id, link.id)).run()
+    syncWorkProjection(tx, libraryId, libraryBookId)
   })
   const book = await getCatalogBook(actorId, libraryId, libraryBookId)
   const updated = book.versions.find((v) => v.id === link.id)
@@ -1138,8 +1324,11 @@ export async function updateCatalogVersionCover(
   }
   const now = Date.now()
   try {
-    db.insert(blobs).values({ key: coverKey, size: buffer.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
-    db.update(libraryBookVersions).set({ coverKey, updatedAt: now }).where(eq(libraryBookVersions.id, link.id)).run()
+    db.transaction((tx) => {
+      tx.insert(blobs).values({ key: coverKey, size: buffer.length, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+      tx.update(libraryBookVersions).set({ coverKey, updatedAt: now }).where(eq(libraryBookVersions.id, link.id)).run()
+      syncWorkProjection(tx, libraryId, libraryBookId)
+    })
   } catch (err) {
     for (const key of [coverKey, coverThumbnailKey(coverKey)]) {
       if (await storage.exists(key)) await storage.delete(key)
@@ -1162,70 +1351,19 @@ export async function removeCatalogVersionCover(
   await requireLibraryManager(actorId, libraryId)
   getWork(libraryId, libraryBookId)
   const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
-  db.update(libraryBookVersions).set({ coverKey: null, updatedAt: Date.now() })
-    .where(eq(libraryBookVersions.id, link.id)).run()
+  db.transaction((tx) => {
+    tx.update(libraryBookVersions).set({ coverKey: null, updatedAt: Date.now() })
+      .where(eq(libraryBookVersions.id, link.id)).run()
+    // No special case: the projection copies the lead, so clearing the lead's
+    // cover clears the work cover and clearing any other version's cover
+    // leaves it alone. Request order against a default-version switch is
+    // therefore irrelevant.
+    syncWorkProjection(tx, libraryId, libraryBookId)
+  })
   const book = await getCatalogBook(actorId, libraryId, libraryBookId)
   const updated = book.versions.find((v) => v.id === link.id)
   if (!updated) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
   return updated
-}
-
-/**
- * Version metadata reset: clears every version-level override (title, author,
- * description, cover, meta) so the version inherits the work default again,
- * and restores the latest revision's parsed bookmeta from the stored file —
- * the catalog half of the private resetBookMetadata.
- */
-export async function resetCatalogVersionMetadata(
-  actorId: string,
-  libraryId: string,
-  libraryBookId: string,
-  versionLinkId: string,
-) {
-  const db = getDb()
-  await requireLibraryManager(actorId, libraryId)
-  getWork(libraryId, libraryBookId)
-  const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
-  assertMutableContent(link.kind)
-  const latestRevision = db.select().from(contentRevisions)
-    .where(eq(contentRevisions.bookVersionId, link.bookVersionId))
-    .orderBy(desc(contentRevisions.revisionNo)).all().at(0)
-  // The stored content is always EPUB bytes (TXT is converted at upload), so
-  // the blob key itself selects the parser. A missing blob skips the
-  // bookmeta restore but still clears the overrides.
-  if (latestRevision && await getStorage().exists(latestRevision.blobKey)) {
-    const parser = getParser(latestRevision.blobKey, '')
-    if (!parser) throw new AppError('UNSUPPORTED_FORMAT')
-    const parsed = await parser.parse(await getStorage().get(latestRevision.blobKey))
-    const parsedBookmeta = parsed.meta.bookmeta ?? {}
-    const storedBookmeta = ((latestRevision.meta ?? {}) as Record<string, unknown>).bookmeta ?? {}
-    if (JSON.stringify(parsedBookmeta) !== JSON.stringify(storedBookmeta)) {
-      // Same discipline as resetBookMetadata: derived metadata changes append
-      // a revision reusing the blob; an identical parse is a no-op. The new
-      // revision id moves collected pins, keeping the pin == newest invariant
-      // the unread-update flag assumes.
-      const newRevisionId = createId('rev')
-      db.transaction((tx) => {
-        tx.insert(contentRevisions).values({
-          id: newRevisionId, bookVersionId: link.bookVersionId, revisionNo: latestRevision.revisionNo + 1,
-          blobKey: latestRevision.blobKey, size: latestRevision.size,
-          wordCount: latestRevision.wordCount, chapterCount: latestRevision.chapterCount,
-          meta: { ...((latestRevision.meta ?? {}) as Record<string, unknown>), readingCompatibleRevisions: readingCompatibleRevisions(latestRevision.meta, latestRevision.id), bookmeta: parsedBookmeta },
-          createdAt: Date.now(),
-        }).run()
-        tx.update(libraryBookVersions).set({ pinnedRevisionId: newRevisionId })
-          .where(and(
-            eq(libraryBookVersions.bookVersionId, link.bookVersionId),
-            eq(libraryBookVersions.kind, 'shared'),
-          )).run()
-      })
-    }
-  }
-  db.update(libraryBookVersions).set({
-    title: null, author: null, authors: null, description: null, coverKey: null, meta: {},
-    updatedAt: Date.now(),
-  }).where(eq(libraryBookVersions.id, link.id)).run()
-  return getCatalogBook(actorId, libraryId, libraryBookId)
 }
 
 function getVersionLink(libraryId: string, libraryBookId: string, versionLinkId: string) {
@@ -1278,6 +1416,8 @@ export async function findSimilarWorks(
   const ownsSourceVersionIds = getOwnsSourceVersionIds(actorId, links)
   const maintainableLinkIds = getMaintainableVersionLinkIds(actorId, libraryId, links)
   const includeUnlisted = await isLibraryManager(actorId, libraryId)
+  const libraryType = db.select({ type: libraries.type }).from(libraries)
+    .where(eq(libraries.id, libraryId)).get()?.type ?? 'private'
   const visibleLinks = (workId: string) => links.filter(
     (link) => link.libraryBookId === workId && (includeUnlisted || link.status === 'published'),
   )
@@ -1288,7 +1428,7 @@ export async function findSimilarWorks(
     .filter(({ work }) => (includeUnlisted || visibleLinks(work.id).length > 0)
       && (includeUnlisted || !isWorkEffectivelyHidden(db, libraryId, work)))
     .map(({ work, score }) => ({
-      ...toCatalogBook(work, visibleLinks(work.id), [], facts, collectedVersionIds, ownsSourceVersionIds, maintainableLinkIds, includeUnlisted),
+      ...toCatalogBook(work, visibleLinks(work.id), [], facts, collectedVersionIds, ownsSourceVersionIds, maintainableLinkIds, includeUnlisted, undefined, libraryType),
       matchScore: score,
     }))
 }
@@ -1323,10 +1463,15 @@ export async function moveCatalogVersion(
   if (siblings.length <= 1) {
     throw new AppError('VALIDATION_ERROR', 'Move would leave the work without a version; delete it instead')
   }
-  db.update(libraryBookVersions)
-    .set({ libraryBookId: targetLibraryBookId, updatedAt: Date.now() })
-    .where(eq(libraryBookVersions.id, link.id)).run()
-  db.update(libraryBooks).set({ updatedAt: Date.now() }).where(eq(libraryBooks.id, targetLibraryBookId)).run()
+  db.transaction((tx) => {
+    tx.update(libraryBookVersions)
+      .set({ libraryBookId: targetLibraryBookId, updatedAt: Date.now() })
+      .where(eq(libraryBookVersions.id, link.id)).run()
+    tx.update(libraryBooks).set({ updatedAt: Date.now() }).where(eq(libraryBooks.id, targetLibraryBookId)).run()
+    // Both works' version sets changed, so either may have a new lead.
+    syncWorkProjection(tx, libraryId, libraryBookId)
+    syncWorkProjection(tx, libraryId, targetLibraryBookId)
+  })
   return getCatalogBook(actorId, libraryId, targetLibraryBookId)
 }
 
@@ -1592,6 +1737,9 @@ export async function deleteCatalogVersion(
       workDeleted = true
     } else {
       tx.update(libraryBooks).set({ updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
+      // Deleting the default version clears the pointer via the FK, so follow
+      // the new lead (oldest remaining version) with a fresh projection.
+      syncWorkProjection(tx, libraryId, libraryBookId)
     }
     const stillListed = tx.select({ id: libraryBookVersions.id }).from(libraryBookVersions)
       .where(eq(libraryBookVersions.bookVersionId, link.bookVersionId)).get()

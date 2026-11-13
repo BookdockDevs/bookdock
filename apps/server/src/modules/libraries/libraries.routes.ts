@@ -63,7 +63,6 @@ import {
   permanentDeleteCatalogBook,
   removeCatalogBookCover,
   removeCatalogVersionCover,
-  resetCatalogVersionMetadata,
   restoreCatalogBook,
   updateCatalogBook,
   updateCatalogBookCover,
@@ -548,13 +547,6 @@ librariesRoutes.delete('/:id/books/:bookId/versions/:versionLinkId/cover', async
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const version = await removeCatalogVersionCover(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'))
   return c.json({ data: version })
-})
-
-librariesRoutes.post('/:id/books/:bookId/versions/:versionLinkId/reset-metadata', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const book = await resetCatalogVersionMetadata(user.id, c.req.param('id'), c.req.param('bookId'), c.req.param('versionLinkId'))
-  return c.json({ data: book })
 })
 
 librariesRoutes.get('/:id/books/:bookId/versions/:versionLinkId/metadata-source', async (c) => {
