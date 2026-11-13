@@ -23,15 +23,18 @@ export function metadataFieldPatch(book: Pick<ClientLibraryBookView, 'title' | '
   return { bookmeta: metadata }
 }
 
-export function catalogMetadataFieldPatch(version: CatalogVersion, field: EditableMetadataField, value: string, seriesIndex: string, inherit: boolean): CatalogVersionUpdateReq {
-  if (field === 'title') return { title: inherit ? null : value.trim() }
-  if (field === 'authors') return { authors: inherit ? null : parseAuthorList(value) }
-  if (field === 'description') return { description: inherit ? null : value }
+/** A shared catalog version owns its own values: clearing a publication field
+ * writes an explicit null mask rather than falling back onto the work row,
+ * which is only a projection of the default version. Unrelated meta keys ride
+ * along so a single-field edit never drops what the editor cannot show. */
+export function catalogMetadataFieldPatch(version: CatalogVersion, field: EditableMetadataField, value: string, seriesIndex: string): CatalogVersionUpdateReq {
+  if (field === 'title') return { title: value.trim() }
+  if (field === 'authors') return { authors: parseAuthorList(value) }
+  if (field === 'description') return { description: value }
   const parsed = metadataFieldPatch({ title: version.effective.title, author: version.effective.author, authors: version.effective.authors }, {}, field, value, seriesIndex).bookmeta ?? {}
   const meta = { ...version.meta }
   for (const key of field === 'series' ? ['series', 'seriesIndex'] as const : [field]) {
-    if (inherit) delete meta[key]
-    else meta[key] = parsed[key] ?? null
+    meta[key] = parsed[key] ?? null
   }
   return { meta }
 }

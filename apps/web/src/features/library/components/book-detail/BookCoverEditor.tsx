@@ -18,15 +18,19 @@ interface BookCoverEditorProps {
   pendingCoverFile: File | null
   coverPreviewUrl: string | null
   saving: boolean
+  /** Overrides the derived artwork URL; `null` renders the placeholder. */
+  coverSrc?: string | null
   /** Palette picked in the draft (null = none picked yet, id-hash applies) */
-  coverPaletteId: CoverPaletteId | null
+  coverPaletteId?: CoverPaletteId | null
   onCoverFile: (file: File | undefined) => void
   onRemoveCover: () => void
-  onPaletteChange: (id: CoverPaletteId) => void
+  onPaletteChange?: (id: CoverPaletteId) => void
   toolbarVisible?: boolean
   toolbarPinned?: boolean
   fullWidth?: boolean
   allowPalette?: boolean
+  /** Keeps a caller-specific hook on the hidden file input. */
+  inputTestId?: string
 }
 
 const PALETTE_MENU_WIDTH = 176
@@ -40,7 +44,8 @@ export default function BookCoverEditor({
   pendingCoverFile,
   coverPreviewUrl,
   saving,
-  coverPaletteId,
+  coverSrc,
+  coverPaletteId = null,
   onCoverFile,
   onRemoveCover,
   onPaletteChange,
@@ -48,6 +53,7 @@ export default function BookCoverEditor({
   toolbarPinned = false,
   fullWidth = false,
   allowPalette = true,
+  inputTestId,
 }: BookCoverEditorProps) {
   const _ = useTranslation()
   const coverInputRef = useRef<HTMLInputElement>(null)
@@ -89,7 +95,7 @@ export default function BookCoverEditor({
       <div className="group relative">
         <BookCover
           book={book}
-          coverSrc={coverRemovalPending ? null : pendingCoverFile ? coverPreviewUrl : undefined}
+          coverSrc={coverRemovalPending ? null : pendingCoverFile ? coverPreviewUrl : coverSrc}
           coverPaletteId={coverPaletteId}
           spine={false}
         />
@@ -133,7 +139,7 @@ export default function BookCoverEditor({
               </svg>
             </button>
           )}
-          {!hasVisualCover && allowPalette && (
+          {!hasVisualCover && allowPalette && onPaletteChange && (
             <button
               ref={paletteAnchorRef}
               type="button"
@@ -155,6 +161,7 @@ export default function BookCoverEditor({
         </div>}
         <input
           ref={coverInputRef}
+          data-testid={inputTestId}
           type="file"
           accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
           className="hidden"
@@ -178,7 +185,7 @@ export default function BookCoverEditor({
               <button
                 key={p.id}
                 type="button"
-                onClick={() => onPaletteChange(p.id)}
+                onClick={() => onPaletteChange?.(p.id)}
                 aria-label={p.label}
                 aria-pressed={coverPaletteId === p.id}
                 className={cn(

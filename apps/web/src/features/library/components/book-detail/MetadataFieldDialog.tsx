@@ -11,9 +11,11 @@ import { notify } from '@/lib/notifications'
 import { useBookMetadataSource, useCatalogVersionMetadataSource, useUpdateBook, useUpdateCatalogVersion } from '../../hooks'
 import { catalogMetadataFieldPatch, metadataFieldPatch, type EditableMetadataField } from './metadata-field'
 import MetadataFieldAction from './MetadataFieldAction'
-import { draftFieldDiffers, canRestoreField, sourceProvenanceLabel, sourceTextForField } from './metadata-source'
+import { canRestoreField, sourceProvenanceLabel, sourceTextForField } from './metadata-source'
 import { autoGrow, draftFrom } from './types'
-import { inputClass, textareaClass } from './ui'
+import { actionInset, metaInputClass } from './ui'
+
+const fieldTextareaClass = `${metaInputClass} min-h-[88px] max-h-64 resize-none overflow-hidden leading-relaxed`
 
 interface MetadataFieldDialogProps {
   book: Pick<ClientLibraryBookView, 'id' | 'title' | 'author' | 'authors' | 'coverPaletteId' | 'clientVersion' | 'ref'>
@@ -30,7 +32,6 @@ export default function MetadataFieldDialog({ book, bookmeta, field, label, cata
   const formId = useId()
   const updateBook = useUpdateBook()
   const updateVersion = useUpdateCatalogVersion()
-  const [inherit, setInherit] = useState(false)
   const pending = catalog ? updateVersion.isPending : updateBook.isPending
   const [initial] = useState(() => draftFrom(book, bookmeta))
   const [value, setValue] = useState(initial[field])
@@ -40,9 +41,12 @@ export default function MetadataFieldDialog({ book, bookmeta, field, label, cata
   const sourceQuery = catalog ? catalogSource : privateSource
   const source = !sourceQuery.isFetching && !sourceQuery.isError ? (sourceQuery.data?.data ?? null) : null
   const patch = bookUpdateSchema.safeParse(metadataFieldPatch(book, bookmeta, field, value, seriesIndex))
-  const catalogPatch = catalog ? catalogVersionUpdateSchema.safeParse(catalogMetadataFieldPatch(catalog.version, field, value, seriesIndex, inherit)) : null
-  const changed = inherit || value !== initial[field] || (field === 'series' && seriesIndex !== initial.seriesIndex)
-  const invalid = catalog ? !catalogPatch?.success || (!inherit && !patch.success) : !patch.success
+  // A shared catalog work row is a projection of the default version, not a
+  // second set of values to fall back on: the only restore action here reads
+  // the version's own file, and every save writes that version's own values.
+  const catalogPatch = catalog ? catalogVersionUpdateSchema.safeParse(catalogMetadataFieldPatch(catalog.version, field, value, seriesIndex)) : null
+  const changed = value !== initial[field] || (field === 'series' && seriesIndex !== initial.seriesIndex)
+  const invalid = catalog ? !catalogPatch?.success : !patch.success
   const restoreLabel = source?.kind === 'shared' ? _('library.restoreFieldShared') : _('library.restoreFieldFile')
   const provenanceFor = (f: 'title' | 'authors' | 'description' | 'publisher' | 'published' | 'language' | 'isbn' | 'subjects' | 'series' | 'seriesIndex'): string => {
     const p = sourceProvenanceLabel(source, f)
@@ -51,25 +55,20 @@ export default function MetadataFieldDialog({ book, bookmeta, field, label, cata
     return _('library.sourceProvenanceFile') as string
   }
 
-  const inherited = catalog?.version.inherited
-  const inheritedValues = inherited ? { ...inherited.bookmeta, title: inherited.title, authors: inherited.authors, description: inherited.description } : null
   function fieldActions(target: typeof field | 'seriesIndex', raw: string) {
-    const current = inherit && inheritedValues ? sourceTextForField(target, inheritedValues) : raw
-    const restore = source && canRestoreField(target, current, source)
-    const follow = inheritedValues && !inherit && draftFieldDiffers(target, current, inheritedValues)
-    if (!restore && !follow) return null
+    if (!source || !canRestoreField(target, raw, source)) return null
     return <span className={`absolute right-2 flex gap-1 ${target === 'description' ? 'top-2' : 'top-1/2 -translate-y-1/2'}`}>
-      {restore && <MetadataFieldAction label={restoreLabel} provenance={provenanceFor(target)} preview={sourceTextForField(target, source.values)} disabled={pending} onApply={() => {
-        setInherit(false)
+      <MetadataFieldAction label={restoreLabel} provenance={provenanceFor(target)} preview={sourceTextForField(target, source.values)} disabled={pending} onApply={() => {
         if (target === 'seriesIndex') setSeriesIndex(sourceTextForField(target, source.values))
         else setValue(sourceTextForField(target, source.values))
-      }} />}
-      {follow && <MetadataFieldAction label={_('library.restoreFollow')} provenance={_('library.followWork')} preview={sourceTextForField(target, inheritedValues)} kind="inherit" disabled={pending} onApply={() => {
-        setInherit(true)
-        setValue(sourceTextForField(field, inheritedValues))
-        if (field === 'series') setSeriesIndex(sourceTextForField('seriesIndex', inheritedValues))
-      }} />}
+      }} />
     </span>
+  }
+
+  /** The inset only exists to keep text clear of the restore control; without
+   * that control the field must use its full width. */
+  function restoreInset(target: typeof field | 'seriesIndex', raw: string) {
+    return fieldActions(target, raw) ? ` ${actionInset}` : ''
   }
 
   async function save() {
@@ -109,9 +108,9 @@ export default function MetadataFieldDialog({ book, bookmeta, field, label, cata
 
         <div className="relative">
           {field === 'description' ? (
-            <textarea ref={autoGrow} autoFocus aria-label={label} rows={5} value={value} disabled={pending} onChange={(event) => { setInherit(false); setValue(event.target.value); autoGrow(event.target) }} className={`${textareaClass} max-h-64 overflow-y-auto! overscroll-contain pr-20`} />
+            <textarea ref={autoGrow} autoFocus aria-label={label} maxLength={4000} rows={5} value={value} disabled={pending} onChange={(event) => { setValue(event.target.value); autoGrow(event.target) }} className={`${fieldTextareaClass} overflow-y-auto! overscroll-contain${restoreInset(field, value)}`} />
           ) : (
-            <input autoFocus type="text" aria-label={label} required={field === 'title'} value={value} disabled={pending} onChange={(event) => { setInherit(false); setValue(event.target.value) }} placeholder={field === 'authors' ? _('library.authorListHint') : undefined} className={`${inputClass} pr-20`} />
+            <input autoFocus type="text" aria-label={label} required={field === 'title'} maxLength={field === 'title' ? 300 : field === 'authors' ? 500 : undefined} value={value} disabled={pending} onChange={(event) => setValue(event.target.value)} placeholder={field === 'authors' ? _('library.authorListHint') : undefined} className={`${metaInputClass}${restoreInset(field, value)}`} />
           )}
           {fieldActions(field, value)}
         </div>
@@ -119,7 +118,7 @@ export default function MetadataFieldDialog({ book, bookmeta, field, label, cata
           <div>
             <span className="mb-1 block text-xs font-medium text-stone-500">{_('library.seriesIndex')}</span>
             <div className="relative">
-              <input aria-label={_('library.seriesIndex')} type="text" inputMode="decimal" value={seriesIndex} disabled={pending} onChange={(event) => { setInherit(false); setSeriesIndex(event.target.value) }} className={`${inputClass} pr-20`} />
+              <input aria-label={_('library.seriesIndex')} type="text" inputMode="decimal" value={seriesIndex} disabled={pending} onChange={(event) => setSeriesIndex(event.target.value)} className={`${metaInputClass}${restoreInset('seriesIndex', seriesIndex)}`} />
               {fieldActions('seriesIndex', seriesIndex)}
             </div>
           </div>

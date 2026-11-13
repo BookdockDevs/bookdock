@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
-import i18n from 'i18next'
 
 import type { ClientLibraryDetailView, ClientLibraryBookView, ReadStatus, Review, UndoReceipt } from '@bookdock/shared'
 
@@ -10,31 +9,32 @@ import { isDeviceBook } from '@/features/reading-data/book-source'
 import { warmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import { clientScopeKey } from '@bookdock/shared'
-import { apiPatch } from '@/api/client'
-import { Button } from '@/components/ui/Button'
-import { formatRelativeTime } from '@/features/reader/components/format-relative-time'
+import { apiPatch, apiPut } from '@/api/client'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
 import { copyCover, downloadCover } from '../../download'
 import { invalidateDeviceMembershipQueries, useForkBook, useVaultOperations } from '../../hooks'
 import { getHiddenCause } from '../../hidden-status'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import BookCover from '../BookCover'
+import CategoryChip from './CategoryChip'
+import DetailActions, { type DetailAction } from './DetailActions'
 import DetailCoverEditor from './DetailCoverEditor'
 import DetailHeader from './DetailHeader'
+import DescriptionSection from './DescriptionSection'
 import DownloadMenu from './DownloadMenu'
-import MetaGrid, { type MetaRow } from './MetaGrid'
+import MetaGrid from './MetaGrid'
+import { buildMetaRows } from './meta-rows'
 import MetadataFieldDialog from './MetadataFieldDialog'
 import type { EditableMetadataField } from './metadata-field'
-import MoreActionsMenu, { type MoreActionsMenuItem } from './MoreActionsMenu'
+import type { MoreActionsMenuItem } from './MoreActionsMenu'
+import RatingBadge from './RatingBadge'
 import ReadStatusChip from './ReadStatusChip'
-import { isMachineIdentifier, formatLanguage, formatWordCount } from './types'
-import { ActionIcon, FilterChip, GroupLabel } from './ui'
-import TaxonomyIcon from '../TaxonomyIcon'
+import ReadingProgress from './ReadingProgress'
+import { ActionIcon, FilterChip } from './ui'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import ReviewPreviewSection from '@/features/reviews/components/ReviewPreviewSection'
 import { useReviewBookContext } from '@/features/reviews/hooks/useReviews'
@@ -44,7 +44,8 @@ interface BookDetailViewProps {
   book: ClientLibraryBookView
   readOnly?: boolean
   detail?: ClientLibraryDetailView
-  categoryName?: string
+  /** The taxonomy this book is filed under; null reads the device catalog's. */
+  categoryLibraryId?: string | null
   memberTags: Array<{ id: string; name: string }>
   isLoading?: boolean
   reviewContext?: import('@bookdock/shared').ReviewBookContext | null
@@ -65,7 +66,7 @@ export default function BookDetailView({
   book,
   readOnly = false,
   detail,
-  categoryName,
+  categoryLibraryId = null,
   memberTags,
   isLoading,
   reviewContext: reviewContextProp,
@@ -217,6 +218,29 @@ export default function BookDetailView({
     }
   }
 
+  // Filing a book is its own small write: the edit form batches it with the
+  // rest of the record, but a right-click on the chip carries nothing else.
+  async function changeCategory(categoryId: string | null) {
+    try {
+      let undo: UndoReceipt | undefined
+      if (isLocalBook) {
+        if (displayBook.clientVersion === undefined) throw new Error('The displayed local book version is required')
+        const targetRef = book.ref!
+        await vault.update(targetRef, { catalog: { categoryId } }, displayBook.clientVersion)
+        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(targetRef.scope)] })
+        if (!local) invalidateDeviceMembershipQueries(queryClient)
+      } else {
+        const result = await apiPut<{ undo?: UndoReceipt }>(`/books/${book.id}/organization`, { categoryId })
+        undo = result.undo
+        void queryClient.invalidateQueries({ queryKey: ['books'] })
+        void queryClient.invalidateQueries({ queryKey: ['book', book.id] })
+      }
+      notify.success({ key: 'toast.bookUpdated' }, { undo })
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'toast.updateBookFailed'))
+    }
+  }
+
   function goToFilter(search: { shelf?: string; category?: string; tag?: string; author?: string; series?: string; status?: ReadStatus }) {
     onClose()
     const taxonomy = search.category !== undefined || search.tag !== undefined
@@ -226,73 +250,97 @@ export default function BookDetailView({
   }
 
   const hasProgress = displayBook.progress != null && displayBook.progress > 0
-  const hasReadingState = hasProgress || Boolean(displayBook.lastReadAt)
-  const rawIdentifier = bookmeta?.isbn || bookmeta?.identifier || ''
-  const isIsbn = Boolean(bookmeta?.isbn)
 
-  const metaRows: MetaRow[] = []
-  const groupDigits = (n: number): string => new Intl.NumberFormat(i18n.language).format(n)
-  if (bookmeta?.series) {
-    metaRows.push({
-      label: _('library.seriesSection'),
-      value: bookmeta.seriesIndex != null ? `${bookmeta.series} #${bookmeta.seriesIndex}` : bookmeta.series,
-      onClick: () => goToFilter({ series: bookmeta.series }),
-      onEdit: metadataEdit('series', _('library.seriesSection')),
+  const metaRows = buildMetaRows(
+    {
+      bookmeta,
+      format: displayBook.format,
+      size: displayBook.size,
+      wordCount: detail?.meta?.wordCount,
+      createdAt: displayBook.createdAt,
+      updatedAt: displayBook.updatedAt,
+      fileName: detail?.meta?.fileName,
+    },
+    {
+      t: _,
+      onFilterSeries: (series) => goToFilter({ series }),
+      onEdit: metadataEdit,
+    },
+  )
+
+  // Action order: edit, download, review, reading data, visibility, more, delete.
+  const actions: DetailAction[] = []
+  if (!readOnly) {
+    actions.push({
+      key: 'edit',
+      label: _('library.edit'),
+      onClick: onEdit,
+      icon: (
+        <>
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </>
+      ),
+    })
+    actions.push({
+      key: 'download',
+      label: _('library.download'),
+      node: <DownloadMenu bookId={book.id} bookRef={book.ref} title={displayBook.title} format={displayBook.format} />,
     })
   }
-  if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher, onEdit: metadataEdit('publisher', _('library.publisher')) })
-  if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published, onEdit: metadataEdit('published', _('library.published')) })
-  if (bookmeta?.language) {
-    metaRows.push({ label: _('library.language'), value: formatLanguage(bookmeta.language, i18n.language), onEdit: metadataEdit('language', _('library.language')) })
-  }
-  if (rawIdentifier && (isIsbn || !isMachineIdentifier(rawIdentifier))) {
-    metaRows.push({ label: isIsbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true, hint: _('library.copyValue'), onEdit: isIsbn ? metadataEdit('isbn', 'ISBN') : undefined })
-  }
-  metaRows.push({ label: _('library.format'), value: displayBook.format.toUpperCase() })
-  metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(displayBook.size), hint: displayBook.size === null ? undefined : `${groupDigits(displayBook.size)} B` })
-  if (detail?.meta?.wordCount != null) {
-    const wordCount = detail.meta.wordCount
-    metaRows.push({
-      label: _('library.wordCount'),
-      value: formatWordCount(wordCount, i18n.language, _),
-      hint: _('library.tocRuleWords', { count: groupDigits(wordCount) }),
+  if (signedIn || isLocalBook) {
+    actions.push({
+      key: 'review',
+      label: _('review.reviewsTitle'),
+      fold: true,
+      disabled: openingReview,
+      className: openingReview ? 'animate-pulse' : undefined,
+      title: openingReview ? _('reader.loading') : undefined,
+      onClick: () => void openReviewAction(),
+      icon: reviewIconPaths,
     })
   }
-  metaRows.push({ label: _('library.addedAt'), value: formatDate(displayBook.createdAt), hint: formatDateTime(displayBook.createdAt) })
-  if (displayBook.updatedAt !== displayBook.createdAt) {
-    metaRows.push({ label: _('library.updatedAt'), value: formatDate(displayBook.updatedAt), hint: formatDateTime(displayBook.updatedAt) })
+  if (onOpenReadingData) {
+    actions.push({
+      key: 'reading-data',
+      label: _('readingData.data'),
+      fold: true,
+      onClick: onOpenReadingData,
+      icon: <path d="M4 19V9m8 10V4m8 15v-7" />,
+    })
   }
-  if (bookmeta?.subjects?.length) {
-    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、'), expandable: true, onEdit: metadataEdit('subjects', _('library.subjects')) })
+  if (!readOnly) {
+    // A taxonomy-derived hide has no book flag to clear, so the toggle stays
+    // inert and the tooltip names the cause.
+    actions.push({
+      key: 'visibility',
+      label: hiddenCause
+        ? _(hiddenCause.shortKey)
+        : displayBook.hidden ? _('library.show') : _('library.hide'),
+      fold: true,
+      title: hiddenCause ? _(hiddenCause.hintKey, hiddenCause.hintParams) : undefined,
+      disabled: Boolean(hiddenCause),
+      onClick: hiddenCause ? undefined : () => void toggleHidden(),
+      icon: displayBook.hidden || hiddenCause ? (
+        <>
+          <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+          <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+          <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+          <line x1="2" x2="22" y1="2" y2="22" />
+        </>
+      ) : (
+        <>
+          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+          <circle cx="12" cy="12" r="3" />
+        </>
+      ),
+    })
   }
-  if (detail?.meta?.fileName) {
-    metaRows.push({ label: _('library.originalFile'), value: detail.meta.fileName, copyable: true, expandable: true, hint: _('library.copyFullFileName') })
-  }
-
-  const ratingSlot = reviewContext?.summary && reviewContext.summary.count > 0 ? (
-    <button
-      type="button"
-      onClick={onOpenAllReviews}
-      className="group flex flex-col items-end text-right transition-opacity hover:opacity-80"
-    >
-      <div className="flex items-center gap-1.5 text-amber-500">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-        </svg>
-        <span className="text-2xl font-bold tabular-nums text-stone-900 dark:text-stone-100">
-          {reviewContext.summary.average!.toFixed(1)}
-        </span>
-      </div>
-      <span className="text-xs tabular-nums text-stone-400 dark:text-stone-500">
-        {_('review.ratingCount', { count: reviewContext.summary.count })}
-      </span>
-    </button>
-  ) : null
 
   return (
     <div>
       <DetailHeader
-        rating={ratingSlot}
+        rating={<RatingBadge summary={reviewContext?.summary} onClick={onOpenAllReviews} />}
         cover={readOnly ? <BookCover book={displayBook} coverPaletteId={detail?.meta?.coverPaletteId} spine={false} /> : <DetailCoverEditor key={book.id} book={displayBook} coverPaletteId={detail?.meta?.coverPaletteId ?? displayBook.coverPaletteId ?? null} active={coverEditing} onActiveChange={setCoverEditing} />}
         coverEditing={!readOnly && coverEditing}
         hasCoverImage={hasCoverImage}
@@ -325,44 +373,25 @@ export default function BookDetailView({
                 </span>
               </span>
             )}
-            {categoryName && displayBook.categoryId !== undefined && (
-              <FilterChip icon={<TaxonomyIcon kind="category" size={13} className="text-stone-400" />} label={categoryName} onClick={() => goToFilter({ category: displayBook.categoryId ?? 'none' })} />
+            {displayBook.categoryId !== undefined && (
+              <CategoryChip
+                libraryId={categoryLibraryId}
+                categoryId={displayBook.categoryId}
+                fallbackLabel={displayBook.categoryName ?? undefined}
+                editable={!readOnly}
+                onFilter={() => goToFilter({ category: displayBook.categoryId ?? 'none' })}
+                onChange={(value) => void changeCategory(value.categoryId ?? null)}
+              />
             )}
             {memberTags.map((tag) => (
               <FilterChip key={tag.id} prefix="#" label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
             ))}
           </div>
         )}
-        reading={hasReadingState && (
-          <div className="mt-3 space-y-1.5">
-            <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
-              <span className="tabular-nums font-medium text-stone-600 dark:text-stone-300">
-                {Math.round(displayBook.progress ?? 0)}%
-              </span>
-              {displayBook.lastReadAt ? (
-                <span className="text-[11px] text-stone-400 dark:text-stone-500" title={formatDateTime(displayBook.lastReadAt)}>
-                  {formatRelativeTime(_, displayBook.lastReadAt)}
-                </span>
-              ) : null}
-            </div>
-            <div
-              role="progressbar"
-              aria-label={_('library.readingProgress')}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(displayBook.progress ?? 0)}
-              className="h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700"
-            >
-              <div
-                className="h-full rounded-full bg-stone-700 dark:bg-stone-400"
-                style={{ width: `${displayBook.progress ?? 0}%` }}
-              />
-            </div>
-          </div>
-        )}
+        reading={<ReadingProgress progress={displayBook.progress} lastReadAt={displayBook.lastReadAt} />}
         actions={(
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {displayBook.hasUnreadUpdate && (
+          <DetailActions
+            leading={displayBook.hasUnreadUpdate && (
               <span
                 className="inline-flex items-center gap-1.5 rounded-full bg-blue-50/80 px-2.5 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
                 title={_('library.unreadUpdateHint')}
@@ -371,108 +400,36 @@ export default function BookDetailView({
                 <span>{_('library.unreadUpdate')}</span>
               </span>
             )}
-
-            <Button
-              size="sm"
-              className="gap-1.5"
-              onPointerEnter={() => warmReaderEntry(queryClient, { bookId: book.id, isLocal: isDeviceBook(book.ref), prefetch: false })}
-              onClick={() => {
+            primary={{
+              label: hasProgress ? _('library.continueReading') : _('library.startReading'),
+              onPointerEnter: () => warmReaderEntry(queryClient, { bookId: book.id, isLocal: isDeviceBook(book.ref), prefetch: false }),
+              onClick: () => {
                 onClose()
                 warmReaderEntry(queryClient, { bookId: book.id, isLocal: isDeviceBook(book.ref) })
                 void navigate({ ...catalogBookTarget(book) })
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-              </svg>
-              {hasProgress ? _('library.continueReading') : _('library.startReading')}
-            </Button>
-            <div className="flex flex-1 items-center gap-1.5">
-              {/* Action order: edit, download, review, reading data, visibility, more, delete. */}
-              {!readOnly && (
-                <ActionIcon secondary label={_('library.edit')} onClick={onEdit}>
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                </ActionIcon>
-              )}
-              {!readOnly && (
-                <DownloadMenu bookId={book.id} bookRef={book.ref} title={displayBook.title} format={displayBook.format} />
-              )}
-              {(signedIn || isLocalBook) && (
-                <ActionIcon
-                  secondary
-                  disabled={openingReview}
-                  className={openingReview ? 'animate-pulse' : undefined}
-                  title={openingReview ? _('reader.loading') : undefined}
-                  label={_('review.reviewsTitle')}
-                  onClick={() => void openReviewAction()}
-                >
-                  {reviewIconPaths}
-                </ActionIcon>
-              )}
-              {onOpenReadingData && (
-                <ActionIcon secondary label={_('readingData.data')} onClick={onOpenReadingData}>
-                  <path d="M4 19V9m8 10V4m8 15v-7" />
-                </ActionIcon>
-              )}
-              {!readOnly && hiddenCause && (
-                <ActionIcon
-                  secondary
-                  label={_(hiddenCause.shortKey)}
-                  title={_(hiddenCause.hintKey, hiddenCause.hintParams)}
-                  disabled
-                >
-                  <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-                  <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                  <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-                  <line x1="2" x2="22" y1="2" y2="22" />
-                </ActionIcon>
-              )}
-              {!readOnly && !hiddenCause && (
-                <ActionIcon
-                  secondary
-                  label={displayBook.hidden ? _('library.privateHiddenAction') : _('library.privateVisibleAction')}
-                  onClick={() => void toggleHidden()}
-                >
-                  {displayBook.hidden ? (
-                    <>
-                      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-                      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-                      <line x1="2" x2="22" y1="2" y2="22" />
-                    </>
-                  ) : (
-                    <>
-                      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </>
-                  )}
-                </ActionIcon>
-              )}
-              {!readOnly && overflowItems.length > 0 && (
-                <MoreActionsMenu items={overflowItems} />
-              )}
-              {!readOnly && <div className="ml-auto">
-                <ActionIcon label={displayBook.source ? _('library.removeFromLibrary') : _('library.delete')} danger onClick={() => onDelete(book)}>
-                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
-                </ActionIcon>
-              </div>}
-            </div>
-          </div>
+              },
+            }}
+            actions={actions}
+            overflow={readOnly ? [] : overflowItems}
+            trailing={!readOnly ? (
+              <ActionIcon label={displayBook.source ? _('library.removeFromLibrary') : _('library.delete')} danger onClick={() => onDelete(book)}>
+                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+              </ActionIcon>
+            ) : undefined}
+          />
         )}
       />
 
       {bookmeta?.description && (
-        <section className="mt-5" onContextMenu={canEditBookmeta ? (event) => { event.preventDefault(); event.stopPropagation(); setMetadataField({ field: 'description', label: _('library.descriptionSection') }) } : undefined}>
-          <GroupLabel>{_('library.descriptionSection')}</GroupLabel>
-          <p className="max-h-40 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1 whitespace-pre-wrap text-sm leading-relaxed text-stone-600 dark:text-stone-300">
-            {bookmeta.description}
-          </p>
-        </section>
+        <DescriptionSection
+          text={bookmeta.description}
+          onEdit={canEditBookmeta
+            ? () => setMetadataField({ field: 'description', label: _('library.descriptionSection') })
+            : undefined}
+        />
       )}
 
-      <MetaGrid rows={metaRows} isLoading={isLoading} />
+      <MetaGrid rows={metaRows} isLoading={isLoading} tight={Boolean(bookmeta?.description)} />
 
       <ReviewPreviewSection
         context={reviewContext}

@@ -247,7 +247,7 @@ describe('the existing library screen with local authority', () => {
     fireEvent.click(within(article).getByRole('button', { name: i18n.t('library.moreActions') }))
     fireEvent.click(await screen.findByRole('button', { name: i18n.t('library.details') }))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(await within(dialog).findByRole('button', { name: i18n.t('library.privateVisibleAction') }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: i18n.t('library.hide') }))
     await waitFor(async () => expect((await repository.getBook(ref)).catalog?.hidden).toBe(true))
     expect(apiPatch).not.toHaveBeenCalled()
     expectNoBookTraffic()

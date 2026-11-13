@@ -7,6 +7,9 @@ import { useDialogLayout } from './dialog-layout-context'
 
 interface ModalProps {
   title: ReactNode
+  /** Rendered next to the title, for a picker that qualifies what is on screen
+   *  (e.g. which version of a work the dialog is showing). */
+  titleExtra?: ReactNode
   onClose: () => void
   /** Extra header actions between the title and the close button */
   actions?: ReactNode
@@ -41,6 +44,7 @@ const FOCUSABLE_SELECTOR =
  *  "back" semantics (e.g. cancel an inline edit view) via onClose. */
 export default function Modal({
   title,
+  titleExtra,
   onClose,
   actions,
   footer,
@@ -185,9 +189,12 @@ export default function Modal({
         {hideHeader ? (
           <h2 id={titleId} className="sr-only">{title}</h2>
         ) : (
-          <div className={`flex shrink-0 items-center justify-between border-b px-4 py-3 sm:px-5 ${reader ? 'border-[var(--bd-read-accent)]' : 'border-stone-100 dark:border-stone-800'}`}>
-            <h2 id={titleId} className={`truncate text-base font-semibold ${reader ? 'text-[var(--bd-read-text)]' : 'text-stone-900 dark:text-stone-100'}`}>{title}</h2>
-            <div className="flex items-center gap-1">
+          <div className={`flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-5 ${reader ? 'border-[var(--bd-read-accent)]' : 'border-stone-100 dark:border-stone-800'}`}>
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 id={titleId} className={`truncate text-base font-semibold ${reader ? 'text-[var(--bd-read-text)]' : 'text-stone-900 dark:text-stone-100'}`}>{title}</h2>
+              {titleExtra}
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
               {actions}
               {!hideClose && (
                 <button

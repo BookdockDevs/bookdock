@@ -16,6 +16,8 @@ let bookDetailData: unknown = undefined
 vi.mock('../features/library/hooks', () => ({
   useLibraryCategories: () => ({ data: { data: [{ id: 'category-1', name: '分类' }] }, isLoading: false }),
   useLibraryTags: () => ({ data: { data: [{ id: 'tag-1', name: '标签' }] }, isLoading: false }),
+  useCreateLibraryCategory: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateLibraryTag: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePublishPrivateBook: () => ({ mutate: publishMutate, isPending: false }),
   useBook: () => ({ data: bookDetailData }),
   usePushVersion: () => ({ mutate: pushMutate, isPending: false }),
@@ -74,8 +76,10 @@ describe('PublishBookDialog', () => {
     })
     render(<PublishBookDialog book={book} libraries={libraries} onClose={vi.fn()} onOpenLibrary={vi.fn()} />)
 
-    fireEvent.change(screen.getByLabelText('书库分类'), { target: { value: 'category-1' } })
-    fireEvent.click(screen.getByLabelText('标签'))
+    fireEvent.click(screen.getByLabelText('分类'))
+    fireEvent.click(screen.getByRole('radio', { name: '分类' }))
+    fireEvent.click(screen.getByLabelText('新建标签'))
+    fireEvent.click(screen.getByRole('checkbox', { name: '标签' }))
     fireEvent.click(screen.getByRole('button', { name: '发布' }))
 
     await waitFor(() => expect(publishMutate).toHaveBeenCalledWith(

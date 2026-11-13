@@ -2,7 +2,12 @@ import type { ClientLibraryBookView, BookMetadata, CoverPaletteId } from '@bookd
 
 import { notify } from '@/lib/notifications'
 
-export interface MetaDraft {
+/**
+ * The ten editable text fields of a book's metadata. Both editors (private
+ * library detail and shared catalog version) bind to this shape; their drafts
+ * add the bookkeeping fields each dialog owns on top of it.
+ */
+export interface MetaFormValues {
   title: string
   /**
    * Raw editable author text; multiple authors are separated with 、 , ， ；
@@ -17,6 +22,9 @@ export interface MetaDraft {
   series: string
   seriesIndex: string
   description: string
+}
+
+export interface MetaDraft extends MetaFormValues {
   /** Pinned placeholder-cover palette; null = none picked (id-hash palette applies) */
   coverPaletteId: CoverPaletteId | null
 }

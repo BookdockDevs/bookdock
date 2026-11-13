@@ -7,8 +7,7 @@ import { useTranslation } from '@/hooks/useTranslation'
  * The presentation shell both detail bodies sit in: artwork with its hover
  * actions, title, byline, and whatever the context adds below them. A private
  * card fills the reading-progress and action slots; a catalog work fills the
- * action slot and puts its version tabs in the footer. Everything a work cannot
- * have stays absent rather than stubbed.
+ * action slot. Everything a work cannot have stays absent rather than stubbed.
  */
 interface DetailHeaderProps {
   cover: ReactNode
@@ -26,7 +25,6 @@ interface DetailHeaderProps {
   chips?: ReactNode
   reading?: ReactNode
   actions?: ReactNode
-  footer?: ReactNode
   rating?: ReactNode
 }
 
@@ -46,7 +44,6 @@ export default function DetailHeader({
   chips,
   reading,
   actions,
-  footer,
   rating,
 }: DetailHeaderProps) {
   const _ = useTranslation()
@@ -137,7 +134,6 @@ export default function DetailHeader({
         {chips}
         {reading}
         {actions}
-        {footer}
       </div>
     </div>
   )

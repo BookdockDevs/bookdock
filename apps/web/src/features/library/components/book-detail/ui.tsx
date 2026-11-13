@@ -1,11 +1,16 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode, Ref } from 'react'
+
+/** Room for a restore action: the icon is 28px wide and sits 8px in. */
+export const actionInset = 'pr-12'
+
+/** The metadata editors' skin: the full form and the single-field dialog must
+ * not drift apart, so both read this one string. */
+export const metaInputClass =
+  'w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 outline-none transition-all placeholder:text-stone-400 focus:border-stone-900 focus:ring-1 focus:ring-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 dark:focus:border-stone-200 dark:focus:ring-stone-200'
 
 export const inputClass =
   'h-9 w-full rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:ring-2 focus:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500 dark:focus:ring-stone-500/20'
-
-export const textareaClass =
-  'w-full min-h-[88px] resize-none overflow-hidden rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm leading-relaxed text-stone-700 outline-none transition-all placeholder:text-stone-400 focus:border-stone-400 focus:ring-2 focus:ring-stone-400/10 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200 dark:focus:border-stone-500 dark:focus:ring-stone-500/20'
 
 export function GroupLabel({ children, className = "mb-2" }: { children: ReactNode; className?: string }) {
   return (
@@ -65,18 +70,26 @@ export function FilterChip({
   prefix,
   muted = false,
   onClick,
+  onContextMenu,
+  buttonRef,
 }: {
   label: string
   icon?: ReactNode
   prefix?: string
   muted?: boolean
   onClick: () => void
+  /** A chip that can also be edited in place (the category chip). */
+  onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void
+  /** Anchors a menu on the chip itself, without wrapping it in an element. */
+  buttonRef?: Ref<HTMLButtonElement>
 }) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       aria-label={label}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={`inline-flex min-h-7 items-center gap-1.5 rounded-md px-2 py-0.5 text-xs transition-colors ${
         muted
           ? 'border border-dashed border-stone-300 text-stone-400 hover:border-stone-400 hover:text-stone-600 dark:border-stone-600 dark:hover:border-stone-500 dark:hover:text-stone-300'
@@ -118,7 +131,7 @@ export function ActionIcon({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
         danger
           ? 'text-stone-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400'
           : secondary

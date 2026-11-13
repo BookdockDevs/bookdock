@@ -60,7 +60,7 @@ export default function MoreActionsMenu({ items }: { items: MoreActionsMenuItem[
         <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
       </ActionIcon>
       {menu && (
-        <SmartMenu triggerRef={anchorRef} innerRef={menuRef} position={menu} onClose={() => setMenu(null)}>
+        <SmartMenu triggerRef={anchorRef} innerRef={menuRef} position={menu} onClose={() => setMenu(null)} width="auto" minWidth={148} maxWidth={280}>
           {items.map((item) => (
             <button
               key={item.key}
@@ -74,7 +74,7 @@ export default function MoreActionsMenu({ items }: { items: MoreActionsMenuItem[
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
                 {item.icon}
               </svg>
-              <span className="flex-1">{item.label}</span>
+              <span className="min-w-0 flex-1 truncate" title={item.label}>{item.label}</span>
             </button>
           ))}
         </SmartMenu>

@@ -20,15 +20,18 @@ export interface MetaRow {
  * wrapped values are resolved from the values themselves, so a long file name
  * or subject list pushes its own cell wider instead of relying on the caller to
  * guess - which is how the two detail bodies had drifted apart.
+ *
+ * `tight` closes the gap above the card when a description sits there: its
+ * clamped last line already leaves a band of empty space under the text.
  */
-export default function MetaGrid({ rows, isLoading }: { rows: MetaRow[]; isLoading?: boolean }) {
+export default function MetaGrid({ rows, isLoading, tight = false }: { rows: MetaRow[]; isLoading?: boolean; tight?: boolean }) {
   const _ = useTranslation()
   const values = rows.map((row) => row.value)
   const spanClasses = resolveMetaSpanClasses(values)
   const valueSizeClasses = resolveMetaValueSizeClasses(values)
 
   return (
-    <section className="mt-5">
+    <section className={tight ? 'mt-2' : 'mt-3.5'}>
       <div className="rounded-xl border border-stone-200/70 bg-stone-50/70 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
           {rows.map((row, index) => (

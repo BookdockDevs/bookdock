@@ -1,12 +1,10 @@
 import { useState } from 'react'
 
 import { useNavigate } from '@tanstack/react-router'
-import i18n from 'i18next'
 
 import type { CatalogBook, Library, Review } from '@bookdock/shared'
 
 import { ApiError } from '@/api/client'
-import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetch'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
@@ -17,26 +15,27 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { formatBytes, formatDate, formatDateTime } from '@/lib/utils'
 
 import { catalogWorkRow, rowCover, versionOrdinal, versionTabLabel } from '../book-row'
 import { copyCover, downloadCover } from '../download'
-import { useCollectBook, useLibraryCategories, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
-import { categoryPath } from '../taxonomy'
+import { useBook, useCollectBook, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
 import { getHiddenCause } from '../hidden-status'
 import BookCover from './BookCover'
-import TaxonomyIcon from './TaxonomyIcon'
+import DetailActions, { type DetailAction } from './book-detail/DetailActions'
+import CategoryChip from './book-detail/CategoryChip'
 import DetailHeader from './book-detail/DetailHeader'
 import DetailCoverEditor from './book-detail/DetailCoverEditor'
+import DescriptionSection from './book-detail/DescriptionSection'
 import MetadataFieldDialog from './book-detail/MetadataFieldDialog'
 import type { EditableMetadataField } from './book-detail/metadata-field'
 import DownloadMenu from './book-detail/DownloadMenu'
-import MetaGrid, { type MetaRow } from './book-detail/MetaGrid'
-import MoreActionsMenu, { type MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
-import { formatLanguage, formatWordCount, isMachineIdentifier } from './book-detail/types'
-import { ActionIcon, FilterChip, GroupLabel } from './book-detail/ui'
+import MetaGrid from './book-detail/MetaGrid'
+import { buildMetaRows } from './book-detail/meta-rows'
+import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
+import RatingBadge from './book-detail/RatingBadge'
+import ReadingProgress from './book-detail/ReadingProgress'
+import { ActionIcon, FilterChip } from './book-detail/ui'
 import DeleteVersionsDialog from './DeleteVersionsDialog'
-import VersionTabs from './VersionTabs'
 import WorkEditDialog from './WorkEditDialog'
 import CatalogUploadSheet from './CatalogUploadSheet'
 
@@ -44,12 +43,12 @@ import CatalogUploadSheet from './CatalogUploadSheet'
  * What a work in a shared library knows about itself, told the way a private
  * book's detail tells it: artwork, title, author, actions, description, facts.
  * What a work cannot have - read status, progress, shelf, personal metadata -
- * is absent rather than stubbed. Versions render below only while there is
- * more than one to choose from; a single version is the work, acted on above.
+ * is absent rather than stubbed. Which version is on screen is picked from the
+ * dialog title bar, so the body only ever describes the version it is given.
  */
 export default function WorkDetailBody({
   work, library, canManage, canCollect, canContribute = false, onClose,
-  selectedVersionId, onSelectVersion, onVersionsUploaded, moreActions,
+  selectedVersionId, onVersionsUploaded, moreActions,
   onOpenReadingData,
   onOpenAllReviews,
   onOpenReviewDetail,
@@ -61,12 +60,11 @@ export default function WorkDetailBody({
   /** Member upload lane: the library opened member uploads. Server still refuses non-owners. */
   canContribute?: boolean
   /**
-   * Which version is on screen is owned by the dialog, not here: the overflow
-   * menu offers the content-maintenance actions for that same version, so the
-   * two cannot disagree about it.
+   * Which version is on screen is owned by the dialog, not here: the header
+   * picker, the overflow menu and the actions all read that same id, so they
+   * cannot disagree about it.
    */
   selectedVersionId: string | null
-  onSelectVersion: (versionLinkId: string) => void
   onVersionsUploaded: (versionLinkIds: string[]) => void
   moreActions?: MoreActionsMenuItem[]
   /** Drill into the personal reading data; absent when there is none to show. */
@@ -78,12 +76,16 @@ export default function WorkDetailBody({
   const _ = useTranslation()
   const navigate = useNavigate()
   const warmReader = useWarmReaderEntry()
-  const categories = useLibraryCategories(library.id, { enabled: Boolean(work.categoryId) })
-  const categoryName = categories.isError ? undefined : (work.categoryId && categories.data?.data.some((category) => category.id === work.categoryId) ? categoryPath(categories.data.data, work.categoryId).map((category) => category.name).join(' / ') : undefined)
   const row = catalogWorkRow(work)
   // The visible version drives everything below: header, actions and manager
   // operations all read the selection, never a hardcoded first row.
   const selected = work.versions.find((v) => v.id === selectedVersionId) ?? work.versions[0]
+  const bookDetailQuery = useBook(selected?.bookVersionId ?? null)
+  const bookDetail = bookDetailQuery.data?.data
+  const progress = bookDetail?.progress
+  const lastReadAt = bookDetail?.lastReadAt
+  const hasProgress = progress != null && progress > 0
+
   const collect = useCollectBook()
   const updateVersion = useUpdateCatalogVersion()
   const updateWork = useUpdateCatalogBook()
@@ -205,20 +207,43 @@ export default function WorkDetailBody({
     }
   }
 
+  // A one-version work is the work, so its two layers must end up agreeing.
+  // Hiding only needs the work flag; showing has to clear whichever layer is
+  // still hiding it - the lone version's status and/or the work flag - or the
+  // button says "show" and leaves the work hidden.
+  async function showOneVersionWork() {
+    if (!selected) return
+    try {
+      if (versionHidden) {
+        await updateVersion.mutateAsync({
+          libraryId: library.id,
+          libraryBookId: work.id,
+          versionLinkId: selected.id,
+          patch: { status: 'published' },
+        })
+      }
+      if (workHidden) {
+        await updateWork.mutateAsync({ libraryId: library.id, libraryBookId: work.id, patch: { hidden: false } })
+      }
+      notify.success({ key: 'library.catalogWorkShown' })
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'library.catalogVisibilityFailed'))
+    }
+  }
+
   function togglePublish() {
     if (!selected) return
-    // A one-version work has no version-level meaning to toggle: the control
-    // reads as a work-level switch, so it must write library_books.hidden.
-    // Writing the version here left the work badged as hidden while the button
-    // reported it as shown.
     if (singleVersion && !hiddenCause) {
-      const showing = workHidden
+      if (selectedHidden) {
+        void showOneVersionWork()
+        return
+      }
       updateWork.mutate({
         libraryId: library.id,
         libraryBookId: work.id,
-        patch: { hidden: !showing },
+        patch: { hidden: true },
       }, {
-        onSuccess: () => notify.success({ key: showing ? 'library.catalogWorkShown' : 'library.catalogWorkHidden' }),
+        onSuccess: () => notify.success({ key: 'library.catalogWorkHidden' }),
         onError: (err) => notify.error(getUserErrorNotification(err, 'library.catalogVisibilityFailed')),
       })
       return
@@ -258,6 +283,17 @@ export default function WorkDetailBody({
     })
   }
 
+  // Filing a work is its own small write: the edit dialog batches it with the
+  // rest of the record, but a right-click on the chip carries nothing else.
+  async function changeCategory(categoryId: string | null) {
+    try {
+      await updateWork.mutateAsync({ libraryId: library.id, libraryBookId: work.id, patch: { categoryId } })
+      notify.success({ key: 'toast.bookUpdated' })
+    } catch (err) {
+      notify.error(getUserErrorNotification(err, 'library.catalogWorkSaveFailed'))
+    }
+  }
+
   function collectSelected() {
     if (!selected) return
     collect.mutate({ libraryId: library.id, versionLinkId: selected.id }, {
@@ -277,48 +313,22 @@ export default function WorkDetailBody({
     })
   }
 
-  const metaRows: MetaRow[] = []
-  const bookmeta = selected?.effective.bookmeta
-  const groupDigits = (n: number): string => new Intl.NumberFormat(i18n.language).format(n)
-  if (bookmeta?.series) {
-    const series = bookmeta.series
-    metaRows.push({
-      label: _('library.seriesSection'),
-      value: bookmeta.seriesIndex != null ? `${series} #${bookmeta.seriesIndex}` : series,
-      onClick: () => goToFilter({ series }),
-      onEdit: metadataEdit('series', _('library.seriesSection')),
-    })
-  }
-  if (bookmeta?.publisher) metaRows.push({ label: _('library.publisher'), value: bookmeta.publisher, onEdit: metadataEdit('publisher', _('library.publisher')) })
-  if (bookmeta?.published) metaRows.push({ label: _('library.published'), value: bookmeta.published, onEdit: metadataEdit('published', _('library.published')) })
-  if (bookmeta?.language) {
-    metaRows.push({ label: _('library.language'), value: formatLanguage(bookmeta.language, i18n.language), onEdit: metadataEdit('language', _('library.language')) })
-  }
-  const rawIdentifier = bookmeta?.isbn || bookmeta?.identifier || ''
-  if (rawIdentifier && (bookmeta?.isbn || !isMachineIdentifier(rawIdentifier))) {
-    metaRows.push({ label: bookmeta?.isbn ? 'ISBN' : _('library.identifier'), value: rawIdentifier, copyable: true, hint: _('library.copyValue'), onEdit: bookmeta?.isbn ? metadataEdit('isbn', 'ISBN') : undefined })
-  }
-  if (selected) {
-    metaRows.push({ label: _('library.format'), value: selected.format.toUpperCase() })
-    metaRows.push({ label: _('library.sortBy.size'), value: formatBytes(selected.size), hint: `${groupDigits(selected.size)} B` })
-    if (selected.wordCount != null) {
-      metaRows.push({
-        label: _('library.wordCount'),
-        value: formatWordCount(selected.wordCount, i18n.language, _),
-        hint: _('library.tocRuleWords', { count: groupDigits(selected.wordCount) }),
-      })
-    }
-    metaRows.push({ label: _('library.addedAt'), value: formatDate(selected.createdAt), hint: formatDateTime(selected.createdAt) })
-    if (selected.updatedAt !== selected.createdAt) {
-      metaRows.push({ label: _('library.updatedAt'), value: formatDate(selected.updatedAt), hint: formatDateTime(selected.updatedAt) })
-    }
-  }
-  if (bookmeta?.subjects?.length) {
-    metaRows.push({ label: _('library.subjects'), value: bookmeta.subjects.join('、'), expandable: true, onEdit: metadataEdit('subjects', _('library.subjects')) })
-  }
-  if (selected?.effective.fileName) {
-    metaRows.push({ label: _('library.originalFile'), value: selected.effective.fileName, copyable: true, expandable: true, hint: _('library.copyFullFileName') })
-  }
+  const metaRows = buildMetaRows(
+    {
+      bookmeta: selected?.effective.bookmeta,
+      format: selected?.format ?? '',
+      size: selected?.size ?? null,
+      wordCount: selected?.wordCount ?? null,
+      createdAt: selected?.createdAt ?? 0,
+      updatedAt: selected?.updatedAt ?? 0,
+      fileName: selected?.effective.fileName,
+    },
+    {
+      t: _,
+      onFilterSeries: (series) => goToFilter({ series }),
+      onEdit: metadataEdit,
+    },
+  )
 
   if (!selected) return null
 
@@ -336,30 +346,113 @@ export default function WorkDetailBody({
     size: selected.size,
   }
 
-  const ratingSlot = reviewContext?.summary && reviewContext.summary.count > 0 ? (
-    <button
-      type="button"
-      onClick={onOpenAllReviews}
-      className="group flex flex-col items-end text-right transition-opacity hover:opacity-80"
-    >
-      <div className="flex items-center gap-1.5 text-amber-500">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-        </svg>
-        <span className="text-2xl font-bold tabular-nums text-stone-900 dark:text-stone-100">
-          {reviewContext.summary.average!.toFixed(1)}
-        </span>
-      </div>
-      <span className="text-xs tabular-nums text-stone-400 dark:text-stone-500">
-        {_('review.ratingCount', { count: reviewContext.summary.count })}
-      </span>
-    </button>
-  ) : null
+  const actions: DetailAction[] = []
+  // Action order: collect, edit, download, review, reading data, visibility, more, delete.
+  if (canCollect) {
+    actions.push({
+      key: 'collect',
+      label: alreadyJoined ? _('library.collected') : _('library.collect'),
+      disabled: alreadyJoined || collect.isPending,
+      onClick: alreadyJoined ? undefined : collectSelected,
+      icon: (
+        <>
+          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+          {alreadyJoined ? (
+            <polyline points="9 11 11 13 15 9" />
+          ) : (
+            <>
+              <line x1="12" y1="7" x2="12" y2="13" />
+              <line x1="9" y1="10" x2="15" y2="10" />
+            </>
+          )}
+        </>
+      ),
+    })
+  }
+  if (canManage) {
+    actions.push({
+      key: 'edit',
+      label: _('library.edit'),
+      onClick: () => setEditOpen(true),
+      icon: (
+        <>
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </>
+      ),
+    })
+  }
+  if (canDownload) {
+    actions.push({
+      key: 'download',
+      label: _('library.download'),
+      node: (
+        <DownloadMenu
+          bookId={selected.bookVersionId}
+          title={selected.effective.title}
+          format={selected.format}
+          versionLabel={versionTabLabel(selected.name, _('library.versionFallback', { n: versionOrdinal(work.versions, selected.id) }))}
+        />
+      ),
+    })
+  }
+  if (signedIn) {
+    actions.push({
+      key: 'review',
+      label: _('review.reviewsTitle'),
+      fold: true,
+      disabled: openingReview,
+      className: openingReview ? 'animate-pulse' : undefined,
+      title: openingReview ? _('reader.loading') : undefined,
+      onClick: () => void openReviewAction(),
+      icon: reviewIconPaths,
+    })
+  }
+  if (onOpenReadingData) {
+    actions.push({
+      key: 'reading-data',
+      label: _('readingData.data'),
+      fold: true,
+      onClick: onOpenReadingData,
+      icon: <path d="M4 19V9m8 10V4m8 15v-7" />,
+    })
+  }
+  if (canManage) {
+    // A taxonomy-derived hide has no work flag to clear, so the control is
+    // read-only: offering an action here would write the version layer instead.
+    // The cause names the exact layer (category or tag) for the tooltip.
+    // A one-version work reads its control as a work-level switch, so it says
+    // "work"; only a many-version work hides a version the reader could pick.
+    const visibilityLabel = selectedHidden
+      ? _(singleVersion ? 'library.catalogShowWork' : 'library.versionShowAction')
+      : _(singleVersion ? 'library.catalogHideWork' : 'library.versionHideAction')
+    actions.push({
+      key: 'visibility',
+      label: hiddenCause ? _(hiddenCause.shortKey) : visibilityLabel,
+      fold: true,
+      title: hiddenCause ? _(hiddenCause.hintKey, hiddenCause.hintParams) : undefined,
+      disabled: hiddenCause ? true : updateVersion.isPending || updateWork.isPending,
+      onClick: hiddenCause ? undefined : togglePublish,
+      icon: hiddenCause || selectedHidden ? (
+        <>
+          <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+          <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+          <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+          <line x1="2" x2="22" y1="2" y2="22" />
+        </>
+      ) : (
+        <>
+          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+          <circle cx="12" cy="12" r="3" />
+        </>
+      ),
+    })
+  }
 
   return (
     <div>
       <DetailHeader
-        rating={ratingSlot}
+        rating={<RatingBadge summary={reviewContext?.summary} onClick={onOpenAllReviews} />}
         cover={canManage ? <DetailCoverEditor key={selected.id} book={rowCover(selectedRow)} coverPaletteId={null} active={coverEditing} onActiveChange={(active) => setCoverEditingId(active ? selected.id : null)} catalog={{ libraryId: library.id, libraryBookId: work.id, versionLinkId: selected.id, hasVersionCover: Boolean(selected.coverKey) }} /> : <BookCover book={rowCover(selectedRow)} coverSrc={selectedRow.coverSrc} spine={false} />}
         coverEditing={coverEditing}
         hasCoverImage={hasCoverImage}
@@ -374,159 +467,50 @@ export default function WorkDetailBody({
         onEditAuthors={metadataEdit('authors', _('library.sortBy.author'))}
         chips={(
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            {!work.categoryId || categoryName ? (
-              <FilterChip icon={<TaxonomyIcon kind="category" size={13} className="text-stone-400" />} label={categoryName ?? _('library.uncategorized')} onClick={() => goToFilter({ category: work.categoryId ?? 'none', categoryScope: work.categoryId ? 'subtree' : 'direct' })} />
-            ) : (
-              <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-stone-100/90 px-2 py-0.5 text-xs text-stone-400 dark:bg-stone-800/90 dark:text-stone-500">
-                <TaxonomyIcon kind="category" size={13} className="text-stone-400" />
-                {categories.isPending ? _('library.categories') : _('library.categoryUnavailable')}
-              </span>
-            )}
+            <CategoryChip
+              libraryId={library.id}
+              categoryId={work.categoryId ?? null}
+              editable={canManage}
+              onFilter={() => goToFilter({ category: work.categoryId ?? 'none', categoryScope: work.categoryId ? 'subtree' : 'direct' })}
+              onChange={(value) => void changeCategory(value.categoryId ?? null)}
+            />
             {work.tags.map((tag) => (
               <FilterChip key={tag.id} prefix="#" label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
             ))}
           </div>
         )}
+        reading={<ReadingProgress progress={progress} lastReadAt={lastReadAt} />}
         actions={(
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              className="gap-1.5"
-              disabled={!readable}
-              title={!readable ? _('library.catalogUnlistedReadHint') : undefined}
-              onClick={readSelected}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-              </svg>
-              {_('library.startReading')}
-            </Button>
-            <div className="flex flex-1 items-center gap-1.5">
-              {/* Action order: collect, edit, download, review, reading data, visibility, more, delete. */}
-              {canCollect && (
-                <ActionIcon
-                  secondary
-                  label={alreadyJoined ? _('library.collected') : _('library.collect')}
-                  disabled={alreadyJoined || collect.isPending}
-                  onClick={alreadyJoined ? undefined : collectSelected}
-                >
-                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                  {alreadyJoined ? (
-                    <polyline points="9 11 11 13 15 9" />
-                  ) : (
-                    <>
-                      <line x1="12" y1="7" x2="12" y2="13" />
-                      <line x1="9" y1="10" x2="15" y2="10" />
-                    </>
-                  )}
-                </ActionIcon>
-              )}
-              {canManage && (
-                <ActionIcon
-                  secondary
-                  label={_('library.editWork')}
-                  onClick={() => setEditOpen(true)}
-                >
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                </ActionIcon>
-              )}
-              {canDownload && (
-                <DownloadMenu
-                  bookId={selected.bookVersionId}
-                  title={selected.effective.title}
-                  format={selected.format}
-                  versionLabel={versionTabLabel(selected.name, _('library.versionFallback', { n: versionOrdinal(work.versions, selected.id) }))}
-                />
-              )}
-              {signedIn && (
-                <ActionIcon
-                  secondary
-                  disabled={openingReview}
-                  className={openingReview ? 'animate-pulse' : undefined}
-                  title={openingReview ? _('reader.loading') : undefined}
-                  label={_('review.reviewsTitle')}
-                  onClick={() => void openReviewAction()}
-                >
-                  {reviewIconPaths}
-                </ActionIcon>
-              )}
-              {onOpenReadingData && (
-                <ActionIcon secondary label={_('readingData.data')} onClick={onOpenReadingData}>
-                  <path d="M4 19V9m8 10V4m8 15v-7" />
-                </ActionIcon>
-              )}
-              {canManage && (
-                hiddenCause ? (
-                  // The hide came from a hidden category or tag, so there is no
-                  // work-level action to take. Keep the same eye icon, just
-                  // inert, and let the tooltip say why.
-                  <ActionIcon
-                    secondary
-                    label={_(hiddenCause.shortKey)}
-                    title={_(hiddenCause.hintKey, hiddenCause.hintParams)}
-                    disabled
-                  >
-                    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-                    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-                    <line x1="2" x2="22" y1="2" y2="22" />
-                  </ActionIcon>
-                ) : selectedHidden ? (
-                  <ActionIcon
-                    secondary
-                    label={_('library.versionHiddenAction')}
-                    disabled={updateVersion.isPending || updateWork.isPending}
-                    onClick={togglePublish}
-                  >
-                    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
-                    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-                    <line x1="2" x2="22" y1="2" y2="22" />
-                  </ActionIcon>
-                ) : (
-                  <ActionIcon
-                    secondary
-                    label={_('library.versionVisibleAction')}
-                    disabled={updateVersion.isPending || updateWork.isPending}
-                    onClick={togglePublish}
-                  >
-                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </ActionIcon>
-                )
-              )}
-              {overflowItems.length > 0 && (
-                <MoreActionsMenu items={overflowItems} />
-              )}
-              {(canManage || selected.maintainable) && (
-                <div className="ml-auto">
-                  <ActionIcon label={_('library.delete')} danger onClick={() => setDeleteOpen(true)}>
-                    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
-                  </ActionIcon>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        footer={work.versions.length > 1 && (
-          <div className="mt-3.5">
-            <VersionTabs versions={work.versions} selectedId={selected.id} onSelect={onSelectVersion} />
-          </div>
+          <DetailActions
+            primary={{
+              label: hasProgress ? _('library.continueReading') : _('library.startReading'),
+              onClick: readSelected,
+              disabled: !readable,
+              title: !readable ? _('library.catalogUnlistedReadHint') : undefined,
+              // Hover warms the route only: the row already holds this
+              // version's detail, and prefetching it again under the reader's
+              // key would fetch the same payload twice.
+              onPointerEnter: () => warmReader({ bookId: selected.bookVersionId, isLocal: false, prefetch: false }),
+            }}
+            actions={actions}
+            overflow={overflowItems}
+            trailing={(canManage || selected.maintainable) ? (
+              <ActionIcon label={_('library.delete')} danger onClick={() => setDeleteOpen(true)}>
+                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
+              </ActionIcon>
+            ) : undefined}
+          />
         )}
       />
 
       {selected.effective.description && (
-        <section className="mt-5" onContextMenu={canManage ? (event) => { event.preventDefault(); event.stopPropagation(); metadataEdit('description', _('library.descriptionSection'))?.() } : undefined}>
-          <GroupLabel>{_('library.descriptionSection')}</GroupLabel>
-          <p className="max-h-40 overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] pr-1 whitespace-pre-wrap text-sm leading-relaxed text-stone-600 dark:text-stone-300">
-            {selected.effective.description}
-          </p>
-        </section>
+        <DescriptionSection
+          text={selected.effective.description}
+          onEdit={metadataEdit('description', _('library.descriptionSection'))}
+        />
       )}
 
-      <MetaGrid rows={metaRows} />
+      <MetaGrid rows={metaRows} tight={Boolean(selected.effective.description)} />
 
       <ReviewPreviewSection
         context={reviewContext}
@@ -583,7 +567,6 @@ export default function WorkDetailBody({
           work={work}
           libraryId={library.id}
           version={selected}
-          versionIndex={work.versions.indexOf(selected)}
           onClose={() => setEditOpen(false)}
         />
       )}

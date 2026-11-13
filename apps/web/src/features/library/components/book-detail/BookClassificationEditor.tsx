@@ -2,7 +2,7 @@ import { type Dispatch, type SetStateAction } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
-import { useLibraryCategories, useTags } from '../../hooks'
+import { useLibraryCategories } from '../../hooks'
 import CategorySelectPopover from '../CategorySelectPopover'
 import TagSelectPopover from '../TagSelectPopover'
 import { toggleSetItem } from './types'
@@ -14,6 +14,11 @@ interface BookClassificationEditorProps {
   tagIds: Set<string>
   onCategoryChange: (value: { categoryId: string | null; categoryTemplateKey?: undefined } | { categoryId?: undefined; categoryTemplateKey: string }) => void
   onTagChange: Dispatch<SetStateAction<Set<string>>>
+  tags: { id: string; name: string }[]
+  onCreateTag: (name: string) => Promise<string>
+  creatingTag?: boolean
+  allowTemplates?: boolean
+  className?: string
 }
 
 export default function BookClassificationEditor({
@@ -23,16 +28,19 @@ export default function BookClassificationEditor({
   tagIds,
   onCategoryChange,
   onTagChange,
+  tags,
+  onCreateTag,
+  creatingTag,
+  allowTemplates = true,
+  className = 'border-t border-stone-100 pt-3.5 dark:border-stone-800',
 }: BookClassificationEditorProps) {
   const _ = useTranslation()
   const { data: categoriesData } = useLibraryCategories(libraryId)
-  const { data: tagsData } = useTags()
 
-  const allTags = tagsData?.data ?? []
-  const selectedTags = allTags.filter((tag) => tagIds.has(tag.id))
+  const selectedTags = tags.filter((tag) => tagIds.has(tag.id))
 
   return (
-    <section className="mt-5 border-t border-stone-100 pt-4 dark:border-stone-800">
+    <section className={className}>
       {/* Category Section */}
       <div className="mb-2 flex items-center justify-between">
         <p className="text-xs font-semibold text-stone-500 dark:text-stone-400">{_('library.categories')}</p>
@@ -43,7 +51,7 @@ export default function BookClassificationEditor({
           categories={categoriesData?.data ?? []}
           categoryId={categoryId}
           categoryTemplateKey={categoryTemplateKey}
-          allowTemplates
+          allowTemplates={allowTemplates}
           onChange={onCategoryChange}
         />
       </div>
@@ -77,10 +85,12 @@ export default function BookClassificationEditor({
 
         {/* Add Tag Popover Trigger */}
         <TagSelectPopover
-          tags={allTags}
+          tags={tags}
           selectedTagIds={tagIds}
           onToggleTag={(id) => onTagChange((current) => toggleSetItem(current, id))}
           onAddTag={(id) => onTagChange((current) => new Set(current).add(id))}
+          onCreateTag={onCreateTag}
+          creating={creatingTag}
         />
       </div>
     </section>

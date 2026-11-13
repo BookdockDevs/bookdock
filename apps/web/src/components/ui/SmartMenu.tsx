@@ -10,7 +10,15 @@ interface SmartMenuProps {
   triggerRef?: React.RefObject<HTMLElement | null>
   position: SmartPosition | null
   onClose: () => void
-  width?: number
+  /**
+   * Fixed width in px, or 'auto' to shrink-wrap the widest row between
+   * minWidth and maxWidth. A menu of two-character labels does not need a
+   * fixed column, but a menu with one long label must not run off-screen -
+   * so 'auto' is bounded on both ends rather than purely intrinsic.
+   */
+  width?: number | 'auto'
+  minWidth?: number
+  maxWidth?: number
   variant?: 'default' | 'reader'
   className?: string
   children: ReactNode
@@ -23,6 +31,8 @@ export default function SmartMenu({
   position,
   onClose,
   width = 176,
+  minWidth = 160,
+  maxWidth = 320,
   variant = 'default',
   className = '',
   children,
@@ -71,11 +81,28 @@ export default function SmartMenu({
   if (!position) return null
 
   const finalPos = clamped ?? position
+  const autoWidth = width === 'auto'
 
   const themeClass =
     variant === 'reader'
       ? 'border-stone-200/80 bg-[var(--bd-read-bg)] text-[var(--bd-read-text)] dark:border-stone-700/80'
       : 'border-stone-200/80 bg-white/95 text-stone-900 shadow-stone-900/8 dark:border-stone-700 dark:bg-stone-900/95 dark:text-stone-100'
+
+  const sizeStyle: React.CSSProperties = autoWidth
+    ? {
+        minWidth,
+        // Never wider than the viewport allows, whatever the caller asks.
+        maxWidth: Math.min(maxWidth, window.innerWidth - PADDING * 2),
+      }
+    : { width: width as number }
+
+  const style = {
+    left: finalPos.left,
+    top: finalPos.top,
+    ...sizeStyle,
+    animation: 'smart-menu-in 120ms ease-out forwards',
+    '--slide-y': finalPos.dir === 'down' ? '-4px' : '4px',
+  } as React.CSSProperties
 
   // Portaled to body: fixed + z-50 only escapes ancestors that create a
   // stacking context (e.g. the sticky sidebar) when the DOM node is a root child.
@@ -90,14 +117,13 @@ export default function SmartMenu({
         e.preventDefault()
         e.stopPropagation()
       }}
-      className={cn('fixed z-50 rounded-xl border p-1 shadow-xl backdrop-blur-md', themeClass, className)}
-      style={{
-        left: finalPos.left,
-        top: finalPos.top,
-        width,
-        animation: 'smart-menu-in 120ms ease-out forwards',
-        '--slide-y': finalPos.dir === 'down' ? '-4px' : '4px',
-      } as React.CSSProperties}
+      className={cn(
+        'fixed z-50 rounded-xl border p-1 shadow-xl backdrop-blur-md',
+        autoWidth && 'w-max',
+        themeClass,
+        className,
+      )}
+      style={style}
     >
       {children}
     </div>,

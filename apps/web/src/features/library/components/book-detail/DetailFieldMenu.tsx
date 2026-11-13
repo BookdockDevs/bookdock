@@ -71,7 +71,7 @@ export default function DetailFieldMenu({ label, editLabel, value, options, edit
         {label}
       </button>
       {editable && !disabled && position && (
-        <SmartMenu id={id} innerRef={menuRef} triggerRef={anchorRef} position={position} onClose={close} width={184}>
+        <SmartMenu id={id} innerRef={menuRef} triggerRef={anchorRef} position={position} onClose={close} width="auto" minWidth={148} maxWidth={280}>
           <div
             role="menu"
             aria-label={editLabel}

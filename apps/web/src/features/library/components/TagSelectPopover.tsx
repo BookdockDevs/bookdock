@@ -1,16 +1,16 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { ClientTaxonomyView } from '@bookdock/shared'
-
+import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
-
-import { useCreateTag } from '../hooks'
+import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
 
 interface TagSelectPopoverProps {
-  tags: ClientTaxonomyView[]
+  tags: { id: string; name: string }[]
   selectedTagIds: Set<string>
   onToggleTag: (tagId: string) => void
   onAddTag: (tagId: string) => void
+  onCreateTag: (name: string) => Promise<string>
+  creating?: boolean
 }
 
 export default function TagSelectPopover({
@@ -18,15 +18,19 @@ export default function TagSelectPopover({
   selectedTagIds,
   onToggleTag,
   onAddTag,
+  onCreateTag,
+  creating,
 }: TagSelectPopoverProps) {
   const _ = useTranslation()
-  const createTag = useCreateTag()
   const containerRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const [open, setOpen] = useState(false)
-  const [flipUp, setFlipUp] = useState(false)
+  // Portaled for the same reason as the category picker: the dialog body
+  // scrolls, and an in-flow panel is clipped at its edge.
+  const [position, setPosition] = useState<SmartPosition | null>(null)
+  const open = Boolean(position)
   const [query, setQuery] = useState('')
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -43,41 +47,27 @@ export default function TagSelectPopover({
     return tags.some((t) => t.name.toLocaleLowerCase() === normalizedQuery)
   }, [tags, normalizedQuery])
 
-  useLayoutEffect(() => {
-    if (!open || !containerRef.current) return
-    const rect = containerRef.current.getBoundingClientRect()
-    const spaceBelow = window.innerHeight - rect.bottom
-    if (spaceBelow < 260 && rect.top > spaceBelow) {
-      setFlipUp(true)
-    } else {
-      setFlipUp(false)
-    }
+  useEffect(() => {
+    if (open) return
+    setQuery('')
   }, [open])
 
-  useEffect(() => {
-    if (!open) {
-      setQuery('')
+  function toggle() {
+    if (position) {
+      setPosition(null)
       return
     }
-    const onMouseDown = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false)
-      }
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onMouseDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setPosition(
+      computeDropdownPosition(
+        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        240,
+        288,
+        'start',
+      ),
+    )
+  }
 
   useEffect(() => {
     if (open) {
@@ -87,13 +77,13 @@ export default function TagSelectPopover({
 
   async function handleCreateTag() {
     const name = query.trim()
-    if (!name || createTag.isPending) return
+    if (!name || creating) return
     try {
-      const res = await createTag.mutateAsync(name)
-      onAddTag(res.data.id)
+      const id = await onCreateTag(name)
+      onAddTag(id)
       setQuery('')
     } catch {
-      // toast error handled by hook
+      // toast error handled by the caller's mutation
     }
   }
 
@@ -101,11 +91,12 @@ export default function TagSelectPopover({
     <div ref={containerRef} className="relative inline-block">
       {/* Trigger Button */}
       <button
+        ref={triggerRef}
         type="button"
         aria-label={_('library.newTag')}
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={toggle}
         className={`inline-flex min-h-[28px] cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-all select-none ${
           open
             ? 'border-stone-400 bg-white ring-2 ring-stone-200 dark:border-stone-500 dark:bg-stone-900 dark:ring-stone-800'
@@ -116,7 +107,7 @@ export default function TagSelectPopover({
         <span>{selectedTagIds.size > 0 ? _('library.tags') : _('library.newTag')}</span>
         <svg
           className={`h-3 w-3 shrink-0 text-stone-400 transition-transform duration-200 ${
-            open ? (flipUp ? 'rotate-0' : 'rotate-180') : (flipUp ? 'rotate-180' : 'rotate-0')
+            open ? 'rotate-180' : 'rotate-0'
           }`}
           viewBox="0 0 24 24"
           fill="none"
@@ -129,16 +120,19 @@ export default function TagSelectPopover({
         </svg>
       </button>
 
-      {/* Floating Popover Panel: compact multi-select list */}
-      {open && (
-        <div
-          ref={panelRef}
-          role="region"
-          aria-label={_('library.tags')}
-          className={`absolute left-0 z-30 w-64 max-h-72 overflow-y-auto rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl custom-scrollbar dark:border-stone-700 dark:bg-stone-900 animate-modal-panel ${
-            flipUp ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
-          }`}
+      {/* Compact multi-select list, portaled so the dialog body cannot clip it */}
+      {position && (
+        <SmartMenu
+          innerRef={panelRef}
+          triggerRef={containerRef}
+          position={position}
+          onClose={() => setPosition(null)}
+          width="auto"
+          minWidth={208}
+          maxWidth={304}
+          className="max-h-72 overflow-y-auto custom-scrollbar"
         >
+          <div role="region" aria-label={_('library.tags')}>
           {/* Search & Quick-Create Input */}
           <div className="mb-1 border-b border-stone-100 pb-1.5 dark:border-stone-800">
             <div className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50/80 px-2 py-1 focus-within:border-stone-400 focus-within:bg-white dark:border-stone-700 dark:bg-stone-800/60 dark:focus-within:border-stone-500 dark:focus-within:bg-stone-900">
@@ -165,7 +159,7 @@ export default function TagSelectPopover({
                   if (e.key === 'Escape') {
                     e.preventDefault()
                     e.stopPropagation()
-                    setOpen(false)
+                    setPosition(null)
                   } else if (e.key === 'Enter') {
                     e.preventDefault()
                     if (!exactMatch && query.trim()) {
@@ -183,7 +177,7 @@ export default function TagSelectPopover({
           {!exactMatch && query.trim() && (
             <button
               type="button"
-              disabled={createTag.isPending}
+              disabled={creating}
               onClick={() => void handleCreateTag()}
               className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
             >
@@ -191,12 +185,12 @@ export default function TagSelectPopover({
                 <path d="M12 5v14M5 12h14" />
               </svg>
               <span className="truncate">
-                {createTag.isPending ? '...' : `${_('library.create')} “${query.trim()}”`}
+                {creating ? '...' : `${_('library.create')} “${query.trim()}”`}
               </span>
             </button>
           )}
 
-          {/* ClientTaxonomyView Items List (Checkable rows, stays open on click) */}
+          {/* Tag items (checkable rows; stays open on click) */}
           <div className="space-y-0.5">
             {filteredTags.map((tag) => {
               const isChecked = selectedTagIds.has(tag.id)
@@ -239,7 +233,8 @@ export default function TagSelectPopover({
               </p>
             )}
           </div>
-        </div>
+          </div>
+        </SmartMenu>
       )}
     </div>
   )

@@ -4,16 +4,18 @@ import type { ClientLibraryBookView, LibraryListItem, PublishedLinkInfo, Publish
 
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
-import { useLibraryCategories, useLibraryTags, usePublishPrivateBook, useBook, usePushVersion } from '../hooks'
-import { categoryChoices } from '../taxonomy'
+import { useCreateLibraryTag, useLibraryTags, usePublishPrivateBook, useBook, usePushVersion } from '../hooks'
+import BookClassificationEditor from './book-detail/BookClassificationEditor'
 
 interface CustomSelectOption {
   value: string
@@ -32,30 +34,59 @@ interface CustomSelectProps {
 }
 
 function CustomSelect({ id, value, onChange, options, disabled = false, loading = false, placeholder }: CustomSelectProps) {
-  const [open, setOpen] = useState(false)
+  // The dialog body scrolls, so a list rendered in flow is cut off at the
+  // body's edge - the last options simply cannot be reached. The list is
+  // portaled to the document and anchored to the trigger instead, and it
+  // closes as soon as the body scrolls so it never floats over other fields.
+  const [menu, setMenu] = useState<{ position: SmartPosition; width: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   const selectedOption = options.find((opt) => opt.value === value)
 
   useEffect(() => {
-    if (!open) return
-    function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+    if (!menu) return
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!menuRef.current?.contains(target) && !containerRef.current?.contains(target)) setMenu(null)
     }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setOpen(false)
-      }
+    const dismissOnScroll = (event: Event) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenu(null)
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleKeyDown)
+    const dismissOnResize = () => setMenu(null)
+    const dismissOnKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenu(null)
+    }
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', dismissOnKey)
+    window.addEventListener('scroll', dismissOnScroll, true)
+    window.addEventListener('resize', dismissOnResize)
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', dismissOnKey)
+      window.removeEventListener('scroll', dismissOnScroll, true)
+      window.removeEventListener('resize', dismissOnResize)
     }
-  }, [open])
+  }, [menu])
+
+  function toggle() {
+    if (menu) {
+      setMenu(null)
+      return
+    }
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const height = Math.min(options.length * 36 + 8, 224)
+    const position = computeDropdownPosition(
+      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      rect.width,
+      height,
+      'start',
+    )
+    // A zero-width trigger (jsdom, or before layout) must still open.
+    setMenu({ position, width: Math.max(rect.width, 160) })
+  }
 
   return (
     <div ref={containerRef} className="relative">
@@ -75,11 +106,12 @@ function CustomSelect({ id, value, onChange, options, disabled = false, loading 
       </select>
 
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled || loading}
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={toggle}
         aria-haspopup="listbox"
-        aria-expanded={open}
+        aria-expanded={Boolean(menu)}
         className={cn(
           'flex h-10 w-full items-center justify-between rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none transition-all',
           'focus:border-stone-400 focus:ring-1 focus:ring-stone-400 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:focus:border-stone-500',
@@ -108,60 +140,66 @@ function CustomSelect({ id, value, onChange, options, disabled = false, loading 
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className={cn('shrink-0 text-stone-400 transition-transform duration-150', open && 'rotate-180')}
+            className={cn('shrink-0 text-stone-400 transition-transform duration-150', menu && 'rotate-180')}
           >
             <path d="m6 9 6 6 6-6" />
           </svg>
         )}
       </button>
 
-      {open && (
-        <div
-          role="listbox"
-          className="absolute left-0 top-full z-30 mt-1.5 max-h-56 w-full overflow-y-auto rounded-xl border border-stone-200/90 bg-white/95 p-1 shadow-lg backdrop-blur-md dark:border-stone-700 dark:bg-stone-800/95"
+      {menu && (
+        <SmartMenu
+          innerRef={menuRef}
+          triggerRef={containerRef}
+          position={menu.position}
+          onClose={() => setMenu(null)}
+          width={menu.width}
+          className="max-h-56 overflow-y-auto"
         >
-          {options.map((opt) => {
-            const isSelected = opt.value === value
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                onClick={() => {
-                  onChange(opt.value)
-                  setOpen(false)
-                }}
-                className={cn(
-                  'flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-medium transition-colors',
-                  isSelected
-                    ? 'bg-stone-100 font-semibold text-stone-900 dark:bg-stone-700 dark:text-stone-100'
-                    : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-700/50 dark:hover:text-stone-100',
-                )}
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  {opt.icon}
-                  <span className="truncate">{opt.label}</span>
-                </div>
-                {isSelected && (
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="shrink-0 text-stone-900 dark:text-stone-100"
-                  >
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                )}
-              </button>
-            )
-          })}
-        </div>
+          <div role="listbox">
+            {options.map((opt) => {
+              const isSelected = opt.value === value
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => {
+                    onChange(opt.value)
+                    setMenu(null)
+                  }}
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-medium transition-colors',
+                    isSelected
+                      ? 'bg-stone-100 font-semibold text-stone-900 dark:bg-stone-700 dark:text-stone-100'
+                      : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900 dark:text-stone-300 dark:hover:bg-stone-700/50 dark:hover:text-stone-100',
+                  )}
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    {opt.icon}
+                    <span className="truncate">{opt.label}</span>
+                  </div>
+                  {isSelected && (
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="shrink-0 text-stone-900 dark:text-stone-100"
+                    >
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </SmartMenu>
       )}
     </div>
   )
@@ -189,7 +227,7 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
   const targetPreferenceKey = userId ? `bd-publish-target-library:${userId}` : null
   const [selectedLibraryId, setSelectedLibraryId] = useState('')
   const [categoryId, setCategoryId] = useState('')
-  const [tagIds, setTagIds] = useState<string[]>([])
+  const [tagIds, setTagIds] = useState<Set<string>>(() => new Set())
   const [result, setResult] = useState<PublishPrivateBookRes | null>(null)
   const [errorKey, setErrorKey] = useState<string | null>(null)
   // Push is the one destructive-ish action in this dialog — it replaces what
@@ -216,22 +254,20 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
   useEffect(() => {
     setResult(null)
     setCategoryId('')
-    setTagIds([])
+    setTagIds(new Set())
     setErrorKey(null)
   }, [book?.id])
 
   useEffect(() => {
     setCategoryId('')
-    setTagIds([])
+    setTagIds(new Set())
     setErrorKey(null)
   }, [selectedLibraryId])
 
-  const { data: categoriesData, isLoading: categoriesLoading } = useLibraryCategories(selectedLibraryId || null, {
+  const { data: tagsData } = useLibraryTags(selectedLibraryId || null, {
     enabled: Boolean(book && selectedLibraryId && !result),
   })
-  const { data: tagsData, isLoading: tagsLoading } = useLibraryTags(selectedLibraryId || null, {
-    enabled: Boolean(book && selectedLibraryId && !result),
-  })
+  const createTag = useCreateLibraryTag()
 
   const libraryOptions: CustomSelectOption[] = useMemo(
     () => targets.map((lib) => ({
@@ -247,39 +283,15 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
     [targets],
   )
 
-  const categoryOptions: CustomSelectOption[] = useMemo(() => {
-    const list = categoryChoices(categoriesData?.data ?? [])
-    return [
-      {
-        value: '',
-        label: _('library.uncategorized'),
-        icon: (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-          </svg>
-        ),
-      },
-      ...list.map((cat) => ({
-        value: cat.id,
-        label: cat.name,
-        icon: (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          </svg>
-        ),
-      })),
-    ]
-  }, [_, categoriesData?.data])
-
   if (!book) return null
   const currentBook = book
 
   const selectedLibrary = targets.find((library) => library.id === selectedLibraryId)
   const tags = tagsData?.data ?? []
 
-  function toggleTag(tagId: string) {
-    setTagIds((current) => current.includes(tagId) ? current.filter((id) => id !== tagId) : [...current, tagId])
+  async function createTagForTarget(name: string): Promise<string> {
+    const response = await createTag.mutateAsync({ libraryId: selectedLibraryId, name })
+    return response.data.id
   }
 
   function submit() {
@@ -290,7 +302,7 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
         libraryId: selectedLibraryId,
         bookId: currentBook.id,
         categoryId: categoryId || undefined,
-        tagIds,
+        tagIds: [...tagIds],
       },
       {
         onSuccess: (response) => {
@@ -441,80 +453,22 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
             />
           </div>
 
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-stone-600 dark:text-stone-300" htmlFor="publish-target-category">
-              {_('library.publishCategory')}
-            </label>
-            <CustomSelect
-              id="publish-target-category"
-              value={categoryId}
-              onChange={setCategoryId}
-              options={categoryOptions}
-              disabled={publishBook.isPending}
-              loading={categoriesLoading}
-            />
-          </div>
-
-          <div>
-            <p className="mb-1.5 text-xs font-medium text-stone-600 dark:text-stone-300">{_('library.publishTags')}</p>
-            {tagsLoading ? (
-              <div className="flex flex-wrap gap-1.5 py-1" aria-busy="true">
-                <div className="h-7 w-16 animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800" />
-                <div className="h-7 w-20 animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800" />
-                <div className="h-7 w-14 animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800" />
-              </div>
-            ) : tags.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-stone-200 px-3 py-2.5 text-center text-xs text-stone-400 dark:border-stone-800 dark:text-stone-500">
-                {_('library.publishNoTags')}
-              </div>
-            ) : (
-              <div className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto">
-                {tags.map((tag) => {
-                  const isSelected = tagIds.includes(tag.id)
-                  return (
-                    <label
-                      key={tag.id}
-                      className={cn(
-                        'inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs select-none transition-colors',
-                        isSelected
-                          ? 'border-stone-900 bg-stone-900 font-medium text-white dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900'
-                          : 'border-stone-200 text-stone-600 hover:border-stone-300 hover:text-stone-900 dark:border-stone-700 dark:text-stone-300 dark:hover:border-stone-600',
-                        publishBook.isPending && 'pointer-events-none opacity-60',
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        aria-label={tag.name}
-                        checked={isSelected}
-                        onChange={() => toggleTag(tag.id)}
-                        disabled={publishBook.isPending}
-                        className="sr-only"
-                      />
-                      {isSelected ? (
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                          className="shrink-0"
-                        >
-                          <path d="M20 6 9 17l-5-5" />
-                        </svg>
-                      ) : (
-                        <span aria-hidden="true" className="text-[11px] text-stone-400 dark:text-stone-500">#</span>
-                      )}
-                      <span>{tag.name}</span>
-                    </label>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+          {/* Same taxonomy editor the edit dialog uses: a two-level tree with
+              inline creation and a searchable tag picker, instead of a flat
+              select and a wall of tag chips. Recommendations are off because a
+              shared library already owns its taxonomy - the publish API only
+              takes an existing category id, and a template would mint one. */}
+          <BookClassificationEditor
+            libraryId={selectedLibraryId || null}
+            categoryId={categoryId || null}
+            tagIds={tagIds}
+            onCategoryChange={(value) => setCategoryId(value.categoryId ?? '')}
+            onTagChange={setTagIds}
+            tags={tags}
+            onCreateTag={createTagForTarget}
+            creatingTag={createTag.isPending}
+            allowTemplates={false}
+          />
 
           {errorKey && <p className="text-xs text-red-600 dark:text-red-400">{_(errorKey)}</p>}
         </div>

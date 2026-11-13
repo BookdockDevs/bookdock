@@ -8,14 +8,44 @@ All notable changes to Bookdock are documented here.
 
 - Opening the content workbench now follows the reader's entry flow: the header and chapter list paint from cache while the text is still loading, the source request starts when you pick Content editing instead of after the page mounts, and EPUB packages are unzipped once and kept per revision, so reopening a book you just read no longer waits behind a full-screen spinner.
 - The editor's revision-pinned TXT request is now reused from the browser cache for five minutes, so reloading, navigating back, or opening the same revision in a second tab no longer re-downloads the whole book. The cached body stays private to that browser and is split per session, so a shared library cannot hand one member's copy to another account.
+- Shared catalog editing now uses one form per version with the same category and tag popovers as private books, including category recommendations; catalog cards follow the default version, and metadata lookup applies to the version being edited.
+- A shared catalog's work row now keeps its title, authors, description and cover as a projection of the default version, refreshed when that version, the default pointer or the version set changes; private libraries are unchanged.
+- Shared catalog details now use the same "Edit" action label and "Edit book" dialog title as private libraries; the obsolete "Edit work" wording is gone.
+- Shared catalog versions now own their metadata: publishing, or uploading straight into a shared library, writes the title, authors, description and cover onto the version row, the work row is copied from the default version and never read back, and existing shared works are backfilled once at startup. Editing the work is editing the default version, so a version that has no cover of its own no longer borrows the work's.
+- The shared catalog no longer reads a work-level publication meta: a version's publisher, ISBN and the rest resolve from the parsed file plus that version's own override, a work meta patch writes the default version instead, and any leftover work-level value is dropped once at startup rather than shadowing the file.
+- Restoring source metadata in the editor is now offered only for values the file itself carried: a title or author derived from the file name no longer counts, so text books show neither the per-field restore icon nor the restore-all action, and both disappear as soon as the draft matches the file again after a reset or a restore.
+- The shared catalog version editor and the private book dialog now render one metadata form, one cover editor and one save footer instead of three near-duplicate implementations. Both editors use the same input skin, restore affordances and expansion behaviour, and the right-click single-field dialog adopts that skin too; only the structures that genuinely differ (version tabs, version name, shelf and reading state) stay separate.
 - Covers in a book's detail view and in the cover editor no longer carry the faux spine shading. That binding effect is a shelf affordance, so it stays on grid, list and recently-read cards while the detail hero shows the artwork - and the file the user is choosing - unaltered. Generated placeholder covers keep their own binding everywhere, so one book looks the same in the grid and in its detail.
+- Opening a work in a shared library now shows the calling account's reading progress for the version on screen and offers "Continue reading" once it has been read, from the same progress strip a private book uses; a version nobody has opened still reads "Start reading".
+- Both detail dialogues now share one rating badge, progress strip, description block, action row and fact grid instead of keeping a copy each, so a book reads the same whether it lives in the private library or in a shared one. The rating keeps its existing rule - a summary without rated reviews shows nothing.
+- A long description is now cut at four lines - no ellipsis, the last line just fades into the panel - and the text expands in place when clicked instead of scrolling inside a 160px box. Only the text is clickable - the heading is not - and nothing sits on top of it while it rests: the expand button fades in on the heading row, the same slot that holds the collapse button once expanded. Both appear only when the clamp actually cuts something off, and a click that ends a text selection is left alone. The fact grid below moves up to half a line under the text instead of a full one.
+- The detail action row now keeps the primary action, the icons and the delete on one line: it folds just enough secondary icons into the overflow menu - visibility first, then reading data, then reviews - instead of measuring the row and letting the delete drop onto a line of its own. The delete keeps its own gap from the icon cluster, and the menu never opens just to hold a single icon: its trigger costs the slot that icon would have freed, so icons fold in twos. Edit, download and delete are never folded.
+- The visibility toggle now names its action the way the rest of the app does: "Hide"/"Show" on a private book, "Hide work"/"Show work" on a one-version shared work, and "Hide this version"/"Show this version" once a work has more than one. The old label reported a status and told the reader to "click" in the same sentence, which no touch or keyboard user does, and read as a stray sentence once the row folded it into the overflow menu.
+- Dropdown menus in the detail and edit dialogues now size to their own content instead of a fixed column: the reading-state menu of two-character labels is about 148px wide instead of 184, the overflow menu shrinks the same way, and a long label widens the menu up to 280px before it truncates. The editor's tag picker follows the same rule instead of a fixed 256px panel. Long labels still truncate rather than run off-screen, and no menu grows past the viewport.
+- Publishing a private book now picks its category and tags with the same taxonomy editor the book editor uses: one two-level category tree with inline creation and a searchable tag picker replace the flat category select and the wall of tag chips. Recommendations are not offered here, because publishing takes an existing category id - a recommendation would have to mint categories in the target library first - and a shared library already owns its taxonomy.
+- A book's category is now editable from its own detail header: right-clicking the category chip opens the same two-level picker the editor and the publish dialog use - recommendations excluded - for a private book and for a work in a shared library alike, while a left click still filters the list as before.
+- The book editor no longer prints a "Basic info" heading above the cover, title and author: every control under it names itself, so the heading only pushed the form down.
+- The description field of the book editor now opens six lines tall on a phone and eight on a wider screen instead of four, so a blurb that runs past a couple of paragraphs can be read without scrolling inside the box; it stays vertically resizable.
+- Version switching moved out of the body and into the dialog title bar: a menu beside "Book details" and "Edit book" names the version on screen, tags the default one, still works at a dozen versions, and leaves a one-version work with the plain title a private book has. The tab strip it replaces is gone, and so is the sticky version bar in the editor. The list takes the width its labels need - 148px at the narrowest, 280px before a long name truncates, and never a fixed column with a blank right half - each row stands on its own so hovering the version next to the current one no longer fuses the two highlights into one block, and a work with dozens of versions scrolls the list instead of running off-screen.
+- The read-only identifier in the book editor now shares the subjects row instead of sitting on a line of its own: the id takes the second column at the height and label style of the input beside it, still copies on click, and truncates when a work id runs long, while subjects falls back to the full row when there is no identifier to show.
+
+### Removed
+
+- Removed the separate work-info layer from the shared catalog editor, along with its duplicate title/author/description/cover inputs, inline category/tag chips, single-version version tabs and the restore-inherit action. The right-click single-field dialog stays, but it writes the version's own values and no longer offers re-inherit.
+- Removed the shared-catalog version metadata reset endpoint (`POST /:id/books/:bookId/versions/:versionLinkId/reset-metadata`), which had no caller left; restoring parsed values happens in the editor draft.
 
 ### Fixed
 
 - Saving in the content workbench now refreshes the book detail and chapter list it reads, so a saved edit no longer strands the editor on its content-load error page and the reader no longer paints the previous table of contents when the book is reopened.
 - A successful save or an explicit draft discard now reliably removes the local draft, instead of leaving a pre-save draft that a later visit reported as never saved; local autosave also stops claiming another tab is editing after the workbench re-checks edit permission.
+- Editing or scraping a shared catalog version no longer leaves catalog cards showing the old work title, and removing the default version's cover no longer falls back to a stale work cover.
+- Removing a cover now targets only the version being edited: the action is hidden when the version has no cover of its own, and clearing the default version's cover no longer depends on which of the two requests in one save reached the server first.
+- Showing a one-version work now clears both layers that can hide it: the lone version is republished when it was unlisted, and the work flag is cleared when it was set. Previously the button read "Show work" but only wrote the work flag, so a work whose only version had been unlisted stayed hidden - or was hidden outright when the flag was already off.
+- The book-source listing no longer shows the default version's cover for a shared version that has none of its own.
 - The reader's bottom bar no longer collapses while the pointer travels from the progress strip up to a companion capsule: a revealed footer keeps a taller keep-alive band covering the gap and the capsules, and hiding waits longer, so moving back within the grace period cancels it. Moving off a control onto the bar itself (its background is pass-through, so only buttons and the slider take the pointer) no longer starts a hide either.
 - Hovering the selection bubble no longer summons the reader's top or bottom bar while a selection is active: the bubble is clamped to the viewport edge and overlaps the hover band, so it now counts as selection UI and leaves the chrome alone, matching what the same pointer position does over the page.
+- The dropdowns in the publish dialog and the editor's category and tag pickers now open outside the dialog's scrolling body instead of inside it: the publish dialog's category list is no longer cut off at the footer, and the lower half of a long category tree can be reached. Each panel stays anchored under its field, flips above it when there is no room below, and closes as soon as the body scrolls instead of floating over unrelated fields.
+- The description box and the metadata inputs no longer end in a dead strip on the right: the inset that keeps text clear of the restore-from-file icon is now applied only when that icon is offered, instead of reserving 48px in every field. The right-click single-field editor follows the same rule.
 
 ## [0.8.2] - 2026-11-13
 
@@ -1196,14 +1226,44 @@ All notable changes to Bookdock are documented here.
 
 - 打开编辑工作台改为与阅读器一致的入口流程：头部与章节列表先按缓存渲染、正文继续加载，正文请求在点击「内容编辑」时就发起而不再等页面挂载，EPUB 整包只解压一次并按修订缓存；刚读过的书再进编辑器不再卡在全屏加载上。
 - 编辑工作台按修订读取 TXT 正文的请求现在会在浏览器缓存中复用五分钟：刷新页面、后退或开第二个标签页重开同一修订时不再重新下载整本书。缓存仅限本浏览器并按会话隔离，共享书库不会把一位成员的副本发给另一位账号。
+- 共享书库编辑改为「每个版本一份表单」，分类与标签复用私库的弹层选择器，并支持推荐分类；书城卡片跟随默认版本，刮削只作用于当前正在编辑的版本。
+- 共享书库作品行的书名、作者、简介与封面现在由默认版本投影，版本信息、默认版本或版本集合变化时会同步刷新；私库行为不变。
+- 共享书库详情的编辑按钮与弹窗标题现在与私库一致（「编辑」/「编辑书籍」），移除已无对应对象的「编辑作品」文案。
+- 共享书库的版本现在自带完整元数据：发布、或直接上传到共享书库时，把书名、作者、简介与封面写进版本行，作品行只从默认版本复制、不再反向回读，存量共享作品在启动时一次性回填。编辑作品即编辑默认版本，因此没有自己封面的版本不再借用作品行的封面。
+- 共享书库不再读取作品级出版元数据：版本的出版商、ISBN 等只来自解析出的文件与该版本自身的覆盖，改作品 meta 会写到默认版本，存量遗留的作品级值在启动时一次性丢弃，不再压在文件值之上。
+- 编辑弹窗的「恢复来源值」只在文件本身带过该字段时才出现：由文件名推断出的书名与作者不再算来源值，TXT 书籍因此既不显示单字段恢复图标、也不显示整表恢复入口；草稿与文件重新一致时（例如刚重置或刚恢复完）两者都会隐藏。
+- 共享书库版本编辑器与私库书籍弹窗现在共用同一份元数据表单、封面编辑器与保存底栏，不再各自维护三份近乎相同的实现；两处的输入框皮肤、恢复操作与展开行为保持一致，右键单字段弹窗也改用同一皮肤，只有真正不同的结构（版本页签、版本名、书架与阅读状态）才分别保留。
 - 书籍详情页与封面编辑器中的封面不再叠加书脊阴影。该书脊效果属于书架语境，保留在网格、列表与最近阅读卡片上，详情头图则原样呈现封面图片（以及用户正在挑选的文件）。自动生成的占位封面在各处都保留自己的装订设计，同一本书在网格与详情里看起来一致。
+- 共享书库的作品详情现在显示当前账号在该版本上的阅读进度，读过之后主按钮为「继续阅读」，进度条与私库一致；从未打开过的版本仍显示「开始阅读」。
+- 私库与共享库的详情弹窗现在共用同一份评分徽标、进度条、简介区块、操作行与信息网格，不再各存一份副本，同一本书在两处读到的是同一套表现。评分沿用既有口径：没有任何公开评分时不显示。
+- 长简介改为四行截断（不再画省略号，末行直接隐入面板），点击简介文字就地展开，不再塞进 160px 高的盒子内部滚动。只有文字可点、标题行不参与；静止时正文上不压任何控件，悬停才在标题行右侧浮出「展开」按钮，与展开后的「收起」是同一位置的同一控件。两者都只在文字真的被截断时出现，拖选文字结束的那一次点击也不会误触展开；下方的信息卡片同时上移，与简介之间只隔半行而不是一整行。
+- 详情页操作行现在保证主按钮、图标与删除同处一行：按需把次要图标收进「更多」菜单——先显隐，再阅读数据，最后书评——而不是量一下整行宽度就把删除挤到单独一行。删除与图标区之间保留固定间距；「更多」也不会只为收纳一个图标而出现——触发按钮本身要占掉那个图标腾出的位置，所以图标按两个为单位折叠。编辑、下载与删除始终留在行内。
+- 详情页的显隐按钮改用全站一致的动词：私库为「隐藏／显示」，单版本共享作品为「隐藏作品／显示作品」，多版本作品才是「隐藏此版本／显示此版本」。旧文案把状态和「点击」拼成一句话，触屏与键盘用户都不会「点击」，而且被收进「更多」菜单后读起来像一句错位的说明。
+- 详情与编辑弹窗里的下拉菜单改为按内容自适应宽度，不再套用固定列宽：阅读状态这类只有两个字的菜单由 184px 收到约 148px，「更多操作」菜单同样收紧，长文案则会把菜单撑到 280px 才截断；编辑器的标签选择器也不再固定 256px。超长文案仍然截断而不是溢出，菜单也不会宽过视口。
+- 发布弹窗的分类与标签改用书籍编辑弹窗那套分类编辑器：两级分类树（可建子分类）与可搜索的标签选择器，取代原来的平铺分类下拉与一整墙标签按钮。这里不提供推荐分类——发布接口只接受目标书库里已有的分类 id，推荐项得先在目标书库建出分类，而共享书库本来就有自己的分类体系。
+- 详情页的分类现在可以直接就地修改：右键分类标签会打开编辑弹窗与发布弹窗同一套两级分类选择（不提供推荐分类），私库书籍与共享库作品都支持；左键仍然跳到该分类的列表筛选。
+- 编辑弹窗不再在封面、书名与作者上方显示「基本信息」分组标题：这一组里的每个控件本身就有标签，标题只是把表单往下推了一截。
+- 编辑弹窗的简介输入框默认高度由四行提高到手机六行、宽屏八行，两段以上的简介不必在框内滚动才能读完；仍然可以竖向拖拽调整高度。
+- 版本切换从正文移到弹窗标题栏：书名旁的下拉菜单（「书籍详情」/「编辑书籍」）列出全部版本、标出当前与默认版本，十几版也不会撑破布局；单版本作品的弹窗因此和私库书籍一样只有一个标题，不再多出一行只能点一次的页签。编辑器里那条吸顶版本栏一并移除。菜单宽度跟着版本名走——最窄 148px，超过 280px 才截断，不再出现固定宽度留下半列空白；条目之间留出间距，悬停在当前版本的相邻版本上时两块高亮不再连成一片；版本再多也只在菜单内滚动，不会溢出到屏幕外。
+- 编辑弹窗里的只读标识符不再单独占一行，改为与「主题」并排：标识符占据第二列，高度与标签样式跟旁边的输入框对齐，点击仍然复制，作品 id 过长时截断；没有标识符可显示时「主题」自动占满整行。
+
+#### 移除
+
+- 移除共享书库编辑里独立的「作品信息」层及其重复的书名/作者/简介/封面输入、平铺式分类标签、单版本下的版本页签与「恢复跟随」操作。右键单字段编辑保留，但只写入当前版本自身的值，不再提供「恢复跟随」。
+- 移除共享书库的版本元数据重置接口（`POST /:id/books/:bookId/versions/:versionLinkId/reset-metadata`），该接口已无调用方；恢复解析值改由编辑草稿完成。
 
 #### 修复
 
 - 编辑工作台保存成功后会同步刷新它所读取的书籍详情与章节列表，保存后不再停留在「正文读取失败」错误页，重新打开书籍时阅读器也不会先渲染上一版目录。
 - 正式保存成功或手动放弃草稿后会可靠删除本地草稿，不再残留保存前的草稿、导致下次进入时被提示「此草稿尚未正式保存」；重新检查编辑权限后，本地自动暂存也不会再误报另有标签页正在编辑。
+- 修复编辑或刮削共享书库版本后书城卡片仍显示旧书名的问题；移除默认版本封面后也不再回退到过期的作品封面。
+- 单版本作品点「显示作品」时，现在会把两层隐藏状态都清干净：唯一版本被下架过就先重新发布，作品级隐藏标记为真就一并清除。此前按钮写着「显示作品」，却只写作品标记，于是「唯一版本已下架」的作品点完仍然隐藏，而标记本就没开时反而被设成隐藏。
+- 移除封面现在只作用于正在编辑的版本：该版本没有自己的封面时不显示移除入口，清除默认版本封面也不再取决于一次保存里两个请求谁先到达服务端。
+- 书源版本列表不再把默认版本的封面显示到没有自己封面的共享版本上。
 - 阅读器底栏不再在鼠标从进度条移向伴随胶囊的途中收起：底栏浮现后「保持」判定区更高、覆盖空档与胶囊，收起前的宽限时间也更长，宽限内移回即取消收起。鼠标从底栏上的控件移到条形本身的空白处（条形背景不拦截指针，只有按钮和滑块响应），也同样不会再触发收起。
 - 选区气泡在屏时，鼠标移到气泡上不再唤出阅读器顶栏／底栏：气泡会被钳到视口边缘并与感应带重叠，现在按「选区浮层」处理、不参与感应，与同一位置移到正文上的表现一致。
+- 发布弹窗的下拉菜单与编辑弹窗的分类／标签选择器改为渲染在弹窗滚动区之外：发布弹窗的分类列表不再被底栏截断，分类树的下半部分也能点到了。面板仍贴着对应字段展开，下方放不下时自动翻到上方，滚动弹窗内容时即时关闭，不再浮在无关字段上。
+- 简介输入框与各元数据输入框右侧不再留出一条用不了的空白：原本为「恢复文件值」图标固定预留的 48px 内边距，现在只在真的提供该图标时才生效；右键单字段编辑弹窗同步修复。
 
 ### [0.8.2] - 2026-11-13
 

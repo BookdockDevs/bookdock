@@ -74,11 +74,37 @@ export function draftFieldDiffers(field: DraftTextField, draftValue: string, val
   return draftValue.trim() !== sourceText.trim()
 }
 
+/**
+ * Only values that came from the file's own embedded metadata or a shared
+ * library version are source values worth restoring. A file-name guess is not:
+ * a text file carries no metadata of its own, so it offers nothing to restore.
+ */
+function sourceProvenanceRestorable(source: BookMetadataSourceRes, field: DraftTextField): boolean {
+  if (source.kind === 'shared') return field === 'title' || field === 'authors'
+  return (source.provenance as Record<string, string> | undefined)?.[field] === 'file'
+}
+
 export function canRestoreField(field: DraftTextField, draftValue: string, source: BookMetadataSourceRes | null | undefined): boolean {
   if (!source) return false
   const values = source.values as Partial<MetadataSourceValues>
   if (!sourceHasValue(field, values)) return false
+  if (!sourceProvenanceRestorable(source, field)) return false
   return draftFieldDiffers(field, draftValue, values)
+}
+
+/**
+ * Whether "restore source values" has anything left to do: at least one field
+ * the editor owns still differs from a restorable source value. Once the draft
+ * matches the file (fresh upload, after a reset, after restoring), there is no
+ * action to offer.
+ */
+export function hasRestorableField(
+  source: BookMetadataSourceRes | null | undefined,
+  fields: DraftTextField[],
+  draftValueOf: (field: DraftTextField) => string,
+): boolean {
+  if (!source) return false
+  return fields.some((field) => canRestoreField(field, draftValueOf(field), source))
 }
 
 export function applySourceFieldToDraft(draft: MetaDraft, field: DraftTextField, source: BookMetadataSourceRes): MetaDraft {

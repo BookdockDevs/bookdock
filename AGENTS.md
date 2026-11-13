@@ -49,7 +49,7 @@ Vite dev, defaults to http://localhost:5173, `/api` proxy to :18423.
 pnpm dev
 ```
 
-## Pre-commit setup
+## Full validation commands
 
 ```bash
 pnpm lint      # Root OxLint check
@@ -177,6 +177,7 @@ import { booksService } from './books.service'
 - Use Tailwind CSS 4 utility classes exclusively. No custom CSS unless Tailwind cannot express it.
 - Class order: layout → sizing → spacing → background/border → typography → interaction (hover/focus/active).
 - Use Tailwind semantic color palette (`slate-*`, `blue-*`), never hardcoded color values.
+- Avoid unnecessary secondary labels and descriptions. Prefer clear labels, layout, and interaction; keep help text only for non-obvious constraints or consequences, and preserve accessible names.
 
 ### Error handling
 - Server: services throw `AppError(code, message?, details?)`; errors propagate to the centralized `error.ts` middleware, which produces the authoritative error response. Catch locally only when recovery or translation is required.
@@ -196,7 +197,8 @@ import { booksService } from './books.service'
 - Focus a test from its package directory with `pnpm exec vitest run <test-file> -t "<test name>"` so package aliases and configuration resolve correctly.
 - Run package type checks with `pnpm --filter <package-name> typecheck`. After moving files or changing imports, run affected type checks and the root `pnpm lint`.
 - Root `pnpm lint` runs OxLint; package `lint` scripts currently run TypeScript checks. Tests, type checks, and lint are separate checks.
-- Keep the full suite green. Before committing, run the full checks below. Broaden or repeat checks when failures, further edits, or unresolved concerns justify it.
+- During development and before local commits, run relevant tests and affected type checks; run lint as appropriate. Broaden checks when the impact is unclear.
+- Before pushing or merging, run `pnpm lint`, `pnpm typecheck`, and `pnpm test`. Reuse passing results for the same revision if the relevant environment is unchanged. Documentation-only changes do not require application checks.
 - If a check is blocked, report what ran, what did not, and why. Never present an unrun check as passed.
 
 ## Git & PR instructions
@@ -218,7 +220,6 @@ import { booksService } from './books.service'
 
 - **Commit messages**: conventional commits — `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`, `perf:`. Example: `feat(server): add book upload endpoint`.
 - **PR title format**: `[<project_name>] <Title>` (e.g. `[server] support book upload`).
-- Always run `pnpm lint`, `pnpm typecheck`, and `pnpm test` before committing.
 - Do not commit, push, or open PRs unless explicitly asked.
 
 ## Communication

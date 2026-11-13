@@ -6,7 +6,9 @@ import {
   applySourceAllToDraft,
   canRestoreField,
   draftFieldDiffers,
+  hasRestorableField,
   sourceTextForField,
+  type DraftTextField,
 } from '../features/library/components/book-detail/metadata-source'
 import { draftToBookmetaPreserving, type MetaDraft } from '../features/library/components/book-detail/types'
 
@@ -83,6 +85,24 @@ describe('metadata source draft helpers', () => {
     expect(next.authors).toBe('FA')
     expect(next.publisher).toBe('')
     expect(next.coverPaletteId).toBe('sand')
+  })
+
+  it('never offers a file-name guess as a restore target', () => {
+    const txt = { ...fileSource({ title: 'Guessed', authors: ['Guessed Author'] }), format: 'txt' as const }
+    txt.provenance = { ...txt.provenance, title: 'filename', authors: 'filename' }
+    expect(canRestoreField('title', 'Edited', txt)).toBe(false)
+    expect(canRestoreField('authors', 'Someone', txt)).toBe(false)
+    const fields: DraftTextField[] = ['title', 'authors']
+    expect(hasRestorableField(txt, fields, (f) => (f === 'title' ? 'Edited' : 'Someone'))).toBe(false)
+  })
+
+  it('offers the restore-all action only while a field still differs from the file', () => {
+    const source = fileSource({ title: 'File', publisher: 'Press' })
+    const fields: DraftTextField[] = ['title', 'publisher', 'description']
+    const draftWith = (title: string) => (f: DraftTextField) => (f === 'title' ? title : f === 'publisher' ? 'Press' : '')
+    expect(hasRestorableField(source, fields, draftWith('File'))).toBe(false)
+    expect(hasRestorableField(source, fields, draftWith('Draft'))).toBe(true)
+    expect(hasRestorableField(null, fields, draftWith('Draft'))).toBe(false)
   })
 
   it('preserves unowned bookmeta keys on save', () => {

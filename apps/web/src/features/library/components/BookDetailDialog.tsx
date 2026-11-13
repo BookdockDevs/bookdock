@@ -13,7 +13,6 @@ import { clientScopeKey } from '@bookdock/shared'
 import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
 import { READING_RECORDS_KEY } from '@/api/hooks/reading-records'
-import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -21,22 +20,23 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import type { ToastMessage } from '@/stores/toast.store'
 
-import { invalidateDeviceMembershipQueries, useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useTags, useVersionTocState, useLibraryCategories, useLibraries } from '../hooks'
+import { invalidateDeviceMembershipQueries, useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useTags, useCreateTag, useVersionTocState, useLibraries } from '../hooks'
 import { warmEditorEntry } from '@/features/content-editor/lib/editor-entry-prefetch'
 
 import AppendContentModal from './AppendContentModal'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
-import { categoryPath } from '../taxonomy'
 import BookCoverEditor from './book-detail/BookCoverEditor'
 import BookDetailView from './book-detail/BookDetailView'
 import BookMetaForm from './book-detail/BookMetaForm'
+import MetadataEditorFooter from './book-detail/MetadataEditorFooter'
 import MetadataLookupDialog from './book-detail/MetadataLookupDialog'
 import MetadataLookupDropdown from './book-detail/MetadataLookupDropdown'
 import type { DraftTextField } from './book-detail/metadata-source'
-import { applySourceAllToDraft, applySourceFieldToDraft, PRIVATE_ALL_TEXT_FIELDS, PRIVATE_B_TEXT_FIELDS } from './book-detail/metadata-source'
+import { applySourceAllToDraft, applySourceFieldToDraft, hasRestorableField, PRIVATE_ALL_TEXT_FIELDS, PRIVATE_B_TEXT_FIELDS } from './book-detail/metadata-source'
 import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
-import { draftFrom, draftToBookmetaPreserving, parseAuthorList, type MetaDraft } from './book-detail/types'
+import { draftFrom, draftToBookmetaPreserving, isMachineIdentifier, parseAuthorList, type MetaDraft } from './book-detail/types'
 import TocRulePicker from './TocRulePicker'
+import VersionSelect from './VersionSelect'
 import WorkDetailBody from './WorkDetailBody'
 import AllReviewsView from '@/features/reviews/components/AllReviewsView'
 import ReviewDetailHeaderActions, { ReviewDetailModalTitle } from '@/features/reviews/components/ReviewDetailHeaderActions'
@@ -84,13 +84,12 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   // must not probe the account's library list.
   const { data: librariesData } = useLibraries({ enabled: !isLocalBook && Boolean(user) })
   const privateLibraryId = isLocalBook ? null : user?.privateLibraryId ?? librariesData?.data.find((library) => library.type === 'private')?.id ?? null
-  const categoriesData = useLibraryCategories(privateLibraryId)
   const { data: tagsData } = useTags({ fallbackAnonymous: isLocalBook })
+  const createTag = useCreateTag()
 
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<ToastMessage | null>(null)
-  const [confirmReset, setConfirmReset] = useState(false)
   const [draft, setDraft] = useState<MetaDraft | null>(null)
   const [editVersion, setEditVersion] = useState<number | undefined>()
   const [draftEpoch, setDraftEpoch] = useState(0)
@@ -236,7 +235,6 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const discardEdit = useCallback(() => {
     setSaveError(null)
     setEditing(false)
-    setConfirmReset(false)
     setDraft(null)
     setEditVersion(undefined)
     setMetadataLookup({ open: false })
@@ -268,7 +266,6 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   // Reset transient state when switching books
   useEffect(() => {
     setEditing(false)
-    setConfirmReset(false)
     setDraft(null)
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
@@ -284,6 +281,11 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const editAllowedFields: DraftTextField[] = isEditLibraryOwned ? PRIVATE_B_TEXT_FIELDS : PRIVATE_ALL_TEXT_FIELDS
   const metadataSource = useBookMetadataSource(book?.id ?? null, editing && Boolean(book), book?.ref)
   const sourceData = !metadataSource.isFetching && !metadataSource.isError ? (metadataSource.data?.data ?? null) : null
+  // Only offered while some field still differs from a value the file itself
+  // carried: a text file has no embedded metadata, and an untouched or
+  // just-restored draft has nothing left to restore.
+  const canRestoreAll = draft !== null && sourceData !== null
+    && hasRestorableField(sourceData, editAllowedFields, (field) => draft[field])
 
   function enterEdit() {
     if (!book) return
@@ -305,7 +307,6 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
             .map((t) => t.id),
       ),
     )
-    setConfirmReset(false)
     setDraftEpoch((n) => n + 1)
     void queryClient.removeQueries({ queryKey: ['books', book.id, 'metadata-source'] })
     setEditing(true)
@@ -319,7 +320,6 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   function handleRestoreAll() {
     if (!draft || !sourceData) return
     setDraft(applySourceAllToDraft(draft, sourceData, editAllowedFields))
-    setConfirmReset(false)
   }
 
   async function handleSave() {
@@ -439,6 +439,14 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
       <>
         <Modal
           title={renderModalTitle(reviewSubView, _('library.bookDetails'), getReviewTotalCount(workReviewContext))}
+          titleExtra={reviewSubView === 'detail' ? (
+            <VersionSelect
+              versions={work.work.versions}
+              selectedId={workVersion?.id ?? null}
+              onSelect={setWorkVersionId}
+              defaultVersionId={work.work.defaultVersionLinkId}
+            />
+          ) : undefined}
           onClose={closeDialog}
           closeLabel={_('library.close')}
           hideClose={reviewSubView !== 'detail'}
@@ -466,7 +474,6 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
               canCollect={work.canCollect}
               canContribute={work.canContribute}
               selectedVersionId={workVersion?.id ?? null}
-              onSelectVersion={setWorkVersionId}
               onVersionsUploaded={(ids) => {
                 if (ids.length > 0) pendingWorkVersionRef.current = ids
               }}
@@ -560,25 +567,14 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   // is the right test for that: it is set for a B and for a library read, and
   // absent for A/C.
   const isLibraryOwned = Boolean(displayBook.source)
-  const currentCategoryName = displayBook.categoryId === null
-    ? categoriesData.data ? _('library.uncategorized') : undefined
-    : displayBook.categoryId
-      ? categoriesData.data?.data.some((category) => category.id === displayBook.categoryId)
-        ? categoryPath(categoriesData.data.data, displayBook.categoryId).map((category) => category.name).join(' / ')
-        : displayBook.categoryName ?? undefined
-      : displayBook.categoryName ?? undefined
   const memberTags = tagIds
     ? (tagsData?.data ?? []).filter((t) => tagIds.has(t.id))
     : (book.tags ?? []).map((name) => {
         const found = (tagsData?.data ?? []).find((t) => t.name === name)
         return { id: found ? found.id : name, name }
       })
-  const isMachineId = (id: string) =>
-    /^urn:uuid:/i.test(id.trim()) ||
-    /^uuid:/i.test(id.trim()) ||
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim())
   const rawId = bookmeta?.isbn || bookmeta?.identifier || ''
-  const identifier = rawId && (bookmeta?.isbn || !isMachineId(rawId)) ? rawId : ''
+  const identifier = rawId && (bookmeta?.isbn || !isMachineIdentifier(rawId)) ? rawId : ''
 
   const privateMenuItems: MoreActionsMenuItem[] =
     !readOnly && !isLibraryOwned && (displayBook.format === 'txt' || displayBook.format === 'epub')
@@ -641,49 +637,14 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
         }
         footer={
           editing ? (
-            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-              {confirmReset ? (
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-xs text-stone-500 dark:text-stone-400">{_('library.restoreSourceConfirm')}</span>
-                  <button
-                    type="button"
-                    onClick={handleRestoreAll}
-                    disabled={!sourceData || metadataSource.isFetching}
-                    className="shrink-0 text-xs font-medium text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
-                  >
-                    {_('library.restoreSourceValues')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmReset(false)}
-                    className="shrink-0 text-xs text-stone-400 hover:underline"
-                  >
-                    {_('library.cancel')}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmReset(true)}
-                  disabled={!sourceData || metadataSource.isFetching}
-                  className="inline-flex items-center gap-1.5 text-xs text-stone-400 transition-colors hover:text-stone-700 disabled:opacity-50 dark:hover:text-stone-200"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-70">
-                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                    <path d="M3 3v5h5" />
-                  </svg>
-                  <span>{_('library.restoreSourceValues')}</span>
-                </button>
-              )}
-              <div className={`flex shrink-0 items-center gap-2 ${confirmReset ? '' : ''}`}>
-                <Button variant="secondary" onClick={discardEdit} disabled={saving}>
-                  {_('library.cancel')}
-                </Button>
-                <Button onClick={() => void handleSave()} disabled={saving || !draft?.title.trim()}>
-                  {saving ? `${_('library.save')}...` : _('library.save')}
-                </Button>
-              </div>
-            </div>
+            <MetadataEditorFooter
+              canRestoreAll={canRestoreAll}
+              onRestoreAll={handleRestoreAll}
+              onCancel={discardEdit}
+              onSave={() => void handleSave()}
+              saving={saving}
+              saveDisabled={!draft?.title.trim()}
+            />
           ) : undefined
         }
       >
@@ -694,15 +655,15 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
                 {_(saveError.key, saveError.params)}
               </p>}
               <BookMetaForm
-                draft={draft}
-                onChange={setDraft}
+                values={draft}
+                onChange={(patch) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev))}
                 identifier={identifier}
                 limited={isEditLibraryOwned}
                 source={sourceData}
-                sourceLoading={metadataSource.isFetching}
                 sourceError={metadataSource.isError ? metadataSource.error : null}
                 onRetrySource={() => void metadataSource.refetch()}
                 onRestoreField={handleRestoreField}
+                actionsDisabled={saving}
                 coverSlot={
                   <BookCoverEditor
                     book={displayBook}
@@ -726,12 +687,16 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
 
               {metadataLookup.open && draft && <MetadataLookupDialog draft={draft} limited={isEditLibraryOwned} hasCover={Boolean(pendingCoverFile || displayBook.coverKey || displayBook.format === 'epub')} initialProvider={metadataLookup.provider} autoSearch={metadataLookup.autoSearch} onClose={() => setMetadataLookup({ open: false })} onApply={(next, cover) => { setDraft(next); if (cover) handleCoverFile(cover); setMetadataLookup({ open: false }) }} />}
               <BookClassificationEditor
+                className="mt-4 border-t border-stone-100 pt-3.5 dark:border-stone-800"
                 libraryId={privateLibraryId}
                 categoryId={categorySel.categoryId ?? null}
                 categoryTemplateKey={categorySel.categoryTemplateKey}
                 tagIds={tagSel}
                 onCategoryChange={(value) => setCategorySel(value)}
                 onTagChange={setTagSel}
+                tags={tagsData?.data ?? []}
+                onCreateTag={async (name) => (await createTag.mutateAsync(name)).data.id}
+                creatingTag={createTag.isPending}
               />
             </div>
           ) : (
@@ -743,7 +708,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
               // private card; their personal-library actions must stay hidden.
               readOnly={readOnly || displayBook.collected === false}
               detail={detail}
-              categoryName={currentCategoryName}
+              categoryLibraryId={privateLibraryId}
               memberTags={memberTags}
               isLoading={detailLoading || !detail}
               moreActions={privateMenuItems}
