@@ -36,6 +36,7 @@ import librariesRoutes from './modules/libraries/libraries.routes'
 import shelvesRoutes from './modules/shelves/shelves.routes'
 import tagsRoutes from './modules/tags/tags.routes'
 import fontsRoutes from './modules/fonts/fonts.routes'
+import builtinFontsRoutes from './modules/fonts/builtin-fonts.routes'
 import replacementRoutes from './modules/replacements/replacements.routes'
 import tocRuleRoutes from './modules/toc-rules/toc-rules.routes'
 import ttsRoutes from './modules/tts/tts.routes'
@@ -98,6 +99,7 @@ app.route('/api/v1/libraries', librariesRoutes)
 app.route('/api/v1/shelves', shelvesRoutes)
 app.route('/api/v1/tags', tagsRoutes)
 app.route('/api/v1/fonts', fontsRoutes)
+app.route('/api/v1/fonts/builtin', builtinFontsRoutes)
 app.route('/api/v1/replacements', replacementRoutes)
 app.route('/api/v1/toc-rules', tocRuleRoutes)
 app.route('/api/v1/tts', ttsRoutes)

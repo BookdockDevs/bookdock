@@ -55,7 +55,7 @@ describe('resolveFont', () => {
     expect(resolved.name).toBe('霞鹜文楷')
     expect(resolved.stack).toBe(BUILTIN_FONTS[0].family)
     expect(resolved.stack).toContain(READER_GLYPH_FALLBACK)
-    expect(resolved.builtin?.cssUrl).toContain('lxgw-wenkai-webfont')
+    expect(resolved.builtin?.cssUrl).toContain('/fonts/builtin/lxgw-wenkai/1.7.0/css')
   })
 
   it('resolves uploaded fonts to the aliased family', () => {
@@ -107,8 +107,8 @@ describe('resolveDualFont', () => {
     const dual = resolveDualFont('literata', 'lxgw-wenkai', [])
     expect(dual.stack.startsWith('"Literata Variable", ')).toBe(true)
     expect(dual.stack).toContain('"LXGW WenKai"')
-    expect(dual.css).toContain('fontsource-variable/literata')
-    expect(dual.css).toContain('lxgw-wenkai-webfont')
+    expect(dual.css).toContain('/fonts/builtin/literata/5.3.0/css')
+    expect(dual.css).toContain('/fonts/builtin/lxgw-wenkai/1.7.0/css')
   })
 
   it('combines css only for the non-system faces in use', () => {
@@ -185,7 +185,7 @@ describe('fontCssFor', () => {
   it('returns @import for builtin fonts', () => {
     const css = fontCssFor(resolveFont('noto-serif-sc', []))
     expect(css).toBe(builtinImportCss(BUILTIN_FONTS.find((f) => f.id === 'noto-serif-sc')!.cssUrl))
-    expect(css).toMatch(/^@import url\("https:\/\/cdn\.jsdelivr\.net\//)
+    expect(css).toMatch(/^@import url\(".*\/api\/v1\/fonts\/builtin\/noto-serif-sc\//)
   })
 
   it('returns @font-face for uploaded fonts and empty for system stacks', () => {
@@ -223,6 +223,73 @@ describe('ensureBuiltinFontLoaded', () => {
 
     expect(useFontLoaderStore.getState().loadingIds).toEqual([])
     expect(localStorage.getItem('bd-builtin-fonts-loaded')).toBeNull()
+  })
+
+  it('times out when the stylesheet never loads and allows a retry', () => {
+    // Earlier tests leave their (still-connected) links behind; drop them so
+    // the idempotent-injection guard does not swallow this fresh attempt.
+    document.head.querySelectorAll('link[data-bd-font]').forEach((link) => link.remove())
+    vi.useFakeTimers()
+    try {
+      ensureBuiltinFontLoaded('lxgw-wenkai')
+      expect(useFontLoaderStore.getState().loadingIds).toContain('lxgw-wenkai')
+
+      vi.advanceTimersByTime(10_000)
+
+      expect(document.head.querySelector('link[data-bd-font="lxgw-wenkai"]')).toBeNull()
+      expect(useFontLoaderStore.getState().loadingIds).toEqual([])
+      expect(isBuiltinFontLoaded('lxgw-wenkai')).toBe(false)
+
+      ensureBuiltinFontLoaded('lxgw-wenkai')
+      expect(document.head.querySelector('link[data-bd-font="lxgw-wenkai"]')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('times out when the font face never confirms after the css loads', async () => {
+    const load = vi.fn(() => new Promise(() => { /* hangs forever */ }))
+    Object.defineProperty(document, 'fonts', { value: { load }, configurable: true, writable: true })
+    vi.useFakeTimers()
+    try {
+      ensureBuiltinFontLoaded('noto-serif-sc')
+      const link = document.head.querySelector('link[data-bd-font="noto-serif-sc"]') as HTMLLinkElement
+      link.onload?.(new Event('load'))
+      expect(useFontLoaderStore.getState().loadingIds).toContain('noto-serif-sc')
+
+      await vi.advanceTimersByTimeAsync(10_000)
+
+      expect(useFontLoaderStore.getState().loadingIds).toEqual([])
+      expect(document.head.querySelector('link[data-bd-font="noto-serif-sc"]')).toBeNull()
+      expect(isBuiltinFontLoaded('noto-serif-sc')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+      Reflect.deleteProperty(document, 'fonts')
+    }
+  })
+
+  it('ignores a late success after the attempt timed out', async () => {
+    let resolveLoad: ((faces: object[]) => void) | undefined
+    const load = vi.fn(() => new Promise<object[]>((resolve) => { resolveLoad = resolve }))
+    Object.defineProperty(document, 'fonts', { value: { load }, configurable: true, writable: true })
+    vi.useFakeTimers()
+    try {
+      ensureBuiltinFontLoaded('literata')
+      const link = document.head.querySelector('link[data-bd-font="literata"]') as HTMLLinkElement
+      link.onload?.(new Event('load'))
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(isBuiltinFontLoaded('literata')).toBe(false)
+
+      resolveLoad?.([{}])
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(isBuiltinFontLoaded('literata')).toBe(false)
+      expect(document.head.querySelector('link[data-bd-font="literata"]')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+      Reflect.deleteProperty(document, 'fonts')
+    }
   })
 })
 
@@ -303,21 +370,21 @@ describe('buildFontOptions', () => {
     expect(options.find((o) => o.id === 'serif')).toMatchObject({ name: '正文宋体', enabled: true })
   })
 
-  it('uses the variable fontsource packages for the noto fonts', () => {
+  it('uses the versioned proxy addresses for the noto fonts', () => {
     const serif = BUILTIN_FONTS.find((f) => f.id === 'noto-serif-sc')!
-    expect(serif.cssUrl).toContain('@fontsource-variable/noto-serif-sc')
+    expect(serif.cssUrl).toContain('/fonts/builtin/noto-serif-sc/5.3.0/css')
     expect(serif.family).toContain('Noto Serif SC Variable')
     const sans = BUILTIN_FONTS.find((f) => f.id === 'noto-sans-sc')!
-    expect(sans.cssUrl).toContain('@fontsource-variable/noto-sans-sc')
+    expect(sans.cssUrl).toContain('/fonts/builtin/noto-sans-sc/5.3.0/css')
     expect(sans.family).toContain('Noto Sans SC Variable')
   })
 
-  it('exposes the wenkai and an English serif CDN entry', () => {
+  it('exposes the wenkai and an English serif proxy entry', () => {
     const wenkai = BUILTIN_FONTS.find((f) => f.id === 'lxgw-wenkai')!
-    expect(wenkai.cssUrl).toContain('lxgw-wenkai-webfont')
+    expect(wenkai.cssUrl).toContain('/fonts/builtin/lxgw-wenkai/1.7.0/css')
     expect(wenkai.family).toContain('LXGW WenKai')
     const literata = BUILTIN_FONTS.find((f) => f.id === 'literata')!
-    expect(literata.cssUrl).toContain('@fontsource-variable/literata')
+    expect(literata.cssUrl).toContain('/fonts/builtin/literata/5.3.0/css')
     expect(literata.family).toContain('Literata Variable')
   })
 

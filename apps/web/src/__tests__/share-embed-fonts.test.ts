@@ -8,7 +8,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('share font embedding', () => {
   it('embeds selected CDN faces with absolute font URLs and only used Unicode subsets', async () => {
     const fetcher = vi.fn(async (url: string) => {
-      if (url.endsWith('.css')) return new Response(`
+      if (url.endsWith('/css')) return new Response(`
         @font-face { font-family: "LXGW WenKai"; src: url("./latin.woff2"); unicode-range: U+0-FF; }
         @font-face { font-family: "LXGW WenKai"; src: url("./han.woff2"); unicode-range: U+4E00-9FFF; }
         @font-face { font-family: "LXGW WenKai"; font-weight: 700; src: url("./han.woff2"); unicode-range: U+4E00-9FFF; }
@@ -45,7 +45,7 @@ describe('share font embedding', () => {
   })
 
   it('rejects missing font bytes instead of producing a fallback-font image', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('.css')
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/css')
       ? new Response('@font-face { font-family: "LXGW WenKai"; src: url(./font.woff2); }')
       : new Response('', { status: 404 })))
     await expect(embedCardFonts([resolveFont('lxgw-wenkai')], '字')).rejects.toThrow('card font file unavailable')

@@ -9,6 +9,7 @@ export const config = Object.freeze({
   jwtSecret: env.JWT_SECRET ?? '',
   uploadMaxBytes: env.UPLOAD_MAX_BYTES,
   fontsMaxBytes: env.FONT_UPLOAD_MAX_BYTES,
+  fontCacheMaxMb: env.FONT_CACHE_MAX_MB,
   avatarMaxBytes: env.AVATAR_UPLOAD_MAX_BYTES,
   personalSourceMaxBytes: env.PERSONAL_SOURCE_UPLOAD_MAX_BYTES,
   authRpm: env.AUTH_RPM,

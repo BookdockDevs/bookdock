@@ -1,56 +1,32 @@
 import { create } from 'zustand'
 
-import type { FontListItem, FontPreferences } from '@bookdock/shared'
+import { BUILTIN_FONTS as SHARED_BUILTIN_FONTS } from '@bookdock/shared'
+import type { BuiltinFont as SharedBuiltinFont, FontListItem, FontPreferences } from '@bookdock/shared'
 
 import { BASE_URL } from '@/api/client'
 import i18n from '@/i18n/i18n'
 
 import { FONT_OPTIONS, READER_GLYPH_FALLBACK } from './types'
 
-export interface BuiltinFont {
-  id: string
-  name: string
-  /** CSS family name as declared by the CDN stylesheet */
+export interface BuiltinFont extends SharedBuiltinFont {
+  /** CSS family stack: the upstream face + CJK glyph fallback + generic */
   family: string
+  /** Absolute URL of the server-proxied stylesheet (the foliate iframe is a
+   *  blob document, so relative URLs would not resolve back to this origin) */
   cssUrl: string
-  license: { name: string; url: string }
-  /** Latin-first entries pair with a CJK companion instead of covering CJK */
-  latin?: boolean
 }
 
-export const BUILTIN_FONTS: BuiltinFont[] = [
-  {
-    id: 'lxgw-wenkai',
-    name: '霞鹜文楷',
-    family: `"LXGW WenKai", ${READER_GLYPH_FALLBACK}, serif`,
-    cssUrl: 'https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css',
-    license: { name: 'OFL-1.1', url: 'https://github.com/lxgw/LxgwWenKai/blob/main/LICENSE' },
-  },
-  {
-    id: 'noto-serif-sc',
-    name: '思源宋体',
-    // Variable package: fontsource's static index.css ships weight 400 only,
-    // so the reader's fontWeight would synthesize faux bold
-    family: `"Noto Serif SC Variable", ${READER_GLYPH_FALLBACK}, serif`,
-    cssUrl: 'https://cdn.jsdelivr.net/npm/@fontsource-variable/noto-serif-sc@5.3.0/index.css',
-    license: { name: 'OFL-1.1', url: 'https://fonts.google.com/noto/specimen/Noto+Serif+SC/license' },
-  },
-  {
-    id: 'noto-sans-sc',
-    name: '思源黑体',
-    family: `"Noto Sans SC Variable", ${READER_GLYPH_FALLBACK}, sans-serif`,
-    cssUrl: 'https://cdn.jsdelivr.net/npm/@fontsource-variable/noto-sans-sc@5.3.0/index.css',
-    license: { name: 'OFL-1.1', url: 'https://fonts.google.com/noto/specimen/Noto+Sans+SC/license' },
-  },
-  {
-    id: 'literata',
-    name: 'Literata',
-    latin: true,
-    family: `"Literata Variable", ${READER_GLYPH_FALLBACK}, serif`,
-    cssUrl: 'https://cdn.jsdelivr.net/npm/@fontsource-variable/literata@5.3.0/index.css',
-    license: { name: 'OFL-1.1', url: 'https://fonts.google.com/specimen/Literata/license' },
-  },
-]
+/** The server proxies the pinned upstream stylesheet; the versioned address
+ *  changes content only when the registry pins a new package version. */
+export function builtinFontCssUrl(font: Pick<SharedBuiltinFont, 'id' | 'version'>): string {
+  return `${window.location.origin}${BASE_URL}/fonts/builtin/${font.id}/${font.version}/css`
+}
+
+export const BUILTIN_FONTS: BuiltinFont[] = SHARED_BUILTIN_FONTS.map((font) => ({
+  ...font,
+  family: `"${font.familyName}", ${READER_GLYPH_FALLBACK}, ${font.generic}`,
+  cssUrl: builtinFontCssUrl(font),
+}))
 
 export interface ResolvedFont {
   name: string
@@ -225,7 +201,12 @@ export function isBuiltinFontLoaded(id: string): boolean {
 
 const injectedBuiltinIds = new Set<string>()
 
-/** Idempotently inject the CDN stylesheet into the main document (settings
+/** Covers the whole chain (stylesheet fetch + font-face confirmation): a
+ *  stalled CSS request never fires onload, so waiting on link events alone
+ *  would spin forever. */
+const BUILTIN_FONT_TIMEOUT_MS = 10_000
+
+/** Idempotently inject the proxied stylesheet into the main document (settings
  *  panel / share card previews live outside the reader iframe). The persisted
  *  marker is written only after the browser font-loading API confirms that the
  *  font face itself is available; a stylesheet load alone is not enough. */
@@ -245,41 +226,60 @@ export function ensureBuiltinFontLoaded(id: string): void {
   link.rel = 'stylesheet'
   link.href = font.cssUrl
   link.dataset.bdFont = id
-  link.onload = () => {
-    link.dataset.loaded = 'true'
-    if (typeof document.fonts?.load !== 'function') {
-      useFontLoaderStore.setState((s) => {
-        const loadedIds = s.loadedIds.includes(id) ? s.loadedIds : [...s.loadedIds, id]
-        try {
-          localStorage.setItem(BUILTIN_LOADED_KEY, JSON.stringify(loadedIds))
-        } catch { /* private-mode quota failures are non-fatal */ }
-        return { loadedIds, loadingIds: s.loadingIds.filter((v) => v !== id) }
-      })
-      return
-    }
 
-    const familyName = font.family.split(',')[0].trim().replace(/^['"]|['"]$/g, '')
-    void document.fonts.load(`400 16px "${familyName}"`, BUILTIN_SAMPLE_TEXT).then((faces) => {
-      if (faces.length === 0) throw new Error(`font face unavailable: ${id}`)
-      useFontLoaderStore.setState((s) => {
-        const loadedIds = s.loadedIds.includes(id) ? s.loadedIds : [...s.loadedIds, id]
-        try {
-          localStorage.setItem(BUILTIN_LOADED_KEY, JSON.stringify(loadedIds))
-        } catch { /* private-mode quota failures are non-fatal */ }
-        return { loadedIds, loadingIds: s.loadingIds.filter((v) => v !== id) }
-      })
-    }).catch(() => {
-      injectedBuiltinIds.delete(id)
-      link.remove()
-      useFontLoaderStore.setState((s) => ({ loadingIds: s.loadingIds.filter((v) => v !== id) }))
+  // A timed-out attempt removes the link, so late callbacks from it are
+  // dropped via isConnected and cannot clobber a fresh retry's state.
+  let settled = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const markLoaded = () => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    link.dataset.loaded = 'true'
+    useFontLoaderStore.setState((s) => {
+      const loadedIds = s.loadedIds.includes(id) ? s.loadedIds : [...s.loadedIds, id]
+      try {
+        localStorage.setItem(BUILTIN_LOADED_KEY, JSON.stringify(loadedIds))
+      } catch { /* private-mode quota failures are non-fatal */ }
+      return { loadedIds, loadingIds: s.loadingIds.filter((v) => v !== id) }
     })
   }
-  link.onerror = () => {
+  const fail = () => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    // Unblock waitForCardFont listeners before the element goes away
+    link.dispatchEvent(new Event('error'))
     link.dataset.failed = 'true'
     injectedBuiltinIds.delete(id)
     link.remove()
     useFontLoaderStore.setState((s) => ({ loadingIds: s.loadingIds.filter((v) => v !== id) }))
   }
+  link.onload = () => {
+    if (!link.isConnected) return
+    if (typeof document.fonts?.load !== 'function') {
+      markLoaded()
+      return
+    }
+
+    const familyName = font.family.split(',')[0].trim().replace(/^['"]|['"]$/g, '')
+    void document.fonts.load(`400 16px "${familyName}"`, BUILTIN_SAMPLE_TEXT).then((faces) => {
+      if (!link.isConnected) return
+      if (faces.length === 0) throw new Error(`font face unavailable: ${id}`)
+      markLoaded()
+    }).catch(() => {
+      if (!link.isConnected) return
+      fail()
+    })
+  }
+  link.onerror = () => {
+    if (!link.isConnected) return
+    fail()
+  }
+  timer = setTimeout(() => {
+    if (!link.isConnected) return
+    fail()
+  }, BUILTIN_FONT_TIMEOUT_MS)
   document.head.appendChild(link)
 }
 

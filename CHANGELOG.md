@@ -33,6 +33,7 @@ All notable changes to Bookdock are documented here.
 - The reader's text-replacement dialogs now follow the reading theme end to end: the rule form, its inputs, segmented controls, toggles and the rule list share the same paper palette as the reader's own panels instead of pasting the settings page's white-and-stone controls onto the reading surface. The shared controls resolve from semantic tokens whose values the reading surface overrides, so the settings page keeps its exact previous look.
 - The regex switch in the replacement rule form moves from the scope card to the right end of the match-content label row - it belongs to the field it affects - and the case-sensitivity hint becomes the match field's placeholder while regex is on, so toggling the switch no longer resizes the dialog.
 - The notes panel's loading skeleton follows the reading theme (its borders used to harden to near-black only in app dark mode), and while the chapter grouping is still loading it keeps the skeleton on screen instead of collapsing to a bare centered loading line. The table-of-contents loading skeleton announces itself as a live status and stops animating for users who prefer reduced motion.
+- Builtin reader fonts (LXGW WenKai, Noto Serif SC, Noto Sans SC, Literata) now load through your own instance instead of a public CDN: the server fetches each pinned font package once, caches its files under the instance data directory and rewrites the stylesheets so reader sessions never contact jsDelivr directly. Slow or unreliable client-to-CDN links no longer leave chapters painted in a fallback font, and the proxy's read-only endpoints accept anonymous requests so device-book readers without an account keep builtin fonts. A cold cache still shows a brief fallback while the server fetches from upstream.
 
 ### Removed
 
@@ -58,6 +59,7 @@ All notable changes to Bookdock are documented here.
 - Book covers no longer flash the raw book title in the top-left corner of the cover frame: when a shelf remounts and the browser briefly re-decodes a cached image, the image's alt text used to paint as visible text while the designed placeholder stayed hidden behind it. The alt text now stays invisible on screen - screen readers still announce it - in both the library cover and the statistics cover, so the placeholder remains in charge until the artwork paints.
 - The replace dialog opened from the reader's selection toolbar now uses the same reader-themed shell as the replacements manager, instead of the plain white app modal.
 - Content workbench edits no longer erase annotation locations while any of the quoted text survives: fixing a typo or rewriting part of a highlight's quoted range now re-anchors the note, highlight or bookmark to the surviving portion of the original quote (server and device books alike), and every later save re-checks all surviving portions together, so the annotation keeps its jump until nothing of the original quote remains. Unchanged text inside a rewritten region is now mapped exactly, letting anchors inside it survive whenever their correspondence can be proven.
+- The font list's download button no longer spins forever when a builtin font cannot finish loading: loading now times out after ten seconds — covering both the stylesheet request and the font-face confirmation — and returns the entry to a retryable state. A timed-out attempt that completes late can no longer be mistaken for a success.
 
 ## [0.8.2] - 2026-11-13
 
@@ -1263,6 +1265,7 @@ All notable changes to Bookdock are documented here.
 - 阅读器内的文本替换弹窗整体跟随阅读主题：规则表单、输入框、分段选择器、开关与规则列表，与阅读器自带面板共用同一套纸面色板，不再把设置页的白底石灰色控件拼到阅读表面上。共享控件改从语义 token 取色、由阅读表面覆盖取值，设置页观感与此前完全一致。
 - 文本替换规则表单的「正则表达式」开关从作用域卡片移到「匹配内容」标签行右端——开关直属它所影响的字段；大小写提示改为正则开启时匹配框的占位文案，切换开关不再改变弹窗尺寸。
 - 笔记面板的加载骨架屏跟随阅读主题（此前仅应用深色下边框会变成近黑），按章节分组的排序数据尚未就绪时保持骨架屏，不再塌缩成一行孤零零的「加载中」。目录加载骨架屏以 live 状态对外宣告，并为偏好减弱动画的用户停用动画。
+- 内置阅读字体（霞鹜文楷、思源宋体、思源黑体、Literata）改为经自己的实例加载：服务器按钉住的版本整包回源一次、缓存在实例数据目录，并重写样式表，阅读会话不再直连 jsDelivr。客户端到公共 CDN 的慢速或不稳定链路不再让章节长时间停在回退字体上；代理只读端点对匿名请求开放，无账号的设备书阅读仍可用内置字体。冷缓存时服务器回源期间仍可能出现短暂的回退显示。
 
 #### 移除
 
@@ -1288,6 +1291,7 @@ All notable changes to Bookdock are documented here.
 - 书籍封面不再在封面框左上角闪现书名原文：书架重挂载、浏览器短暂重新解码缓存图片的间隙里，图片的 alt 文本会被当作可见文字绘制，而设计好的占位封面此时反而被藏住。现在库内封面与统计页封面的 alt 文本在屏上保持不可见——屏幕阅读器仍会朗读——占位封面在图片真正绘制出来之前始终负责显示。
 - 从阅读器划词工具栏打开的替换弹窗现在与替换规则管理弹窗共用阅读主题外壳，不再是纯白的应用模态窗。
 - 编辑工作台在引文仍有存活部分时不再丢失标注位置：修正划线范围内的错别字、或改写其中一段，现在会把笔记、划线与书签重新锚定到原文存活的片段上（服务端与设备书籍一致），且之后每次保存都会把主位置与全部留存片段一起重新核验——只要原始引文还有任何部分存活，标注就保留跳转。改写区域内的未改动文字现在会被精确映射，对应关系可证明时其中的锚点得以保留。
+- 字体列表的下载按钮不再在字体加载不出来时无限转圈：内置字体加载现在有 10 秒超时（同时覆盖样式表请求与字体面确认），超时后恢复为可重试状态；已超时的尝试即使迟到完成，也不会再被误记为已加载。
 
 ### [0.8.2] - 2026-11-13
 

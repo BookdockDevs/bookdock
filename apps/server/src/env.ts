@@ -22,6 +22,9 @@ const envSchema = z.object({
   JWT_SECRET: z.string().optional(),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(104857600),
   FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
+  // Disk budget for the rebuildable builtin-font shard cache; evicted entries
+  // are simply re-fetched from the upstream CDN on the next request.
+  FONT_CACHE_MAX_MB: z.coerce.number().int().positive().default(512),
   AVATAR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5242880),
   PERSONAL_SOURCE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
   AUTH_RPM: z.coerce.number().int().min(1).max(120).default(5),

@@ -56,7 +56,10 @@ fontsRoutes.get('/', async (c) => {
   const user = c.get('user')
   const items = await listFonts(user?.id ?? null)
   const visibleItems = !user ? items.filter((item) => item.scope === 'instance') : items
-  return c.json({ data: visibleItems } satisfies { data: FontListItem[] })
+  // The payload is per-user (`mine`); never let an intermediary cache it.
+  return c.json({ data: visibleItems } satisfies { data: FontListItem[] }, 200, {
+    'Cache-Control': 'private, no-store',
+  })
 })
 
 fontsRoutes.patch('/:id/scope', async (c) => {

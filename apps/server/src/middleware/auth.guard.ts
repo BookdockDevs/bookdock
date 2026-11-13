@@ -53,6 +53,20 @@ const PUBLIC_ROUTES = new Set([
   'GET /api/v1/legado/login',
 ])
 
+// Builtin font proxy reads: pinned open-source font binaries whose upstream
+// paths are locked by the shared registry, so anonymous access cannot turn
+// the instance into an arbitrary proxy. Device-book readers without an
+// account depend on these. GET/HEAD only — no mutation routes exist there.
+const PUBLIC_ROUTE_PATTERNS = [
+  /^\/api\/v1\/fonts\/builtin\/[A-Za-z0-9-]+\/[A-Za-z0-9.~-]+\/css$/,
+  /^\/api\/v1\/fonts\/builtin\/[A-Za-z0-9-]+\/[A-Za-z0-9.~-]+\/res\/[A-Za-z0-9._/-]+$/,
+]
+
+function isPublicRoute(method: string, path: string): boolean {
+  if (PUBLIC_ROUTES.has(`${method} ${path}`)) return true
+  return (method === 'GET' || method === 'HEAD') && PUBLIC_ROUTE_PATTERNS.some((pattern) => pattern.test(path))
+}
+
 const USER_CACHE_TTL = 30_000
 
 interface CachedUser extends AuthUser {
@@ -153,7 +167,7 @@ export function authGuard(): MiddlewareHandler {
     c.set('user', null)
     c.set('guest', false)
     c.set('legadoAccessKey', false)
-    if (PUBLIC_ROUTES.has(`${c.req.method} ${c.req.path}`)) {
+    if (isPublicRoute(c.req.method, c.req.path)) {
       return next()
     }
 

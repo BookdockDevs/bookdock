@@ -3,6 +3,8 @@ export { metadataConfigUpdateSchema, metadataConnectionTestSchema, metadataCover
 export type { MetadataCandidate, MetadataConfiguration, MetadataProvider, MetadataProviderId, MetadataSearchResponse, WeReadSearchScope } from './metadata-lookup'
 export { personalMetadataCandidateSchema, personalMetadataFieldsSchema, personalSourceGitHubInstallSchema, personalMetadataSourceManifestSchema } from './personal-metadata-source'
 export type { PersonalMetadataCandidate, PersonalMetadataFields, PersonalMetadataSourceManifest, PersonalMetadataSourceView } from './personal-metadata-source'
+export { BUILTIN_FONTS, findBuiltinFont } from './builtin-fonts'
+export type { BuiltinFont } from './builtin-fonts'
 export { BOOKDOCK_BUILD_INFO } from './build-info'
 export {
   ANNOTATION_MAX_TEXT_LENGTH,
