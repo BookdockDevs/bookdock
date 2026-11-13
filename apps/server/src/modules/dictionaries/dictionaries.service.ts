@@ -6,7 +6,6 @@ import { and, eq } from 'drizzle-orm'
 import { decodeHTML } from 'entities'
 
 import {
-  DICTIONARY_MAX_COUNT,
   DICTIONARY_MAX_FILES,
   DICTIONARY_MAX_UPLOAD_BYTES,
   type DictionaryItem,
@@ -170,7 +169,6 @@ export async function importDictionary(userId: string, files: File[]): Promise<D
   if (mdds.some((file) => { const name = file.name.slice(0, -4).toLowerCase(); return name !== stem && !(name.startsWith(stem) && /^[ ._-]\d+$/.test(name.slice(stem.length))) })) {
     throw new AppError('DICTIONARY_INVALID', 'MDD filenames must match the MDX name')
   }
-  if (manifest(userId).items.length >= DICTIONARY_MAX_COUNT) throw new AppError('DICTIONARY_INVALID', 'Dictionary limit reached')
   const header = Buffer.from(await mdxs[0]!.slice(0, 1_048_580).arrayBuffer())
   const headerSize = header.length >= 4 ? header.readUInt32BE(0) : 0
   if (!headerSize || headerSize > 1_048_576 || header.length < headerSize + 4 || headerSize % 2) throw new AppError('DICTIONARY_INVALID', 'Invalid MDX header')
@@ -227,7 +225,6 @@ export async function importDictionary(userId: string, files: File[]): Promise<D
       await fs.rm(directory, { recursive: true, force: true })
       return toView(existing, true)
     }
-    if (current.items.length >= DICTIONARY_MAX_COUNT) throw new AppError('DICTIONARY_INVALID', 'Dictionary limit reached')
     save(userId, { ...current, items: [...current.items, item] })
     return toView(item, true)
   } catch (error) {

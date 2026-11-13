@@ -38,7 +38,7 @@ export default function InstanceSettingsSection() {
 
   const registrationMode: RegistrationMode = instance.registrationMode ?? (instance.allowRegistration ? 'open' : 'closed')
 
-  function toggle(key: 'allowGuestAccess' | 'allowUserCreateLibrary' | 'allowUserUpload', value: boolean) {
+  function toggle(key: 'allowGuestAccess' | 'allowUserCreateLibrary' | 'allowUserUpload' | 'allowUserResourceUpload', value: boolean) {
     updateInstance.mutate(
       { [key]: value },
       { onError: (error) => notify.error(getUserErrorNotification(error, 'settings.instanceSettingsUpdateFailed')) },
@@ -100,6 +100,7 @@ export default function InstanceSettingsSection() {
         <div role="group" aria-labelledby="member-permissions-label" aria-describedby="member-permissions-hint" aria-busy={updateInstance.isPending} className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800">
           {([
             ['allowUserUpload', 'admin.memberPermissionUpload'],
+            ['allowUserResourceUpload', 'admin.memberPermissionResourceUpload'],
             ['allowUserCreateLibrary', 'admin.memberPermissionCreateLibrary'],
           ] as const).map(([key, label]) => {
             const checked = instance[key] !== false

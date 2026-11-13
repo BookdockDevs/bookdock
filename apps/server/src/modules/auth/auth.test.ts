@@ -223,7 +223,7 @@ describe('auth module', () => {
       const info = getInstanceInfo()
       expect(info).toEqual({
         initialized: false, registrationMode: 'closed', allowRegistration: false, allowGuestAccess: false, uploadMaxBytes: config.uploadMaxBytes,
-        allowUserCreateLibrary: true, allowUserUpload: true,
+        allowUserCreateLibrary: true, allowUserUpload: true, allowUserResourceUpload: true,
       })
     })
 
@@ -247,10 +247,13 @@ describe('auth module', () => {
       await seedInstance(db, {})
       expect(getInstanceInfo().allowUserCreateLibrary).toBe(true)
       expect(getInstanceInfo().allowUserUpload).toBe(true)
-      const info = updateInstanceSettings({ allowUserCreateLibrary: false, allowUserUpload: false })
+      expect(getInstanceInfo().allowUserResourceUpload).toBe(true)
+      const info = updateInstanceSettings({ allowUserCreateLibrary: false, allowUserUpload: false, allowUserResourceUpload: false })
       expect(info.allowUserCreateLibrary).toBe(false)
       expect(info.allowUserUpload).toBe(false)
+      expect(info.allowUserResourceUpload).toBe(false)
       expect(getInstanceInfo().allowUserCreateLibrary).toBe(false)
+      expect(getInstanceInfo().allowUserResourceUpload).toBe(false)
     })
 
     it('reports initialized=true once the instance row exists', async () => {

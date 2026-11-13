@@ -123,6 +123,7 @@ function makeLegacyIdentity() {
     ALTER TABLE instance DROP COLUMN storage_backend_status;
     ALTER TABLE instance DROP COLUMN storage_backend_last_tested_at;
     ALTER TABLE instance DROP COLUMN storage_backend_latency_ms;
+    ALTER TABLE instance DROP COLUMN allow_user_resource_upload;
     DROP TRIGGER idea_comments_deleted_author;
     DROP TABLE idea_comment_likes; DROP TABLE idea_likes; DROP TABLE idea_comments;
     ALTER TABLE ideas DROP COLUMN source_library_book_version_id;

@@ -20,6 +20,7 @@ export const READING_IMPORTS_TAG = '0060_reading_imports'
 export const INSTANCE_INVITES_TAG = '0061_instance_invites'
 export const AI_CHAT_JOBS_TAG = '0062_ai_chat_jobs'
 export const ANCHOR_EVIDENCE_TAG = '0063_anchor_evidence'
+export const MEMBER_RESOURCE_UPLOAD_TAG = '0064_member_resource_upload_switch'
 
 /** Guarded revert of 0061_instance_invites and 0062_ai_chat_jobs for legacy-fixture
  * tests that reset the migration watermark and re-run the chain from an earlier
@@ -35,6 +36,12 @@ export function revertInstanceAndAiJobsSchema(
   if (table('instance_invite_libraries')) sqlite.exec('DROP TABLE instance_invite_libraries')
   if (table('instance_invites')) sqlite.exec('DROP TABLE instance_invites')
   if (table('instance') && columns('instance').has('registration_mode')) sqlite.exec('ALTER TABLE instance DROP COLUMN registration_mode')
+  if (table('instance') && columns('instance').has('allow_user_resource_upload')) sqlite.exec('ALTER TABLE instance DROP COLUMN allow_user_resource_upload')
+  // 0063_anchor_evidence also replays after a watermark reset; its columns are
+  // nullable annotation metadata on tables some fixtures rebuild by hand.
+  for (const anchored of ['highlights', 'bookmarks', 'ideas']) {
+    if (table(anchored) && columns(anchored).has('anchor_evidence')) sqlite.exec(`ALTER TABLE ${anchored} DROP COLUMN anchor_evidence`)
+  }
 }
 
 /** Guarded revert of 0060_reading_imports for legacy-fixture tests that reset
@@ -228,7 +235,9 @@ export function migrateBeforeBookRetirementIncluding(
   includeTags: string[],
 ) {
   // Older partial fixtures lack book_reviews, so stage only the archive/annotation portion there.
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG])
+  // MEMBER_RESOURCE_UPLOAD_TAG keeps the drizzle `instance` shape and its
+  // settings queries consistent across service-test fixtures.
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG])
   migrateWithTagFilter(
     db,
     options,

@@ -435,6 +435,13 @@
       "when": 1794100000000,
       "tag": "0063_anchor_evidence",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1794200000000,
+      "tag": "0064_member_resource_upload_switch",
+      "breakpoints": true
     }
   ]
 }

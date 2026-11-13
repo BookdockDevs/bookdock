@@ -2356,6 +2356,7 @@
     "memberPermissions": "Member permissions",
     "memberPermissionsHint": "Choose which features regular members can use.",
     "memberPermissionUpload": "Upload books",
+    "memberPermissionResourceUpload": "Upload reading resources",
     "memberPermissionCreateLibrary": "Create libraries",
     "registrationMode": "Registration mode",
     "registrationModeClosed": "Closed",

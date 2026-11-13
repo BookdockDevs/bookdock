@@ -34,9 +34,11 @@ All notable changes to Bookdock are documented here.
 - The regex switch in the replacement rule form moves from the scope card to the right end of the match-content label row - it belongs to the field it affects - and the case-sensitivity hint becomes the match field's placeholder while regex is on, so toggling the switch no longer resizes the dialog.
 - The notes panel's loading skeleton follows the reading theme (its borders used to harden to near-black only in app dark mode), and while the chapter grouping is still loading it keeps the skeleton on screen instead of collapsing to a bare centered loading line. The table-of-contents loading skeleton announces itself as a live status and stops animating for users who prefer reduced motion.
 - Builtin reader fonts (LXGW WenKai, Noto Serif SC, Noto Sans SC, Literata) now load through your own instance instead of a public CDN: the server fetches each pinned font package once, caches its files under the instance data directory and rewrites the stylesheets so reader sessions never contact jsDelivr directly. Slow or unreliable client-to-CDN links no longer leave chapters painted in a fallback font, and the proxy's read-only endpoints accept anonymous requests so device-book readers without an account keep builtin fonts. A cold cache still shows a brief fallback while the server fetches from upstream.
+- Instance settings' Member permissions now include an "Upload reading resources" switch, on by default so existing instances keep their behavior. It governs only member writes that put reading-resource files on the server — font uploads and dictionary imports — independently of the "Upload books" switch and shared-library upload rules, and the instance owner always bypasses it. While it is off, members keep managing the resources they may manage: renaming, ordering, enabling, disabling and deleting uploaded fonts and dictionaries still work, and system and builtin fonts, which never upload files, are unaffected.
 
 ### Removed
 
+- Removed the per-user dictionary count cap (20 dictionaries): members can keep importing dictionaries without limit, while the per-import file count, total size and format checks remain in place.
 - Removed the separate work-info layer from the shared catalog editor, along with its duplicate title/author/description/cover inputs, inline category/tag chips, single-version version tabs and the restore-inherit action. The right-click single-field dialog stays, but it writes the version's own values and no longer offers re-inherit.
 - Removed the shared-catalog version metadata reset endpoint (`POST /:id/books/:bookId/versions/:versionLinkId/reset-metadata`), which had no caller left; restoring parsed values happens in the editor draft.
 
@@ -1266,9 +1268,11 @@ All notable changes to Bookdock are documented here.
 - 文本替换规则表单的「正则表达式」开关从作用域卡片移到「匹配内容」标签行右端——开关直属它所影响的字段；大小写提示改为正则开启时匹配框的占位文案，切换开关不再改变弹窗尺寸。
 - 笔记面板的加载骨架屏跟随阅读主题（此前仅应用深色下边框会变成近黑），按章节分组的排序数据尚未就绪时保持骨架屏，不再塌缩成一行孤零零的「加载中」。目录加载骨架屏以 live 状态对外宣告，并为偏好减弱动画的用户停用动画。
 - 内置阅读字体（霞鹜文楷、思源宋体、思源黑体、Literata）改为经自己的实例加载：服务器按钉住的版本整包回源一次、缓存在实例数据目录，并重写样式表，阅读会话不再直连 jsDelivr。客户端到公共 CDN 的慢速或不稳定链路不再让章节长时间停在回退字体上；代理只读端点对匿名请求开放，无账号的设备书阅读仍可用内置字体。冷缓存时服务器回源期间仍可能出现短暂的回退显示。
+- 「设置 → 管理」的「成员权限」新增「上传阅读资源」开关，默认开启，升级后维持原有行为。它只约束普通成员向服务器写入阅读资源文件的操作（上传字体、导入词典），与「上传书籍」开关及共享书库的上传规则相互独立，实例所有者始终不受限制。开关关闭时，成员对已有资源的管理照旧——改名、排序、启停、删除都不受影响，系统字体与内置字体等不向服务器上传文件的字体也不受影响。
 
 #### 移除
 
+- 移除每用户词典数量上限（20 部）：成员可以不限数量地继续导入词典，单次导入的文件数量、总大小与格式校验保持不变。
 - 移除共享书库编辑里独立的「作品信息」层及其重复的书名/作者/简介/封面输入、平铺式分类标签、单版本下的版本页签与「恢复跟随」操作。右键单字段编辑保留，但只写入当前版本自身的值，不再提供「恢复跟随」。
 - 移除共享书库的版本元数据重置接口（`POST /:id/books/:bookId/versions/:versionLinkId/reset-metadata`），该接口已无调用方；恢复解析值改由编辑草稿完成。
 

@@ -803,6 +803,7 @@ export const updateInstanceSchema = z.object({
   uploadMaxBytes: z.number().int().min(5 * 1024 * 1024).max(10 * 1024 * 1024 * 1024).optional(),
   allowUserCreateLibrary: z.boolean().optional(),
   allowUserUpload: z.boolean().optional(),
+  allowUserResourceUpload: z.boolean().optional(),
 }).refine(
   (value) => !(
     value.registrationMode !== undefined

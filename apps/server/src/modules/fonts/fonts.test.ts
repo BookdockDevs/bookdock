@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { eq } from 'drizzle-orm'
+import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,6 +15,7 @@ import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { errorHandler } from '../../middleware/error'
+import { resetInstanceCache } from '../auth/auth.service'
 import { createId } from '../../lib/id'
 import { sha256 } from '../../lib/hash'
 import { fontKey } from './fonts.service'
@@ -26,7 +28,10 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  // The resource-upload gate reads instance settings, so the fixture needs
+  // the current `instance` shape (0042/0043 storage backend, 0061 registration
+  // mode); 0064 rides along through the shared include set.
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, ['0042_storage_connections', '0043_storage_backend'])
   return db
 }
 
@@ -132,7 +137,22 @@ describe('fonts routes', () => {
     vi.spyOn(storage, 'getStorage').mockReturnValue(mem.driver)
     owner = seedUser(db, 'owner', 'owner')
     member = seedUser(db, 'member', 'member')
+    resetInstanceCache()
   })
+
+  function seedInstanceRow(opts: { allowUserResourceUpload?: boolean } = {}) {
+    db.insert(schema.instance).values({
+      id: 'instance',
+      ownerUserId: owner.id,
+      allowRegistration: false,
+      allowGuestAccess: false,
+      uploadMaxBytes: null,
+      allowUserResourceUpload: opts.allowUserResourceUpload ?? true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }).run()
+    resetInstanceCache()
+  }
 
   it('uploads a font and falls back to the file name when parsing fails', async () => {
     const app = createApp(owner)
@@ -197,6 +217,37 @@ describe('fonts routes', () => {
     expect(allowed.status).toBe(201)
     const { data } = (await allowed.json()) as { data: FontListItem }
     expect(data.scope).toBe('instance')
+  })
+
+  it('gates member uploads behind allowUserResourceUpload while the owner stays exempt', async () => {
+    seedInstanceRow({ allowUserResourceUpload: false })
+    const memberApp = createApp(member)
+    const denied = await memberApp.request(uploadRequest(new File([Buffer.from('blocked font')], 'blocked.ttf')))
+    expect(denied.status).toBe(403)
+    expect(((await denied.json()) as { error: { code: string } }).error.code).toBe('FORBIDDEN')
+
+    const ownerApp = createApp(owner)
+    const ownerAllowed = await ownerApp.request(uploadRequest(new File([Buffer.from('owner font')], 'owner.ttf')))
+    expect(ownerAllowed.status).toBe(201)
+  })
+
+  it('keeps managing an already uploaded font available after the switch turns off', async () => {
+    const memberApp = createApp(member)
+    const upload = await memberApp.request(uploadRequest(new File([Buffer.from('earlier font')], 'earlier.ttf')))
+    expect(upload.status).toBe(201)
+    const { data: font } = (await upload.json()) as { data: FontListItem }
+
+    seedInstanceRow({ allowUserResourceUpload: false })
+    const toggle = await memberApp.request(`http://test/api/v1/fonts/${font.id}/scope`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'user' }),
+    })
+    expect(toggle.status).toBe(403) // scope changes stay owner-only, unrelated to the switch
+
+    const del = await memberApp.request(`http://test/api/v1/fonts/${font.id}`, { method: 'DELETE' })
+    expect(del.status).toBe(200)
+    expect(db.select().from(schema.fonts).where(eq(schema.fonts.id, font.id)).all()).toHaveLength(0)
   })
 
   it('lists own fonts plus instance fonts, hiding other users’ private fonts', async () => {

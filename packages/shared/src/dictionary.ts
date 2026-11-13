@@ -2,8 +2,6 @@ import { z } from 'zod'
 
 export const DICTIONARY_MAX_FILES = 12
 export const DICTIONARY_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
-export const DICTIONARY_MAX_COUNT = 20
-export const DICTIONARY_MAX_ORDER_COUNT = 100
 export type DictionaryScope = 'user' | 'instance'
 
 export const dictionaryLookupSchema = z.object({ word: z.string().trim().min(1).max(100) }).strict()
@@ -16,7 +14,9 @@ export const dictionaryUpdateSchema = z.object({
 })
 export type DictionaryUpdateReq = z.infer<typeof dictionaryUpdateSchema>
 
-export const dictionaryOrderSchema = z.object({ ids: z.array(z.string().min(1).max(100)).max(DICTIONARY_MAX_ORDER_COUNT) }).strict()
+// The service validates that `ids` exactly matches the user's current list,
+// so no separate count cap is needed here.
+export const dictionaryOrderSchema = z.object({ ids: z.array(z.string().min(1).max(100)) }).strict()
 
 export interface DictionaryItem {
   id: string

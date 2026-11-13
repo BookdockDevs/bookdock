@@ -294,6 +294,8 @@ export interface InstanceInfoRes {
   uploadMaxBytes: number
   allowUserCreateLibrary: boolean
   allowUserUpload: boolean
+  /** Gates member font uploads and dictionary imports; owner always bypasses. */
+  allowUserResourceUpload: boolean
 }
 
 export interface UpdateInstanceReq {
@@ -304,6 +306,7 @@ export interface UpdateInstanceReq {
   uploadMaxBytes?: number
   allowUserCreateLibrary?: boolean
   allowUserUpload?: boolean
+  allowUserResourceUpload?: boolean
 }
 
 export interface RegisterReq {

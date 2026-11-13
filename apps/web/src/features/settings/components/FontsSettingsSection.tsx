@@ -18,11 +18,16 @@ import FontEditor from './FontEditor'
 import FontRow from './FontRow'
 import SettingsCard from './SettingsCard'
 
+interface FontsSettingsSectionProps {
+  /** False hides the upload entry while the instance keeps member resource uploads off. */
+  canUploadResources?: boolean
+}
+
 function PlusIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
 }
 
-export default function FontsSettingsSection() {
+export default function FontsSettingsSection({ canUploadResources = true }: FontsSettingsSectionProps) {
   const _ = useTranslation()
   const user = useAuthStore((state) => state.user)
   const isGuest = !user
@@ -176,7 +181,7 @@ export default function FontsSettingsSection() {
         action={
           <div className="flex shrink-0 items-center gap-1">
             <EditModeButton active={sorting} disabled={deleteFont.isPending || uploadFont.isPending} onClick={toggleSorting} />
-            {!isGuest && (
+            {!isGuest && (isOwner || canUploadResources) && (
               <>
                 <input
                   ref={fileInputRef}

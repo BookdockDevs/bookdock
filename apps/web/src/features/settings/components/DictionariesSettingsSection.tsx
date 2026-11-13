@@ -27,6 +27,11 @@ function PlusIcon() {
   )
 }
 
+interface DictionariesSettingsSectionProps {
+  /** False hides the import entry while the instance keeps member resource uploads off. */
+  canImportDictionaries?: boolean
+}
+
 function SpinnerIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true" className="animate-spin">
@@ -35,7 +40,7 @@ function SpinnerIcon() {
   )
 }
 
-export default function DictionariesSettingsSection() {
+export default function DictionariesSettingsSection({ canImportDictionaries = true }: DictionariesSettingsSectionProps) {
   const _ = useTranslation()
   const user = useAuthStore((state) => state.user)
   const isOwner = user?.role === 'owner'
@@ -94,72 +99,76 @@ export default function DictionariesSettingsSection() {
                 onClick={() => setEditing((value) => !value)}
               />
             )}
-            <input
-              ref={input}
-              type="file"
-              multiple
-              accept=".mdx,.mdd,.css"
-              className="hidden"
-              disabled={mutation.isPending}
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? [])
-                event.target.value = ''
-                if (!user || !ownsState) return
-                if (!files.length || mutation.isPending) return
-                const size = files.reduce((sum, file) => sum + file.size, 0)
-                if (
-                  files.filter((file) => /\.mdx$/i.test(file.name)).length !== 1 ||
-                  files.length > DICTIONARY_MAX_FILES ||
-                  files.some((file) => !/\.(mdx|mdd|css)$/i.test(file.name)) ||
-                  size > DICTIONARY_MAX_UPLOAD_BYTES
-                ) {
-                  notify.error({ key: 'dictionary.invalidFiles' })
-                  return
-                }
-                const mainMdx = files.find((file) => /\.mdx$/i.test(file.name))
-                setUploadState({ fileName: mainMdx?.name ?? files[0]!.name, progress: 0, phase: 'uploading' })
-                mutation.mutate(
-                  {
-                    kind: 'import',
-                    files,
-                    onProgress: (percent) => {
-                      if (useAuthStore.getState().user?.id !== user?.id) return
-                      setUploadState((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              progress: percent,
-                              phase: percent >= 100 ? 'processing' : 'uploading',
-                            }
-                          : null,
-                      )
-                    },
-                  },
-                  {
-                    onSuccess: () => {
-                      if (useAuthStore.getState().user?.id !== user?.id) return
-                      setUploadState(null)
-                      notify.success({ key: 'dictionary.imported' })
-                    },
-                    onError: (error) => {
-                      if (useAuthStore.getState().user?.id !== user?.id) return
-                      setUploadState(null)
-                      failed(error)
-                    },
-                  },
-                )
-              }}
-            />
-            <button
-              type="button"
-              disabled={!user || !ownsState || mutation.isPending || query.isPending || query.isError}
-              onClick={() => input.current?.click()}
-              aria-label={actionTitle}
-              title={actionTitle}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-            >
-              {isImporting ? <SpinnerIcon /> : <PlusIcon />}
-            </button>
+            {canImportDictionaries && (
+              <>
+                <input
+                  ref={input}
+                  type="file"
+                  multiple
+                  accept=".mdx,.mdd,.css"
+                  className="hidden"
+                  disabled={mutation.isPending}
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? [])
+                    event.target.value = ''
+                    if (!user || !ownsState) return
+                    if (!files.length || mutation.isPending) return
+                    const size = files.reduce((sum, file) => sum + file.size, 0)
+                    if (
+                      files.filter((file) => /\.mdx$/i.test(file.name)).length !== 1 ||
+                      files.length > DICTIONARY_MAX_FILES ||
+                      files.some((file) => !/\.(mdx|mdd|css)$/i.test(file.name)) ||
+                      size > DICTIONARY_MAX_UPLOAD_BYTES
+                    ) {
+                      notify.error({ key: 'dictionary.invalidFiles' })
+                      return
+                    }
+                    const mainMdx = files.find((file) => /\.mdx$/i.test(file.name))
+                    setUploadState({ fileName: mainMdx?.name ?? files[0]!.name, progress: 0, phase: 'uploading' })
+                    mutation.mutate(
+                      {
+                        kind: 'import',
+                        files,
+                        onProgress: (percent) => {
+                          if (useAuthStore.getState().user?.id !== user?.id) return
+                          setUploadState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  progress: percent,
+                                  phase: percent >= 100 ? 'processing' : 'uploading',
+                                }
+                              : null,
+                          )
+                        },
+                      },
+                      {
+                        onSuccess: () => {
+                          if (useAuthStore.getState().user?.id !== user?.id) return
+                          setUploadState(null)
+                          notify.success({ key: 'dictionary.imported' })
+                        },
+                        onError: (error) => {
+                          if (useAuthStore.getState().user?.id !== user?.id) return
+                          setUploadState(null)
+                          failed(error)
+                        },
+                      },
+                    )
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={!user || !ownsState || mutation.isPending || query.isPending || query.isError}
+                  onClick={() => input.current?.click()}
+                  aria-label={actionTitle}
+                  title={actionTitle}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                >
+                  {isImporting ? <SpinnerIcon /> : <PlusIcon />}
+                </button>
+              </>
+            )}
           </div>
         }
       >

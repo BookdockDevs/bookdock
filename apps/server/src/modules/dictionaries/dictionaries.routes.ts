@@ -9,6 +9,7 @@ import {
 } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
+import { assertResourceUploadAllowed } from '../auth/auth.service'
 import {
   deleteDictionary,
   dictionaryResource,
@@ -28,7 +29,12 @@ routes.use('*', async (c, next) => {
 
 routes.get('/', (c) => c.json({ data: listDictionaries(c.get('user')!.id) }))
 
-routes.post('/', bodyLimit({ maxSize: DICTIONARY_MAX_UPLOAD_BYTES + 64 * 1024, onError: () => { throw new AppError('UPLOAD_TOO_LARGE') } }), async (c) => {
+// The upload gate runs before bodyLimit so a blocked member's files are
+// rejected without being read.
+routes.post('/', (c, next) => {
+  assertResourceUploadAllowed(c.get('user')!.id)
+  return next()
+}, bodyLimit({ maxSize: DICTIONARY_MAX_UPLOAD_BYTES + 64 * 1024, onError: () => { throw new AppError('UPLOAD_TOO_LARGE') } }), async (c) => {
   const body = await c.req.parseBody({ all: true })
   const files = Array.isArray(body.files) ? body.files : [body.files]
   if (files.some((file) => !(file instanceof File))) throw new AppError('DICTIONARY_INVALID', 'Dictionary files are required')

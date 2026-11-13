@@ -7,6 +7,7 @@ import type { FontListItem } from '@bookdock/shared'
 
 import { config } from '../../config'
 import { getStorage } from '../../storage'
+import { assertResourceUploadAllowed } from '../auth/auth.service'
 import { AppError } from '../../middleware/error'
 import {
   deleteFont,
@@ -33,6 +34,9 @@ fontsRoutes.post('/', async (c) => {
   if (!user) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot upload fonts' } }, 403)
   }
+  // Reject before parsing the multipart body so a blocked member's payload is
+  // never read.
+  assertResourceUploadAllowed(user.id)
   const body = await c.req.parseBody()
   const file = body['file']
   if (!file || !(file instanceof File)) {

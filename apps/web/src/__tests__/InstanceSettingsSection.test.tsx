@@ -36,8 +36,21 @@ describe('InstanceSettingsSection', () => {
     const permissions = screen.getByRole('group', { name: '成员权限' })
     expect(permissions).toContainElement(screen.getByRole('checkbox', { name: '创建书库', checked: true }))
     expect(permissions).toContainElement(screen.getByRole('checkbox', { name: '上传书籍', checked: true }))
+    expect(permissions).toContainElement(screen.getByRole('checkbox', { name: '上传阅读资源', checked: true }))
     expect(screen.getByRole('switch', { name: '游客访问' })).toHaveAttribute('aria-checked', 'false')
     expect(screen.getAllByRole('switch')).toHaveLength(1)
+  })
+
+  it('toggles the member resource-upload permission independently', () => {
+    const mutate = mockSection({ allowRegistration: false, allowGuestAccess: false, allowUserUpload: true, allowUserResourceUpload: false })
+
+    render(<InstanceSettingsSection />)
+    fireEvent.click(screen.getByRole('checkbox', { name: '上传阅读资源' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '上传书籍' }))
+
+    expect(mutate).toHaveBeenCalledWith({ allowUserResourceUpload: true }, expect.anything())
+    expect(mutate).toHaveBeenCalledWith({ allowUserUpload: false }, expect.anything())
+    expect(mutate).toHaveBeenCalledTimes(2)
   })
 
   it('updates each member permission independently through the instance endpoint', () => {

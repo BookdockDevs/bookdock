@@ -15,6 +15,7 @@ vi.mock('../../db/client', () => ({ getDb: () => db }))
 
 import { errorHandler } from '../../middleware/error'
 import { releaseDictionaryReader } from '../../lib/mdict-reader'
+import { resetInstanceCache } from '../auth/auth.service'
 import routes from './dictionaries.routes'
 import { deleteDictionary, dictionaryCandidates, dictionaryResource, importDictionary, listDictionaries, lookupDictionary, reorderDictionaries, updateDictionary } from './dictionaries.service'
 import { dictionaryFixture } from './dictionary-fixture'
@@ -28,7 +29,7 @@ let id: string
 
 beforeAll(async () => {
   state.directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bookdock-dictionary-'))
-  sqlite.exec('PRAGMA foreign_keys=ON; CREATE TABLE users(id TEXT PRIMARY KEY); INSERT INTO users VALUES (\'reader\'),(\'other\'),(\'owner\'),(\'member\'); CREATE TABLE settings(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),key TEXT NOT NULL,value TEXT NOT NULL); CREATE UNIQUE INDEX settings_user_key_idx ON settings(user_id,key);')
+  sqlite.exec('PRAGMA foreign_keys=ON; CREATE TABLE users(id TEXT PRIMARY KEY); INSERT INTO users VALUES (\'reader\'),(\'other\'),(\'owner\'),(\'member\'); CREATE TABLE settings(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),key TEXT NOT NULL,value TEXT NOT NULL); CREATE UNIQUE INDEX settings_user_key_idx ON settings(user_id,key); CREATE TABLE instance(id TEXT PRIMARY KEY, owner_user_id TEXT, registration_mode TEXT, allow_registration INTEGER NOT NULL DEFAULT 0, allow_guest_access INTEGER NOT NULL DEFAULT 0, upload_max_bytes INTEGER, allow_user_create_library INTEGER NOT NULL DEFAULT 1, allow_user_upload INTEGER NOT NULL DEFAULT 1, allow_user_resource_upload INTEGER NOT NULL DEFAULT 1, storage_backend_enabled INTEGER NOT NULL DEFAULT 0, storage_backend_connection_id TEXT, storage_backend_base_path TEXT NOT NULL DEFAULT \'/Bookdock/storage\', storage_backend_cache_max_mb INTEGER NOT NULL DEFAULT 2048, storage_backend_status TEXT NOT NULL DEFAULT \'disabled\', storage_backend_last_tested_at INTEGER, storage_backend_latency_ms INTEGER, created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0);')
 })
 afterAll(async () => { await releaseDictionaryReader(); sqlite.close(); await fs.rm(state.directory, { recursive: true, force: true }) })
 
@@ -172,6 +173,44 @@ describe('personal dictionaries', () => {
     expect(listDictionaries('reader')).toEqual({ items: [], lastUsedId: null })
     await expect(fs.stat(path.join(state.directory, 'dictionaries', 'reader', id))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(lookupDictionary('reader', id, 'hello')).rejects.toMatchObject({ code: 'DICTIONARY_NOT_FOUND' })
+  })
+  it('imports more dictionaries than the retired count limit allowed', async () => {
+    for (let index = 0; index < 21; index++) {
+      const bytes = dictionaryFixture({ [`word${index}`]: `<p>释义 ${index}</p>` })
+      const imported = await importDictionary('other', [new File([bytes], `dict${index}.mdx`)])
+      expect(imported.id).toBeDefined()
+    }
+    expect(listDictionaries('other').items.length).toBeGreaterThanOrEqual(21)
+    const items = listDictionaries('other').items
+    await Promise.all(items.map((item) => deleteDictionary('other', item.id)))
+    expect(listDictionaries('other').items).toEqual([])
+  }, 120_000)
+  it('gates member imports behind allowUserResourceUpload while the owner stays exempt', async () => {
+    sqlite.exec("INSERT INTO instance(id, owner_user_id, allow_user_resource_upload) VALUES ('instance', 'owner', 0)")
+    resetInstanceCache()
+
+    const memberApp = new Hono()
+    memberApp.onError(errorHandler)
+    memberApp.use('*', async (c, next) => { c.set('user', { id: 'reader', username: 'Reader', role: 'member', avatarKey: null }); c.set('guest', false); await next() })
+    memberApp.route('/api/v1/dictionaries', routes)
+    const memberForm = new FormData()
+    files().forEach((file) => memberForm.append('files', file))
+    const denied = await memberApp.request('/api/v1/dictionaries', { method: 'POST', body: memberForm })
+    expect(denied.status).toBe(403)
+    expect(((await denied.json()) as { error: { code: string } }).error.code).toBe('FORBIDDEN')
+
+    const ownerApp = new Hono()
+    ownerApp.onError(errorHandler)
+    ownerApp.use('*', async (c, next) => { c.set('user', { id: 'owner', username: 'Owner', role: 'owner', avatarKey: null }); c.set('guest', false); await next() })
+    ownerApp.route('/api/v1/dictionaries', routes)
+    const ownerForm = new FormData()
+    files().forEach((file) => ownerForm.append('files', file))
+    const allowed = await ownerApp.request('/api/v1/dictionaries', { method: 'POST', body: ownerForm })
+    expect(allowed.status).toBe(201)
+
+    sqlite.exec("DELETE FROM instance")
+    resetInstanceCache()
+    await deleteDictionary('owner', 'owner', ((await allowed.json()) as { data: { id: string } }).data.id)
   })
   it.runIf(Boolean(process.env.BOOKDOCK_TEST_MDX))('imports and queries an explicitly supplied real MDX using disposable data', async () => {
     const filePath = process.env.BOOKDOCK_TEST_MDX!

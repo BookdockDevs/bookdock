@@ -803,6 +803,7 @@ export const instance = sqliteTable('instance', {
   // bypasses them (see isInstanceOwner + the upload/create gates).
   allowUserCreateLibrary: integer('allow_user_create_library', { mode: 'boolean' }).notNull().default(true),
   allowUserUpload: integer('allow_user_upload', { mode: 'boolean' }).notNull().default(true),
+  allowUserResourceUpload: integer('allow_user_resource_upload', { mode: 'boolean' }).notNull().default(true),
   storageBackendEnabled: integer('storage_backend_enabled', { mode: 'boolean' }).notNull().default(false),
   storageBackendConnectionId: text('storage_backend_connection_id').references(() => storageConnections.id, { onDelete: 'set null' }),
   storageBackendBasePath: text('storage_backend_base_path').notNull().default('/Bookdock/storage'),

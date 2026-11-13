@@ -52,6 +52,8 @@ export interface InstanceSettings {
   allowUserCreateLibrary: boolean
   /** Ordinary members may upload files to their private library; the instance owner always bypasses */
   allowUserUpload: boolean
+  /** Ordinary members may upload reading resources (fonts, dictionary imports); the instance owner always bypasses */
+  allowUserResourceUpload: boolean
 }
 
 function resolveRegistrationMode(row?: { registrationMode?: string | null; allowRegistration?: boolean } | null): RegistrationMode {
@@ -120,6 +122,18 @@ export function assertUserCreateLibraryAllowed(userId: string): void {
   }
 }
 
+/**
+ * Reading-resource upload gate: covers only member writes that put resource
+ * files on the server (font uploads, dictionary imports). Managing already
+ * uploaded resources and system/builtin fonts stays available; the instance
+ * owner always bypasses.
+ */
+export function assertResourceUploadAllowed(userId: string): void {
+  if (!getInstanceSettings().allowUserResourceUpload && !isInstanceOwner(userId)) {
+    throw new AppError('FORBIDDEN', 'Reading resource uploads are disabled by the instance owner')
+  }
+}
+
 export function getInstanceSettings(): InstanceSettings {
   if (instanceCache && Date.now() - instanceCache.at < INSTANCE_CACHE_TTL) {
     return instanceCache.value
@@ -136,6 +150,7 @@ export function getInstanceSettings(): InstanceSettings {
     // unset switch reads as open, so existing instances keep their behavior.
     allowUserCreateLibrary: row?.allowUserCreateLibrary !== false,
     allowUserUpload: row?.allowUserUpload !== false,
+    allowUserResourceUpload: row?.allowUserResourceUpload !== false,
   }
   instanceCache = { value, at: Date.now() }
   return value
@@ -169,6 +184,7 @@ export function updateInstanceSettings(patch: UpdateInstanceReq): InstanceInfoRe
   if (patch.uploadMaxBytes !== undefined) updates.uploadMaxBytes = patch.uploadMaxBytes
   if (patch.allowUserCreateLibrary !== undefined) updates.allowUserCreateLibrary = patch.allowUserCreateLibrary
   if (patch.allowUserUpload !== undefined) updates.allowUserUpload = patch.allowUserUpload
+  if (patch.allowUserResourceUpload !== undefined) updates.allowUserResourceUpload = patch.allowUserResourceUpload
   db.update(instance).set(updates).where(eq(instance.id, INSTANCE_ID)).run()
   resetInstanceCache()
   return getInstanceInfo()

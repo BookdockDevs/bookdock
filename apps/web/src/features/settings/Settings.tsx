@@ -60,6 +60,9 @@ export default function Settings() {
   const { data: instanceData } = useInstanceInfo({ enabled: !local })
   const registrationMode = instanceData?.data.registrationMode ?? (instanceData?.data.allowRegistration ? 'open' : 'closed')
   const userUploadAllowed = instanceData?.data.allowUserUpload !== false
+  // Undefined/absent instance info (local surface, old instance) reads as allowed;
+  // the owner always bypasses the member resource-upload switch.
+  const userResourceUploadAllowed = isOwner || instanceData?.data.allowUserResourceUpload !== false
   // Unified shelf: anonymous visitors with vault access still get the
   // device-level library preferences on the common settings surface.
   const guestVaultAccess = instanceData?.data.allowGuestAccess === true
@@ -337,8 +340,8 @@ export default function Settings() {
               {!isGuest && <TocRulesSettingsSection />}
               <TtsSettingsSection id="tts-settings" />
               <AiSettingsSection id="ai-settings" />
-              <FontsSettingsSection />
-              {!isGuest && <DictionariesSettingsSection />}
+              <FontsSettingsSection canUploadResources={userResourceUploadAllowed} />
+              {!isGuest && <DictionariesSettingsSection canImportDictionaries={userResourceUploadAllowed} />}
               {(local || !isGuest || guestVaultAccess) && <ReplacementsSettingsSection />}
             </div>
           )}

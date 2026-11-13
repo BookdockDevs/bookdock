@@ -27,10 +27,10 @@ const data: DictionaryList = {
   lastUsedId: null,
 }
 
-function mount() {
+function mount(props: { canImportDictionaries?: boolean } = {}) {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
-      <DictionariesSettingsSection />
+      <DictionariesSettingsSection {...props} />
     </QueryClientProvider>,
   )
 }
@@ -107,5 +107,14 @@ describe('dictionary management using existing settings components', () => {
     fireEvent.change(input, { target: { files: [new File(['fixture'], 'sample.mdd')] } })
     expect(apiUpload).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('hides the import entry while keeping management available when imports are not allowed', async () => {
+    const view = mount({ canImportDictionaries: false })
+    await screen.findByText('Test dictionary')
+    expect(screen.queryByRole('button', { name: 'dictionary.import' })).not.toBeInTheDocument()
+    expect(view.container.querySelector('input[type="file"]')).toBeNull()
+    expect(screen.getByRole('switch', { name: 'Test dictionary' })).toBeInTheDocument()
+    expect(screen.getByLabelText('settings.editModeEnter')).toBeInTheDocument()
   })
 })
