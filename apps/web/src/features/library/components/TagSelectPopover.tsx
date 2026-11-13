@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 
 interface TagSelectPopoverProps {
   tags: { id: string; name: string }[]
@@ -29,8 +29,8 @@ export default function TagSelectPopover({
 
   // Portaled for the same reason as the category picker: the dialog body
   // scrolls, and an in-flow panel is clipped at its edge.
-  const [position, setPosition] = useState<SmartPosition | null>(null)
-  const open = Boolean(position)
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null)
+  const open = Boolean(anchor)
   const [query, setQuery] = useState('')
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -53,20 +53,13 @@ export default function TagSelectPopover({
   }, [open])
 
   function toggle() {
-    if (position) {
-      setPosition(null)
+    if (anchor) {
+      setAnchor(null)
       return
     }
-    const rect = triggerRef.current?.getBoundingClientRect()
-    if (!rect) return
-    setPosition(
-      computeDropdownPosition(
-        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-        240,
-        288,
-        'start',
-      ),
-    )
+    const el = triggerRef.current
+    if (!el) return
+    setAnchor({ kind: 'element', el, placement: 'below', align: 'start' })
   }
 
   useEffect(() => {
@@ -121,13 +114,13 @@ export default function TagSelectPopover({
       </button>
 
       {/* Compact multi-select list, portaled so the dialog body cannot clip it */}
-      {position && (
+      {anchor && (
         <SmartMenu
           innerRef={panelRef}
           triggerRef={containerRef}
-          position={position}
-          onClose={() => setPosition(null)}
-          width="auto"
+          anchor={anchor}
+          onClose={() => setAnchor(null)}
+          size={{ width: 'auto', height: 288 }}
           minWidth={208}
           maxWidth={304}
           className="max-h-72 overflow-y-auto custom-scrollbar"
@@ -159,7 +152,7 @@ export default function TagSelectPopover({
                   if (e.key === 'Escape') {
                     e.preventDefault()
                     e.stopPropagation()
-                    setPosition(null)
+                    setAnchor(null)
                   } else if (e.key === 'Enter') {
                     e.preventDefault()
                     if (!exactMatch && query.trim()) {

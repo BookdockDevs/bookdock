@@ -8,7 +8,7 @@ import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -36,57 +36,27 @@ interface CustomSelectProps {
 function CustomSelect({ id, value, onChange, options, disabled = false, loading = false, placeholder }: CustomSelectProps) {
   // The dialog body scrolls, so a list rendered in flow is cut off at the
   // body's edge - the last options simply cannot be reached. The list is
-  // portaled to the document and anchored to the trigger instead, and it
-  // closes as soon as the body scrolls so it never floats over other fields.
-  const [menu, setMenu] = useState<{ position: SmartPosition; width: number } | null>(null)
+  // portaled to the document and anchored to the trigger, so it travels with
+  // the field while the body scrolls instead of floating over other fields.
+  const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const selectedOption = options.find((opt) => opt.value === value)
 
-  useEffect(() => {
-    if (!menu) return
-    const dismiss = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!menuRef.current?.contains(target) && !containerRef.current?.contains(target)) setMenu(null)
-    }
-    const dismissOnScroll = (event: Event) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenu(null)
-    }
-    const dismissOnResize = () => setMenu(null)
-    const dismissOnKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenu(null)
-    }
-    document.addEventListener('pointerdown', dismiss)
-    document.addEventListener('keydown', dismissOnKey)
-    window.addEventListener('scroll', dismissOnScroll, true)
-    window.addEventListener('resize', dismissOnResize)
-    return () => {
-      document.removeEventListener('pointerdown', dismiss)
-      document.removeEventListener('keydown', dismissOnKey)
-      window.removeEventListener('scroll', dismissOnScroll, true)
-      window.removeEventListener('resize', dismissOnResize)
-    }
-  }, [menu])
-
   function toggle() {
     if (menu) {
       setMenu(null)
       return
     }
-    const rect = triggerRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const height = Math.min(options.length * 36 + 8, 224)
-    const position = computeDropdownPosition(
-      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      rect.width,
-      height,
-      'start',
-    )
-    // A zero-width trigger (jsdom, or before layout) must still open.
-    setMenu({ position, width: Math.max(rect.width, 160) })
+    const el = triggerRef.current
+    if (!el) return
+    setMenu({ kind: 'element', el, placement: 'below', align: 'start' })
   }
+
+  // A zero-width trigger (jsdom, or before layout) still needs a usable width.
+  const menuWidth = Math.max(triggerRef.current?.getBoundingClientRect().width ?? 0, 160)
 
   return (
     <div ref={containerRef} className="relative">
@@ -151,9 +121,9 @@ function CustomSelect({ id, value, onChange, options, disabled = false, loading 
         <SmartMenu
           innerRef={menuRef}
           triggerRef={containerRef}
-          position={menu.position}
+          anchor={menu}
           onClose={() => setMenu(null)}
-          width={menu.width}
+          size={{ width: menuWidth, height: Math.min(options.length * 36 + 8, 224) }}
           className="max-h-56 overflow-y-auto"
         >
           <div role="listbox">

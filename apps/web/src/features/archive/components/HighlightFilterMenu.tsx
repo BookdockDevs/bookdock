@@ -11,7 +11,7 @@ import {
 } from '@/features/reader/components/annotation-colors'
 import { CheckIcon, StyleGlyph } from '@/features/reader/components/annotation-icons'
 import { useTranslation } from '@/hooks/useTranslation'
-import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 import { cn } from '@/lib/utils'
 
 interface HighlightFilterMenuProps {
@@ -30,7 +30,7 @@ export default function HighlightFilterMenu({
   onReset,
 }: HighlightFilterMenuProps) {
   const _ = useTranslation()
-  const [menu, setMenu] = useState<SmartPosition | null>(null)
+  const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -44,16 +44,7 @@ export default function HighlightFilterMenu({
       setMenu(null)
       return
     }
-    const rect = anchor.getBoundingClientRect()
-    const position = computeFromAnchor(
-      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      menuWidth,
-      190,
-    )
-    setMenu({
-      ...position,
-      left: Math.max(PADDING, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - PADDING)),
-    })
+    setMenu({ kind: 'element', el: anchor, placement: 'side', align: 'end' })
   }
 
   return (
@@ -93,9 +84,9 @@ export default function HighlightFilterMenu({
         <SmartMenu
           innerRef={menuRef}
           triggerRef={anchorRef}
-          position={menu}
+          anchor={menu}
           onClose={() => setMenu(null)}
-          width={menuWidth}
+          size={{ width: menuWidth, height: 190 }}
           className="p-3"
         >
           <div className="space-y-3" role="dialog" aria-label={_('annotation.filterStyle')}>

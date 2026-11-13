@@ -13,7 +13,7 @@ import { getHiddenCause } from '../hidden-status'
 import BookCardShell from './BookCardShell'
 import DeviceBookIndicator from './DeviceBookIndicator'
 import HiddenIndicator from './HiddenIndicator'
-import { useContextMenu } from './use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { ContextMenuContent } from './BookContextMenu'
 import TrashInfo from './TrashInfo'
 import UnpinButton, { PinIcon } from './UnpinButton'
@@ -44,7 +44,7 @@ const MENU_H = 300
  */
 const BookCard = memo(function BookCard({ book, selected = false, selectionActive = false, gridCardFields, readOnly = false, onToggleSelect, onDelete, onPublish, onUploadToServer, onFork, onShowDetails, onRestore, onPermanentDelete }: BookCardProps) {
   const _ = useTranslation()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
   const trashCard = Boolean(onRestore && onPermanentDelete)
   const showMenu = !trashCard
   const isLocalBook = isDeviceBook(book.ref)
@@ -135,8 +135,8 @@ const BookCard = memo(function BookCard({ book, selected = false, selectionActiv
         <SmartMenu
           triggerRef={menu.btnRef}
           innerRef={menu.menuRef}
-          position={menu.position(MENU_W, MENU_H)}
-          width={MENU_W}
+          anchor={menu.anchor}
+          size={{ width: MENU_W, height: MENU_H }}
           onClose={menu.close}
         >
           <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onPublish={onPublish} onUploadToServer={onUploadToServer} onFork={onFork} onDelete={onDelete} onClose={menu.close} />

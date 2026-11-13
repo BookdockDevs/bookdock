@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef } from 'react'
 
 import SmartMenu from '@/components/ui/SmartMenu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { useTranslation } from '@/hooks/useTranslation'
-import { computeAtPoint, type SmartPosition } from '@/lib/position'
 
 import { useLibraryCategories } from '../../hooks'
 import { categoryPath } from '../../taxonomy'
@@ -45,24 +45,9 @@ export default function CategoryChip({ libraryId, categoryId, fallbackLabel, edi
       : (loading ? _('library.categories') : _('library.uncategorized'))
 
   const anchorRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState<SmartPosition | null>(null)
+  const menu = useMenuAnchor()
   // Without a tree there is nothing honest to pick from.
   const canEdit = editable && !unresolved
-
-  useEffect(() => {
-    if (!position) return
-    const dismissOnScroll = (event: Event) => {
-      if (!menuRef.current?.contains(event.target as Node)) setPosition(null)
-    }
-    const dismissOnResize = () => setPosition(null)
-    window.addEventListener('scroll', dismissOnScroll, true)
-    window.addEventListener('resize', dismissOnResize)
-    return () => {
-      window.removeEventListener('scroll', dismissOnScroll, true)
-      window.removeEventListener('resize', dismissOnResize)
-    }
-  }, [position])
 
   return (
     <>
@@ -74,16 +59,16 @@ export default function CategoryChip({ libraryId, categoryId, fallbackLabel, edi
         onContextMenu={canEdit ? (event) => {
           event.preventDefault()
           event.stopPropagation()
-          setPosition(computeAtPoint({ x: event.clientX, y: event.clientY }, 240, 288))
+          menu.openFromEvent(event)
         } : undefined}
       />
-      {position && (
+      {menu.open && (
         <SmartMenu
-          innerRef={menuRef}
+          innerRef={menu.menuRef}
           triggerRef={anchorRef}
-          position={position}
-          onClose={() => setPosition(null)}
-          width="auto"
+          anchor={menu.anchor}
+          onClose={menu.close}
+          size={{ width: 'auto', height: 288 }}
           minWidth={200}
           maxWidth={340}
           className="max-h-72 overflow-y-auto custom-scrollbar"
@@ -96,7 +81,7 @@ export default function CategoryChip({ libraryId, categoryId, fallbackLabel, edi
             // mint a category from a recommendation: only real ones are offered.
             allowTemplates={false}
             onChange={onChange}
-            onDismiss={() => setPosition(null)}
+            onDismiss={menu.close}
           />
         </SmartMenu>
       )}

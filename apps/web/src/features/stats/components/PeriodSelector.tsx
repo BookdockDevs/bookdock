@@ -3,7 +3,7 @@ import { useTranslation as useI18nTranslation } from 'react-i18next'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 import { cn } from '@/lib/utils'
 
 import {
@@ -109,7 +109,7 @@ export default function PeriodSelector({
   const isZh = !i18n.language || i18n.language.startsWith('zh')
 
   const [isOpen, setIsOpen] = useState(false)
-  const [position, setPosition] = useState<SmartPosition | null>(null)
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const selectedWeekRef = useRef<HTMLButtonElement | null>(null)
@@ -181,15 +181,7 @@ export default function PeriodSelector({
     }
     const el = triggerRef.current
     if (!el) return
-    const rect = el.getBoundingClientRect()
-    setPosition(
-      computeDropdownPosition(
-        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-        popoverWidth,
-        popoverHeight,
-        'start',
-      ),
-    )
+    setAnchor({ kind: 'element', el, placement: 'below', align: 'start' })
     setPickerYear(Math.min(range.from.getFullYear(), currentYear))
     setPickerMonth(range.from.getMonth())
     setIsOpen(true)
@@ -297,9 +289,9 @@ export default function PeriodSelector({
         <SmartMenu
           innerRef={menuRef}
           triggerRef={triggerRef}
-          position={position}
+          anchor={anchor}
           onClose={() => setIsOpen(false)}
-          width={popoverWidth}
+          size={{ width: popoverWidth, height: popoverHeight }}
           className="rounded-xl border border-stone-200 bg-white p-2 shadow-lg dark:border-stone-800 dark:bg-stone-900"
         >
           {/* Week Picker */}

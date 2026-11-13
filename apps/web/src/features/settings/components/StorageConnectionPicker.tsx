@@ -1,11 +1,9 @@
-import { useMemo } from 'react'
 import type { ReactNode } from 'react'
 
 import type { StorageConnectionRes } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
-import { useContextMenu } from '@/features/library/components/use-context-menu'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { cn } from '@/lib/utils'
 
 import LocalStorageBadge from './LocalStorageBadge'
@@ -57,7 +55,7 @@ export default function StorageConnectionPicker({
   menuClassName,
   ariaLabel,
 }: StorageConnectionPickerProps) {
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
   const selected = connections.find((c) => c.id === value)
   const isLocal = showLocalOption && value === 'local'
   const triggerLabel = isLocal ? localLabel : (selected?.name || value)
@@ -68,13 +66,6 @@ export default function StorageConnectionPicker({
     : menuWidth
   const rowCount = (showLocalOption ? 1 : 0) + connections.length + (onAddNew ? 1 : 0)
   const estimatedHeight = Math.min(240, rowCount * 34 + 16)
-  // Dropdown selects open directly below the trigger (left-aligned,
-  // right-clamped into the viewport). The shared context-menu placement
-  // prefers the side of the anchor, which looks detached for selects.
-  const position: SmartPosition | null = useMemo(() => {
-    if (!menu.open || !anchor) return null
-    return computeDropdownPosition(anchor, resolvedWidth, estimatedHeight)
-  }, [menu.open, anchor, resolvedWidth, estimatedHeight])
 
   function handleSelect(id: string) {
     onChange(id)
@@ -86,7 +77,7 @@ export default function StorageConnectionPicker({
       <button
         ref={menu.btnRef}
         type="button"
-        onClick={menu.toggleFromButton}
+        onClick={(event) => menu.toggleFromButton(event, 'below')}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={menu.open}
@@ -128,9 +119,9 @@ export default function StorageConnectionPicker({
         <SmartMenu
           triggerRef={menu.btnRef}
           innerRef={menu.menuRef}
-          position={position}
+          anchor={menu.anchor}
+          size={{ width: resolvedWidth, height: estimatedHeight }}
           onClose={menu.close}
-          width={resolvedWidth}
           className={menuClassName}
         >
           <div className="max-h-56 overflow-y-auto overscroll-contain py-1">

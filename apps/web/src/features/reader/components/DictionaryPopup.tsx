@@ -3,7 +3,7 @@ import { useRef, useState } from 'react'
 import { useDictionaries, useDictionaryLookup } from '@/api/hooks/useDictionaries'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 import { isAccessRevocationError } from '@/lib/error-message'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -35,7 +35,7 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
   const lookup = useDictionaryLookup(id, word)
   const trigger = useRef<HTMLButtonElement>(null)
   const menu = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState<SmartPosition | null>(null)
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null)
   const close = () => useReaderState.getState().setDictionaryTarget(null)
   const current = enabled.find((item) => item.id === id)
   const result = available && !revoked && !isAccessRevocationError(lookup.error) ? lookup.data?.data : undefined
@@ -87,28 +87,24 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
             ref={trigger}
             type="button"
             disabled={list.isPending || !enabled.length}
-            onClick={() =>
-              setPosition(
-                position
-                  ? null
-                  : computeDropdownPosition(
-                      trigger.current!.getBoundingClientRect(),
-                      168,
-                      Math.min(240, enabled.length * 36 + 40),
-                      'end',
-                    ),
-              )
-            }
+            onClick={() => {
+              if (anchor) {
+                setAnchor(null)
+                return
+              }
+              const el = trigger.current
+              if (el) setAnchor({ kind: 'element', el, placement: 'below', align: 'end' })
+            }}
             aria-haspopup="listbox"
-            aria-expanded={Boolean(position)}
+            aria-expanded={Boolean(anchor)}
             title={current?.name ?? (list.isPending ? _('dictionary.loading') : _('dictionary.empty'))}
             className={`flex h-7 max-w-[130px] items-center gap-1 rounded-lg border border-[var(--bd-read-accent)]/60 bg-stone-500/5 px-2 text-xs font-medium text-[var(--bd-read-text)] transition-colors hover:border-[var(--bd-read-accent)] hover:bg-stone-500/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)] disabled:opacity-40 sm:max-w-[170px] ${
-              position ? 'border-[var(--bd-read-accent)] bg-stone-500/15' : ''
+              anchor ? 'border-[var(--bd-read-accent)] bg-stone-500/15' : ''
             }`}
           >
             <span className="truncate">{current?.name ?? (list.isPending ? _('dictionary.loading') : _('dictionary.empty'))}</span>
             <svg
-              className={`h-3 w-3 shrink-0 text-[var(--bd-read-sub)] transition-transform ${position ? 'rotate-180' : ''}`}
+              className={`h-3 w-3 shrink-0 text-[var(--bd-read-sub)] transition-transform ${anchor ? 'rotate-180' : ''}`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -124,11 +120,11 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
           <SmartMenu
             innerRef={menu}
             triggerRef={trigger}
-            position={position}
-            width={168}
+            anchor={anchor}
+            size={{ width: 168, height: Math.min(240, enabled.length * 36 + 40) }}
             variant="reader"
             className="z-[80]"
-            onClose={() => setPosition(null)}
+            onClose={() => setAnchor(null)}
           >
             <div
               role="listbox"
@@ -146,7 +142,7 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
                     aria-selected={isSelected}
                     onClick={() => {
                       setSelected(item.id)
-                      setPosition(null)
+                      setAnchor(null)
                     }}
                     className={`flex min-h-7.5 w-full items-center justify-between gap-1.5 rounded-lg px-2 py-1 text-left text-xs transition-colors ${
                       isSelected

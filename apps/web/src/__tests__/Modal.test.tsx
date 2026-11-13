@@ -24,16 +24,19 @@ function NestedMenuHarness() {
   const [modalOpen, setModalOpen] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   if (!modalOpen) return null
 
   return (
     <Modal title="Test modal" onClose={() => setModalOpen(false)}>
-      <button type="button" onClick={() => setMenuOpen(true)}>Open menu</button>
+      <button ref={buttonRef} type="button" onClick={() => setMenuOpen(true)}>Open menu</button>
       {menuOpen && (
         <SmartMenu
           innerRef={menuRef}
-          position={{ left: 0, top: 0, dir: 'down' }}
+          triggerRef={buttonRef}
+          anchor={buttonRef.current ? { kind: 'element', el: buttonRef.current, placement: 'below' } : null}
+          size={{ width: 160, height: 40 }}
           onClose={() => setMenuOpen(false)}
         >
           menu item

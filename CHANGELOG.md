@@ -6,6 +6,7 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- Floating menus update their position directly each frame to reduce React rendering overhead while scrolling, while preserving their entrance animation.
 - Opening the content workbench now follows the reader's entry flow: the header and chapter list paint from cache while the text is still loading, the source request starts when you pick Content editing instead of after the page mounts, and EPUB packages are unzipped once and kept per revision, so reopening a book you just read no longer waits behind a full-screen spinner.
 - The editor's revision-pinned TXT request is now reused from the browser cache for five minutes, so reloading, navigating back, or opening the same revision in a second tab no longer re-downloads the whole book. The cached body stays private to that browser and is split per session, so a shared library cannot hand one member's copy to another account.
 - Shared catalog editing now uses one form per version with the same category and tag popovers as private books, including category recommendations; catalog cards follow the default version, and metadata lookup applies to the version being edited.
@@ -45,8 +46,10 @@ All notable changes to Bookdock are documented here.
 - The book-source listing no longer shows the default version's cover for a shared version that has none of its own.
 - The reader's bottom bar no longer collapses while the pointer travels from the progress strip up to a companion capsule: a revealed footer keeps a taller keep-alive band covering the gap and the capsules, and hiding waits longer, so moving back within the grace period cancels it. Moving off a control onto the bar itself (its background is pass-through, so only buttons and the slider take the pointer) no longer starts a hide either.
 - Hovering the selection bubble no longer summons the reader's top or bottom bar while a selection is active: the bubble is clamped to the viewport edge and overlaps the hover band, so it now counts as selection UI and leaves the chrome alone, matching what the same pointer position does over the page.
-- The dropdowns in the publish dialog and the editor's category and tag pickers now open outside the dialog's scrolling body instead of inside it: the publish dialog's category list is no longer cut off at the footer, and the lower half of a long category tree can be reached. Each panel stays anchored under its field, flips above it when there is no room below, and closes as soon as the body scrolls instead of floating over unrelated fields.
+- The dropdowns in the publish dialog and the editor's category and tag pickers now open outside the dialog's scrolling body instead of inside it: the publish dialog's category list is no longer cut off at the footer, and the lower half of a long category tree can be reached. Each panel stays anchored under its field, flips above it when there is no room below, and keeps to that field while the body scrolls instead of floating over unrelated ones.
 - The description box and the metadata inputs no longer end in a dead strip on the right: the inset that keeps text clear of the restore-from-file icon is now applied only when that icon is offered, instead of reserving 48px in every field. The right-click single-field editor follows the same rule.
+- SmartMenu-based menus and the translation channel picker now follow their trigger while pages, sidebars and dialogs scroll, recalculate placement using their measured size, and close when the trigger is unmounted or fully clipped. Scrolling inside a menu preserves it. Reader image menus and other independent popovers are unchanged.
+- Touching outside a menu now dismisses it on pointer down. Clicking the trigger again or elsewhere on the same card retains the existing dismissal behavior.
 
 ## [0.8.2] - 2026-11-13
 
@@ -1225,6 +1228,7 @@ All notable changes to Bookdock are documented here.
 
 #### 优化
 
+- 菜单逐帧直接更新位置，减少滚动跟随时的 React 渲染开销，并保留原有入场动画。
 - 打开编辑工作台改为与阅读器一致的入口流程：头部与章节列表先按缓存渲染、正文继续加载，正文请求在点击「内容编辑」时就发起而不再等页面挂载，EPUB 整包只解压一次并按修订缓存；刚读过的书再进编辑器不再卡在全屏加载上。
 - 编辑工作台按修订读取 TXT 正文的请求现在会在浏览器缓存中复用五分钟：刷新页面、后退或开第二个标签页重开同一修订时不再重新下载整本书。缓存仅限本浏览器并按会话隔离，共享书库不会把一位成员的副本发给另一位账号。
 - 共享书库编辑改为「每个版本一份表单」，分类与标签复用私库的弹层选择器，并支持推荐分类；书城卡片跟随默认版本，刮削只作用于当前正在编辑的版本。
@@ -1264,8 +1268,10 @@ All notable changes to Bookdock are documented here.
 - 书源版本列表不再把默认版本的封面显示到没有自己封面的共享版本上。
 - 阅读器底栏不再在鼠标从进度条移向伴随胶囊的途中收起：底栏浮现后「保持」判定区更高、覆盖空档与胶囊，收起前的宽限时间也更长，宽限内移回即取消收起。鼠标从底栏上的控件移到条形本身的空白处（条形背景不拦截指针，只有按钮和滑块响应），也同样不会再触发收起。
 - 选区气泡在屏时，鼠标移到气泡上不再唤出阅读器顶栏／底栏：气泡会被钳到视口边缘并与感应带重叠，现在按「选区浮层」处理、不参与感应，与同一位置移到正文上的表现一致。
-- 发布弹窗的下拉菜单与编辑弹窗的分类／标签选择器改为渲染在弹窗滚动区之外：发布弹窗的分类列表不再被底栏截断，分类树的下半部分也能点到了。面板仍贴着对应字段展开，下方放不下时自动翻到上方，滚动弹窗内容时即时关闭，不再浮在无关字段上。
+- 发布弹窗的下拉菜单与编辑弹窗的分类／标签选择器改为渲染在弹窗滚动区之外：发布弹窗的分类列表不再被底栏截断，分类树的下半部分也能点到了。面板仍贴着对应字段展开，下方放不下时自动翻到上方，滚动弹窗内容时跟着字段走，不再浮在无关字段上。
 - 简介输入框与各元数据输入框右侧不再留出一条用不了的空白：原本为「恢复文件值」图标固定预留的 48px 内边距，现在只在真的提供该图标时才生效；右键单字段编辑弹窗同步修复。
+- 基于 SmartMenu 的菜单与翻译渠道选择器现在随页面、侧栏和弹窗滚动跟随触发元素，按菜单实测尺寸重新定位，并在触发元素卸载或被完全裁剪时关闭。菜单内部滚动保持展开。阅读器图片菜单与其他独立浮层不在本次范围内。
+- 在菜单外触摸现在于按下时关闭菜单。再次点击触发按钮或点击同一卡片的其他位置仍沿用原有关闭行为。
 
 ### [0.8.2] - 2026-11-13
 

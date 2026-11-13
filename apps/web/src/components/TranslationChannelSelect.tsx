@@ -5,7 +5,9 @@ import { isAiEmbeddingModel, type AiConfigRes, type TranslationChannel } from '@
 
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
 import { CheckIcon } from '@/features/reader/components/annotation-icons'
+import { useReconciledMenuPosition } from '@/hooks/useMenuAnchor'
 import { useTranslation } from '@/hooks/useTranslation'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 
 interface TranslationChannelSelectProps {
   config?: AiConfigRes
@@ -30,7 +32,6 @@ const isProfileUsable = (profile: { model?: string | null; models: { id: string;
 export default function TranslationChannelSelect({ config, value, onChange, disabled }: TranslationChannelSelectProps) {
   const _ = useTranslation()
   const [open, setOpen] = useState(false)
-  const [menuPos, setMenuPos] = useState<{ left: number; bottom: number; maxWidth?: number } | null>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -65,41 +66,29 @@ export default function TranslationChannelSelect({ config, value, onChange, disa
       ? _('translation.noServices')
       : _('translation.unavailable')
 
+  const anchor: MenuAnchor | null = open && buttonRef.current
+    ? { kind: 'element', el: buttonRef.current, placement: 'above', align: 'start', gap: 6 }
+    : null
+  // `above` keeps the picker growing away from the bottom edge, which is where
+  // this control lives in the reader settings panel.
+  const menuPos = useReconciledMenuPosition(anchor, menuRef, { width: 260, height: 240 }, () => setOpen(false))
+
   useEffect(() => {
-    if (!open) {
-      setMenuPos(null)
-      return
-    }
-
-    const updatePos = () => {
-      const button = buttonRef.current
-      if (!button) return
-      const rect = button.getBoundingClientRect()
-      const bottom = Math.max(8, window.innerHeight - rect.top + 6)
-      const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 260))
-      setMenuPos({ left, bottom, maxWidth: Math.min(320, window.innerWidth - 16) })
-    }
-
-    updatePos()
-
+    if (!open) return
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target
       if (!(target instanceof Node)) return
       if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return
       setOpen(false)
     }
-
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false)
     }
-
     window.addEventListener('click', handlePointerDown, true)
     window.addEventListener('keydown', handleKeyDown, true)
-    window.addEventListener('resize', updatePos)
     return () => {
       window.removeEventListener('click', handlePointerDown, true)
       window.removeEventListener('keydown', handleKeyDown, true)
-      window.removeEventListener('resize', updatePos)
     }
   }, [open])
 
@@ -188,7 +177,7 @@ export default function TranslationChannelSelect({ config, value, onChange, disa
           data-reader-translation-popover
           aria-label={_('translation.channel')}
           className="reader-scrollbar fixed z-[80] max-h-56 min-w-56 overflow-y-auto overscroll-contain rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1.5 shadow-xl"
-          style={{ left: menuPos.left, bottom: menuPos.bottom, maxWidth: menuPos.maxWidth }}
+          style={{ left: 0, top: 0, translate: `${menuPos.left}px ${menuPos.top}px`, maxWidth: Math.min(320, window.innerWidth - 16) }}
         >
           {!hasAnyServices ? (
             <p className="px-3 py-4 text-center text-xs text-[var(--bd-read-sub)]">{_('translation.noServices')}</p>

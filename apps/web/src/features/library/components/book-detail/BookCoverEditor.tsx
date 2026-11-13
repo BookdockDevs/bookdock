@@ -5,7 +5,7 @@ import type { CoverPaletteId } from '@bookdock/shared'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
-import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 
 import BookCover, { type CoverSource } from '../BookCover'
 import { MORANDI_PALETTES } from '../cover-palettes'
@@ -59,7 +59,7 @@ export default function BookCoverEditor({
   const coverInputRef = useRef<HTMLInputElement>(null)
   const paletteAnchorRef = useRef<HTMLButtonElement>(null)
   const paletteMenuRef = useRef<HTMLDivElement>(null)
-  const [paletteMenu, setPaletteMenu] = useState<SmartPosition | null>(null)
+  const [paletteMenu, setPaletteMenu] = useState<MenuAnchor | null>(null)
 
   useEffect(() => {
     if (!toolbarVisible) setPaletteMenu(null)
@@ -75,16 +75,7 @@ export default function BookCoverEditor({
       setPaletteMenu(null)
       return
     }
-    const rect = el.getBoundingClientRect()
-    const position = computeFromAnchor(
-      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      PALETTE_MENU_WIDTH,
-      PALETTE_MENU_HEIGHT,
-    )
-    setPaletteMenu({
-      ...position,
-      left: Math.max(PADDING, Math.min(rect.right - PALETTE_MENU_WIDTH, window.innerWidth - PALETTE_MENU_WIDTH - PADDING)),
-    })
+    setPaletteMenu({ kind: 'element', el, placement: 'side', align: 'end' })
   }
 
   const iconButtonClass =
@@ -176,9 +167,9 @@ export default function BookCoverEditor({
         <SmartMenu
           innerRef={paletteMenuRef}
           triggerRef={paletteAnchorRef}
-          position={paletteMenu}
+          anchor={paletteMenu}
           onClose={() => setPaletteMenu(null)}
-          width={PALETTE_MENU_WIDTH}
+          size={{ width: PALETTE_MENU_WIDTH, height: PALETTE_MENU_HEIGHT }}
         >
           <div className="grid grid-cols-5 gap-1.5 p-1">
             {MORANDI_PALETTES.map((p) => (

@@ -13,7 +13,7 @@ import SmartMenu from '@/components/ui/SmartMenu'
 import LibraryCreateDialog from '@/features/library/components/LibraryCreateDialog'
 import LibraryManageDialog from '@/features/library/components/LibraryManageDialog'
 import { MenuHeader } from '@/features/library/components/RowMenuChrome'
-import { useContextMenu } from '@/features/library/components/use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { applyLibraryOrder } from '@/features/library/dnd'
 import { useDeleteLibrary, useHiddenLibraries, useLibraries, useLibraryPrefs, useRemoveLibraryMember } from '@/features/library/hooks'
 import { useInstanceInfo } from '@/features/auth/hooks'
@@ -259,7 +259,7 @@ function LibraryRow({ library, hidden, onEnter, onManage, onLeave, onDelete, onT
   onToggleHidden: () => void
 }) {
   const _ = useTranslation()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
 
   const isOwnerRow = library.relation === 'owner'
   const canManageRow = isOwnerRow || library.relation === 'admin'
@@ -314,7 +314,7 @@ function LibraryRow({ library, hidden, onEnter, onManage, onLeave, onDelete, onT
             <circle cx="12" cy="19" r="2" />
           </svg>
         </button>
-        <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(150, itemCount * 36 + 60)} onClose={menu.close}>
+        <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} anchor={menu.anchor} size={{ width: 150, height: itemCount * 36 + 60 }} onClose={menu.close}>
           <MenuHeader title={library.name} onClick={() => { menu.close(); onEnter() }} />
           {canManageRow && (
             <button

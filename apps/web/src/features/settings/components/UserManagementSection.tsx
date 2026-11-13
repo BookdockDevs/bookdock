@@ -16,7 +16,7 @@ import SegmentedControl from '@/components/ui/SegmentedControl'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useAdminUsers, useCreateUser, useDeleteUser, useTransferInstanceOwnership, useUpdateUser } from '@/features/auth/hooks'
-import { useContextMenu } from '@/features/library/components/use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import {
   useLibraries,
   useLibraryMembers,
@@ -467,7 +467,7 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete
   onDelete: (user: AdminUserRes) => void
 }) {
   const _ = useTranslation()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
   // Deletion blockers are pre-checked so the menu never offers an action the
   // server would refuse: self-service deletion lives on the profile page, the
   // instance owner must transfer first, and shared-library owners must
@@ -522,7 +522,7 @@ function UserRow({ user, isSelf, onAction, onTransfer, onResetPassword, onDelete
             <circle cx="12" cy="19" r="2" />
           </svg>
         </button>
-        <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(176, isSelf ? 64 : 148)} onClose={menu.close}>
+        <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} anchor={menu.anchor} size={{ width: 176, height: isSelf ? 64 : 148 }} onClose={menu.close}>
           {!isSelf && user.role === 'member' && !user.disabled && (
             <button
               type="button"
@@ -1035,7 +1035,7 @@ function LibraryMemberRow({
   onRemove: () => void
 }) {
   const _ = useTranslation()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
 
   const canChangeRole = isOwner && !isSelf
   const canTransfer = isOwner && !isSelf
@@ -1077,7 +1077,7 @@ function LibraryMemberRow({
                 <circle cx="12" cy="19" r="2" />
               </svg>
             </button>
-            <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(160, 120)} onClose={menu.close}>
+            <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} anchor={menu.anchor} size={{ width: 160, height: 120 }} onClose={menu.close}>
               {canChangeRole && (
                 <button
                   type="button"

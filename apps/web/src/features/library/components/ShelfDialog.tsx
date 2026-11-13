@@ -7,7 +7,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 
 import TaxonomyIcon from './TaxonomyIcon'
-import { useContextMenu } from './use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 
 import { useCreateLibraryCategory, useCreateShelf, useLibraryCategories, useRenameShelf, useUpdateLibraryCategory } from '../hooks'
 
@@ -46,30 +46,12 @@ export default function ShelfDialog({ open, libraryId, taxonomyKind, shelfId, in
     }
   }, [open, initialName, initialParentId])
 
-  const dropdown = useContextMenu()
+  const dropdown = useMenuAnchor()
   const dropdownOpen = dropdown.open
   const parentChoices = hasChildren ? [] : categories.filter((category) => category.parentId === null && category.id !== shelfId)
   const anchor = dropdown.btnRef.current?.getBoundingClientRect()
   const dropdownWidth = Math.min(anchor?.width ?? 280, window.innerWidth - 16)
   const dropdownHeight = Math.min(192, (parentChoices.length + 1) * 32 + 10) + 10
-  const anchoredPosition = dropdown.position(dropdownWidth, dropdownHeight)
-  const dropdownPosition = anchoredPosition && anchor
-    ? { ...anchoredPosition, left: Math.max(8, Math.min(anchor.left, window.innerWidth - dropdownWidth - 8)) }
-    : null
-
-  useEffect(() => {
-    if (!dropdownOpen) return
-    const closeOnLayoutChange = (event: Event) => {
-      if (event.target instanceof Node && dropdown.menuRef.current?.contains(event.target)) return
-      dropdown.close()
-    }
-    window.addEventListener('resize', closeOnLayoutChange)
-    window.addEventListener('scroll', closeOnLayoutChange, true)
-    return () => {
-      window.removeEventListener('resize', closeOnLayoutChange)
-      window.removeEventListener('scroll', closeOnLayoutChange, true)
-    }
-  }, [dropdownOpen, dropdown])
 
   if (!open) return null
 
@@ -149,7 +131,7 @@ export default function ShelfDialog({ open, libraryId, taxonomyKind, shelfId, in
                 ref={dropdown.btnRef}
                 type="button"
                 disabled={isPending || taxonomyLoading || taxonomyFailed}
-                onClick={dropdown.toggleFromButton}
+                onClick={(event) => dropdown.toggleFromButton(event, 'below')}
                 aria-haspopup="listbox"
                 aria-expanded={dropdownOpen}
                 className={cn(
@@ -183,7 +165,7 @@ export default function ShelfDialog({ open, libraryId, taxonomyKind, shelfId, in
               </button>
 
               {dropdownOpen && (
-                <SmartMenu triggerRef={dropdown.btnRef} innerRef={dropdown.menuRef} position={dropdownPosition} onClose={dropdown.close} width={dropdownWidth}>
+                <SmartMenu triggerRef={dropdown.btnRef} innerRef={dropdown.menuRef} anchor={dropdown.anchor} size={{ width: dropdownWidth, height: dropdownHeight }} onClose={dropdown.close}>
                 <div className="max-h-[min(12rem,calc(100dvh-2rem))] overflow-y-auto overscroll-contain custom-scrollbar">
                   {/* Root / Top-level option */}
                   <button

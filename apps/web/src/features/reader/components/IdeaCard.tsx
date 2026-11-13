@@ -6,7 +6,7 @@ import type { IdeaEntry } from './IdeaOverlay'
 import Avatar from '@/components/ui/Avatar'
 import SmartMenu from '@/components/ui/SmartMenu'
 import ContentImages from '@/features/content-files/components/ContentImages'
-import { useContextMenu } from '@/features/library/components/use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 import { cn } from '@/lib/utils'
@@ -45,7 +45,7 @@ export default function IdeaCard({
 }: IdeaCardProps) {
   const [quoteExpanded, setQuoteExpanded] = useState(false)
   const [noteExpanded, setNoteExpanded] = useState(false)
-  const contextMenu = useContextMenu()
+  const contextMenu = useMenuAnchor()
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const touchStartPos = useRef<{ x: number; y: number } | null>(null)
 
@@ -71,9 +71,16 @@ export default function IdeaCard({
     const touch = e.touches[0]
     touchStartPos.current = { x: touch.clientX, y: touch.clientY }
     if (touchTimer.current) clearTimeout(touchTimer.current)
+    // Capture element and offset now: the event is gone by the time the timer
+    // fires, and the list may have scrolled in between.
+    const anchor = contextMenu.captureFromEvent({
+      currentTarget: e.currentTarget,
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+    })
     touchTimer.current = setTimeout(() => {
       touchTimer.current = null
-      contextMenu.openFromPoint(touchStartPos.current ?? { x: touch.clientX, y: touch.clientY })
+      contextMenu.openWithAnchor(anchor)
     }, 500)
   }
 
@@ -298,9 +305,9 @@ export default function IdeaCard({
           triggerRef={contextMenu.btnRef}
           innerRef={contextMenu.menuRef}
           variant="reader"
-          position={contextMenu.position(130, 140)}
+          anchor={contextMenu.anchor}
+          size={{ width: 130, height: 140 }}
           onClose={contextMenu.close}
-          width={130}
         >
           {onShare && (
             <button

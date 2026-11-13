@@ -12,7 +12,7 @@ import { getHiddenCause } from '../hidden-status'
 
 import BookCardShell from './BookCardShell'
 import HiddenIndicator from './HiddenIndicator'
-import { useContextMenu } from './use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import CatalogWorkMenu from './CatalogWorkMenu'
 import DeleteVersionsDialog from './DeleteVersionsDialog'
 import { PinIcon } from './UnpinButton'
@@ -43,7 +43,7 @@ export default function CatalogCard({
   selected = false, selectionActive = false, onToggleSelect, onShowDetails,
 }: CatalogCardProps) {
   const _ = useTranslation()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
   const updateWork = useUpdateCatalogBook()
   // The version-delete dialog lives here (outside the menu subtree): closing
   // the menu unmounts everything inside it, so menu-owned dialog state dies
@@ -132,7 +132,7 @@ export default function CatalogCard({
         <CatalogWorkMenu
           innerRef={menu.menuRef}
           triggerRef={menu.btnRef}
-          position={menu.position(184, 300)}
+          anchor={menu.anchor}
           width={184}
           onClose={menu.close}
           work={book}

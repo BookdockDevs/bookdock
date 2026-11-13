@@ -8,8 +8,8 @@ import {
 } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 import { useTranslation } from '@/hooks/useTranslation'
-import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
 import { cn } from '@/lib/utils'
 
 import type { ArchiveSidebarParams } from './ArchiveSidebar'
@@ -52,7 +52,7 @@ interface ArchiveFilterMenuProps {
 export default function ArchiveFilterMenu({ params, onChange }: ArchiveFilterMenuProps) {
   const _ = useTranslation()
   const typeItems = TYPE_ITEMS
-  const [menu, setMenu] = useState<SmartPosition | null>(null)
+  const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -76,16 +76,7 @@ export default function ArchiveFilterMenu({ params, onChange }: ArchiveFilterMen
       setMenu(null)
       return
     }
-    const rect = anchor.getBoundingClientRect()
-    const position = computeFromAnchor(
-      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      menuWidth,
-      estimatedHeight,
-    )
-    setMenu({
-      ...position,
-      left: Math.max(PADDING, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - PADDING)),
-    })
+    setMenu({ kind: 'element', el: anchor, placement: 'side', align: 'end' })
   }
 
   // 重置筛选：对齐首页逻辑，仅清空过滤条件，绝不重置用户的排序方式
@@ -172,9 +163,9 @@ export default function ArchiveFilterMenu({ params, onChange }: ArchiveFilterMen
         <SmartMenu
           innerRef={menuRef}
           triggerRef={anchorRef}
-          position={menu}
+          anchor={menu}
           onClose={() => setMenu(null)}
-          width={menuWidth}
+          size={{ width: menuWidth, height: estimatedHeight }}
           className="rounded-2xl border border-stone-200/80 bg-white/95 p-3 shadow-2xl shadow-stone-900/10 backdrop-blur-md dark:border-stone-800 dark:bg-stone-900/95"
         >
           <div role="menu" aria-label={_('library.tabSortFilter', { defaultValue: '筛选' })} className="flex flex-col gap-3">

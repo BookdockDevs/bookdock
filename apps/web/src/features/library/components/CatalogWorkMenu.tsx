@@ -10,7 +10,7 @@ import { formatAuthorList } from '@/lib/utils'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
-import type { SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 
 import { useDownloadStore } from '@/stores/download.store'
 import { versionOrdinal, versionTabLabel } from '../book-row'
@@ -29,7 +29,7 @@ import { MenuDangerItem, MenuDivider, MenuHeader, MenuItem } from './RowMenuChro
 interface CatalogWorkMenuProps {
   innerRef: RefObject<HTMLDivElement | null>
   triggerRef: RefObject<HTMLElement | null>
-  position: SmartPosition | null
+  anchor: MenuAnchor | null
   width: number
   onClose: () => void
   work: CatalogBook
@@ -43,7 +43,7 @@ interface CatalogWorkMenuProps {
   onDeleteRequest: () => void
 }
 
-export default function CatalogWorkMenu({ innerRef, triggerRef, position, width, onClose, work, canManage, canCollect, canDownload, onShowDetails, onDeleteRequest }: CatalogWorkMenuProps) {
+export default function CatalogWorkMenu({ innerRef, triggerRef, anchor, width, onClose, work, canManage, canCollect, canDownload, onShowDetails, onDeleteRequest }: CatalogWorkMenuProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const warmReader = useWarmReaderEntry()
@@ -60,7 +60,7 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, position, width,
 
   return (
     <>
-      <SmartMenu triggerRef={triggerRef} innerRef={innerRef} position={position} onClose={onClose} width={width}>
+      <SmartMenu triggerRef={triggerRef} innerRef={innerRef} anchor={anchor} onClose={onClose} size={{ width, height: 300 }}>
       <MenuHeader
         title={work.title}
         subtitle={[formatAuthorList(work.authors, work.author), first?.format].filter(Boolean).join(' · ')}

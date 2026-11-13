@@ -14,7 +14,7 @@ import { isBookDrag } from '../dnd'
 import HiddenIndicator from './HiddenIndicator'
 import { MenuHeader } from './RowMenuChrome'
 import TaxonomyIcon from './TaxonomyIcon'
-import { useContextMenu } from './use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 
 interface TaxonomyEntryProps {
   row: Pick<ShelfListItem, 'id' | 'name' | 'bookCount' | 'hidden' | 'pinned'>
@@ -49,7 +49,7 @@ export default function TaxonomyEntry({ row, isTag = false, isCategory = false, 
   indent = false, onClick, onOpen, onPointerEnter, onEdit, onDelete,
   onTogglePin, onToggleHidden, onNewChild }: TaxonomyEntryProps) {
   const _ = useTranslation()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
   const dragged = useRef(false)
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: sortableId, data: { type: isTag ? 'tag' : isCategory ? 'category' : 'shelf', entryId: row.id },
@@ -91,7 +91,7 @@ export default function TaxonomyEntry({ row, isTag = false, isCategory = false, 
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>
       </button>
     </div>}
-      {hasMenu && <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, onNewChild ? 224 : 186)} onClose={menu.close} width={152}>
+      {hasMenu && <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} anchor={menu.anchor} size={{ width: 152, height: onNewChild ? 224 : 186 }} onClose={menu.close}>
         <MenuHeader title={row.name} subtitle={_('library.bookCount', { count: row.bookCount })}
           onClick={() => { menu.close(); (onOpen ?? onClick)() }} />
         <button

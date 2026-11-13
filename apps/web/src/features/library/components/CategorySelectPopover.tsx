@@ -4,7 +4,7 @@ import { CATEGORY_TEMPLATES, type ClientCategoryView } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 
 import { categoryPath } from '../taxonomy'
 import CategoryPickerPanel, { type CategorySelection } from './CategoryPickerPanel'
@@ -36,8 +36,8 @@ export default function CategorySelectPopover({
   // The panel is portaled: the edit dialog body scrolls, so a panel positioned
   // in flow gets clipped at the body's edge and the lower half of a long
   // category tree cannot be reached.
-  const [position, setPosition] = useState<SmartPosition | null>(null)
-  const open = Boolean(position)
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null)
+  const open = Boolean(anchor)
 
   const currentPath = useMemo(() => {
     if (!categoryId) return []
@@ -62,23 +62,13 @@ export default function CategorySelectPopover({
   const isSelected = Boolean(categoryId || categoryTemplateKey)
 
   function toggle() {
-    if (position) {
-      setPosition(null)
+    if (anchor) {
+      setAnchor(null)
       return
     }
-    const rect = triggerRef.current?.getBoundingClientRect()
-    if (!rect) return
-    // Placement flips above the trigger by itself when the estimated panel
-    // height does not fit below, and the panel is clamped into the viewport
-    // once its real height is known.
-    setPosition(
-      computeDropdownPosition(
-        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-        240,
-        288,
-        'start',
-      ),
-    )
+    const el = triggerRef.current
+    if (!el) return
+    setAnchor({ kind: 'element', el, placement: 'below', align: 'start' })
   }
 
   return (
@@ -120,14 +110,14 @@ export default function CategorySelectPopover({
       {/* Portaled to the document: minsize keeps a two-level tree readable,
           the content decides the rest, and the max keeps long names from
           stretching the panel across the dialog. */}
-      {position && (
+      {anchor && (
         <SmartMenu
           id={id}
           innerRef={panelRef}
           triggerRef={containerRef}
-          position={position}
-          onClose={() => setPosition(null)}
-          width="auto"
+          anchor={anchor}
+          onClose={() => setAnchor(null)}
+          size={{ width: 'auto', height: 288 }}
           minWidth={200}
           maxWidth={340}
           className="max-h-72 overflow-y-auto custom-scrollbar"
@@ -139,7 +129,7 @@ export default function CategorySelectPopover({
             categoryTemplateKey={categoryTemplateKey}
             allowTemplates={allowTemplates}
             onChange={onChange}
-            onDismiss={() => setPosition(null)}
+            onDismiss={() => setAnchor(null)}
           />
         </SmartMenu>
       )}

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { computeDropdownPosition, computeFromAnchor } from '../lib/position'
+import { computeAtPoint, computeDropdownPosition, computeFromAnchor } from '../lib/position'
 
 describe('computeFromAnchor', () => {
   beforeEach(() => {
@@ -14,6 +14,38 @@ describe('computeFromAnchor', () => {
     expect(position.left).toBe(112)
     expect(position.top).toBe(136)
     expect(position.dir).toBe('down')
+  })
+})
+
+describe('computeFromAnchor flip', () => {
+  beforeEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
+  })
+
+  it('flips above the anchor when there is no room below', () => {
+    const position = computeFromAnchor({ left: 100, top: 700, width: 28, height: 28 }, 176, 88)
+
+    expect(position).toMatchObject({ left: 128, top: 604, dir: 'up' })
+  })
+})
+
+describe('computeAtPoint', () => {
+  beforeEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
+  })
+
+  it('opens at the pointer when the menu fits below it', () => {
+    const position = computeAtPoint({ x: 500, y: 400 }, 200, 100)
+
+    expect(position).toMatchObject({ left: 500, top: 400, dir: 'down' })
+  })
+
+  it('clamps the menu into the viewport and opens upwards near the bottom edge', () => {
+    const position = computeAtPoint({ x: 500, y: 760 }, 200, 100)
+
+    expect(position).toMatchObject({ left: 500, top: 692, dir: 'up' })
   })
 })
 

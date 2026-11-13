@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
+import { pointerAnchor, type MenuAnchor } from '@/lib/menu-anchor'
 import { cn } from '@/lib/utils'
 
 import { useViewSettings } from '../view-settings-context'
@@ -44,7 +45,7 @@ export default function ReadingPresetPicker() {
   const [draftName, setDraftName] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<{ id: string; anchor: MenuAnchor } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const cfg = parseReadingConfig(readingConfig)
@@ -129,7 +130,7 @@ export default function ReadingPresetPicker() {
               className="flex items-center gap-1"
               onContextMenu={(e) => {
                 e.preventDefault()
-                setMenu({ id: preset.id, x: e.clientX, y: e.clientY })
+                setMenu({ id: preset.id, anchor: pointerAnchor(e.currentTarget, { x: e.clientX, y: e.clientY }) })
               }}
             >
               {renamingId === preset.id ? (
@@ -242,8 +243,8 @@ export default function ReadingPresetPicker() {
           id="preset-context-menu"
           innerRef={menuRef}
           variant="reader"
-          width={130}
-          position={{ left: menu.x, top: menu.y, dir: 'down' }}
+          anchor={menu.anchor}
+          size={{ width: 130, height: 140 }}
           onClose={() => setMenu(null)}
         >
           {setBoundPreset && (

@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react'
 
 import SmartMenu, { menuItemClass } from '@/components/ui/SmartMenu'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 import { CheckIcon } from '@/features/reader/components/annotation-icons'
-import { computeFromAnchor, PADDING, type SmartPosition } from '@/lib/position'
 import { cn } from '@/lib/utils'
 
 export interface SortMenuOption<T extends string> {
@@ -26,7 +26,7 @@ export default function SortMenu<T extends string>({
   menuWidth?: number
   triggerClassName?: string
 }) {
-  const [menu, setMenu] = useState<SmartPosition | null>(null)
+  const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const active = options.find((option) => option.value === value) ?? options[0]!
@@ -38,16 +38,7 @@ export default function SortMenu<T extends string>({
       setMenu(null)
       return
     }
-    const rect = anchor.getBoundingClientRect()
-    const position = computeFromAnchor(
-      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      menuWidth,
-      options.length * 37 + 8,
-    )
-    setMenu({
-      ...position,
-      left: Math.max(PADDING, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - PADDING)),
-    })
+    setMenu({ kind: 'element', el: anchor, placement: 'side', align: 'end' })
   }
 
   return (
@@ -73,9 +64,9 @@ export default function SortMenu<T extends string>({
         <SmartMenu
           innerRef={menuRef}
           triggerRef={anchorRef}
-          position={menu}
+          anchor={menu}
           onClose={() => setMenu(null)}
-          width={menuWidth}
+          size={{ width: menuWidth, height: options.length * 37 + 8 }}
         >
           <div role="menu" aria-label={label}>
             {options.map((option) => {

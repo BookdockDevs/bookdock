@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 
 import { ActionIcon } from './ui'
 
@@ -23,7 +23,7 @@ export interface MoreActionsMenuItem {
  */
 export default function MoreActionsMenu({ items }: { items: MoreActionsMenuItem[] }) {
   const _ = useTranslation()
-  const [menu, setMenu] = useState<SmartPosition | null>(null)
+  const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const anchorRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -34,15 +34,7 @@ export default function MoreActionsMenu({ items }: { items: MoreActionsMenuItem[
       setMenu(null)
       return
     }
-    const rect = el.getBoundingClientRect()
-    const menuWidth = 176
-    const position = computeDropdownPosition(
-      { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-      menuWidth,
-      88,
-      'start',
-    )
-    setMenu(position)
+    setMenu({ kind: 'element', el, placement: 'below', align: 'start' })
   }
 
   if (items.length === 0) return null
@@ -60,7 +52,7 @@ export default function MoreActionsMenu({ items }: { items: MoreActionsMenuItem[
         <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
       </ActionIcon>
       {menu && (
-        <SmartMenu triggerRef={anchorRef} innerRef={menuRef} position={menu} onClose={() => setMenu(null)} width="auto" minWidth={148} maxWidth={280}>
+        <SmartMenu triggerRef={anchorRef} innerRef={menuRef} anchor={menu} onClose={() => setMenu(null)} size={{ width: 'auto', height: items.length * 36 + 8 }} minWidth={148} maxWidth={280}>
           {items.map((item) => (
             <button
               key={item.key}

@@ -2,7 +2,7 @@ import { useNavigate, useRouter } from '@tanstack/react-router'
 
 import Avatar from '@/components/ui/Avatar'
 import SmartMenu from '@/components/ui/SmartMenu'
-import { useContextMenu } from '@/features/library/components/use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 import { useAuthStore } from '@/stores/auth.store'
@@ -58,7 +58,7 @@ export default function AccountMenu() {
   const local = useLocalCatalog()
   const { data: instanceData } = useInstanceInfo({ enabled: !local })
   const logout = useLogout()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
 
   const instance = instanceData?.data
   // Guest = server injected the default passwordless user: the me payload is
@@ -112,7 +112,7 @@ export default function AccountMenu() {
         </span>
       </button>
 
-      <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(176, 120)} onClose={menu.close}>
+      <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} anchor={menu.anchor} size={{ width: 176, height: 120 }} onClose={menu.close}>
         <div className="mx-1.5 mb-1 border-b border-stone-100 px-1.5 pb-2 pt-1.5 dark:border-stone-800">
           <p className="truncate text-xs font-medium text-stone-900 dark:text-stone-100">{username}</p>
           <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">

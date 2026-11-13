@@ -11,7 +11,7 @@ import { ledgerProgressBounds } from '@/features/archive/components/reading-ledg
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 import { cn } from '@/lib/utils'
 import { isDeviceBook } from '@/features/reading-data/book-source'
 
@@ -116,7 +116,7 @@ export default function AddRecordDialog({
 
   // Custom Calendar Popover state (inspired by PeriodSelector)
   const [datePickerOpen, setDatePickerOpen] = useState(false)
-  const [datePickerPos, setDatePickerPos] = useState<SmartPosition | null>(null)
+  const [datePickerAnchor, setDatePickerAnchor] = useState<MenuAnchor | null>(null)
   const dateTriggerRef = useRef<HTMLButtonElement | null>(null)
   const dateMenuRef = useRef<HTMLDivElement | null>(null)
 
@@ -136,15 +136,7 @@ export default function AddRecordDialog({
     }
     const el = dateTriggerRef.current
     if (!el) return
-    const rect = el.getBoundingClientRect()
-    setDatePickerPos(
-      computeDropdownPosition(
-        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-        260,
-        280,
-        'start',
-      ),
-    )
+    setDatePickerAnchor({ kind: 'element', el, placement: 'below', align: 'start' })
     const current = new Date(date)
     if (!Number.isNaN(current.getFullYear())) {
       setCalYear(current.getFullYear())
@@ -409,9 +401,9 @@ export default function AddRecordDialog({
               <SmartMenu
                 innerRef={dateMenuRef}
                 triggerRef={dateTriggerRef}
-                position={datePickerPos}
+                anchor={datePickerAnchor}
                 onClose={() => setDatePickerOpen(false)}
-                width={260}
+                size={{ width: 260, height: 280 }}
                 variant={variant}
                 className={cn(
                   'rounded-xl border p-2.5 shadow-xl',

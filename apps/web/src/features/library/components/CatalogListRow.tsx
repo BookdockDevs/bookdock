@@ -23,7 +23,7 @@ import DeleteVersionsDialog from './DeleteVersionsDialog'
 import ListItemInfo from './ListItemInfo'
 import { SelectionCheck } from './RowChrome'
 import { PinIcon } from './UnpinButton'
-import { useContextMenu } from './use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 
 interface CatalogListRowProps {
   work: CatalogBook
@@ -47,7 +47,7 @@ export default function CatalogListRow({
   work, canManage, canCollect, selected, selectionActive, selection, dragJustEndedRef, onToggleSelect, onShowDetails,
 }: CatalogListRowProps) {
   const _ = useTranslation()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
   const warmReader = useWarmReaderEntry()
   const updateWork = useUpdateCatalogBook()
   // Same rule as the card: the delete dialog must outlive the menu.
@@ -218,7 +218,7 @@ export default function CatalogListRow({
         <CatalogWorkMenu
           innerRef={menu.menuRef}
           triggerRef={menu.btnRef}
-          position={menu.position(184, 300)}
+          anchor={menu.anchor}
           width={184}
           onClose={menu.close}
           work={work}

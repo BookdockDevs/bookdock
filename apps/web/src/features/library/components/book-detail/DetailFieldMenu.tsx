@@ -1,7 +1,7 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useId, useLayoutEffect, useRef, type ReactNode } from 'react'
 
 import SmartMenu, { menuItemClass } from '@/components/ui/SmartMenu'
-import { computeAtPoint, type SmartPosition } from '@/lib/position'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 
 interface DetailFieldMenuProps {
   label: ReactNode
@@ -17,43 +17,22 @@ interface DetailFieldMenuProps {
 
 export default function DetailFieldMenu({ label, editLabel, value, options, editable, busy = false, disabled = false, onFilter, onSelect }: DetailFieldMenuProps) {
   const id = useId()
-  const [position, setPosition] = useState<SmartPosition | null>(null)
+  const menu = useMenuAnchor()
   const anchorRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
 
   function close() {
-    setPosition(null)
+    menu.close()
     triggerRef.current?.focus()
   }
 
   useLayoutEffect(() => {
-    if (!position) return
-    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')
-    const selected = menuRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')
+    if (!menu.open) return
+    const items = menu.menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')
+    const selected = menu.menuRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')
     const target = selected ?? items?.[0]
     target?.focus()
-  }, [position])
-
-  useEffect(() => {
-    if (!position) return
-    const dismiss = (event: PointerEvent) => {
-      const target = event.target as Node
-      if (!menuRef.current?.contains(target) && !anchorRef.current?.contains(target)) setPosition(null)
-    }
-    const dismissOnScroll = (event: Event) => {
-      if (!menuRef.current?.contains(event.target as Node)) setPosition(null)
-    }
-    const dismissOnResize = () => setPosition(null)
-    document.addEventListener('pointerdown', dismiss)
-    window.addEventListener('scroll', dismissOnScroll, true)
-    window.addEventListener('resize', dismissOnResize)
-    return () => {
-      document.removeEventListener('pointerdown', dismiss)
-      window.removeEventListener('scroll', dismissOnScroll, true)
-      window.removeEventListener('resize', dismissOnResize)
-    }
-  }, [position])
+  }, [menu.open, menu.menuRef])
 
   return (
     <div
@@ -64,20 +43,20 @@ export default function DetailFieldMenu({ label, editLabel, value, options, edit
         if (!editable) return
         event.preventDefault()
         event.stopPropagation()
-        if (!disabled) setPosition(computeAtPoint({ x: event.clientX, y: event.clientY }, 184, Math.min(options.length * 36 + 8, 280)))
+        if (!disabled) menu.openFromEvent(event)
       }}
     >
-      <button ref={triggerRef} type="button" aria-haspopup={editable ? "menu" : undefined} aria-expanded={editable ? Boolean(position) : undefined} aria-controls={position ? id : undefined} onClick={onFilter} className="flex min-h-7 items-center gap-1.5 rounded-md px-2 py-0.5 hover:bg-stone-200 dark:hover:bg-stone-700">
+      <button ref={triggerRef} type="button" aria-haspopup={editable ? "menu" : undefined} aria-expanded={editable ? menu.open : undefined} aria-controls={menu.open ? id : undefined} onClick={onFilter} className="flex min-h-7 items-center gap-1.5 rounded-md px-2 py-0.5 hover:bg-stone-200 dark:hover:bg-stone-700">
         {label}
       </button>
-      {editable && !disabled && position && (
-        <SmartMenu id={id} innerRef={menuRef} triggerRef={anchorRef} position={position} onClose={close} width="auto" minWidth={148} maxWidth={280}>
+      {editable && !disabled && menu.open && (
+        <SmartMenu id={id} innerRef={menu.menuRef} triggerRef={anchorRef} anchor={menu.anchor} onClose={close} size={{ width: 'auto', height: Math.min(options.length * 36 + 8, 280) }} minWidth={148} maxWidth={280}>
           <div
             role="menu"
             aria-label={editLabel}
             className="max-h-64 overflow-y-auto"
             onKeyDown={(event) => {
-              const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [])
+              const items = Array.from(menu.menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [])
               const index = items.indexOf(document.activeElement as HTMLButtonElement)
               if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
                 event.preventDefault()

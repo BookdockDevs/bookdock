@@ -7,7 +7,7 @@ import SmartMenu, {
   readerMenuItemClass,
 } from '@/components/ui/SmartMenu'
 import { ledgerProgressBounds } from '@/features/archive/components/reading-ledger-stats'
-import { useContextMenu } from '@/features/library/components/use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { PencilIcon, TrashIcon } from '@/features/reader/components/annotation-icons'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -77,7 +77,7 @@ export default function ReadingSessionCard({
 }: ReadingSessionCardProps) {
   const _ = useTranslation()
   const isReader = variant === 'reader'
-  const contextMenu = useContextMenu()
+  const contextMenu = useMenuAnchor()
 
   const { start: rawStart, end: rawEnd } = ledgerProgressBounds(session)
   const startPct = rawStart !== null ? Number((rawStart * 100).toFixed(2)) : null
@@ -243,9 +243,9 @@ export default function ReadingSessionCard({
         <SmartMenu
           innerRef={contextMenu.menuRef}
           triggerRef={isReader ? undefined : contextMenu.btnRef}
-          position={contextMenu.position(136, (canEdit ? 36 : 0) + (onDelete ? 36 : 0) + 16)}
+          anchor={contextMenu.anchor}
+          size={{ width: 136, height: (canEdit ? 36 : 0) + (onDelete ? 36 : 0) + 16 }}
           onClose={contextMenu.close}
-          width={136}
           variant={variant}
         >
           {canEdit && (

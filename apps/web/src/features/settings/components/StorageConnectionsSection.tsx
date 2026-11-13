@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { StorageConnectionRes } from '@bookdock/shared'
 
 import {
@@ -18,9 +18,8 @@ import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { computeDropdownPosition } from '@/lib/position'
 import { cn } from '@/lib/utils'
-import { useContextMenu } from '@/features/library/components/use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 
 import AiModelIcon from './AiModelIcon'
 import SettingsCard from './SettingsCard'
@@ -321,12 +320,7 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
   const [region, setRegion] = useState(connection?.region || '')
   const [bucket, setBucket] = useState(connection?.bucket || '')
   const [testLatency, setTestLatency] = useState<number | null>(null)
-  const providerMenu = useContextMenu()
-  const providerAnchor = providerMenu.btnRef.current?.getBoundingClientRect()
-  const providerPosition = useMemo(
-    () => (providerMenu.open && providerAnchor ? computeDropdownPosition(providerAnchor, 200, 110) : null),
-    [providerMenu.open, providerAnchor],
-  )
+  const providerMenu = useMenuAnchor()
 
   const isSaving = createMutation.isPending || updateMutation.isPending
   const isTesting = directTestMutation.isPending || byIdTestMutation.isPending
@@ -459,7 +453,7 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
               <button
                 ref={providerMenu.btnRef}
                 type="button"
-                onClick={providerMenu.toggleFromButton}
+                onClick={(event) => providerMenu.toggleFromButton(event, 'below')}
                 aria-haspopup="listbox"
                 aria-expanded={providerMenu.open}
                 disabled={isSaving}
@@ -493,9 +487,9 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
                 <SmartMenu
                   triggerRef={providerMenu.btnRef}
                   innerRef={providerMenu.menuRef}
-                  position={providerPosition}
+                  anchor={providerMenu.anchor}
+                  size={{ width: 200, height: 110 }}
                   onClose={providerMenu.close}
-                  width={200}
                   className="!z-[60]"
                 >
                   <div className="py-1">

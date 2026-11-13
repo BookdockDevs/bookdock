@@ -4,7 +4,7 @@ import type { CatalogVersion } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 import { cn } from '@/lib/utils'
 
 import { versionOrdinal, versionTabLabel } from '../book-row'
@@ -26,11 +26,6 @@ const ITEM_GAP = 4
 /** The list scrolls past this, so a work with thirty versions still fits the screen. */
 const LIST_MAX_HEIGHT = 320
 
-interface MenuState extends SmartPosition {
-  /** A menu narrower than its own trigger reads as a mistake, so the trigger sets the floor. */
-  anchorWidth: number
-}
-
 /**
  * Version picker for a multi-version work, living in the dialog title bar.
  * A tab strip costs horizontal room on every render and stops scaling once a
@@ -40,7 +35,7 @@ interface MenuState extends SmartPosition {
  */
 export default function VersionSelect({ versions, selectedId, onSelect, defaultVersionId }: VersionSelectProps) {
   const _ = useTranslation()
-  const [menu, setMenu] = useState<MenuState | null>(null)
+  const [menu, setMenu] = useState<MenuAnchor | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -57,16 +52,7 @@ export default function VersionSelect({ versions, selectedId, onSelect, defaultV
     }
     const el = triggerRef.current
     if (!el) return
-    const rect = el.getBoundingClientRect()
-    const predictedWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, rect.width))
-    setMenu({
-      ...computeDropdownPosition(
-        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-        predictedWidth,
-        Math.min(versions.length * (ITEM_HEIGHT + ITEM_GAP) + 8, LIST_MAX_HEIGHT + 8),
-      ),
-      anchorWidth: rect.width,
-    })
+    setMenu({ kind: 'element', el, placement: 'below', align: 'start' })
   }
 
   return (
@@ -100,10 +86,10 @@ export default function VersionSelect({ versions, selectedId, onSelect, defaultV
         <SmartMenu
           triggerRef={triggerRef}
           innerRef={menuRef}
-          position={menu}
+          anchor={menu}
           onClose={() => setMenu(null)}
-          width="auto"
-          minWidth={Math.max(MIN_WIDTH, Math.min(menu.anchorWidth, MAX_WIDTH))}
+          size={{ width: 'auto', height: Math.min(versions.length * (ITEM_HEIGHT + ITEM_GAP) + 8, LIST_MAX_HEIGHT + 8) }}
+          minWidth={Math.max(MIN_WIDTH, Math.min(triggerRef.current?.getBoundingClientRect().width ?? MIN_WIDTH, MAX_WIDTH))}
           maxWidth={MAX_WIDTH}
         >
           <div role="menu" aria-label={_('library.catalogVersions') as string} className="flex max-h-80 flex-col gap-1 overflow-y-auto overscroll-contain">

@@ -5,6 +5,7 @@ import type { AnnotationRes, AnnotationUpdateReq } from '@bookdock/shared'
 import SmartMenu from '@/components/ui/SmartMenu'
 import ContentImages from '@/features/content-files/components/ContentImages'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { pointerAnchor, type MenuAnchor } from '@/lib/menu-anchor'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
@@ -81,7 +82,7 @@ export const NotesPanel = memo(function NotesPanel({
   const user = useAuthStore((s) => s.user)
   const local = useLocalReader()
   const composer = useIdeaComposer(bookId, !!user)
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: AnnotationRes } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ anchor: MenuAnchor; item: AnnotationRes } | null>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const editingVersion = useRef<number | undefined>(undefined)
@@ -250,9 +251,9 @@ export const NotesPanel = memo(function NotesPanel({
     })
   }
 
-  function handleContextMenu(e: MouseEvent, item: AnnotationRes) {
+  function handleContextMenu(e: React.MouseEvent<HTMLElement>, item: AnnotationRes) {
     e.preventDefault()
-    setContextMenu({ x: e.clientX, y: e.clientY, item })
+    setContextMenu({ anchor: pointerAnchor(e.currentTarget, { x: e.clientX, y: e.clientY }), item })
   }
 
   async function copyItem(item: AnnotationRes) {
@@ -696,8 +697,8 @@ export const NotesPanel = memo(function NotesPanel({
           id="notes-context-menu"
           innerRef={contextMenuRef}
           variant="reader"
-          width={130}
-          position={{ left: contextMenu.x, top: contextMenu.y, dir: 'down' }}
+          anchor={contextMenu.anchor}
+          size={{ width: 130, height: 140 }}
           onClose={() => setContextMenu(null)}
         >
           <button

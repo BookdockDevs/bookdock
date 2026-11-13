@@ -20,7 +20,7 @@ import { ContextMenuContent } from './BookContextMenu'
 import ListItemInfo from './ListItemInfo'
 import { SelectionCheck } from './RowChrome'
 import UnpinButton, { PinIcon } from './UnpinButton'
-import { useContextMenu } from './use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 
 interface ListItemWrapperProps {
   book: ClientLibraryBookView
@@ -42,7 +42,7 @@ interface ListItemWrapperProps {
  */
 export default function ListItemWrapper({ book, selection, selectionActive, dragJustEndedRef, onToggleSelect, readOnly, onDelete, onPublish, onUploadToServer, onFork, onShowDetails }: ListItemWrapperProps) {
   const _ = useTranslation()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
   const warmReader = useWarmReaderEntry()
   const selected = selection.has(catalogSelectionKey(book))
   const bookIds = selectionActive && selected ? Array.from(selection) : [catalogSelectionKey(book)]
@@ -133,8 +133,8 @@ export default function ListItemWrapper({ book, selection, selectionActive, drag
         <SmartMenu
           triggerRef={menu.btnRef}
           innerRef={menu.menuRef}
-          position={menu.position(184, 300)}
-          width={184}
+          anchor={menu.anchor}
+          size={{ width: 184, height: 300 }}
           onClose={menu.close}
         >
           <ContextMenuContent book={book} readOnly={readOnly} onShowDetails={onShowDetails} onPublish={onPublish} onUploadToServer={onUploadToServer} onFork={onFork} onDelete={onDelete} onClose={menu.close} />

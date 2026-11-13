@@ -31,7 +31,7 @@ import LibraryDetailsDialog from './LibraryDetailsDialog'
 import ShelfDialog from './ShelfDialog'
 import TagDialog from './TagDialog'
 import PrivateLibraryRenameDialog from './PrivateLibraryRenameDialog'
-import { useContextMenu } from './use-context-menu'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 
 const navigationSessions = new Map<string, { panel: 'shelves' | 'categories' | 'tags'; expanded: string[]; scroll: Record<string, number> }>()
 const EMPTY_CATEGORIES: ClientCategoryView[] = []
@@ -1003,7 +1003,7 @@ function LibraryRow({
   onShowDetails?: () => void
 }) {
   const _ = useTranslation()
-  const menu = useContextMenu()
+  const menu = useMenuAnchor()
   const { isHidden, setHidden } = useHiddenLibraries()
   // What a row's menu offers follows from the reader's relation to that
   // library: a non-member can only be let in, a member has nothing to do here,
@@ -1089,7 +1089,7 @@ function LibraryRow({
             </svg>
           </button>
           {menu.open && (
-            <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} position={menu.position(152, 258)} onClose={menu.close} width={152}>
+            <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} anchor={menu.anchor} size={{ width: 152, height: 258 }} onClose={menu.close}>
               <MenuHeader title={displayName}
                 subtitle={library.type === 'shared' ? _(`library.visibility${library.visibility === 'public' ? 'Public' : library.visibility === 'password' ? 'Password' : 'Private'}`) : _('library.personalLibraryLabel')}
                 onClick={() => { menu.close(); onSelect() }} />

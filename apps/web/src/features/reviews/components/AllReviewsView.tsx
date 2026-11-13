@@ -7,7 +7,7 @@ import { ChatBubbleIcon, CheckIcon, HeartIcon, LockIcon } from '@/features/reade
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { computeDropdownPosition, type SmartPosition } from '@/lib/position'
+import type { MenuAnchor } from '@/lib/menu-anchor'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 import ProfileIdentityLink from '@/features/profile/components/ProfileIdentityLink'
@@ -201,7 +201,7 @@ export default function AllReviewsView({
   const sortMenuRef = useRef<HTMLDivElement>(null)
   const [activeTab, setActiveTab] = useState<FilterTab>('all')
   const [sortOption, setSortOption] = useState<SortOption>('newest')
-  const [sortMenuPosition, setSortMenuPosition] = useState<SmartPosition | null>(null)
+  const [sortMenuAnchor, setSortMenuAnchor] = useState<MenuAnchor | null>(null)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   const own = context?.own ?? null
@@ -234,18 +234,18 @@ export default function AllReviewsView({
   const selectedSort = sortOptions.find((option) => option.value === sortOption) ?? sortOptions[0]
 
   function closeSortMenu() {
-    setSortMenuPosition(null)
+    setSortMenuAnchor(null)
     sortTriggerRef.current?.focus()
   }
 
   function toggleSortMenu() {
-    if (sortMenuPosition) {
+    if (sortMenuAnchor) {
       closeSortMenu()
       return
     }
-    const anchor = sortTriggerRef.current?.getBoundingClientRect()
-    if (!anchor) return
-    setSortMenuPosition(computeDropdownPosition(anchor, SORT_MENU_WIDTH, SORT_MENU_HEIGHT))
+    const el = sortTriggerRef.current
+    if (!el) return
+    setSortMenuAnchor({ kind: 'element', el, placement: 'below', align: 'start' })
   }
 
   function selectSort(option: SortOption) {
@@ -305,8 +305,8 @@ export default function AllReviewsView({
               ref={sortTriggerRef}
               type="button"
               aria-haspopup="menu"
-              aria-expanded={Boolean(sortMenuPosition)}
-              aria-controls={sortMenuPosition ? sortMenuId : undefined}
+              aria-expanded={Boolean(sortMenuAnchor)}
+              aria-controls={sortMenuAnchor ? sortMenuId : undefined}
               onClick={toggleSortMenu}
               className="flex min-h-8 items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
             >
@@ -319,14 +319,14 @@ export default function AllReviewsView({
               </svg>
             </button>
 
-            {sortMenuPosition && (
+            {sortMenuAnchor && (
               <SmartMenu
                 id={sortMenuId}
                 innerRef={sortMenuRef}
                 triggerRef={sortTriggerRef}
-                position={sortMenuPosition}
+                anchor={sortMenuAnchor}
                 onClose={closeSortMenu}
-                width={SORT_MENU_WIDTH}
+                size={{ width: SORT_MENU_WIDTH, height: SORT_MENU_HEIGHT }}
               >
                 <div role="menu" aria-label={_('review.sortMenuLabel')} onKeyDown={handleSortMenuKeyDown}>
                   {sortOptions.map((option) => (

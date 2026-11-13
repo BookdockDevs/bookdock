@@ -9,7 +9,7 @@ import ReviewTime from '@/features/reviews/components/ReviewTime'
 import { useTranslation } from '@/hooks/useTranslation'
 import { avatarUrl } from '@/lib/avatar'
 import { notify } from '@/lib/notifications'
-import { computeAtPoint } from '@/lib/position'
+import { pointerAnchor, type MenuAnchor } from '@/lib/menu-anchor'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -105,7 +105,7 @@ export default function DiscussionThread({
   const [deleteTarget, setDeleteTarget] = useState<DiscussionThreadComment | null>(null)
   const [isFocused, setIsFocused] = useState(false)
 
-  const [contextMenu, setContextMenu] = useState<{ comment: DiscussionThreadComment; pos: { x: number; y: number } } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ comment: DiscussionThreadComment; anchor: MenuAnchor } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -175,7 +175,7 @@ export default function DiscussionThread({
   function handleCommentContextMenu(e: React.MouseEvent, comment: DiscussionThreadComment) {
     e.preventDefault()
     e.stopPropagation()
-    setContextMenu({ comment, pos: { x: e.clientX, y: e.clientY } })
+    setContextMenu({ comment, anchor: pointerAnchor(e.currentTarget, { x: e.clientX, y: e.clientY }) })
   }
 
   function handleTouchStart(e: React.TouchEvent, comment: DiscussionThreadComment) {
@@ -183,9 +183,11 @@ export default function DiscussionThread({
     const touch = e.touches[0]
     touchStartPos.current = { x: touch.clientX, y: touch.clientY }
     if (touchTimer.current) clearTimeout(touchTimer.current)
+    // Capture element and offset now: the event is gone by the time the timer fires.
+    const anchor = pointerAnchor(e.currentTarget, { x: touch.clientX, y: touch.clientY })
     touchTimer.current = setTimeout(() => {
       touchTimer.current = null
-      setContextMenu({ comment, pos: touchStartPos.current ?? { x: touch.clientX, y: touch.clientY } })
+      setContextMenu({ comment, anchor })
     }, 500)
   }
 
@@ -291,8 +293,6 @@ export default function DiscussionThread({
       </div>
     )
   }
-
-  const menuPos = contextMenu ? computeAtPoint(contextMenu.pos, 130, 140) : null
 
   return (
     <div className={cn(detailLayout ? 'mt-3 px-5 pb-4' : cn('pt-1', !hideTabs && 'mt-4'), className)}>
@@ -539,14 +539,14 @@ export default function DiscussionThread({
         </div>
       )}
 
-      {contextMenu && menuPos && (
+      {contextMenu && (
         <SmartMenu
           id={contextMenuId}
           innerRef={menuRef}
           variant={theme === 'reader' ? 'reader' : 'default'}
-          position={menuPos}
+          anchor={contextMenu.anchor}
           onClose={() => setContextMenu(null)}
-          width={130}
+          size={{ width: 130, height: 140 }}
         >
           <button
             type="button"
