@@ -57,6 +57,7 @@ All notable changes to Bookdock are documented here.
 - Collapsing the reader's book search (back to TOC, the magnifier toggle or Escape) now hides the match highlights in the text together with the result capsule, instead of leaving orphaned highlights painted on every chapter you turn. Reopening the search bar restores the highlights instantly from the cached matches without re-searching, so the round trip keeps everything the query had.
 - Book covers no longer flash the raw book title in the top-left corner of the cover frame: when a shelf remounts and the browser briefly re-decodes a cached image, the image's alt text used to paint as visible text while the designed placeholder stayed hidden behind it. The alt text now stays invisible on screen - screen readers still announce it - in both the library cover and the statistics cover, so the placeholder remains in charge until the artwork paints.
 - The replace dialog opened from the reader's selection toolbar now uses the same reader-themed shell as the replacements manager, instead of the plain white app modal.
+- Content workbench edits no longer erase annotation locations while any of the quoted text survives: fixing a typo or rewriting part of a highlight's quoted range now re-anchors the note, highlight or bookmark to the surviving portion of the original quote (server and device books alike), and every later save re-checks all surviving portions together, so the annotation keeps its jump until nothing of the original quote remains. Unchanged text inside a rewritten region is now mapped exactly, letting anchors inside it survive whenever their correspondence can be proven.
 
 ## [0.8.2] - 2026-11-13
 
@@ -1286,6 +1287,7 @@ All notable changes to Bookdock are documented here.
 - 收起阅读器的书籍搜索（返回目录、放大镜切换或 Esc）时，正文中的匹配高亮现在随结果胶囊一起隐藏，不再在翻到的每一章上留下孤零零的高亮；重新打开搜索栏时，高亮依据缓存的匹配结果立即恢复，无需重新搜索，往返一次不丢失任何东西。
 - 书籍封面不再在封面框左上角闪现书名原文：书架重挂载、浏览器短暂重新解码缓存图片的间隙里，图片的 alt 文本会被当作可见文字绘制，而设计好的占位封面此时反而被藏住。现在库内封面与统计页封面的 alt 文本在屏上保持不可见——屏幕阅读器仍会朗读——占位封面在图片真正绘制出来之前始终负责显示。
 - 从阅读器划词工具栏打开的替换弹窗现在与替换规则管理弹窗共用阅读主题外壳，不再是纯白的应用模态窗。
+- 编辑工作台在引文仍有存活部分时不再丢失标注位置：修正划线范围内的错别字、或改写其中一段，现在会把笔记、划线与书签重新锚定到原文存活的片段上（服务端与设备书籍一致），且之后每次保存都会把主位置与全部留存片段一起重新核验——只要原始引文还有任何部分存活，标注就保留跳转。改写区域内的未改动文字现在会被精确映射，对应关系可证明时其中的锚点得以保留。
 
 ### [0.8.2] - 2026-11-13
 

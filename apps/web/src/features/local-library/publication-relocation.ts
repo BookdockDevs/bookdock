@@ -32,6 +32,35 @@ export function relocatePublication(snapshot: PublicationRelocationSnapshot, con
     const { layout: _layout, ...previous } = locator
     return { ...previous, content, value: mapped.cfi, href: mapped.chapterHref }
   }
+  // Notes migrate the primary CFI AND every retained evidence fragment each
+  // round, unioning the survivors into the new evidence: a fragment must not
+  // be dropped while the primary CFI still maps, or a later edit deleting the
+  // primary would lose a fragment that is still alive (see
+  // revision-anchors.ts mapAnnotationAnchorWithEvidence).
+  const mapNoteAnchor = (note: ClientNote) => {
+    const base = note.locator
+    if (!base || base.content.contentId !== snapshot.baseContentId) return null
+    const attempts: Array<{ value: string; href?: string }> = [{ value: base.value, href: base.href }]
+    for (const fragment of note.locatorEvidence ?? []) {
+      if (fragment.value !== base.value) attempts.push(fragment)
+    }
+    const survivors: Array<{ cfi: string; chapterHref: string }> = []
+    let primary: { cfi: string; chapterHref: string } | null = null
+    for (const attempt of attempts) {
+      const mapped = mapAnnotationAnchor(attempt.value, attempt.href, mapping.sourceSections, mapping.targetSections, sourceTexts, targetTexts, sourceMarkups, targetMarkups, mapping.segments)
+      if (!mapped?.cfi) continue
+      const pieces = mapped.fragments ?? [{ cfi: mapped.cfi, chapterHref: mapped.chapterHref }]
+      survivors.push(...pieces)
+      if (!primary && attempt.value === base.value) primary = { cfi: mapped.cfi, chapterHref: mapped.chapterHref }
+    }
+    if (!survivors.length) return null
+    const chosen = primary ?? survivors[0]!
+    const { layout: _layout, ...previous } = base
+    return {
+      locator: { ...previous, content, value: chosen.cfi, href: chosen.chapterHref },
+      fragments: survivors.length > 1 ? survivors : undefined,
+    }
+  }
   const projectCoverage = (intervals: Array<[number, number]>) => projectRevisionCoverage(intervals, mapping.sourceSections, mapping.targetSections, mapping.segments, mapping.structuralRanges)
   const state = snapshot.state ? structuredClone(snapshot.state) : null
   let intervals = snapshot.intervals
@@ -65,9 +94,15 @@ export function relocatePublication(snapshot: PublicationRelocationSnapshot, con
   }
   const notes = snapshot.notes.map((note) => {
     if (!note.locator) return note
-    const locator = mapLocator(note.locator)
-    if (!locator) { unlocated[note.kind === 'idea' ? 'notes' : note.kind === 'highlight' ? 'highlights' : 'bookmarks']++; return note }
-    return { ...note, locator, locatorHistory: [...(note.locatorHistory ?? []), note.locator], version: note.version + 1 }
+    const result = mapNoteAnchor(note)
+    if (!result) { unlocated[note.kind === 'idea' ? 'notes' : note.kind === 'highlight' ? 'highlights' : 'bookmarks']++; return note }
+    return {
+      ...note,
+      locator: result.locator,
+      locatorHistory: [...(note.locatorHistory ?? []), note.locator],
+      locatorEvidence: result.fragments?.map((fragment) => ({ value: fragment.cfi, href: fragment.chapterHref })),
+      version: note.version + 1,
+    }
   })
   const rounds = structuredClone(snapshot.rounds)
   for (const round of rounds.rounds) {

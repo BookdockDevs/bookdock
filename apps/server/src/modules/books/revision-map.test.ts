@@ -124,4 +124,76 @@ describe('content revision maps', () => {
     expect(mapRevisionOffset(composed, 25, 'old.xhtml')).toBe(115)
     expect(mapRevisionOffset(composed, 25, 'other.xhtml')).toBeNull()
   })
+
+  it('recovers offsets inside a small reordered gap through bounded local alignment', () => {
+    const before = `${passage('前段')}五${'甲乙'.repeat(40)}六${passage('后段')}`
+    const after = `${passage('前段')}六${'甲乙'.repeat(40)}五${passage('后段')}`
+    const segments = createRevisionMap(before, after)
+
+    const gapStart = before.indexOf('五')
+    // The reordered interior is provably unchanged text: offsets inside the gap
+    // map instead of falling into an unmapped hole between the reliable
+    // segments. The two swapped boundary characters cannot be proven (the diff
+    // can only keep one of them), so they stay unmapped.
+    expect(mapRevisionOffset(segments, gapStart + 5)).toBe(gapStart + 5)
+    expect(mapRevisionOffset(segments, gapStart + 70)).toBe(gapStart + 70)
+    expect(mapRevisionOffset(segments, gapStart)).toBeNull()
+    expect(mapRevisionOffset(segments, gapStart + 81)).toBeNull()
+  })
+
+  it('does not persist equal runs whose text repeats inside the gap', () => {
+    const before = `${passage('前段')}甲同乙同丙${passage('后段')}`
+    const after = `${passage('前段')}丁同戊${passage('后段')}`
+    const segments = createRevisionMap(before, after)
+
+    // Both source 同 characters can pair with the single target 同; the diff's
+    // arbitrary choice between them is not a provable correspondence, so the
+    // run must stay unmapped even though the surrounding context is unique.
+    const gapStart = before.indexOf('甲同乙同丙')
+    expect(mapRevisionOffset(segments, gapStart + 1)).toBeNull()
+    expect(mapRevisionOffset(segments, gapStart + 3)).toBeNull()
+  })
+
+  it('keeps a gap with no provable character correspondence unmapped', () => {
+    const before = `${passage('前段')}丙甲乙甲丁${passage('后段')}`
+    const after = `${passage('前段')}戊乙甲甲己${passage('后段')}`
+    const segments = createRevisionMap(before, after)
+
+    // The diff proposes the contiguous run 乙甲, unique in both gaps, yet no
+    // character pairing survives every optimal alignment: the trailing 甲 can
+    // pair with either target 甲, and the 乙 itself is deleted on the
+    // alternative optimal alignment. Nothing inside the gap may map.
+    const gapStart = before.indexOf('丙甲乙甲丁')
+    expect(mapRevisionOffset(segments, gapStart + 1)).toBeNull()
+    expect(mapRevisionOffset(segments, gapStart + 2)).toBeNull()
+    expect(mapRevisionOffset(segments, gapStart + 3)).toBeNull()
+    expect(mapRevisionOffset(segments, gapStart + 4)).toBeNull()
+  })
+
+  it('keeps oversized gaps unmapped', () => {
+    const before = `${passage('前段')}${'甲乙'.repeat(300)}${passage('后段')}`
+    const after = `${passage('前段')}${'甲丙'.repeat(300)}${passage('后段')}`
+    const segments = createRevisionMap(before, after)
+
+    expect(mapRevisionOffset(segments, before.indexOf('后段') + 5)).not.toBeNull()
+    expect(mapRevisionOffset(segments, before.indexOf('前段') + 5)).not.toBeNull()
+    // The 600-character gaps exceed the refinement size cap, so the local
+    // alignment never runs and every interior offset stays unmapped.
+    expect(mapRevisionOffset(segments, before.indexOf('后段') - 1)).toBeNull()
+    expect(mapRevisionOffset(segments, before.indexOf('后段') - 2)).toBeNull()
+  })
+
+  it('keeps gaps beyond the edit-distance budget unmapped', () => {
+    const before = `${passage('前段')}${'甲乙'.repeat(150)}${passage('后段')}`
+    const after = `${passage('前段')}${'甲丙'.repeat(150)}${passage('后段')}`
+    const segments = createRevisionMap(before, after)
+
+    expect(mapRevisionOffset(segments, before.indexOf('后段') + 5)).not.toBeNull()
+    expect(mapRevisionOffset(segments, before.indexOf('前段') + 5)).not.toBeNull()
+    // The 299-character gap pair fits the size cap, but its edit distance (300)
+    // exceeds the distance budget, so the local alignment declines and every
+    // interior offset stays unmapped.
+    expect(mapRevisionOffset(segments, before.indexOf('后段') - 1)).toBeNull()
+    expect(mapRevisionOffset(segments, before.indexOf('后段') - 2)).toBeNull()
+  })
 })

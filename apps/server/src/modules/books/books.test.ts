@@ -2524,6 +2524,66 @@ describe('editor TXT save', () => {
     })
   })
 
+  it('keeps a partially surviving highlight located across consecutive edits via anchor evidence', async () => {
+    const title = '第一章 证据'
+    const body = '开头铺垫。目标开头中间标记目标结尾收尾内容。'
+    const { book } = await uploadBook(ownerId, new File([`${title}\n\n${body}`], 'book.txt', { type: 'text/plain' }))
+    const sourceBook = await getActiveBook(ownerId, book.id)
+    const sourceEpub = await bufferFromStream(await storage.getStorage().get(sourceBook.filePath))
+    const sourceTexts = await extractEpubSpineText(sourceEpub)
+    const sourceHref = [...sourceTexts.keys()][0]!
+    const sourceText = sourceTexts.get(sourceHref)!
+    const sourceMarkup = (await loadEpubSpineMarkup(sourceEpub)).find((section) => section.href === sourceHref)!.markup
+    const rangeStart = sourceText.indexOf('目标开头')
+    const rangeEnd = sourceText.indexOf('目标结尾') + '目标结尾'.length
+    const highlightId = createId('hl')
+    db.insert(schema.highlights).values({
+      id: highlightId, userId: otherId, bookVersionId: book.id, revisionId: book.revisionId!,
+      cfiRange: createEpubCfiTextRange(sourceMarkup, 0, rangeStart, rangeEnd)!,
+      chapterHref: sourceHref, text: '目标开头中间标记目标结尾', createdAt: 100, updatedAt: 100,
+    }).run()
+
+    const rewritten = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: book.revisionId!,
+      chapters: [{ id: 'ch-0', title, content: body.replace('中间标记', '改写段'), level: 1 }],
+    })
+    const firstRound = db.select().from(schema.highlights).where(eq(schema.highlights.id, highlightId)).get()!
+    expect(firstRound).toMatchObject({ revisionId: rewritten.revisionId, relocation: 'ok', chapterHref: sourceHref })
+    expect(firstRound.anchorEvidence).toHaveLength(2)
+    expect(rewritten.unlocated.highlights).toBe(0)
+
+    const untouched = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: rewritten.revisionId,
+      chapters: [{ id: 'ch-0', title, content: body.replace('中间标记', '改写段').replace('收尾内容', '收尾改写'), level: 1 }],
+    })
+    const midRound = db.select().from(schema.highlights).where(eq(schema.highlights.id, highlightId)).get()!
+    expect(midRound).toMatchObject({ revisionId: untouched.revisionId, relocation: 'ok', chapterHref: sourceHref })
+    // The primary fragment still maps whole, but the retained fragment must
+    // survive the round too — dropping it here would lose the anchor when a
+    // later edit deletes the primary.
+    expect(midRound.anchorEvidence).toHaveLength(2)
+    expect(untouched.unlocated.highlights).toBe(0)
+
+    const second = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: untouched.revisionId,
+      chapters: [{ id: 'ch-0', title, content: body.replace('中间标记', '改写段').replace('收尾内容', '收尾改写').replace('目标开头', ''), level: 1 }],
+    })
+    const secondRound = db.select().from(schema.highlights).where(eq(schema.highlights.id, highlightId)).get()!
+    expect(secondRound).toMatchObject({ revisionId: second.revisionId, relocation: 'ok', chapterHref: sourceHref })
+    // The evidence retry relocated the row onto the surviving fragment through
+    // a full (unfragmented) migration, so the retained evidence clears: the
+    // other fragments are gone and partial survival covers future edits.
+    expect(secondRound.anchorEvidence).toBeNull()
+    expect(second.unlocated.highlights).toBe(0)
+
+    const savedEpub = await bufferFromStream(await storage.getStorage().get(
+      db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, second.revisionId)).get()!.blobKey,
+    ))
+    const savedMarkup = (await loadEpubSpineMarkup(savedEpub)).find((section) => section.href === sourceHref)!.markup
+    const savedRange = resolveEpubCfiTextRange(savedMarkup, secondRound.cfiRange!)!
+    expect((await extractEpubSpineText(savedEpub)).get(sourceHref)!.slice(savedRange.start, savedRange.end)).toBe('目标结尾')
+  })
+
   it('preserves every other TXT chapter after adding two characters to an existing chapter', async () => {
     const source = '序言文字。\n\n第一卷\n\n第一章\n\n第一段正文。\n\n第二章\n\n第二段正文。\n\n第二卷\n\n第三章\n\n第三段正文。'
     const { book } = await uploadBook(ownerId, new File([source], 'book.txt', { type: 'text/plain' }))
@@ -2905,15 +2965,16 @@ describe('editor EPUB save', () => {
     expect(mappedStableHighlight).toMatchObject({ revisionId: result.revisionId, relocation: 'ok', chapterHref: changedHref })
     const mappedStableBookmark = db.select().from(schema.bookmarks).where(eq(schema.bookmarks.id, stableBookmarkId)).get()!
     expect(mappedStableBookmark).toMatchObject({ revisionId: result.revisionId, relocation: 'ok', chapterHref: changedHref })
-    expect(db.select().from(schema.highlights).where(eq(schema.highlights.id, changedHighlightId)).get()).toMatchObject({
-      revisionId: sourceRevisionId, relocation: 'unresolved', cfiRange: editedRangeCfi, text: editedQuote,
+    const changedHighlight = db.select().from(schema.highlights).where(eq(schema.highlights.id, changedHighlightId)).get()!
+    expect(changedHighlight).toMatchObject({ revisionId: result.revisionId, relocation: 'ok', chapterHref: changedHref })
+    // A single surviving piece is fully covered by the primary CFI plus later
+    // partial survival, so the evidence clears.
+    expect(changedHighlight.anchorEvidence).toBeNull()
+    const changedIdea = db.select().from(schema.ideas).where(eq(schema.ideas.id, changedIdeaId)).get()!
+    expect(changedIdea).toMatchObject({
+      revisionId: result.revisionId, relocation: 'ok', chapterHref: changedHref, cfiRange: changedHighlight.cfiRange, text: editedQuote, note: 'keep original quote',
     })
-    expect(db.select().from(schema.ideas).where(eq(schema.ideas.id, stableIdeaId)).get()).toMatchObject({
-      revisionId: result.revisionId, relocation: 'ok', chapterHref: changedHref, cfiRange: mappedStableHighlight.cfiRange,
-    })
-    expect(db.select().from(schema.ideas).where(eq(schema.ideas.id, changedIdeaId)).get()).toMatchObject({
-      revisionId: sourceRevisionId, relocation: 'unresolved', cfiRange: editedRangeCfi, text: editedQuote, note: 'keep original quote',
-    })
+    expect(changedIdea.anchorEvidence).toBeNull()
     expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, stableReplacementId)).get()).toMatchObject({
       relocation: 'ok', spineHref: changedHref, textOffset: expect.any(Number), originalText: stableQuote,
     })
@@ -2927,6 +2988,8 @@ describe('editor EPUB save', () => {
     const mappedRange = resolveEpubCfiTextRange(savedSpine.find((section) => section.href === changedHref)!.markup, mappedStableHighlight.cfiRange!)
     expect(mappedRange).not.toBeNull()
     expect((await extractEpubSpineText(savedEpub)).get(changedHref)?.slice(mappedRange!.start, mappedRange!.end)).toBe(stableQuote)
+    const changedSurvivingRange = resolveEpubCfiTextRange(savedSpine.find((section) => section.href === changedHref)!.markup, changedHighlight.cfiRange!)
+    expect((await extractEpubSpineText(savedEpub)).get(changedHref)?.slice(changedSurvivingRange!.start, changedSurvivingRange!.end)).toBe('ody 1')
     const savedRevision = db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, result.revisionId)).get()!
     expect(savedRevision.meta.chapters).toEqual(expect.arrayContaining([
       expect.objectContaining({ title: 'Renamed two', level: 1 }),

@@ -116,3 +116,42 @@ it('uses the same relocation from the TXT save workflow and keeps structural-tit
   expect(state.position?.content.contentId).toBe('txt-after')
   expect(state.coverage?.fraction).toBeCloseTo(1)
 })
+
+it('relocates a partially surviving highlight through locator evidence across consecutive replacements', async () => {
+  const evidenceRef = { ...ref, bookId: 'evidence' }
+  const body = '开头铺垫。目标开头中间标记目标结尾收尾内容。'
+  const first = await prepareEditedLocalTxt({ baseRevisionId: 'ev-0', chapters: [{ id: 'chapter', title: 'One', level: 1, content: body }] }, 'book.txt', 'Book', 'ev-0')
+  const second = await prepareEditedLocalTxt({ baseRevisionId: 'ev-0', chapters: [{ id: 'chapter', title: 'One', level: 1, content: body.replace('中间标记', '改写段') }] }, 'book.txt', 'Book', 'ev-1')
+  const third = await prepareEditedLocalTxt({ baseRevisionId: 'ev-1', chapters: [{ id: 'chapter', title: 'One', level: 1, content: body.replace('中间标记', '改写段').replace('收尾内容', '收尾改写') }] }, 'book.txt', 'Book', 'ev-2')
+  const fourth = await prepareEditedLocalTxt({ baseRevisionId: 'ev-2', chapters: [{ id: 'chapter', title: 'One', level: 1, content: body.replace('中间标记', '改写段').replace('收尾内容', '收尾改写').replace('目标开头', '') }] }, 'book.txt', 'Book', 'ev-3')
+  await repository.addBook({ ref: evidenceRef, content: { book: evidenceRef, contentId: 'ev-0' }, format: 'epub', title: 'Book', authors: [], availability: 'available', size: first.publication.size, version: 0, createdAt: 1, updatedAt: 1 }, first.publication)
+  const source = (await processLocalEpub(first.publication, new AbortController().signal)).source.documents[0]!
+  const text = extractEpubMarkupText([{ href: source.href, markup: source.content }]).get(source.href)!
+  const start = text.indexOf('目标开头')
+  const end = text.indexOf('目标结尾') + '目标结尾'.length
+  const locator = { content: { book: evidenceRef, contentId: 'ev-0' }, schemaVersion: 1 as const, kind: 'epub-cfi' as const, href: source.href, value: createEpubCfiTextRange(source.content, 0, start, end)! }
+  await repository.saveNote({ book: evidenceRef, chapter: 'One', createdAt: 1, updatedAt: 1, version: 0, id: 'span', kind: 'highlight', text: '目标开头中间标记目标结尾', color: 'yellow', style: 'highlight', locator }, 0)
+
+  await repository.replacePublication({ book: evidenceRef, baseContentId: 'ev-0', contentId: 'ev-1' }, second.publication)
+  const mid = (await repository.listNotes(evidenceRef)).find((note) => note.id === 'span')!
+  expect(mid.locator?.content.contentId).toBe('ev-1')
+  expect(mid.locatorEvidence).toHaveLength(2)
+
+  await repository.replacePublication({ book: evidenceRef, baseContentId: 'ev-1', contentId: 'ev-2' }, third.publication)
+  const kept = (await repository.listNotes(evidenceRef)).find((note) => note.id === 'span')!
+  // The primary fragment still maps whole, but the retained fragment must
+  // survive the round too, or a later edit deleting the primary loses it.
+  expect(kept.locator?.content.contentId).toBe('ev-2')
+  expect(kept.locatorEvidence).toHaveLength(2)
+
+  await repository.replacePublication({ book: evidenceRef, baseContentId: 'ev-2', contentId: 'ev-3' }, fourth.publication)
+  const final = (await repository.listNotes(evidenceRef)).find((note) => note.id === 'span')!
+  expect(final.locator?.content.contentId).toBe('ev-3')
+  // The primary fragment was deleted; the retained evidence moved the note onto
+  // the surviving fragment through a full migration, so the evidence clears.
+  expect(final.locatorEvidence).toBeUndefined()
+  const targetDocuments = (await processLocalEpub(fourth.publication, new AbortController().signal)).source.documents
+  const targetText = extractEpubMarkupText(targetDocuments.map((document) => ({ href: document.href, markup: document.content }))).get(source.href)!
+  const range = resolveEpubCfiTextRange(targetDocuments[0]!.content, final.locator!.value)!
+  expect(targetText.slice(range.start, range.end)).toBe('目标结尾')
+})

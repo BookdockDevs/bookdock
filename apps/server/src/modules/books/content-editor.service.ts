@@ -1,7 +1,7 @@
 import { and, desc, eq, or } from 'drizzle-orm'
 
-import { mapPointReplacementAnchor, mapAnnotationAnchor, buildTxtEditorSource, normalizeTxtEditorContent } from '@bookdock/shared'
-import type { EditorEpubLoadRes, EditorEpubSaveReq, EditorTxtSaveReq, EditorTxtSaveRes, TocRulePattern } from '@bookdock/shared'
+import { mapPointReplacementAnchor, mapAnnotationAnchorWithEvidence, buildTxtEditorSource, normalizeTxtEditorContent } from '@bookdock/shared'
+import type { AnnotationAnchorFragment, EditorEpubLoadRes, EditorEpubSaveReq, EditorTxtSaveReq, EditorTxtSaveRes, TocRulePattern } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { blobKeyReferenced } from '../../db/blob-refs'
@@ -89,6 +89,76 @@ function withRestorableCfi(
   const spineIndex = targetSections.findIndex((section) => section.spineHref === position.spineHref)
   const cfi = markup && spineIndex >= 0 ? createEpubCfiTextOffset(markup, spineIndex, position.textOffset) : null
   return cfi ? { ...position, cfi } : null
+}
+
+type AnnotationRemapWriter = Pick<ReturnType<typeof import('../../db/client').getDb>, 'select' | 'update'>
+
+/**
+ * Remaps every highlight, bookmark and idea of one BookVersion inside the save
+ * transaction (both save paths share this). A row migrates whole when its
+ * anchor maps; otherwise surviving portions keep it located and their CFIs are
+ * stored as anchor_evidence (previous evidence is retried when the primary CFI
+ * no longer maps). Failed rows keep their record and become unresolved; they
+ * are never deleted and never retried.
+ */
+function remapAnnotationAnchors(
+  tx: AnnotationRemapWriter,
+  input: {
+    bookVersionId: string
+    baseRevisionId: string
+    revisionId: string
+    mapping: RevisionProjection | null
+    sourceTexts: Map<string, string>
+    targetTexts: Map<string, string>
+    sourceMarkups: Map<string, string>
+    targetMarkups: Map<string, string>
+    unlocated: EditorTxtSaveRes['unlocated']
+    now: number
+  },
+): void {
+  const mapRow = (cfi: string | null, chapterHref: string | null, evidence: AnnotationAnchorFragment[] | null) => input.mapping
+    ? mapAnnotationAnchorWithEvidence(cfi, chapterHref, evidence, input.mapping.sourceSections, input.mapping.targetSections,
+      input.sourceTexts, input.targetTexts, input.sourceMarkups, input.targetMarkups, input.mapping.segments)
+    : null
+  for (const row of tx.select().from(highlights).where(eq(highlights.bookVersionId, input.bookVersionId)).all()) {
+    if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
+    const mapped = mapRow(row.cfiRange, row.chapterHref, row.anchorEvidence)
+    if (mapped) {
+      tx.update(highlights).set({
+        revisionId: input.revisionId, cfiRange: mapped.cfi ?? row.cfiRange, chapterHref: mapped.chapterHref,
+        anchorEvidence: mapped.fragments ?? null, updatedAt: input.now,
+      }).where(eq(highlights.id, row.id)).run()
+    } else {
+      input.unlocated.highlights += 1
+      tx.update(highlights).set({ relocation: 'unresolved', updatedAt: input.now }).where(eq(highlights.id, row.id)).run()
+    }
+  }
+  for (const row of tx.select().from(bookmarks).where(eq(bookmarks.bookVersionId, input.bookVersionId)).all()) {
+    if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
+    const mapped = mapRow(row.cfi, row.chapterHref, row.anchorEvidence)
+    if (mapped) {
+      tx.update(bookmarks).set({
+        revisionId: input.revisionId, cfi: mapped.cfi ?? row.cfi, chapterHref: mapped.chapterHref,
+        anchorEvidence: mapped.fragments ?? null, updatedAt: input.now,
+      }).where(eq(bookmarks.id, row.id)).run()
+    } else {
+      input.unlocated.bookmarks += 1
+      tx.update(bookmarks).set({ relocation: 'unresolved', updatedAt: input.now }).where(eq(bookmarks.id, row.id)).run()
+    }
+  }
+  for (const row of tx.select().from(ideas).where(eq(ideas.bookVersionId, input.bookVersionId)).all()) {
+    if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
+    const mapped = mapRow(row.cfiRange, row.chapterHref, row.anchorEvidence)
+    if (mapped) {
+      tx.update(ideas).set({
+        revisionId: input.revisionId, cfiRange: mapped.cfi ?? row.cfiRange, chapterHref: mapped.chapterHref,
+        anchorEvidence: mapped.fragments ?? null, updatedAt: input.now,
+      }).where(eq(ideas.id, row.id)).run()
+    } else {
+      input.unlocated.notes += 1
+      tx.update(ideas).set({ relocation: 'unresolved', updatedAt: input.now }).where(eq(ideas.id, row.id)).run()
+    }
+  }
 }
 
 async function resolveReaderPositionAnchors(
@@ -394,33 +464,10 @@ async function saveEpubContent(
           progressData: nextProgress, updatedAt: now,
         }).where(and(eq(bookStates.userId, row.userId), eq(bookStates.bookVersionId, bookId))).run()
       }
-      for (const row of tx.select().from(highlights).where(eq(highlights.bookVersionId, bookId)).all()) {
-        if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
-        const mapped = mapAnnotationAnchor(row.cfiRange, row.chapterHref, revisionMapping.sourceSections, revisionMapping.targetSections, sourceTexts, targetTexts, sourceMarkups, targetMarkups, revisionMapping.segments)
-        if (mapped) tx.update(highlights).set({ revisionId, cfiRange: mapped.cfi ?? row.cfiRange, chapterHref: mapped.chapterHref, updatedAt: now }).where(eq(highlights.id, row.id)).run()
-        else {
-          unlocated.highlights += 1
-          tx.update(highlights).set({ relocation: 'unresolved', updatedAt: now }).where(eq(highlights.id, row.id)).run()
-        }
-      }
-      for (const row of tx.select().from(bookmarks).where(eq(bookmarks.bookVersionId, bookId)).all()) {
-        if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
-        const mapped = mapAnnotationAnchor(row.cfi, row.chapterHref, revisionMapping.sourceSections, revisionMapping.targetSections, sourceTexts, targetTexts, sourceMarkups, targetMarkups, revisionMapping.segments)
-        if (mapped) tx.update(bookmarks).set({ revisionId, cfi: mapped.cfi ?? row.cfi, chapterHref: mapped.chapterHref, updatedAt: now }).where(eq(bookmarks.id, row.id)).run()
-        else {
-          unlocated.bookmarks += 1
-          tx.update(bookmarks).set({ relocation: 'unresolved', updatedAt: now }).where(eq(bookmarks.id, row.id)).run()
-        }
-      }
-      for (const row of tx.select().from(ideas).where(eq(ideas.bookVersionId, bookId)).all()) {
-        if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
-        const mapped = mapAnnotationAnchor(row.cfiRange, row.chapterHref, revisionMapping.sourceSections, revisionMapping.targetSections, sourceTexts, targetTexts, sourceMarkups, targetMarkups, revisionMapping.segments)
-        if (mapped) tx.update(ideas).set({ revisionId, cfiRange: mapped.cfi ?? row.cfiRange, chapterHref: mapped.chapterHref, updatedAt: now }).where(eq(ideas.id, row.id)).run()
-        else {
-          unlocated.notes += 1
-          tx.update(ideas).set({ relocation: 'unresolved', updatedAt: now }).where(eq(ideas.id, row.id)).run()
-        }
-      }
+      remapAnnotationAnchors(tx, {
+        bookVersionId: bookId, baseRevisionId: input.baseRevisionId, revisionId,
+        mapping: revisionMapping, sourceTexts, targetTexts, sourceMarkups, targetMarkups, unlocated, now,
+      })
     })
   } catch (error) {
     if (!blobKeyReferenced(filePath) && await storage.exists(filePath)) {
@@ -684,33 +731,10 @@ async function saveTxtContent(
           progressData: nextProgress, updatedAt: now,
         }).where(and(eq(bookStates.userId, row.userId), eq(bookStates.bookVersionId, bookId))).run()
       }
-      for (const row of tx.select().from(highlights).where(eq(highlights.bookVersionId, bookId)).all()) {
-        if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
-        const mapped = revisionMapping && mapAnnotationAnchor(row.cfiRange, row.chapterHref, revisionMapping.sourceSections, revisionMapping.targetSections, sourceTexts, targetTexts, sourceMarkups, targetMarkups, revisionMapping.segments)
-        if (mapped) tx.update(highlights).set({ revisionId, cfiRange: mapped.cfi ?? row.cfiRange, chapterHref: mapped.chapterHref, updatedAt: now }).where(eq(highlights.id, row.id)).run()
-        else {
-          unlocated.highlights += 1
-          tx.update(highlights).set({ relocation: 'unresolved', updatedAt: now }).where(eq(highlights.id, row.id)).run()
-        }
-      }
-      for (const row of tx.select().from(bookmarks).where(eq(bookmarks.bookVersionId, bookId)).all()) {
-        if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
-        const mapped = revisionMapping && mapAnnotationAnchor(row.cfi, row.chapterHref, revisionMapping.sourceSections, revisionMapping.targetSections, sourceTexts, targetTexts, sourceMarkups, targetMarkups, revisionMapping.segments)
-        if (mapped) tx.update(bookmarks).set({ revisionId, cfi: mapped.cfi ?? row.cfi, chapterHref: mapped.chapterHref, updatedAt: now }).where(eq(bookmarks.id, row.id)).run()
-        else {
-          unlocated.bookmarks += 1
-          tx.update(bookmarks).set({ relocation: 'unresolved', updatedAt: now }).where(eq(bookmarks.id, row.id)).run()
-        }
-      }
-      for (const row of tx.select().from(ideas).where(eq(ideas.bookVersionId, bookId)).all()) {
-        if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
-        const mapped = revisionMapping && mapAnnotationAnchor(row.cfiRange, row.chapterHref, revisionMapping.sourceSections, revisionMapping.targetSections, sourceTexts, targetTexts, sourceMarkups, targetMarkups, revisionMapping.segments)
-        if (mapped) tx.update(ideas).set({ revisionId, cfiRange: mapped.cfi ?? row.cfiRange, chapterHref: mapped.chapterHref, updatedAt: now }).where(eq(ideas.id, row.id)).run()
-        else {
-          unlocated.notes += 1
-          tx.update(ideas).set({ relocation: 'unresolved', updatedAt: now }).where(eq(ideas.id, row.id)).run()
-        }
-      }
+      remapAnnotationAnchors(tx, {
+        bookVersionId: bookId, baseRevisionId: input.baseRevisionId, revisionId,
+        mapping: revisionMapping, sourceTexts, targetTexts, sourceMarkups, targetMarkups, unlocated, now,
+      })
     })
   } catch (error) {
     if (!blobKeyReferenced(filePath) && await storage.exists(filePath)) {

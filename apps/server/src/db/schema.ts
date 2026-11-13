@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
-import type { ReadingTimeFragment, ReadingCoverageInterval, AiChatJobRes, AccessTokenPermission, ActivityAudience, ActivityEventType, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern } from '@bookdock/shared'
+import type { ReadingTimeFragment, ReadingCoverageInterval, AiChatJobRes, AccessTokenPermission, ActivityAudience, ActivityEventType, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern, AnnotationAnchorFragment } from '@bookdock/shared'
 import type { ProgressFileData } from '../lib/progress-file'
 
 export const users = sqliteTable('users', {
@@ -919,6 +919,10 @@ export const highlights = sqliteTable('highlights', {
   chapter: text('chapter'),
   chapterHref: text('chapter_href'),
   relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
+  // Surviving portions of the originally quoted range after a partial anchor
+  // migration; null while the anchor migrates whole. Plain text/JSON without
+  // FKs: evidence must outlive what it points at, like revisionId.
+  anchorEvidence: text('anchor_evidence', { mode: 'json' }).$type<AnnotationAnchorFragment[] | null>(),
   // Imported highlight re-import identity: '<datasetKey>|<sourceRecordId>'.
   importKey: text('import_key'),
   importHash: text('import_hash'),
@@ -949,6 +953,9 @@ export const bookmarks = sqliteTable('bookmarks', {
   title: text('title'),
   contextText: text('context_text'),
   relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
+  // Same semantics as highlights.anchorEvidence (bookmarks stay point anchors,
+  // so the column stays null today but shares the migration shape).
+  anchorEvidence: text('anchor_evidence', { mode: 'json' }).$type<AnnotationAnchorFragment[] | null>(),
   // Imported bookmark re-import identity: '<datasetKey>|<sourceRecordId>'.
   importKey: text('import_key'),
   importHash: text('import_hash'),
@@ -976,6 +983,8 @@ export const ideas = sqliteTable('ideas', {
   sourceLibraryBookVersionId: text('source_library_book_version_id'),
   revisionId: text('revision_id'),
   relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
+  // Same semantics as highlights.anchorEvidence.
+  anchorEvidence: text('anchor_evidence', { mode: 'json' }).$type<AnnotationAnchorFragment[] | null>(),
   // Imported idea re-import identity: '<datasetKey>|<sourceRecordId>'.
   importKey: text('import_key'),
   importHash: text('import_hash'),

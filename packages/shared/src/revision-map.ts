@@ -23,6 +23,13 @@ export interface RevisionTextRange {
 }
 
 const ANCHOR_SIZE = 64
+// Gap refinement: interior gaps between order-consistent reliable segments are
+// proven correspondences, so a bounded local diff can recover precise offsets
+// for anchors that fall inside them (typically an edited region with a typo
+// fix). The size cap bounds the per-character optimality DP; larger gaps stay
+// unmapped. Ambiguous character correspondences stay unmapped.
+const GAP_REFINEMENT_MAX_CHARS = 512
+const GAP_REFINEMENT_EDIT_BUDGET = 256
 
 function nonOverlapping(segments: readonly RevisionMapSegment[], start: 'sourceStart' | 'targetStart', end: 'sourceEnd' | 'targetEnd') {
   const spineKey = start === 'sourceStart' ? 'sourceSpineHref' : 'targetSpineHref'
@@ -141,7 +148,182 @@ export function createRevisionMap(source: string, target: string): RevisionMapSe
       segment.targetEnd += 1
     }
   }
-  return result
+  const refined = refinedInteriorGapSegments(source, target, result)
+  if (!refined.length) return result
+  const output: RevisionMapSegment[] = []
+  for (let index = 0; index < result.length; index += 1) {
+    output.push(result[index]!)
+    if (index < refined.length) output.push(...refined[index]!)
+  }
+  return output
+}
+
+interface GapEqualRun { aStart: number; bStart: number; length: number }
+
+/**
+ * Bounded Myers diff over a small gap pair; returns the diagonal (equal) runs
+ * in gap-local coordinates, or null when the edit distance exceeds the budget.
+ */
+function boundedGapEqualRuns(a: string, b: string, editBudget: number): GapEqualRun[] | null {
+  if (Math.abs(a.length - b.length) > editBudget) return null
+  const furthest = new Map<number, number>([[1, 0]])
+  const trace: Array<Map<number, number>> = []
+  for (let d = 0; d <= editBudget; d += 1) {
+    trace.push(new Map(furthest))
+    for (let k = -d; k <= d; k += 2) {
+      let x: number
+      if (k === -d || (k !== d && (furthest.get(k - 1) ?? Number.POSITIVE_INFINITY) < (furthest.get(k + 1) ?? Number.NEGATIVE_INFINITY))) {
+        x = furthest.get(k + 1) ?? 0
+      } else {
+        x = (furthest.get(k - 1) ?? 0) + 1
+      }
+      let y = x - k
+      while (x < a.length && y < b.length && a[x] === b[y]) {
+        x += 1
+        y += 1
+      }
+      furthest.set(k, x)
+      if (x >= a.length && y >= b.length) return backtrackGapEqualRuns(a, b, trace)
+    }
+  }
+  return null
+}
+
+function backtrackGapEqualRuns(a: string, b: string, trace: Array<Map<number, number>>): GapEqualRun[] {
+  const diagonals: Array<{ x: number; y: number }> = []
+  let x = a.length
+  let y = b.length
+  for (let d = trace.length - 1; x > 0 || y > 0; d -= 1) {
+    const furthest = trace[d] ?? trace[0]!
+    const k = x - y
+    const prevK = k === -d || (k !== d && (furthest.get(k - 1) ?? Number.POSITIVE_INFINITY) < (furthest.get(k + 1) ?? Number.NEGATIVE_INFINITY))
+      ? k + 1
+      : k - 1
+    const prevX = furthest.get(prevK) ?? 0
+    const prevY = prevX - prevK
+    while (x > prevX && y > prevY) {
+      diagonals.push({ x: x - 1, y: y - 1 })
+      x -= 1
+      y -= 1
+    }
+    if (d > 0) {
+      if (x === prevX) y -= 1
+      else x -= 1
+    }
+  }
+  diagonals.reverse()
+  const runs: GapEqualRun[] = []
+  for (const diagonal of diagonals) {
+    const current = runs.at(-1)
+    if (current && current.aStart + current.length === diagonal.x && current.bStart + current.length === diagonal.y) {
+      current.length += 1
+    } else runs.push({ aStart: diagonal.x, bStart: diagonal.y, length: 1 })
+  }
+  return runs
+}
+
+/**
+ * Forward/backward indel-only edit-distance tables over a gap pair, indexed
+ * [i * width + j]. The tables let the refinement prove, per matched character,
+ * that its correspondence is identical in every optimal alignment.
+ */
+interface GapAlignmentTables {
+  forward: Int32Array
+  backward: Int32Array
+  width: number
+  total: number
+}
+
+function gapAlignmentTables(a: string, b: string): GapAlignmentTables {
+  const width = b.length + 1
+  const height = a.length + 1
+  const unreachable = a.length + b.length + 1
+  const forward = new Int32Array(width * height)
+  const backward = new Int32Array(width * height)
+  for (let j = 0; j <= b.length; j += 1) forward[j] = j
+  for (let i = 1; i <= a.length; i += 1) {
+    forward[i * width] = i
+    for (let j = 1; j <= b.length; j += 1) {
+      const diagonal = a[i - 1] === b[j - 1] ? forward[(i - 1) * width + j - 1] : unreachable
+      forward[i * width + j] = Math.min(forward[(i - 1) * width + j] + 1, forward[i * width + j - 1] + 1, diagonal)
+    }
+  }
+  for (let i = 0; i <= a.length; i += 1) backward[i * width + b.length] = a.length - i
+  for (let j = b.length - 1; j >= 0; j -= 1) backward[a.length * width + j] = b.length - j
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      const diagonal = a[i] === b[j] ? backward[(i + 1) * width + j + 1] : unreachable
+      backward[i * width + j] = Math.min(backward[(i + 1) * width + j] + 1, backward[i * width + j + 1] + 1, diagonal)
+    }
+  }
+  return { forward, backward, width, total: forward[height * width - 1] }
+}
+
+/**
+ * Whether the match of a[s] to b[t] is the only way source character s is
+ * consumed by ANY optimal alignment of the gap pair: the match edge must lie
+ * on an optimal path, no other occurrence of the character may pair with s on
+ * one, and no optimal path may delete s. Only then is the correspondence
+ * provable — identical characters elsewhere make the re-reading check blind.
+ */
+function gapCharCorrespondenceForced(tables: GapAlignmentTables, a: string, b: string, s: number, t: number): boolean {
+  const { forward, backward, width, total } = tables
+  if (forward[s * width + t] + backward[(s + 1) * width + t + 1] !== total) return false
+  for (let other = 0; other < b.length; other += 1) {
+    if (other !== t && b[other] === a[s] && forward[s * width + other] + backward[(s + 1) * width + other + 1] === total) return false
+  }
+  for (let j = 0; j <= b.length; j += 1) {
+    if (forward[s * width + j] + 1 + backward[(s + 1) * width + j] === total) return false
+  }
+  return true
+}
+
+/**
+ * Refines interior gaps between consecutive reliable segments. The gap pair is
+ * a proven correspondence (both gaps sit between the same matched anchors), so
+ * a bounded local diff recovers exact offsets. From each equal run the diff
+ * proposes, only the stretches whose per-character correspondence is identical
+ * across every optimal alignment are emitted — whole-run uniqueness does not
+ * prove interior pairings (identical characters inside or beside the run can
+ * re-pair between equally optimal alignments, and the verbatim re-check cannot
+ * catch that). Repeated runs, oversized gaps and edits beyond the distance
+ * budget remain unmapped.
+ */
+function refinedInteriorGapSegments(source: string, target: string, segments: RevisionMapSegment[]): RevisionMapSegment[][] {
+  const refined: RevisionMapSegment[][] = []
+  for (let index = 0; index + 1 < segments.length; index += 1) {
+    const previous = segments[index]!
+    const next = segments[index + 1]!
+    const sourceGap = source.slice(previous.sourceEnd, next.sourceStart)
+    const targetGap = target.slice(previous.targetEnd, next.targetStart)
+    const runs = sourceGap.length > 0 && targetGap.length > 0
+      && sourceGap.length <= GAP_REFINEMENT_MAX_CHARS && targetGap.length <= GAP_REFINEMENT_MAX_CHARS
+      ? boundedGapEqualRuns(sourceGap, targetGap, GAP_REFINEMENT_EDIT_BUDGET)
+      : null
+    const tables = runs?.length ? gapAlignmentTables(sourceGap, targetGap) : null
+    refined.push((runs ?? []).flatMap((run) => {
+      const emitted: RevisionMapSegment[] = []
+      let stretchStart = -1
+      for (let k = 0; k <= run.length; k += 1) {
+        const forced = tables !== null && k < run.length
+          && gapCharCorrespondenceForced(tables, sourceGap, targetGap, run.aStart + k, run.bStart + k)
+        if (forced && stretchStart < 0) stretchStart = k
+        if (!forced && stretchStart >= 0) {
+          const sourceStart = previous.sourceEnd + run.aStart + stretchStart
+          const targetStart = previous.targetEnd + run.bStart + stretchStart
+          emitted.push({
+            sourceStart,
+            sourceEnd: sourceStart + k - stretchStart,
+            targetStart,
+            targetEnd: targetStart + k - stretchStart,
+          })
+          stretchStart = -1
+        }
+      }
+      return emitted
+    }))
+  }
+  return refined
 }
 
 export function composeRevisionMaps(

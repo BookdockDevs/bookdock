@@ -19,6 +19,7 @@ export const BOOK_STATE_PROGRESS_TAG = '0051_book_state_progress'
 export const READING_IMPORTS_TAG = '0060_reading_imports'
 export const INSTANCE_INVITES_TAG = '0061_instance_invites'
 export const AI_CHAT_JOBS_TAG = '0062_ai_chat_jobs'
+export const ANCHOR_EVIDENCE_TAG = '0063_anchor_evidence'
 
 /** Guarded revert of 0061_instance_invites and 0062_ai_chat_jobs for legacy-fixture
  * tests that reset the migration watermark and re-run the chain from an earlier
@@ -227,7 +228,7 @@ export function migrateBeforeBookRetirementIncluding(
   includeTags: string[],
 ) {
   // Older partial fixtures lack book_reviews, so stage only the archive/annotation portion there.
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG])
   migrateWithTagFilter(
     db,
     options,

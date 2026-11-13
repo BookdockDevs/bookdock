@@ -165,8 +165,22 @@ export const clientNoteImageSchema = z.object({
 })
 export type ClientNoteImage = z.infer<typeof clientNoteImageSchema>
 
+/**
+ * Surviving portions of an annotation's originally quoted text after a content
+ * edit. The note's `locator` holds the primary (longest surviving) fragment;
+ * every surviving fragment is retained here so later content edits can retry
+ * the primary CFI first and then the remaining fragments, keeping the note
+ * locatable while any part of the original quote survives.
+ */
+const clientLocatorEvidenceSchema = z.object({
+  value: z.string().regex(/^epubcfi\(.+\)$/),
+  href: z.string().optional(),
+})
+export type ClientLocatorEvidence = z.infer<typeof clientLocatorEvidenceSchema>
+
 const noteBase = {
   locatorHistory: z.array(clientLocatorSchema).optional(),
+  locatorEvidence: z.array(clientLocatorEvidenceSchema).optional(),
   id: identity,
   book: clientBookRefSchema,
   locator: clientLocatorSchema.nullable(),
