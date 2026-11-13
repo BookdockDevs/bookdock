@@ -83,6 +83,20 @@ import { ImageViewer } from './components/ImageViewer'
 import { BOOKMARK_CONTEXT_MAX_LENGTH, resolveClientPresetBinding } from '@bookdock/shared'
 import type { AnnotationRes, BookDetailRes, ClientLibraryDetailView, ClientLibraryListView, ClientPreferenceOwner, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
+// Reader chrome geometry (desktop hover). The summon bands match the visible
+// chrome rows exactly — the header is h-12 and the progress strip is 3rem — so
+// entry and exit share one boundary. The companion capsules (history, timer,
+// TTS, media) float 0.75rem ABOVE the strip, outside that boundary, so an
+// already-revealed footer keeps a taller band alive: without it the pointer
+// climbing towards a capsule leaves the strip and starts the hide timer
+// mid-journey. 112px = 3rem strip + 0.75rem gap + 2.75rem capsule + slack.
+const CHROME_HEADER_BAND = 48
+const CHROME_FOOTER_BAND = 48
+const CHROME_FOOTER_SUSTAIN_BAND = 112
+// Hiding must outlast the 300ms reveal/hide transition, otherwise catching a
+// capsule mid-flight is down to pointer speed.
+const CHROME_LEAVE_GRACE_MS = 280
+
 const RECENTLY_READ_QUERY = {
   page: 1,
   pageSize: 30,
@@ -182,8 +196,10 @@ export default function Reader() {
   // reading-area interactions hide them again, while footer controls keep them open for consecutive navigation
   const [chromePinned, setChromePinned] = useState(false)
   const keepChromePinnedRef = useRef(false)
-  // Chrome visibility state machine: hot strips SUMMON the header/footer with a 180ms
-  // debounce grace period; corner zones sustain the footer; touch uses chromePinned alone.
+  // Chrome visibility state machine: a 48px hot strip SUMMONs the header/footer, while
+  // an already-revealed footer keeps a taller band alive so the pointer can climb to the
+  // companion capsules. Leaving either starts a CHROME_LEAVE_GRACE_MS timer; touch uses
+  // chromePinned alone.
   const [headerSummon, setHeaderSummon] = useState(false)
   const [footerSummon, setFooterSummon] = useState(false)
   const [cornerDwell, setCornerDwell] = useState(false)
@@ -206,7 +222,7 @@ export default function Reader() {
     headerLeaveTimerRef.current = setTimeout(() => {
       setHeaderSummon(false)
       headerLeaveTimerRef.current = null
-    }, 180)
+    }, CHROME_LEAVE_GRACE_MS)
   }, [])
 
   const onFooterEnter = useCallback(() => {
@@ -221,7 +237,7 @@ export default function Reader() {
     footerLeaveTimerRef.current = setTimeout(() => {
       setFooterSummon(false)
       footerLeaveTimerRef.current = null
-    }, 180)
+    }, CHROME_LEAVE_GRACE_MS)
   }, [])
 
   const clearChromeSummon = useCallback(() => {
@@ -279,11 +295,26 @@ export default function Reader() {
       const overDialog = target instanceof Element && Boolean(target.closest('[role="dialog"]'))
       const overToast = target instanceof Element && Boolean(target.closest('[data-toast-id]'))
       const currentReadingMode = useUiStore.getState().readingMode
-      const inHeader = Boolean(insideCanvas && !overDialog && !overToast && rect && clientY <= rect.top + 48
+      // Once the footer is up it keeps a taller keep-alive band, so the pointer can
+      // travel from the strip up to a capsule without falling out of the sensor.
+      const footerBand = footerVisibleRef.current ? CHROME_FOOTER_SUSTAIN_BAND : CHROME_FOOTER_BAND
+      const inHeader = Boolean(insideCanvas && !overDialog && !overToast && rect && clientY <= rect.top + CHROME_HEADER_BAND
         && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
-      const inFooter = Boolean(insideCanvas && !overDialog && !overToast && rect && clientY >= rect.bottom - 48
+      const inFooter = Boolean(insideCanvas && !overDialog && !overToast && rect && clientY >= rect.bottom - footerBand
         && clientX >= rect.left
         && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
+      // Staying inside a band also cancels a pending hide, not just crossing into it.
+      // The bar's background is pointer-events-none, so moving off a control onto the
+      // strip itself fires that control's pointerleave and can start a countdown the
+      // geometry never agreed with; the sensor stays the only authority on hiding.
+      if (inHeader && headerLeaveTimerRef.current) {
+        clearTimeout(headerLeaveTimerRef.current)
+        headerLeaveTimerRef.current = null
+      }
+      if (inFooter && footerLeaveTimerRef.current) {
+        clearTimeout(footerLeaveTimerRef.current)
+        footerLeaveTimerRef.current = null
+      }
       if (inHeader !== headerHotRef.current) {
         headerHotRef.current = inHeader
         if (inHeader) onHeaderEnter()
@@ -332,6 +363,9 @@ export default function Reader() {
     return () => window.removeEventListener('pointerdown', onPointerDown)
   }, [])
   const footerVisibleRef = useRef(false)
+  // Dwell on a capsule sustains an already-visible footer; the taller keep-alive band
+  // above is what makes the strip → capsule handoff survivable, so this stays a latch
+  // rather than a summon.
   const footerVisible = !readerModalOpen && (chromePinned || footerSummon || (footerVisibleRef.current && cornerDwell))
   const headerVisible = !readerModalOpen && (chromePinned || headerSummon || settingsOpen || ttsOpen || autoReadingOpen)
   useEffect(() => {
@@ -2322,15 +2356,17 @@ export default function Reader() {
               </div>
             )}
             {/* Bottom controls float over the reader; desktop summoning follows pointer position.
-                Capsules retain their own small interactive hit areas.
+                Capsules sit above the strip but inside the footer's keep-alive band, so the
+                pointer can climb to them without the chrome collapsing. The strip's own
+                background is pointer-events-none (only its controls take the pointer), so the
+                hover sensor above — not this subtree — owns show/hide: a pointerleave here
+                fires when the pointer merely slides off a control onto the bar itself.
                 Touch: summon/dwell stay inert (no sticky hover, no tap
                 interception); the footer follows chromePinned alone. The
                 mobile tool dock occupies the row below this progress strip. */}
             <div className="absolute inset-x-0 bottom-0 z-40 pointer-events-none">
               <div
                 className={cn('absolute inset-x-0 bottom-0', footerVisible && !isSelectingText ? 'pointer-events-auto' : 'pointer-events-none')}
-                onPointerEnter={isTouch || isSelectingText ? undefined : onFooterEnter}
-                onPointerLeave={isTouch ? undefined : onFooterLeave}
               >
                 <ProgressStrip
                   percent={percent}
