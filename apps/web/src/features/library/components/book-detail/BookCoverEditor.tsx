@@ -91,6 +91,7 @@ export default function BookCoverEditor({
           book={book}
           coverSrc={coverRemovalPending ? null : pendingCoverFile ? coverPreviewUrl : undefined}
           coverPaletteId={coverPaletteId}
+          spine={false}
         />
         {toolbarVisible && <div
           className={cn(

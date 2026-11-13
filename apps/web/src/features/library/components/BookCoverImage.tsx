@@ -35,6 +35,15 @@ export interface BookCoverProps {
   className?: string
   coverSrc?: string | null
   coverPaletteId?: CoverPaletteId | null
+  /**
+   * Faux binding shading drawn over real artwork. It is a shelf affordance - it
+   * makes a grid of rectangles read as separate volumes - so callers outside a
+   * shelf rhythm (the detail hero and its cover editor) turn it off to keep the
+   * artwork, and the preview of the file the user is choosing, unaltered. The
+   * generated placeholder keeps its own binding design everywhere: that is its
+   * artwork, not a post-effect over someone else's.
+   */
+  spine?: boolean
 }
 
 const EXT_RE = /\.(epub|txt|pdf|mobi|azw3?|fb2)$/i
@@ -45,7 +54,7 @@ function displayTitle(title: string): string {
   return trimmed.replace(EXT_RE, '') || trimmed
 }
 
-export default function BookCoverImage({ book, size = 'md', showFormat = true, className, coverSrc, coverPaletteId }: BookCoverProps) {
+export default function BookCoverImage({ book, size = 'md', showFormat = true, className, coverSrc, coverPaletteId, spine = true }: BookCoverProps) {
   const source = coverSrc === undefined
     ? (book.coverKey || book.format === 'epub'
       ? `/api/v1/books/${book.id}/cover?v=${encodeURIComponent(book.coverKey ?? 'auto')}`
@@ -163,7 +172,7 @@ export default function BookCoverImage({ book, size = 'md', showFormat = true, c
       )}
 
       {/* Subtle spine shadow overlay on real covers */}
-      {hasCover && !isSm && (
+      {hasCover && !isSm && spine && (
         <>
           <span className="pointer-events-none absolute inset-y-0 left-0 w-3 bg-gradient-to-r from-black/25 via-black/5 to-transparent" />
           <span className="pointer-events-none absolute inset-y-0 left-2.5 w-px bg-white/20" />

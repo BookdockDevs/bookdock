@@ -74,6 +74,24 @@ describe('BookCover', () => {
     expect(container.querySelector('.left-2.w-px')).toBeInTheDocument()
   })
 
+  it('draws the spine shading over real artwork in shelf contexts', () => {
+    const { container } = render(<BookCover book={{ ...baseBook, coverKey: 'covers/book-1.jpg' }} />)
+    expect(container.querySelector('.w-3')).toBeInTheDocument()
+  })
+
+  it('leaves real artwork unshaded when the caller opts out of the spine', () => {
+    const { container } = render(<BookCover book={{ ...baseBook, coverKey: 'covers/book-1.jpg' }} spine={false} />)
+    expect(container.querySelector('.w-3')).not.toBeInTheDocument()
+  })
+
+  it('keeps the generated placeholder binding when the spine is off', () => {
+    // The placeholder's binding is its own artwork, not a shelf post-effect, so
+    // the same book keeps the same generated cover in the grid and the detail.
+    const { container } = render(<BookCover book={baseBook} spine={false} />)
+    expect(container.querySelector('.w-1')).toBeInTheDocument()
+    expect(container.querySelector('.left-2.w-px')).toBeInTheDocument()
+  })
+
   it('supports custom coverPaletteId override', () => {
     const { container } = render(<BookCover book={baseBook} coverPaletteId="sage" />)
     const card = container.firstChild as HTMLElement

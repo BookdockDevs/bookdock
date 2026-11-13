@@ -360,7 +360,7 @@ export default function WorkDetailBody({
     <div>
       <DetailHeader
         rating={ratingSlot}
-        cover={canManage ? <DetailCoverEditor key={selected.id} book={rowCover(selectedRow)} coverPaletteId={null} active={coverEditing} onActiveChange={(active) => setCoverEditingId(active ? selected.id : null)} catalog={{ libraryId: library.id, libraryBookId: work.id, versionLinkId: selected.id, hasVersionCover: Boolean(selected.coverKey) }} /> : <BookCover book={rowCover(selectedRow)} coverSrc={selectedRow.coverSrc} />}
+        cover={canManage ? <DetailCoverEditor key={selected.id} book={rowCover(selectedRow)} coverPaletteId={null} active={coverEditing} onActiveChange={(active) => setCoverEditingId(active ? selected.id : null)} catalog={{ libraryId: library.id, libraryBookId: work.id, versionLinkId: selected.id, hasVersionCover: Boolean(selected.coverKey) }} /> : <BookCover book={rowCover(selectedRow)} coverSrc={selectedRow.coverSrc} spine={false} />}
         coverEditing={coverEditing}
         hasCoverImage={hasCoverImage}
         copyingCover={copyingCover}

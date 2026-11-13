@@ -293,7 +293,7 @@ export default function BookDetailView({
     <div>
       <DetailHeader
         rating={ratingSlot}
-        cover={readOnly ? <BookCover book={displayBook} coverPaletteId={detail?.meta?.coverPaletteId} /> : <DetailCoverEditor key={book.id} book={displayBook} coverPaletteId={detail?.meta?.coverPaletteId ?? displayBook.coverPaletteId ?? null} active={coverEditing} onActiveChange={setCoverEditing} />}
+        cover={readOnly ? <BookCover book={displayBook} coverPaletteId={detail?.meta?.coverPaletteId} spine={false} /> : <DetailCoverEditor key={book.id} book={displayBook} coverPaletteId={detail?.meta?.coverPaletteId ?? displayBook.coverPaletteId ?? null} active={coverEditing} onActiveChange={setCoverEditing} />}
         coverEditing={!readOnly && coverEditing}
         hasCoverImage={hasCoverImage}
         copyingCover={copyingCover}

@@ -8,6 +8,7 @@ All notable changes to Bookdock are documented here.
 
 - Opening the content workbench now follows the reader's entry flow: the header and chapter list paint from cache while the text is still loading, the source request starts when you pick Content editing instead of after the page mounts, and EPUB packages are unzipped once and kept per revision, so reopening a book you just read no longer waits behind a full-screen spinner.
 - The editor's revision-pinned TXT request is now reused from the browser cache for five minutes, so reloading, navigating back, or opening the same revision in a second tab no longer re-downloads the whole book. The cached body stays private to that browser and is split per session, so a shared library cannot hand one member's copy to another account.
+- Covers in a book's detail view and in the cover editor no longer carry the faux spine shading. That binding effect is a shelf affordance, so it stays on grid, list and recently-read cards while the detail hero shows the artwork - and the file the user is choosing - unaltered. Generated placeholder covers keep their own binding everywhere, so one book looks the same in the grid and in its detail.
 
 ### Fixed
 
@@ -1195,6 +1196,7 @@ All notable changes to Bookdock are documented here.
 
 - 打开编辑工作台改为与阅读器一致的入口流程：头部与章节列表先按缓存渲染、正文继续加载，正文请求在点击「内容编辑」时就发起而不再等页面挂载，EPUB 整包只解压一次并按修订缓存；刚读过的书再进编辑器不再卡在全屏加载上。
 - 编辑工作台按修订读取 TXT 正文的请求现在会在浏览器缓存中复用五分钟：刷新页面、后退或开第二个标签页重开同一修订时不再重新下载整本书。缓存仅限本浏览器并按会话隔离，共享书库不会把一位成员的副本发给另一位账号。
+- 书籍详情页与封面编辑器中的封面不再叠加书脊阴影。该书脊效果属于书架语境，保留在网格、列表与最近阅读卡片上，详情头图则原样呈现封面图片（以及用户正在挑选的文件）。自动生成的占位封面在各处都保留自己的装订设计，同一本书在网格与详情里看起来一致。
 
 #### 修复
 
