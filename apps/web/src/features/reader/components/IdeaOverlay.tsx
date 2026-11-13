@@ -10,7 +10,7 @@ import { avatarUrl } from '@/lib/avatar'
 
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
-import { useUiStore } from '@/stores/ui.store'
+import { selectReadingTone, useUiStore } from '@/stores/ui.store'
 
 import { getLastHighlightStyle } from './annotation-colors'
 import { AiSparkleIcon, BulbIcon, ChevronDownIcon, CloseIcon, CopyIcon, ExcerptShareIcon, PencilIcon, QuoteLeftIcon, SearchIcon, StyleGlyph } from './annotation-icons'
@@ -110,6 +110,9 @@ export function IdeaOverlay({
   const _ = useTranslation()
   const isTouch = useIsTouch()
   const ideaDisplayMode = useUiStore((s) => s.ideaDisplayMode)
+  // Body portal: carries its own tone class so the `dark:` axis follows the
+  // reading theme instead of the system preference.
+  const readingTone = useUiStore(selectReadingTone)
   // Sidebar mode is for non-touch desktop viewports; touch always falls back to modal
   const effectiveMode = isTouch ? 'modal' : ideaDisplayMode
 
@@ -279,7 +282,7 @@ export function IdeaOverlay({
 
     return createPortal(
       <div
-        className={`fixed inset-0 z-50 flex justify-end pb-[env(safe-area-inset-bottom)] pointer-events-none ${dialogLayout.className}`}
+        className={`fixed inset-0 z-50 flex justify-end pb-[env(safe-area-inset-bottom)] pointer-events-none ${readingTone} ${dialogLayout.className}`}
         style={dialogLayout.style}
       >
         {fontCss && <style data-reader-font>{fontCss}</style>}
@@ -536,7 +539,7 @@ export function IdeaOverlay({
   return createPortal(
     <div
       data-reader-modal=""
-      className={`fixed inset-0 z-50 flex flex-col bg-black/50 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm ${dialogLayout.className}`}
+      className={`fixed inset-0 z-50 flex flex-col bg-black/50 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm ${readingTone} ${dialogLayout.className}`}
       style={dialogLayout.style}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()

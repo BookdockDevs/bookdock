@@ -60,7 +60,7 @@ export default function SegmentedControl<T extends string = string>({
       className={cn(
         fullWidth ? 'flex w-full' : 'inline-flex w-fit shrink-0',
         wrap && 'flex-wrap',
-        'items-center gap-0.5 rounded-lg bg-stone-100 p-0.5 dark:bg-stone-800',
+        'items-center gap-0.5 rounded-lg bg-(--bd-seg-track) p-0.5',
         className,
       )}
     >
@@ -90,8 +90,8 @@ export default function SegmentedControl<T extends string = string>({
               size === 'md' ? 'h-8 px-3 text-xs' : 'h-7 px-2.5 text-xs',
               fullWidth && 'min-w-0 flex-1',
               selected
-                ? 'bg-white text-stone-900 shadow-xs dark:bg-stone-700 dark:text-stone-100'
-                : 'text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200',
+                ? 'bg-(--bd-seg-chip-bg) text-(--bd-seg-chip-text) shadow-xs'
+                : 'text-(--bd-seg-text) hover:text-(--bd-seg-text-hover)',
             )}
           >
             {opt.label}

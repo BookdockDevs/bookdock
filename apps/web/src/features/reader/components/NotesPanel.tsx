@@ -620,10 +620,11 @@ export const NotesPanel = memo(function NotesPanel({
           )}
         </div>
       )}
-      {isLoading ? (
+      {isLoading || (items.length > 0 && isChapterSort && !chapterOrderReady) ? (
         <div role="status" aria-busy="true" className="space-y-3 pt-1">
+          <span className="sr-only">{_('reader.loading')}</span>
           {[1, 2, 3].map((i) => (
-            <div key={i} className="animate-pulse rounded-xl border border-stone-200/60 bg-stone-500/5 p-3.5 space-y-2.5 dark:border-stone-800/60 motion-reduce:animate-none">
+            <div key={i} className="animate-pulse rounded-xl border border-[var(--bd-read-accent)]/80 bg-stone-500/5 p-3.5 space-y-2.5 motion-reduce:animate-none">
               <div className="flex items-center justify-between">
                 <div className="h-3 w-16 rounded bg-stone-500/15" />
                 <div className="h-3 w-12 rounded bg-stone-500/10" />
@@ -655,10 +656,6 @@ export const NotesPanel = memo(function NotesPanel({
           <p className="mt-1.5 text-xs text-[var(--bd-read-sub)] max-w-64 leading-relaxed">
             {allItems.length > 0 ? (_('reader.noMatchingNotesHint') || '请尝试调整筛选条件或搜索关键词') : _('reader.noNotesHint')}
           </p>
-        </div>
-      ) : isChapterSort && !chapterOrderReady ? (
-        <div className="flex flex-1 items-center justify-center py-12 text-xs text-[var(--bd-read-sub)]">
-          {_('reader.loading')}
         </div>
       ) : (
         <div className="space-y-4">

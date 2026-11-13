@@ -29,6 +29,10 @@ All notable changes to Bookdock are documented here.
 - The description field of the book editor now opens six lines tall on a phone and eight on a wider screen instead of four, so a blurb that runs past a couple of paragraphs can be read without scrolling inside the box; it stays vertically resizable.
 - Version switching moved out of the body and into the dialog title bar: a menu beside "Book details" and "Edit book" names the version on screen, tags the default one, still works at a dozen versions, and leaves a one-version work with the plain title a private book has. The tab strip it replaces is gone, and so is the sticky version bar in the editor. The list takes the width its labels need - 148px at the narrowest, 280px before a long name truncates, and never a fixed column with a blank right half - each row stands on its own so hovering the version next to the current one no longer fuses the two highlights into one block, and a work with dozens of versions scrolls the list instead of running off-screen.
 - The read-only identifier in the book editor now shares the subjects row instead of sitting on a line of its own: the id takes the second column at the height and label style of the input beside it, still copies on click, and truncates when a work id runs long, while subjects falls back to the full row when there is no identifier to show.
+- Reader chrome no longer mixes the app's dark mode with the reading theme: every reader surface - the side panels, the settings popover, reader dialogs, floating menus and the idea overlay - pins its dark-mode styles to the brightness of the reading theme itself. A system dark theme combined with a light day reading theme (and the reverse) no longer paints dark borders and backgrounds onto light panels, nor leaves light remnants on dark ones.
+- The reader's text-replacement dialogs now follow the reading theme end to end: the rule form, its inputs, segmented controls, toggles and the rule list share the same paper palette as the reader's own panels instead of pasting the settings page's white-and-stone controls onto the reading surface. The shared controls resolve from semantic tokens whose values the reading surface overrides, so the settings page keeps its exact previous look.
+- The regex switch in the replacement rule form moves from the scope card to the right end of the match-content label row - it belongs to the field it affects - and the case-sensitivity hint becomes the match field's placeholder while regex is on, so toggling the switch no longer resizes the dialog.
+- The notes panel's loading skeleton follows the reading theme (its borders used to harden to near-black only in app dark mode), and while the chapter grouping is still loading it keeps the skeleton on screen instead of collapsing to a bare centered loading line. The table-of-contents loading skeleton announces itself as a live status and stops animating for users who prefer reduced motion.
 
 ### Removed
 
@@ -52,6 +56,7 @@ All notable changes to Bookdock are documented here.
 - Touching outside a menu now dismisses it on pointer down. Clicking the trigger again or elsewhere on the same card retains the existing dismissal behavior.
 - Collapsing the reader's book search (back to TOC, the magnifier toggle or Escape) now hides the match highlights in the text together with the result capsule, instead of leaving orphaned highlights painted on every chapter you turn. Reopening the search bar restores the highlights instantly from the cached matches without re-searching, so the round trip keeps everything the query had.
 - Book covers no longer flash the raw book title in the top-left corner of the cover frame: when a shelf remounts and the browser briefly re-decodes a cached image, the image's alt text used to paint as visible text while the designed placeholder stayed hidden behind it. The alt text now stays invisible on screen - screen readers still announce it - in both the library cover and the statistics cover, so the placeholder remains in charge until the artwork paints.
+- The replace dialog opened from the reader's selection toolbar now uses the same reader-themed shell as the replacements manager, instead of the plain white app modal.
 
 ## [0.8.2] - 2026-11-13
 
@@ -1253,6 +1258,10 @@ All notable changes to Bookdock are documented here.
 - 编辑弹窗的简介输入框默认高度由四行提高到手机六行、宽屏八行，两段以上的简介不必在框内滚动才能读完；仍然可以竖向拖拽调整高度。
 - 版本切换从正文移到弹窗标题栏：书名旁的下拉菜单（「书籍详情」/「编辑书籍」）列出全部版本、标出当前与默认版本，十几版也不会撑破布局；单版本作品的弹窗因此和私库书籍一样只有一个标题，不再多出一行只能点一次的页签。编辑器里那条吸顶版本栏一并移除。菜单宽度跟着版本名走——最窄 148px，超过 280px 才截断，不再出现固定宽度留下半列空白；条目之间留出间距，悬停在当前版本的相邻版本上时两块高亮不再连成一片；版本再多也只在菜单内滚动，不会溢出到屏幕外。
 - 编辑弹窗里的只读标识符不再单独占一行，改为与「主题」并排：标识符占据第二列，高度与标签样式跟旁边的输入框对齐，点击仍然复制，作品 id 过长时截断；没有标识符可显示时「主题」自动占满整行。
+- 阅读器界面不再把应用的深色模式与阅读主题混在一起：阅读器的每块界面——各侧栏面板、设置浮层、阅读器弹窗、悬浮菜单与想法侧栏——都把深色样式锚定到阅读主题自身的明暗。系统深色配日间阅读（以及反过来）不再往浅色面板上画深色边框底色，也不会在深色面板上残留浅色块。
+- 阅读器内的文本替换弹窗整体跟随阅读主题：规则表单、输入框、分段选择器、开关与规则列表，与阅读器自带面板共用同一套纸面色板，不再把设置页的白底石灰色控件拼到阅读表面上。共享控件改从语义 token 取色、由阅读表面覆盖取值，设置页观感与此前完全一致。
+- 文本替换规则表单的「正则表达式」开关从作用域卡片移到「匹配内容」标签行右端——开关直属它所影响的字段；大小写提示改为正则开启时匹配框的占位文案，切换开关不再改变弹窗尺寸。
+- 笔记面板的加载骨架屏跟随阅读主题（此前仅应用深色下边框会变成近黑），按章节分组的排序数据尚未就绪时保持骨架屏，不再塌缩成一行孤零零的「加载中」。目录加载骨架屏以 live 状态对外宣告，并为偏好减弱动画的用户停用动画。
 
 #### 移除
 
@@ -1276,6 +1285,7 @@ All notable changes to Bookdock are documented here.
 - 在菜单外触摸现在于按下时关闭菜单。再次点击触发按钮或点击同一卡片的其他位置仍沿用原有关闭行为。
 - 收起阅读器的书籍搜索（返回目录、放大镜切换或 Esc）时，正文中的匹配高亮现在随结果胶囊一起隐藏，不再在翻到的每一章上留下孤零零的高亮；重新打开搜索栏时，高亮依据缓存的匹配结果立即恢复，无需重新搜索，往返一次不丢失任何东西。
 - 书籍封面不再在封面框左上角闪现书名原文：书架重挂载、浏览器短暂重新解码缓存图片的间隙里，图片的 alt 文本会被当作可见文字绘制，而设计好的占位封面此时反而被藏住。现在库内封面与统计页封面的 alt 文本在屏上保持不可见——屏幕阅读器仍会朗读——占位封面在图片真正绘制出来之前始终负责显示。
+- 从阅读器划词工具栏打开的替换弹窗现在与替换规则管理弹窗共用阅读主题外壳，不再是纯白的应用模态窗。
 
 ### [0.8.2] - 2026-11-13
 

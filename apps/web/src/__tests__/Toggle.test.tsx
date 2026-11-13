@@ -10,9 +10,9 @@ describe('Toggle', () => {
     const track = screen.getByRole('switch', { name: 'switch' })
     expect(track).toHaveAttribute('aria-checked', 'false')
     const knob = track.firstElementChild!.firstElementChild!
-    expect(track.firstElementChild!.className).toContain('bg-stone-200')
+    expect(track.firstElementChild!.className).toContain('bg-(--bd-toggle-off)')
     expect(knob.className).toContain('left-0.5')
-    expect(knob.className).toContain('bg-white')
+    expect(knob.className).toContain('bg-(--bd-toggle-knob)')
     expect(knob.className).not.toContain('translate-x-4')
   })
 
@@ -22,8 +22,8 @@ describe('Toggle', () => {
     const track = screen.getByRole('switch', { name: 'switch' })
     expect(track).toHaveAttribute('aria-checked', 'true')
     const knob = track.firstElementChild!.firstElementChild!
-    expect(track.firstElementChild!.className).toContain('bg-stone-900')
-    expect(knob.className).toContain('bg-white')
+    expect(track.firstElementChild!.className).toContain('bg-(--bd-toggle-on)')
+    expect(knob.className).toContain('bg-(--bd-toggle-knob)')
     expect(knob.className).toContain('translate-x-4')
   })
 

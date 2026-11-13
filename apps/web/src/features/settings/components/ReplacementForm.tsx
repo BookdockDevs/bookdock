@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { compileReplacementRegex, type TextReplacementRes, type ReplacementCreateReq, type ReplacementUpdateReq } from '@bookdock/shared'
 
@@ -79,6 +79,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
 
   const [groupDropdownOpen, setGroupDropdownOpen] = useState(false)
   const groupContainerRef = useRef<HTMLDivElement>(null)
+  const patternFieldId = useId()
 
   useEffect(() => {
     if (!groupDropdownOpen) return
@@ -234,7 +235,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
             <p className="text-xs text-amber-600 dark:text-amber-400">{_('annotation.replaceHereUnavailable')}</p>
           )}
           {!bookId && (
-            <p className="text-xs text-stone-400 dark:text-stone-500">{_('settings.replacementsToBookHint')}</p>
+            <p className="text-xs text-(--bd-hint-text)">{_('settings.replacementsToBookHint')}</p>
           )}
         </div>
       )}
@@ -303,7 +304,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
               {groupDropdownOpen && filteredGroups.length > 0 && (
                 <div
                   role="listbox"
-                  className="absolute top-full z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-stone-200 bg-white p-1 shadow-lg dark:border-stone-700 dark:bg-stone-800"
+                  className="absolute top-full z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-(--bd-field-border) bg-(--bd-field-bg) p-1 shadow-lg"
                 >
                   {filteredGroups.map((g) => {
                     const isSelected = g === group.trim()
@@ -353,11 +354,21 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
 
       <div className="min-w-0">
         <SettingsFormField
+          labelFor={patternFieldId}
           label={_('settings.replacementsPattern')}
           required
           error={patternError === 'required' ? _('settings.replacementsPatternRequired') : patternError === 'invalidRegex' ? _('settings.replacementsRegexInvalid') : undefined}
+          labelExtra={!isPoint && (
+            <Toggle
+              label={_('settings.replacementsRegex')}
+              checked={isRegex}
+              onChange={setIsRegex}
+              disabled={saving}
+            />
+          )}
         >
           <textarea
+            id={patternFieldId}
             rows={2}
             value={pattern}
             onChange={(e) => {
@@ -366,6 +377,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
             }}
             disabled={saving}
             aria-invalid={patternError !== null || undefined}
+            placeholder={isRegex ? _('settings.replacementsRegexHint') : undefined}
             className={settingsTextareaClass}
           />
         </SettingsFormField>
@@ -385,34 +397,18 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
       </div>
 
       {!isPoint && (
-        <div className="space-y-3 rounded-xl border border-stone-200/80 bg-stone-50/60 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
-          <div className="space-y-1.5">
-            <span className="block text-xs font-medium text-stone-500 dark:text-stone-400">
-              {_('settings.replacementsApplyTo')}
-            </span>
-            <SegmentedControl
-              ariaLabel={_('settings.replacementsApplyTo')}
-              fullWidth
-              pending={saving}
-              value={applyTo}
-              onChange={setApplyTo}
-              options={APPLY_TO.map(({ value, key }) => ({ value, label: _(key) }))}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1 pt-0.5">
-            <Toggle
-              label={_('settings.replacementsRegex')}
-              checked={isRegex}
-              onChange={setIsRegex}
-              disabled={saving}
-            />
-            {isRegex && (
-              <p className="text-xs text-stone-400 dark:text-stone-500">
-                {_('settings.replacementsRegexHint')}
-              </p>
-            )}
-          </div>
+        <div className="space-y-1.5 rounded-xl border border-(--bd-card-border) bg-(--bd-card-bg) p-3.5">
+          <span className="block text-xs font-medium text-(--bd-label-text)">
+            {_('settings.replacementsApplyTo')}
+          </span>
+          <SegmentedControl
+            ariaLabel={_('settings.replacementsApplyTo')}
+            fullWidth
+            pending={saving}
+            value={applyTo}
+            onChange={setApplyTo}
+            options={APPLY_TO.map(({ value, key }) => ({ value, label: _(key) }))}
+          />
         </div>
       )}
 

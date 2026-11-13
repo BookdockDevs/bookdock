@@ -10,7 +10,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { useUiStore } from '@/stores/ui.store'
+import { selectReadingTone, useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { LOCAL_READER_SHORTCUT_SCOPE, isReaderContentTarget, isReaderModalOpen, isReaderShortcutModalOpen, readReaderShortcuts, shortcutMatches } from './lib/reader-shortcuts'
 import { useSettingsSyncStore } from '@/stores/settings-sync.store'
@@ -403,6 +403,9 @@ export default function Reader() {
   const sidebarWidth = useUiStore((s) => s.sidebarWidth)
   const ideaDisplayMode = useUiStore((s) => s.ideaDisplayMode)
   const ideaSidebarWidth = useUiStore((s) => s.ideaSidebarWidth)
+  // Pins the `dark:` axis for the whole reader chrome subtree to the reading
+  // theme's brightness instead of the system preference (see index.css).
+  const readingTone = useUiStore(selectReadingTone)
   const dialogInset = !isTouch && (sidebarOpen || toolbarLocked) ? 56 + (sidebarOpen ? sidebarWidth : 0) : 0
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
@@ -2150,7 +2153,7 @@ export default function Reader() {
       <RendererContext.Provider value={rendererContextValue}>
       <AutoReadingSessionProvider renderer={renderer} coordinator={playbackCoordinator} onStart={onAutoReadingStart}>
       <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator} guestReadOnly={isGuest} onStart={onTtsStart}>
-      <div className="fixed inset-0 z-30" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+      <div className={`fixed inset-0 z-30 ${readingTone}`} style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
         {local && localSaveError && <div role="alert" className="absolute left-1/2 top-4 z-[80] w-max max-w-[90vw] -translate-x-1/2 space-y-2 rounded-xl border border-amber-400 bg-stone-50 p-4 text-sm text-stone-900 shadow-lg">
           <p>{_('localLibrary.progressFailed')}</p>
           <div className="flex gap-3"><Button onClick={async () => { try { await local.getProgress(); flushPendingProgress() } catch (error) { setLocalSaveError(error instanceof Error ? error.message : 'Local storage is unavailable') } }}>{_('localLibrary.retryPosition')}</Button><Button onClick={() => window.location.reload()}>{_('localLibrary.restorePosition')}</Button></div>
@@ -2443,6 +2446,7 @@ export default function Reader() {
           <Modal
             title={_('annotation.replaceSelection')}
             onClose={() => setReplaceTarget(null)}
+            variant="reader"
             containerProps={{ 'data-reader-modal': '' }}
           >
             <ReplacementForm

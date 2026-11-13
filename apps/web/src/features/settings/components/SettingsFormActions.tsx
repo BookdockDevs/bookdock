@@ -11,7 +11,7 @@ export default function SettingsFormActions({ onCancel, cancelDisabled = false, 
   const _ = useTranslation()
 
   return (
-    <div className="flex justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
+    <div className="flex justify-end gap-2 border-t border-(--bd-divider) pt-4">
       <Button type="button" variant="secondary" size="sm" onClick={onCancel} disabled={cancelDisabled}>
         {_('library.cancel')}
       </Button>

@@ -57,6 +57,17 @@ export const PRESET_READING_THEMES: CustomReadingTheme[] = [
   { id: 'night', name: '夜间', colors: { bg: '#111111', fg: '#d6d6d6', primary: '#8a8a8a' } },
 ]
 
+// Tone classes pin the app `dark:` variant axis to the reading theme's
+// brightness: reader chrome surfaces add the class so `dark:` styles inside
+// follow the reading surface instead of the system preference (see the
+// `dark` custom variant in index.css).
+export type ReadingTone = 'bd-tone-light' | 'bd-tone-dark'
+
+export function resolveReadingTone(themeId: string, customThemes: CustomReadingTheme[] = []): ReadingTone {
+  const theme = resolveReadingTheme(themeId, customThemes)
+  return isDark(theme.bg) ? 'bd-tone-dark' : 'bd-tone-light'
+}
+
 export function resolveReadingTheme(id: string, customThemes: CustomReadingTheme[] = []): ReadingTheme {
   const preset = PRESET_READING_THEMES.find((t) => t.id === id)
   if (preset) return deriveReadingTheme(preset.colors)

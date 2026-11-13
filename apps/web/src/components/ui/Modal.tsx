@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type HTMLAttributes, type ReactNode } from 'r
 import { createPortal } from 'react-dom'
 
 import { useTranslation } from '@/hooks/useTranslation'
+import { selectReadingTone, useUiStore } from '@/stores/ui.store'
 
 import { useDialogLayout } from './dialog-layout-context'
 
@@ -74,6 +75,9 @@ export default function Modal({
   initialFocusRef.current = initialFocus
 
   const reader = variant === 'reader'
+  // Portaled reader dialogs escape the reader root, so they carry the tone
+  // class themselves to keep the `dark:` axis on the reading theme.
+  const readingTone = useUiStore(selectReadingTone)
   const width =
     size === 'wide' ? 'max-w-2xl' : size === 'xl' ? 'max-w-xl' : size === 'idea' ? 'max-w-[420px]' : size === 'sm' ? 'max-w-sm' : 'max-w-lg'
   const placement = centered ? 'items-center p-4' : 'items-end p-0 sm:items-center sm:p-4'
@@ -183,7 +187,7 @@ export default function Modal({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`flex w-full ${width} ${panelShape} flex-col overflow-hidden shadow-xl outline-none ${reader ? 'bg-[var(--bd-read-bg)] text-[var(--bd-read-text)]' : 'bg-white dark:bg-stone-900'} animate-modal-panel ${panelClassName}`}
+        className={`flex w-full ${width} ${panelShape} flex-col overflow-hidden shadow-xl outline-none ${reader ? `bd-reader-surface bg-[var(--bd-read-bg)] text-[var(--bd-read-text)] ${readingTone}` : 'bg-white dark:bg-stone-900'} animate-modal-panel ${panelClassName}`}
         onClick={(e) => e.stopPropagation()}
       >
         {hideHeader ? (

@@ -1618,14 +1618,15 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
               <div className={cn('relative', showTocSkeleton && rootNodes.length === 0 && 'min-h-60')}>
                 {showTocSkeleton && (
                   <div
-                    aria-hidden="true"
+                    role="status"
+                    aria-busy="true"
                     data-testid="toc-loading-skeleton"
                     className="pointer-events-none absolute inset-x-0 top-0 space-y-2 px-2 pt-2"
                   >
                     {[78, 64, 88, 72, 60, 84, 70, 76].map((width, index) => (
                       <div
                         key={index}
-                        className="h-6 animate-pulse rounded-md bg-stone-500/10"
+                        className="h-6 animate-pulse rounded-md bg-stone-500/10 motion-reduce:animate-none"
                         style={{ width: `${width}%` }}
                       />
                     ))}

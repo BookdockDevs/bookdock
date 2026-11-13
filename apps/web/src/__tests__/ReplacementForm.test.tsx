@@ -248,6 +248,25 @@ describe('ReplacementForm', () => {
       const [body] = createReplacement.mutate.mock.calls[0]
       expect(body).toMatchObject({ group: '错别字修正', pattern: '错字' })
     })
+
+    it('places the regex switch in the match-field label row with the hint as its placeholder', () => {
+      render(<ReplacementForm onDone={() => {}} />)
+
+      const matchField = screen.getByLabelText(/匹配内容/)
+      const regexSwitch = screen.getByRole('switch', { name: '正则表达式' })
+      // Switch and textarea share the match field's container; the hint lives
+      // in the placeholder so toggling never resizes the dialog
+      expect(matchField.parentElement).toContainElement(regexSwitch)
+      expect(matchField).not.toHaveAttribute('placeholder')
+
+      fireEvent.click(regexSwitch)
+      expect(matchField).toHaveAttribute('placeholder', '默认区分大小写；需要忽略大小写时在开头写 (?i)')
+    })
+
+    it('hides the regex switch for point patches', () => {
+      render(<ReplacementForm bookId="b1" selection={selection()} onDone={() => {}} />)
+      expect(screen.queryByRole('switch', { name: '正则表达式' })).not.toBeInTheDocument()
+    })
   })
 
   describe('edit', () => {

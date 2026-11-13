@@ -5,8 +5,10 @@ import type { AutoReadingMode, FontFamily, ReadingMode, IdeaDisplayMode, Chinese
 import {
   isReadingThemeMode,
   resolveEffectiveReadingThemeId,
+  resolveReadingTone,
   type CustomReadingTheme,
   type ReadingThemeMode,
+  type ReadingTone,
   type SystemTheme,
 } from '../lib/reading-theme'
 import {
@@ -313,6 +315,10 @@ export function getEffectiveTheme(): 'light' | 'dark' {
 
 export function selectEffectiveReadingThemeId(state: UiState): string {
   return resolveEffectiveReadingThemeId(state.readingThemeMode, state.systemTheme, state.lightReadingThemeId)
+}
+
+export function selectReadingTone(state: UiState): ReadingTone {
+  return resolveReadingTone(selectEffectiveReadingThemeId(state), state.customThemes)
 }
 
 function getInitialNumber(key: string, fallback: number, min?: number, max?: number): number {

@@ -29,12 +29,12 @@ export default function Toggle({ checked, disabled, onChange, ariaLabel, label }
       <span
         className={cn(
           'relative block h-5 w-9 shrink-0 rounded-full transition-colors',
-          checked ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-200 dark:bg-stone-700',
+          checked ? 'bg-(--bd-toggle-on)' : 'bg-(--bd-toggle-off)',
         )}
       >
         <span
           className={cn(
-            'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform dark:bg-stone-900',
+            'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-(--bd-toggle-knob) shadow-sm transition-transform',
             checked && 'translate-x-4',
           )}
         />

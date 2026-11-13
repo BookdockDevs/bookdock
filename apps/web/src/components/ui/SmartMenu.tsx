@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { useReconciledMenuPosition } from '@/hooks/useMenuAnchor'
 import type { MenuAnchor } from '@/lib/menu-anchor'
 import { PADDING } from '@/lib/position'
+import { selectReadingTone, useUiStore } from '@/stores/ui.store'
 import { cn } from '@/lib/utils'
 
 export interface SmartMenuSize {
@@ -53,6 +54,9 @@ export default function SmartMenu({
   children,
 }: SmartMenuProps) {
   const autoWidth = size.width === 'auto'
+  // Reader menus portal to body, so they carry the tone class themselves to
+  // keep the `dark:` axis on the reading theme (matches Modal variant reader).
+  const readingTone = useUiStore(selectReadingTone)
   // Auto-width menus have no known width before they render; maxWidth is the
   // honest upper bound, and the measured box replaces it on the next frame.
   const widthForPlacement = size.width === 'auto' ? Math.min(maxWidth, window.innerWidth - PADDING * 2) : size.width
@@ -101,9 +105,11 @@ export default function SmartMenu({
       }
     : { width: size.width as number }
 
+  // Reader menus portal to body, so they carry the tone class themselves to
+  // keep the `dark:` axis on the reading theme (matches Modal variant reader).
   const themeClass =
     variant === 'reader'
-      ? 'border-stone-200/80 bg-[var(--bd-read-bg)] text-[var(--bd-read-text)] dark:border-stone-700/80'
+      ? `border-stone-200/80 bg-[var(--bd-read-bg)] text-[var(--bd-read-text)] dark:border-stone-700/80 ${readingTone}`
       : 'border-stone-200/80 bg-white/95 text-stone-900 shadow-stone-900/8 dark:border-stone-700 dark:bg-stone-900/95 dark:text-stone-100'
 
   const style = {

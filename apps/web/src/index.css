@@ -4,7 +4,77 @@
 @import "./styles/scrollbars.css";
 @import "@mdxeditor/editor/style.css" layer(components);
 
-@custom-variant dark (&:where(.dark, .dark *));
+/* `dark:` follows the system theme (html.dark) by default. Reader chrome
+   surfaces pin the axis to their own reading theme via tone classes
+   (.bd-tone-light suppresses dark:, .bd-tone-dark forces it) so mixed
+   system-dark/reader-light combinations stay coherent. */
+@custom-variant dark (&:is(.dark, .dark *, .bd-tone-dark, .bd-tone-dark *):not(:is(.bd-tone-light, .bd-tone-light *)));
+
+/* Semantic form tokens. The app axis defines :root (light) and .dark values;
+   reader surfaces override them on .bd-reader-surface with values derived from
+   the reading theme, so shared form controls (inputs, segmented controls,
+   toggles) follow whatever surface they sit on without per-call-site branching.
+   The .bd-reader-surface rule must stay after .dark so a surface that carries
+   both classes resolves to the reading theme. */
+:root {
+  --bd-field-bg: var(--color-white);
+  --bd-field-border: var(--color-stone-200);
+  --bd-field-focus-border: var(--color-stone-400);
+  --bd-field-text: var(--color-stone-700);
+  --bd-seg-track: var(--color-stone-100);
+  --bd-seg-chip-bg: var(--color-white);
+  --bd-seg-chip-text: var(--color-stone-900);
+  --bd-seg-text: var(--color-stone-500);
+  --bd-seg-text-hover: var(--color-stone-800);
+  --bd-toggle-on: var(--color-stone-900);
+  --bd-toggle-off: var(--color-stone-200);
+  --bd-toggle-knob: var(--color-white);
+  --bd-card-bg: color-mix(in srgb, var(--color-stone-50) 60%, transparent);
+  --bd-card-border: color-mix(in srgb, var(--color-stone-200) 80%, transparent);
+  --bd-divider: var(--color-stone-100);
+  --bd-label-text: var(--color-stone-500);
+  --bd-hint-text: var(--color-stone-400);
+}
+
+.dark {
+  --bd-field-bg: var(--color-stone-900);
+  --bd-field-border: var(--color-stone-700);
+  --bd-field-focus-border: var(--color-stone-500);
+  --bd-field-text: var(--color-stone-200);
+  --bd-seg-track: var(--color-stone-800);
+  --bd-seg-chip-bg: var(--color-stone-700);
+  --bd-seg-chip-text: var(--color-stone-100);
+  --bd-seg-text: var(--color-stone-400);
+  --bd-seg-text-hover: var(--color-stone-200);
+  --bd-toggle-on: var(--color-stone-100);
+  --bd-toggle-off: var(--color-stone-700);
+  --bd-toggle-knob: var(--color-stone-900);
+  --bd-card-bg: color-mix(in srgb, var(--color-stone-800) 40%, transparent);
+  --bd-card-border: var(--color-stone-800);
+  --bd-divider: var(--color-stone-800);
+  --bd-label-text: var(--color-stone-400);
+  --bd-hint-text: var(--color-stone-500);
+}
+
+.bd-reader-surface {
+  --bd-field-bg: var(--bd-read-page-bg);
+  --bd-field-border: color-mix(in srgb, var(--bd-read-text) 14%, transparent);
+  --bd-field-focus-border: color-mix(in srgb, var(--bd-read-text) 45%, transparent);
+  --bd-field-text: var(--bd-read-text);
+  --bd-seg-track: color-mix(in srgb, var(--bd-read-text) 8%, transparent);
+  --bd-seg-chip-bg: var(--bd-read-bg);
+  --bd-seg-chip-text: var(--bd-read-text);
+  --bd-seg-text: color-mix(in srgb, var(--bd-read-text) 55%, transparent);
+  --bd-seg-text-hover: var(--bd-read-text);
+  --bd-toggle-on: color-mix(in srgb, var(--bd-read-text) 65%, transparent);
+  --bd-toggle-off: color-mix(in srgb, var(--bd-read-text) 20%, transparent);
+  --bd-toggle-knob: var(--bd-read-bg);
+  --bd-card-bg: color-mix(in srgb, var(--bd-read-text) 4%, transparent);
+  --bd-card-border: color-mix(in srgb, var(--bd-read-text) 12%, transparent);
+  --bd-divider: color-mix(in srgb, var(--bd-read-text) 12%, transparent);
+  --bd-label-text: color-mix(in srgb, var(--bd-read-text) 60%, transparent);
+  --bd-hint-text: color-mix(in srgb, var(--bd-read-text) 45%, transparent);
+}
 
 /* Reader sidebar resize handle & active dragging cursor */
 .reader-resize-cursor {
