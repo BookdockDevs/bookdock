@@ -33,7 +33,11 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
   activeKey.current = key
   const latest = useRef(options)
   latest.current = options
+  // The token belongs to the stored record, not to this run of the effect: re-initialising
+  // for a new revision, a source reload or an edit-permission check must keep it, otherwise
+  // the following save or discard can no longer compare-and-delete the record it wrote.
   const token = useRef<string | null>(null)
+  const tokenKey = useRef<string | null>(null)
   const generation = useRef(0)
   const queue = useRef<Promise<void>>(Promise.resolve())
   const timerRef = useRef<number | null>(null)
@@ -60,7 +64,8 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
     const current = ++generationRef.current
     const authRevision = getAuthSessionRevision()
     const valid = () => generation.current === current && activeKey.current === key && activeOwner.current === ownerIdentity && (isLocal || getAuthSessionRevision() === authRevision && useAuthStore.getState().user?.id === accountId)
-    setReady(false); setFailure(null); setCandidate(null); setStatus('idle'); token.current = null; savedChangeToken.current = undefined
+    setReady(false); setFailure(null); setCandidate(null); setStatus('idle'); savedChangeToken.current = undefined
+    if (tokenKey.current !== key) { token.current = null; tokenKey.current = null }
     if (!key || !options.enabled || !options.revisionId) return () => { generationRef.current++ }
     void (async () => {
       try {
@@ -74,12 +79,12 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
           setReady(true)
           return
         }
-        token.current = parsed.data.token
+        token.current = parsed.data.token; tokenKey.current = key
         if (Date.now() - parsed.data.savedAt > DRAFT_MAX_AGE) {
           const removed = await replaceLocalDraft(key, parsed.data.token, null, valid)
           if (!valid()) return
           if (!removed) throw new Error('Draft changed in another tab')
-          token.current = null; setReady(true); return
+          token.current = null; tokenKey.current = null; setReady(true); return
         }
         const recovered = { ...parsed.data, payload: payload.data }
         if (parsed.data.revisionId === latest.current.revisionId) {
@@ -118,7 +123,7 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
         const written = await replaceLocalDraft(key, token.current, record, valid)
         if (!valid()) return
         if (!written) { setFailure('本地暂存失败：另一标签页已更新草稿。请复制当前修改后重新打开工作台。'); return }
-        token.current = record ? nextToken : null
+        token.current = record ? nextToken : null; tokenKey.current = record ? key : null
         if (record) savedChangeToken.current = snapshot.changeToken
         if (changeSequence.current === sequence) setStatus(record ? 'saved' : 'idle')
       }).catch(() => { if (valid()) setFailure('本地暂存失败，可能是存储不可用或空间不足；当前编辑不会受到本地保护。') })
@@ -133,7 +138,7 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
     const valid = () => generation.current === current && activeKey.current === key && activeOwner.current === ownerIdentity && (isLocal || useAuthStore.getState().user?.id === accountId)
     const removed = await replaceLocalDraft(key, candidate.token, null, valid)
     if (!removed) throw new Error('草稿已在另一标签页更新，请重新打开工作台。')
-    token.current = null; setCandidate(null); setReady(true)
+    token.current = null; tokenKey.current = null; setCandidate(null); setReady(true)
   }
 
   function restore() {
@@ -159,7 +164,7 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
       const record: LocalDraftRecord = { version: 1, key, revisionId: snapshot.revisionId!, token: nextToken, savedAt: Date.now(), payload: parsed.data }
       if (!await replaceLocalDraft(key, token.current, record, valid)) throw new Error('Local draft changed in another tab')
       if (!valid()) return
-      token.current = nextToken
+      token.current = nextToken; tokenKey.current = key
       savedChangeToken.current = snapshot.changeToken
       if (changeSequence.current === sequence) setStatus('saved')
       success = true
@@ -179,7 +184,7 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
     try {
       const removed = await replaceLocalDraft(key, token.current, null, valid)
       if (!removed) { if (valid()) setFailure('本地草稿已在另一标签页更新，未删除该草稿。'); return false }
-      token.current = null; setEpoch((value) => value + 1)
+      token.current = null; tokenKey.current = null; setEpoch((value) => value + 1)
       return true
     } catch { if (valid()) setFailure('本地暂存清理失败，请检查浏览器存储。'); return false }
   }

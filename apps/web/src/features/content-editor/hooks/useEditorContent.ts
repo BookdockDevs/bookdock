@@ -1,9 +1,9 @@
 import { useEffect, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { BookDetailRes, ClientLibraryDetailView, EditorAccessRes, EditorEpubLoadRes, EditorEpubSaveReq, EditorTxtDecodeRes, EditorTxtSaveReq, EditorTxtSaveRes } from '@bookdock/shared'
+import type { BookDetailRes, ClientLibraryDetailView, EditorAccessRes, EditorEpubSaveReq, EditorTxtDecodeRes, EditorTxtSaveReq, EditorTxtSaveRes } from '@bookdock/shared'
 
-import { apiGet, apiPut, apiUpload, BASE_URL } from '@/api/client'
+import { apiGet, apiPut, apiUpload } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
 import { useBook } from '@/features/library/hooks'
 import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
@@ -12,8 +12,18 @@ import { localRecordId } from '@/features/local-library/id'
 import { withReveal } from '@/lib/reveal-hidden'
 import type { EditorPublicationSource } from '../lib/editor-publication-source'
 import { editorSourceRevision } from '../lib/editor-publication-source'
+import {
+  editorEpubPath,
+  fetchEditorEpubSource,
+  fetchEditorTxtSource,
+  remoteEditorEpubSourceKey,
+  remoteEditorTxtSourceKey,
+  type ManagedEditorTarget,
+} from '../lib/editor-entry-prefetch'
 import { readEditorResource } from '@/features/local-library/epub-editor'
 import { fetchReaderManifest, ReaderContentSession } from '@/features/reader/lib/reader-content-client'
+
+export type { ManagedEditorTarget }
 
 export function editorContentUrl(book: Pick<BookDetailRes, 'id' | 'revisionId' | 'updatedAt'>): string {
   const revisionId = book.revisionId ? `&revisionId=${encodeURIComponent(book.revisionId)}` : ''
@@ -22,12 +32,6 @@ export function editorContentUrl(book: Pick<BookDetailRes, 'id' | 'revisionId' |
 
 export function useEditorBook(bookId: string) {
   return useBook(bookId)
-}
-
-export interface ManagedEditorTarget {
-  libraryId: string
-  libraryBookId: string
-  versionLinkId: string
 }
 
 export function editorAccessPath(bookId: string, target?: ManagedEditorTarget) {
@@ -84,6 +88,11 @@ function useSaveEditorContent<T extends EditorTxtSaveReq | EditorEpubSaveReq>(fo
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['book', bookId] }),
+        // The editor reads its book through ['books', 'detail', bookId]; without this the
+        // stale revisionId outlives the save, so the content request keeps the old revision
+        // and the server rejects it.
+        queryClient.invalidateQueries({ queryKey: ['books', 'detail', bookId] }),
+        queryClient.invalidateQueries({ queryKey: ['chapters', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['progress', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['annotations', bookId] }),
         queryClient.invalidateQueries({ queryKey: ['replacements', 'book', bookId] }),
@@ -95,22 +104,18 @@ function useSaveEditorContent<T extends EditorTxtSaveReq | EditorEpubSaveReq>(fo
   })
 }
 
-function editorEpubPath(bookId: string, target?: ManagedEditorTarget): string {
-  return target
-    ? `/libraries/${encodeURIComponent(target.libraryId)}/books/${encodeURIComponent(target.libraryBookId)}/versions/${encodeURIComponent(target.versionLinkId)}/content/${encodeURIComponent(bookId)}/editor-epub-content`
-    : `/books/${encodeURIComponent(bookId)}/editor-epub-content`
-}
-
 export function useEditorEpubSource(bookId: string, revisionId: string | null | undefined, enabled: boolean, target?: ManagedEditorTarget) {
   const local = useLocalCatalog()
   const epoch = getAuthSessionRevision()
   return useQuery({
-    queryKey: ['content-editor', 'epub-source', local ? `local:${JSON.stringify(local.scope)}:${bookId}` : bookId, revisionId, ...(local ? [] : [target?.versionLinkId, epoch])],
+    queryKey: local
+      ? ['content-editor', 'epub-source', `local:${JSON.stringify(local.scope)}:${bookId}`, revisionId]
+      : remoteEditorEpubSourceKey(bookId, revisionId, target, epoch),
     networkMode: local ? 'always' : 'online',
     queryFn: async ({ signal }) => {
       if (local) return local.operations.readEpubSource({ scope: local.scope, bookId }, revisionId!, signal)
       if (getAuthSessionRevision() !== epoch) throw new DOMException('Editor account changed', 'AbortError')
-      const result = await apiGet<{ data: EditorEpubLoadRes }>(editorEpubPath(bookId, target), signal)
+      const result = await fetchEditorEpubSource(bookId, target, signal)
       if (getAuthSessionRevision() !== epoch) throw new DOMException('Editor account changed', 'AbortError')
       return result
     },
@@ -137,16 +142,15 @@ export function useEditorTxtSource(book: ClientLibraryDetailView | undefined) {
   const local = useLocalCatalog()
   const epoch = getAuthSessionRevision()
   return useQuery({
-    queryKey: ['content-editor', local ? `local:${JSON.stringify(local.scope)}:${book?.id}` : book?.id, 'txt-source', book?.revisionId, ...(local ? [] : [epoch])],
+    queryKey: local
+      ? ['content-editor', `local:${JSON.stringify(local.scope)}:${book?.id}`, 'txt-source', book?.revisionId]
+      : remoteEditorTxtSourceKey(book?.id ?? '', book?.revisionId, epoch),
     networkMode: local ? 'always' : 'online',
     queryFn: async ({ signal }) => {
       if (!book) throw new Error('Book content is unavailable')
       if (local) return local.operations.readTxtSource({ scope: local.scope, bookId: book.id }, book.revisionId!, signal)
       if (getAuthSessionRevision() !== epoch) throw new DOMException('Editor account changed', 'AbortError')
-      const url = withReveal(`${BASE_URL}/books/${encodeURIComponent(book.id)}/content?revisionId=${encodeURIComponent(book.revisionId ?? '')}`)
-      const response = await fetch(url, { credentials: 'include', signal })
-      if (!response.ok) throw new Error('Book content could not be loaded')
-      const text = await response.text()
+      const text = await fetchEditorTxtSource(book, signal)
       if (getAuthSessionRevision() !== epoch) throw new DOMException('Editor account changed', 'AbortError')
       return text
     },

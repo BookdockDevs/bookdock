@@ -8,7 +8,7 @@ import { useToastStore } from '@/stores/toast.store'
 import ContentEditorPage from './ContentEditorPage'
 import { createUnits } from './lib/create-editor-units'
 
-const mocks = vi.hoisted(() => ({ save: vi.fn(), clear: vi.fn(), bookRevision: 'rev-1', pending: false, multiChapter: false }))
+const mocks = vi.hoisted(() => ({ save: vi.fn(), clear: vi.fn(), bookRevision: 'rev-1', pending: false, multiChapter: false, sourcePending: false }))
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: ReactNode }) => <a href="/books/book-1">{children}</a>,
@@ -29,7 +29,9 @@ vi.mock('./hooks/useEditorContent', () => ({
       { id: 'chapter-3', title: '第三章', level: 0, startOffset: third, contentStartOffset: third + 5, endOffset: source.length },
     ] } }
   },
-  useEditorTxtSource: () => ({ data: mocks.multiChapter ? '第一章\n\n正文一\n\n第二章\n\n正文二\n\n第三章\n\n正文三' : '第一章\n\n正文' }),
+  useEditorTxtSource: () => mocks.sourcePending
+    ? { data: undefined, isPending: true }
+    : { data: mocks.multiChapter ? '第一章\n\n正文一\n\n第二章\n\n正文二\n\n第三章\n\n正文三' : '第一章\n\n正文' },
   useSaveEditorTxt: () => ({ mutateAsync: mocks.save, isPending: mocks.pending }),
 }))
 
@@ -56,9 +58,19 @@ describe('ContentEditorPage', () => {
     mocks.bookRevision = 'rev-1'
     mocks.pending = false
     mocks.multiChapter = false
+    mocks.sourcePending = false
     mocks.save.mockReset().mockResolvedValue({ data: { revisionId: 'rev-2', changed: true, unlocated: { progress: 0, coverage: 0, highlights: 0, bookmarks: 0, notes: 0, pointReplacements: 0 } } })
     mocks.clear.mockReset().mockResolvedValue(undefined)
     useToastStore.getState().clearToasts()
+  })
+
+  it('paints the chapter list while the book text is still loading', async () => {
+    mocks.sourcePending = true
+    render(<ContentEditorPage />)
+
+    expect(await screen.findByText('第一章')).toBeInTheDocument()
+    expect(screen.getByText('正在载入编辑内容…')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '章节正文' })).not.toBeInTheDocument()
   })
 
   it('keeps text changes in one draft, supports undo, and saves against the opened revision', async () => {

@@ -299,7 +299,16 @@ booksRoutes.get('/:id/content', async (c) => {
   const id = c.req.param('id')
   const revisionId = c.req.query('revisionId')
   const content = await getBookContent(user.id, id, { showHidden: requestShowHidden(c), ...(revisionId ? { revisionId } : {}) })
-  return c.newResponse(content)
+  // A revision-pinned body can never change, so it is safe to reuse for a while.
+  // This is not the same trade-off as `streamBookFile`, which refuses HTTP caching
+  // because zip.js Range reads served from a multi-MB cache entry stall in Chrome;
+  // this response is read once as text and never range-requested.
+  // `private` keeps proxies out, and `Vary: Cookie` keeps one browser from handing a
+  // cached body to another account that reaches the same book and revision through a
+  // shared library — `private` alone does not split a browser cache per session.
+  return c.newResponse(content, 200, revisionId
+    ? { 'Cache-Control': 'private, max-age=300, immutable', Vary: 'Cookie' }
+    : { 'Cache-Control': 'private, no-store' })
 })
 
 booksRoutes.get('/:id/editor-access', async (c) => {

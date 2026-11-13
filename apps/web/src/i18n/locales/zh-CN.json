@@ -3211,6 +3211,7 @@
   "editor": {
     "opening": "正在打开编辑工作台…",
     "loadingContent": "正在载入编辑内容…",
+    "checkingAccess": "正在确认编辑权限…",
     "title": "内容编辑",
     "documentTitle": "{{title}} · 内容编辑",
     "save": "保存",

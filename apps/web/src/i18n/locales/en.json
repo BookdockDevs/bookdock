@@ -3145,6 +3145,7 @@
   "editor": {
     "opening": "Opening the editing workspace…",
     "loadingContent": "Loading content for editing…",
+    "checkingAccess": "Checking editing permissions…",
     "title": "Content Editor",
     "documentTitle": "{{title}} · Content Editor",
     "save": "Save Changes",

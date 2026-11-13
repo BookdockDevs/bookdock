@@ -2702,6 +2702,34 @@ describe('editor TXT save', () => {
     const deniedResponse = await denied.request(`/api/v1/books/${book.id}/editor-txt-decode`, { method: 'POST', body: deniedForm })
     expect(deniedResponse.status).toBe(404)
   })
+
+  it('reuses a revision-pinned TXT body privately but never across sessions', async () => {
+    const { book } = await uploadBook(ownerId, new File(['第一章\n\n正文'], 'book.txt', { type: 'text/plain' }))
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('/api/v1/*', async (c, next) => {
+      c.set('user', { id: ownerId, username: 'owner', role: 'owner', avatarKey: null })
+      return next()
+    })
+    app.route('/api/v1/books', booksRoutes)
+
+    const pinned = await app.request(`/api/v1/books/${book.id}/content?revisionId=${book.revisionId}`)
+    expect(pinned.status).toBe(200)
+    const cacheControl = pinned.headers.get('Cache-Control') ?? ''
+    expect(cacheControl).toContain('private')
+    expect(cacheControl).toContain('immutable')
+    expect(cacheControl).not.toContain('public')
+    // Passing an explicit header object must not drop the text content type.
+    expect(pinned.headers.get('Content-Type')).toContain('text/plain')
+    // A shared library exposes this same book and revision to other accounts, so a
+    // browser cache keyed on the URL alone would hand one user's body to another.
+    expect(pinned.headers.get('Vary')).toBe('Cookie')
+
+    // Without a revision the body tracks whatever is current and must not be reused.
+    const unpinned = await app.request(`/api/v1/books/${book.id}/content`)
+    expect(unpinned.status).toBe(200)
+    expect(unpinned.headers.get('Cache-Control')).toBe('private, no-store')
+  })
 })
 
 describe('editor EPUB save', () => {
@@ -2943,6 +2971,22 @@ describe('editor EPUB save', () => {
     await expect(saveEditorEpubContent(ownerId, book.id, {
       baseRevisionId: sourceRevisionId, documents: [], tocEntries: reopened.tocEntries, spineOrder: reopened.spineOrder,
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+
+  it('reuses the parsed package when the same revision is opened again', async () => {
+    const epub = await convertTxtToEpub({ title: 'EPUB Reopen', id: 'epub-reopen' }, [
+      { id: 'one', title: 'One', level: 0 }, { id: 'two', title: 'Two', level: 0 },
+    ], (index) => `<p>Body ${index + 1} is only read twice.</p>`)
+    const book = seedBook(db, ownerId, { format: 'epub', size: epub.length, filePath: `blobs/epub/${createId('hash')}.epub` })
+    await storage.getStorage().put(book.filePath, epub)
+
+    const first = await getEditorEpubContent(ownerId, book.id)
+    const read = vi.spyOn(storage.getStorage(), 'get')
+    const second = await getEditorEpubContent(ownerId, book.id)
+
+    expect(read).not.toHaveBeenCalled()
+    expect(second.documents).toBe(first.documents)
+    expect(second.revisionId).toBe(first.revisionId)
   })
 })
 

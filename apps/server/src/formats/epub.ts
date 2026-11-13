@@ -851,7 +851,11 @@ export async function extractEpubChapterText(buffer: Buffer, chapterIndex: numbe
 
 /** Read each spine document once; navigation entries are not book content. */
 export async function loadEpubSpineMarkup(buffer: Buffer): Promise<{ href: string; markup: string; coverPage: boolean }[]> {
-  const zip = await JSZip.loadAsync(buffer)
+  return loadEpubSpineMarkupFromZip(await JSZip.loadAsync(buffer))
+}
+
+/** Same as `loadEpubSpineMarkup` for callers that already opened the archive. */
+export async function loadEpubSpineMarkupFromZip(zip: JSZip): Promise<{ href: string; markup: string; coverPage: boolean }[]> {
   const findFile = createArchiveFileLookup(zip)
   const container = findFile('META-INF/container.xml')
   if (!container) throw new Error('Missing EPUB container')

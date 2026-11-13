@@ -2,6 +2,18 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Opening the content workbench now follows the reader's entry flow: the header and chapter list paint from cache while the text is still loading, the source request starts when you pick Content editing instead of after the page mounts, and EPUB packages are unzipped once and kept per revision, so reopening a book you just read no longer waits behind a full-screen spinner.
+- The editor's revision-pinned TXT request is now reused from the browser cache for five minutes, so reloading, navigating back, or opening the same revision in a second tab no longer re-downloads the whole book. The cached body stays private to that browser and is split per session, so a shared library cannot hand one member's copy to another account.
+
+### Fixed
+
+- Saving in the content workbench now refreshes the book detail and chapter list it reads, so a saved edit no longer strands the editor on its content-load error page and the reader no longer paints the previous table of contents when the book is reopened.
+- A successful save or an explicit draft discard now reliably removes the local draft, instead of leaving a pre-save draft that a later visit reported as never saved; local autosave also stops claiming another tab is editing after the workbench re-checks edit permission.
+
 ## [0.8.2] - 2026-11-13
 
 ### Highlights
@@ -1174,6 +1186,18 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [待发布]
+
+#### 优化
+
+- 打开编辑工作台改为与阅读器一致的入口流程：头部与章节列表先按缓存渲染、正文继续加载，正文请求在点击「内容编辑」时就发起而不再等页面挂载，EPUB 整包只解压一次并按修订缓存；刚读过的书再进编辑器不再卡在全屏加载上。
+- 编辑工作台按修订读取 TXT 正文的请求现在会在浏览器缓存中复用五分钟：刷新页面、后退或开第二个标签页重开同一修订时不再重新下载整本书。缓存仅限本浏览器并按会话隔离，共享书库不会把一位成员的副本发给另一位账号。
+
+#### 修复
+
+- 编辑工作台保存成功后会同步刷新它所读取的书籍详情与章节列表，保存后不再停留在「正文读取失败」错误页，重新打开书籍时阅读器也不会先渲染上一版目录。
+- 正式保存成功或手动放弃草稿后会可靠删除本地草稿，不再残留保存前的草稿、导致下次进入时被提示「此草稿尚未正式保存」；重新检查编辑权限后，本地自动暂存也不会再误报另有标签页正在编辑。
 
 ### [0.8.2] - 2026-11-13
 

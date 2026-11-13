@@ -22,6 +22,7 @@ import { notify } from '@/lib/notifications'
 import type { ToastMessage } from '@/stores/toast.store'
 
 import { invalidateDeviceMembershipQueries, useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useTags, useVersionTocState, useLibraryCategories, useLibraries } from '../hooks'
+import { warmEditorEntry } from '@/features/content-editor/lib/editor-entry-prefetch'
 
 import AppendContentModal from './AppendContentModal'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
@@ -412,6 +413,10 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
             icon: <path d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-4-4L4 16v4M13.5 6.5l4 4" />,
             onSelect: () => {
               closeDialog()
+              warmEditorEntry(queryClient, {
+                bookId: workVersion.bookVersionId,
+                target: { libraryId: work.library.id, libraryBookId: work.work.id, versionLinkId: workVersion.id },
+              })
               void navigate({
                 to: '/books/$id/editor',
                 params: { id: workVersion.bookVersionId },
@@ -584,6 +589,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           icon: <path d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-4-4L4 16v4M13.5 6.5l4 4" />,
           onSelect: () => {
             closeDialog()
+            warmEditorEntry(queryClient, { bookId: book.id })
             void navigate({ to: '/books/$id/editor', params: { id: book.id } })
           },
         },

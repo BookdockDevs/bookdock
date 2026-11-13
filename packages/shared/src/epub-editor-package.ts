@@ -77,7 +77,7 @@ function replaceChildren(parent: XmlElement, children: XmlElement[]) {
   for (const child of children) parent.appendChild(child)
 }
 
-export async function readEpubEditorPackage(source: Uint8Array, loadSpine?: (source: Uint8Array) => Promise<{ href: string; markup: string }[]>): Promise<Omit<EditorEpubLoadRes, 'revisionId'>> {
+export async function readEpubEditorPackage(source: Uint8Array, loadSpine?: (source: Uint8Array, zip: JSZip) => Promise<{ href: string; markup: string }[]>): Promise<Omit<EditorEpubLoadRes, 'revisionId'>> {
   const zip = await JSZip.loadAsync(source)
   const containerFile = zip.file('META-INF/container.xml')
   if (!containerFile) throw new Error('EPUB container document is missing')
@@ -95,7 +95,7 @@ export async function readEpubEditorPackage(source: Uint8Array, loadSpine?: (sou
     if (!item) throw new Error('EPUB spine references a missing manifest item')
     return archivePath(packagePath, item.getAttribute('href'))
   })
-  const documents = loadSpine ? await loadSpine(source) : await Promise.all(spineOrder.flatMap((href) => {
+  const documents = loadSpine ? await loadSpine(source, zip) : await Promise.all(spineOrder.flatMap((href) => {
     const item = manifestItems.find((item) => archivePath(packagePath, item.getAttribute('href')) === href)
     if (!item || !/^(application\/(xhtml\+xml|xml)|text\/html)$/i.test(item.getAttribute('media-type') ?? '') || (item.getAttribute('properties') ?? '').split(/\s+/).includes('nav')) return []
     return [(async () => { const file = zip.file(href); if (!file) throw new Error('EPUB spine document is missing'); return { href, markup: await file.async('string') } })()]
@@ -151,7 +151,7 @@ export async function readEpubEditorPackage(source: Uint8Array, loadSpine?: (sou
   return { documents: documents.map(({ href, markup }) => ({ href, content: markup })), tocEntries, spineOrder }
 }
 
-export async function patchEpubPackage(source: Uint8Array, request: EditorEpubSaveReq, loadSpine?: (source: Uint8Array) => Promise<{ href: string; markup: string }[]>): Promise<Uint8Array> {
+export async function patchEpubPackage(source: Uint8Array, request: EditorEpubSaveReq, loadSpine?: (source: Uint8Array, zip: JSZip) => Promise<{ href: string; markup: string }[]>): Promise<Uint8Array> {
   const zip = await JSZip.loadAsync(source)
   const containerFile = zip.file('META-INF/container.xml')
   if (!containerFile) throw new Error('EPUB container document is missing')

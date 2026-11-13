@@ -164,4 +164,17 @@ describe('local editor recovery', () => {
     expect(state.records.has(key)).toBe(false)
     expect(state.records.has(other)).toBe(true)
   })
+
+  it('keeps its record token across a source re-initialisation so the save can still clear it', async () => {
+    const key = draftKey('user-a', 'book', 'txt')
+    const { result, rerender } = renderHook(({ enabled }) => useLocalEditorDraft(options({ enabled })), { initialProps: { enabled: true } })
+    await waitFor(() => expect(state.records.get(key)?.payload).toEqual({ text: 'edited' }), { timeout: 3000 })
+    // A successful save refreshes the book and re-checks edit permission, which re-runs the
+    // initialisation effect without a usable source. The record stays stored, so the token
+    // must survive or the following clear() silently leaves the saved draft behind.
+    rerender({ enabled: false })
+    await waitFor(() => expect(result.current.ready).toBe(false))
+    await act(async () => { await result.current.clear() })
+    expect(state.records.has(key)).toBe(false)
+  })
 })

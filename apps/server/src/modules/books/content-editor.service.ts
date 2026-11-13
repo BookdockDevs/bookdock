@@ -29,6 +29,31 @@ import { cfiSpineIndex, createEpubCfiTextOffset, resolveEpubCfiTextStart } from 
 
 type RevisionProjection = Awaited<ReturnType<typeof createEpubRevisionMap>>
 
+/**
+ * Opening the EPUB workbench decompresses every spine document, which costs
+ * hundreds of milliseconds on a few-hundred-chapter book. Keeping the last two
+ * packages makes reopening (reload, second tab, back navigation) free; a save
+ * produces a new revision and therefore a new key, so entries go stale safely.
+ */
+const EDITOR_PACKAGE_CACHE_ENTRIES = 2
+const editorPackageCache = new Map<string, Omit<EditorEpubLoadRes, 'revisionId'>>()
+
+function cachedEditorPackage(key: string) {
+  const cached = editorPackageCache.get(key)
+  if (!cached) return undefined
+  editorPackageCache.delete(key)
+  editorPackageCache.set(key, cached)
+  return cached
+}
+
+function storeEditorPackage(key: string, value: Omit<EditorEpubLoadRes, 'revisionId'>) {
+  editorPackageCache.delete(key)
+  editorPackageCache.set(key, value)
+  while (editorPackageCache.size > EDITOR_PACKAGE_CACHE_ENTRIES) {
+    editorPackageCache.delete(editorPackageCache.keys().next().value!)
+  }
+}
+
 export interface EditorTarget {
   libraryId: string
   libraryBookId: string
@@ -182,10 +207,15 @@ export async function getEditorEpubContent(userId: string, bookId: string): Prom
   const book = await getActiveBook(userId, bookId, { showHidden: true })
   if (book.format !== 'epub') throw new AppError('UNSUPPORTED_FORMAT', 'EPUB editor content is unavailable for this format')
   if (!book.revisionId) throw new AppError('BOOK_NOT_FOUND', 'Book content revision is unavailable')
+  const cacheKey = `${book.filePath}:${book.revisionId}`
+  const cached = cachedEditorPackage(cacheKey)
+  if (cached) return { revisionId: book.revisionId, ...cached }
   const storage = getStorage()
   if (!(await storage.exists(book.filePath))) throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   try {
-    return { revisionId: book.revisionId, ...await readEpubEditorPackage(await bufferFromStream(await storage.get(book.filePath))) }
+    const parsed = await readEpubEditorPackage(await bufferFromStream(await storage.get(book.filePath)))
+    storeEditorPackage(cacheKey, parsed)
+    return { revisionId: book.revisionId, ...parsed }
   } catch (error) {
     throw new AppError('READER_ENTRY_FAILED', 'EPUB editor content could not be loaded', error instanceof Error ? error.message : undefined)
   }

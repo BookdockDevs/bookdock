@@ -46,6 +46,7 @@ import { createUnits } from './lib/create-editor-units'
 import { useEditorBook, useEditorChapters, useEditorTxtSource, useSaveEditorTxt } from './hooks/useEditorContent'
 import ContentToolDialog from './components/ContentToolDialog'
 import ContentEditorPending from './components/ContentEditorPending'
+import ContentEditorLoading from './components/ContentEditorLoading'
 import EpubContentEditor from './components/EpubContentEditor'
 import { useDraftNavigationGuard } from './hooks/useDraftNavigationGuard'
 import { ContentEditorHeader } from './components/ContentEditorHeader'
@@ -138,7 +139,10 @@ function ChapterSortableRow({
       onPointerMoveCapture={() => {
         if (isDragging) dragged.current = true
       }}
-      className={cn('relative min-w-0 list-none', isDragging && 'z-30 opacity-60')}
+      className={cn(
+        'relative min-w-0 list-none [content-visibility:auto] [contain-intrinsic-size:0_32px]',
+        isDragging && 'z-30 opacity-60',
+      )}
     >
       <button
         ref={setActivatorNodeRef}
@@ -460,6 +464,10 @@ function ContentEditorWorkbench() {
     return visible
   }, [chapterSearch, collapsedIds, draft])
 
+  // Rows used to call `draft.units.findIndex` per chapter, i.e. O(n²) on every
+  // keystroke re-render — 600k comparisons for a 777-chapter book.
+  const unitIndexById = useMemo(() => new Map(draft?.units.map((unit, index) => [unit.id, index])), [draft])
+
   const ruleSelectionChanged = Boolean(
     draft && JSON.stringify(draft.tocRuleSelection) !== JSON.stringify(draft.baselineTocRuleSelection),
   )
@@ -491,7 +499,7 @@ function ContentEditorWorkbench() {
   }
   if (access === 'error') return <main className="p-8 text-red-600">无法确认当前内容或编辑权限，请返回后重试。本地草稿已保留。</main>
   if (sourceQuery.isPending || chaptersQuery.isPending) {
-    return <ContentEditorPending stage="content" />
+    return <ContentEditorLoading bookId={book.id} title={book.title} chapters={chaptersQuery.data?.data} />
   }
   if (sourceQuery.isError || chaptersQuery.isError) {
     return (
@@ -501,13 +509,15 @@ function ContentEditorWorkbench() {
     )
   }
   if (!draft) {
+    return <ContentEditorLoading bookId={book.id} title={book.title} chapters={chaptersQuery.data?.data} />
+  }
+  if (access === 'pending' || (!localDraft.ready && !localDraft.candidate)) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-stone-50 p-8 text-sm text-stone-500 dark:bg-stone-950 dark:text-stone-400">
-        正在准备草稿…
+      <main role="status" aria-busy="true" className="flex min-h-screen items-center justify-center bg-stone-50 p-8 text-sm text-stone-500 dark:bg-stone-950 dark:text-stone-400">
+        {access === 'pending' ? _('editor.checkingAccess') : _('editor.loadingContent')}
       </main>
     )
   }
-  if (access === 'pending' || (!localDraft.ready && !localDraft.candidate)) return <main className="p-8">正在检查本地草稿…</main>
   if (localDraft.candidate) return <LocalDraftRecovery record={localDraft.candidate} revisionId={draftRevisionId.current!}
     text={localDraft.candidate.payload.units.map((item) => [item.title, item.content].filter(Boolean).join('\n\n')).filter(Boolean).join('\n\n')}
     onRestore={localDraft.restore} onDiscard={localDraft.discard} failure={localDraft.failure} />
@@ -797,7 +807,7 @@ function ContentEditorWorkbench() {
               >
                 <ol aria-label={_('editor.tocTitle') || '目录'} className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pl-2 pr-3 pt-1 pb-2 custom-scrollbar">
                   {visibleUnits.map((unit) => {
-                    const index = draft.units.findIndex((item) => item.id === unit.id)
+                    const index = unitIndexById.get(unit.id) ?? -1
                     const hasChildren = (draft.units[index + 1]?.level ?? 0) > (unit.level ?? 0)
                     const isCollapsed = collapsedIds.includes(unit.id)
                     const isActive = unit.id === activeUnit?.id
