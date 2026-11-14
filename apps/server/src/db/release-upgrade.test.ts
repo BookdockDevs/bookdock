@@ -84,7 +84,13 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
   await fs.mkdir(path.dirname(progressFile), { recursive: true })
   await fs.writeFile(progressFile, progress)
   const retainedTables = ['users', 'settings', 'libraries', 'library_books', 'library_book_versions', 'book_versions', 'content_revisions', 'bookmarks', 'ideas', 'ai_threads', 'ai_messages']
-  const before = retainedTables.map((table) => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
+  const stripVersionInheritance = (row: Record<string, unknown>) => {
+    const { title: _title, author: _author, authors: _authors, description: _description, ...retained } = row
+    return retained
+  }
+  const before = retainedTables.map((table) => (table === 'library_book_versions'
+    ? (sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all() as Array<Record<string, unknown>>).map(stripVersionInheritance)
+    : sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all()))
   const oldLedger = sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at').all()
   expect(oldLedger).toHaveLength(41)
   expect(sqlite.prepare('SELECT count(*) AS n FROM ai_chunks_fts').get()).toEqual({ n: 1 })
@@ -118,6 +124,13 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
   const after = retainedTables.map((table) => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
   const libraryBooksIndex = retainedTables.indexOf('library_books')
   after[libraryBooksIndex] = (after[libraryBooksIndex] as Array<Record<string, unknown>>).map(({ shelf_id: _shelfId, ...row }) => row)
+  // The work-projection startup migration intentionally copies the work's
+  // publication fields onto NULL version overrides; assert the backfill and
+  // exclude the fields from the byte-for-byte no-loss comparison.
+  const versionLinksIndex = retainedTables.indexOf('library_book_versions')
+  after[versionLinksIndex] = (after[versionLinksIndex] as Array<Record<string, unknown>>).map(stripVersionInheritance)
+  expect(sqlite.prepare('SELECT title, author, authors, description FROM library_book_versions WHERE id = ?').get('link'))
+    .toEqual({ title: 'Book', author: '', authors: '[]', description: '' })
   for (const table of ['bookmarks', 'ideas']) {
     const index = retainedTables.indexOf(table)
     after[index] = (after[index] as Array<Record<string, unknown>>).map(({ relocation: _relocation, import_key: _importKey, import_hash: _importHash, import_locator: _importLocator, import_chapter_index: _importChapterIndex, anchor_evidence: _anchorEvidence, ...row }) => row)

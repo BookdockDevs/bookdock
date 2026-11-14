@@ -291,6 +291,8 @@ export interface BookReader {
   followSelectionScroll?(callback: (deltaY: number, visible: boolean) => void): () => void
   /** Remove all search result highlights from the page */
   clearSearch(): void
+  /** Hide (or restore) drawn search highlights without discarding cached matches */
+  setSearchHighlightsVisible(visible: boolean): void
   /** Clear the DOM selection without emitting events — keeps React toolbar state */
   deselect(): void
   /** Resolve the live bounding rect of the currently clicked annotation */

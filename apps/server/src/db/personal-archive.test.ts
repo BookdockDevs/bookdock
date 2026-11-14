@@ -57,7 +57,9 @@ describe('personal archive upgrade', () => {
     const snapshot = () => tables.map((table) => (sqlite.prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>)
       .map((row) => {
         if (table === 'bookmarks' || table === 'ideas' || table === 'highlights') {
-          const { relocation: _relocation, import_key: _importKey, import_hash: _importHash, import_locator: _importLocator, import_chapter_index: _importChapterIndex, ...retained } = row
+          // 0063 adds anchor_evidence as a nullable column; NULL stays NULL, so
+          // the added column itself is excluded from the no-rewrite comparison.
+          const { relocation: _relocation, import_key: _importKey, import_hash: _importHash, import_locator: _importLocator, import_chapter_index: _importChapterIndex, anchor_evidence: _anchorEvidence, ...retained } = row
           return retained
         }
         return row

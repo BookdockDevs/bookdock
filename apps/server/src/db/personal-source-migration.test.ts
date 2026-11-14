@@ -33,6 +33,8 @@ it('creates a fresh database with the consolidated migration and repeats safely'
   } finally { sqlite.close() }
 })
 
+// Each case replays the full migration stack twice; 30s matches the other
+// migration suites' budget against whole-workspace parallel slowdown.
 it.each([0, 1, 2, 3])('preserves installed sources from historical state %i', async (state) => {
   const sqlite = new Database(':memory:')
   try {
@@ -60,7 +62,7 @@ it.each([0, 1, 2, 3])('preserves installed sources from historical state %i', as
       .toEqual([{ hash: migration.hash, created_at: sourceWhen }])
     expect(sqlite.pragma('foreign_key_check')).toEqual([])
   } finally { sqlite.close() }
-})
+}, 30_000)
 
 it('rejects unknown history without modifying the ledger or installed sources', async () => {
   const sqlite = new Database(':memory:')

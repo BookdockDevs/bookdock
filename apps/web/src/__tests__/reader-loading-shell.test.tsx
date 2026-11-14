@@ -21,6 +21,7 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('@/api/client', () => ({
   ApiError: class extends Error {},
+  BASE_URL: '/api/v1',
   apiGet: vi.fn(),
   apiPatch: vi.fn(),
   apiPut: vi.fn(),
