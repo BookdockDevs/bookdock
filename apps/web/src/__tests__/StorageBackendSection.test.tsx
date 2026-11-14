@@ -110,13 +110,13 @@ describe('StorageBackendSection', () => {
     renderSection()
 
     await waitFor(() => {
-      expect(screen.getByText('本地磁盘')).toBeInTheDocument()
+      expect(screen.getByText('服务器磁盘')).toBeInTheDocument()
     })
 
     expect(screen.getByText('存储管理')).toBeInTheDocument()
-    expect(screen.getByText('本地总占用')).toBeInTheDocument()
+    expect(screen.getByText('服务器磁盘占用')).toBeInTheDocument()
     expect(screen.getByText('书籍文件')).toBeInTheDocument()
-    expect(screen.getByText('本地可用空间')).toBeInTheDocument()
+    expect(screen.getByText('服务器可用空间')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '更改存储位置' })).toBeInTheDocument()
   })
 
@@ -124,7 +124,7 @@ describe('StorageBackendSection', () => {
     renderSection()
 
     await waitFor(() => {
-      expect(screen.getByText('本地磁盘')).toBeInTheDocument()
+      expect(screen.getByText('服务器磁盘')).toBeInTheDocument()
     })
 
     // Click to open modal via clickable capsule button
@@ -178,7 +178,7 @@ describe('StorageBackendSection', () => {
       expect(screen.getByText(/我的网盘/)).toBeInTheDocument()
     })
 
-    const clearBtn = screen.getByLabelText('清理本地缓存')
+    const clearBtn = screen.getByLabelText('清理服务器缓存')
     fireEvent.click(clearBtn)
 
     const confirmBtn = screen.getByRole('button', { name: '确认清理' })

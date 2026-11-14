@@ -2,46 +2,48 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.4] - 2026-11-15
+
+### Highlights
+
+- Import fonts directly into this browser for online and offline reading, with localized names and unified font management.
+- Share reading resources across the instance while keeping each account's enable switches and ordering independent.
+- Manage AI provider connections and models separately, with model discovery, testing, and remembered choices for chat and translation.
 
 ### Added
 
-- Reading resources share one visibility model: TOC rules, global text replacements, speech services and AI quick commands can each stay private or be published to every account, and only the instance owner may publish. Every account keeps its own enable switch and display order, and consumers never rewrite the publisher's row.
-- Speech services can be reordered and switched off without deleting them. Disabled services stay configured but disappear from the reader's engine picker, which follows your saved order.
-- Replacement rules can be drag-ordered in the same edit mode that renames and deletes them. The order is personal and drives both the settings list and the reader's execution order.
+- Added device fonts alongside system, builtin, and server fonts. Import TTF, OTF, WOFF, and WOFF2 files up to 100 MB each into the current browser without uploading them. Device fonts work with both device and server books, including while signed out or offline, and remain available after logout or account switches. Rename, enable, reorder, and delete them from the same fonts page, mixing sources in one shared order.
+- The fonts page's "+" menu offers "Add to server" and "Add to device". Device import remains available to guests and when member resource uploads are disabled; a failed server font list shows an inline error without blocking device fonts.
+- Instance owners can share TOC rules, global text replacements, speech services, and AI quick commands with all accounts. Each account keeps its own enable switches and ordering, with newly shared resources disabled by default for other accounts. Shared definitions remain editable only by their publisher; quick commands can also be copied for personal editing.
+- Speech services can be reordered and disabled without deleting their configuration or credentials. The reader's engine picker follows your saved order and excludes disabled services. New services append to the list, and editing or renaming no longer changes their position.
+- Text replacements support drag ordering in edit mode. Personal and shared global rules can be mixed in one personal order that applies to both the settings list and reading.
 
 ### Changed
 
-- Prefetched the reader Data sidebar's statistics and first page of records after the reading overview loads, reducing the wait on first open while retaining version consistency checks.
+- AI settings now separate provider connections from models. Manage a connection's credentials, discover models, choose which models are available, and test saved models in one dialog. Instance owners can share connections for other accounts to use with their own model preferences.
+- Chat and translation remember their last-used models separately and list only enabled models. If a selected model is no longer available, requests use the last-used available model for that surface, then the first available chat-capable model. Disabled models remain manageable in settings.
+- Font display names prefer the current interface language, then other available names and the filename; manual renames take priority. Device fonts and newly uploaded server fonts extract localized names, including from WOFF files. Existing server fonts keep their previous family names.
+- Raised the default per-file font limit from 20 MB to 100 MB for both device imports and server uploads (`FONT_UPLOAD_MAX_BYTES`).
+- When member resource uploads are disabled, members can still use downloaded builtin fonts but no longer see undownloaded entries or trigger new upstream downloads. The instance owner retains the full catalog and download controls.
+- Unified edit-mode controls across speech, fonts, dictionaries, TOC rules, and quick commands. Rows keep enable switches visible, while editing, deletion, and drag ordering appear in edit mode. Rule selection bars use consistent spacing and counts, and settings section titles show item counts.
+- Built-in TOC rules and AI quick commands remain personal copies for each account and cannot be published, avoiding duplicate presets in other accounts' lists.
+- Simplified labels and help text across general, library, reading, access-control, and integration settings. Clarified server disk and cache controls, device storage, trash retention, and permanent deletion; moved sidebar sorting guidance into an information popover and retained key access-link and token warnings in Legado import guidance.
+- Prefetched the reader Data sidebar's statistics and first page of records after the reading overview loads, reducing the wait on first open while retaining data-version checks.
 - Completed missing interface translations, including the review editor, and removed unused translation keys.
-- AI settings separate provider connections from models. Add one connection per provider, choose which discovered models are exposed, and test models on demand — all in one dialog per connection. Chat and translation remember the model you last used on each surface and only list enabled models; a choice that no longer resolves is ignored, and the next available model serves the request.
-- The reading settings cards (speech, fonts, dictionaries, TOC rules, quick commands) share one edit-mode interaction: rows show enable switches, and edit, delete and drag ordering appear only in edit mode. AI provider entries show just the endpoint, and section titles carry item counts.
-- Simplified settings labels and help text across general, library, reading, access control and integration settings. Key-retention guidance appears only for saved credentials, and sidebar sorting guidance moved into a click-to-open information bubble.
-- Distinguished server disk and cache controls from device storage, clarified trash retention and permanent-deletion behavior, and simplified Legado import guidance while keeping access-link and token warnings explicit.
-- Built-in TOC presets stay personal copies: each account is seeded its own version, so publishing one is rejected instead of adding a duplicate preset to other accounts.
 
 ### Removed
 
-- AI profiles: the `/ai/profiles` endpoints, the `profiles`/`activeProfileId` settings fields and the profile-based translation channel are gone. Conversations, retry recipes and the saved translation choice now reference a model id, and existing settings are converted during the upgrade.
+- Replaced AI profiles and the `/api/v1/ai/profiles` endpoints with connections and models. Conversations, retry records, and translation choices now reference model IDs; the old profile fields and account default-model setting are replaced by separate last-used choices for chat and translation.
 
 ### Fixed
 
-- Reordering text replacements no longer moves rules the settings list does not show. The personal order only permutes the global rules it lists, so book-scoped rules keep their execution position.
-- Font and dictionary rows no longer apply general visual transitions to drag transforms, keeping sortable positioning separate from hover and selection effects.
-- Confirmation dialogs keep their action label while a request is pending unless a custom progress label is supplied; pending indicators and interaction locks remain in place.
+- Fixed replacement-rule ordering moving rules that the settings list does not show. Reordering global rules preserves book-scoped rules' execution positions, keeping server and device books consistent.
+- Fixed font and dictionary row transitions interfering with drag positioning by keeping hover effects separate from sorting animations.
+- Confirmation dialogs retain their action label while submitting unless a custom progress label is supplied, while preserving pending indicators and interaction locks.
 
-## [0.8.4] - 2026-11-14
+### Upgrade notes
 
-### Added
-
-- Added device fonts as a fourth font source. Import TTF, OTF, WOFF, and WOFF2 files (up to 100 MB each) into the current browser's site storage without uploading them; device fonts work logged in, as a guest, or offline, on both device and server books, and survive logout and account switches. Manage them from the same fonts page with rename, enable/disable, drag ordering, and delete; they can interleave freely with the other sources in the shared sort order.
-- The fonts page "+" button now offers "Add to server" and "Add to device" entries. Device import stays available to guests and when the instance disables member uploads; a failed server font list only shows an inline error and never blocks device fonts.
-- Font display names now prefer the name matching your interface language (for example the Chinese name of a CJK font), falling back to other languages and the file name. Manual renames always win. Device fonts and newly uploaded server fonts extract these localized names, including from WOFF files; fonts uploaded before this release keep their existing family name.
-
-### Changed
-
-- Raised the per-file font size limit from 20 MB to 100 MB, for both device imports and server uploads (`FONT_UPLOAD_MAX_BYTES` default).
-- When the instance disables member resource uploads, members no longer see builtin fonts that were never downloaded, and selecting a font can no longer trigger an upstream download; already-downloaded builtin fonts remain usable. The instance owner keeps the full catalog with download entries, and unrestricted instances are unaffected.
+- Startup automatically migrates existing AI profiles, model selections, translation preferences, and quick commands to the new structure. Reading-resource enable switches and ordering are stored separately for each account.
 
 ## [0.8.3] - 2026-11-14
 
@@ -1269,55 +1271,48 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [待发布]
+### [0.8.4] - 2026-11-15
+
+#### 亮点
+
+- 字体可直接导入当前浏览器，支持离线阅读、本地化名称和统一管理。
+- 阅读资源可向实例内所有账号开放，每个账号独立管理启用状态和顺序。
+- AI 设置拆分为供应商连接与模型，支持发现、测试模型，并分别记住对话和翻译的选择。
 
 #### 新增
 
-- 朗读服务可以调整顺序和临时停用，无需删除。停用后配置与密钥都保留，只是不再出现在阅读器的引擎列表中；引擎列表按你保存的顺序显示，新建服务追加在末尾，不再因为改名或被编辑而跳到最前。
-- 阅读资源统一了可见范围：目录规则、全局替换和朗读服务都可以选择「仅自己」或「所有用户」，只有实例所有者能发布给所有用户。每个账号各自保存启用状态和显示顺序，共享资源不会改写发布者自己的设置。
-- AI 设置拆分为「供应商连接」和「模型」两层：按供应商添加连接，选择要暴露的模型，可随时测试，并设置个人默认模型供新对话和翻译使用。
-- 文本替换规则可以在编辑模式里拖动排序（与改名、删除同一个模式）。顺序属于个人偏好，自己的规则和公开规则可以混排，设置列表和阅读器的执行顺序都按它生效。
+- 新增「本机字体」，与系统、内置、服务器字体统一管理。支持导入 TTF、OTF、WOFF、WOFF2 文件，单个最大 100 MB，仅保存在当前浏览器中，不上传服务器。本机书籍与服务器书籍均可使用，未登录或离线时也可用，退出登录和切换账号不影响。支持改名、启停、拖拽排序和删除，不同来源的字体可自由混排。
+- 字体页的「+」菜单提供「添加到服务器」和「添加到本机」入口。游客及关闭成员资源上传的实例仍可导入本机字体；服务器字体列表加载失败时显示内联提示，不影响本机字体使用。
+- 实例所有者可将目录规则、全局文本替换、朗读服务和 AI 快捷指令开放给所有账号。每个账号独立保存启用状态和顺序，新开放的资源对其他账号默认关闭；共享定义仅由发布者编辑，快捷指令还可复制后自行修改。
+- 朗读服务支持排序和停用，无需删除配置与密钥。阅读器的引擎列表按个人顺序显示，并隐藏已停用的服务；新服务追加到末尾，改名或编辑不再改变位置。
+- 文本替换支持在编辑模式中拖拽排序。自己的全局规则与共享规则可混排，个人顺序同时用于设置列表和阅读时的规则执行。
 
-#### 调整
+#### 优化
 
-- 阅读器加载阅读概览后会提前获取数据侧页的统计和首屏记录，减少首次打开时的等待，同时保留数据版本一致性检查。
+- AI 设置拆分为供应商连接与模型，可在同一个连接弹窗中管理凭证、发现模型、选择可用模型并测试已保存的模型。实例所有者可共享连接，其他账号独立管理模型使用偏好。
+- 对话和翻译分别记住最近使用的模型，选择器仅列出已启用的模型。所选模型失效时，请求会依次尝试该场景最近使用的可用模型、首个可用的对话模型；停用的模型仍可在设置中管理。
+- 字体显示名称优先匹配当前界面语言，再回退到其他可用名称和文件名，手动改名始终优先。本机字体与新上传的服务器字体会提取本地化名称，包括 WOFF 文件；已有服务器字体保留原有家族名。
+- 本机导入与服务器上传的字体单文件默认上限从 20 MB 提升到 100 MB（`FONT_UPLOAD_MAX_BYTES`）。
+- 关闭成员「上传阅读资源」权限后，普通成员仍可使用已下载的内置字体，但不再显示未下载条目，也不能触发新的上游下载；实例所有者保留完整目录和下载入口。
+- 统一朗读、字体、词典、目录规则和快捷指令的编辑模式：启用开关常驻，编辑、删除和拖拽排序收在编辑模式中。规则列表的选择栏统一间距与数量显示，设置分区标题增加条目计数。
+- 内置目录规则和 AI 快捷指令保持每个账号独立一份，不允许共享，避免在其他账号的列表中产生重复预设。
+- 精简通用、书库、阅读、访问控制和集成设置的名称与说明，区分服务器磁盘、缓存和本机存储，明确回收站保留期限及永久删除行为。侧栏排序说明改为信息气泡，开源阅读导入指引保留免登录链接和访问令牌的关键提醒。
+- 阅读概览加载后，提前获取阅读器数据侧页的统计和首屏记录，减少首次打开时的等待，同时保留数据版本一致性检查。
 - 补齐界面翻译，包括书评编辑器，并清理不再使用的翻译键。
-- 设置 → 阅读的朗读卡片改用与字体、词典、目录规则一致的编辑模式：行右侧是启用开关，改名、删除和拖拽排序收在铅笔按钮之后（此处按钮提示为「完成」，因为该列表不是「保存排序」语义）。供应商列表改为由「+」图标按钮打开，菜单定位与同页其他卡片一致。
-- 精简通用、书库、阅读、访问控制及集成设置的名称和说明。仅在已有凭证时提示留空保留密钥；明确字体和词典的可用范围及实例所有者权限，并在字体导入菜单中直接展示本机保存说明。
-- 将侧栏拖拽排序说明移到「侧栏导航项」旁的点击气泡中，移除重复的行内排序说明；精简开源阅读导入指引，保留免登录链接和访问令牌的关键提醒。
-- 区分服务器磁盘、缓存与本机存储，明确回收站保留期限和永久删除行为，移除关于页面链接的重复说明，中英文文案同步调整。
-- 统一目录规则和文本替换编辑模式下的全选、选中数量栏，调整间距、分隔线和计数对齐。
-- 选中文本翻译默认使用你的默认模型；也可以在翻译卡片里改选其他模型，该选择只作用于当前翻译。对话内选定的模型同样只影响该对话，不修改账号默认。
-- 目录规则和朗读服务的排序属于个人偏好：调整只改变自己的列表，不影响共享定义的顺序。
-- 实例所有者公开的规则会出现在设置列表中，你可以逐条启用、停用和调整顺序；这些规则的正文只有发布者能改，所有者在目录规则和文本替换编辑器里就能直接选择可用范围。
-- 删除 AI 模型或连接不再改写你的默认模型选择：下一次请求会明确提示模型不可用，设置页也会标出已失效的选择，不会再悄悄切到部署提供的模型。
-- 翻译选定的模型不再被自动替换：模型被删除、停用或取消共享后，卡片保留你的选择、停止翻译并提示重新选择，而不是悄悄改用账号默认模型。
-- 对话和翻译的模型选择器只列出你已启用的模型；停用的模型仍可在设置中看到和管理。
-- 内置目录规则始终是个人的副本：每个账号都有一份自己的内置规则，因此编辑器不再提供可用范围，发布内置规则也会被拒绝，避免在其他账号的列表里多出一条重复预设。
 
 #### 移除
 
-- AI 配置档：`/ai/profiles` 接口、设置中的 `profiles`/`activeProfileId` 字段以及按配置档翻译的方式已移除。对话、重试记录和已保存的翻译选择改为记录模型 ID，升级时会自动转换现有配置。
+- AI 配置档及 `/api/v1/ai/profiles` 接口改由连接与模型取代。对话、重试记录和翻译选择改为引用模型 ID；旧配置档字段和账号默认模型设置改由对话、翻译各自最近使用的模型取代。
 
 #### 修复
 
-- 选择已删除的模型或连接时返回明确的 404/409，不再是笼统的服务器错误；阅读器会直接提示「所选模型已不可用」。
-- 字体和词典列表的通用视觉过渡不再作用于拖拽位移，避免与排序动画叠加。
-- 确认弹窗提交期间默认保留操作按钮原文案，仍显示等待状态并锁定操作；显式指定进度文案时继续使用该文案。
-- 调整替换规则顺序不再改变设置列表里看不到的规则：个人顺序只重排条目中的全局规则，本书规则保留原有执行位置，服务器书籍与本机书籍的替换结果保持一致。
+- 修复调整替换规则顺序时影响设置列表中不可见规则的问题。重排全局规则会保留本书规则的执行位置，使服务器书籍与本机书籍的结果保持一致。
+- 修复字体和词典列表的视觉过渡干扰拖拽定位的问题，将悬停效果与排序动画分开处理。
+- 确认弹窗提交期间默认保留操作按钮原文案，同时显示等待状态并锁定操作；指定进度文案时继续使用该文案。
 
-### [0.8.4] - 2026-11-14
+#### 升级说明
 
-#### 新增
-
-- 新增第四种字体来源「本机字体」。支持导入 TTF、OTF、WOFF、WOFF2 文件（单个最大 100 MB），仅保存在当前浏览器的站点存储中，不上传服务器；登录、游客或离线状态均可用，本机书籍与服务器书籍通用，退出登录和切换账号不影响。与系统、在线、服务器字体在同一页面管理，支持改名、启停、拖拽排序和删除，可与任意来源自由混排。
-- 字体页的「+」按钮改为「添加到服务器」与「添加到本机」两个入口。本机导入对游客和关闭资源上传的实例始终可用；服务器字体列表加载失败只显示内联提示，不影响本机字体。
-- 字体显示名称优先匹配当前界面语言（例如中日韩字体显示中文名），无对应语言时回退其他语言和文件名；手动改名始终优先。本机字体与本次之后上传的服务器字体都会提取本地化名称（WOFF 也支持）；在此之前上传的字体沿用原有家族名。
-
-#### 调整
-
-- 字体单文件大小上限从 20 MB 提升到 100 MB（本机导入与服务器上传一致，`FONT_UPLOAD_MAX_BYTES` 默认值）。
-- 实例关闭「上传阅读资源」后，普通成员不再显示从未下载过的内置字体，选择字体也不会触发上游下载；已下载的内置字体仍可使用。实例所有者保留完整目录和下载入口，未关闭该开关的实例不受影响。
+- 启动时自动将已有 AI 配置档、模型选择、翻译偏好和快捷指令迁移到新结构；阅读资源的启用状态和顺序按账号独立保存。
 
 ### [0.8.3] - 2026-11-14
 

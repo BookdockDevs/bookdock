@@ -754,6 +754,8 @@
     "downloadSuccessCount": "下载成功的 {{count}} 本",
     "retryFailedCount": "重试失败的 {{count}} 本",
     "downloadContent": "文本版本",
+    "original": "原文",
+    "edited": "校订版",
     "downloadEditedHint": "应用你为本书启用的文本替换规则。",
     "downloadRulesFailed": "文本替换规则加载失败，请重试。",
     "downloadNoText": "这本书没有可导出的文字，可能是图片或扫描书。",

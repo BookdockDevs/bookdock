@@ -762,6 +762,8 @@
     "downloadSuccessCount": "Download {{count}} successful books",
     "retryFailedCount": "Retry {{count}} failed books",
     "downloadContent": "Text version",
+    "original": "Original",
+    "edited": "Edited version",
     "downloadEditedHint": "Apply your enabled text replacement rules for this book.",
     "downloadRulesFailed": "Could not load text replacement rules. Please retry.",
     "downloadNoText": "This book has no text to export. It may contain only images or scanned pages.",

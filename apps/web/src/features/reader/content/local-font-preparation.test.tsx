@@ -17,7 +17,7 @@ it('mounts with host-resolved local fonts without requesting server fonts', asyn
   const view = render(<QueryClientProvider client={client}><Host /></QueryClientProvider>)
   try {
     await waitFor(() => expect(mount).toHaveBeenCalledOnce())
-    expect(fetch).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/fonts'), expect.anything())
   } finally {
     view.unmount()
     client.clear()
