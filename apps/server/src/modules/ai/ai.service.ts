@@ -1,9 +1,7 @@
-import crypto from 'node:crypto'
-
 import { and, eq } from 'drizzle-orm'
 
 import { AI_CORE_SYSTEM_PROMPT, AI_CORE_TOOL_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CONTEXT_CHARS, AI_TOOL_NAMES, createAiContextCitations, expandAiPrompt, getAiModelCapabilityFlags, getAiPromptVariables, isAiEmbeddingModel, normalizeAiCitationMarkers, normalizeAiToolName } from '@bookdock/shared'
-import type { AiAssistantMode, AiAssistantModeInput, AiChatReq, AiCitation, AiConfigRes, AiConfigTestReq, AiConfigUpdateReq, AiConnectionTestRes, AiContextPlan, AiContextReceipt, AiContextTruncationReason, AiConversationSettings, AiGenerationDiagnostics, AiGenerationUsage, AiHistoryMessage, AiLocalChatReq, AiModelCapabilities, AiModelDiscoveryReq, AiModelKind, AiModelRes, AiNormalizedEvent, AiProfileCreateReq, AiProfileRes, AiProfileUpdateReq, AiPromptTemplate, AiPromptTemplateInput, AiPromptVariable, AiProvider, AiProviderRes, AiProtocol, AiReadingScope, AiRetryRecipe, AiStatusRes, AiToolName } from '@bookdock/shared'
+import type { AiAssistantMode, AiAssistantModeInput, AiChatReq, AiCitation, AiConfigRes, AiConfigUpdateReq, AiConnectionModelTestRes, AiContextPlan, AiContextReceipt, AiContextTruncationReason, AiConversationSettings, AiGenerationDiagnostics, AiGenerationUsage, AiHistoryMessage, AiLocalChatReq, AiModelCapabilities, AiModelKind, AiModelRes, AiNormalizedEvent, AiPromptVariable, AiProvider, AiProviderRes, AiProtocol, AiReadingScope, AiRetryRecipe, AiStatusRes, AiToolName } from '@bookdock/shared'
 
 import { config } from '../../config'
 import { getDb } from '../../db/client'
@@ -16,42 +14,14 @@ import { getProgress } from '../progress/progress.service'
 import { AI_TOOL_MAX_CALLS, AI_TOOL_MAX_CONCURRENCY, AI_TOOL_MAX_STEPS, AI_TOOL_MAX_RESULT_CHARS, AI_TOOL_MAX_TOTAL_RESULT_CHARS, AI_TOOLS, createAiToolBudgetExecution, createAiToolDisabledExecution, createAiToolRepeatedExecution, executeAiToolWithPolicy, getAiToolDefinition, isAiToolEnabled, type AiToolCall, type AiToolDefinition, type AiToolExecution } from './ai.tools'
 import { createAiCheckpointWriter, finalizeAiGenerationRun, setAiGenerationTargetMessage, startAiGenerationRun, transitionAiGenerationRun, cancelAiGenerationRun as cancelStoredAiGenerationRun, getAiGenerationRun } from './ai.runs.service'
 import { createAiAssistantDraft, prepareAiThread, saveAiMessage, updateAiMessageContext } from './ai.sessions.service'
+import { assertChatCapable, connectionExecution, getAiCatalog, readAiSettings, readLastUsedModels, resolveAiExecution, resolveExplicitModel, AI_SETTINGS_KEY, type AiModelExecution } from './ai.connections.service'
+import { aiPromptsRestoreAvailable, effectiveAiPrompts, listAiPrompts, resolveAiPromptForExecution } from './ai.prompts.service'
+import { AI_PROVIDERS, assertDraftBaseUrlAllowed, requiresApiKey } from './ai.providers'
 
 const MAX_PROVIDER_INPUT_CHARS = AI_MAX_CONTEXT_CHARS
-const MAX_MODEL_OPTIONS = 200
-const MAX_AI_PROFILES = 12
-const MAX_AI_PROMPTS = 24
+const MAX_MODEL_OPTIONS = 500
 const MAX_ASSISTANT_MODE_PROMPT_CHARS = 2_000
 
-const AI_SETTINGS_KEY = 'ai'
-
-const PROVIDERS: readonly AiProviderRes[] = [
-  { id: 'openai', name: 'OpenAI', protocol: 'openai-compatible', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: null, requiresApiKey: true },
-  { id: 'anthropic', name: 'Claude', protocol: 'anthropic', defaultBaseUrl: 'https://api.anthropic.com', defaultModel: 'claude-3-5-sonnet-latest', requiresApiKey: true },
-  { id: 'gemini', name: 'Gemini', protocol: 'gemini', defaultBaseUrl: 'https://generativelanguage.googleapis.com', defaultModel: 'gemini-2.5-flash', requiresApiKey: true },
-  { id: 'ollama', name: 'Ollama', protocol: 'ollama', defaultBaseUrl: 'http://localhost:11434', defaultModel: 'llama3.2', requiresApiKey: false },
-  { id: 'lmstudio', name: 'LM Studio', protocol: 'openai-compatible', defaultBaseUrl: 'http://localhost:1234/v1', defaultModel: null, requiresApiKey: false },
-  { id: 'deepseek', name: 'DeepSeek', protocol: 'openai-compatible', defaultBaseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-chat', requiresApiKey: true },
-  { id: 'qwen', name: '通义千问', protocol: 'openai-compatible', defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', requiresApiKey: true },
-  { id: 'glm', name: '智谱 GLM', protocol: 'openai-compatible', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4-flash', requiresApiKey: true },
-  { id: 'moonshot', name: 'Moonshot / Kimi', protocol: 'openai-compatible', defaultBaseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'moonshot-v1-8k', requiresApiKey: true },
-  { id: 'openrouter', name: 'OpenRouter', protocol: 'openai-compatible', defaultBaseUrl: 'https://openrouter.ai/api/v1', defaultModel: null, requiresApiKey: true },
-  { id: 'siliconflow', name: 'SiliconFlow', protocol: 'openai-compatible', defaultBaseUrl: 'https://api.siliconflow.cn/v1', defaultModel: null, requiresApiKey: true },
-  { id: 'minimax', name: 'MiniMax', protocol: 'openai-compatible', defaultBaseUrl: 'https://api.minimaxi.com/v1', defaultModel: 'MiniMax-Text-01', requiresApiKey: true },
-  { id: 'mimo', name: 'MiMo', protocol: 'openai-compatible', defaultBaseUrl: 'https://api.xiaomimimo.com/v1', defaultModel: null, requiresApiKey: true },
-]
-
-const PROVIDER_MAP = new Map(PROVIDERS.map((provider) => [provider.id, provider]))
-
-const DEFAULT_AI_PROMPTS: readonly AiPromptTemplateInput[] = [
-  { id: 'explain-selection', name: '解释这段', prompt: '请解释以下内容，并说明其中的关键概念和隐含信息。\n\n内容：\n{SELTEXT}', scope: 'selection', enabled: true, order: 10 },
-  { id: 'translate-selection', name: '翻译这段', prompt: '请翻译以下内容；处理好指代、语气和专有名词，保留原意，不要擅自补充信息。\n\n待翻译内容：\n{SELTEXT}', scope: 'selection', enabled: true, order: 20 },
-  { id: 'summarize-selection', name: '概括这段', prompt: '请概括以下内容，提炼主要信息和关键细节；只根据提供的内容回答，不要补充未出现的事实。\n\n内容：\n{SELTEXT}', scope: 'selection', enabled: true, order: 30 },
-  { id: 'questions-selection', name: '提出问题', prompt: '请围绕以下内容提出 3—5 个有助于理解和思考的问题，并简要说明每个问题关注的文本线索。\n\n内容：\n{SELTEXT}', scope: 'selection', enabled: true, order: 40 },
-  { id: 'summarize-chapter', name: '总结当前章节', prompt: '请根据下面提供的当前章节正文，梳理主要情节、人物关系和关键线索；只依据这段正文回答，不要补充未提供的内容。\n\n当前章节正文：\n{CHAPTER}', scope: 'reading', enabled: true, order: 50 },
-]
-
-const DEFAULT_AI_PROMPT_IDS = new Set(DEFAULT_AI_PROMPTS.map((prompt) => prompt.id))
 const DEFAULT_ASSISTANT_MODE: AiAssistantMode = { id: 'assistant', name: '助理', prompt: AI_DEFAULT_ASSISTANT_MODE_PROMPT, builtIn: true }
 const DEFAULT_LAST_USED_CONVERSATION_SETTINGS: AiConversationSettings = {
   readingScope: AI_DEFAULT_READING_SCOPE,
@@ -59,29 +29,7 @@ const DEFAULT_LAST_USED_CONVERSATION_SETTINGS: AiConversationSettings = {
   assistantModeId: DEFAULT_ASSISTANT_MODE.id,
 }
 
-interface StoredAiConfig {
-  profiles?: StoredAiProfile[] | null
-  activeProfileId?: string | null
-  prompts?: AiPromptTemplateInput[] | null
-  modes?: AiAssistantModeInput[] | null
-  defaultAssistantMode?: AiAssistantModeInput | null
-  lastUsedConversationSettings?: AiConversationSettings | null
-}
-
-interface StoredAiProfile {
-  id: string
-  name: string
-  provider: AiProvider
-  baseUrl: string | null
-  model: string | null
-  models: AiModelRes[]
-  embeddingModel: string | null
-  embeddingModels: AiModelRes[]
-  encryptedApiKey: string | null
-  createdAt: number
-  updatedAt: number
-}
-
+/** Provider-facing projection of a resolved model; never carries model ids. */
 interface EffectiveAiConfig {
   provider: AiProvider
   protocol: AiProtocol
@@ -101,145 +49,21 @@ interface AiChatStream {
   receipt: AiContextReceipt
 }
 
-function encryptionKey() {
-  return crypto.createHash('sha256').update(config.jwtSecret).digest()
-}
-
-function encryptApiKey(value: string | null) {
-  if (!value?.trim()) return ''
-  const iv = crypto.randomBytes(12)
-  const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey(), iv)
-  const ciphertext = Buffer.concat([cipher.update(value.trim(), 'utf8'), cipher.final()])
-  return [iv, cipher.getAuthTag(), ciphertext].map((part) => part.toString('base64url')).join('.')
-}
-
-function decryptApiKey(value: string | undefined) {
-  if (!value) return undefined
-  try {
-    const [ivEncoded, tagEncoded, ciphertextEncoded] = value.split('.')
-    if (!ivEncoded || !tagEncoded || !ciphertextEncoded) return undefined
-    const decipher = crypto.createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(ivEncoded, 'base64url'))
-    decipher.setAuthTag(Buffer.from(tagEncoded, 'base64url'))
-    return Buffer.concat([
-      decipher.update(Buffer.from(ciphertextEncoded, 'base64url')),
-      decipher.final(),
-    ]).toString('utf8') || undefined
-  } catch {
-    return undefined
-  }
-}
-
-function storedConfig(userId: string): { id?: string; exists: boolean; value: StoredAiConfig } {
-  const row = getDb()
-    .select()
-    .from(settings)
-    .where(and(eq(settings.userId, userId), eq(settings.key, AI_SETTINGS_KEY)))
-    .get()
-  if (!row || typeof row.value !== 'object' || row.value === null || Array.isArray(row.value)) {
-    return { exists: false, value: {} }
-  }
-  return { id: row.id, exists: true, value: row.value as StoredAiConfig }
-}
-
-function normalizeProvider(value: unknown): AiProvider {
-  return typeof value === 'string' && PROVIDER_MAP.has(value as AiProvider)
-    ? value as AiProvider
-    : 'openai'
-}
-
-function storedProfiles(value: StoredAiConfig): StoredAiProfile[] {
-  if (!Array.isArray(value.profiles)) return []
-  return value.profiles.slice(0, MAX_AI_PROFILES).flatMap((raw) => {
-    if (!raw || typeof raw !== 'object') return []
-    const candidate = raw as Partial<StoredAiProfile>
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : ''
-    if (!id) return []
-    const now = Date.now()
-    const createdAt = typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt) ? candidate.createdAt : now
-    const updatedAt = typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt) ? candidate.updatedAt : createdAt
-    return [{
-      id,
-      name: typeof candidate.name === 'string' ? candidate.name.trim().slice(0, 100) : '',
-      provider: normalizeProvider(candidate.provider),
-      baseUrl: typeof candidate.baseUrl === 'string' ? candidate.baseUrl.trim() || null : null,
-      model: typeof candidate.model === 'string' ? candidate.model.trim() || null : null,
-      models: normalizeModels(candidate.models),
-      embeddingModel: typeof candidate.embeddingModel === 'string' ? candidate.embeddingModel.trim() || null : null,
-      embeddingModels: normalizeModels(candidate.embeddingModels),
-      encryptedApiKey: typeof candidate.encryptedApiKey === 'string' ? candidate.encryptedApiKey : null,
-      createdAt,
-      updatedAt,
-    }]
-  })
-}
-
-function activeStoredProfile(value: StoredAiConfig, profiles = storedProfiles(value)) {
-  const activeId = typeof value.activeProfileId === 'string' ? value.activeProfileId.trim() : ''
-  return profiles.find((profile) => profile.id === activeId) ?? profiles[0]
-}
-
-function profileEffectiveConfig(profile: StoredAiProfile): EffectiveAiConfig {
-  const provider = normalizeProvider(profile.provider)
-  const catalog = PROVIDER_MAP.get(provider)!
+function executionConfig(execution: AiModelExecution): EffectiveAiConfig {
   return {
-    provider,
-    protocol: catalog.protocol,
-    baseUrl: profile.baseUrl?.trim() || catalog.defaultBaseUrl || undefined,
-    model: profile.model?.trim() || catalog.defaultModel || undefined,
-    apiKey: decryptApiKey(profile.encryptedApiKey ?? undefined),
-    configuredByUser: true,
+    provider: execution.provider,
+    protocol: execution.protocol,
+    ...(execution.baseUrl ? { baseUrl: execution.baseUrl } : {}),
+    ...(execution.apiKey ? { apiKey: execution.apiKey } : {}),
+    ...(execution.upstreamModelId ? { model: execution.upstreamModelId } : {}),
+    configuredByUser: execution.configuredByUser,
   }
 }
 
-function writeStoredConfig(userId: string, existing: { id?: string; exists: boolean; value: StoredAiConfig }, value: StoredAiConfig) {
-  const db = getDb()
-  if (existing.exists && existing.id) {
-    db.update(settings).set({ value }).where(eq(settings.id, existing.id)).run()
-    return
-  }
-  db.insert(settings).values({
-    id: createId('setting'),
-    userId,
-    key: AI_SETTINGS_KEY,
-    value,
-  }).run()
-}
-
-function defaultAiPrompts(): AiPromptTemplate[] {
-  return DEFAULT_AI_PROMPTS.map((prompt) => ({ ...prompt, scope: prompt.scope ?? 'both', enabled: prompt.enabled !== false, order: prompt.order ?? 0, builtIn: true }))
-}
-
-function normalizePromptTemplates(prompts: readonly AiPromptTemplateInput[] | null | undefined): AiPromptTemplate[] {
-  const seen = new Set<string>()
-  const normalized: AiPromptTemplate[] = []
-  for (const prompt of prompts ?? []) {
-    if (!prompt || typeof prompt !== 'object') continue
-    const id = typeof prompt.id === 'string' ? prompt.id.trim().slice(0, 100) : ''
-    const name = typeof prompt.name === 'string' ? prompt.name.trim().slice(0, 80) : ''
-    const content = typeof prompt.prompt === 'string' ? prompt.prompt.trim().slice(0, 2_000) : ''
-    const scope = prompt.scope === 'selection' || prompt.scope === 'reading' || prompt.scope === 'both' ? prompt.scope : 'both'
-    if (!id || !name || !content || seen.has(id)) continue
-    seen.add(id)
-    normalized.push({
-      id,
-      name,
-      prompt: content,
-      scope,
-      enabled: prompt.enabled !== false,
-      order: typeof prompt.order === 'number' && Number.isFinite(prompt.order) ? Math.max(0, Math.min(10_000, Math.trunc(prompt.order))) : normalized.length,
-      builtIn: DEFAULT_AI_PROMPT_IDS.has(id),
-    })
-    if (normalized.length >= MAX_AI_PROMPTS) break
-  }
-  return normalized.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
-}
-
-function storedPrompts(value: StoredAiConfig): AiPromptTemplate[] {
-  return Array.isArray(value.prompts) ? normalizePromptTemplates(value.prompts) : defaultAiPrompts()
-}
-
-function storedPromptInputs(prompts: readonly AiPromptTemplate[]): AiPromptTemplateInput[] {
-  return prompts.map(({ id, name, prompt, enabled, order }) => ({ id, name, prompt, enabled, order }))
+function writeStoredPrompts(userId: string, value: Record<string, unknown>) {
+  const row = getDb().select().from(settings).where(and(eq(settings.userId, userId), eq(settings.key, AI_SETTINGS_KEY))).get()
+  if (row) getDb().update(settings).set({ value }).where(eq(settings.id, row.id)).run()
+  else getDb().insert(settings).values({ id: createId('setting'), userId, key: AI_SETTINGS_KEY, value }).run()
 }
 
 function normalizeAssistantModes(modes: readonly AiAssistantModeInput[] | null | undefined): AiAssistantMode[] {
@@ -258,7 +82,7 @@ function normalizeAssistantModes(modes: readonly AiAssistantModeInput[] | null |
   return normalized
 }
 
-function storedAssistantModes(value: StoredAiConfig): AiAssistantMode[] {
+function storedAssistantModes(value: { modes?: AiAssistantModeInput[] | null; defaultAssistantMode?: AiAssistantModeInput | null }): AiAssistantMode[] {
   const saved = value.defaultAssistantMode
   const name = typeof saved?.name === 'string' ? saved.name.trim().slice(0, 80) : ''
   const prompt = typeof saved?.prompt === 'string' ? saved.prompt.trim().slice(0, MAX_ASSISTANT_MODE_PROMPT_CHARS) : ''
@@ -283,178 +107,67 @@ function normalizeConversationSettings(value: unknown, modes: readonly AiAssista
   return { readingScope, enabledTools, assistantModeId }
 }
 
-function storedLastUsedConversationSettings(value: StoredAiConfig): AiConversationSettings {
-  return normalizeConversationSettings(value.lastUsedConversationSettings, storedAssistantModes(value))
+function storedLastUsedConversationSettings(value: { lastUsedConversationSettings?: AiConversationSettings | null }, modes: readonly AiAssistantMode[]): AiConversationSettings {
+  return normalizeConversationSettings(value.lastUsedConversationSettings, modes)
 }
 
 function storedAssistantModeInputs(modes: readonly AiAssistantMode[]): AiAssistantModeInput[] {
   return modes.filter((mode) => !mode.builtIn).map(({ id, name, prompt }) => ({ id, name, prompt }))
 }
 
-function profileModels(profile: StoredAiProfile): AiModelRes[] {
-  return normalizeModels([
-    ...profile.models,
-    ...profile.embeddingModels,
-    ...(profile.model ? [{ id: profile.model, name: profile.model }] : []),
-    ...(profile.embeddingModel ? [{ id: profile.embeddingModel, name: profile.embeddingModel }] : []),
-  ])
+export function listAiProviders(): readonly AiProviderRes[] {
+  return AI_PROVIDERS
 }
 
-function profileEmbeddingModels(profile: StoredAiProfile): AiModelRes[] {
-  return embeddingModelsFor(profileModels(profile), profile.embeddingModel)
-}
-
-function selectedEmbeddingModel(models: readonly AiModelRes[], configuredModel?: string | null) {
-  const normalized = normalizeModels(models)
-  const configured = configuredModel?.trim()
-  if (configured && normalized.some((model) => model.id === configured)) return configured
-  return normalized.find(isAiEmbeddingModel)?.id ?? null
-}
-
-function embeddingModelsFor(models: readonly AiModelRes[], configuredModel?: string | null) {
-  const normalized = normalizeModels(models)
-  const selected = selectedEmbeddingModel(normalized, configuredModel)
-  const selectedEntry = selected ? normalized.find((model) => model.id === selected) : undefined
-  return normalizeModels([
-    ...(selectedEntry ? [selectedEntry] : []),
-    ...normalized.filter(isAiEmbeddingModel),
-  ])
-}
-
-function toProfileRes(profile: StoredAiProfile): AiProfileRes {
+/** Shared projection of the personal settings document, used by status and config. */
+function personalSettings(userId: string) {
+  const stored = readAiSettings(userId)
+  const modes = storedAssistantModes({
+    modes: stored.modes as AiAssistantModeInput[] | null | undefined,
+    defaultAssistantMode: stored.defaultAssistantMode as AiAssistantModeInput | null | undefined,
+  })
   return {
-    id: profile.id,
-    name: profile.name,
-    provider: profile.provider,
-    baseUrl: profile.baseUrl,
-    model: profile.model,
-    models: profileModels(profile),
-    embeddingModel: profile.embeddingModel,
-    embeddingModels: profileEmbeddingModels(profile),
-    apiKeyConfigured: Boolean(decryptApiKey(profile.encryptedApiKey ?? undefined)),
-    createdAt: profile.createdAt,
-    updatedAt: profile.updatedAt,
+    stored,
+    modes,
+    lastUsedConversationSettings: storedLastUsedConversationSettings({
+      lastUsedConversationSettings: stored.lastUsedConversationSettings as AiConversationSettings | null | undefined,
+    }, modes),
   }
 }
 
-function effectiveConfig(userId: string): EffectiveAiConfig {
-  const stored = storedConfig(userId)
-  const profiles = storedProfiles(stored.value)
-  const activeProfile = activeStoredProfile(stored.value, profiles)
-  if (activeProfile) return profileEffectiveConfig(activeProfile)
-  const provider = normalizeProvider(config.aiProvider)
-  const catalog = PROVIDER_MAP.get(provider)!
+export function getAiStatus(userId: string): AiStatusRes {
+  const catalog = getAiCatalog(userId)
+  const personal = personalSettings(userId)
+  // This payload feeds the chat selector, which is an execution surface: a model
+  // that is switched off cannot run, so it is not offered here. The management
+  // list (`/ai/config`) still shows it to its owner.
+  const models = catalog.models.filter((model) => model.enabled)
   return {
-    provider,
-    protocol: catalog.protocol,
-    baseUrl: config.aiBaseUrl ?? catalog.defaultBaseUrl ?? undefined,
-    model: config.aiModel ?? catalog.defaultModel ?? undefined,
-    apiKey: config.aiApiKey,
-    configuredByUser: false,
-  }
-}
-
-function configured(ai: EffectiveAiConfig) {
-  return Boolean(ai.baseUrl && ai.model && (!requiresApiKey(ai) || ai.apiKey))
-}
-
-function canonicalBaseUrl(value: string) {
-  return value.replace(/\/+$/, '').toLowerCase()
-}
-
-function memberBaseUrlAllowed(provider: AiProvider, baseUrl: string | null | undefined) {
-  const defaultBaseUrl = PROVIDER_MAP.get(provider)?.defaultBaseUrl
-  if (!defaultBaseUrl || !baseUrl) return false
-  const normalized = canonicalBaseUrl(baseUrl)
-  const normalizedDefault = canonicalBaseUrl(defaultBaseUrl)
-  return normalized === normalizedDefault || (provider === 'deepseek' && normalized === `${normalizedDefault}/v1`)
-}
-
-function assertBaseUrlAllowed(role: string, ai: EffectiveAiConfig) {
-  if (role !== 'member' || !ai.configuredByUser || memberBaseUrlAllowed(ai.provider, ai.baseUrl)) return
-  throw new AppError('AI_NOT_ALLOWED', 'Members can only use the default provider endpoint')
-}
-
-function assertDraftBaseUrlAllowed(role: string, provider: AiProvider, baseUrl: string | null | undefined) {
-  if (role !== 'member' || !baseUrl || memberBaseUrlAllowed(provider, baseUrl)) return
-  throw new AppError('AI_NOT_ALLOWED', 'Members can only use the default provider endpoint')
-}
-
-export function listAiProviders() {
-  return PROVIDERS
-}
-
-function assertAvailable(role: string, ai: EffectiveAiConfig) {
-  assertBaseUrlAllowed(role, ai)
-  if (!configured(ai)) {
-    throw new AppError('AI_NOT_CONFIGURED', 'AI is not configured on this server')
-  }
-}
-
-function requiresApiKey(ai: EffectiveAiConfig) {
-  const provider = PROVIDER_MAP.get(ai.provider)
-  if (!provider?.requiresApiKey) return false
-  if (ai.provider !== 'openai') return true
-  const baseUrl = ai.baseUrl?.replace(/\/+$/, '').toLowerCase()
-  return !baseUrl || baseUrl === 'https://api.openai.com/v1'
-}
-
-export function getAiStatus(userId: string, role: string): AiStatusRes {
-  const ai = effectiveConfig(userId)
-  const stored = storedConfig(userId)
-  const profiles = storedProfiles(stored.value)
-  const activeProfile = activeStoredProfile(stored.value, profiles)
-  const models = activeProfile ? profileModels(activeProfile) : []
-  if (ai.model && !models.some((model) => model.id === ai.model)) models.unshift({ id: ai.model, name: ai.model })
-  return {
-    enabled: configured(ai) && (role !== 'member' || !ai.configuredByUser || memberBaseUrlAllowed(ai.provider, ai.baseUrl)),
-    provider: ai.provider,
-    model: ai.model,
+    enabled: models.length > 0,
+    lastUsedModelId: readLastUsedModels(userId).chat,
     models,
-    prompts: storedPrompts(stored.value).filter((prompt) => prompt.enabled),
-    modes: storedAssistantModes(stored.value),
-    lastUsedConversationSettings: storedLastUsedConversationSettings(stored.value),
-    activeProfileId: activeProfile?.id ?? null,
+    prompts: effectiveAiPrompts(userId),
+    modes: personal.modes,
+    lastUsedConversationSettings: personal.lastUsedConversationSettings,
   }
 }
 
 export function getAiConfig(userId: string): AiConfigRes {
-  const ai = effectiveConfig(userId)
-  const stored = storedConfig(userId)
-  const profiles = storedProfiles(stored.value)
-  const activeProfile = activeStoredProfile(stored.value, profiles)
-  const models = activeProfile ? profileModels(activeProfile) : []
-  if (ai.model && !models.some((model) => model.id === ai.model)) models.unshift({ id: ai.model, name: ai.model })
+  const catalog = getAiCatalog(userId)
+  const personal = personalSettings(userId)
   return {
-    activeProfileId: activeProfile?.id ?? null,
-    profiles: profiles.map(toProfileRes),
-    provider: ai.provider,
-    baseUrl: ai.baseUrl ?? null,
-    model: ai.model ?? null,
-    models,
-    prompts: storedPrompts(stored.value),
-    modes: storedAssistantModes(stored.value),
-    lastUsedConversationSettings: storedLastUsedConversationSettings(stored.value),
-    apiKeyConfigured: Boolean(ai.apiKey),
-    configuredByUser: ai.configuredByUser,
+    connections: catalog.connections,
+    models: catalog.models,
+    lastUsedModels: readLastUsedModels(userId),
+    prompts: listAiPrompts(userId),
+    promptsRestoreAvailable: aiPromptsRestoreAvailable(userId),
+    modes: personal.modes,
+    lastUsedConversationSettings: personal.lastUsedConversationSettings,
   }
 }
 
 export function updateAiConfig(userId: string, input: AiConfigUpdateReq): AiConfigRes {
-  const existing = storedConfig(userId)
-  const profiles = storedProfiles(existing.value)
-  const activeProfile = activeStoredProfile(existing.value, profiles)
-  const activeId = Object.hasOwn(input, 'activeProfileId') ? input.activeProfileId?.trim() || null : (existing.value.activeProfileId?.trim() || activeProfile?.id || null)
-  if (activeId && !profiles.some((profile) => profile.id === activeId)) throw new AppError('AI_PROFILE_NOT_FOUND', 'AI profile not found')
-  const value: StoredAiConfig = {
-    profiles,
-    activeProfileId: activeId,
-    prompts: existing.value.prompts,
-    modes: existing.value.modes,
-    defaultAssistantMode: existing.value.defaultAssistantMode,
-    lastUsedConversationSettings: existing.value.lastUsedConversationSettings,
-  }
-  if (Object.hasOwn(input, 'prompts')) value.prompts = input.prompts === null ? storedPromptInputs(defaultAiPrompts()) : storedPromptInputs(normalizePromptTemplates(input.prompts))
+  const value: Record<string, unknown> = { ...readAiSettings(userId) as Record<string, unknown> }
   if (Object.hasOwn(input, 'modes')) value.modes = input.modes === null ? [] : storedAssistantModeInputs(normalizeAssistantModes(input.modes))
   if (Object.hasOwn(input, 'defaultAssistantMode')) {
     if (input.defaultAssistantMode === null) {
@@ -468,96 +181,11 @@ export function updateAiConfig(userId: string, input: AiConfigUpdateReq): AiConf
       value.defaultAssistantMode = { id: DEFAULT_ASSISTANT_MODE.id, name, prompt }
     }
   }
-  if (Object.hasOwn(input, 'lastUsedConversationSettings')) value.lastUsedConversationSettings = normalizeConversationSettings(input.lastUsedConversationSettings, storedAssistantModes(value))
-  writeStoredConfig(userId, existing, value)
+  if (Object.hasOwn(input, 'lastUsedConversationSettings')) {
+    value.lastUsedConversationSettings = normalizeConversationSettings(input.lastUsedConversationSettings, storedAssistantModes(value))
+  }
+  writeStoredPrompts(userId, value)
   return getAiConfig(userId)
-}
-
-function updateStoredProfile(profile: StoredAiProfile, input: AiProfileUpdateReq): StoredAiProfile {
-  const next = { ...profile, updatedAt: Date.now() }
-  const nextProvider = input.provider ? normalizeProvider(input.provider) : profile.provider
-  const providerChanged = nextProvider !== normalizeProvider(profile.provider)
-  if (Object.hasOwn(input, 'name')) next.name = input.name?.trim().slice(0, 100) ?? ''
-  if (Object.hasOwn(input, 'provider') && input.provider) next.provider = nextProvider
-  if (providerChanged && !Object.hasOwn(input, 'baseUrl')) next.baseUrl = PROVIDER_MAP.get(next.provider)?.defaultBaseUrl ?? null
-  if (Object.hasOwn(input, 'baseUrl')) next.baseUrl = input.baseUrl?.trim() || null
-  if (Object.hasOwn(input, 'model')) next.model = input.model?.trim() || null
-  if (Object.hasOwn(input, 'models')) {
-    next.models = normalizeModels(input.models)
-    next.embeddingModel = selectedEmbeddingModel(next.models, next.embeddingModel)
-    next.embeddingModels = embeddingModelsFor(next.models, next.embeddingModel)
-  }
-  if (providerChanged && !Object.hasOwn(input, 'embeddingModel')) {
-    next.embeddingModel = null
-    next.embeddingModels = []
-  }
-  if (Object.hasOwn(input, 'embeddingModel')) next.embeddingModel = input.embeddingModel?.trim() || null
-  if (Object.hasOwn(input, 'embeddingModels')) next.embeddingModels = normalizeModels(input.embeddingModels)
-  if (Object.hasOwn(input, 'apiKey')) next.encryptedApiKey = encryptApiKey(input.apiKey ?? null) || null
-  if (providerChanged && !Object.hasOwn(input, 'apiKey')) next.encryptedApiKey = null
-  if (next.model && !next.models.some((model) => model.id === next.model)) next.models = [{ id: next.model, name: next.model }, ...next.models]
-  return next
-}
-
-function profileFromCreate(input: AiProfileCreateReq): StoredAiProfile {
-  const provider = normalizeProvider(input.provider)
-  const catalog = PROVIDER_MAP.get(provider)!
-  const model = input.model?.trim() || catalog.defaultModel || null
-  const models = normalizeModels(input.models)
-  if (model && !models.some((item) => item.id === model)) models.unshift({ id: model, name: model })
-  const requestedEmbeddingModel = input.embeddingModel?.trim() || null
-  if (requestedEmbeddingModel && !models.some((item) => item.id === requestedEmbeddingModel)) models.push({ id: requestedEmbeddingModel, name: requestedEmbeddingModel })
-  const embeddingModel = selectedEmbeddingModel(models, requestedEmbeddingModel)
-  const now = Date.now()
-  return {
-    id: createId('ai-profile'),
-    name: input.name.trim().slice(0, 100) || catalog.name,
-    provider,
-    baseUrl: Object.hasOwn(input, 'baseUrl') ? input.baseUrl?.trim() || null : catalog.defaultBaseUrl,
-    model,
-    models,
-    embeddingModel,
-    embeddingModels: embeddingModelsFor(models, embeddingModel),
-    encryptedApiKey: encryptApiKey(input.apiKey ?? null) || null,
-    createdAt: now,
-    updatedAt: now,
-  }
-}
-
-export function createAiProfile(userId: string, role: string, input: AiProfileCreateReq): AiProfileRes {
-  assertDraftBaseUrlAllowed(role, normalizeProvider(input.provider), input.baseUrl)
-  const existing = storedConfig(userId)
-  const profiles = storedProfiles(existing.value)
-  if (profiles.length >= MAX_AI_PROFILES) throw new AppError('VALIDATION_ERROR', 'Too many AI profiles')
-  const profile = profileFromCreate(input)
-  if (profiles.some((item) => item.name.trim().toLowerCase() === profile.name.trim().toLowerCase())) throw new AppError('VALIDATION_ERROR', 'An AI profile with this name already exists')
-  writeStoredConfig(userId, existing, { ...existing.value, profiles: [profile, ...profiles], activeProfileId: profile.id })
-  return toProfileRes(profile)
-}
-
-export function updateAiProfile(userId: string, role: string, profileId: string, input: AiProfileUpdateReq): AiProfileRes {
-  const existing = storedConfig(userId)
-  const profiles = storedProfiles(existing.value)
-  const profile = profiles.find((item) => item.id === profileId)
-  if (!profile) throw new AppError('AI_PROFILE_NOT_FOUND', 'AI profile not found')
-  const nextProvider = normalizeProvider(input.provider ?? profile.provider)
-  const nextBaseUrl = Object.hasOwn(input, 'baseUrl')
-    ? input.baseUrl
-    : nextProvider !== profile.provider ? PROVIDER_MAP.get(nextProvider)?.defaultBaseUrl : profile.baseUrl
-  assertDraftBaseUrlAllowed(role, nextProvider, nextBaseUrl)
-  const updated = updateStoredProfile(profile, input)
-  if (profiles.some((item) => item.id !== profileId && item.name.trim().toLowerCase() === updated.name.trim().toLowerCase())) throw new AppError('VALIDATION_ERROR', 'An AI profile with this name already exists')
-  writeStoredConfig(userId, existing, { ...existing.value, profiles: profiles.map((item) => item.id === profileId ? updated : item), activeProfileId: existing.value.activeProfileId?.trim() || profileId })
-  return toProfileRes(updated)
-}
-
-export function deleteAiProfile(userId: string, role: string, profileId: string) {
-  const existing = storedConfig(userId)
-  const profiles = storedProfiles(existing.value)
-  if (!profiles.some((profile) => profile.id === profileId)) throw new AppError('AI_PROFILE_NOT_FOUND', 'AI profile not found')
-  const nextProfiles = profiles.filter((profile) => profile.id !== profileId)
-  const nextActive = nextProfiles.find((profile) => profile.id === existing.value.activeProfileId)?.id ?? nextProfiles[0]?.id ?? null
-  writeStoredConfig(userId, existing, { ...existing.value, profiles: nextProfiles, activeProfileId: nextActive })
 }
 
 function normalizeModels(models: readonly AiModelRes[] | null | undefined): AiModelRes[] {
@@ -1055,36 +683,28 @@ function parseModelList(value: unknown, protocol: AiProtocol, kind?: AiModelKind
   return normalizeModels([...models.values()])
 }
 
-function draftConfig(userId: string, input: AiModelDiscoveryReq | AiConfigTestReq): EffectiveAiConfig {
-  const stored = storedConfig(userId)
-  const saved = effectiveConfig(userId)
-  const profileId = input.profileId?.trim() || ''
-  const sourceProfile = profileId
-    ? storedProfiles(stored.value).find((profile) => profile.id === profileId)
-    : undefined
-  if (profileId && !sourceProfile) throw new AppError('AI_PROFILE_NOT_FOUND', 'AI profile not found')
-  const provider = normalizeProvider(input.provider)
-  const catalog = PROVIDER_MAP.get(provider)!
-  const baseUrl = Object.hasOwn(input, 'baseUrl')
-    ? input.baseUrl?.trim() || undefined
-    : provider === saved.provider ? saved.baseUrl : catalog.defaultBaseUrl ?? undefined
-  const savedProfileKey = sourceProfile && normalizeProvider(sourceProfile.provider) === provider
-    ? decryptApiKey(sourceProfile.encryptedApiKey ?? undefined)
-    : undefined
-  const apiKey = input.apiKey?.trim() || savedProfileKey
-  return {
-    provider,
-    protocol: catalog.protocol,
-    baseUrl,
-    apiKey,
-    model: 'model' in input ? input.model.trim() : undefined,
-    configuredByUser: false,
-  }
+/**
+ * Discovery and testing only run against a saved connection, so stored
+ * credentials are never reusable by an unauthenticated draft and every call
+ * re-authorizes the caller as the connection's owner.
+ */
+async function discoverProviderModels(role: string, ai: EffectiveAiConfig, kind: AiModelKind | undefined, signal: AbortSignal): Promise<AiModelRes[]> {
+  assertDraftBaseUrlAllowed(role, ai.provider, ai.baseUrl)
+  assertProviderRequestable(ai, false)
+  const response = await fetchProvider(modelsEndpoint(ai), { headers: providerHeaders(ai) }, signal)
+  if (!response.ok) throw await providerResponseError(response)
+  const payload = await response.json().catch(() => null)
+  return parseModelList(payload, ai.protocol, kind)
+}
+
+/** Discovers models for a saved connection using its stored credential; owner only. */
+export async function discoverAiConnectionModels(userId: string, role: string, connectionId: string, kind: AiModelKind | undefined, signal: AbortSignal): Promise<AiModelRes[]> {
+  return discoverProviderModels(role, executionConfig(connectionExecution(userId, connectionId)), kind, signal)
 }
 
 function assertProviderRequestable(ai: EffectiveAiConfig, requireModel: boolean) {
   if (!ai.baseUrl) throw new AppError('AI_NOT_CONFIGURED', 'AI service URL is required')
-  if (requiresApiKey(ai) && !ai.apiKey) throw new AppError('AI_NOT_CONFIGURED', 'AI API key is required')
+  if (requiresApiKey(ai.provider, ai.baseUrl) && !ai.apiKey) throw new AppError('AI_NOT_CONFIGURED', 'AI API key is required')
   if (requireModel && !ai.model) throw new AppError('AI_NOT_CONFIGURED', 'AI model is required')
 }
 
@@ -1163,17 +783,7 @@ function parseEmbeddingResponse(value: unknown, protocol: AiProtocol): number[][
   })
 }
 
-export async function listAiModels(userId: string, role: string, input: AiModelDiscoveryReq, signal: AbortSignal): Promise<AiModelRes[]> {
-  const ai = draftConfig(userId, input)
-  assertDraftBaseUrlAllowed(role, ai.provider, ai.baseUrl)
-  assertProviderRequestable(ai, false)
-  const response = await fetchProvider(modelsEndpoint(ai), { headers: providerHeaders(ai) }, signal)
-  if (!response.ok) throw await providerResponseError(response)
-  const payload = await response.json().catch(() => null)
-  return parseModelList(payload, ai.protocol, input.kind)
-}
-
-async function testProvider(ai: EffectiveAiConfig, signal: AbortSignal): Promise<AiConnectionTestRes> {
+async function testProvider(ai: EffectiveAiConfig, signal: AbortSignal): Promise<AiConnectionModelTestRes> {
   assertProviderRequestable(ai, true)
   const startedAt = Date.now()
   const messages: ChatMessage[] = [{ role: 'user', content: '请只回复 OK，不要解释。' }]
@@ -1186,10 +796,10 @@ async function testProvider(ai: EffectiveAiConfig, signal: AbortSignal): Promise
   if (!response.ok) throw await providerResponseError(response)
   if (!response.body) throw new AppError('AI_PROVIDER_ERROR', 'AI provider returned an empty response', { retryable: true })
   await response.arrayBuffer()
-  return { ok: true, provider: ai.provider, model: ai.model!, latencyMs: Date.now() - startedAt }
+  return { ok: true, provider: ai.provider, upstreamModelId: ai.model!, latencyMs: Date.now() - startedAt }
 }
 
-async function testEmbeddingProvider(ai: EffectiveAiConfig, signal: AbortSignal): Promise<AiConnectionTestRes> {
+async function testEmbeddingProvider(ai: EffectiveAiConfig, signal: AbortSignal): Promise<AiConnectionModelTestRes> {
   assertProviderRequestable(ai, true)
   if (ai.protocol === 'anthropic') throw new AppError('AI_PROVIDER_ERROR', 'This AI provider does not support embeddings')
   const model = ai.model!
@@ -1216,19 +826,19 @@ async function testEmbeddingProvider(ai: EffectiveAiConfig, signal: AbortSignal)
   if (vectors.length !== 1 || vectors[0]?.length === 0 || vectors[0]?.some((value) => !Number.isFinite(value))) {
     throw new AppError('AI_PROVIDER_ERROR', 'AI provider returned invalid embeddings')
   }
-  return { ok: true, provider: ai.provider, model, latencyMs: Date.now() - startedAt }
+  return { ok: true, provider: ai.provider, upstreamModelId: model, latencyMs: Date.now() - startedAt }
 }
 
-export async function testAiConfigDraft(userId: string, role: string, input: AiConfigTestReq, signal: AbortSignal) {
-  const ai = draftConfig(userId, input)
-  assertDraftBaseUrlAllowed(role, ai.provider, ai.baseUrl)
-  return input.kind === 'embedding' ? testEmbeddingProvider(ai, signal) : testProvider(ai, signal)
+function testExecution(ai: EffectiveAiConfig, kind: AiModelKind | undefined, signal: AbortSignal) {
+  const wantsEmbedding = kind === 'embedding' || isAiEmbeddingModel({ id: ai.model ?? '', name: ai.model ?? '' })
+  return wantsEmbedding ? testEmbeddingProvider(ai, signal) : testProvider(ai, signal)
 }
 
-export async function testAiConfig(userId: string, role: string, signal: AbortSignal) {
-  const ai = effectiveConfig(userId)
-  assertAvailable(role, ai)
-  return testProvider(ai, signal)
+/** Tests a saved model through the authorized resolver, so credentials stay server-side. */
+export async function testAiModel(userId: string, role: string, modelId: string, signal: AbortSignal) {
+  // Strict on purpose: "test this model" must exercise that model or fail, never a fallback.
+  const execution = resolveExplicitModel(userId, role, modelId)
+  return testExecution(executionConfig(execution), execution.capabilities?.embedding ? 'embedding' : 'chat', signal)
 }
 
 interface UpstreamRequest {
@@ -1806,20 +1416,9 @@ export async function translateAiSelectedText(
   signal: AbortSignal, onText: (text: string) => void,
 ) {
   if (role !== 'owner' && role !== 'member') throw new AppError('AI_NOT_ALLOWED', 'Login required')
-  let ai = effectiveConfig(userId)
-  if (input.channel.profileId) {
-    const profile = storedProfiles(storedConfig(userId).value).find((item) => item.id === input.channel.profileId)
-    if (!profile) throw new AppError('AI_NOT_CONFIGURED', 'Translation profile is unavailable')
-    ai = profileEffectiveConfig(profile)
-    if (input.channel.model && !profileModels(profile).some((item) => item.id === input.channel.model && !isAiEmbeddingModel(item))) {
-      throw new AppError('AI_NOT_CONFIGURED', 'Translation model is unavailable')
-    }
-  } else if (input.channel.model && !getAiConfig(userId).models.some((item) => item.id === input.channel.model && !isAiEmbeddingModel(item))) {
-    throw new AppError('AI_NOT_CONFIGURED', 'Translation model is unavailable')
-  }
-  if (input.channel.model) ai = { ...ai, model: input.channel.model }
-  if (ai.model && isAiEmbeddingModel({ id: ai.model, name: ai.model })) throw new AppError('VALIDATION_ERROR', 'Translation requires a chat model')
-  assertAvailable(role, ai)
+  const execution = resolveAiExecution(userId, role, input.channel.modelId, 'translate')
+  assertChatCapable(execution)
+  const ai = executionConfig(execution)
   const controller = reserveAiRequest(userId)
   const timeout = AbortSignal.timeout(config.aiTimeoutMs)
   const combined = AbortSignal.any([signal, controller.signal, timeout])
@@ -1853,11 +1452,38 @@ export async function translateAiSelectedText(
   }
 }
 
-export async function createAiChatStream(userId: string, role: string, input: AiChatReq, requestSignal: AbortSignal): Promise<AiChatStream> {
-  const ai = effectiveConfig(userId)
-  assertAvailable(role, ai)
+/**
+ * A quick command is resolved to the definition the caller can see right now,
+ * so the request never runs the prompt text a client cached before the command
+ * was unshared, deleted or switched off.
+ */
+function withResolvedPrompt<T extends { prompt: string; promptId?: string }>(userId: string, input: T): T {
+  if (!input.promptId) return input
+  return { ...input, prompt: resolveAiPromptForExecution(userId, input.promptId).prompt }
+}
+
+export async function createAiChatStream(userId: string, role: string, rawInput: AiChatReq, requestSignal: AbortSignal): Promise<AiChatStream> {
+  const input = withResolvedPrompt(userId, rawInput)
   const requestController = reserveAiRequest(userId)
   const startedAt = Date.now()
+  let thread: ReturnType<typeof prepareAiThread>
+  let resolved: AiModelExecution
+  try {
+    await getActiveBook(userId, input.bookId)
+    thread = prepareAiThread(userId, input.bookId, input.threadId, input.prompt, input.regenerate, {
+      ...(input.modelId ? { modelId: input.modelId } : {}),
+      ...(input.readingScope ? { readingScope: input.readingScope } : {}),
+      ...(input.enabledTools ? { enabledTools: input.enabledTools } : {}),
+      ...(input.assistantModeId ? { assistantModeId: input.assistantModeId } : {}),
+    }, input.editMessageId)
+    // Conversation choice wins over the account default, which the resolver applies.
+    resolved = resolveAiExecution(userId, role, input.modelId ?? thread.settings?.modelId ?? null, 'chat')
+    assertChatCapable(resolved)
+  } catch (error) {
+    activeRequests.delete(userId)
+    throw error
+  }
+  const ai = executionConfig(resolved)
   const diagnostics: AiGenerationDiagnostics = {
     provider: ai.provider,
     ...(ai.model ? { model: ai.model } : {}),
@@ -1880,17 +1506,10 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
   let availableTools: readonly AiToolDefinition[]
   let context: string
   let receipt: AiContextReceipt
-  let thread: ReturnType<typeof prepareAiThread>
   let requestId: string
   let runId: string
   let persistedUserMessageId: string | undefined
   try {
-    await getActiveBook(userId, input.bookId)
-    thread = prepareAiThread(userId, input.bookId, input.threadId, input.prompt, input.regenerate, {
-      ...(input.readingScope ? { readingScope: input.readingScope } : {}),
-      ...(input.enabledTools ? { enabledTools: input.enabledTools } : {}),
-      ...(input.assistantModeId ? { assistantModeId: input.assistantModeId } : {}),
-    }, input.editMessageId)
     const threadSettings = thread.settings ?? {
       readingScope: input.readingScope ?? AI_DEFAULT_READING_SCOPE,
       enabledTools: input.enabledTools ?? [...AI_TOOL_NAMES],
@@ -1950,6 +1569,7 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
       context: input.context,
       readingScope,
       enabledTools: AI_TOOL_NAMES.filter((name) => enabledToolNames.has(name)),
+      modelId: resolved.modelId,
       ...(input.assistantModeId ? { assistantModeId: input.assistantModeId } : {}),
       ...(input.assistantMode?.trim() ? { assistantMode: input.assistantMode.trim() } : {}),
       ...(input.assistantModePrompt?.trim() ? { assistantModePrompt: input.assistantModePrompt.trim() } : {}),
@@ -2318,12 +1938,14 @@ export async function createAiChatStream(userId: string, role: string, input: Ai
 export async function createAiLocalChatStream(
   userId: string,
   role: string,
-  input: AiLocalChatReq,
+  rawInput: AiLocalChatReq,
   requestSignal: AbortSignal,
 ): Promise<Omit<AiChatStream, 'runId'>> {
   if (role !== 'owner' && role !== 'member') throw new AppError('AI_NOT_ALLOWED', 'Login required')
-  const ai = effectiveConfig(userId)
-  assertAvailable(role, ai)
+  const input = withResolvedPrompt(userId, rawInput)
+  const execution = resolveAiExecution(userId, role, input.modelId, 'chat')
+  assertChatCapable(execution)
+  const ai = executionConfig(execution)
   const requestController = reserveAiRequest(userId)
   const startedAt = Date.now()
   const requestId = createId('ai')

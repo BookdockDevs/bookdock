@@ -1,14 +1,16 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
-import { compileReplacementRegex, type TextReplacementRes, type ReplacementCreateReq, type ReplacementUpdateReq } from '@bookdock/shared'
+import { compileReplacementRegex, type TextReplacementRes, type ReplacementCreateReq, type ReplacementUpdateReq, type ResourceAvailability } from '@bookdock/shared'
 
 import { useCreateReplacement, useReplacements, useUpdateReplacement } from '@/api/hooks/useReplacements'
 import SegmentedControl from '@/components/ui/SegmentedControl'
 import Toggle from '@/components/ui/Toggle'
+import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth.store'
 
 import type { SelectionInfo } from '../../reader/types'
 import SettingsFormActions from './SettingsFormActions'
@@ -63,6 +65,9 @@ function initialScope(
 
 export default function ReplacementForm({ bookId, initial, selection, groups, onDone }: ReplacementFormProps) {
   const _ = useTranslation()
+  const localCatalog = useLocalCatalog()
+  const user = useAuthStore((state) => state.user)
+  const isOwner = user?.role === 'owner'
   const createReplacement = useCreateReplacement()
   const updateReplacement = useUpdateReplacement()
   const replacementsQuery = useReplacements()
@@ -108,6 +113,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
   const [isRegex, setIsRegex] = useState(initial?.isRegex ?? false)
   const [applyTo, setApplyTo] = useState<ApplyTo>(initial?.applyTo ?? 'content')
   const [scope, setScope] = useState<Scope>(() => initialScope(initial, selection, pointAvailable, bookId))
+  const [availability, setAvailability] = useState<ResourceAvailability>(initial?.availability ?? 'user')
   const [patternError, setPatternError] = useState<PatternError>(null)
 
   const filteredGroups = useMemo(() => {
@@ -172,6 +178,10 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
         body.pattern = trimmed
         body.isRegex = isRegex
         body.applyTo = applyTo
+        // Only a global pattern rule can be published; a book-scoped rule keeps
+        // its personal scope and the server rejects the field anyway. Device
+        // vaults have no publisher, so the field is not sent there either.
+        if (scope === 'global' && !localCatalog) body.availability = availability
         if (initialIsPoint) {
           // point → pattern: the snapshot becomes the pattern; anchors are
           // cleared server-side. Scope: keep the patch's book, or promote.
@@ -206,6 +216,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
             ...common,
             matchType: 'pattern',
             ...(scope === 'book' ? { bookId } : {}),
+            ...(scope === 'global' && !localCatalog ? { availability } : {}),
             pattern: trimmed,
             isRegex,
             applyTo,
@@ -410,6 +421,24 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
             options={APPLY_TO.map(({ value, key }) => ({ value, label: _(key) }))}
           />
         </div>
+      )}
+
+      {scope === 'global' && !localCatalog && isOwner && (
+        <fieldset className="space-y-1.5">
+          <legend className="text-xs text-stone-400 dark:text-stone-500">{_('settings.resourceScope')}</legend>
+          <SegmentedControl
+            ariaLabel={_('settings.resourceScope')}
+            fullWidth
+            size="md"
+            pending={saving}
+            value={availability}
+            onChange={setAvailability}
+            options={(['user', 'instance'] as ResourceAvailability[]).map((value) => ({
+              value,
+              label: _(value === 'user' ? 'settings.resourceScopeUser' : 'settings.resourceScopeInstance'),
+            }))}
+          />
+        </fieldset>
       )}
 
       <SettingsFormActions onCancel={onDone} cancelDisabled={saving} saveDisabled={saving} />

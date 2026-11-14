@@ -79,6 +79,16 @@ export function useUpdateTtsService() {
   })
 }
 
+export function useReorderTtsServices() {
+  const queryClient = useQueryClient()
+  const accountId = useAuthStore((state) => state.user?.id ?? null)
+  return useMutation({
+    mutationKey: [...ttsServicesKey(accountId), 'order'],
+    mutationFn: (ids: string[]) => requestForTtsAccount(accountId, () => apiPut<{ data: TtsServiceRes[] }>('/tts/services/order', { ids })),
+    onSuccess: () => { if (useAuthStore.getState().user?.id === accountId) void queryClient.invalidateQueries({ queryKey: ttsServicesKey(accountId) }) },
+  })
+}
+
 export function useDeleteTtsService() {
   const queryClient = useQueryClient()
   const accountId = useAuthStore((state) => state.user?.id ?? null)

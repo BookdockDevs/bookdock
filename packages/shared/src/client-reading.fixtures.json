@@ -38,7 +38,7 @@
     "chapters": [{ "title": "Chapter 1", "level": 1, "startOffset": 0, "endOffset": 17, "contentStartOffset": 11, "wordCount": 1 }]
   },
   "selectedTextTranslation": {
-    "text": "Hello.", "targetLang": "zh-Hans", "channel": { "kind": "ai", "profileId": "fixture-profile", "model": null }
+    "text": "Hello.", "targetLang": "zh-Hans", "channel": { "kind": "ai", "modelId": null }
   },
   "speechRequest": { "serviceId": "fixture-service", "text": "Hello.", "voice": "alloy", "rate": 1 },
   "edgeSpeechRequest": { "text": "Hello.", "voice": "en-US-AriaNeural", "rate": 1 },

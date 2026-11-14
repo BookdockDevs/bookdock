@@ -116,8 +116,11 @@ export default function BookReplacementsSection({
                 rule={rule}
                 count={counts?.[rule.id]}
                 onToggle={() => onGlobalToggle(rule)}
-                onEdit={onEdit ? () => onEdit(rule) : undefined}
-                onDelete={onDelete ? () => onDelete(rule) : undefined}
+                // A shared rule runs in this book (the switch above writes a
+                // personal override) but its definition stays with the
+                // publisher, so no edit/delete entry points are offered.
+                onEdit={onEdit && rule.mine !== false ? () => onEdit(rule) : undefined}
+                onDelete={onDelete && rule.mine !== false ? () => onDelete(rule) : undefined}
               />
             ),
           )}
@@ -412,8 +415,8 @@ function RowActions({ onEdit, onDelete }: { onEdit?: () => void; onDelete?: () =
         <button
           type="button"
           onClick={onDelete}
-          aria-label={_('settings.fontsDelete')}
-          title={_('settings.fontsDelete')}
+          aria-label={_('library.delete')}
+          title={_('library.delete')}
           className={`${actionBtn} hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400`}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

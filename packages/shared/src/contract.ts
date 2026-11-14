@@ -629,6 +629,13 @@ export interface TtsServiceRes {
   defaultVoice: string | null
   options: Record<string, string | number | boolean>
   credentialsConfigured: boolean
+  /** The caller's personal switch; disabled services disappear from the reader's engine picker. */
+  enabled: boolean
+  /** The caller's personal display order; lower comes first in the reader's engine picker. */
+  order: number
+  availability: ResourceAvailability
+  /** Whether the caller owns the definition (edit/delete rights). */
+  mine: boolean
   createdAt: number
   updatedAt: number
 }
@@ -641,6 +648,7 @@ export interface TtsServiceCreateReq {
   defaultVoice?: string | null
   options?: Record<string, string | number | boolean>
   secrets?: Record<string, string>
+  availability?: ResourceAvailability
 }
 
 export interface TtsServiceUpdateReq {
@@ -649,6 +657,9 @@ export interface TtsServiceUpdateReq {
   baseUrl?: string | null
   model?: string | null
   defaultVoice?: string | null
+  /** The caller's personal switch; never changes who else can see the service. */
+  enabled?: boolean
+  availability?: ResourceAvailability
   options?: Record<string, string | number | boolean>
   /** Empty/missing preserves existing secrets; null clears one secret. */
   secrets?: Record<string, string | null>
@@ -726,27 +737,132 @@ export interface AiModelRes {
   capabilities?: AiModelCapabilities
 }
 
+/**
+ * `user` = visible to its owner only; `instance` = published to every signed-in
+ * account. Availability is separate from any personal preference: consumers
+ * enable/order a shared definition without ever mutating it.
+ */
+export type ResourceAvailability = 'user' | 'instance'
+
+export interface AiConnectionRes {
+  id: string
+  name: string
+  provider: AiProvider
+  baseUrl: string | null
+  availability: ResourceAvailability
+  /** True when the caller owns the connection and may edit it. */
+  mine: boolean
+  apiKeyConfigured: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AiConnectionCreateReq {
+  name: string
+  provider: AiProvider
+  baseUrl?: string | null
+  apiKey?: string | null
+}
+
+export interface AiConnectionUpdateReq {
+  name?: string
+  provider?: AiProvider
+  baseUrl?: string | null
+  availability?: ResourceAvailability
+  /** Missing preserves the saved key; null clears it. */
+  apiKey?: string | null
+}
+
+export interface AiModelEntryRes {
+  /** Internal model id; every executable selection uses this, never the upstream name. */
+  id: string
+  connectionId: string
+  connectionName: string
+  provider: AiProvider
+  upstreamModelId: string
+  name: string
+  /** Publisher-controlled exposure. A consumer's hidden choice cannot re-enable it. */
+  enabled: boolean
+  capabilities?: AiModelCapabilities
+  /** True when the caller owns the connection and may edit the entry. */
+  mine: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AiModelEntryCreateReq {
+  upstreamModelId: string
+  name?: string
+  capabilities?: AiModelCapabilities
+}
+
+export interface AiModelEntryUpdateReq {
+  upstreamModelId?: string
+  name?: string
+  enabled?: boolean
+  /** Manual override; null clears it and falls back to discovery metadata. */
+  capabilities?: AiModelCapabilities | null
+}
+
+/** Connection-scoped discovery refresh; never persists credentials. */
+export interface AiModelDiscoverReq {
+  kind?: AiModelKind
+}
+
+export interface AiConnectionModelTestRes {
+  ok: true
+  provider: AiProvider
+  upstreamModelId: string
+  latencyMs: number
+}
+
 export type AiModelKind = 'chat' | 'embedding'
 
 export type AiPromptScope = 'selection' | 'reading' | 'both'
 
+/**
+ * A quick-command definition plus the caller's own switch and position. The
+ * definition (name/prompt/scope) is publisher-owned; `enabled`/`order` are the
+ * account's private choices, so publishing or reordering never rewrites another
+ * account's list.
+ */
 export interface AiPromptTemplate {
   id: string
   name: string
   prompt: string
   scope: AiPromptScope
+  /** The caller's personal switch; a shared prompt stays off until enabled. */
   enabled: boolean
+  /** The caller's effective position in the quick-command list. */
   order: number
+  /** Stable built-in preset identity; restore-defaults resets these rows. */
   builtIn: boolean
+  availability: ResourceAvailability
+  /** True when the caller owns the definition and may edit or delete it. */
+  mine: boolean
+  createdAt: number
+  updatedAt: number
 }
 
-export interface AiPromptTemplateInput {
-  id: string
+export interface AiPromptCreateReq {
   name: string
   prompt: string
   scope?: AiPromptScope
   enabled?: boolean
-  order?: number
+  availability?: ResourceAvailability
+}
+
+export interface AiPromptUpdateReq {
+  name?: string
+  prompt?: string
+  scope?: AiPromptScope
+  /** The caller's personal switch for a shared prompt; the definition default for an own prompt. */
+  enabled?: boolean
+  availability?: ResourceAvailability
+}
+
+export interface AiPromptReorderReq {
+  ids: string[]
 }
 
 export interface AiAssistantMode {
@@ -762,68 +878,11 @@ export interface AiAssistantModeInput {
   prompt: string
 }
 
-export interface AiModelDiscoveryReq {
-  /** Existing profile whose saved secret may be reused; omitted for new drafts. */
-  profileId?: string | null
-  provider: AiProvider
-  baseUrl?: string | null
-  kind?: AiModelKind
-  apiKey?: string | null
-}
-
-export interface AiConfigTestReq {
-  /** Existing profile whose saved secret may be reused; omitted for new drafts. */
-  profileId?: string | null
-  provider: AiProvider
-  baseUrl?: string | null
-  kind?: AiModelKind
-  model: string
-  apiKey?: string | null
-}
-
 export interface AiConnectionTestRes {
   ok: true
   provider: AiProvider
   model: string
   latencyMs: number
-}
-
-export interface AiProfileRes {
-  id: string
-  name: string
-  provider: AiProvider
-  baseUrl: string | null
-  model: string | null
-  models: AiModelRes[]
-  embeddingModel: string | null
-  embeddingModels: AiModelRes[]
-  apiKeyConfigured: boolean
-  createdAt: number
-  updatedAt: number
-}
-
-export interface AiProfileCreateReq {
-  name: string
-  provider: AiProvider
-  baseUrl?: string | null
-  model?: string | null
-  models?: AiModelRes[]
-  embeddingModel?: string | null
-  embeddingModels?: AiModelRes[]
-  /** Credentials are accepted only for this request and never returned. */
-  apiKey?: string | null
-}
-
-export interface AiProfileUpdateReq {
-  name?: string
-  provider?: AiProvider
-  baseUrl?: string | null
-  model?: string | null
-  models?: AiModelRes[]
-  embeddingModel?: string | null
-  embeddingModels?: AiModelRes[]
-  /** Missing preserves the saved key; null clears it. */
-  apiKey?: string | null
 }
 
 export interface AiContextReq {
@@ -866,6 +925,12 @@ export interface AiChatReq {
   prompt: string
   context: AiContextReq
   history?: AiHistoryMessage[]
+  /**
+   * Quick command the caller picked. When present the server resolves the
+   * current definition it can see and runs that prompt text; a command that is
+   * no longer shared or was deleted fails instead of replaying a cached copy.
+   */
+  promptId?: string
   /** Optional prompt supplied by the selected assistant mode; the server always adds its invariant core system prompt. */
   assistantModePrompt?: string
   /** User-visible assistant mode label stored in the request receipt. */
@@ -876,6 +941,8 @@ export interface AiChatReq {
   readingScope?: AiReadingScope
   /** Optional per-request allowlist for the server's bounded read-only tools. */
   enabledTools?: AiToolName[]
+  /** Per-conversation model; omitted to follow the thread snapshot and then the account default. */
+  modelId?: string
 }
 
 /**
@@ -886,9 +953,13 @@ export interface AiLocalChatReq {
   prompt: string
   context: AiContextReq
   history?: AiHistoryMessage[]
+  /** Quick command the caller picked; resolved against the server's current definitions. */
+  promptId?: string
   assistantModePrompt?: string
   assistantMode?: string
   assistantModeId?: string
+  /** Per-conversation model; omitted to follow the account default. */
+  modelId?: string
 }
 
 export interface AiRetryRecipe {
@@ -896,6 +967,8 @@ export interface AiRetryRecipe {
   context: AiChatReq['context']
   readingScope: AiReadingScope
   enabledTools: AiToolName[]
+  /** Resolved model identity, so a retry reruns the same selection instead of today's default. */
+  modelId?: string
   assistantMode?: string
   assistantModeId?: string
   assistantModePrompt?: string
@@ -1072,6 +1145,8 @@ export interface AiThreadSettings {
   enabledTools: AiToolName[]
   /** Optional when the built-in assistant mode is selected. */
   assistantModeId?: string
+  /** Model chosen for this conversation; omitted to follow the account default. */
+  modelId?: string
 }
 
 export interface AiConversationSettings {
@@ -1108,34 +1183,36 @@ export interface AiSearchRes {
 
 export interface AiStatusRes {
   enabled: boolean
-  provider: AiProvider
-  model?: string
-  models: AiModelRes[]
+  /** Last model the caller used in a chat; null seeds the resolver's fallback chain. */
+  lastUsedModelId: string | null
+  /** Enabled, accessible models; a switched-off model only appears in `/ai/config`. */
+  models: AiModelEntryRes[]
+  /** Executable quick commands: the caller's enabled list, in their own order. */
   prompts: AiPromptTemplate[]
   modes: AiAssistantMode[]
   lastUsedConversationSettings: AiConversationSettings
-  activeProfileId: string | null
+}
+
+/** Per-surface last-used models; both null until the surface runs for the first time. */
+export interface AiLastUsedModels {
+  chat: string | null
+  translate: string | null
 }
 
 export interface AiConfigRes {
-  activeProfileId: string | null
-  profiles: AiProfileRes[]
-  provider: AiProvider
-  baseUrl: string | null
-  model: string | null
-  models: AiModelRes[]
+  connections: AiConnectionRes[]
+  /** Models the caller can select or manage; disabled models appear only for their owner. */
+  models: AiModelEntryRes[]
+  lastUsedModels: AiLastUsedModels
+  /** Every quick command the caller can see, including shared ones they keep switched off. */
   prompts: AiPromptTemplate[]
+  /** True when at least one built-in quick command is missing and restore would add it. */
+  promptsRestoreAvailable: boolean
   modes: AiAssistantMode[]
   lastUsedConversationSettings: AiConversationSettings
-  apiKeyConfigured: boolean
-  configuredByUser: boolean
 }
 
 export interface AiConfigUpdateReq {
-  /** Switches the active profile without changing its fields. */
-  activeProfileId?: string | null
-  /** Replaces the user's bounded quick-prompt template list; null restores defaults. */
-  prompts?: AiPromptTemplateInput[] | null
   /** Replaces the bounded user-authored assistant mode list; null clears custom modes. */
   modes?: AiAssistantModeInput[] | null
   /** Updates the built-in assistant mode; null restores its default name and prompt. */
@@ -1767,6 +1844,8 @@ export type ReplacementCreateReq = {
   spineHref?: string
   textOffset?: number
   originalText?: string
+  /** Only user-global pattern rules can be published to the instance. */
+  availability?: ResourceAvailability
 }
 
 export type ReplacementUpdateReq = {
@@ -1784,6 +1863,7 @@ export type ReplacementUpdateReq = {
   bookId?: string | null
   /** Point-patch snapshot edit (anchor offset is kept where the user selected) */
   originalText?: string
+  availability?: ResourceAvailability
 }
 
 export interface TextReplacementRes {
@@ -1811,6 +1891,9 @@ export interface TextReplacementRes {
   locationAvailable?: boolean
   /** Execution + display order (ascending); new and imported rules append. */
   sortOrder: number
+  availability: ResourceAvailability
+  /** Whether the caller owns the definition (edit/delete rights). */
+  mine: boolean
   createdAt: number
   updatedAt: number
 }
@@ -1826,6 +1909,7 @@ export type TocRuleCreateReq = {
   enabled?: boolean
   sortOrder?: number
   patterns: TocRulePattern[]
+  availability?: ResourceAvailability
 }
 
 export type TocRuleUpdateReq = {
@@ -1833,6 +1917,7 @@ export type TocRuleUpdateReq = {
   enabled?: boolean
   sortOrder?: number
   patterns?: TocRulePattern[]
+  availability?: ResourceAvailability
 }
 
 export type TocRuleReorderReq = {
@@ -1862,12 +1947,17 @@ export interface TocRuleRes {
   sortOrder: number
   patterns: TocRulePattern[]
   builtIn: boolean
+  /** Whether the caller owns the definition (edit/delete rights). */
+  mine: boolean
+  availability: ResourceAvailability
   createdAt: number
   updatedAt: number
 }
 
 export interface TocRuleListRes {
   data: TocRuleRes[]
+  /** True when at least one built-in preset is missing and restore would add it. */
+  restoreAvailable: boolean
 }
 
 export interface TocPreviewReq {

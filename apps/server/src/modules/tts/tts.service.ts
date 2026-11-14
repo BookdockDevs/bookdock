@@ -9,13 +9,14 @@ import type {
   TtsSpeechReq,
   TtsVoiceRes,
 } from '@bookdock/shared'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, asc, eq, ne, or, sql } from 'drizzle-orm'
 
 import { config } from '../../config'
 import { getDb } from '../../db/client'
 import { ttsServices } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
+import { effectiveEnabled, isCompleteIdSet, orderResourceItems, patchResourcePreference, readResourcePreferences } from '../../lib/resource-preferences'
 
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024
 const REQUEST_TIMEOUT_MS = 30_000
@@ -133,7 +134,9 @@ function serviceConfig(row: TtsServiceRow): ProviderConfig {
   }
 }
 
-function toServiceRes(row: TtsServiceRow): TtsServiceRes {
+const PREFERENCE_KEY = 'tts'
+
+function toServiceRes(row: TtsServiceRow, userId: string, order: number, enabled: boolean): TtsServiceRes {
   return {
     id: row.id,
     name: row.name,
@@ -143,14 +146,35 @@ function toServiceRes(row: TtsServiceRow): TtsServiceRes {
     defaultVoice: row.defaultVoice,
     options: row.options ?? {},
     credentialsConfigured: Object.values(decryptSecrets(row.encryptedSecrets)).some((value) => value.trim()),
+    enabled,
+    order,
+    availability: row.availability,
+    mine: row.userId === userId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
 }
 
-function getServiceRow(userId: string, serviceId: string) {
+/** Owner-only lookup: definition edits never cross accounts. */
+function getOwnedServiceRow(userId: string, serviceId: string) {
   const row = getDb().select().from(ttsServices).where(and(eq(ttsServices.id, serviceId), eq(ttsServices.userId, userId))).get()
   if (!row) throw new AppError('TTS_SERVICE_NOT_FOUND', 'TTS service not found')
+  return row
+}
+
+/**
+ * Readable service for voice lookup and synthesis: the caller's own services
+ * plus instance-published ones, which must additionally be switched on for
+ * that account. A private service answers not-found so a guessed id leaks
+ * nothing.
+ */
+function getAccessibleServiceRow(userId: string, serviceId: string) {
+  const row = getDb().select().from(ttsServices).where(eq(ttsServices.id, serviceId)).get()
+  if (!row) throw new AppError('TTS_SERVICE_NOT_FOUND', 'TTS service not found')
+  if (row.userId === userId) return row
+  if (row.availability !== 'instance') throw new AppError('TTS_SERVICE_NOT_FOUND', 'TTS service not found')
+  const preferences = readResourcePreferences(userId, PREFERENCE_KEY)
+  if (!effectiveEnabled(preferences, row.id, false, true)) throw new AppError('TTS_SERVICE_NOT_FOUND', 'TTS service not found')
   return row
 }
 
@@ -190,8 +214,32 @@ export function listTtsProviders(): readonly TtsProviderRes[] {
   return PROVIDERS
 }
 
+/** Own services plus instance-published services, ordered by the caller's layout. */
+function accessibleServiceRows(userId: string): TtsServiceRow[] {
+  return getDb().select().from(ttsServices).where(
+    or(eq(ttsServices.userId, userId), and(ne(ttsServices.userId, userId), eq(ttsServices.availability, 'instance'))),
+  ).orderBy(asc(ttsServices.sortOrder), asc(ttsServices.createdAt)).all()
+}
+
 export function listTtsServices(userId: string): TtsServiceRes[] {
-  return getDb().select().from(ttsServices).where(eq(ttsServices.userId, userId)).orderBy(desc(ttsServices.updatedAt)).all().map(toServiceRes)
+  const preferences = readResourcePreferences(userId, PREFERENCE_KEY)
+  const ordered = orderResourceItems(accessibleServiceRows(userId), preferences, (row) => row.sortOrder)
+  return ordered.map((row, index) => toServiceRes(
+    row,
+    userId,
+    (index + 1) * 10,
+    effectiveEnabled(preferences, row.id, row.userId === userId, true),
+  ))
+}
+
+/** Appends after the last service so a new entry never displaces an existing order. */
+function nextSortOrder(userId: string): number {
+  const row = getDb()
+    .select({ value: sql<number | null>`max(${ttsServices.sortOrder})` })
+    .from(ttsServices)
+    .where(eq(ttsServices.userId, userId))
+    .get()
+  return (row?.value ?? 0) + 10
 }
 
 export function createTtsService(userId: string, input: TtsServiceCreateReq): TtsServiceRes {
@@ -212,6 +260,8 @@ export function createTtsService(userId: string, input: TtsServiceCreateReq): Tt
     defaultVoice: input.defaultVoice?.trim() || null,
     options,
     encryptedSecrets: encryptSecrets(secrets),
+    sortOrder: nextSortOrder(userId),
+    availability: input.availability ?? 'user',
     createdAt: now,
     updatedAt: now,
   }
@@ -221,11 +271,23 @@ export function createTtsService(userId: string, input: TtsServiceCreateReq): Tt
     if (error instanceof Error && /unique/i.test(error.message)) throw new AppError('VALIDATION_ERROR', 'A TTS service with this name already exists')
     throw error
   }
-  return toServiceRes(getServiceRow(userId, row.id))
+  return listTtsServices(userId).find((service) => service.id === row.id)!
 }
 
 export function updateTtsService(userId: string, serviceId: string, input: TtsServiceUpdateReq): TtsServiceRes {
-  const existing = getServiceRow(userId, serviceId)
+  const row = getDb().select().from(ttsServices).where(eq(ttsServices.id, serviceId)).get()
+  if (!row) throw new AppError('TTS_SERVICE_NOT_FOUND', 'TTS service not found')
+  if (row.userId !== userId) {
+    // A consumer only controls their own switch; credentials, endpoint, model
+    // and publication stay with the publisher.
+    if (row.availability !== 'instance') throw new AppError('TTS_SERVICE_NOT_FOUND', 'TTS service not found')
+    if (Object.keys(input).some((key) => key !== 'enabled') || input.enabled === undefined) {
+      throw new AppError('FORBIDDEN', 'Only the publisher can edit a shared TTS service')
+    }
+    patchResourcePreference(userId, PREFERENCE_KEY, { enabled: { [serviceId]: input.enabled } })
+    return listTtsServices(userId).find((service) => service.id === serviceId)!
+  }
+  const existing = getOwnedServiceRow(userId, serviceId)
   const provider = validateProvider(input.provider ?? existing.provider)
   const secrets = mergeSecrets(decryptSecrets(existing.encryptedSecrets), input.secrets)
   const next = {
@@ -242,6 +304,7 @@ export function updateTtsService(userId: string, serviceId: string, input: TtsSe
       baseUrl: next.baseUrl,
       model: next.model,
       defaultVoice: input.defaultVoice === undefined ? existing.defaultVoice : input.defaultVoice?.trim() || null,
+      availability: input.availability ?? existing.availability,
       options: next.options,
       encryptedSecrets: encryptSecrets(secrets),
       updatedAt: Date.now(),
@@ -250,12 +313,26 @@ export function updateTtsService(userId: string, serviceId: string, input: TtsSe
     if (error instanceof Error && /unique/i.test(error.message)) throw new AppError('VALIDATION_ERROR', 'A TTS service with this name already exists')
     throw error
   }
-  return toServiceRes(getServiceRow(userId, serviceId))
+  if (input.enabled !== undefined) patchResourcePreference(userId, PREFERENCE_KEY, { enabled: { [serviceId]: input.enabled } })
+  return listTtsServices(userId).find((service) => service.id === serviceId)!
 }
 
 export function deleteTtsService(userId: string, serviceId: string) {
-  getServiceRow(userId, serviceId)
+  getOwnedServiceRow(userId, serviceId)
   getDb().delete(ttsServices).where(and(eq(ttsServices.id, serviceId), eq(ttsServices.userId, userId))).run()
+}
+
+/**
+ * Replaces the caller's whole visible order. The incoming ids must be exactly
+ * that set, so a partial list can never silently drop or reorder a service the
+ * client did not see — and only the personal layout is written, never the
+ * publisher's definition.
+ */
+export function reorderTtsServices(userId: string, ids: string[]): TtsServiceRes[] {
+  const currentIds = accessibleServiceRows(userId).map((row) => row.id)
+  if (!isCompleteIdSet(ids, currentIds)) throw new AppError('VALIDATION_ERROR', 'Invalid TTS service order')
+  patchResourcePreference(userId, PREFERENCE_KEY, { order: ids })
+  return listTtsServices(userId)
 }
 
 async function fetchUpstream(url: string, init: RequestInit, signal: AbortSignal) {
@@ -484,7 +561,7 @@ async function synthesizeProvider(input: ProviderConfig, speech: TtsSpeechReq, s
 }
 
 export async function synthesizeSpeech(userId: string, input: TtsSpeechReq, signal: AbortSignal) {
-  const row = getServiceRow(userId, input.serviceId)
+  const row = getAccessibleServiceRow(userId, input.serviceId)
   const service = serviceConfig(row)
   assertConfigured(service.provider, service)
   try {
@@ -514,7 +591,7 @@ async function listMinimaxVoices(service: ProviderConfig, signal: AbortSignal): 
 }
 
 export async function listTtsVoices(userId: string, serviceId: string, signal: AbortSignal): Promise<TtsVoiceRes[]> {
-  const service = serviceConfig(getServiceRow(userId, serviceId))
+  const service = serviceConfig(getAccessibleServiceRow(userId, serviceId))
   try {
     if (service.provider === 'azure') return await listAzureVoices(service, signal)
     if (service.provider === 'minimax') return await listMinimaxVoices(service, signal)
@@ -528,7 +605,9 @@ export async function listTtsVoices(userId: string, serviceId: string, signal: A
   return OPENAI_VOICES
 }
 
+/** Saved-secret test stays publisher-only: it reuses the stored credentials. */
 export async function testTtsService(userId: string, serviceId: string, signal: AbortSignal) {
+  getOwnedServiceRow(userId, serviceId)
   await synthesizeSpeech(userId, { serviceId, text: '这是一段测试语音。', rate: 1 }, signal)
   return { ok: true as const }
 }

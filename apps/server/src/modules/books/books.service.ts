@@ -8,7 +8,7 @@ import { blobKeyReferenced, deleteBlobRowIfUnreferenced } from '../../db/blob-re
 import {
   blobs, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
   libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
-  libraryMemberships, users as usersTable, tocRules, shelves,
+  libraryMemberships, users as usersTable, shelves,
   highlights, bookmarks, aiThreads, textReplacements,
   readingArchives, readingDurationFacts, readingImportBindings, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingWriteReceipts, bookReviews,
 } from '../../db/schema'
@@ -25,6 +25,7 @@ import {
   txtChapterId,
 } from '../../formats/txt'
 import { pickTocRule, TOC_SAMPLE_SIZE } from '../../formats/toc'
+import { effectiveTocRules, getTocRuleForExecution } from '../toc-rules/toc-rules.service'
 import { AppError } from '../../middleware/error'
 import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
@@ -113,8 +114,9 @@ export async function resolveEffectiveTocRule(
   }
   const pinnedId = typeof meta.tocRuleId === 'string' ? meta.tocRuleId : null
   if (!pinnedId) return { patterns: null, tocRuleId: null, tocRuleAuto: false }
-  const db = getDb()
-  const rule = db.select().from(tocRules).where(and(eq(tocRules.id, pinnedId), eq(tocRules.userId, userId))).get()
+  // Shared rules are readable but never executable for another account's
+  // private rule, so resolution goes through the effective-rule helper.
+  const rule = getTocRuleForExecution(userId, pinnedId)
   if (!rule) return { patterns: null, tocRuleId: null, tocRuleAuto: false }
   return {
     patterns: rule.patterns.filter((p) => p.enabled !== false),
@@ -124,14 +126,10 @@ export async function resolveEffectiveTocRule(
   }
 }
 
-/** Auto-score the user's enabled presets against a normalized sample.
- * Returns the winning preset row (with its patterns), or null when none clears the bar. */
-export function scoreTocRules(userId: string, sample: string): typeof tocRules.$inferSelect | null {
-  const db = getDb()
-  const rules = db.select().from(tocRules)
-    .where(and(eq(tocRules.userId, userId), eq(tocRules.enabled, 1)))
-    .orderBy(tocRules.sortOrder, tocRules.createdAt)
-    .all()
+/** Auto-score the user's enabled effective rules against a normalized sample.
+ * Returns the winning rule (with its patterns), or null when none clears the bar. */
+export function scoreTocRules(userId: string, sample: string) {
+  const rules = effectiveTocRules(userId)
   const pickedId = pickTocRule(
     rules.map((r) => ({ id: r.id, patterns: r.patterns })),
     sample,
@@ -2160,7 +2158,6 @@ export async function reTocBook(
   customPatterns?: TocRulePattern[],
   excludedChapterIds?: string[],
 ): Promise<string> {
-  const db = getDb()
   assertMutableContent(resolveLibraryBook(userId, bookId).kind)
   const book = await getBook(userId, bookId, { showHidden: true })
   if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'Re-TOC only supports txt books')
@@ -2175,7 +2172,7 @@ export async function reTocBook(
   if (tocRuleId !== undefined) {
     // Explicit pin or clear: tocRuleId is validated against the user's rules
     if (tocRuleId !== null) {
-      const rule = db.select().from(tocRules).where(and(eq(tocRules.id, tocRuleId), eq(tocRules.userId, userId))).get()
+      const rule = getTocRuleForExecution(userId, tocRuleId)
       if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
       return rebuildTocBook(userId, bookId, rule.patterns.filter((p) => p.enabled !== false), rule.id, false, null, effectiveExcludedChapterIds)
     }
@@ -2227,7 +2224,6 @@ export async function previewBookToc(
   bookId: string,
   options: PreviewBookTocOptions = {},
 ): Promise<TocPreviewRes> {
-  const db = getDb()
   const book = await getBook(userId, bookId, { showHidden: true })
   if (book.format !== 'txt') throw new AppError('UNSUPPORTED_FORMAT', 'TOC preview only supports txt books')
 
@@ -2253,7 +2249,7 @@ export async function previewBookToc(
           ruleName = '本书专属规则'
         }
       } else {
-        const rule = db.select().from(tocRules).where(and(eq(tocRules.id, options.tocRuleId), eq(tocRules.userId, userId))).get()
+        const rule = getTocRuleForExecution(userId, options.tocRuleId)
         if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
         patterns = rule.patterns.filter((p) => p.enabled !== false)
         ruleId = rule.id
@@ -2364,7 +2360,7 @@ export async function previewCityToc(
           ruleName = '本书专属规则'
         }
       } else {
-        const rule = db.select().from(tocRules).where(and(eq(tocRules.id, options.tocRuleId), eq(tocRules.userId, actorId))).get()
+        const rule = getTocRuleForExecution(actorId, options.tocRuleId)
         if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
         patterns = rule.patterns.filter((p) => p.enabled !== false)
         ruleId = rule.id
@@ -2454,7 +2450,7 @@ export async function reTocCityVersion(
 
   if (tocRuleId !== undefined) {
     if (tocRuleId !== null) {
-      const rule = db.select().from(tocRules).where(and(eq(tocRules.id, tocRuleId), eq(tocRules.userId, actorId))).get()
+      const rule = getTocRuleForExecution(actorId, tocRuleId)
       if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
       // The rule's patterns freeze onto the version and only its name travels
       // as a label, so the chapter map stops depending on the rule row later.
@@ -2870,7 +2866,7 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
       delete baseMeta.tocRuleId
       delete baseMeta.tocRuleAuto
     } else {
-      const rule = db.select().from(tocRules).where(and(eq(tocRules.id, data.tocRuleId), eq(tocRules.userId, userId))).get()
+      const rule = getTocRuleForExecution(userId, data.tocRuleId)
       if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
       baseMeta.tocRuleId = data.tocRuleId
       baseMeta.tocRuleAuto = false

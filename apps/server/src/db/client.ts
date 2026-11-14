@@ -55,7 +55,12 @@ export function repairLegacyTextReplacementSchema(db: ReturnType<typeof drizzle<
     if (indexes.has('text_transform_overrides_user_book_idx')) {
       db.run(sql.raw('DROP INDEX `text_transform_overrides_user_book_idx`'))
     }
-    db.run(sql.raw('CREATE UNIQUE INDEX IF NOT EXISTS `text_replacement_overrides_book_replacement_unique` ON `text_replacement_overrides` (`book_id`, `replacement_id`)'))
+    // The override key includes the consuming account so two users can override
+    // the same shared rule on the same shared book.
+    if (indexes.has('text_replacement_overrides_book_replacement_unique')) {
+      db.run(sql.raw('DROP INDEX `text_replacement_overrides_book_replacement_unique`'))
+    }
+    db.run(sql.raw('CREATE UNIQUE INDEX IF NOT EXISTS `text_replacement_overrides_user_book_replacement_unique` ON `text_replacement_overrides` (`user_id`, `book_id`, `replacement_id`)'))
     db.run(sql.raw('CREATE INDEX IF NOT EXISTS `text_replacement_overrides_user_book_idx` ON `text_replacement_overrides` (`user_id`, `book_id`)'))
   }
   if (tables.has('text_transforms') || tables.has('text_replacements')) {
@@ -311,6 +316,16 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
   reconcilePersonalSourceMigration(db, migrationsFolder)
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
   migrate(db, { migrationsFolder })
+  // 0066 AI foundation: legacy profile bundles and the translation pick become
+  // connections/models plus a default model. The schema half is already
+  // committed above; this conversion is transactional and retries on the next
+  // boot, so a failure here blocks serving instead of marking a half-done
+  // upgrade as complete.
+  const { migrateLegacyAiSettings } = await import('../modules/ai/ai-legacy-migration')
+  migrateLegacyAiSettings(db)
+  // 0066 also turns the personal `ai.prompts` array into owned definition rows.
+  const { migrateLegacyAiPrompts } = await import('../modules/ai/ai-prompts-migration')
+  migrateLegacyAiPrompts(db)
   repairReadingLedgerSchema(db)
   const { migrateCategoryShelfSeparation } = await import('../modules/libraries/category-shelf-migration')
   migrateCategoryShelfSeparation(db)
@@ -480,7 +495,7 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
     },
     {
       table: 'text_replacements',
-      columns: '`id`, `user_id`, `book_id`, `match_type`, `pattern`, `replacement`, `is_regex`, `enabled`, `name`, `group_name`, `spine_href`, `text_offset`, `original_text`, `relocation`, `created_at`, `updated_at`, `apply_to`, `sort_order`, `book_version_id`',
+      columns: '`id`, `user_id`, `book_id`, `match_type`, `pattern`, `replacement`, `is_regex`, `enabled`, `name`, `group_name`, `spine_href`, `text_offset`, `original_text`, `relocation`, `created_at`, `updated_at`, `apply_to`, `sort_order`, `availability`, `book_version_id`',
       create: `CREATE TABLE \`text_replacements_new\` (
 	\`id\` text PRIMARY KEY NOT NULL,
 	\`user_id\` text NOT NULL REFERENCES \`users\`(\`id\`) ON UPDATE no action ON DELETE cascade,
@@ -499,11 +514,13 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
 	\`updated_at\` integer NOT NULL,
 	\`apply_to\` text NOT NULL DEFAULT 'content',
 	\`sort_order\` integer NOT NULL DEFAULT 0,
+	\`availability\` text NOT NULL DEFAULT 'user',
 	\`book_version_id\` text REFERENCES \`book_versions\`(\`id\`) ON UPDATE no action ON DELETE cascade
 )`,
       indexes: [
         'CREATE INDEX `text_replacements_user_book_idx` ON `text_replacements` (`user_id`, `book_id`)',
         'CREATE INDEX `text_replacements_book_version_idx` ON `text_replacements` (`book_version_id`)',
+        'CREATE INDEX `text_replacements_availability_idx` ON `text_replacements` (`availability`)',
       ],
     },
     {
@@ -520,7 +537,7 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
 	\`book_version_id\` text REFERENCES \`book_versions\`(\`id\`) ON UPDATE no action ON DELETE cascade
 )`,
       indexes: [
-        'CREATE UNIQUE INDEX `text_replacement_overrides_book_replacement_unique` ON `text_replacement_overrides` (`book_id`, `replacement_id`)',
+        'CREATE UNIQUE INDEX `text_replacement_overrides_user_book_replacement_unique` ON `text_replacement_overrides` (`user_id`, `book_id`, `replacement_id`)',
         'CREATE INDEX `text_replacement_overrides_user_book_idx` ON `text_replacement_overrides` (`user_id`, `book_id`)',
         'CREATE INDEX `text_replacement_overrides_book_version_idx` ON `text_replacement_overrides` (`book_version_id`)',
       ],
@@ -546,11 +563,22 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
       let sourceColumns = spec.columns
       let targetColumns = spec.columns
       let createStatement = spec.create
+      let indexes = spec.indexes
       if (spec.table === 'text_replacements') {
         const columns = db.all(sql.raw('PRAGMA table_info(text_replacements)')) as Array<{ name: string }>
         // Manual legacy retargets may run before the sort-order migration.
         if (!columns.some((column) => column.name === 'sort_order')) {
           sourceColumns = sourceColumns.replace('`sort_order`', '0')
+        }
+        // Availability arrived with the reading-resource foundation. A legacy
+        // retarget can run before that migration, so the rebuilt table keeps the
+        // historical shape: adding the column here would make 0066 fail on the
+        // next startup with "duplicate column name".
+        if (!columns.some((column) => column.name === 'availability')) {
+          sourceColumns = sourceColumns.replace('`availability`, ', '')
+          targetColumns = targetColumns.replace('`availability`, ', '')
+          createStatement = createStatement.replace('\t`availability` text NOT NULL DEFAULT \'user\',\n', '')
+          indexes = indexes.filter((index) => !index.includes('text_replacements_availability_idx'))
         }
         if (!columns.some((column) => column.name === 'relocation')) {
           sourceColumns = sourceColumns.replace('`relocation`, ', '')
@@ -565,7 +593,7 @@ export function retargetBookIdReferences(db: ReturnType<typeof drizzle<typeof sc
       db.run(sql.raw(`INSERT INTO "${spec.table}_new" (${targetColumns}) SELECT ${sourceColumns} FROM "${spec.table}"`))
       db.run(sql.raw(`DROP TABLE "${spec.table}"`))
       db.run(sql.raw(`ALTER TABLE "${spec.table}_new" RENAME TO "${spec.table}"`))
-      for (const index of spec.indexes) db.run(sql.raw(index))
+      for (const index of indexes) db.run(sql.raw(index))
     }
     const violations = db.all(sql.raw('PRAGMA foreign_key_check')) as Array<unknown>
     if (violations.length > 0) {

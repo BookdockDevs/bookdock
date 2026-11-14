@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as client from './client'
 import * as schema from './schema'
-import { LEGACY_IDENTITY_RETIREMENT_TAG, migrationTagWhen, revertReadingImportsSchema } from './migration-stage'
+import { LEGACY_IDENTITY_RETIREMENT_TAG, migrationTagWhen, revertReadingImportsSchema, revertReadingResourceSchema } from './migration-stage'
 import { authGuard, requireOwner, resetAuthCaches } from '../middleware/auth.guard'
 import { errorHandler } from '../middleware/error'
 import authRoutes from '../modules/auth/auth.routes'
@@ -107,6 +107,7 @@ function makeLegacyIdentity() {
     DROP TABLE IF EXISTS ai_chat_jobs;
     `);
     revertReadingImportsSchema(db.$client);
+    revertReadingResourceSchema(db.$client);
     db.$client.exec(`
     ALTER TABLE instance DROP COLUMN registration_mode;
     ALTER TABLE book_states DROP COLUMN progress_revision_id;
@@ -203,7 +204,8 @@ describe('identity/configuration retirement', () => {
     if (invalid === 'guest-credential') db.$client.exec("UPDATE users SET password_hash = 'credential' WHERE id = 'guest'")
     if (invalid === 'guest-library') db.insert(schema.libraries).values({ id: 'guest-library', userId: 'guest', name: '', type: 'private', createdAt: 1, updatedAt: 1 }).run()
     if (invalid === 'guest-setting') db.$client.exec("INSERT INTO settings (id, user_id, key, value) VALUES ('custom', 'guest', 'ai', '{}')")
-    if (invalid === 'guest-rule') db.insert(schema.tocRules).values({ id: 'custom-rule', userId: 'guest', name: 'custom', createdAt: 1, updatedAt: 2 }).run()
+    // Raw insert: the fixture schema predates the current resource columns.
+    if (invalid === 'guest-rule') db.$client.exec("INSERT INTO toc_rules (id, user_id, name, patterns, created_at, updated_at) VALUES ('custom-rule', 'guest', 'custom', '[]', 1, 2)")
     const before = db.$client.prepare('SELECT * FROM users ORDER BY id').all()
     await expect(client.runDatabaseMigrations(db)).rejects.toMatchObject({ cause: { code: 'SQLITE_CONSTRAINT_CHECK' } })
     expect(db.$client.prepare('SELECT * FROM users ORDER BY id').all()).toEqual(before)

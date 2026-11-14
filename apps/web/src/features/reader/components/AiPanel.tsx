@@ -7,9 +7,10 @@ import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CHAT
 import type { AiAssistantMode, AiChapterReference, AiChatReq, AiCitation, AiContextReceipt, AiConversationSettings, AiHistoryMessage, AiMessageEventRes, AiMessageRes, AiReadingScope, AiRetryRecipe, AiStatusRes, AiThreadRes, AiToolName } from '@bookdock/shared'
 
 import { ApiError, apiGet, apiPost, apiStreamAiChat, apiStreamAiLocalChat } from '@/api/client'
-import { aiJobsKey, aiThreadDetailKey, aiThreadsScopeKey, useAiJobs, useAiMessageRevisions, useAiThread, useAiThreads, useDeleteAiThread, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiProfile, useUpdateAiThread } from '@/api/hooks/useAi'
+import { aiJobsKey, aiStatusKey, aiThreadDetailKey, aiThreadsScopeKey, useAiJobs, useAiMessageRevisions, useAiThread, useAiThreads, useDeleteAiThread, useSelectAiMessageRevision, useUpdateAiConfig, useUpdateAiThread } from '@/api/hooks/useAi'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import AiBrandIcon from '@/components/ui/AiBrandIcon'
+import AiModelOptionList, { type AiModelGroup } from '@/components/ui/AiModelOptionList'
 import Modal from '@/components/ui/Modal'
 import { useLocalReader } from '@/features/reading-data/reader-source-context'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
@@ -54,11 +55,15 @@ interface AiRequest {
   regenerate?: boolean
   editMessageId?: string
   prompt: string
+  /** Quick command that produced this prompt; the server resolves its current text. */
+  promptId?: string
   context: AiChatReq['context']
   history: AiHistoryMessage[]
   enabledTools: AiToolName[]
   readingScope: AiReadingScope
   assistantModeId: string
+  /** Internal model id for this conversation; omitted to follow the account default. */
+  modelId?: string
   assistantMode?: string
   assistantModePrompt?: string
 }
@@ -572,6 +577,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const [moreOpen, setMoreOpen] = useState(false)
   const [enabledTools, setEnabledTools] = useState<AiToolName[]>(DEFAULT_CONVERSATION_SETTINGS.enabledTools)
   const [readingScope, setReadingScope] = useState<AiReadingScope>(DEFAULT_CONVERSATION_SETTINGS.readingScope)
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
   const [retryRequest, setRetryRequest] = useState<AiRequest | null>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
@@ -613,7 +619,9 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const copiedMessageTimerRef = useRef<number | null>(null)
   const referenceAbortRef = useRef<AbortController | null>(null)
   const requestGenerationRef = useRef(0)
-  const sendRef = useRef<(promptOverride?: string) => Promise<void>>(async () => undefined)
+  const sendRef = useRef<(promptOverride?: string, promptIdOverride?: string) => Promise<void>>(async () => undefined)
+  /** The command the composer still holds untouched; send() turns it into a server-resolved reference. */
+  const appliedCommandRef = useRef<{ promptId: string; prompt: string } | null>(null)
   const skipMemoryWriteRef = useRef(true)
   const conversationSettingsHydratedRef = useRef(false)
   const latestConversationSettingsRef = useRef<AiConversationSettings>(DEFAULT_CONVERSATION_SETTINGS)
@@ -626,7 +634,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const latestRevisionMessageId = !streaming && latestMessage?.role === 'assistant' && latestMessage.content.trim() && latestMessage.revisionGroupId ? latestMessage.id : null
   const revisionsQuery = useAiMessageRevisions(threadId, latestRevisionMessageId, { enabled: !local && Boolean(latestRevisionMessageId) })
   const updateAiConfig = useUpdateAiConfig()
-  const updateAiProfile = useUpdateAiProfile()
   const selectRevisionMutation = useSelectAiMessageRevision()
   const { mutate: updateThreadSettings } = useUpdateAiThread()
   const renameThread = useUpdateAiThread()
@@ -635,7 +642,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const { commands: quickCommands } = useAiQuickCommands()
 
   const statusQuery = useQuery({
-    queryKey: ['ai-status'],
+    queryKey: aiStatusKey(user?.id ?? null),
     queryFn: () => apiGet<{ data: AiStatusRes }>('/ai/status'),
     enabled: accountAvailable,
   })
@@ -770,6 +777,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         enabledTools: [...recipe.enabledTools],
         readingScope: recipe.readingScope,
         assistantModeId: recipe.assistantModeId ?? threadQuery.data.data.settings?.assistantModeId ?? DEFAULT_ASSISTANT_MODE.id,
+        ...(recipe.modelId ? { modelId: recipe.modelId } : {}),
         ...(recipe.assistantMode ? { assistantMode: recipe.assistantMode } : {}),
         ...(assistantModePrompt ? { assistantModePrompt } : {}),
       })
@@ -791,6 +799,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         setEnabledTools(threadQuery.data.data.settings.enabledTools)
       }
       setSelectedAssistantModeId(threadQuery.data.data.settings.assistantModeId ?? DEFAULT_ASSISTANT_MODE.id)
+      setSelectedModelId(threadQuery.data.data.settings.modelId ?? null)
     }
   }, [_, annotationsQuery.data, currentJob, local, streamingRequest, threadId, threadQuery.data])
   useEffect(() => {
@@ -799,7 +808,8 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     const toolsMatch = local || (savedSettings.enabledTools.length === enabledTools.length && savedSettings.enabledTools.every((name, index) => name === enabledTools[index]))
     const scopeMatch = local || savedSettings.readingScope === readingScope
     const modeMatch = (savedSettings.assistantModeId ?? DEFAULT_ASSISTANT_MODE.id) === selectedAssistantModeId
-    if (scopeMatch && toolsMatch && modeMatch) return
+    const modelMatch = (savedSettings.modelId ?? null) === (selectedModelId ?? null)
+    if (scopeMatch && toolsMatch && modeMatch && modelMatch) return
     const timer = window.setTimeout(() => {
       updateThreadSettings({
         id: threadId,
@@ -808,6 +818,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
             readingScope: local ? savedSettings.readingScope : readingScope,
             enabledTools: local ? savedSettings.enabledTools : enabledTools,
             assistantModeId: selectedAssistantModeId,
+            modelId: selectedModelId ?? undefined,
           },
         },
       }, {
@@ -815,7 +826,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
       })
     }, 250)
     return () => window.clearTimeout(timer)
-  }, [enabledTools, local, readingScope, selectedAssistantModeId, streaming, threadId, threadQuery.data, updateThreadSettings])
+  }, [enabledTools, local, readingScope, selectedAssistantModeId, selectedModelId, streaming, threadId, threadQuery.data, updateThreadSettings])
   useEffect(() => {
     const memory: AiPanelMemory = {
       activeThreadId: threadId,
@@ -1013,17 +1024,31 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const chapterHref = aiContext?.chapterHref ?? currentChapterHref
   const chapterIndex = aiContext?.chapterIndex ?? activeSelection?.chapterIndex ?? currentChapterIndex ?? -1
   const modelReady = accountAvailable && Boolean(statusQuery.data?.data.enabled)
-  const modelLabel = modelReady ? statusQuery.data?.data.model ?? _('reader.aiCurrentModel') : _('reader.aiSelectModel')
-  const modelOptions = useMemo(() => {
-    const models = (statusQuery.data?.data.models ?? []).filter((model) => !isAiEmbeddingModel(model))
-    const currentModel = statusQuery.data?.data.model
-    if (currentModel && !isAiEmbeddingModel({ id: currentModel, name: currentModel }) && !models.some((model) => model.id === currentModel)) return [{ id: currentModel, name: currentModel }, ...models]
-    return models
-  }, [statusQuery.data])
-  const selectedModel = modelOptions.find((model) => model.id === statusQuery.data?.data.model)
+  const modelOptions = useMemo(
+    // Only exposed-and-enabled models can actually run: a switched-off model of
+    // your own is manageable in settings, but not selectable for a chat.
+    () => (statusQuery.data?.data.models ?? [])
+      .filter((model) => model.enabled && !isAiEmbeddingModel({ id: model.upstreamModelId, name: model.name })),
+    [statusQuery.data],
+  )
+  // Group in catalog order so the picker reads like the settings connection list.
+  const modelGroups = useMemo(() => {
+    const groups = new Map<string, AiModelGroup>()
+    for (const model of modelOptions) {
+      const group = groups.get(model.connectionId) ?? { id: model.connectionId, name: model.connectionName, models: [] }
+      group.models.push(model)
+      groups.set(model.connectionId, group)
+    }
+    return [...groups.values()]
+  }, [modelOptions])
+  const effectiveModelId = selectedModelId ?? statusQuery.data?.data.lastUsedModelId ?? null
+  const selectedModel = modelOptions.find((model) => model.id === effectiveModelId)
+  // No valid remembered model: fall back to naming the only enabled model when
+  // that is what a send would use anyway, otherwise show the empty state.
+  const labelModel = selectedModel ?? (modelOptions.length === 1 ? modelOptions[0] : null)
   const selectedModelLabel = selectedModel
-    ? selectedModel.name === selectedModel.id ? selectedModel.id : `${selectedModel.name} · ${selectedModel.id}`
-    : modelLabel
+    ? selectedModel.name === selectedModel.upstreamModelId ? selectedModel.name : `${selectedModel.name} · ${selectedModel.upstreamModelId}`
+    : labelModel ? labelModel.name : _('reader.aiSelectModel')
   const visibleTextVersion = renderer?.getAiCorpusVersion?.() ?? null
   const availableAssistantModes = assistantModes.length > 0 ? assistantModes : [DEFAULT_ASSISTANT_MODE]
   const selectedAssistantMode = availableAssistantModes.find((mode) => mode.id === selectedAssistantModeId) ?? DEFAULT_ASSISTANT_MODE
@@ -1131,6 +1156,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
       enabledTools: [...recipe.enabledTools],
       readingScope: recipe.readingScope,
       assistantModeId: recipe.assistantModeId ?? DEFAULT_ASSISTANT_MODE.id,
+      ...(recipe.modelId ? { modelId: recipe.modelId } : {}),
       ...(recipe.assistantMode ? { assistantMode: recipe.assistantMode } : {}),
       ...(assistantModePrompt ? { assistantModePrompt } : {}),
     }
@@ -1414,6 +1440,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         readingScope: request.readingScope,
         enabledTools: request.enabledTools,
         assistantModeId: request.assistantModeId,
+        ...(request.modelId ? { modelId: request.modelId } : {}),
         ...(request.assistantMode ? { assistantMode: request.assistantMode } : {}),
         ...(request.assistantModePrompt ? { assistantModePrompt: request.assistantModePrompt } : {}),
       },
@@ -1511,9 +1538,11 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         controller.signal.throwIfAborted()
         await apiStreamAiLocalChat({
           prompt: request.prompt,
+          ...(request.promptId ? { promptId: request.promptId } : {}),
           context: request.context,
           ...(request.history.length > 0 ? { history: boundAiHistory(request.history) } : {}),
           assistantModeId: request.assistantModeId,
+          ...(request.modelId ? { modelId: request.modelId } : {}),
           ...(request.assistantMode ? { assistantMode: request.assistantMode } : {}),
           ...(request.assistantModePrompt ? { assistantModePrompt: request.assistantModePrompt } : {}),
         }, streamHandlers, controller.signal, { clientRequestId: assistantId, scopeKey: local.namespace, threadId: activeThreadId })
@@ -1567,7 +1596,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     }
   }
 
-  async function send(promptOverride?: string) {
+  async function send(promptOverride?: string, promptIdOverride?: string) {
     const template = (promptOverride ?? prompt).trim()
     if (!modelReady || !template || streaming || preparingReferences) return
     const generation = requestGenerationRef.current
@@ -1622,9 +1651,15 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
       notify.error({ key: 'reader.aiPromptTooLong' })
       return
     }
+    // The composer still holding the untouched command text is what makes the
+    // reference valid: any edit turns the request into the user's own words.
+    const applied = appliedCommandRef.current
+    appliedCommandRef.current = null
+    const appliedPromptId = promptIdOverride ?? (applied && applied.prompt === template ? applied.promptId : undefined)
     void runRequest({
       ...(threadId ? { threadId } : {}),
       prompt: template,
+      ...(appliedPromptId ? { promptId: appliedPromptId } : {}),
       history,
       context: {
         chapterIndex,
@@ -1639,6 +1674,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
       enabledTools: [...enabledTools],
       readingScope,
       assistantModeId: selectedAssistantMode.id,
+      ...(selectedModelId ? { modelId: selectedModelId } : {}),
       assistantMode: selectedAssistantMode.name,
       ...(selectedAssistantMode.prompt ? { assistantModePrompt: selectedAssistantMode.prompt } : {}),
     })
@@ -1658,7 +1694,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     setAiPendingCommand(null)
     setPrompt(pendingCommand.prompt)
     setQuickCommandMenuOpen(false)
-    if (modelReady) void sendRef.current(pendingCommand.prompt)
+    if (modelReady) void sendRef.current(pendingCommand.prompt, pendingCommand.promptId)
   }, [aiPendingCommand, modelReady, setAiPendingCommand, statusQuery.isPending, streaming])
 
   async function stop() {
@@ -1761,10 +1797,10 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     }
   }
 
-  function selectModel(model: string) {
-    const activeProfileId = statusQuery.data?.data.activeProfileId
-    if (!model || model === statusQuery.data?.data.model || !activeProfileId || updateAiConfig.isPending || updateAiProfile.isPending) return
-    updateAiProfile.mutate({ id: activeProfileId, body: { model } }, { onError: (error) => showError(error) })
+  function selectModel(modelId: string) {
+    if (!modelId || modelId === (selectedModelId ?? statusQuery.data?.data.lastUsedModelId ?? null)) return
+    // Pinning a model is a conversation choice; the account default is edited in settings.
+    setSelectedModelId(modelId)
   }
 
 
@@ -1796,6 +1832,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
 
   function applyQuickCommand(command: AiQuickCommand) {
     setPrompt(command.prompt)
+    appliedCommandRef.current = command.promptId ? { promptId: command.promptId, prompt: command.prompt } : null
     setQuickCommandMenuOpen(false)
     promptTextareaRef.current?.focus()
   }
@@ -2087,7 +2124,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                 })}
                 </div>
               </div>}
-              <textarea ref={promptTextareaRef} value={prompt} onChange={(event) => { const value = event.target.value; setPrompt(value); const slashOpen = value.startsWith('/'); setQuickCommandMenuOpen(slashOpen); if (slashOpen) { setAttachmentOpen(false); setToolsOpen(false) } }} onKeyDown={handlePromptKeyDown} rows={2} placeholder={_('reader.aiInputPlaceholder')} className={`${READ_SCROLLBAR_CLASSES} min-h-12 max-h-36 w-full resize-none overflow-y-hidden overscroll-contain bg-transparent text-sm leading-relaxed text-current outline-none placeholder:text-[var(--bd-read-sub)]`} />
+              <textarea ref={promptTextareaRef} value={prompt} onChange={(event) => { const value = event.target.value; setPrompt(value); appliedCommandRef.current = null; const slashOpen = value.startsWith('/'); setQuickCommandMenuOpen(slashOpen); if (slashOpen) { setAttachmentOpen(false); setToolsOpen(false) } }} onKeyDown={handlePromptKeyDown} rows={2} placeholder={_('reader.aiInputPlaceholder')} className={`${READ_SCROLLBAR_CLASSES} min-h-12 max-h-36 w-full resize-none overflow-y-hidden overscroll-contain bg-transparent text-sm leading-relaxed text-current outline-none placeholder:text-[var(--bd-read-sub)]`} />
               {quickCommandMenuOpen && slashQuery !== null && (
                 <div ref={quickCommandMenuRef} role="menu" aria-label={_('reader.aiQuickCommands')} data-testid="ai-quick-command-menu" className="absolute bottom-full left-0 z-30 mb-2 flex max-h-[min(360px,calc(100vh-4rem))] w-full flex-col overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1.5 shadow-xl">
                   {visibleQuickCommands.length > 0 ? visibleQuickCommands.map((command) => (
@@ -2117,42 +2154,22 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                     aria-haspopup="listbox"
                     aria-expanded={modelMenuOpen}
                     title={selectedModelLabel}
-                    disabled={!modelReady || modelOptions.length < 2 || updateAiConfig.isPending || updateAiProfile.isPending}
+                    disabled={!modelReady || modelOptions.length < 2}
                     ref={modelButtonRef}
                     onClick={() => { setAttachmentOpen(false); setToolsOpen(false); setAssistantModeMenuOpen(false); setQuickCommandMenuOpen(false); setMoreOpen(false); setModelMenuOpen((open) => !open) }}
                     className={`flex h-7 min-w-0 w-full max-w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs font-medium text-[var(--bd-read-text)] outline-none transition-colors hover:bg-stone-500/10 focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)] disabled:cursor-not-allowed disabled:text-[var(--bd-read-sub)] ${modelMenuOpen ? 'bg-stone-500/10' : ''}`}
                   >
-                    {modelReady && <AiBrandIcon name={selectedModel?.name ?? statusQuery.data?.data.model} model={selectedModel} provider={statusQuery.data?.data.provider} className="h-5 w-5 shrink-0 @max-[280px]/composer:hidden" />}
+                    {modelReady && labelModel && <AiBrandIcon name={labelModel.name} model={{ id: labelModel.upstreamModelId, name: labelModel.name }} provider={labelModel.provider} className="h-5 w-5 shrink-0 @max-[280px]/composer:hidden" />}
                     <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
                     <svg className={`h-3.5 w-3.5 shrink-0 text-[var(--bd-read-sub)] transition-transform ${modelMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
                   </button>
                   {modelMenuOpen && modelOptions.length > 1 && modelMenuPosition && createPortal(
                     <div ref={modelMenuPopupRef} role="listbox" aria-label={_('reader.aiSelectModel')} className={`${READ_SCROLLBAR_CLASSES} fixed z-[70] max-h-52 min-w-56 w-max max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain rounded-lg border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-1 shadow-xl`} style={modelMenuPosition}>
-                      {modelOptions.map((model) => {
-                        const hasId = model.name !== model.id
-                        const selected = model.id === statusQuery.data?.data.model
-                        return (
-                          <button
-                            key={model.id}
-                            type="button"
-                            role="option"
-                            aria-selected={selected}
-                            title={hasId ? `${model.name} (${model.id})` : model.name}
-                            onClick={() => {
-                              selectModel(model.id)
-                              setModelMenuOpen(false)
-                            }}
-                            className={`flex min-h-10 min-w-0 w-full items-center gap-2 overflow-hidden rounded-md px-2 py-1 text-left text-sm transition-colors ${selected ? 'bg-[var(--bd-read-primary)]/15 font-medium text-[var(--bd-read-primary)] hover:bg-[var(--bd-read-primary)]/20' : 'text-[var(--bd-read-text)] hover:bg-stone-500/15'}`}
-                          >
-                            <AiBrandIcon name={model.name} model={model} className="h-5 w-5 shrink-0" />
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-medium">{model.name}</p>
-                              {hasId && <p className="truncate text-[10px] text-[var(--bd-read-sub)]">{model.id}</p>}
-                            </div>
-                            {selected && <span className="ml-2 shrink-0 text-[var(--bd-read-primary)]"><CheckIcon /></span>}
-                          </button>
-                        )
-                      })}
+                      <AiModelOptionList
+                        groups={modelGroups}
+                        selectedModelId={effectiveModelId}
+                        onSelect={(modelId) => { selectModel(modelId); setModelMenuOpen(false) }}
+                      />
                     </div>,
                     document.body,
                   )}

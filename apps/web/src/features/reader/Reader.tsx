@@ -300,13 +300,17 @@ export default function Reader() {
       const insideCanvas = rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
       const overDialog = target instanceof Element && Boolean(target.closest('[role="dialog"]'))
       const overToast = target instanceof Element && Boolean(target.closest('[data-toast-id]'))
+      // The unpinned sidebar overlays the canvas while staying out of flow, so the
+      // canvas rect alone cannot tell pointer-over-sidebar from pointer-over-text;
+      // hovering the panel must not summon the chrome underneath it.
+      const overSidebar = target instanceof Element && Boolean(target.closest('#reader-navigation'))
       const currentReadingMode = useUiStore.getState().readingMode
       // Once the footer is up it keeps a taller keep-alive band, so the pointer can
       // travel from the strip up to a capsule without falling out of the sensor.
       const footerBand = footerVisibleRef.current ? CHROME_FOOTER_SUSTAIN_BAND : CHROME_FOOTER_BAND
-      const inHeader = Boolean(insideCanvas && !overDialog && !overToast && rect && clientY <= rect.top + CHROME_HEADER_BAND
+      const inHeader = Boolean(insideCanvas && !overDialog && !overToast && !overSidebar && rect && clientY <= rect.top + CHROME_HEADER_BAND
         && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
-      const inFooter = Boolean(insideCanvas && !overDialog && !overToast && rect && clientY >= rect.bottom - footerBand
+      const inFooter = Boolean(insideCanvas && !overDialog && !overToast && !overSidebar && rect && clientY >= rect.bottom - footerBand
         && clientX >= rect.left
         && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
       // Staying inside a band also cancels a pending hide, not just crossing into it.

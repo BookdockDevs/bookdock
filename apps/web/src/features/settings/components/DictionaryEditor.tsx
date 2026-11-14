@@ -52,23 +52,23 @@ export default function DictionaryEditor({ item, isOwner, saving, onClose, onSav
           />
         </label>
 
+        {isOwner && (
         <fieldset className="space-y-1.5">
           <legend className="text-xs text-stone-400 dark:text-stone-500">{_('settings.fontsScope')}</legend>
           <SegmentedControl
             ariaLabel={_('settings.fontsScope')}
             fullWidth
             size="md"
-            disabled={!isOwner}
             pending={saving}
             value={scope}
             onChange={setScope}
             options={(['user', 'instance'] as DictionaryScope[]).map((value) => ({
               value,
-              label: _(value === 'user' ? 'settings.fontsScopeUser' : 'settings.fontsScopeInstance'),
+              label: _(value === 'user' ? 'settings.resourceScopeUser' : 'settings.resourceScopeInstance'),
             }))}
           />
-          {!isOwner && <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{_('settings.dictionariesScopeOwnerHint')}</p>}
         </fieldset>
+        )}
 
         <div className="flex flex-col gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:bg-stone-800/60 dark:text-stone-400">
           {item.fileNames.map((fileName, idx) => (

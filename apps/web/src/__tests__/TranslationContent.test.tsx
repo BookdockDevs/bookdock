@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StrictMode } from 'react'
 
-import type { AiConfigRes, AiProfileRes, TranslationPreferences } from '@bookdock/shared'
+import type { AiConfigRes, AiConnectionRes, AiModelEntryRes, TranslationPreferences } from '@bookdock/shared'
 
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
 vi.mock('../api/client', async (original) => ({ ...await original<typeof import('../api/client')>(), streamTranslation: vi.fn(), apiPut: vi.fn() }))
@@ -12,15 +12,26 @@ import { apiPut, streamTranslation } from '../api/client'
 import TranslationContent from '../features/reader/components/TranslationContent'
 import { useAuthStore } from '../stores/auth.store'
 
-const preferences: TranslationPreferences = { targetLang: 'zh-Hans', channel: { kind: 'ai', profileId: null, model: null } }
-const firstProfile: AiProfileRes = { id: 'first', name: 'First AI', provider: 'ollama', baseUrl: 'http://localhost:11434', model: 'first-model', models: [{ id: 'first-model', name: 'first-model' }], embeddingModel: null, embeddingModels: [], apiKeyConfigured: false, createdAt: 1, updatedAt: 1 }
-const firstPreferences: TranslationPreferences = { ...preferences, channel: { kind: 'ai', profileId: 'first', model: null } }
-const config: AiConfigRes = {
-  activeProfileId: 'second', profiles: [firstProfile, { ...firstProfile, id: 'second', name: 'Second AI', model: 'second-model', models: [{ id: 'second-model', name: 'second-model' }] }], provider: 'openai', baseUrl: 'https://example.test', model: 'second-model', models: [],
-  prompts: [], modes: [], lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: [], assistantModeId: 'assistant' },
+const preferences: TranslationPreferences = { targetLang: 'zh-Hans', channel: { kind: 'ai', modelId: null } }
 
-  apiKeyConfigured: true, configuredByUser: true,
+function connection(overrides: Partial<AiConnectionRes> = {}): AiConnectionRes {
+  return { id: 'first', name: 'First AI', provider: 'ollama', baseUrl: 'http://localhost:11434', availability: 'user', mine: true, apiKeyConfigured: false, createdAt: 1, updatedAt: 1, ...overrides }
 }
+
+function model(overrides: Partial<AiModelEntryRes> = {}): AiModelEntryRes {
+  return { id: 'first-model', connectionId: 'first', connectionName: 'First AI', provider: 'ollama', upstreamModelId: 'first-model', name: 'first-model', enabled: true, mine: true, createdAt: 1, updatedAt: 1, ...overrides }
+}
+
+const config: AiConfigRes = {
+  connections: [connection(), connection({ id: 'second', name: 'Second AI', provider: 'openai', baseUrl: 'https://example.test', apiKeyConfigured: true })],
+  models: [model(), model({ id: 'second-model', connectionId: 'second', connectionName: 'Second AI', provider: 'openai', upstreamModelId: 'second-model', name: 'second-model' })],
+  lastUsedModels: { chat: 'second-model', translate: 'second-model' },
+  prompts: [],
+  modes: [],
+  lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: [], assistantModeId: 'assistant' },
+}
+
+const noModelConfig: AiConfigRes = { ...config, connections: [], models: [], lastUsedModels: { chat: null, translate: null } }
 
 function mount(saved = preferences, ai = config, bookId: string | undefined = 'book') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -40,8 +51,9 @@ describe('selection translation card', () => {
     mount()
     expect(await screen.findByText('翻译结果')).toBeInTheDocument()
     expect(screen.queryByText('Original private selection')).not.toBeInTheDocument()
-    expect(streamTranslation).toHaveBeenCalledWith({ bookId: 'book', text: 'Original private selection', ...firstPreferences }, expect.any(AbortSignal), expect.any(Function))
-    expect(apiPut).toHaveBeenCalledWith('/translation/config', firstPreferences)
+    expect(streamTranslation).toHaveBeenCalledWith({ bookId: 'book', text: 'Original private selection', ...preferences }, expect.any(AbortSignal), expect.any(Function))
+    // Following the account default writes nothing back: there is no explicit choice to persist.
+    expect(apiPut).not.toHaveBeenCalled()
     expect(screen.queryByText(/translation.followAi/)).not.toBeInTheDocument()
   })
 
@@ -49,7 +61,7 @@ describe('selection translation card', () => {
     const client = new QueryClient()
     render(<QueryClientProvider client={client}><TranslationContent text="Local selection" preferences={preferences} config={config} onClose={vi.fn()} /></QueryClientProvider>)
     expect(await screen.findByText('翻译结果')).toBeInTheDocument()
-    expect(streamTranslation).toHaveBeenCalledWith({ text: 'Local selection', ...firstPreferences }, expect.any(AbortSignal), expect.any(Function))
+    expect(streamTranslation).toHaveBeenCalledWith({ text: 'Local selection', ...preferences }, expect.any(AbortSignal), expect.any(Function))
   })
 
   it('shows the account requirement without forwarding anonymous text', () => {
@@ -88,7 +100,7 @@ describe('selection translation card', () => {
     fireEvent.change(screen.getByLabelText('translation.target'), { target: { value: 'en' } })
     await waitFor(() => expect(streamTranslation).toHaveBeenCalledTimes(2))
     expect(vi.mocked(streamTranslation).mock.calls[1]![0].targetLang).toBe('en')
-    expect(apiPut).toHaveBeenCalledWith('/translation/config', { ...firstPreferences, targetLang: 'en' })
+    expect(apiPut).toHaveBeenCalledWith('/translation/config', { ...preferences, targetLang: 'en' })
   })
 
   it('stops upstream work, keeps partial text and ignores late chunks', async () => {
@@ -138,18 +150,18 @@ describe('selection translation card', () => {
     expect(vi.mocked(streamTranslation).mock.calls[1]![0].text).toHaveLength(6000)
   })
 
-  it('restores the last selected service, model and language instead of choosing the first service again', async () => {
-    const saved: TranslationPreferences = { targetLang: 'ja', channel: { kind: 'ai', profileId: 'second', model: 'second-model' } }
+  it('restores the last selected model and language instead of choosing the first service again', async () => {
+    const saved: TranslationPreferences = { targetLang: 'ja', channel: { kind: 'ai', modelId: 'second-model' } }
     mount(saved)
     await screen.findByText('翻译结果')
     expect(vi.mocked(streamTranslation).mock.calls[0]![0]).toMatchObject(saved)
     expect(screen.getByLabelText('translation.target')).toHaveValue('ja')
-    expect(screen.getByLabelText('translation.channel')).toHaveValue(JSON.stringify(['second', null]))
+    expect(screen.getByLabelText('translation.channel')).toHaveValue('second-model')
     expect(apiPut).not.toHaveBeenCalled()
   })
 
   it('shows configuration guidance without sending translation requests when no AI service exists', () => {
-    mount(preferences, { ...config, profiles: [] })
+    mount(preferences, noModelConfig)
     expect(screen.getByText('translation.notConfigured')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'translation.configure' })).toHaveAttribute('href', '/settings?section=reading&focus=ai')
     expect(screen.getByLabelText('translation.channel')).toBeDisabled()
@@ -158,10 +170,10 @@ describe('selection translation card', () => {
     expect(apiPut).not.toHaveBeenCalled()
   })
 
-  it('shows not configured state without erroring when all models in profile are deleted', () => {
-    const emptyModelsProfile: AiProfileRes = { ...firstProfile, model: null, models: [] }
-    const saved: TranslationPreferences = { targetLang: 'en', channel: { kind: 'ai', profileId: 'first', model: 'gemma-4-31b-it' } }
-    mount(saved, { ...config, profiles: [emptyModelsProfile] })
+  it('shows not configured state without erroring when every model of the connection is deleted', () => {
+    const saved: TranslationPreferences = { targetLang: 'en', channel: { kind: 'ai', modelId: 'gemma-4-31b-it' } }
+    const connectionWithoutModels: AiConfigRes = { ...config, connections: [connection()], models: [], lastUsedModels: { chat: null, translate: null } }
+    mount(saved, connectionWithoutModels)
     expect(screen.getByText('translation.notConfigured')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'translation.configure' })).toHaveAttribute('href', '/settings?section=reading&focus=ai')
     expect(screen.getByLabelText('translation.channel')).toBeDisabled()
@@ -169,12 +181,26 @@ describe('selection translation card', () => {
     expect(streamTranslation).not.toHaveBeenCalled()
   })
 
-  it('falls back to remaining model when previously selected model was deleted', async () => {
-    const saved: TranslationPreferences = { targetLang: 'zh-Hans', channel: { kind: 'ai', profileId: 'first', model: 'deleted-model' } }
+  it('offers only enabled models in the channel picker', async () => {
+    const withDisabled: AiConfigRes = {
+      ...config,
+      models: [...config.models, model({ id: 'off-model', upstreamModelId: 'off-model', name: 'off-model', enabled: false })],
+    }
+    mount({ targetLang: 'zh-Hans', channel: { kind: 'ai', modelId: 'second-model' } }, withDisabled)
+    expect(await screen.findByText('翻译结果')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'second-model' })).toBeInTheDocument()
+    // A switched-off model of your own is manageable in settings, not runnable here.
+    expect(screen.queryByRole('option', { name: 'off-model' })).toBeNull()
+  })
+
+  it('treats a deleted model selection as absent and still translates through the chain', async () => {
+    const saved: TranslationPreferences = { targetLang: 'zh-Hans', channel: { kind: 'ai', modelId: 'deleted-model' } }
     mount(saved)
     expect(await screen.findByText('翻译结果')).toBeInTheDocument()
+    // The picker shows the empty state; the server-side chain picks the model.
+    expect(screen.getByText('translation.selectModel')).toBeInTheDocument()
     expect(streamTranslation).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: { kind: 'ai', profileId: 'first', model: null } }),
+      { bookId: 'book', text: 'Original private selection', ...saved },
       expect.any(AbortSignal),
       expect.any(Function),
     )

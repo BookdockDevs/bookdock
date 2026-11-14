@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 
-import { aiChatJobCreateSchema, aiChatJobListSchema, aiChatSchema, aiConfigTestSchema, aiConfigUpdateSchema, aiGenerationRunIdSchema, aiLocalChatSchema, aiMessageIdSchema, aiModelDiscoverySchema, aiProfileCreateSchema, aiProfileUpdateSchema, aiSearchSchema, aiThreadCreateSchema, aiThreadListSchema, aiThreadUpdateSchema, type AiConfigRes, type AiConnectionTestRes, type AiGenerationRunRes, type AiMessageRevisionRes, type AiModelRes, type AiProfileRes, type AiProviderRes, type AiSearchRes, type AiStatusRes, type AiThreadDetailRes, type AiThreadRes } from '@bookdock/shared'
+import { aiChatJobCreateSchema, aiChatJobListSchema, aiChatSchema, aiConfigUpdateSchema, aiConnectionCreateSchema, aiConnectionUpdateSchema, aiGenerationRunIdSchema, aiLocalChatSchema, aiMessageIdSchema, aiModelDiscoverSchema, aiModelEntryCreateSchema, aiModelEntryUpdateSchema, aiPromptCreateSchema, aiPromptReorderSchema, aiPromptUpdateSchema, aiSearchSchema, aiThreadCreateSchema, aiThreadListSchema, aiThreadUpdateSchema, type AiConfigRes, type AiConnectionModelTestRes, type AiConnectionRes, type AiGenerationRunRes, type AiMessageRevisionRes, type AiModelEntryRes, type AiPromptTemplate, type AiProviderRes, type AiSearchRes, type AiStatusRes, type AiThreadDetailRes, type AiThreadRes } from '@bookdock/shared'
 
-import { cancelAiChatRun, createAiChatStream, createAiLocalChatStream, createAiProfile, deleteAiProfile, getAiConfig, getAiSearchChapterLimit, getAiStatus, listAiModels, listAiProviders, testAiConfig, testAiConfigDraft, updateAiConfig, updateAiProfile } from './ai.service'
+import { cancelAiChatRun, createAiChatStream, createAiLocalChatStream, discoverAiConnectionModels, getAiConfig, getAiSearchChapterLimit, getAiStatus, listAiProviders, testAiModel, updateAiConfig } from './ai.service'
+import { createAiConnection, createAiModel, deleteAiConnection, deleteAiModel, mergeDiscoveredModels, updateAiConnection, updateAiModel } from './ai.connections.service'
+import { createAiPrompt, deleteAiPrompt, reorderAiPrompts, restoreAiPrompts, updateAiPrompt } from './ai.prompts.service'
 import { createAiThread, deleteAiThread, getAiThread, listAiMessageRevisions, listAiThreads, selectAiMessageRevision, updateAiThread } from './ai.sessions.service'
 import { searchAiBook } from './ai.retrieval.service'
 import { getAiGenerationRun } from './ai.runs.service'
@@ -18,7 +20,7 @@ aiRoutes.get('/providers', (c) => {
 aiRoutes.get('/status', (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  return c.json({ data: getAiStatus(user.id, user.role) } satisfies { data: AiStatusRes })
+  return c.json({ data: getAiStatus(user.id) } satisfies { data: AiStatusRes })
 })
 
 aiRoutes.get('/config', (c) => {
@@ -38,59 +40,120 @@ aiRoutes.patch('/config', async (c) => {
   return c.json({ data: updateAiConfig(user.id, parsed.data) } satisfies { data: AiConfigRes })
 })
 
-aiRoutes.post('/profiles', async (c) => {
+aiRoutes.post('/connections', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = aiProfileCreateSchema.safeParse(await c.req.json().catch(() => null))
+  const parsed = aiConnectionCreateSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI profile', details: parsed.error.flatten() } }, 400)
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI connection', details: parsed.error.flatten() } }, 400)
   }
-  return c.json({ data: createAiProfile(user.id, user.role, parsed.data) } satisfies { data: AiProfileRes }, 201)
+  return c.json({ data: createAiConnection(user.id, user.role, parsed.data) } satisfies { data: AiConnectionRes }, 201)
 })
 
-aiRoutes.patch('/profiles/:id', async (c) => {
+aiRoutes.patch('/connections/:id', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = aiProfileUpdateSchema.safeParse(await c.req.json().catch(() => null))
+  const parsed = aiConnectionUpdateSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI profile', details: parsed.error.flatten() } }, 400)
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI connection', details: parsed.error.flatten() } }, 400)
   }
-  return c.json({ data: updateAiProfile(user.id, user.role, c.req.param('id'), parsed.data) } satisfies { data: AiProfileRes })
+  return c.json({ data: updateAiConnection(user.id, user.role, c.req.param('id'), parsed.data) } satisfies { data: AiConnectionRes })
 })
 
-aiRoutes.delete('/profiles/:id', (c) => {
+aiRoutes.delete('/connections/:id', (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  deleteAiProfile(user.id, user.role, c.req.param('id'))
+  deleteAiConnection(user.id, c.req.param('id'))
   return c.json({ data: null })
 })
 
-aiRoutes.post('/models', async (c) => {
+// Static segments are registered before `:id` routes so they never resolve as an id.
+aiRoutes.post('/connections/:id/models', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const raw = await c.req.json().catch(() => null)
-  const parsed = aiModelDiscoverySchema.safeParse(raw)
+  const parsed = aiModelEntryCreateSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI model discovery request', details: parsed.error.flatten() } }, 400)
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI model', details: parsed.error.flatten() } }, 400)
   }
-  return c.json({ data: await listAiModels(user.id, user.role, parsed.data, c.req.raw.signal) } satisfies { data: AiModelRes[] })
+  return c.json({ data: createAiModel(user.id, c.req.param('id'), parsed.data) } satisfies { data: AiModelEntryRes }, 201)
 })
 
-aiRoutes.post('/test', async (c) => {
+aiRoutes.post('/connections/:id/models/discover', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const raw = await c.req.json().catch(() => null)
-  const parsed = aiConfigTestSchema.safeParse(raw)
+  const parsed = aiModelDiscoverSchema.safeParse(await c.req.json().catch(() => ({})))
   if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI test request', details: parsed.error.flatten() } }, 400)
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI model discovery request' } }, 400)
   }
-  return c.json({ data: await testAiConfigDraft(user.id, user.role, parsed.data, c.req.raw.signal) } satisfies { data: AiConnectionTestRes })
+  const discovered = await discoverAiConnectionModels(user.id, user.role, c.req.param('id'), parsed.data.kind, c.req.raw.signal)
+  return c.json({ data: mergeDiscoveredModels(user.id, c.req.param('id'), discovered) } satisfies { data: AiModelEntryRes[] })
 })
 
-aiRoutes.post('/config/test', async (c) => {
+aiRoutes.patch('/models/:id', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  return c.json({ data: await testAiConfig(user.id, user.role, c.req.raw.signal) } satisfies { data: AiConnectionTestRes })
+  const parsed = aiModelEntryUpdateSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid AI model', details: parsed.error.flatten() } }, 400)
+  }
+  return c.json({ data: updateAiModel(user.id, c.req.param('id'), parsed.data) } satisfies { data: AiModelEntryRes })
+})
+
+aiRoutes.delete('/models/:id', (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  deleteAiModel(user.id, c.req.param('id'))
+  return c.json({ data: null })
+})
+
+aiRoutes.post('/models/:id/test', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  return c.json({ data: await testAiModel(user.id, user.role, c.req.param('id'), c.req.raw.signal) } satisfies { data: AiConnectionModelTestRes })
+})
+
+// Static segments are registered before `:id` routes so they never resolve as an id.
+aiRoutes.post('/prompts', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = aiPromptCreateSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid quick command', details: parsed.error.flatten() } }, 400)
+  }
+  return c.json({ data: createAiPrompt(user.id, user.role, parsed.data) } satisfies { data: AiPromptTemplate }, 201)
+})
+
+aiRoutes.put('/prompts/reorder', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = aiPromptReorderSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid quick command order', details: parsed.error.flatten() } }, 400)
+  }
+  return c.json({ data: reorderAiPrompts(user.id, parsed.data) } satisfies { data: AiPromptTemplate[] })
+})
+
+aiRoutes.post('/prompts/restore', (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  return c.json({ data: restoreAiPrompts(user.id) } satisfies { data: AiPromptTemplate[] })
+})
+
+aiRoutes.patch('/prompts/:id', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = aiPromptUpdateSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid quick command', details: parsed.error.flatten() } }, 400)
+  }
+  return c.json({ data: updateAiPrompt(user.id, user.role, c.req.param('id'), parsed.data) } satisfies { data: AiPromptTemplate })
+})
+
+aiRoutes.delete('/prompts/:id', (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  deleteAiPrompt(user.id, c.req.param('id'))
+  return c.json({ data: null })
 })
 
 aiRoutes.get('/threads', (c) => {

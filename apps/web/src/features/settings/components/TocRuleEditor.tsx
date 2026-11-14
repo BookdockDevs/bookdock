@@ -3,13 +3,15 @@ import { useRef, useState } from 'react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
-import type { TocRulePattern, TocRuleRes } from '@bookdock/shared'
+import type { ResourceAvailability, TocRulePattern, TocRuleRes } from '@bookdock/shared'
 
 import { useCreateTocRule, useUpdateTocRule } from '@/api/hooks/useTocRules'
 import Modal from '@/components/ui/Modal'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { useAuthStore } from '@/stores/auth.store'
 
 import TocPatternRow, { type TocPatternError } from './TocPatternRow'
 import SettingsFormActions from './SettingsFormActions'
@@ -39,12 +41,18 @@ function toDrafts(patterns: TocRulePattern[]): Omit<PatternDraft, 'id'>[] {
 
 export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) {
   const _ = useTranslation()
+  const user = useAuthStore((state) => state.user)
+  const isOwner = user?.role === 'owner'
   const createRule = useCreateTocRule()
   const updateRule = useUpdateTocRule()
 
   const editing = initial != null
+  // A built-in preset is seeded per account, so another account already has its
+  // own copy: publishing this one would add a duplicate instead of reaching it.
+  const publishable = initial?.builtIn !== true
   const [name, setName] = useState(initial?.name ?? '')
   const [nameError, setNameError] = useState(false)
+  const [availability, setAvailability] = useState<ResourceAvailability>(initial?.availability ?? 'user')
   const initialPatterns = initial?.patterns ?? [{ level: 1, regex: '', replacement: '', enabled: true }]
   const [drafts, setDrafts] = useState<PatternDraft[]>(() => toDrafts(initialPatterns).map((draft, index) => ({ ...draft, id: `pattern-${index}` })))
   const nextPatternId = useRef(initialPatterns.length)
@@ -122,9 +130,10 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
       onClose()
     }
     if (editing) {
-      updateRule.mutate({ id: initial.id, body: { name: name.trim(), enabled: initial.enabled, patterns } }, { onSuccess: done, onError })
+      const body = { name: name.trim(), enabled: initial.enabled, patterns, ...(publishable ? { availability } : {}) }
+      updateRule.mutate({ id: initial.id, body }, { onSuccess: done, onError })
     } else {
-      createRule.mutate({ name: name.trim(), enabled: true, patterns }, { onSuccess: done, onError })
+      createRule.mutate({ name: name.trim(), enabled: true, patterns, availability }, { onSuccess: done, onError })
     }
   }
 
@@ -185,6 +194,24 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
             </div>
           </SortableContext>
         </DndContext>
+
+        {publishable && isOwner && (
+          <fieldset className="space-y-1.5">
+            <legend className="text-xs text-stone-400 dark:text-stone-500">{_('settings.resourceScope')}</legend>
+            <SegmentedControl
+              ariaLabel={_('settings.resourceScope')}
+              fullWidth
+              size="md"
+              pending={saving}
+              value={availability}
+              onChange={setAvailability}
+              options={(['user', 'instance'] as ResourceAvailability[]).map((value) => ({
+                value,
+                label: _(value === 'user' ? 'settings.resourceScopeUser' : 'settings.resourceScopeInstance'),
+              }))}
+            />
+          </fieldset>
+        )}
 
         <SettingsFormActions onCancel={onClose} cancelDisabled={saving} saveDisabled={saving} />
       </form>

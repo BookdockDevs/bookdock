@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
@@ -18,7 +18,7 @@ function createTestDb() {
   const sqlite = new Database(':memory:')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [])
   return db
 }
 
@@ -102,6 +102,67 @@ describe('tts routes', () => {
     expect(stored.every((row) => row.encryptedSecrets && !row.encryptedSecrets.includes('secret'))).toBe(true)
     const memberList = await createApp(member).request('http://test/api/v1/tts/services')
     expect((await memberList.json() as { data: unknown[] }).data).toEqual([])
+  })
+
+  it('keeps an explicit order that a later edit and a new service do not disturb', async () => {
+    const app = createApp(owner)
+    const create = async (name: string) => {
+      const response = await app.request('http://test/api/v1/tts/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, provider: 'openai', model: 'gpt-4o-mini-tts', secrets: { apiKey: 'secret-key' } }),
+      })
+      return (await response.json() as { data: { id: string } }).data.id
+    }
+    const listNames = async () => {
+      const response = await app.request('http://test/api/v1/tts/services')
+      return (await response.json() as { data: Array<{ name: string }> }).data.map((service) => service.name)
+    }
+    const firstId = await create('首个')
+    const secondId = await create('第二个')
+    expect(await listNames()).toEqual(['首个', '第二个'])
+
+    const reordered = await app.request('http://test/api/v1/tts/services/order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [secondId, firstId] }),
+    })
+    expect(reordered.status).toBe(200)
+    expect((await reordered.json() as { data: Array<{ name: string }> }).data.map((service) => service.name)).toEqual(['第二个', '首个'])
+
+    await app.request(`http://test/api/v1/tts/services/${secondId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '第二个改名' }),
+    })
+    expect(await listNames()).toEqual(['第二个改名', '首个'])
+
+    await create('第三个')
+    expect(await listNames()).toEqual(['第二个改名', '首个', '第三个'])
+  })
+
+  it('rejects an order that is not exactly the caller\'s own set', async () => {
+    const app = createApp(owner)
+    const create = async (user: TestUser, name: string) => {
+      const response = await createApp(user).request('http://test/api/v1/tts/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, provider: 'openai', model: 'gpt-4o-mini-tts', secrets: { apiKey: 'secret-key' } }),
+      })
+      return (await response.json() as { data: { id: string } }).data.id
+    }
+    const mine = await create(owner, '我的')
+    const foreign = await create(member, '别人的')
+    const order = (ids: string[]) => app.request('http://test/api/v1/tts/services/order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    })
+
+    expect((await order([])).status).toBe(400)
+    expect((await order([mine, mine])).status).toBe(400)
+    expect((await order([mine, foreign])).status).toBe(400)
+    expect(await app.request('http://test/api/v1/tts/services').then((response) => response.json())).toMatchObject({ data: [{ name: '我的', order: 10, enabled: true }] })
   })
 
   it('does not expose or mutate AI services for guests', async () => {

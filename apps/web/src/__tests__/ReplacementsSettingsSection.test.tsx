@@ -1,19 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 
 import type { TextReplacementRes } from '@bookdock/shared'
 
-import { useCreateReplacement, useDeleteGlobalReplacements, useReplacements, useUpdateReplacement } from '@/api/hooks/useReplacements'
+import { useCreateReplacement, useDeleteGlobalReplacements, useReorderReplacements, useReplacements, useUpdateReplacement } from '@/api/hooks/useReplacements'
 import i18n from '../i18n/i18n'
 import ReplacementsSettingsSection from '../features/settings/components/ReplacementsSettingsSection'
+
+const dragState = vi.hoisted(() => ({ end: null as ((event: unknown) => void) | null }))
 
 vi.mock('@/api/hooks/useReplacements', () => ({
   useReplacements: vi.fn(() => ({ data: { data: [] } })),
   useCreateReplacement: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useUpdateReplacement: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useDeleteGlobalReplacements: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useReorderReplacements: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useImportReplacements: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }))
+
+// jsdom has no pointer geometry, so the drag is driven through the handler.
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@dnd-kit/core')>()
+  const { createElement } = await import('react')
+  return {
+    ...actual,
+    DndContext: (props: Parameters<typeof actual.DndContext>[0]) => {
+      dragState.end = props.onDragEnd as (event: unknown) => void
+      return createElement(actual.DndContext, props)
+    },
+  }
+})
 
 const rule = (overrides: Partial<TextReplacementRes> = {}): TextReplacementRes => ({
   id: 't1',
@@ -31,6 +47,8 @@ const rule = (overrides: Partial<TextReplacementRes> = {}): TextReplacementRes =
   textOffset: null,
   originalText: null,
   sortOrder: 0,
+  availability: 'user',
+  mine: true,
   createdAt: 0,
   updatedAt: 0,
   ...overrides,
@@ -104,6 +122,21 @@ describe('ReplacementsSettingsSection', () => {
     expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
   })
 
+  it('deletes a single rule from its row through the confirm dialog', () => {
+    const mutation = { mutate: vi.fn(), isPending: false }
+    vi.mocked(useDeleteGlobalReplacements).mockReturnValue(mutation as unknown as ReturnType<typeof useDeleteGlobalReplacements>)
+    mockRules([rule({ id: 't1', name: '去广告' })])
+    render(<ReplacementsSettingsSection />)
+
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    // The row delete button and the dialog confirm share the plain “删除” label.
+    fireEvent.click(within(screen.getAllByRole('listitem')[0]!).getByRole('button', { name: '删除', exact: true }))
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('去广告')
+    expect(mutation.mutate).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '删除', exact: true }))
+    expect(mutation.mutate).toHaveBeenCalledWith({ ruleIds: ['t1'] }, expect.any(Object))
+  })
+
   it('supports select-all and keeps selected rules available after a failed batch deletion', () => {
     const mutation = { mutate: vi.fn(), isPending: false }
     vi.mocked(useDeleteGlobalReplacements).mockReturnValue(mutation as unknown as ReturnType<typeof useDeleteGlobalReplacements>)
@@ -115,7 +148,8 @@ describe('ReplacementsSettingsSection', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '全选' }))
     fireEvent.click(screen.getByRole('button', { name: '删除所选' }))
     expect(screen.getByRole('alertdialog')).toHaveTextContent('确定删除所选的 2 条规则')
-    fireEvent.click(screen.getByRole('button', { name: '删除', exact: true }))
+    // The per-row delete buttons share the plain “删除” label; confirm inside the dialog.
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '删除', exact: true }))
     expect(mutation.mutate).toHaveBeenCalledWith({ ruleIds: ['a', 'b'] }, expect.any(Object))
     act(() => mutation.mutate.mock.calls[0]![1].onError(new Error('failed')))
     expect(screen.getByRole('alertdialog')).toBeInTheDocument()
@@ -181,6 +215,34 @@ describe('ReplacementsSettingsSection', () => {
     expect(deleteReplacement.mutate).toHaveBeenCalledWith({ ruleIds: ['t1'] }, expect.objectContaining({ onError: expect.any(Function) }))
   })
 
+  it('shows a published rule with its scope badge while keeping the definition read-only', () => {
+    const updateReplacement = { mutate: vi.fn(), isPending: false }
+    vi.mocked(useUpdateReplacement).mockReturnValue(updateReplacement as unknown as ReturnType<typeof useUpdateReplacement>)
+    mockRules([
+      rule({ id: 'own', name: '我的规则', sortOrder: 0 }),
+      rule({ id: 'shared', name: '公共规则', sortOrder: 1, enabled: false, availability: 'instance', mine: false }),
+    ])
+    render(<ReplacementsSettingsSection />)
+
+    expect(screen.getByText('公共规则')).toBeInTheDocument()
+    expect(screen.getByText('共享')).toBeInTheDocument()
+
+    // The consumer's switch is their own preference, never the publisher's row.
+    fireEvent.click(screen.getAllByRole('switch', { name: '启用' })[1]!)
+    expect(updateReplacement.mutate).toHaveBeenCalledWith(
+      { id: 'shared', body: { enabled: true } },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    // select-all + the caller's own row only: a shared rule cannot be removed
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: '编辑' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除所选' }))
+    expect(screen.getByText(/确定删除所选的 1 条规则/)).toBeInTheDocument()
+  })
+
   it('creates a rule in the shared modal and cancels back to the list', () => {
     const createReplacement = { mutate: vi.fn(), isPending: false }
     vi.mocked(useCreateReplacement).mockReturnValue(createReplacement as unknown as ReturnType<typeof useCreateReplacement>)
@@ -240,8 +302,33 @@ describe('ReplacementsSettingsSection', () => {
     expect(screen.queryByRole('button', { name: '所有匹配处' })).not.toBeInTheDocument()
   })
 
-  it('keeps the group field editable per rule without group sections', () => {
-    mockRules([rule({ id: 'r1', name: '规则1', group: '旧分组' })])
+  it('saves the personal order on exit and only when the order actually changed', () => {
+    const reorder = { mutate: vi.fn(), isPending: false }
+    vi.mocked(useReorderReplacements).mockReturnValue(reorder as unknown as ReturnType<typeof useReorderReplacements>)
+    mockRules([
+      rule({ id: 'a', name: 'A', sortOrder: 0 }),
+      rule({ id: 'shared', name: '公共规则', sortOrder: 1, availability: 'instance', mine: false }),
+      rule({ id: 'b', name: 'B', sortOrder: 2 }),
+    ])
+    render(<ReplacementsSettingsSection />)
+
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    expect(screen.getAllByRole('button', { name: '拖动调整顺序' })).toHaveLength(3)
+    // Leaving without dragging writes nothing.
+    fireEvent.click(screen.getByRole('button', { name: '退出编辑模式' }))
+    expect(reorder.mutate).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    // A published rule takes part in the same personal order as own rules.
+    act(() => dragState.end!({ active: { id: 'b' }, over: { id: 'a' } }))
+    expect(screen.getAllByRole('listitem')[0]).toHaveTextContent('B')
+    fireEvent.click(screen.getByRole('button', { name: '退出编辑模式' }))
+    expect(reorder.mutate).toHaveBeenCalledWith(['b', 'a', 'shared'], expect.objectContaining({ onError: expect.any(Function) }))
+    act(() => reorder.mutate.mock.calls[0]![1].onSuccess())
+    expect(screen.getByRole('button', { name: '进入编辑模式' })).toBeInTheDocument()
+  })
+
+  it('keeps the group field editable per rule without group sections', () => {    mockRules([rule({ id: 'r1', name: '规则1', group: '旧分组' })])
     render(<ReplacementsSettingsSection />)
 
     // no group headers, no bulk group actions — the badge is display-only

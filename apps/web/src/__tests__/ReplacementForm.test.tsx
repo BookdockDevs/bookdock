@@ -7,6 +7,7 @@ import { useCreateReplacement, useUpdateReplacement } from '@/api/hooks/useRepla
 import i18n from '../i18n/i18n'
 import ReplacementForm from '../features/settings/components/ReplacementForm'
 import type { SelectionInfo } from '../features/reader/types'
+import { useAuthStore } from '../stores/auth.store'
 
 vi.mock('@/api/hooks/useReplacements', () => ({
   useReplacements: vi.fn(() => ({ data: { data: [] } })),
@@ -60,6 +61,7 @@ const mockUpdate = () => {
 describe('ReplacementForm', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
+    useAuthStore.setState({ user: null })
     mockCreate()
     mockUpdate()
   })
@@ -266,6 +268,42 @@ describe('ReplacementForm', () => {
     it('hides the regex switch for point patches', () => {
       render(<ReplacementForm bookId="b1" selection={selection()} onDone={() => {}} />)
       expect(screen.queryByRole('switch', { name: '正则表达式' })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('availability', () => {
+    it('publishes a global rule when the owner picks 共享', () => {
+      useAuthStore.setState({ user: { id: 'u1', username: 'owner', role: 'owner' } })
+      const createReplacement = mockCreate()
+      render(<ReplacementForm onDone={() => {}} />)
+
+      fireEvent.change(screen.getByLabelText(/匹配内容/), { target: { value: '广告' } })
+      fireEvent.click(screen.getByRole('button', { name: '共享' }))
+      fireEvent.click(screen.getByText('保存'))
+
+      expect(createReplacement.mutate.mock.calls[0]![0]).toMatchObject({ availability: 'instance' })
+    })
+
+    it('hides the availability control for a member and never sends the instance scope', () => {
+      useAuthStore.setState({ user: { id: 'u2', username: 'member', role: 'member' } })
+      const createReplacement = mockCreate()
+      render(<ReplacementForm onDone={() => {}} />)
+
+      expect(screen.queryByText('可用范围')).not.toBeInTheDocument()
+
+      fireEvent.change(screen.getByLabelText(/匹配内容/), { target: { value: '广告' } })
+      fireEvent.click(screen.getByText('保存'))
+      expect(createReplacement.mutate.mock.calls[0]![0]).toMatchObject({ availability: 'user' })
+    })
+
+    it('hides the control for book-scoped rules', () => {
+      useAuthStore.setState({ user: { id: 'u1', username: 'owner', role: 'owner' } })
+      render(<ReplacementForm bookId="b1" onDone={() => {}} />)
+
+      fireEvent.click(screen.getByText('所有匹配处'))
+      expect(screen.getByRole('button', { name: '共享' })).toBeInTheDocument()
+      fireEvent.click(screen.getByText('本书所有匹配处'))
+      expect(screen.queryByRole('button', { name: '共享' })).not.toBeInTheDocument()
     })
   })
 

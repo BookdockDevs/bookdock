@@ -2711,7 +2711,7 @@ describe('editor TXT save', () => {
       baseRevisionId: secondBook.book.revisionId!,
       chapters: [{ id: 'ch-0', title: '第一章', content: '正文', level: 1 }],
       tocRuleSelection: { ruleId: foreignRuleId, patterns, label: '他人规则', auto: false },
-    })).rejects.toThrow('does not belong')
+    })).rejects.toThrow('not available to this account')
   })
 
   it('leaves the active revision unchanged when storing the new content blob fails', async () => {

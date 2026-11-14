@@ -70,23 +70,21 @@ export default function FontEditor({ font, isOwner, onClose }: FontEditorProps) 
           />
         </label>
 
-        {uploaded && (
+        {uploaded && isOwner && (
           <fieldset className="space-y-1.5">
             <legend className="text-xs text-stone-400 dark:text-stone-500">{_('settings.fontsScope')}</legend>
             <SegmentedControl
               ariaLabel={_('settings.fontsScope')}
               fullWidth
               size="md"
-              disabled={!isOwner}
               pending={saving}
               value={scope}
               onChange={setScope}
               options={(['user', 'instance'] as FontScope[]).map((value) => ({
                 value,
-                label: _(value === 'user' ? 'settings.fontsScopeUser' : 'settings.fontsScopeInstance'),
+                label: _(value === 'user' ? 'settings.resourceScopeUser' : 'settings.resourceScopeInstance'),
               }))}
             />
-            {!isOwner && <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{_('settings.fontsScopeOwnerHint')}</p>}
           </fieldset>
         )}
 

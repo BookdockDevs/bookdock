@@ -2,19 +2,20 @@ import { Hono } from 'hono'
 
 import { ruleBatchDeleteSchema, tocRuleCreateSchema, tocRuleReorderSchema, tocRuleUpdateSchema } from '@bookdock/shared'
 
+import { assertCanPublish } from '../../lib/publish-permission'
 import { readRuleTransferFile } from '../../lib/rule-transfer'
 import { AppError } from '../../middleware/error'
 
 import { createTocRule, deleteTocRule, deleteTocRules, importTocRules, listTocRules, reorderTocRules, updateTocRule } from './toc-rules.service'
-import { restoreTocRuleSeeds } from './seeds'
+import { restoreTocRuleSeeds, tocRuleRestoreAvailable } from './seeds'
 
 const tocRuleRoutes = new Hono()
 
 tocRuleRoutes.get('/', async (c) => {
   const user = c.get('user')
-  if (!user) return c.json({ data: [] })
+  if (!user) return c.json({ data: [], restoreAvailable: false })
   const items = listTocRules(user.id)
-  return c.json({ data: items })
+  return c.json({ data: items, restoreAvailable: tocRuleRestoreAvailable(user.id) })
 })
 
 tocRuleRoutes.post('/', async (c) => {
@@ -25,6 +26,7 @@ tocRuleRoutes.post('/', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
+  assertCanPublish(user.role, parsed.data.availability)
   const rule = createTocRule(user.id, parsed.data)
   return c.json({ data: rule }, 201)
 })
@@ -76,6 +78,7 @@ tocRuleRoutes.put('/:ruleId', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
+  assertCanPublish(user.role, parsed.data.availability)
   const rule = updateTocRule(user.id, ruleId, parsed.data)
   return c.json({ data: rule })
 })

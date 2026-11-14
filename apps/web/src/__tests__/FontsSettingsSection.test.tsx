@@ -86,7 +86,7 @@ describe('FontsSettingsSection', () => {
     expect(screen.queryByText('2.0 MB')).not.toBeInTheDocument()
     expect(screen.queryByText('512 KB')).not.toBeInTheDocument()
     expect(screen.getByText('仅自己')).toBeInTheDocument()
-    expect(screen.getByText('所有用户')).toBeInTheDocument()
+    expect(screen.getByText('共享')).toBeInTheDocument()
     expect(screen.getAllByText('在线')).toHaveLength(4)
     expect(screen.getAllByText('系统')).toHaveLength(6)
     expect(screen.queryByText('自定义')).not.toBeInTheDocument()
@@ -129,7 +129,7 @@ describe('FontsSettingsSection', () => {
     expect(screen.queryAllByRole('button', { name: '调整字体顺序' })).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     expect(screen.getAllByRole('button', { name: '调整字体顺序' })).toHaveLength(12)
-    fireEvent.click(screen.getByRole('button', { name: '保存排序并退出编辑模式' }))
+    fireEvent.click(screen.getByRole('button', { name: '退出编辑模式' }))
     expect(screen.queryAllByRole('button', { name: '调整字体顺序' })).toHaveLength(0)
   })
 
@@ -162,7 +162,7 @@ describe('FontsSettingsSection', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '编辑字体' })[0])
     expect(screen.getByText('hand.ttf')).toBeInTheDocument()
     expect(screen.queryByText('类型')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '所有用户' }))
+    fireEvent.click(screen.getByRole('button', { name: '共享' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(updateScope.mutateAsync).toHaveBeenCalledWith({ id: 'f1', scope: 'instance' }))
@@ -297,7 +297,7 @@ describe('FontsSettingsSection', () => {
     render(<FontsSettingsSection />)
 
     fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
-    fireEvent.click(screen.getByRole('button', { name: '保存排序并退出编辑模式' }))
+    fireEvent.click(screen.getByRole('button', { name: '退出编辑模式' }))
 
     // The unchanged draft keeps device ids out of the synced fontOrder
     expect(useUiStore.getState().fontOrder).not.toContain(deviceFont.id)

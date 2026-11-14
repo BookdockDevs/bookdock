@@ -10,6 +10,7 @@ const { mockTranslate } = vi.hoisted(() => ({ mockTranslate: (key: string, param
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => mockTranslate }))
 
 import { AI_DEFAULT_ASSISTANT_MODE_PROMPT, aiLocalChatSchema, createAiContextCitations } from '@bookdock/shared'
+import type { AiModelEntryRes } from '@bookdock/shared'
 
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiStreamAiChat, apiStreamAiLocalChat } from '../api/client'
 import AiPanel from '../features/reader/components/AiPanel'
@@ -58,6 +59,23 @@ function readerWithChapterReferences(): TestRenderer {
     display: vi.fn(),
     getAiChapterText: vi.fn().mockImplementation(async (chapterIndex: number) => `第${chapterIndex + 1}章的可见正文`),
     getAiCorpusVersion: vi.fn().mockReturnValue('reader-test'),
+  }
+}
+
+/** One exposed model as `/ai/status` returns it, grouped under its connection. */
+function chatModel(overrides: Partial<AiModelEntryRes> = {}): AiModelEntryRes {
+  return {
+    id: 'model-1',
+    connectionId: 'connection-1',
+    connectionName: '本地配置',
+    provider: 'ollama',
+    upstreamModelId: 'qwen3:8b',
+    name: 'qwen3:8b',
+    enabled: true,
+    mine: true,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
   }
 }
 
@@ -828,9 +846,18 @@ describe('AiPanel', () => {
     expect(screen.queryByText('reader.aiQuickCommandsNoMatchHint')).toBeNull()
   })
 
-  it('switches between models saved on the active AI profile', async () => {
-    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', models: [{ id: 'qwen3:8b', name: 'qwen3:8b' }, { id: 'llama3.2', name: 'llama3.2' }], activeProfileId: 'profile-1', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
-    vi.mocked(apiPatch).mockResolvedValue({ data: {} })
+  it('pins a conversation model without touching the account last-used model', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: {
+      enabled: true,
+      lastUsedModelId: 'model-qwen',
+      models: [
+        chatModel({ id: 'model-qwen', upstreamModelId: 'qwen3:8b', name: 'qwen3:8b' }),
+        chatModel({ id: 'model-llama', upstreamModelId: 'llama3.2', name: 'llama3.2' }),
+      ],
+      maxSelectionChars: 6_000,
+      maxContextChars: 8_000,
+    } })
+    vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
 
     renderPanel()
 
@@ -840,15 +867,32 @@ describe('AiPanel', () => {
     expect(selector).toHaveClass('bg-stone-500/10')
     fireEvent.click(screen.getByRole('option', { name: 'llama3.2' }))
 
-    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/ai/profiles/profile-1', { model: 'llama3.2' }))
+    // The pinned model only travels with the next request; the account last-used model is untouched.
+    await waitFor(() => expect(selector).toHaveAttribute('title', 'llama3.2'))
+    expect(apiPatch).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '换个模型试试' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiSend' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiSend' }))
+
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({ prompt: '换个模型试试', modelId: 'model-llama' })
   })
 
-  it('filters embedding models out of the Chat selector', async () => {
-    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'openai', model: 'qwen3:8b', models: [
-      { id: 'qwen3:8b', name: 'qwen3:8b' },
-      { id: 'llama3.2', name: 'llama3.2' },
-      { id: 'qwen3-embedding-8b', name: 'qwen3-embedding-8b' },
-    ], maxSelectionChars: 6_000, maxContextChars: 8_000 } })
+  it('offers only enabled chat models in the Chat selector', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: {
+      enabled: true,
+      lastUsedModelId: 'model-qwen',
+      models: [
+        chatModel({ id: 'model-qwen', upstreamModelId: 'qwen3:8b', name: 'qwen3:8b', provider: 'openai' }),
+        chatModel({ id: 'model-llama', upstreamModelId: 'llama3.2', name: 'llama3.2', provider: 'openai' }),
+        chatModel({ id: 'model-embedding', upstreamModelId: 'qwen3-embedding-8b', name: 'qwen3-embedding-8b', provider: 'openai' }),
+        // A switched-off model of your own is manageable in settings, not usable here.
+        chatModel({ id: 'model-off', upstreamModelId: 'qwen-off', name: 'qwen-off', enabled: false }),
+      ],
+      maxSelectionChars: 6_000,
+      maxContextChars: 8_000,
+    } })
 
     renderPanel()
 
@@ -857,6 +901,7 @@ describe('AiPanel', () => {
     fireEvent.click(selector)
     expect(screen.getByRole('listbox', { name: 'reader.aiSelectModel' })).toContainElement(screen.getByRole('option', { name: 'qwen3:8b' }))
     expect(screen.queryByRole('option', { name: 'qwen3-embedding-8b' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'qwen-off' })).toBeNull()
   })
 
   it('can start a tool-assisted question without a selected passage', async () => {
@@ -1004,6 +1049,63 @@ describe('AiPanel', () => {
       context: { selection: '选区' },
     })
     expect(useReaderState.getState().aiPendingCommand).toBeNull()
+  })
+
+  it('sends the server quick-command reference when the composer still holds the untouched command', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: {
+      enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000,
+      prompts: [{ id: 'prompt-explain', name: '解释命令', prompt: '请解释：{SELTEXT}', scope: 'selection', enabled: true, order: 10, builtIn: false, availability: 'instance', mine: false, createdAt: 1, updatedAt: 1 }],
+    } })
+    vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
+
+    renderPanel()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/' } })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '解释命令' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiSend' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiSend' }))
+
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
+      prompt: '请解释：{SELTEXT}',
+      promptId: 'prompt-explain',
+    })
+  })
+
+  it('drops the quick-command reference once the composer text is edited', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: {
+      enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000,
+      prompts: [{ id: 'prompt-explain', name: '解释命令', prompt: '请解释：{SELTEXT}', scope: 'selection', enabled: true, order: 10, builtIn: false, availability: 'instance', mine: false, createdAt: 1, updatedAt: 1 }],
+    } })
+    vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
+
+    renderPanel()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/' } })
+    fireEvent.click(await screen.findByRole('menuitem', { name: '解释命令' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '我自己改写的问题' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiSend' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'reader.aiSend' }))
+
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+    const body = apiStreamAiChat.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(body.prompt).toBe('我自己改写的问题')
+    expect(body).not.toHaveProperty('promptId')
+  })
+
+  it('carries the quick-command reference through the selection auto-send', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', maxSelectionChars: 6_000, maxContextChars: 8_000 } })
+    vi.mocked(apiStreamAiChat).mockResolvedValue(undefined)
+    useReaderState.setState({
+      aiContext: { cfiRange: 'selection', text: '选区', rawText: '选区', chapterIndex: 0 },
+      aiPendingCommand: { id: 'prompt-explain', name: '解释命令', prompt: '请解释：{SELTEXT}', promptId: 'prompt-explain' },
+    })
+
+    renderPanel()
+
+    await waitFor(() => expect(apiStreamAiChat).toHaveBeenCalledTimes(1))
+    expect(apiStreamAiChat.mock.calls[0]?.[0]).toMatchObject({
+      prompt: '请解释：{SELTEXT}',
+      promptId: 'prompt-explain',
+    })
   })
 
   it('sends a chapter variable larger than the former context limit without truncating it', async () => {
@@ -1773,6 +1875,67 @@ describe('AiPanel', () => {
     expect(eighth.history).toHaveLength(12)
     expect(aiLocalChatSchema.safeParse(eighth).success).toBe(true)
     expect(screen.getAllByText('本地解读结果')).toHaveLength(8)
+  })
+
+  it('carries the quick-command reference through the local chat auto-send', async () => {
+    const saveAiThreadTurn = vi.fn().mockResolvedValue({
+      data: {
+        id: 'local-thread-1',
+        bookId: 'local-book-1',
+        title: '请解释：{SELTEXT}',
+        createdAt: 1000,
+        updatedAt: 2000,
+        messageCount: 2,
+        settings: { readingScope: 'to_here', enabledTools: [], assistantModeId: 'assistant' },
+        messages: [],
+        generation: null,
+      },
+    })
+    const localSession = {
+      ref: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'local-book-1' },
+      bookId: 'local-book-1',
+      namespace: 'local:device:local-book-1:content-1',
+      sourceAvailable: true,
+      content: { book: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'local-book-1' }, contentId: 'content-1' },
+      getStructure: vi.fn().mockResolvedValue({
+        content: { book: { scope: { kind: 'local', vaultId: 'device' }, bookId: 'local-book-1' }, contentId: 'content-1' },
+        sections: [{ index: 0, title: '第一章', href: 'ch1.xhtml', wordCount: 100 }],
+      }),
+      listNotes: vi.fn().mockResolvedValue({ data: [] }),
+      listAiThreads: vi.fn().mockResolvedValue({ data: [] }),
+      getAiThread: vi.fn(),
+      saveAiThreadTurn,
+      applyAiThreadResult: vi.fn().mockResolvedValue(true),
+      updateAiThread: vi.fn(),
+      deleteAiThread: vi.fn(),
+    } as unknown as LocalReaderSession
+
+    vi.mocked(apiGet).mockImplementation(async (path) => {
+      if (path === '/ai/status') return { data: { enabled: true, provider: 'ollama', model: 'qwen3:8b', prompts: [], modes: [], lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: [], assistantModeId: 'assistant' } } }
+      throw new Error(`Unexpected apiGet: ${path}`)
+    })
+    vi.mocked(apiStreamAiLocalChat).mockResolvedValue(undefined)
+
+    useReaderState.setState({
+      aiContext: { cfiRange: 'epubcfi(/6/4!/2)', text: '本地原文', chapterTitle: '第一章', chapterIndex: 0, rect: { left: 0, top: 0, width: 10, height: 10 } },
+      aiPendingCommand: { id: 'prompt-explain', name: '解释命令', prompt: '请解释：{SELTEXT}', promptId: 'prompt-explain' },
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LocalReaderContext.Provider value={localSession}>
+          <RendererContext.Provider value={{ renderer: readerWithChapterReferences() as never }}>
+            <AiPanel bookId="local-book-1" />
+          </RendererContext.Provider>
+        </LocalReaderContext.Provider>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(apiStreamAiLocalChat).toHaveBeenCalledTimes(1))
+    expect(apiStreamAiLocalChat.mock.calls[0]?.[0]).toMatchObject({
+      prompt: '请解释：{SELTEXT}',
+      promptId: 'prompt-explain',
+    })
   })
 
   it('shows an account-required notice without querying /ai/status for anonymous local reading', async () => {

@@ -5,53 +5,35 @@ import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-ki
 
 import type { TocRuleRes } from '@bookdock/shared'
 
-import { prepareRuleTransferExport, serializeTocRulesForExport, type TocTransferFile } from '@bookdock/shared'
+import { serializeTocRulesForExport } from '@bookdock/shared'
 
 import { useDeleteTocRules, useReorderTocRules, useSeedTocRules, useTocRules, useUpdateTocRule } from '@/api/hooks/useTocRules'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { useTranslation } from '@/hooks/useTranslation'
+import { downloadJsonFile, timestampSuffix } from '@/lib/download'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
 import EditModeButton from './EditModeButton'
+import RuleSelectAllBar from './RuleSelectAllBar'
 import RuleSelectionActions from './RuleSelectionActions'
 import SettingsCard from './SettingsCard'
 import TocRuleEditor from './TocRuleEditor'
 import TocRuleImportDialog from './TocRuleImportDialog'
 import TocRuleRow from './TocRuleRow'
+import { ExportIcon, ImportIcon, PlusIcon } from './row-icons'
 
 const EMPTY_RULES: TocRuleRes[] = []
-
-function downloadJsonFile(fileName: string, data: TocTransferFile) {
-  const prepared = prepareRuleTransferExport(data)
-  if (!prepared.success) {
-    notify.error({ key: prepared.reason === 'limit' ? 'settings.ruleExportLimit' : 'settings.ruleExportInvalid' })
-    return
-  }
-  const blob = new Blob([prepared.text], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = fileName
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
-}
-
-function timestampSuffix(): string {
-  const now = new Date()
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-}
 
 export default function TocRulesSettingsSection() {
   const _ = useTranslation()
   const rulesQuery = useTocRules()
   const { data } = rulesQuery
   const serverRules = data?.data ?? EMPTY_RULES
+  // The restore button only appears when a built-in preset is actually missing.
+  const restoreAvailable = data?.restoreAvailable ?? false
   const [sorting, setSorting] = useState(false)
   const [draftIds, setDraftIds] = useState<string[] | null>(null)
   const rulesById = new Map(serverRules.map((rule) => [rule.id, rule]))
@@ -62,6 +44,10 @@ export default function TocRulesSettingsSection() {
     : serverRules
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedRules = rules.filter((rule) => selectedIds.includes(rule.id))
+  // Published rules from another account run here (and can be switched off or
+  // reordered) but their definition belongs to the publisher: no edit, no
+  // delete, no selection for a batch that would be rejected server-side.
+  const ownRules = rules.filter((rule) => rule.mine !== false)
   const deleteRule = useDeleteTocRules()
   const reorderRules = useReorderTocRules()
   const seedRules = useSeedTocRules()
@@ -159,8 +145,7 @@ export default function TocRulesSettingsSection() {
         }
         action={
           <div className="flex shrink-0 items-center gap-1">
-            {!sorting && <EditModeButton active={false} disabled={busy || !listReady} onClick={toggleSorting} />}
-            {sorting && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={() => exportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules)} />}
+            {sorting && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={() => exportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules.filter((rule) => rule.mine !== false))} />}
             {!sorting && <>
               <button
                 type="button"
@@ -170,10 +155,7 @@ export default function TocRulesSettingsSection() {
                 aria-label={_('settings.tocImport')}
                 title={_('settings.tocImport')}
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4" />
-                  <path d="M12 3v11m-5-5 5 5 5-5" />
-                </svg>
+                <ImportIcon />
               </button>
               <button
                 type="button"
@@ -183,13 +165,10 @@ export default function TocRulesSettingsSection() {
                 aria-label={_('settings.tocExportAll')}
                 title={_('settings.tocExportAll')}
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4" />
-                  <path d="M12 14V3m-5 5 5-5 5 5" />
-                </svg>
+                <ExportIcon />
               </button>
             </>}
-            {sorting && <button
+            {sorting && restoreAvailable && <button
               type="button"
               disabled={busy || !listReady}
               onClick={() => seedRules.mutate(undefined, {
@@ -209,6 +188,7 @@ export default function TocRulesSettingsSection() {
                 <path d="M4 9h10.5A5.5 5.5 0 1 1 9 19H8" />
               </svg>
             </button>}
+            {!sorting && <EditModeButton active={false} disabled={busy || !listReady} onClick={toggleSorting} />}
             {sorting && <EditModeButton active disabled={busy || !listReady} onClick={toggleSorting} />}
             {!sorting && <button
               type="button"
@@ -218,26 +198,20 @@ export default function TocRulesSettingsSection() {
               aria-label={_('settings.tocRulesNew')}
               title={_('settings.tocRulesNew')}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
+              <PlusIcon />
             </button>}
           </div>
         }
         bodyClassName={sorting ? undefined : 'pt-3'}
       >
       {sorting && (
-        <div className="flex items-center justify-between gap-3 border-b border-stone-100 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
-          <label className="flex cursor-pointer items-center gap-2 font-medium text-stone-600 dark:text-stone-300">
-            <input type="checkbox" checked={rules.length > 0 && selectedRules.length === rules.length}
-              ref={(node) => { if (node) node.indeterminate = selectedRules.length > 0 && selectedRules.length < rules.length }}
-              disabled={busy || !listReady || rules.length === 0}
-              onChange={(event) => setSelectedIds(event.target.checked ? rules.map((rule) => rule.id) : [])}
-              className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300" />
-            {_('settings.ruleSelectAll')}
-          </label>
-          <span className="shrink-0 tabular-nums">{_('settings.ruleSelectedCount', { count: selectedRules.length })}</span>
-        </div>
+        <RuleSelectAllBar
+          disabled={busy || !listReady || ownRules.length === 0}
+          allSelected={ownRules.length > 0 && ownRules.every((rule) => selectedIds.includes(rule.id))}
+          indeterminate={selectedRules.length > 0 && selectedRules.length < ownRules.length}
+          selectedCount={selectedRules.length}
+          onToggleAll={(checked) => setSelectedIds(checked ? ownRules.map((rule) => rule.id) : [])}
+        />
       )}
       {rulesQuery.isError ? (
         <QueryErrorState isRetrying={rulesQuery.isFetching} onRetry={rulesQuery.refetch} />
@@ -267,6 +241,9 @@ export default function TocRulesSettingsSection() {
                   sorting={sorting}
                   onToggle={() => onToggle(rule)}
                   onEdit={() => setEditor({ open: true, initial: rule })}
+                  onDelete={rule.mine !== false ? () => setPendingDelete([rule]) : undefined}
+                  editable={rule.mine !== false}
+                  selectable={rule.mine !== false}
                   selected={selectedIds.includes(rule.id)}
                   onSelect={() => setSelectedIds((current) => current.includes(rule.id) ? current.filter((id) => id !== rule.id) : [...current, rule.id])}
                 />
@@ -297,7 +274,9 @@ export default function TocRulesSettingsSection() {
 
       {importOpen && (
         <TocRuleImportDialog
-          existingNames={serverRules.map((rule) => rule.name)}
+          // Only our own names can conflict: a published rule keeps its name
+          // with the publisher, and the server compares against the caller.
+          existingNames={ownRules.map((rule) => rule.name)}
           onClose={() => setImportOpen(false)}
         />
       )}

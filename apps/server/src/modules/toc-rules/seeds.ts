@@ -262,16 +262,26 @@ export function ensureTocRuleSeeds(userId: string) {
 export function restoreTocRuleSeeds(userId: string) {
   const db = getDb()
   backfillLegacySeedKeys(userId)
-  const existingSeedKeys = new Set(
-    db.select({ seedKey: tocRules.seedKey }).from(tocRules).where(eq(tocRules.userId, userId)).all()
-      .map((rule) => rule.seedKey)
-      .filter((seedKey): seedKey is string => seedKey !== null),
-  )
-  const missing = SEED_TOC_RULES.filter((seed) => !existingSeedKeys.has(seed.seedKey))
+  const missing = missingTocRuleSeeds(userId)
   if (missing.length > 0) {
     const maxOrder = db.select({ max: sql<number>`max(${tocRules.sortOrder})` }).from(tocRules)
       .where(eq(tocRules.userId, userId)).get()?.max ?? -1
     insertSeeds(userId, missing, maxOrder + 1)
   }
   markSeeded(userId)
+}
+
+/** True when at least one built-in preset is missing, so restore would add it. */
+export function tocRuleRestoreAvailable(userId: string): boolean {
+  return missingTocRuleSeeds(userId).length > 0
+}
+
+function missingTocRuleSeeds(userId: string): SeedTocRule[] {
+  const db = getDb()
+  const existingSeedKeys = new Set(
+    db.select({ seedKey: tocRules.seedKey }).from(tocRules).where(eq(tocRules.userId, userId)).all()
+      .map((rule) => rule.seedKey)
+      .filter((seedKey): seedKey is string => seedKey !== null),
+  )
+  return SEED_TOC_RULES.filter((seed) => !existingSeedKeys.has(seed.seedKey))
 }

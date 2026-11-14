@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { Hono } from 'hono'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrateBeforeBookRetirement as migrate } from '../../db/migration-stage'
+import { eq } from 'drizzle-orm'
+import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -31,7 +32,7 @@ function createTestDb() {
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })
-  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') })
+  migrate(db, { migrationsFolder: path.join(__dirname, '..', '..', 'db', 'migrations') }, [])
   return db
 }
 
@@ -156,7 +157,7 @@ describe('toc-rules service', () => {
     expect(items.some((r) => r.id === created.id)).toBe(false)
   })
 
-  it('reorders the whole list and rewrites sortOrder 0..n-1', async () => {
+  it('reorders the whole list through the caller\'s personal order', async () => {
     const a = createTocRule(ownerId, sampleRule('a'))
     const b = createTocRule(ownerId, sampleRule('b'))
     const c = createTocRule(ownerId, sampleRule('c'))
@@ -164,7 +165,10 @@ describe('toc-rules service', () => {
     const reordered = reorderTocRules(ownerId, [c.id, a.id, b.id])
     const mine = reordered.filter((r) => ['a', 'b', 'c'].includes(r.name))
     expect(mine.map((r) => r.name)).toEqual(['c', 'a', 'b'])
-    expect(mine.map((r) => r.sortOrder)).toEqual([0, 1, 2])
+    // Reordering is a consumer preference: the definition rows keep their own
+    // creation order so another user's list does not move with this edit.
+    expect(mine.map((r) => r.sortOrder)).toEqual([2, 0, 1])
+    expect((await listTocRules(ownerId)).filter((r) => ['a', 'b', 'c'].includes(r.name)).map((r) => r.name)).toEqual(['c', 'a', 'b'])
   })
 
   it('rejects reorder with a foreign user\'s or unknown rule id', async () => {
@@ -192,6 +196,24 @@ describe('toc-rules service', () => {
     expect(first.map((r) => r.name)).toEqual(SEED_TOC_RULES.map((s) => s.name))
     expect(first[0]?.name).toBe('中文网文（卷·章）')
     expect(await listTocRules(ownerId)).toHaveLength(SEED_TOC_RULES.length)
+  })
+
+  it('refuses to publish a built-in preset and never exposes another account\'s copy', async () => {
+    const [preset] = await listTocRules(ownerId)
+    expect(preset?.builtIn).toBe(true)
+    // Every account is seeded its own copy, so publishing one cannot reach the
+    // others — it would only duplicate the preset in their list.
+    expect(() => updateTocRule(ownerId, preset!.id, { availability: 'instance' }))
+      .toThrowError(expect.objectContaining({ code: 'VALIDATION_ERROR' }))
+
+    // A row published before that rule existed stays invisible to other accounts
+    // and falls back to private on its next save instead of staying shared.
+    db.update(schema.tocRules).set({ availability: 'instance' }).where(eq(schema.tocRules.id, preset!.id)).run()
+    const otherRules = await listTocRules(otherId)
+    expect(otherRules.some((rule) => rule.id === preset!.id)).toBe(false)
+    expect(otherRules.every((rule) => rule.builtIn)).toBe(true)
+
+    expect(updateTocRule(ownerId, preset!.id, { name: preset!.name }).availability).toBe('user')
   })
 
   it('merges flat Chinese title forms into the hierarchy preset', async () => {
@@ -539,7 +561,7 @@ describe('toc-rules routes', () => {
     const { data } = (await res.json()) as { data: { name: string; sortOrder: number }[] }
     const mine = data.filter((r) => ['a', 'b'].includes(r.name))
     expect(mine.map((r) => r.name)).toEqual(['b', 'a'])
-    expect(mine.map((r) => r.sortOrder)).toEqual([0, 1])
+    expect(mine.map((r) => r.sortOrder)).toEqual([1, 0])
   })
 
   it('GET / seeds the built-in presets on first access', async () => {

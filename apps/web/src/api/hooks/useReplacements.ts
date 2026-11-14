@@ -264,6 +264,29 @@ export function useImportReplacements() {
 }
 
 /** Per-book override for a pattern rule: boolean sets it, null restores global inheritance */
+/**
+ * Personal execution order of the global rule list. It never rewrites a
+ * definition: the server keeps the order in the account's settings document,
+ * the device store keeps it as the array order of its own rules.
+ */
+export function useReorderReplacements() {
+  const source = useReplacementSource()
+  return useMutation({
+    networkMode: source.local ? 'always' : 'online',
+    mutationFn: async (replacementIds: string[]) => {
+      const scope = source.deviceFor(null)
+      if (scope) return repository.reorderReplacements(scope.vaultId, replacementIds)
+      source.assertCurrent()
+      const result = await apiPut<{ data: TextReplacementRes[] }>('/replacements/reorder', { replacementIds })
+      source.assertCurrent()
+      return result
+    },
+    onSuccess: () => {
+      void source.saved()
+    },
+  })
+}
+
 export function useSetReplacementOverride() {
   const source = useReplacementSource()
   const queryClient = useQueryClient()

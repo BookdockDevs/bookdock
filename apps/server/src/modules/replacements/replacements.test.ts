@@ -22,6 +22,7 @@ import {
   updateReplacement,
   deleteReplacement,
   deleteGlobalReplacements,
+  reorderReplacements,
   setReplacementOverride,
   importReplacements,
 } from './replacements.service'
@@ -431,6 +432,65 @@ describe('replacement overrides', () => {
   })
 })
 
+describe('shared replacement visibility', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let otherId: string
+  let bookId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+
+    ownerId = createId('user')
+    db.insert(schema.users).values({ id: ownerId, username: 'owner', passwordHash: null, role: 'owner', createdAt: Date.now() }).run()
+    otherId = createId('user')
+    db.insert(schema.users).values({ id: otherId, username: 'other', passwordHash: null, role: 'member', createdAt: Date.now() }).run()
+
+    bookId = createId('book')
+    db.insert(schema.books).values({
+      id: bookId,
+      userId: ownerId,
+      title: 'Test Book',
+      author: 'Author',
+      format: 'txt',
+      filePath: 'books/test/test.txt',
+      coverKey: null,
+      size: 100,
+      meta: {},
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }).run()
+    mirrorPrivateBook(db, ownerId, [bookId])
+  })
+
+  it('lists a published rule for other accounts, off until they switch it on, without book context', async () => {
+    const shared = await createReplacement(ownerId, { pattern: 'global shared', availability: 'instance' })
+    await createReplacement(ownerId, { pattern: 'private rule' })
+    // Publication is only meaningful for user-global pattern rules.
+    const bookScoped = await createReplacement(ownerId, { bookId, pattern: 'book rule', availability: 'instance' })
+    expect(bookScoped.availability).toBe('user')
+
+    const forConsumer = await listReplacements(otherId)
+    expect(forConsumer.map((rule) => rule.pattern)).toEqual(['global shared'])
+    expect(forConsumer[0]).toMatchObject({ id: shared.id, availability: 'instance', mine: false, enabled: false })
+
+    // The consumer's switch is personal: it never rewrites the publisher row.
+    const enabled = await updateReplacement(otherId, shared.id, { enabled: true })
+    expect(enabled.enabled).toBe(true)
+    expect((await listReplacements(otherId))[0]!.enabled).toBe(true)
+    expect((await listReplacements(ownerId)).find((rule) => rule.id === shared.id)!.enabled).toBe(true)
+  })
+
+  it('keeps the definition with the publisher and never exposes it to non-consumers', async () => {
+    const shared = await createReplacement(ownerId, { pattern: 'shared', availability: 'instance' })
+    await expect(updateReplacement(otherId, shared.id, { pattern: 'hijacked' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(deleteReplacement(otherId, shared.id)).rejects.toMatchObject({ code: 'REPLACEMENT_NOT_FOUND' })
+    expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, shared.id)).get()?.pattern).toBe('shared')
+  })
+})
+
 describe('replacement ordering and import', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
@@ -583,6 +643,108 @@ describe('replacement ordering and import', () => {
     expect(mine.map((r) => r.pattern)).toEqual(['legacy-2', 'legacy-1', 'legacy-0'])
     const theirs = db.select().from(schema.textReplacements).where(eq(schema.textReplacements.userId, otherId)).all()
     expect(theirs.map((r) => r.sortOrder)).toEqual([0])
+  })
+})
+
+describe('replacement personal order', () => {
+  let db: ReturnType<typeof createTestDb>
+  let publisherId: string
+  let consumerId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    publisherId = createId('user')
+    db.insert(schema.users).values({ id: publisherId, username: 'publisher', passwordHash: null, role: 'owner', createdAt: Date.now() }).run()
+    consumerId = createId('user')
+    db.insert(schema.users).values({ id: consumerId, username: 'consumer', passwordHash: null, role: 'member', createdAt: Date.now() }).run()
+  })
+
+  it('interleaves own and instance-published rules in one personal order', async () => {
+    const shared = await createReplacement(publisherId, { pattern: 'shared', name: 'shared', availability: 'instance' })
+    const first = await createReplacement(consumerId, { pattern: 'first', name: 'first' })
+    const second = await createReplacement(consumerId, { pattern: 'second', name: 'second' })
+
+    const reordered = reorderReplacements(consumerId, [second.id, shared.id, first.id])
+    expect(reordered.filter((rule) => rule.matchType === 'pattern').map((rule) => rule.id))
+      .toEqual([second.id, shared.id, first.id])
+    expect((await listReplacements(consumerId)).map((rule) => rule.id)).toEqual([second.id, shared.id, first.id])
+
+    // The definition rows keep their own order: nothing was rewritten for the
+    // publisher, who still sees their list unchanged.
+    expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, shared.id)).get()?.sortOrder).toBe(0)
+    expect((await listReplacements(publisherId)).map((rule) => rule.id)).toEqual([shared.id])
+  })
+
+  it('keeps a book-scoped rule at its execution position when globals are reordered', async () => {
+    const consumerBookId = createId('book')
+    db.insert(schema.books).values({
+      id: consumerBookId,
+      userId: consumerId,
+      title: 'Consumer Book',
+      author: 'Author',
+      format: 'txt',
+      filePath: `books/test/${consumerBookId}.txt`,
+      coverKey: null,
+      size: 100,
+      meta: {},
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }).run()
+    mirrorPrivateBook(db, consumerId, [consumerBookId])
+
+    await createReplacement(consumerId, { pattern: 'book', name: 'book', bookId: consumerBookId })
+    const first = await createReplacement(consumerId, { pattern: 'first', name: 'first' })
+    const second = await createReplacement(consumerId, { pattern: 'second', name: 'second' })
+    expect((await loadEffectiveBookReplacementRules(consumerId, consumerBookId)).map((rule) => rule.pattern))
+      .toEqual(['book', 'first', 'second'])
+
+    reorderReplacements(consumerId, [second.id, first.id])
+    // The saved order permutes the global slots it names; the book rule is not
+    // in that set, so it must keep running before both globals instead of being
+    // pushed behind them by an order the settings list never displayed.
+    expect((await loadEffectiveBookReplacementRules(consumerId, consumerBookId)).map((rule) => rule.pattern))
+      .toEqual(['book', 'second', 'first'])
+  })
+
+  it('rejects a partial or foreign order instead of silently dropping ids', async () => {
+    const a = await createReplacement(consumerId, { pattern: 'a' })
+    await createReplacement(consumerId, { pattern: 'b' })
+    const foreign = await createReplacement(publisherId, { pattern: 'private' })
+
+    expect(() => reorderReplacements(consumerId, [a.id])).toThrowError(/REPLACEMENT_NOT_FOUND/)
+    expect(() => reorderReplacements(consumerId, [a.id, foreign.id])).toThrowError(/REPLACEMENT_NOT_FOUND/)
+    expect((await listReplacements(consumerId)).map((rule) => rule.pattern)).toEqual(['a', 'b'])
+  })
+
+  it('exposes the order through PUT /reorder and rejects guests', async () => {
+    const a = await createReplacement(consumerId, { pattern: 'a' })
+    const b = await createReplacement(consumerId, { pattern: 'b' })
+    const app = (user: { id: string; username: string; role: string; avatarKey: string | null } | null) => {
+      const hono = new Hono()
+      hono.onError(errorHandler)
+      hono.use('/api/v1/replacements/*', async (c, next) => { c.set('user', user); await next() })
+      hono.route('/api/v1/replacements', replacementRoutes)
+      return hono
+    }
+    const member = { id: consumerId, username: 'consumer', role: 'member', avatarKey: null }
+
+    const response = await app(member).request('http://test/api/v1/replacements/reorder', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ replacementIds: [b.id, a.id] }),
+    })
+    expect(response.status).toBe(200)
+    expect(((await response.json()) as { data: { id: string }[] }).data.map((rule) => rule.id)).toEqual([b.id, a.id])
+
+    const invalid = await app(member).request('http://test/api/v1/replacements/reorder', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ replacementIds: [a.id] }),
+    })
+    expect(invalid.status).toBe(404)
+
+    const guest = await app(null).request('http://test/api/v1/replacements/reorder', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ replacementIds: [a.id, b.id] }),
+    })
+    expect(guest.status).toBe(403)
+    expect((await listReplacements(consumerId)).map((rule) => rule.id)).toEqual([b.id, a.id])
   })
 })
 

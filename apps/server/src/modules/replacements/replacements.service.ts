@@ -1,10 +1,12 @@
-import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import { compileReplacementRegex, describeTransferIssues, normalizeTransferName, replacementTransferFileSchema, type TextReplacementRes, type ReplacementCreateReq, type ReplacementOverrideReq, type ReplacementUpdateReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { bookVersions, textReplacementOverrides, textReplacements } from '../../db/schema'
 import { createId } from '../../lib/id'
+import { loadReplacementOverrides, loadReplacementRows, orderReplacementRows, REPLACEMENT_PREFERENCE_KEY, resolveReplacementEnabled } from '../../lib/replacement-effective'
+import { isCompleteIdSet, patchResourcePreference } from '../../lib/resource-preferences'
 import { AppError } from '../../middleware/error'
 import { assertReadableBook } from '../books/books.service'
 
@@ -12,7 +14,8 @@ type ReplacementRow = typeof textReplacements.$inferSelect
 type ReplacementOverrideRow = typeof textReplacementOverrides.$inferSelect
 
 // override undefined = no book context (plain list); null = book context without an override row
-function toRes(row: ReplacementRow, override?: ReplacementOverrideRow | null): TextReplacementRes {
+function toRes(userId: string, row: ReplacementRow, override?: ReplacementOverrideRow | null): TextReplacementRes {
+  const accountEnabled = resolveReplacementEnabled(userId, row)
   const res: TextReplacementRes = {
     id: row.id,
     bookId: row.bookId,
@@ -22,7 +25,7 @@ function toRes(row: ReplacementRow, override?: ReplacementOverrideRow | null): T
     replacement: row.replacement,
     isRegex: row.isRegex === 1,
     applyTo: row.applyTo as TextReplacementRes['applyTo'],
-    enabled: row.enabled === 1,
+    enabled: accountEnabled,
     name: row.name,
     group: row.group,
     spineHref: row.spineHref,
@@ -30,11 +33,13 @@ function toRes(row: ReplacementRow, override?: ReplacementOverrideRow | null): T
     originalText: row.originalText,
     ...(row.matchType === 'point' && row.relocation === 'unresolved' ? { locationAvailable: false } : {}),
     sortOrder: row.sortOrder,
+    availability: row.availability,
+    mine: row.userId === userId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
   if (override !== undefined) {
-    res.effectiveEnabled = override ? override.enabled === 1 : row.enabled === 1
+    res.effectiveEnabled = override ? override.enabled === 1 : accountEnabled
     res.hasOverride = override !== null
   }
   return res
@@ -56,30 +61,17 @@ function getOwnedReplacement(userId: string, replacementId: string): Replacement
 }
 
 export async function listReplacements(userId: string, bookId?: string) {
-  const db = getDb()
   if (!bookId) {
-    const rows = await db.select().from(textReplacements).where(eq(textReplacements.userId, userId))
-      .orderBy(asc(textReplacements.sortOrder), asc(textReplacements.createdAt)).all()
-    return rows.map((row) => toRes(row))
+    const rows = orderReplacementRows(userId, loadReplacementRows(userId))
+    return rows.map((row) => toRes(userId, row))
   }
   await assertReadableBook(userId, bookId)
-  // Book view: user-global pattern rules (per-book state comes from overrides)
-  // plus everything scoped to this book (book-scoped patterns, point patches)
-  const rows = await db.select().from(textReplacements).where(
-    and(
-      eq(textReplacements.userId, userId),
-      or(
-        and(eq(textReplacements.matchType, 'pattern'), isNull(textReplacements.bookId)),
-        eq(textReplacements.bookId, bookId),
-      ),
-    ),
-  ).orderBy(asc(textReplacements.sortOrder), asc(textReplacements.createdAt)).all()
-  const overrides = await db.select().from(textReplacementOverrides).where(
-    and(eq(textReplacementOverrides.userId, userId), eq(textReplacementOverrides.bookId, bookId)),
-  ).all()
-  const overrideByReplacement = new Map(overrides.map((o) => [o.replacementId, o]))
+  // Book view: the caller's own global and book-scoped rules plus readable
+  // shared global rules; per-book state comes from the caller's own overrides.
+  const rows = orderReplacementRows(userId, loadReplacementRows(userId, bookId))
+  const overrideByReplacement = loadReplacementOverrides(userId, bookId)
   return rows.map((row) =>
-    toRes(row, row.matchType === 'pattern' && row.bookId === null
+    toRes(userId, row, row.matchType === 'pattern' && row.bookId === null
       ? overrideByReplacement.get(row.id) ?? null
       : null),
   )
@@ -105,6 +97,9 @@ export async function createReplacement(userId: string, data: ReplacementCreateR
     : null
   const maxOrder = db.select({ max: sql<number>`max(${textReplacements.sortOrder})` }).from(textReplacements)
     .where(eq(textReplacements.userId, userId)).get()?.max ?? -1
+  // Only a user-global pattern rule can be published; book-bound patterns and
+  // point patches are inherently personal.
+  const availability = bookId === null && matchType === 'pattern' ? (data.availability ?? 'user') : 'user'
   const row: ReplacementRow = {
     id: createId('replacement'),
     userId,
@@ -125,11 +120,12 @@ export async function createReplacement(userId: string, data: ReplacementCreateR
     textOffset: data.textOffset ?? null,
     originalText: data.originalText ?? null,
     relocation: 'ok',
+    availability,
     createdAt: now,
     updatedAt: now,
   }
   db.insert(textReplacements).values(row).run()
-  return toRes(row)
+  return toRes(userId, row)
 }
 
 /** Batch import a transfer file: global pattern rules only, appended disabled. */
@@ -163,6 +159,7 @@ export async function importReplacements(userId: string, file: unknown) {
     textOffset: null,
     originalText: null,
     relocation: 'ok',
+    availability: 'user' as const,
     createdAt: now + index,
     updatedAt: now + index,
   }))
@@ -199,12 +196,32 @@ export async function importReplacements(userId: string, file: unknown) {
       }
     })
     tx.insert(textReplacements).values(rows).run()
-    return rows.map((row) => toRes(row))
+    return rows.map((row) => toRes(userId, row))
   })
+}
+
+/** A rule the caller may read but not edit: instance-published global pattern. */
+function getAccessibleSharedReplacement(userId: string, replacementId: string): ReplacementRow {
+  const row = getDb().select().from(textReplacements).where(eq(textReplacements.id, replacementId)).get()
+  if (!row || row.userId === userId || row.availability !== 'instance' || row.matchType !== 'pattern' || row.bookId) {
+    throw new AppError('REPLACEMENT_NOT_FOUND')
+  }
+  return row
 }
 
 export async function updateReplacement(userId: string, replacementId: string, data: ReplacementUpdateReq) {
   const db = getDb()
+  const owned = db.select().from(textReplacements).where(eq(textReplacements.id, replacementId)).get()
+  if (owned && owned.userId !== userId) {
+    // Consumers may only flip their own personal switch. Editing patterns,
+    // publication or book binding stays with the publisher.
+    getAccessibleSharedReplacement(userId, replacementId)
+    if (Object.keys(data).some((key) => key !== 'enabled') || data.enabled === undefined) {
+      throw new AppError('FORBIDDEN', 'Only the publisher can edit a shared rule')
+    }
+    patchResourcePreference(userId, REPLACEMENT_PREFERENCE_KEY, { enabled: { [replacementId]: data.enabled } })
+    return toRes(userId, owned, null)
+  }
   const existing = getOwnedReplacement(userId, replacementId)
   if (data.matchType === 'point') {
     // Point patches need anchor information only a text selection provides;
@@ -238,10 +255,23 @@ export async function updateReplacement(userId: string, replacementId: string, d
   if (data.replacement !== undefined) patch.replacement = data.replacement
   if (data.isRegex !== undefined) patch.isRegex = data.isRegex ? 1 : 0
   if (data.applyTo !== undefined) patch.applyTo = data.applyTo
-  if (data.enabled !== undefined) patch.enabled = data.enabled ? 1 : 0
+  if (data.enabled !== undefined) {
+    patch.enabled = data.enabled ? 1 : 0
+    patchResourcePreference(userId, REPLACEMENT_PREFERENCE_KEY, { enabled: { [replacementId]: data.enabled } })
+  }
   if (data.originalText !== undefined) patch.originalText = data.originalText
+  const nextBookId = patch.bookId === undefined ? existing.bookId : patch.bookId
+  if (data.availability !== undefined) {
+    const eligible = nextBookId === null && (patch.matchType ?? existing.matchType) === 'pattern'
+    if (!eligible) throw new AppError('VALIDATION_ERROR', 'Only global pattern rules can be published')
+    patch.availability = data.availability
+  }
+  if (patch.availability === undefined && data.availability === undefined) {
+    // Unpublish when a published rule stops being a global pattern rule.
+    if ((patch.matchType ?? existing.matchType) !== 'pattern' || nextBookId !== null) patch.availability = 'user'
+  }
   db.update(textReplacements).set(patch).where(eq(textReplacements.id, replacementId)).run()
-  return toRes(db.select().from(textReplacements).where(eq(textReplacements.id, replacementId)).get()!)
+  return toRes(userId, db.select().from(textReplacements).where(eq(textReplacements.id, replacementId)).get()!)
 }
 
 export async function deleteReplacement(userId: string, replacementId: string) {
@@ -262,22 +292,47 @@ export function deleteGlobalReplacements(userId: string, ruleIds: string[]) {
   })
 }
 
+/**
+ * Reorder the caller's whole visible settings list. Only the personal order
+ * changes: the definition row keeps its own sortOrder, so another account's
+ * layout is untouched. The payload must be exactly the set the settings page
+ * shows — every global pattern rule the caller can run — because a partial list
+ * would leave the missing ids on a layout the client never displayed. Book
+ * rules are not part of that set: the saved order permutes the global slots it
+ * names and leaves book-scoped rules where they run.
+ */
+export function reorderReplacements(userId: string, replacementIds: string[]) {
+  const rows = loadReplacementRows(userId)
+  const accessibleIds = rows
+    .filter((row) => row.matchType === 'pattern' && row.bookId === null)
+    .map((row) => row.id)
+  if (!isCompleteIdSet(replacementIds, accessibleIds)) throw new AppError('REPLACEMENT_NOT_FOUND')
+  patchResourcePreference(userId, REPLACEMENT_PREFERENCE_KEY, { order: replacementIds })
+  return orderReplacementRows(userId, rows).map((row) => toRes(userId, row))
+}
+
 export async function setReplacementOverride(userId: string, replacementId: string, data: ReplacementOverrideReq) {
   const db = getDb()
-  const existing = getOwnedReplacement(userId, replacementId)
-  // Overrides only layer on user-global pattern rules: point patches are
-  // single-book, book-scoped patterns already are — both toggle their own
-  // enabled switch instead.
-  if (existing.matchType === 'point' || existing.bookId) {
+  const row = db.select().from(textReplacements).where(eq(textReplacements.id, replacementId)).get()
+  if (!row) throw new AppError('REPLACEMENT_NOT_FOUND')
+  // Overrides only layer on global pattern rules the caller can run: point
+  // patches are single-book and book-scoped patterns already are — both toggle
+  // their own enabled switch instead.
+  if (row.matchType === 'point' || row.bookId) {
     throw new AppError('VALIDATION_ERROR', 'per-book overrides only apply to global pattern rules')
   }
+  if (row.userId !== userId && row.availability !== 'instance') throw new AppError('REPLACEMENT_NOT_FOUND')
   await assertReadableBook(userId, data.bookId)
 
   if (data.enabled === null) {
     db.delete(textReplacementOverrides).where(
-      and(eq(textReplacementOverrides.bookId, data.bookId), eq(textReplacementOverrides.replacementId, replacementId)),
+      and(
+        eq(textReplacementOverrides.userId, userId),
+        eq(textReplacementOverrides.bookId, data.bookId),
+        eq(textReplacementOverrides.replacementId, replacementId),
+      ),
     ).run()
-    return toRes(existing, null)
+    return toRes(userId, row, null)
   }
 
   const now = Date.now()
@@ -290,11 +345,15 @@ export async function setReplacementOverride(userId: string, replacementId: stri
     createdAt: now,
     updatedAt: now,
   }).onConflictDoUpdate({
-    target: [textReplacementOverrides.bookId, textReplacementOverrides.replacementId],
+    target: [textReplacementOverrides.userId, textReplacementOverrides.bookId, textReplacementOverrides.replacementId],
     set: { enabled: data.enabled ? 1 : 0, updatedAt: now },
   }).run()
   const override = db.select().from(textReplacementOverrides).where(
-    and(eq(textReplacementOverrides.bookId, data.bookId), eq(textReplacementOverrides.replacementId, replacementId)),
+    and(
+      eq(textReplacementOverrides.userId, userId),
+      eq(textReplacementOverrides.bookId, data.bookId),
+      eq(textReplacementOverrides.replacementId, replacementId),
+    ),
   ).get()!
-  return toRes(existing, override)
+  return toRes(userId, row, override)
 }

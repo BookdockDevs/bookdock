@@ -1,3 +1,6 @@
+import Database from 'better-sqlite3'
+import { and, eq } from 'drizzle-orm'
+import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -5,16 +8,16 @@ import { AI_CORE_SYSTEM_PROMPT, AI_CORE_TOOL_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT
 import type { AiChatReq } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
+import { migrateBeforeBookRetirementIncluding } from '../../db/migration-stage'
+import * as schema from '../../db/schema'
+import { createId } from '../../lib/id'
 import { errorHandler } from '../../middleware/error'
 import { getProgress } from '../progress/progress.service'
+import { encryptApiKey } from './ai.secrets'
 import { AI_TOOL_MAX_CALLS, AI_TOOL_MAX_STEPS, AI_TOOL_MAX_TOTAL_RESULT_CHARS } from './ai.tools'
 
 vi.mock('../../config', () => ({
   config: {
-    aiBaseUrl: 'https://ai.example.test/v1',
-    aiApiKey: 'test-secret',
-    aiModel: 'test-model',
-    aiProvider: 'openai',
     jwtSecret: 'test-jwt-secret',
     aiMaxOutputTokens: 128,
     aiRpm: 1000,
@@ -83,11 +86,79 @@ interface TestUser {
   role: 'owner' | 'member' | 'guest'
 }
 
-interface StoredSetting {
-  id: string
-  userId: string
-  key: string
-  value: unknown
+function createTestDb() {
+  const sqlite = new Database(':memory:')
+  sqlite.pragma('journal_mode = WAL')
+  sqlite.pragma('foreign_keys = ON')
+  const db = drizzle(sqlite, { schema })
+  migrateBeforeBookRetirementIncluding(db, { migrationsFolder: './src/db/migrations' }, [])
+  return db
+}
+
+type TestDb = ReturnType<typeof createTestDb>
+
+/** Settings and AI rows carry a user FK, so every acting account needs a row. */
+function ensureUser(db: TestDb, id: string) {
+  if (db.select().from(schema.users).where(eq(schema.users.id, id)).get()) return
+  db.insert(schema.users).values({ id, username: id, createdAt: Date.now() }).run()
+}
+
+interface SeedModel {
+  upstreamModelId: string
+  name?: string
+  enabled?: number
+  capabilities?: Record<string, boolean>
+}
+
+interface SeedConnection {
+  name?: string
+  provider: string
+  baseUrl?: string | null
+  apiKey?: string
+  availability?: 'user' | 'instance'
+  models?: SeedModel[]
+}
+
+/** Insert a saved connection (and its model entries) the way the service would. */
+function seedConnection(db: TestDb, userId: string, input: SeedConnection) {
+  ensureUser(db, userId)
+  const connectionId = createId('ai-connection')
+  const now = Date.now()
+  db.insert(schema.aiConnections).values({
+    id: connectionId,
+    userId,
+    name: input.name ?? input.provider,
+    provider: input.provider as never,
+    baseUrl: input.baseUrl ?? null,
+    encryptedApiKey: input.apiKey ? encryptApiKey(input.apiKey) : null,
+    availability: input.availability ?? 'user',
+    createdAt: now,
+    updatedAt: now,
+  }).run()
+  const models = (input.models ?? []).map((model) => {
+    const id = createId('ai-model')
+    db.insert(schema.aiModels).values({
+      id,
+      connectionId,
+      upstreamModelId: model.upstreamModelId,
+      name: model.name ?? model.upstreamModelId,
+      enabled: model.enabled ?? 1,
+      capabilities: (model.capabilities ?? null) as never,
+      createdAt: now,
+      updatedAt: now,
+    }).run()
+    return { id, upstreamModelId: model.upstreamModelId }
+  })
+  return { connectionId, models, modelId: models[0]?.id }
+}
+
+function setLastUsedChatModel(db: TestDb, userId: string, modelId: string | null) {
+  ensureUser(db, userId)
+  const where = and(eq(schema.settings.userId, userId), eq(schema.settings.key, 'ai'))
+  const existing = db.select().from(schema.settings).where(where).get()
+  const value = { ...(existing?.value as Record<string, unknown> | undefined ?? {}), lastUsedModels: { chat: modelId } }
+  if (existing) db.update(schema.settings).set({ value }).where(where).run()
+  else db.insert(schema.settings).values({ id: createId('setting'), userId, key: 'ai', value }).run()
 }
 
 const requestBody: AiChatReq = {
@@ -102,37 +173,9 @@ const requestBody: AiChatReq = {
   },
 }
 
-const settings = new Map<string, StoredSetting>()
-const testDb = {
-  select: () => ({
-    from: () => ({
-      where: () => ({
-        all: () => [],
-        get: () => [...settings.values()][0],
-      }),
-    }),
-  }),
-  insert: () => ({
-    values: (value: StoredSetting) => ({
-      run: () => settings.set(value.userId, value),
-    }),
-  }),
-  update: () => ({
-    set: (value: { value: unknown }) => ({
-      where: () => ({
-        run: () => {
-          const current = [...settings.values()][0]
-          if (current) settings.set(current.userId, { ...current, ...value })
-        },
-      }),
-    }),
-  }),
-  delete: () => ({
-    where: () => ({ run: vi.fn() }),
-  }),
-}
-
 function createApp(user: TestUser) {
+  // Settings/AI rows carry user FKs, so acting accounts need a real row.
+  if (user.role !== 'guest') ensureUser(getDb() as TestDb, user.id)
   const app = new Hono()
   app.onError(errorHandler)
 
@@ -159,10 +202,18 @@ function finalResponse(): Response {
 }
 
 describe('ai routes', () => {
+  let db: TestDb
+
   beforeEach(() => {
-    settings.clear()
-    vi.mocked(getDb).mockReturnValue(testDb as never)
+    db = createTestDb()
+    vi.mocked(getDb).mockReturnValue(db as never)
     vi.stubGlobal('fetch', vi.fn())
+    // Chat surfaces need one runnable model per account: mirror the hosted
+    // provider the request-body assertions below expect.
+    seedConnection(db, 'user-1', {
+      name: 'Test', provider: 'openai', apiKey: 'test-secret',
+      models: [{ upstreamModelId: 'test-model' }],
+    })
   })
 
   it('lists native and OpenAI-compatible providers', async () => {
@@ -302,38 +353,42 @@ describe('ai routes', () => {
     await expect(getAiReadingBoundary('member-1', 'book-1', 'full_book')).resolves.toEqual({ minChapterIndex: 0, maxChapterIndex: 2, currentChapterIndex: 1, readingScope: 'full_book' })
   })
 
-  it('rejects hosted provider operations without a required API key', async () => {
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' }),
+  it('rejects testing a hosted model when its connection has no credential', async () => {
+    const { modelId } = seedConnection(db, 'user-1', {
+      name: 'DeepSeek',
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      models: [{ upstreamModelId: 'deepseek-chat' }],
     })
 
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/models/${modelId}/test`, { method: 'POST' })
+
     expect(response.status).toBe(503)
-    expect(await response.json()).toEqual({ error: { code: 'AI_NOT_CONFIGURED', message: 'AI API key is required' } })
+    expect(await response.json()).toEqual({ error: { code: 'AI_NOT_CONFIGURED', message: 'This AI connection has no credential' } })
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('discovers OpenAI-compatible models through the server', async () => {
+  it('discovers OpenAI-compatible models through a saved connection', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: [
       { id: 'gpt-test', owned_by: 'openai' },
       { id: 'vision-test', owned_by: 'openai', capabilities: { vision: true, tools: true, reasoning: true } },
     ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/models', {
+    const { connectionId } = seedConnection(db, 'user-1', { provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'saved-secret' })
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/connections/${connectionId}/models/discover`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'draft-secret' }),
+      body: JSON.stringify({}),
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ data: [
-      { id: 'gpt-test', name: 'gpt-test', ownedBy: 'openai' },
-      { id: 'vision-test', name: 'vision-test', ownedBy: 'openai', capabilities: { vision: true, tools: true, reasoning: true } },
-    ] })
+    expect((await response.json()).data).toEqual([
+      expect.objectContaining({ upstreamModelId: 'gpt-test', name: 'gpt-test', enabled: false, mine: true }),
+      expect.objectContaining({ upstreamModelId: 'vision-test', name: 'vision-test', enabled: false, capabilities: { vision: true, tools: true, reasoning: true } }),
+    ])
     expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/models', expect.objectContaining({
-      headers: { Accept: 'application/json', Authorization: 'Bearer draft-secret' },
+      headers: { Accept: 'application/json', Authorization: 'Bearer saved-secret' },
       signal: expect.any(AbortSignal),
     }))
   })
@@ -344,30 +399,26 @@ describe('ai routes', () => {
       { id: 'deepseek-v4-flash', owned_by: 'octopus' },
       { id: 'deepseek/deepseek-v4-pro', owned_by: 'octopus' },
       { id: 'doubao-seed-2.1-pro', owned_by: 'octopus' },
-      { id: 'doubao-seed-1.6', owned_by: 'octopus' },
-      { id: 'qwen3.7-plus', owned_by: 'octopus' },
       { id: 'qwen3.7-max', owned_by: 'octopus' },
-      { id: 'qwen3.7-max-2026-06-08', owned_by: 'octopus' },
       { id: 'qwen3-embedding-8b', owned_by: 'octopus' },
     ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/models', {
+    const { connectionId } = seedConnection(db, 'user-1', { provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'saved-secret' })
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/connections/${connectionId}/models/discover`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'draft-secret' }),
+      body: JSON.stringify({}),
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ data: [
-      { id: 'deepseek-v4-flash', name: 'deepseek-v4-flash', ownedBy: 'octopus', capabilities: { tools: true, reasoning: true } },
-      { id: 'deepseek/deepseek-v4-pro', name: 'deepseek/deepseek-v4-pro', ownedBy: 'octopus', capabilities: { tools: true, reasoning: true } },
-      { id: 'doubao-seed-2.1-pro', name: 'doubao-seed-2.1-pro', ownedBy: 'octopus', capabilities: { vision: true, tools: true, reasoning: true } },
-      { id: 'doubao-seed-1.6', name: 'doubao-seed-1.6', ownedBy: 'octopus', capabilities: { vision: true, tools: true, reasoning: true } },
-      { id: 'qwen3.7-plus', name: 'qwen3.7-plus', ownedBy: 'octopus', capabilities: { vision: true, tools: true, reasoning: true } },
-      { id: 'qwen3.7-max', name: 'qwen3.7-max', ownedBy: 'octopus', capabilities: { tools: true, reasoning: true } },
-      { id: 'qwen3.7-max-2026-06-08', name: 'qwen3.7-max-2026-06-08', ownedBy: 'octopus', capabilities: { vision: true, tools: true, reasoning: true } },
-      { id: 'qwen3-embedding-8b', name: 'qwen3-embedding-8b', ownedBy: 'octopus', capabilities: { embedding: true } },
-    ] })
+    const entries = (await response.json()).data as Array<{ upstreamModelId: string; capabilities?: unknown }>
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ upstreamModelId: 'deepseek-v4-flash', capabilities: { tools: true, reasoning: true } }),
+      expect.objectContaining({ upstreamModelId: 'deepseek/deepseek-v4-pro', capabilities: { tools: true, reasoning: true } }),
+      expect.objectContaining({ upstreamModelId: 'doubao-seed-2.1-pro', capabilities: { vision: true, tools: true, reasoning: true } }),
+      expect.objectContaining({ upstreamModelId: 'qwen3.7-max', capabilities: { tools: true, reasoning: true } }),
+      expect.objectContaining({ upstreamModelId: 'qwen3-embedding-8b', capabilities: { embedding: true } }),
+    ]))
   })
 
   it('merges detailed model metadata when a provider returns both data and models arrays', async () => {
@@ -377,15 +428,16 @@ describe('ai routes', () => {
       models: [{ id: 'metadata-model', capabilities: { vision: true, tools: true } }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/models', {
+    const { connectionId } = seedConnection(db, 'user-1', { provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'saved-secret' })
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/connections/${connectionId}/models/discover`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'draft-secret' }),
+      body: JSON.stringify({}),
     })
 
-    expect(await response.json()).toEqual({ data: [
-      { id: 'metadata-model', name: 'metadata-model', ownedBy: 'octopus', capabilities: { vision: true, tools: true } },
-    ] })
+    expect((await response.json()).data).toEqual([
+      expect.objectContaining({ upstreamModelId: 'metadata-model', name: 'metadata-model', capabilities: { vision: true, tools: true } }),
+    ])
   })
 
   it('discovers native Ollama models', async () => {
@@ -395,17 +447,21 @@ describe('ai routes', () => {
       { name: 'llama3.2' },
     ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/models', {
+    const { connectionId } = seedConnection(db, 'user-1', { provider: 'ollama', baseUrl: 'http://localhost:11434' })
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/connections/${connectionId}/models/discover`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'ollama', baseUrl: 'http://localhost:11434' }),
+      body: JSON.stringify({}),
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ data: [
-      { id: 'qwen3:8b', name: 'qwen3:8b', capabilities: { tools: true, reasoning: true } },
-      { id: 'llama3.2', name: 'llama3.2' },
-    ] })
+    const entries = (await response.json()).data as Array<{ upstreamModelId: string; name: string; capabilities?: unknown }>
+    // Row order follows the (connection_id, upstream_model_id) index, not discovery order.
+    expect(entries).toHaveLength(2)
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ upstreamModelId: 'qwen3:8b', name: 'qwen3:8b', capabilities: { tools: true, reasoning: true } }),
+      expect.objectContaining({ upstreamModelId: 'llama3.2', name: 'llama3.2' }),
+    ]))
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:11434/api/tags', expect.anything())
   })
 
@@ -416,18 +472,19 @@ describe('ai routes', () => {
       { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] },
     ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/models', {
+    const { connectionId } = seedConnection(db, 'user-1', { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: 'gemini-secret' })
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/connections/${connectionId}/models/discover`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', kind: 'chat', apiKey: 'gemini-secret' }),
+      body: JSON.stringify({ kind: 'chat' }),
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ data: [{
-      id: 'gemini-2.5-flash',
+    expect((await response.json()).data).toEqual([expect.objectContaining({
+      upstreamModelId: 'gemini-2.5-flash',
       name: 'Gemini 2.5 Flash',
       capabilities: { vision: true, tools: true, reasoning: true },
-    }] })
+    })])
     expect(fetchMock).toHaveBeenCalledWith('https://generativelanguage.googleapis.com/v1beta/models', expect.objectContaining({
       headers: { Accept: 'application/json', 'x-goog-api-key': 'gemini-secret' },
     }))
@@ -440,17 +497,18 @@ describe('ai routes', () => {
       { name: 'models/text-embedding-004', displayName: 'Text Embedding 004', supportedGenerationMethods: ['embedContent'] },
     ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/models', {
+    const { connectionId } = seedConnection(db, 'user-1', { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: 'gemini-secret' })
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/connections/${connectionId}/models/discover`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: 'gemini-secret' }),
+      body: JSON.stringify({}),
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ data: [
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', capabilities: { vision: true, tools: true, reasoning: true } },
-      { id: 'text-embedding-004', name: 'Text Embedding 004', capabilities: { embedding: true } },
-    ] })
+    expect((await response.json()).data).toEqual([
+      expect.objectContaining({ upstreamModelId: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', capabilities: { vision: true, tools: true, reasoning: true } }),
+      expect.objectContaining({ upstreamModelId: 'text-embedding-004', name: 'Text Embedding 004', capabilities: { embedding: true } }),
+    ])
   })
 
   it('discovers Gemini embedding models when the embedding capability is requested', async () => {
@@ -460,44 +518,50 @@ describe('ai routes', () => {
       { name: 'models/text-embedding-004', displayName: 'Text Embedding 004', supportedGenerationMethods: ['embedContent'] },
     ] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/models', {
+    const { connectionId } = seedConnection(db, 'user-1', { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: 'gemini-secret' })
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/connections/${connectionId}/models/discover`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', kind: 'embedding', apiKey: 'gemini-secret' }),
+      body: JSON.stringify({ kind: 'embedding' }),
     })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ data: [{ id: 'text-embedding-004', name: 'Text Embedding 004', capabilities: { embedding: true } }] })
+    expect((await response.json()).data).toEqual([expect.objectContaining({ upstreamModelId: 'text-embedding-004', name: 'Text Embedding 004', capabilities: { embedding: true } })])
     expect(fetchMock).toHaveBeenCalledWith('https://generativelanguage.googleapis.com/v1beta/models', expect.objectContaining({
       headers: { Accept: 'application/json', 'x-goog-api-key': 'gemini-secret' },
     }))
   })
 
-  it('tests a draft embedding model without saving or uploading book content', async () => {
+  it('tests a saved embedding model without uploading book content', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: [{ embedding: [0.1, -0.2, 0.3] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', kind: 'embedding', model: 'text-embedding-test', apiKey: 'draft-secret' }),
+    const { modelId } = seedConnection(db, 'user-1', {
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'saved-secret',
+      models: [{ upstreamModelId: 'text-embedding-test', capabilities: { embedding: true } }],
     })
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/models/${modelId}/test`, { method: 'POST' })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toMatchObject({ data: { ok: true, provider: 'openai', model: 'text-embedding-test' } })
+    expect(await response.json()).toMatchObject({ data: { ok: true, provider: 'openai', upstreamModelId: 'text-embedding-test' } })
     expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/embeddings', expect.objectContaining({
-      headers: { Accept: 'application/json', Authorization: 'Bearer draft-secret', 'Content-Type': 'application/json' },
+      headers: { Accept: 'application/json', Authorization: 'Bearer saved-secret', 'Content-Type': 'application/json' },
     }))
     const [, init] = fetchMock.mock.calls[0] ?? []
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ model: 'text-embedding-test', input: ['Bookdock embedding connectivity test'] })
   })
 
   it('rejects embedding tests for providers without embedding support', async () => {
-    const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com', kind: 'embedding', model: 'claude-test', apiKey: 'draft-secret' }),
+    const { modelId } = seedConnection(db, 'user-1', {
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'saved-secret',
+      models: [{ upstreamModelId: 'claude-test', capabilities: { embedding: true } }],
     })
+
+    const response = await createApp({ id: 'user-1', role: 'member' }).request(`http://test/api/v1/ai/models/${modelId}/test`, { method: 'POST' })
 
     expect(response.status).toBe(502)
     expect(await response.json()).toEqual({ error: { code: 'AI_PROVIDER_ERROR', message: 'This AI provider does not support embeddings' } })
@@ -516,13 +580,11 @@ describe('ai routes', () => {
     expect(await response.json()).toEqual({
       data: {
         enabled: true,
-        provider: 'openai',
-        model: 'test-model',
-        models: [{ id: 'test-model', name: 'test-model' }],
+        lastUsedModelId: null,
+        models: [expect.objectContaining({ upstreamModelId: 'test-model', enabled: true })],
         prompts: expect.any(Array),
         modes: [{ id: 'assistant', name: '助理', prompt: AI_DEFAULT_ASSISTANT_MODE_PROMPT, builtIn: true }],
         lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'], assistantModeId: 'assistant' },
-        activeProfileId: null,
       },
     })
   })
@@ -569,7 +631,7 @@ describe('ai routes', () => {
     }))
 
     const [url, init] = fetchMock.mock.calls[0] ?? []
-    expect(url).toBe('https://ai.example.test/v1/chat/completions')
+    expect(url).toBe('https://api.openai.com/v1/chat/completions')
     expect(init).toEqual(expect.objectContaining({
       method: 'POST',
       signal: expect.any(AbortSignal),
@@ -1043,6 +1105,7 @@ describe('ai routes', () => {
     ))
     const mutableConfig = config as typeof config & { aiRpm: number }
     mutableConfig.aiRpm = 1
+    seedConnection(db, 'rate-limit-user', { name: 'Test', provider: 'openai', apiKey: 'test-secret', models: [{ upstreamModelId: 'test-model' }] })
     const app = createApp({ id: 'rate-limit-user', role: 'member' })
 
     try {
@@ -1068,39 +1131,51 @@ describe('ai routes', () => {
     }
   })
 
-  it('tests a draft model without persisting its credentials', async () => {
+  it('tests a saved model without returning its stored credential', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValue(new Response(
       'data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n',
       { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
     ))
 
-    const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'openai', baseUrl: 'https://draft.example.test/v1', model: 'draft-model', apiKey: 'draft-secret' }),
+    const { modelId, connectionId } = seedConnection(db, 'user-1', {
+      provider: 'openai',
+      baseUrl: 'https://draft.example.test/v1',
+      apiKey: 'saved-secret',
+      models: [{ upstreamModelId: 'draft-model' }],
     })
+    const response = await createApp({ id: 'user-1', role: 'owner' }).request(`http://test/api/v1/ai/models/${modelId}/test`, { method: 'POST' })
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ data: { ok: true, provider: 'openai', model: 'draft-model', latencyMs: expect.any(Number) } })
+    expect(await response.json()).toEqual({ data: { ok: true, provider: 'openai', upstreamModelId: 'draft-model', latencyMs: expect.any(Number) } })
     expect(fetchMock).toHaveBeenCalledWith('https://draft.example.test/v1/chat/completions', expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: 'Bearer draft-secret' }),
+      headers: expect.objectContaining({ Authorization: 'Bearer saved-secret' }),
     }))
-    expect(settings.size).toBe(0)
+    const stored = db.select().from(schema.aiConnections).where(eq(schema.aiConnections.id, connectionId)).get()
+    expect(stored?.encryptedApiKey).toEqual(expect.any(String))
+    expect(stored?.encryptedApiKey).not.toContain('saved-secret')
   })
 
   it('blocks member-owned custom endpoints before any outbound request', async () => {
     const fetchMock = vi.mocked(fetch)
     const app = createApp({ id: 'member-1', role: 'member' })
 
-    const ownerProfileResponse = await createApp({ id: 'member-1', role: 'owner' }).request('http://test/api/v1/ai/profiles', {
+    const createResponse = await app.request('http://test/api/v1/ai/connections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Private endpoint', provider: 'openai', baseUrl: 'http://127.0.0.1:9999/v1', model: 'local-model' }),
+      body: JSON.stringify({ name: 'Private endpoint', provider: 'openai', baseUrl: 'http://127.0.0.1:9999/v1' }),
     })
-    expect(ownerProfileResponse.status).toBe(201)
-    const statusResponse = await app.request('http://test/api/v1/ai/status')
-    expect(await statusResponse.json()).toMatchObject({ data: { enabled: false } })
+    expect(createResponse.status).toBe(403)
+    expect(await createResponse.json()).toMatchObject({ error: { code: 'AI_NOT_ALLOWED' } })
+
+    // A row saved outside the route must not bypass the endpoint rule either.
+    const { modelId } = seedConnection(db, 'member-1', {
+      provider: 'openai',
+      baseUrl: 'http://127.0.0.1:9999/v1',
+      apiKey: 'saved-secret',
+      models: [{ upstreamModelId: 'local-model' }],
+    })
+    setLastUsedChatModel(db, 'member-1', modelId)
 
     const chatResponse = await app.request('http://test/api/v1/ai/chat', {
       method: 'POST',
@@ -1110,100 +1185,99 @@ describe('ai routes', () => {
     expect(chatResponse.status).toBe(403)
     expect(await chatResponse.json()).toMatchObject({ error: { code: 'AI_NOT_ALLOWED' } })
 
-    const profileResponse = await app.request('http://test/api/v1/ai/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Private endpoint', provider: 'openai', baseUrl: 'http://127.0.0.1:9999/v1', model: 'local-model' }),
-    })
-    expect(profileResponse.status).toBe(403)
-    expect(await profileResponse.json()).toMatchObject({ error: { code: 'AI_NOT_ALLOWED' } })
-
-    const modelsResponse = await app.request('http://test/api/v1/ai/models', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'openai', baseUrl: 'http://127.0.0.1:9999/v1', apiKey: 'draft-secret' }),
-    })
-    expect(modelsResponse.status).toBe(403)
-    expect(await modelsResponse.json()).toMatchObject({ error: { code: 'AI_NOT_ALLOWED' } })
-
-    const testResponse = await app.request('http://test/api/v1/ai/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'openai', baseUrl: 'http://127.0.0.1:9999/v1', model: 'local-model', apiKey: 'draft-secret' }),
-    })
+    const testResponse = await app.request(`http://test/api/v1/ai/models/${modelId}/test`, { method: 'POST' })
     expect(testResponse.status).toBe(403)
     expect(await testResponse.json()).toMatchObject({ error: { code: 'AI_NOT_ALLOWED' } })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('allows any signed-in user to save encrypted provider settings without returning the key', async () => {
-    const response = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
+  it('allows any signed-in user to save an encrypted connection without returning the key', async () => {
+    const app = createApp({ id: 'member-1', role: 'member' })
+    const created = await app.request('http://test/api/v1/ai/connections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'DeepSeek',
-        provider: 'deepseek',
-        baseUrl: 'https://api.deepseek.com/v1',
-        model: 'deepseek-chat',
-        apiKey: 'saved-secret',
-      }),
+      body: JSON.stringify({ name: 'DeepSeek', provider: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'saved-secret' }),
     })
 
-    expect(response.status).toBe(201)
-    expect(await response.json()).toEqual({
-      data: expect.objectContaining({
-        id: expect.any(String),
-        name: 'DeepSeek',
-        provider: 'deepseek',
-        baseUrl: 'https://api.deepseek.com/v1',
-        model: 'deepseek-chat',
-        models: [{ id: 'deepseek-chat', name: 'deepseek-chat', capabilities: { tools: true } }],
-        embeddingModel: null,
-        embeddingModels: [],
-        apiKeyConfigured: true,
-        createdAt: expect.any(Number),
-        updatedAt: expect.any(Number),
-      }),
+    expect(created.status).toBe(201)
+    const connection = (await created.json()).data
+    expect(connection).toEqual(expect.objectContaining({
+      name: 'DeepSeek',
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      availability: 'user',
+      mine: true,
+      apiKeyConfigured: true,
+      createdAt: expect.any(Number),
+      updatedAt: expect.any(Number),
+    }))
+    expect(connection).not.toHaveProperty('apiKey')
+    expect(connection).not.toHaveProperty('encryptedApiKey')
+    const stored = db.select().from(schema.aiConnections).where(eq(schema.aiConnections.id, connection.id)).get()
+    expect(stored?.encryptedApiKey).toEqual(expect.any(String))
+    expect(stored?.encryptedApiKey).not.toContain('saved-secret')
+
+    const model = await app.request(`http://test/api/v1/ai/connections/${connection.id}/models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upstreamModelId: 'deepseek-chat' }),
     })
-    const saved = settings.get('member-1')
-    expect(saved?.key).toBe('ai')
-    expect(saved?.value).not.toEqual(expect.objectContaining({ encryptedApiKey: 'saved-secret' }))
+    expect(model.status).toBe(201)
+    expect((await model.json()).data).toEqual(expect.objectContaining({
+      connectionId: connection.id,
+      connectionName: 'DeepSeek',
+      upstreamModelId: 'deepseek-chat',
+      name: 'deepseek-chat',
+      enabled: true,
+      mine: true,
+    }))
   })
 
-  it('supports independent user profiles and active-profile switching', async () => {
-    const first = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
+  it('keeps connections independent per user and rejects the retired default-model setting', async () => {
+    const app = createApp({ id: 'member-1', role: 'member' })
+    const first = await app.request('http://test/api/v1/ai/connections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Cloud',
-        provider: 'deepseek',
-        baseUrl: 'https://api.deepseek.com/v1',
-        model: 'deepseek-chat',
-        apiKey: 'cloud-secret',
-      }),
+      body: JSON.stringify({ name: 'Cloud', provider: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'cloud-secret' }),
     })
-    expect(first.status).toBe(201)
-    const firstProfile = (await first.json()).data
-    expect(firstProfile).toEqual(expect.objectContaining({ name: 'Cloud', provider: 'deepseek', apiKeyConfigured: true }))
+    const firstConnection = (await first.json()).data
+    const firstModel = (await (await app.request(`http://test/api/v1/ai/connections/${firstConnection.id}/models`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upstreamModelId: 'deepseek-chat' }),
+    })).json()).data
 
-    const second = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
+    const second = await app.request('http://test/api/v1/ai/connections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Local', provider: 'ollama', baseUrl: 'http://localhost:11434', model: 'qwen3:8b' }),
+      body: JSON.stringify({ name: 'Local', provider: 'ollama', baseUrl: 'http://localhost:11434' }),
     })
-    expect(second.status).toBe(201)
-    const secondProfile = (await second.json()).data
+    const secondConnection = (await second.json()).data
+    const secondModel = (await (await app.request(`http://test/api/v1/ai/connections/${secondConnection.id}/models`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upstreamModelId: 'qwen3:8b' }),
+    })).json()).data
 
-    const configResponse = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/config')
-    expect(await configResponse.json()).toMatchObject({ data: { activeProfileId: secondProfile.id, profiles: expect.arrayContaining([expect.objectContaining({ id: firstProfile.id }), expect.objectContaining({ id: secondProfile.id })]), provider: 'ollama', model: 'qwen3:8b' } })
+    const configResponse = await app.request('http://test/api/v1/ai/config')
+    const config = (await configResponse.json()).data
+    expect(config.connections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: firstConnection.id }),
+      expect.objectContaining({ id: secondConnection.id }),
+    ]))
+    expect(config.lastUsedModels).toEqual({ chat: null, translate: null })
 
-    const activateResponse = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/config', {
+    // The retired global default is rejected by the strict update schema.
+    const activateResponse = await app.request('http://test/api/v1/ai/config', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ activeProfileId: firstProfile.id }),
+      body: JSON.stringify({ defaultModelId: secondModel.id }),
     })
-    expect(await activateResponse.json()).toMatchObject({ data: { activeProfileId: firstProfile.id, provider: 'deepseek', model: 'deepseek-chat' } })
-    expect(settings.get('member-1')?.value).not.toEqual(expect.objectContaining({ encryptedApiKey: 'cloud-secret' }))
+    expect(activateResponse.status).toBe(400)
+
+    const status = (await (await app.request('http://test/api/v1/ai/status')).json()).data
+    expect(status.lastUsedModelId).toBeNull()
+    expect(status.models.map((model: { id: string }) => model.id)).toEqual(expect.arrayContaining([firstModel.id, secondModel.id]))
+
+    // Another account sees neither connection nor model.
+    const otherConfig = (await (await createApp({ id: 'member-2', role: 'member' }).request('http://test/api/v1/ai/config')).json()).data
+    expect(otherConfig).toMatchObject({ connections: [], models: [], lastUsedModels: { chat: null, translate: null } })
   })
 
   it('rejects retired semantic retrieval settings', async () => {
@@ -1214,31 +1288,14 @@ describe('ai routes', () => {
     expect(response.status).toBe(400)
   })
 
-  it('reuses only the selected profile key for draft model operations', async () => {
-    const first = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Cloud',
-        provider: 'deepseek',
-        baseUrl: 'https://api.deepseek.com/v1',
-        model: 'deepseek-chat',
-        apiKey: 'cloud-secret',
-      }),
+  it('discovers models with the saved connection credential only', async () => {
+    const app = createApp({ id: 'member-1', role: 'member' })
+    const cloud = seedConnection(db, 'member-1', {
+      name: 'Cloud', provider: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'cloud-secret',
     })
-    const firstProfile = (await first.json()).data
-
-    const second = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Second cloud',
-        provider: 'openai',
-        baseUrl: 'https://api.openai.com/v1',
-        model: 'gpt-test',
-      }),
+    const second = seedConnection(db, 'member-1', {
+      name: 'Second cloud', provider: 'openai', baseUrl: 'https://api.openai.com/v1',
     })
-    const secondProfile = (await second.json()).data
 
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'gpt-test' }] }), {
@@ -1246,55 +1303,44 @@ describe('ai routes', () => {
       headers: { 'Content-Type': 'application/json' },
     }))
 
-    const selectedExisting = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/models', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profileId: firstProfile.id, provider: 'deepseek', baseUrl: 'https://api.deepseek.com/v1' }),
+    const selectedExisting = await app.request(`http://test/api/v1/ai/connections/${cloud.connectionId}/models/discover`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
     })
     expect(selectedExisting.status).toBe(200)
     expect(fetchMock).toHaveBeenLastCalledWith('https://api.deepseek.com/v1/models', expect.objectContaining({
       headers: { Accept: 'application/json', Authorization: 'Bearer cloud-secret' },
     }))
 
-    const newDraftWithoutKey = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/models', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profileId: secondProfile.id, provider: 'openai', baseUrl: 'https://api.openai.com/v1' }),
+    const withoutKey = await app.request(`http://test/api/v1/ai/connections/${second.connectionId}/models/discover`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
     })
-    expect(newDraftWithoutKey.status).toBe(503)
+    expect(withoutKey.status).toBe(503)
+    expect(await withoutKey.json()).toEqual({ error: { code: 'AI_NOT_CONFIGURED', message: 'AI API key is required' } })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('clears a saved key when an existing profile changes provider without a replacement key', async () => {
-    const created = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'Hosted',
-        provider: 'deepseek',
-        baseUrl: 'https://api.deepseek.com/v1',
-        model: 'deepseek-chat',
-        apiKey: 'deepseek-secret',
-      }),
+  it('clears a saved key when a connection changes provider without a replacement key', async () => {
+    const app = createApp({ id: 'member-1', role: 'member' })
+    const { connectionId, modelId } = seedConnection(db, 'member-1', {
+      name: 'Hosted',
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'deepseek-secret',
+      models: [{ upstreamModelId: 'deepseek-chat' }],
     })
-    const profile = (await created.json()).data
 
-    const updated = await createApp({ id: 'member-1', role: 'member' }).request(`http://test/api/v1/ai/profiles/${profile.id}`, {
+    const updated = await app.request(`http://test/api/v1/ai/connections/${connectionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-test' }),
+      body: JSON.stringify({ provider: 'openai', baseUrl: 'https://api.openai.com/v1' }),
     })
 
     expect(updated.status).toBe(200)
     expect((await updated.json()).data).toEqual(expect.objectContaining({ provider: 'openai', apiKeyConfigured: false }))
 
-    const testResponse = await createApp({ id: 'member-1', role: 'member' }).request('http://test/api/v1/ai/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profileId: profile.id, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-test' }),
-    })
-
+    const testResponse = await app.request(`http://test/api/v1/ai/models/${modelId}/test`, { method: 'POST' })
     expect(testResponse.status).toBe(503)
+    expect(await testResponse.json()).toEqual({ error: { code: 'AI_NOT_CONFIGURED', message: 'This AI connection has no credential' } })
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -1304,44 +1350,94 @@ describe('ai routes', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       data: {
-        activeProfileId: null,
-        profiles: [],
-        provider: 'openai',
-        baseUrl: 'https://ai.example.test/v1',
-        model: 'test-model',
-        models: [{ id: 'test-model', name: 'test-model' }],
+        connections: [],
+        models: [],
+        lastUsedModels: { chat: null, translate: null },
         prompts: expect.any(Array),
+        promptsRestoreAvailable: expect.any(Boolean),
         modes: [{ id: 'assistant', name: '助理', prompt: AI_DEFAULT_ASSISTANT_MODE_PROMPT, builtIn: true }],
         lastUsedConversationSettings: { readingScope: 'to_here', enabledTools: ['get_book_toc', 'get_chapter_content', 'search_book', 'list_annotations', 'search_annotations'], assistantModeId: 'assistant' },
-        apiKeyConfigured: true,
-        configuredByUser: false,
       },
     })
   })
 
-  it('persists user quick prompts and hides disabled prompts from reader status', async () => {
+  it('persists quick commands through their endpoints and hides disabled ones from reader status', async () => {
     const app = createApp({ id: 'member-1', role: 'member' })
-    const response = await app.request('http://test/api/v1/ai/config', {
+    const reviewResponse = await app.request('http://test/api/v1/ai/prompts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '自定义回顾', prompt: '请结合已读内容列出三个关键线索。', scope: 'both' }),
+    })
+    expect(reviewResponse.status).toBe(201)
+    const review = (await reviewResponse.json()).data
+
+    const hiddenResponse = await app.request('http://test/api/v1/ai/prompts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '隐藏提示', prompt: '不会显示。' }),
+    })
+    const hidden = (await hiddenResponse.json()).data
+    const disableResponse = await app.request(`http://test/api/v1/ai/prompts/${hidden.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompts: [
-          { id: 'custom-review', name: '自定义回顾', prompt: '请结合已读内容列出三个关键线索。', enabled: true, order: 20 },
-          { id: 'hidden-prompt', name: '隐藏提示', prompt: '不会显示。', scope: 'both', enabled: false, order: 10 },
-        ],
-      }),
+      body: JSON.stringify({ enabled: false }),
     })
+    expect(disableResponse.status).toBe(200)
 
-    expect(response.status).toBe(200)
-    expect((await response.json()).data.prompts).toEqual([
-      expect.objectContaining({ id: 'hidden-prompt', builtIn: false, enabled: false }),
-      expect.objectContaining({ id: 'custom-review', builtIn: false, enabled: true, scope: 'both' }),
-    ])
+    const config = await app.request('http://test/api/v1/ai/config')
+    const configPrompts = (await config.json()).data.prompts
+    expect(configPrompts.find((prompt: { id: string }) => prompt.id === review.id))
+      .toEqual(expect.objectContaining({ enabled: true, scope: 'both', builtIn: false, mine: true, availability: 'user' }))
+    expect(configPrompts.find((prompt: { id: string }) => prompt.id === hidden.id)?.enabled).toBe(false)
 
     const status = await app.request('http://test/api/v1/ai/status')
-    expect((await status.json()).data.prompts).toEqual([
-      expect.objectContaining({ id: 'custom-review', enabled: true, scope: 'both' }),
-    ])
+    const statusPrompts = (await status.json()).data.prompts
+    expect(statusPrompts.some((prompt: { id: string }) => prompt.id === review.id)).toBe(true)
+    expect(statusPrompts.some((prompt: { id: string }) => prompt.id === hidden.id)).toBe(false)
+  })
+
+  it('runs the current quick-command definition instead of client-cached text', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"已执行"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+    const app = createApp({ id: 'owner-1', role: 'owner' })
+    seedConnection(db, 'owner-1', { name: 'Test', provider: 'openai', apiKey: 'test-secret', models: [{ upstreamModelId: 'test-model' }] })
+    const createdResponse = await app.request('http://test/api/v1/ai/prompts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '共读', prompt: '旧提示词' }),
+    })
+    const published = (await createdResponse.json()).data
+    await app.request(`http://test/api/v1/ai/prompts/${published.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: '新提示词' }),
+    })
+
+    const chatResponse = await app.request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...requestBody, prompt: '客户端缓存的旧提示词', promptId: published.id }),
+    })
+
+    expect(chatResponse.status).toBe(200)
+    await chatResponse.text()
+    const [, init] = fetchMock.mock.calls[0] ?? []
+    const payload = JSON.parse(String((init as RequestInit).body)) as { messages: Array<{ content?: string }> }
+    expect(payload.messages.at(-1)?.content).toContain('新提示词')
+    expect(payload.messages.at(-1)?.content).not.toContain('旧提示词')
+
+    // After deletion a stale promptId stops the request instead of replaying text.
+    await app.request(`http://test/api/v1/ai/prompts/${published.id}`, { method: 'DELETE' })
+    const staleResponse = await app.request('http://test/api/v1/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...requestBody, prompt: '客户端缓存的旧提示词', promptId: published.id }),
+    })
+    expect(staleResponse.status).toBe(409)
+    expect(await staleResponse.json()).toMatchObject({ error: { code: 'AI_PROMPT_UNAVAILABLE' } })
   })
 
   it('blocks guests from configuring or calling AI', async () => {
@@ -1377,11 +1473,14 @@ describe('ai routes', () => {
       { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
     ))
 
-    await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Anthropic', provider: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-20250514', apiKey: 'anthropic-secret' }),
+    const { modelId } = seedConnection(db, 'user-1', {
+      name: 'Anthropic',
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'anthropic-secret',
+      models: [{ upstreamModelId: 'claude-sonnet-4-20250514' }],
     })
+    setLastUsedChatModel(db, 'user-1', modelId)
     const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1410,11 +1509,14 @@ describe('ai routes', () => {
       { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
     ))
 
-    await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Gemini', provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', model: 'gemini-2.5-flash', apiKey: 'gemini-secret' }),
+    const { modelId } = seedConnection(db, 'user-1', {
+      name: 'Gemini',
+      provider: 'gemini',
+      baseUrl: 'https://generativelanguage.googleapis.com',
+      apiKey: 'gemini-secret',
+      models: [{ upstreamModelId: 'gemini-2.5-flash' }],
     })
+    setLastUsedChatModel(db, 'user-1', modelId)
     const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1440,11 +1542,13 @@ describe('ai routes', () => {
       { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } },
     ))
 
-    await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Ollama', provider: 'ollama', baseUrl: 'http://localhost:11434', model: 'qwen3:8b' }),
+    const { modelId } = seedConnection(db, 'user-1', {
+      name: 'Ollama',
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434',
+      models: [{ upstreamModelId: 'qwen3:8b' }],
     })
+    setLastUsedChatModel(db, 'user-1', modelId)
     const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1908,12 +2012,15 @@ describe('ai routes', () => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('The request timed out', 'AbortError')), { once: true })
     }))
 
+    const { modelId } = seedConnection(db, 'user-1', {
+      provider: 'openai',
+      baseUrl: 'https://draft.example.test/v1',
+      apiKey: 'saved-secret',
+      models: [{ upstreamModelId: 'draft-model' }],
+    })
+
     try {
-      const response = await createApp({ id: 'user-1', role: 'owner' }).request('http://test/api/v1/ai/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'openai', baseUrl: 'https://draft.example.test/v1', model: 'draft-model' }),
-      })
+      const response = await createApp({ id: 'user-1', role: 'owner' }).request(`http://test/api/v1/ai/models/${modelId}/test`, { method: 'POST' })
 
       expect(response.status).toBe(504)
       expect(await response.json()).toMatchObject({ error: { code: 'AI_TIMEOUT' } })
@@ -2008,11 +2115,14 @@ describe('ai routes', () => {
         headers: { 'Content-Type': item.provider === 'ollama' ? 'application/x-ndjson' : 'text/event-stream' },
       }))
 
-      await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: `Native ${item.provider}`, provider: item.provider, baseUrl: item.baseUrl, model: item.model, ...(item.apiKey ? { apiKey: item.apiKey } : {}) }),
+      const seeded = seedConnection(db, 'user-1', {
+        name: `Native ${item.provider}`,
+        provider: item.provider,
+        baseUrl: item.baseUrl,
+        ...(item.apiKey ? { apiKey: item.apiKey } : {}),
+        models: [{ upstreamModelId: item.model }],
       })
+      setLastUsedChatModel(db, 'user-1', seeded.modelId)
       const response = await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2097,11 +2207,14 @@ describe('ai routes', () => {
 
   it('preserves Gemini thought signatures across tool rounds', async () => {
     const fetchMock = vi.mocked(fetch)
-    await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Gemini', provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', model: 'gemini-3.5-flash-lite', apiKey: 'gemini-secret' }),
+    const { modelId } = seedConnection(db, 'user-1', {
+      name: 'Gemini',
+      provider: 'gemini',
+      baseUrl: 'https://generativelanguage.googleapis.com',
+      apiKey: 'gemini-secret',
+      models: [{ upstreamModelId: 'gemini-3.5-flash-lite' }],
     })
+    setLastUsedChatModel(db, 'user-1', modelId)
     fetchMock
       .mockResolvedValueOnce(new Response(
         'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_book_toc","args":{}},"thoughtSignature":"signature-1"}]}}]}' + '\n\ndata: [DONE]\n\n',
@@ -2129,11 +2242,14 @@ describe('ai routes', () => {
 
   it('attaches a detached Gemini thought signature to the preceding tool call', async () => {
     const fetchMock = vi.mocked(fetch)
-    await createApp({ id: 'user-1', role: 'member' }).request('http://test/api/v1/ai/profiles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Gemini', provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', model: 'gemini-3.5-flash-lite', apiKey: 'gemini-secret' }),
+    const { modelId } = seedConnection(db, 'user-1', {
+      name: 'Gemini',
+      provider: 'gemini',
+      baseUrl: 'https://generativelanguage.googleapis.com',
+      apiKey: 'gemini-secret',
+      models: [{ upstreamModelId: 'gemini-3.5-flash-lite' }],
     })
+    setLastUsedChatModel(db, 'user-1', modelId)
     fetchMock
       .mockResolvedValueOnce(new Response(
         'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_book_toc","args":{}}}]}}]}\n\ndata: {"candidates":[{"content":{"parts":[{"text":"","thoughtSignature":"signature-detached"}]}}]}\n\ndata: [DONE]\n\n',

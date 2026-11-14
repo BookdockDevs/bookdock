@@ -4,15 +4,27 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Reading resources share one visibility model: TOC rules, global text replacements, speech services and AI quick commands can each stay private or be published to every account, and only the instance owner may publish. Every account keeps its own enable switch and display order, and consumers never rewrite the publisher's row.
+- Speech services can be reordered and switched off without deleting them. Disabled services stay configured but disappear from the reader's engine picker, which follows your saved order.
+- Replacement rules can be drag-ordered in the same edit mode that renames and deletes them. The order is personal and drives both the settings list and the reader's execution order.
+
 ### Changed
 
-- Simplified settings labels and help text across general, library, reading, access control, and integration settings. Key-retention guidance appears only for saved credentials; font and dictionary availability labels and owner-only hints are clearer, and device-font import guidance is visible in the import menu.
-- Moved sidebar drag-sorting guidance into a click-to-open information bubble beside sidebar navigation options, removing the repeated inline sorting descriptions. Simplified Legado import guidance while keeping access-link and token warnings explicit.
-- Distinguished server disk and cache controls from device storage, clarified trash retention and permanent-deletion behavior, and removed redundant descriptions from the About links. Updated Chinese and English copy together.
-- Aligned the select-all and selection-count bars in TOC and text-replacement rule edit modes, with consistent spacing, dividers, and count alignment.
+- AI settings separate provider connections from models. Add one connection per provider, choose which discovered models are exposed, and test models on demand — all in one dialog per connection. Chat and translation remember the model you last used on each surface and only list enabled models; a choice that no longer resolves is ignored, and the next available model serves the request.
+- The reading settings cards (speech, fonts, dictionaries, TOC rules, quick commands) share one edit-mode interaction: rows show enable switches, and edit, delete and drag ordering appear only in edit mode. AI provider entries show just the endpoint, and section titles carry item counts.
+- Simplified settings labels and help text across general, library, reading, access control and integration settings. Key-retention guidance appears only for saved credentials, and sidebar sorting guidance moved into a click-to-open information bubble.
+- Distinguished server disk and cache controls from device storage, clarified trash retention and permanent-deletion behavior, and simplified Legado import guidance while keeping access-link and token warnings explicit.
+- Built-in TOC presets stay personal copies: each account is seeded its own version, so publishing one is rejected instead of adding a duplicate preset to other accounts.
+
+### Removed
+
+- AI profiles: the `/ai/profiles` endpoints, the `profiles`/`activeProfileId` settings fields and the profile-based translation channel are gone. Conversations, retry recipes and the saved translation choice now reference a model id, and existing settings are converted during the upgrade.
 
 ### Fixed
 
+- Reordering text replacements no longer moves rules the settings list does not show. The personal order only permutes the global rules it lists, so book-scoped rules keep their execution position.
 - Font and dictionary rows no longer apply general visual transitions to drag transforms, keeping sortable positioning separate from hover and selection effects.
 - Confirmation dialogs keep their action label while a request is pending unless a custom progress label is supplied; pending indicators and interaction locks remain in place.
 
@@ -1257,17 +1269,38 @@ All notable changes to Bookdock are documented here.
 
 ### [待发布]
 
+#### 新增
+
+- 朗读服务可以调整顺序和临时停用，无需删除。停用后配置与密钥都保留，只是不再出现在阅读器的引擎列表中；引擎列表按你保存的顺序显示，新建服务追加在末尾，不再因为改名或被编辑而跳到最前。
+- 阅读资源统一了可见范围：目录规则、全局替换和朗读服务都可以选择「仅自己」或「所有用户」，只有实例所有者能发布给所有用户。每个账号各自保存启用状态和显示顺序，共享资源不会改写发布者自己的设置。
+- AI 设置拆分为「供应商连接」和「模型」两层：按供应商添加连接，选择要暴露的模型，可随时测试，并设置个人默认模型供新对话和翻译使用。
+- 文本替换规则可以在编辑模式里拖动排序（与改名、删除同一个模式）。顺序属于个人偏好，自己的规则和公开规则可以混排，设置列表和阅读器的执行顺序都按它生效。
+
 #### 调整
 
+- 设置 → 阅读的朗读卡片改用与字体、词典、目录规则一致的编辑模式：行右侧是启用开关，改名、删除和拖拽排序收在铅笔按钮之后（此处按钮提示为「完成」，因为该列表不是「保存排序」语义）。供应商列表改为由「+」图标按钮打开，菜单定位与同页其他卡片一致。
 - 精简通用、书库、阅读、访问控制及集成设置的名称和说明。仅在已有凭证时提示留空保留密钥；明确字体和词典的可用范围及实例所有者权限，并在字体导入菜单中直接展示本机保存说明。
 - 将侧栏拖拽排序说明移到「侧栏导航项」旁的点击气泡中，移除重复的行内排序说明；精简开源阅读导入指引，保留免登录链接和访问令牌的关键提醒。
 - 区分服务器磁盘、缓存与本机存储，明确回收站保留期限和永久删除行为，移除关于页面链接的重复说明，中英文文案同步调整。
 - 统一目录规则和文本替换编辑模式下的全选、选中数量栏，调整间距、分隔线和计数对齐。
+- 选中文本翻译默认使用你的默认模型；也可以在翻译卡片里改选其他模型，该选择只作用于当前翻译。对话内选定的模型同样只影响该对话，不修改账号默认。
+- 目录规则和朗读服务的排序属于个人偏好：调整只改变自己的列表，不影响共享定义的顺序。
+- 实例所有者公开的规则会出现在设置列表中，你可以逐条启用、停用和调整顺序；这些规则的正文只有发布者能改，所有者在目录规则和文本替换编辑器里就能直接选择可用范围。
+- 删除 AI 模型或连接不再改写你的默认模型选择：下一次请求会明确提示模型不可用，设置页也会标出已失效的选择，不会再悄悄切到部署提供的模型。
+- 翻译选定的模型不再被自动替换：模型被删除、停用或取消共享后，卡片保留你的选择、停止翻译并提示重新选择，而不是悄悄改用账号默认模型。
+- 对话和翻译的模型选择器只列出你已启用的模型；停用的模型仍可在设置中看到和管理。
+- 内置目录规则始终是个人的副本：每个账号都有一份自己的内置规则，因此编辑器不再提供可用范围，发布内置规则也会被拒绝，避免在其他账号的列表里多出一条重复预设。
+
+#### 移除
+
+- AI 配置档：`/ai/profiles` 接口、设置中的 `profiles`/`activeProfileId` 字段以及按配置档翻译的方式已移除。对话、重试记录和已保存的翻译选择改为记录模型 ID，升级时会自动转换现有配置。
 
 #### 修复
 
+- 选择已删除的模型或连接时返回明确的 404/409，不再是笼统的服务器错误；阅读器会直接提示「所选模型已不可用」。
 - 字体和词典列表的通用视觉过渡不再作用于拖拽位移，避免与排序动画叠加。
 - 确认弹窗提交期间默认保留操作按钮原文案，仍显示等待状态并锁定操作；显式指定进度文案时继续使用该文案。
+- 调整替换规则顺序不再改变设置列表里看不到的规则：个人顺序只重排条目中的全局规则，本书规则保留原有执行位置，服务器书籍与本机书籍的替换结果保持一致。
 
 ### [0.8.4] - 2026-11-14
 

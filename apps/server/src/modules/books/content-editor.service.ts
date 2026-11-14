@@ -5,7 +5,7 @@ import type { AnnotationAnchorFragment, EditorEpubLoadRes, EditorEpubSaveReq, Ed
 
 import { getDb } from '../../db/client'
 import { blobKeyReferenced } from '../../db/blob-refs'
-import { blobs, bookStates, bookVersions, bookmarks, contentRevisionMaps, contentRevisions, highlights, ideas, libraryBookVersions, libraryBooks, textReplacements, tocRules } from '../../db/schema'
+import { blobs, bookStates, bookVersions, bookmarks, contentRevisionMaps, contentRevisions, highlights, ideas, libraryBookVersions, libraryBooks, textReplacements } from '../../db/schema'
 import { blobKey } from '../../lib/cover'
 import { createId } from '../../lib/id'
 import { sha256 } from '../../lib/hash'
@@ -18,6 +18,7 @@ import { countWords } from '../../lib/word-count'
 import { createEpubRevisionMap, extractEpubSpineText } from './epub-revision-map'
 import { composeRevisionStructuralRanges, persistContentRevisionMaps } from './revision-map.persistence'
 import { composeRevisionMaps, mapRevisionTextPosition, projectRevisionCoverage, type RevisionMapSegment, type RevisionSectionPosition } from './revision-map'
+import { getTocRuleForExecution } from '../toc-rules/toc-rules.service'
 import { enqueueReaderArchivePreparation } from './reader-content.service'
 import { bufferFromStream, getActiveBook, getOrRecoverTxtNormalized, resolveLibraryBook } from './books.service'
 import { unionLength } from '../../lib/intervals'
@@ -551,10 +552,8 @@ async function saveTxtContent(
       meta.tocRuleLabel = selection.label
       meta.tocRuleAuto = false
     } else if (selection.ruleId) {
-      const ownedRule = db.select({ id: tocRules.id }).from(tocRules).where(and(
-        eq(tocRules.id, selection.ruleId), eq(tocRules.userId, userId),
-      )).get()
-      if (!ownedRule) throw new AppError('VALIDATION_ERROR', 'Directory rule does not belong to this user')
+      const accessibleRule = getTocRuleForExecution(userId, selection.ruleId)
+      if (!accessibleRule) throw new AppError('VALIDATION_ERROR', 'Directory rule is not available to this account')
       meta.tocRuleId = selection.ruleId
       meta.tocRuleLabel = selection.label
       meta.tocRuleAuto = selection.auto

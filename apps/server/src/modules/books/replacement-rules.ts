@@ -1,11 +1,8 @@
 import type { DOMParser } from '@xmldom/xmldom'
 
-import { and, asc, eq, isNull, or } from 'drizzle-orm'
-
 import { applyPointMatch, applyRuleToRuns, findPointMatch, type TextRun } from '@bookdock/shared'
 
-import { getDb } from '../../db/client'
-import { textReplacementOverrides, textReplacements } from '../../db/schema'
+import { loadReplacementOverrides, loadReplacementRows, orderReplacementRows, resolveReplacementEnabled } from '../../lib/replacement-effective'
 
 export interface BookReplacementRule {
   id: string
@@ -21,25 +18,14 @@ export interface BookReplacementRule {
 }
 
 export async function loadEffectiveBookReplacementRules(userId: string, bookId: string): Promise<BookReplacementRule[]> {
-  const db = getDb()
-  const rows = await db.select().from(textReplacements).where(
-    and(
-      eq(textReplacements.userId, userId),
-      or(
-        and(eq(textReplacements.matchType, 'pattern'), isNull(textReplacements.bookId)),
-        eq(textReplacements.bookId, bookId),
-      ),
-    ),
-  ).orderBy(asc(textReplacements.sortOrder), asc(textReplacements.createdAt)).all()
-  const overrides = await db.select().from(textReplacementOverrides).where(
-    and(eq(textReplacementOverrides.userId, userId), eq(textReplacementOverrides.bookId, bookId)),
-  ).all()
-  const overrideByReplacement = new Map(overrides.map((override) => [override.replacementId, override]))
+  const rows = orderReplacementRows(userId, loadReplacementRows(userId, bookId))
+  const overrideByReplacement = loadReplacementOverrides(userId, bookId)
 
   return rows.map((row) => {
     const override = row.matchType === 'pattern' && row.bookId === null
       ? overrideByReplacement.get(row.id)
       : undefined
+    const accountEnabled = resolveReplacementEnabled(userId, row)
     return {
       id: row.id,
       matchType: row.matchType,
@@ -47,7 +33,7 @@ export async function loadEffectiveBookReplacementRules(userId: string, bookId: 
       replacement: row.replacement,
       isRegex: row.isRegex === 1,
       applyTo: row.applyTo as BookReplacementRule['applyTo'],
-      effectiveEnabled: (override ? override.enabled === 1 : row.enabled === 1) && row.relocation !== 'unresolved',
+      effectiveEnabled: (override ? override.enabled === 1 : accountEnabled) && row.relocation !== 'unresolved',
       spineHref: row.spineHref,
       textOffset: row.textOffset,
       originalText: row.originalText,

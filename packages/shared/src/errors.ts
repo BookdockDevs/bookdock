@@ -39,7 +39,11 @@ export const ErrorCode = {
   TTS_NOT_ALLOWED: 'TTS_NOT_ALLOWED',
   AI_NOT_CONFIGURED: 'AI_NOT_CONFIGURED',
   AI_NOT_ALLOWED: 'AI_NOT_ALLOWED',
-  AI_PROFILE_NOT_FOUND: 'AI_PROFILE_NOT_FOUND',
+  AI_CONNECTION_NOT_FOUND: 'AI_CONNECTION_NOT_FOUND',
+  AI_MODEL_NOT_FOUND: 'AI_MODEL_NOT_FOUND',
+  AI_MODEL_UNAVAILABLE: 'AI_MODEL_UNAVAILABLE',
+  AI_PROMPT_NOT_FOUND: 'AI_PROMPT_NOT_FOUND',
+  AI_PROMPT_UNAVAILABLE: 'AI_PROMPT_UNAVAILABLE',
   AI_THREAD_NOT_FOUND: 'AI_THREAD_NOT_FOUND',
   AI_MESSAGE_NOT_FOUND: 'AI_MESSAGE_NOT_FOUND',
   AI_RUN_NOT_FOUND: 'AI_RUN_NOT_FOUND',
@@ -146,7 +150,16 @@ export const ErrorHttpStatus: Record<ErrorCode, number> = {
   TTS_NOT_ALLOWED: 403,
   AI_NOT_CONFIGURED: 503,
   AI_NOT_ALLOWED: 403,
-  AI_PROFILE_NOT_FOUND: 404,
+  AI_CONNECTION_NOT_FOUND: 404,
+  AI_MODEL_NOT_FOUND: 404,
+  // The model exists but is no longer selectable (deleted connection, revoked
+  // exposure, switched off). A conflict, not a 500: the caller's saved choice
+  // has to be replaced instead of silently falling back.
+  AI_MODEL_UNAVAILABLE: 409,
+  AI_PROMPT_NOT_FOUND: 404,
+  // The quick command exists but is no longer visible to this caller (unshared
+  // or deleted), so the request must stop instead of running a cached copy.
+  AI_PROMPT_UNAVAILABLE: 409,
   AI_THREAD_NOT_FOUND: 404,
   AI_MESSAGE_NOT_FOUND: 404,
   AI_RUN_NOT_FOUND: 404,

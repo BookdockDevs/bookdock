@@ -53,3 +53,17 @@ it('retains the actual point basis through content replacement and retires book 
   await repository.removeBook(ref, true)
   expect((await repository.readReplacements('rules')).data).toEqual([])
 })
+
+it('reorders the device list without disturbing book-scoped rules outside it', async () => {
+  await repository.mutateReplacement('rules', 'a', { create: { pattern: 'a' } })
+  await repository.mutateReplacement('rules', 'book', { create: { bookId: ref.bookId, pattern: 'book' }, expectedContentId: 'before' })
+  await repository.mutateReplacement('rules', 'b', { create: { pattern: 'b' } })
+
+  await repository.reorderReplacements('rules', ['b', 'a'])
+  // Only the listed rules move; the book rule keeps its slot.
+  expect((await repository.readReplacements('rules')).data.map((row) => row.id)).toEqual(['b', 'a'])
+  expect((await repository.readReplacements('rules', ref.bookId)).data.map((row) => row.id)).toEqual(['b', 'book', 'a'])
+
+  await expect(repository.reorderReplacements('rules', ['missing'])).rejects.toMatchObject({ category: 'invalid-input' })
+  expect((await repository.readReplacements('rules')).data.map((row) => row.id)).toEqual(['b', 'a'])
+})

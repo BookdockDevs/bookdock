@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 
-import type { RuleBatchDeleteReq, BookDetailRes, CatalogBook, ReTocReq, TocPreviewReq, TocPreviewRes, TocRuleCreateReq, TocRuleImportReq, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
+import type { RuleBatchDeleteReq, BookDetailRes, CatalogBook, ReTocReq, TocPreviewReq, TocPreviewRes, TocRuleCreateReq, TocRuleImportReq, TocRuleListRes, TocRuleRes, TocRuleUpdateReq } from '@bookdock/shared'
 
 import { getAuthSessionRevision } from '@/stores/auth.store'
 import { apiGet, apiPost, apiPut } from '../client'
 
 const TOC_RULES_KEY = ['toc-rules'] as const
 
-type TocRulesCache = { data: TocRuleRes[] }
+type TocRulesCache = TocRuleListRes
 
 function snapshotTocRules(queryClient: QueryClient) {
   return queryClient.getQueryData<TocRulesCache>(TOC_RULES_KEY)
@@ -20,7 +20,7 @@ export function useTocRules(enabled = true) {
     enabled,
     queryFn: async () => {
       if (getAuthSessionRevision() !== epoch) throw new DOMException('TOC rule account changed', 'AbortError')
-      const result = await apiGet<{ data: TocRuleRes[] }>('/toc-rules')
+      const result = await apiGet<TocRuleListRes>('/toc-rules')
       if (getAuthSessionRevision() !== epoch) throw new DOMException('TOC rule account changed', 'AbortError')
       return result
     },
@@ -45,7 +45,7 @@ export function useUpdateTocRule() {
     onMutate: async ({ id, body }) => {
       const previous = snapshotTocRules(queryClient)
       const applyOptimisticPatch = () => queryClient.setQueryData<TocRulesCache>(TOC_RULES_KEY, (old) =>
-        old ? { data: old.data.map((rule) => rule.id === id ? { ...rule, ...body } : rule) } : old,
+        old ? { ...old, data: old.data.map((rule) => rule.id === id ? { ...rule, ...body } : rule) } : old,
       )
       applyOptimisticPatch()
       await queryClient.cancelQueries({ queryKey: TOC_RULES_KEY })

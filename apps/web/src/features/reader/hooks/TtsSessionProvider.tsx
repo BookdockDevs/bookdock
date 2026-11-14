@@ -22,7 +22,7 @@ export function TtsSessionProvider({ renderer, coordinator, guestReadOnly = fals
   const rate = useUiStore((state) => state.ttsRate)
   const autoNext = useUiStore((state) => state.ttsAutoNext)
   const follow = useUiStore((state) => state.ttsFollow)
-  const service = useMemo(() => accountId && engine === 'service' && !isError ? data?.data.find((item) => item.id === serviceId) : undefined, [accountId, data, engine, isError, serviceId])
+  const service = useMemo(() => accountId && engine === 'service' && !isError ? data?.data.find((item) => item.id === serviceId && item.enabled) : undefined, [accountId, data, engine, isError, serviceId])
   const voicesQuery = useTtsServiceVoices(service?.id)
   const serviceVoices = useMemo(() => voicesQuery.data?.data.map((item) => ({ id: item.id, name: item.name, lang: item.lang, gender: item.gender, description: item.description })) ?? [], [voicesQuery.data])
   const unavailableReason = engine !== 'system' && !accountId ? 'account' : engine === 'service' && !service?.credentialsConfigured ? 'service' : engine === 'system' && (!globalThis.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') ? 'system' : undefined

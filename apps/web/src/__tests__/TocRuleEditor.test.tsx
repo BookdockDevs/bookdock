@@ -5,6 +5,7 @@ import type { TocRuleRes } from '@bookdock/shared'
 
 import i18n from '../i18n/i18n'
 import TocRuleEditor from '../features/settings/components/TocRuleEditor'
+import { useAuthStore } from '../stores/auth.store'
 
 const updateMutate = vi.fn()
 const createMutate = vi.fn()
@@ -24,6 +25,8 @@ const initial: TocRuleRes = {
     { level: 2, regex: '^章', replacement: '$1', enabled: false },
   ],
   builtIn: false,
+  mine: true,
+  availability: 'user',
   createdAt: 1,
   updatedAt: 1,
 }
@@ -32,6 +35,7 @@ describe('TocRuleEditor', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     vi.clearAllMocks()
+    useAuthStore.setState({ user: null })
   })
 
   it('uses card order as the level and submits normalized levels', () => {
@@ -52,6 +56,7 @@ describe('TocRuleEditor', () => {
       body: {
         name: '中文规则',
         enabled: true,
+        availability: 'user',
         patterns: [
           { level: 1, regex: '^卷', replacement: null, enabled: true },
           { level: 2, regex: '^章', replacement: '$1', enabled: false },
@@ -59,6 +64,40 @@ describe('TocRuleEditor', () => {
         ],
       },
     }, expect.anything())
+  })
+
+  it('publishes a rule to every user only when the owner asks for it', () => {
+    useAuthStore.setState({ user: { id: 'u1', username: 'owner', role: 'owner' } })
+    render(<TocRuleEditor onClose={vi.fn()} />)
+
+    fireEvent.change(screen.getAllByRole('textbox')[0]!, { target: { value: '公共规则' } })
+    fireEvent.change(screen.getAllByRole('textbox')[1]!, { target: { value: '^章' } })
+    fireEvent.click(screen.getByRole('button', { name: '共享' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(createMutate).toHaveBeenCalledWith(expect.objectContaining({
+      name: '公共规则',
+      availability: 'instance',
+    }), expect.anything())
+  })
+
+  it('hides the availability control for a built-in preset', () => {
+    useAuthStore.setState({ user: { id: 'u1', username: 'owner', role: 'owner' } })
+    render(<TocRuleEditor initial={{ ...initial, builtIn: true }} onClose={vi.fn()} />)
+
+    // Every account already owns a copy of a built-in preset, so publishing it
+    // would only duplicate the preset in the other accounts' lists.
+    expect(screen.queryByText('可用范围')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(updateMutate.mock.calls[0]![0].body).not.toHaveProperty('availability')
+  })
+
+  it('hides the availability control for a member', () => {
+    useAuthStore.setState({ user: { id: 'u2', username: 'member', role: 'member' } })
+    render(<TocRuleEditor onClose={vi.fn()} />)
+
+    expect(screen.queryByText('可用范围')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '共享' })).not.toBeInTheDocument()
   })
 
   it('keeps the rule name field empty and validates it only on submit', () => {

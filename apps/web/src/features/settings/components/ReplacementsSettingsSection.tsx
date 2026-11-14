@@ -1,15 +1,21 @@
 import { useLocalCatalog } from '@/features/reading-data/catalog-source-context'
 import { useMemo, useState } from 'react'
 
-import { prepareRuleTransferExport, serializeReplacementsForExport, type ReplacementTransferFile, type TextReplacementRes } from '@bookdock/shared'
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
-import { useDeleteGlobalReplacements, useReplacements, useUpdateReplacement } from '@/api/hooks/useReplacements'
+import { serializeReplacementsForExport, type TextReplacementRes } from '@bookdock/shared'
+
+import { useDeleteGlobalReplacements, useReorderReplacements, useReplacements, useUpdateReplacement } from '@/api/hooks/useReplacements'
+import Badge from '@/components/ui/Badge'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
+import { downloadJsonFile, timestampSuffix } from '@/lib/download'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
@@ -17,34 +23,13 @@ import { cn } from '@/lib/utils'
 import EditModeButton from './EditModeButton'
 import ReplacementForm from './ReplacementForm'
 import ReplacementImportDialog from './ReplacementImportDialog'
+import RuleSelectAllBar from './RuleSelectAllBar'
 import RuleSelectionActions from './RuleSelectionActions'
 import SettingsCard from './SettingsCard'
+import { DragHandleIcon, EditIcon, ExportIcon, ImportIcon, PlusIcon, TrashIcon } from './row-icons'
 
 type FormState = { mode: 'create' } | { mode: 'edit'; rule: TextReplacementRes } | null
 
-function downloadJsonFile(fileName: string, data: ReplacementTransferFile) {
-  const prepared = prepareRuleTransferExport(data)
-  if (!prepared.success) {
-    notify.error({ key: prepared.reason === 'limit' ? 'settings.ruleExportLimit' : 'settings.ruleExportInvalid' })
-    return
-  }
-  const blob = new Blob([prepared.text], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = fileName
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
-}
-
-function timestampSuffix(): string {
-  const now = new Date()
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-}
- 
 function ReplaceIcon({ className }: { className?: string }) {
   return (
     <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -63,16 +48,24 @@ export default function ReplacementsSettingsSection() {
   const { data } = replacementsQuery
   const updateReplacement = useUpdateReplacement()
   const deleteReplacement = useDeleteGlobalReplacements()
+  const reorderReplacements = useReorderReplacements()
   // This section is the GLOBAL home: book-scoped rules and point patches are
-  // managed per book in the reader dialog. Order is the persisted execution
-  // order (sortOrder ascending); `group` is a display label only and never
-  // re-sorts the list, so an import truly lands at the end of the whole list.
-  const rules = useMemo(
-    () => (data?.data ?? [])
-      .filter((r) => r.matchType === 'pattern' && r.bookId === null)
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt),
+  // managed per book in the reader dialog. The order is the list the server
+  // returns — its personal execution order, where the caller's own rules and
+  // instance-published ones are interleaved as they were arranged. `group` is a
+  // display label only and never re-sorts the list.
+  const serverRules = useMemo(
+    () => (data?.data ?? []).filter((r) => r.matchType === 'pattern' && r.bookId === null),
     [data],
   )
+  const [draftIds, setDraftIds] = useState<string[] | null>(null)
+  const rules = useMemo(() => {
+    if (!draftIds) return serverRules
+    const rulesById = new Map(serverRules.map((rule) => [rule.id, rule]))
+    const drafted = new Set(draftIds)
+    return [...draftIds.flatMap((id) => (rulesById.get(id) ? [rulesById.get(id)!] : [])),
+      ...serverRules.filter((rule) => !drafted.has(rule.id))]
+  }, [draftIds, serverRules])
 
   const existingGroups = useMemo(() => {
     const names = new Set<string>()
@@ -88,8 +81,12 @@ export default function ReplacementsSettingsSection() {
   const [importOpen, setImportOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const selectedRules = rules.filter((rule) => selectedIds.includes(rule.id))
-  const busy = updateReplacement.isPending || deleteReplacement.isPending
+  // Rules published by another account show up here so their switch and order
+  // can be managed, but the definition is the publisher's: no edit, no delete.
+  const ownRules = rules.filter((rule) => rule.mine !== false)
+  const busy = updateReplacement.isPending || deleteReplacement.isPending || reorderReplacements.isPending
   const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.replacementOperationFailed'))
   const listReady = !replacementsQuery.isError && (!replacementsQuery.isPending || replacementsQuery.data)
 
@@ -105,6 +102,7 @@ export default function ReplacementsSettingsSection() {
     const ruleIds = pendingDelete.map((rule) => rule.id)
     deleteReplacement.mutate({ ruleIds, ...(local ? { expectedVersions: Object.fromEntries(pendingDelete.map((rule) => [rule.id, rule.clientVersion!])) } : {}) }, {
       onSuccess: () => {
+        setDraftIds((current) => current?.filter((id) => !ruleIds.includes(id)) ?? current)
         setSelectedIds([])
         setPendingDelete(null)
         notify.success({ key: 'toast.rulesDeleted', params: { count: ruleIds.length } })
@@ -115,8 +113,38 @@ export default function ReplacementsSettingsSection() {
 
   function toggleEditing() {
     if (busy) return
-    setSelectedIds([])
-    setEditing((current) => !current)
+    if (!editing) {
+      setDraftIds(serverRules.map((rule) => rule.id))
+      setSelectedIds([])
+      setEditing(true)
+      return
+    }
+    const nextIds = rules.map((rule) => rule.id)
+    const serverIds = serverRules.map((rule) => rule.id)
+    const unchanged = nextIds.length === serverIds.length && nextIds.every((id, index) => id === serverIds[index])
+    if (unchanged) {
+      setDraftIds(null)
+      setSelectedIds([])
+      setEditing(false)
+      return
+    }
+    reorderReplacements.mutate(nextIds, {
+      onSuccess: () => {
+        setDraftIds(null)
+        setSelectedIds([])
+        setEditing(false)
+      },
+      onError: showError,
+    })
+  }
+
+  function onDragEnd({ active, over }: DragEndEvent) {
+    if (!editing || busy) return
+    if (!over || active.id === over.id) return
+    const oldIndex = rules.findIndex((rule) => rule.id === active.id)
+    const newIndex = rules.findIndex((rule) => rule.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    setDraftIds(arrayMove(rules, oldIndex, newIndex).map((rule) => rule.id))
   }
 
   function exportRules(targets: TextReplacementRes[]) {
@@ -152,13 +180,7 @@ export default function ReplacementsSettingsSection() {
         }
         action={
           <div className="flex shrink-0 items-center gap-1">
-            {editing && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={local ? undefined : () => exportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules)} />}
-            <EditModeButton
-              active={editing}
-              activeLabel={_('settings.replacementsEditModeExit')}
-              disabled={busy || !listReady || (!editing && rules.length === 0)}
-              onClick={toggleEditing}
-            />
+            {editing && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={local ? undefined : () => exportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules.filter((rule) => rule.mine !== false))} />}
             {!editing && <>
               {!local && <button
                 type="button"
@@ -168,10 +190,7 @@ export default function ReplacementsSettingsSection() {
                 aria-label={_('settings.replacementsImport')}
                 title={_('settings.replacementsImport')}
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4" />
-                  <path d="M12 3v11m-5-5 5 5 5-5" />
-                </svg>
+                <ImportIcon />
               </button>}
               {!local && <button
                 type="button"
@@ -181,39 +200,35 @@ export default function ReplacementsSettingsSection() {
                 aria-label={_('settings.replacementsExportAll')}
                 title={_('settings.replacementsExportAll')}
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4" />
-                  <path d="M12 14V3m-5 5 5-5 5 5" />
-                </svg>
+                <ExportIcon />
               </button>}
-              <button
-                type="button"
-                disabled={busy || !listReady}
-                onClick={() => setForm({ mode: 'create' })}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                aria-label={_('settings.replacementsNew')}
-                title={_('settings.replacementsNew')}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-              </button>
             </>}
+            <EditModeButton
+              active={editing}
+              disabled={busy || !listReady || (!editing && rules.length === 0)}
+              onClick={toggleEditing}
+            />
+            {!editing && <button
+              type="button"
+              disabled={busy || !listReady}
+              onClick={() => setForm({ mode: 'create' })}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+              aria-label={_('settings.replacementsNew')}
+              title={_('settings.replacementsNew')}
+            >
+              <PlusIcon />
+            </button>}
           </div>
         }
       >
       {editing && (
-        <div className="flex items-center justify-between gap-3 border-b border-stone-100 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
-          <label className="flex cursor-pointer items-center gap-2 font-medium text-stone-600 dark:text-stone-300">
-            <input type="checkbox" checked={rules.length > 0 && selectedRules.length === rules.length}
-              ref={(node) => { if (node) node.indeterminate = selectedRules.length > 0 && selectedRules.length < rules.length }}
-              disabled={busy || !listReady || rules.length === 0}
-              onChange={(event) => setSelectedIds(event.target.checked ? rules.map((rule) => rule.id) : [])}
-              className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300" />
-            {_('settings.ruleSelectAll')}
-          </label>
-          <span className="shrink-0 tabular-nums">{_('settings.ruleSelectedCount', { count: selectedRules.length })}</span>
-        </div>
+        <RuleSelectAllBar
+          disabled={busy || !listReady || ownRules.length === 0}
+          allSelected={ownRules.length > 0 && ownRules.every((rule) => selectedIds.includes(rule.id))}
+          indeterminate={selectedRules.length > 0 && selectedRules.length < ownRules.length}
+          selectedCount={selectedRules.length}
+          onToggleAll={(checked) => setSelectedIds(checked ? ownRules.map((rule) => rule.id) : [])}
+        />
       )}
 
       {replacementsQuery.isError ? (
@@ -233,21 +248,27 @@ export default function ReplacementsSettingsSection() {
       ) : rules.length === 0 ? (
         <SettingsEmptyState>{_('settings.replacementsEmpty')}</SettingsEmptyState>
       ) : (
-        <ul className="divide-y divide-stone-100 dark:divide-stone-800">
-          {rules.map((rule, index) => (
-            <ReplacementRow
-              key={rule.id}
-              rule={rule}
-              position={index + 1}
-              editing={editing}
-              disabled={busy || !listReady}
-              onToggle={() => onToggle(rule)}
-              onEdit={() => setForm({ mode: 'edit', rule })}
-              selected={selectedIds.includes(rule.id)}
-              onSelect={() => setSelectedIds((current) => current.includes(rule.id) ? current.filter((id) => id !== rule.id) : [...current, rule.id])}
-            />
-          ))}
-        </ul>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={rules.map((rule) => rule.id)} strategy={verticalListSortingStrategy}>
+            <ul className="divide-y divide-stone-100 dark:divide-stone-800">
+              {rules.map((rule) => (
+                <ReplacementRow
+                  key={rule.id}
+                  rule={rule}
+                  editing={editing}
+                  disabled={busy || !listReady}
+                  editable={rule.mine !== false}
+                  selectable={rule.mine !== false}
+                  onToggle={() => onToggle(rule)}
+                  onEdit={() => setForm({ mode: 'edit', rule })}
+                  onDelete={rule.mine !== false ? () => setPendingDelete([rule]) : undefined}
+                  selected={selectedIds.includes(rule.id)}
+                  onSelect={() => setSelectedIds((current) => current.includes(rule.id) ? current.filter((id) => id !== rule.id) : [...current, rule.id])}
+                />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
       </SettingsCard>
 
@@ -282,7 +303,9 @@ export default function ReplacementsSettingsSection() {
 
       {importOpen && (
         <ReplacementImportDialog
-          existingNames={rules.map((rule) => rule.name ?? '')}
+          // Only our own names can conflict: the server checks the caller's
+          // rows, and a published rule keeps its name with the publisher.
+          existingNames={ownRules.map((rule) => rule.name ?? '')}
           onClose={() => setImportOpen(false)}
         />
       )}
@@ -290,23 +313,41 @@ export default function ReplacementsSettingsSection() {
   )
 }
 
-function ReplacementRow({ rule, position, editing, disabled, onToggle, onEdit, selected, onSelect }: { rule: TextReplacementRes; position: number; editing: boolean; disabled: boolean; onToggle: () => void; onEdit: () => void; selected: boolean; onSelect: () => void }) {
+function ReplacementRow({ rule, editing, disabled, editable, selectable, onToggle, onEdit, onDelete, selected, onSelect }: { rule: TextReplacementRes; editing: boolean; disabled: boolean; editable: boolean; selectable: boolean; onToggle: () => void; onEdit: () => void; onDelete?: () => void; selected: boolean; onSelect: () => void }) {
   const _ = useTranslation()
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: rule.id,
+    animateLayoutChanges: () => false,
+  })
   // No arrow when the replacement is empty: a bare pattern means 净化 (the
   // match is removed), never a literal "delete" text.
   const replacementSummary = rule.replacement?.trim() ? `→ ${rule.replacement}` : ''
-  const badge = 'rounded border border-stone-200 px-1.5 py-0.5 text-[11px] text-stone-500 dark:border-stone-700 dark:text-stone-400'
   const actionBtn =
     'flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200'
 
   return (
-    <li className={cn('flex items-center gap-3 py-2', !editing && !rule.enabled && 'opacity-60')}>
-      {editing && <input type="checkbox" checked={selected} onChange={onSelect} disabled={disabled}
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn('flex items-center gap-3 py-2', !editing && !rule.enabled && 'opacity-60', isDragging && 'relative z-10 opacity-60')}
+    >
+      {editing && selectable && <input type="checkbox" checked={selected} onChange={onSelect} disabled={disabled}
         aria-label={_('settings.ruleSelect', { name: rule.name?.trim() || rule.pattern || '—' })}
         className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300" />}
-      <span className="w-6 shrink-0 text-right text-xs tabular-nums text-stone-400 dark:text-stone-500">
-        {position}
-      </span>
+      {editing && !selectable && <span className="h-4 w-4 shrink-0" aria-hidden="true" />}
+      {editing && (
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          disabled={disabled}
+          aria-label={_('settings.replacementsReorder')}
+          title={_('settings.replacementsReorder')}
+          className="flex h-8 w-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+        >
+          <DragHandleIcon />
+        </button>
+      )}
       <div className="min-w-0 flex-1">
         {rule.name && (
           <p className="truncate text-sm">{rule.name}</p>
@@ -314,28 +355,29 @@ function ReplacementRow({ rule, position, editing, disabled, onToggle, onEdit, s
         <p className={cn('truncate font-mono text-xs text-stone-400 dark:text-stone-500', rule.name && 'mt-0.5')}>
           {rule.pattern}{replacementSummary && ` ${replacementSummary}`}
         </p>
-        {/* Badges stay read-only: the toggle carries on/off, position is the
-            execution order, and group is a label that never re-sorts. */}
-        {!editing && (rule.isRegex || rule.group?.trim()) && (
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {rule.isRegex && <span className={badge}>{_('settings.replacementsRegex')}</span>}
-            {rule.group?.trim() && <span className={badge}>{rule.group.trim()}</span>}
-          </div>
-        )}
       </div>
       {!editing && (
-        <div className="flex shrink-0 items-center gap-1">
-          <Toggle checked={rule.enabled} onChange={onToggle} disabled={disabled} ariaLabel={_('settings.replacementsEnabled')} />
-        </div>
+        <>
+          {/* Badges stay read-only: the toggle carries on/off, and group is a
+              label that never re-sorts. */}
+          {rule.availability === 'instance' && <Badge>{_('settings.resourceScopeInstance')}</Badge>}
+          {rule.isRegex && <Badge>{_('settings.replacementsRegex')}</Badge>}
+          {rule.group?.trim() && <Badge>{rule.group.trim()}</Badge>}
+          <div className="flex shrink-0 items-center gap-1">
+            <Toggle checked={rule.enabled} onChange={onToggle} disabled={disabled} ariaLabel={_('settings.replacementsEnabled')} />
+          </div>
+        </>
       )}
-      {editing && (
+      {editing && editable && (
         <div className="flex shrink-0 items-center gap-1">
           <button type="button" onClick={onEdit} disabled={disabled} aria-label={_('settings.replacementsEditShort')} title={_('settings.replacementsEditShort')} className={actionBtn}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-            </svg>
+            <EditIcon />
           </button>
-
+          {onDelete && (
+            <button type="button" onClick={onDelete} disabled={disabled} aria-label={_('settings.ruleDelete')} title={_('settings.ruleDelete')} className="flex h-7 w-7 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40">
+              <TrashIcon />
+            </button>
+          )}
         </div>
       )}
     </li>

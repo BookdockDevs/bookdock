@@ -275,6 +275,9 @@ const ttsProviderSchema = z.enum(['openai', 'azure', 'aliyun', 'dashscope', 'min
 const ttsOptionsSchema = z.record(z.union([z.string().max(500), z.number().finite(), z.boolean()])).refine((value) => Object.keys(value).length <= 20)
 const ttsSecretsSchema = z.record(z.string().max(4096).nullable()).refine((value) => Object.keys(value).length <= 20)
 
+/** Definition visibility: private to its owner, or published to the instance. */
+export const resourceAvailabilitySchema = z.enum(['user', 'instance'])
+
 export const ttsServiceCreateSchema = z.object({
   name: z.string().trim().min(1).max(100),
   provider: ttsProviderSchema,
@@ -283,6 +286,7 @@ export const ttsServiceCreateSchema = z.object({
   defaultVoice: z.string().trim().max(200).nullable().optional(),
   options: ttsOptionsSchema.optional(),
   secrets: z.record(z.string().max(4096)).refine((value) => Object.keys(value).length <= 20).optional(),
+  availability: resourceAvailabilitySchema.optional(),
 })
 
 export const ttsServiceUpdateSchema = z.object({
@@ -291,9 +295,13 @@ export const ttsServiceUpdateSchema = z.object({
   baseUrl: ttsBaseUrlSchema.nullable().optional(),
   model: z.string().trim().max(200).nullable().optional(),
   defaultVoice: z.string().trim().max(200).nullable().optional(),
+  enabled: z.boolean().optional(),
+  availability: resourceAvailabilitySchema.optional(),
   options: ttsOptionsSchema.optional(),
   secrets: ttsSecretsSchema.optional(),
 })
+
+export const ttsServiceOrderSchema = z.object({ ids: z.array(z.string().min(1).max(100)) }).strict()
 
 export const ttsSpeechSchema = z.object({
   serviceId: z.string().min(1),
@@ -337,6 +345,7 @@ const aiThreadSettingsSchema = z.object({
   readingScope: aiReadingScopeSchema,
   enabledTools: z.array(aiToolNameSchema).max(AI_TOOL_NAMES.length),
   assistantModeId: z.string().trim().min(1).max(100).optional(),
+  modelId: z.string().trim().min(1).max(200).optional(),
 }).strict()
 
 export const aiChatSchema = z.object({
@@ -347,20 +356,24 @@ export const aiChatSchema = z.object({
   prompt: z.string().trim().min(1).max(AI_MAX_CHAT_PROMPT_CHARS),
   context: aiContextSchema,
   history: z.array(aiHistoryMessageSchema).max(AI_MAX_HISTORY_MESSAGES).optional(),
+  promptId: z.string().trim().min(1).max(100).optional(),
   assistantModePrompt: z.string().trim().max(2_000).optional(),
   assistantMode: z.string().trim().max(80).optional(),
   assistantModeId: z.string().trim().min(1).max(100).optional(),
   readingScope: aiReadingScopeSchema.optional(),
   enabledTools: z.array(aiToolNameSchema).max(AI_TOOL_NAMES.length).optional(),
+  modelId: z.string().trim().min(1).max(200).optional(),
 }).strict()
 
 export const aiLocalChatSchema = z.object({
   prompt: z.string().trim().min(1).max(AI_MAX_CHAT_PROMPT_CHARS),
   context: aiContextSchema,
   history: z.array(aiHistoryMessageSchema).max(AI_MAX_HISTORY_MESSAGES).optional(),
+  promptId: z.string().trim().min(1).max(100).optional(),
   assistantModePrompt: z.string().trim().max(2_000).optional(),
   assistantMode: z.string().trim().max(80).optional(),
   assistantModeId: z.string().trim().min(1).max(100).optional(),
+  modelId: z.string().trim().min(1).max(200).optional(),
 }).strict()
 
 export const aiChatJobCreateSchema = z.discriminatedUnion('kind', [
@@ -415,23 +428,7 @@ const aiModelCapabilitiesSchema = z.object({
   embedding: z.boolean().optional(),
 }).strict()
 
-const aiModelSchema = z.object({
-  id: z.string().trim().min(1).max(200),
-  name: z.string().trim().min(1).max(200),
-  ownedBy: z.string().trim().max(200).optional(),
-  capabilities: aiModelCapabilitiesSchema.optional(),
-}).strict()
-
 const aiModelKindSchema = z.enum(['chat', 'embedding'])
-
-const aiPromptTemplateSchema = z.object({
-  id: z.string().trim().min(1).max(100),
-  name: z.string().trim().min(1).max(80),
-  prompt: z.string().trim().min(1).max(2_000),
-  scope: z.enum(['selection', 'reading', 'both']).optional(),
-  enabled: z.boolean().optional().default(true),
-  order: z.number().int().min(0).max(10_000).optional().default(0),
-}).strict()
 
 const aiAssistantModeSchema = z.object({
   id: z.string().trim().min(1).max(100),
@@ -456,50 +453,66 @@ export const aiProviderSchema = z.enum([
 ])
 
 export const aiConfigUpdateSchema = z.object({
-  activeProfileId: z.string().trim().max(100).nullable().optional(),
-  prompts: z.array(aiPromptTemplateSchema).max(24).nullable().optional(),
   modes: z.array(aiAssistantModeSchema).max(AI_MAX_ASSISTANT_MODES).nullable().optional(),
   defaultAssistantMode: aiAssistantModeSchema.nullable().optional(),
   lastUsedConversationSettings: aiThreadSettingsSchema.required({ assistantModeId: true }).optional(),
 }).strict()
 
-export const aiProfileCreateSchema = z.object({
+const aiPromptScopeSchema = z.enum(['selection', 'reading', 'both'])
+
+export const aiPromptCreateSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(1).max(2_000),
+  scope: aiPromptScopeSchema.optional(),
+  enabled: z.boolean().optional(),
+  availability: resourceAvailabilitySchema.optional(),
+}).strict()
+
+export const aiPromptUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  prompt: z.string().trim().min(1).max(2_000).optional(),
+  scope: aiPromptScopeSchema.optional(),
+  enabled: z.boolean().optional(),
+  availability: resourceAvailabilitySchema.optional(),
+}).strict()
+
+export const aiPromptReorderSchema = z.object({
+  ids: z.array(z.string().trim().min(1).max(100)).max(50),
+}).strict().refine((value) => new Set(value.ids).size === value.ids.length, {
+  message: 'Duplicate quick command ids',
+})
+
+export const aiConnectionCreateSchema = z.object({
   name: z.string().trim().max(100),
   provider: aiProviderSchema,
   baseUrl: aiBaseUrlSchema.nullable().optional(),
-  model: z.string().trim().max(200).nullable().optional(),
-  models: z.array(aiModelSchema).max(200).optional(),
-  embeddingModel: z.string().trim().max(200).nullable().optional(),
-  embeddingModels: z.array(aiModelSchema).max(200).optional(),
   apiKey: z.string().max(4096).nullable().optional(),
 }).strict()
 
-export const aiProfileUpdateSchema = z.object({
+export const aiConnectionUpdateSchema = z.object({
   name: z.string().trim().max(100).optional(),
   provider: aiProviderSchema.optional(),
   baseUrl: aiBaseUrlSchema.nullable().optional(),
-  model: z.string().trim().max(200).nullable().optional(),
-  models: z.array(aiModelSchema).max(200).optional(),
-  embeddingModel: z.string().trim().max(200).nullable().optional(),
-  embeddingModels: z.array(aiModelSchema).max(200).optional(),
+  availability: resourceAvailabilitySchema.optional(),
   apiKey: z.string().max(4096).nullable().optional(),
 }).strict()
 
-export const aiModelDiscoverySchema = z.object({
-  profileId: z.string().trim().max(100).nullable().optional(),
-  provider: aiProviderSchema,
-  baseUrl: aiBaseUrlSchema.nullable().optional(),
+/** Discovery refresh on a saved connection: only the model kind is caller-supplied. */
+export const aiModelDiscoverSchema = z.object({
   kind: aiModelKindSchema.optional(),
-  apiKey: z.string().max(4096).nullable().optional(),
 }).strict()
 
-export const aiConfigTestSchema = z.object({
-  profileId: z.string().trim().max(100).nullable().optional(),
-  provider: aiProviderSchema,
-  baseUrl: aiBaseUrlSchema.nullable().optional(),
-  kind: aiModelKindSchema.optional().default('chat'),
-  model: z.string().trim().min(1).max(200),
-  apiKey: z.string().max(4096).nullable().optional(),
+export const aiModelEntryCreateSchema = z.object({
+  upstreamModelId: z.string().trim().min(1).max(200),
+  name: z.string().trim().max(200).optional(),
+  capabilities: aiModelCapabilitiesSchema.optional(),
+}).strict()
+
+export const aiModelEntryUpdateSchema = z.object({
+  upstreamModelId: z.string().trim().min(1).max(200).optional(),
+  name: z.string().trim().max(200).optional(),
+  enabled: z.boolean().optional(),
+  capabilities: aiModelCapabilitiesSchema.nullable().optional(),
 }).strict()
 
 export const annotationCreateSchema = z.object({
@@ -549,6 +562,7 @@ const replacementFields = {
   spineHref: z.string().min(1).optional(),
   textOffset: z.number().int().min(0).optional(),
   originalText: z.string().optional(),
+  availability: resourceAvailabilitySchema.optional(),
 }
 
 function isValidRegex(pattern: string): boolean {
@@ -597,6 +611,7 @@ export const replacementUpdateSchema = z.object({
   bookId: z.string().min(1).nullable().optional(),
   // Point-patch snapshot edit (the anchor offset stays where the user selected)
   originalText: z.string().min(1).optional(),
+  availability: resourceAvailabilitySchema.optional(),
 })
 
 export const replacementOverrideSchema = z.object({
@@ -604,6 +619,14 @@ export const replacementOverrideSchema = z.object({
   // boolean = upsert the per-book override; null = delete it (restore inheritance)
   enabled: z.boolean().nullable(),
 })
+
+// Personal execution order for the settings list: every global pattern rule the
+// caller can see, in the order they want. The server rejects a partial list.
+export const replacementReorderSchema = z.object({
+  replacementIds: z.array(z.string().min(1)).refine((ids) => new Set(ids).size === ids.length, {
+    message: 'Replacement ids must be unique',
+  }),
+}).strict()
 
 export const tocRulePatternSchema = z.object({
   level: z.number().int().min(1),
@@ -629,6 +652,7 @@ export const tocRuleCreateSchema = z.object({
   enabled: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
   patterns: tocRulePatternsSchema,
+  availability: resourceAvailabilitySchema.optional(),
 }).refine((v) => v.patterns.every((p) => p.regex === undefined || isValidRegex(p.regex)), {
   message: 'pattern is not a valid regular expression',
   path: ['patterns'],
@@ -639,6 +663,7 @@ export const tocRuleUpdateSchema = z.object({
   enabled: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
   patterns: tocRulePatternsSchema.optional(),
+  availability: resourceAvailabilitySchema.optional(),
 }).refine((v) => v.patterns === undefined || v.patterns.every((p) => p.regex === undefined || isValidRegex(p.regex)), {
   message: 'pattern is not a valid regular expression',
   path: ['patterns'],

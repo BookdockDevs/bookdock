@@ -7,8 +7,24 @@ vi.mock('../../config', () => ({ config: {
   aiBaseUrl: 'https://ai.example.test/v1', aiApiKey: 'secret', aiModel: 'test-model', aiProvider: 'openai',
   jwtSecret: 'test-secret', aiMaxOutputTokens: 128, aiRpm: 1000, aiTimeoutMs: 2000,
 } }))
-vi.mock('../../db/client', () => ({ getDb: () => ({ select: () => ({ from: () => ({ where: () => ({ get: () => undefined }) }) }) }) }))
+vi.mock('../../db/client', () => ({ getDb: () => ({
+  select: () => ({ from: () => ({ where: () => ({ get: () => undefined, all: () => [] }) }) }),
+  insert: () => ({ values: () => ({ run: () => {} }) }),
+  update: () => ({ set: () => ({ where: () => ({ run: () => {} }) }) }),
+  delete: () => ({ where: () => ({ run: () => {} }) }),
+}) }))
 vi.mock('../books/books.service', () => ({ getActiveBook: vi.fn().mockResolvedValue({ id: 'book' }) }))
+
+// Execution comes from a fixed model: the resolver chain is covered by
+// ai.connections.test; these suites exercise the translation flow itself.
+vi.mock('./ai.connections.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./ai.connections.service')>()
+  const execution = {
+    modelId: 'exec-model', connectionId: null, provider: 'openai', protocol: 'openai-compatible',
+    baseUrl: 'https://ai.example.test/v1', apiKey: 'secret', upstreamModelId: 'test-model', configuredByUser: false,
+  } as const
+  return { ...actual, resolveAiExecution: vi.fn(() => execution), resolveExplicitModel: vi.fn(() => execution) }
+})
 
 import { config } from '../../config'
 import { AppError, errorHandler } from '../../middleware/error'
@@ -16,7 +32,7 @@ import { getActiveBook } from '../books/books.service'
 import { translateAiSelectedText, translateAiSelection } from './ai.service'
 import translationRoutes from './translation.routes'
 
-const input: TranslationRequest = { bookId: 'book', text: 'Hello\nworld', targetLang: 'zh-Hans', channel: { kind: 'ai', profileId: null, model: null } }
+const input: TranslationRequest = { bookId: 'book', text: 'Hello\nworld', targetLang: 'zh-Hans', channel: { kind: 'ai', modelId: null } }
 const upstream = (reason = 'stop', separator = '\n') => new Response([
   `data: ${JSON.stringify({ choices: [{ delta: { content: '你好\n世界' } }] })}`,
   `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: reason }] })}`,
@@ -66,11 +82,11 @@ describe('selection translation', () => {
     await expect(translateAiSelection('truncated', 'owner', input, new AbortController().signal, vi.fn())).resolves.toBeUndefined()
   })
 
-  it('rejects unavailable profiles and unreadable books before contacting the provider', async () => {
-    await expect(translateAiSelection('reader', 'member', { ...input, channel: { kind: 'ai', profileId: 'another-users-profile', model: null } }, new AbortController().signal, vi.fn())).rejects.toMatchObject({ code: 'AI_NOT_CONFIGURED' })
+  it('ignores stale or foreign model ids and lets the chain serve the call', async () => {
+    await translateAiSelection('reader', 'member', { ...input, channel: { kind: 'ai', modelId: 'another-users-model' } }, new AbortController().signal, vi.fn())
+    expect(fetch).toHaveBeenCalledTimes(1)
     vi.mocked(getActiveBook).mockRejectedValueOnce(new AppError('BOOK_NOT_FOUND'))
     await expect(translateAiSelection('reader', 'owner', input, new AbortController().signal, vi.fn())).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
-    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('cancels upstream work, releases the user slot and rejects concurrent requests', async () => {
@@ -142,9 +158,8 @@ describe('selection translation', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('retains account profile validation and shares the remote translation concurrency slot', async () => {
+  it('shares the remote translation concurrency slot', async () => {
     const { bookId: _bookId, ...selection } = input
-    await expect(translateAiSelectedText('local-profile', 'member', { ...selection, channel: { ...selection.channel, profileId: 'foreign-profile' } }, new AbortController().signal, vi.fn())).rejects.toMatchObject({ code: 'AI_NOT_CONFIGURED' })
     vi.mocked(fetch).mockImplementationOnce(async (_url, init) => await new Promise<Response>((_resolve, reject) => {
       init!.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
     }))

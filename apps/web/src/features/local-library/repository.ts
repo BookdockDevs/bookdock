@@ -569,7 +569,7 @@ export class LocalLibraryRepository {
         applyTo: row.rule.applyTo, enabled: row.rule.enabled, name: row.rule.name ?? null, group: row.rule.group ?? null,
         spineHref: row.rule.spineHref ?? null, textOffset: row.rule.textOffset ?? null, originalText: row.rule.originalText ?? null,
         locationAvailable: row.rule.matchType !== 'point' || row.contentId === book?.content?.contentId && book.availability === 'available',
-        sortOrder: index, createdAt: row.createdAt, updatedAt: row.updatedAt,
+        sortOrder: index, availability: 'user', mine: true, createdAt: row.createdAt, updatedAt: row.updatedAt,
         ...(bookId ? { effectiveEnabled: overrides[row.id] ?? row.rule.enabled, hasOverride: row.id in overrides } : {}),
       })) }
     })
@@ -620,6 +620,26 @@ export class LocalLibraryRepository {
       for (const target of targets) if (rows.find((row) => row.id === target.id)?.version !== target.version) throw new LocalLibraryError('conflict', 'Replacement selection changed')
       for (const target of targets) await request(tx.objectStore('deleted').put(true, JSON.stringify(['replacement', vaultId, target.id])))
       await request(tx.objectStore('settings').put(rows.filter((row) => !targets.some((target) => target.id === row.id)), rulesKey))
+    })
+  }
+
+  /** Personal execution order for the device's own global rules. */
+  async reorderReplacements(vaultId: string, orderedIds: string[]): Promise<void> {
+    if (new Set(orderedIds).size !== orderedIds.length || orderedIds.length > 1000) throw new LocalLibraryError('invalid-input', 'Invalid replacement order')
+    await this.transaction(['settings'], 'readwrite', async (tx) => {
+      const store = tx.objectStore('settings')
+      const rulesKey = JSON.stringify(['replacement-rules', vaultId])
+      const rows = await request<ClientReplacement[] | undefined>(store.get(rulesKey)) ?? []
+      const byId = new Map(rows.map((row) => [row.id, row]))
+      const wanted = new Set(orderedIds)
+      // Same semantics as the Server's personal order: listed ids take the
+      // slots they already occupied, so book-scoped rules keep their place
+      // instead of being pulled into the global order.
+      const slots = rows.flatMap((row, index) => (wanted.has(row.id) ? [index] : []))
+      if (slots.length !== orderedIds.length) throw new LocalLibraryError('invalid-input', 'Invalid replacement order')
+      const next = [...rows]
+      slots.forEach((slot, index) => { next[slot] = byId.get(orderedIds[index]!)! })
+      await request(store.put(next, rulesKey))
     })
   }
 

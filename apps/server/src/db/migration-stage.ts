@@ -22,6 +22,7 @@ export const AI_CHAT_JOBS_TAG = '0062_ai_chat_jobs'
 export const ANCHOR_EVIDENCE_TAG = '0063_anchor_evidence'
 export const MEMBER_RESOURCE_UPLOAD_TAG = '0064_member_resource_upload_switch'
 export const FONT_LOCAL_NAMES_TAG = '0065_font_local_names'
+export const READING_RESOURCES_AI_FOUNDATION_TAG = '0066_reading_resources_ai_foundation'
 
 /** Guarded revert of 0061_instance_invites and 0062_ai_chat_jobs for legacy-fixture
  * tests that reset the migration watermark and re-run the chain from an earlier
@@ -43,6 +44,36 @@ export function revertInstanceAndAiJobsSchema(
   for (const anchored of ['highlights', 'bookmarks', 'ideas']) {
     if (table(anchored) && columns(anchored).has('anchor_evidence')) sqlite.exec(`ALTER TABLE ${anchored} DROP COLUMN anchor_evidence`)
   }
+  // 0065/0066 reading-resource and AI structure; kept in one place so every
+  // fixture that resets the watermark reverts the same set.
+  revertReadingResourceSchema(sqlite)
+}
+
+/** Guarded revert of 0065/0066 reading-resource and AI structure for fixtures
+ * that reset the migration watermark and re-run the chain from an earlier
+ * point. Every step checks current schema state so a fixture that already
+ * dropped a table still reverts cleanly. */
+export function revertReadingResourceSchema(
+  sqlite: { prepare: (sql: string) => { all: (...params: unknown[]) => unknown[] }; exec: (sql: string) => void },
+) {
+  const table = (name: string) => sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").all(name).length > 0
+  const index = (name: string) => sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").all(name).length > 0
+  const columns = (name: string) => new Set((sqlite.prepare(`PRAGMA table_info(${name})`).all() as Array<{ name: string }>).map((column) => column.name))
+
+  if (table('ai_prompts')) sqlite.exec('DROP TABLE ai_prompts')
+  if (table('ai_models')) sqlite.exec('DROP TABLE ai_models')
+  if (table('ai_connections')) sqlite.exec('DROP TABLE ai_connections')
+  for (const [name, column, indexName] of [
+    ['toc_rules', 'availability', 'toc_rules_availability_idx'],
+    ['text_replacements', 'availability', 'text_replacements_availability_idx'],
+    ['tts_services', 'availability', 'tts_services_availability_idx'],
+  ] as const) {
+    if (index(indexName)) sqlite.exec(`DROP INDEX ${indexName}`)
+    if (table(name) && columns(name).has(column)) sqlite.exec(`ALTER TABLE ${name} DROP COLUMN ${column}`)
+  }
+  if (table('tts_services') && columns('tts_services').has('sort_order')) sqlite.exec('ALTER TABLE tts_services DROP COLUMN sort_order')
+  // 0065 landed before this round and fixtures that reset the watermark need it reverted too.
+  if (table('fonts') && columns('fonts').has('local_names')) sqlite.exec('ALTER TABLE fonts DROP COLUMN local_names')
 }
 
 /** Guarded revert of 0060_reading_imports for legacy-fixture tests that reset
@@ -238,7 +269,7 @@ export function migrateBeforeBookRetirementIncluding(
   // Older partial fixtures lack book_reviews, so stage only the archive/annotation portion there.
   // MEMBER_RESOURCE_UPLOAD_TAG keeps the drizzle `instance` shape and its
   // settings queries consistent across service-test fixtures.
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG, FONT_LOCAL_NAMES_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG, FONT_LOCAL_NAMES_TAG, READING_RESOURCES_AI_FOUNDATION_TAG])
   migrateWithTagFilter(
     db,
     options,

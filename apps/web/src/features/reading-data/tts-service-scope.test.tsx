@@ -11,7 +11,7 @@ import { EdgeSpeechClient, ServiceAudioClient } from '@/features/reader/lib/tts-
 import { useAuthStore } from '@/stores/auth.store'
 
 const account = (id: string) => ({ id, username: id, role: 'member' })
-const service: TtsServiceRes = { id: 'same-service', name: 'Voice', provider: 'openai', baseUrl: null, model: 'voice-model', defaultVoice: 'alloy', options: {}, credentialsConfigured: true, createdAt: 1, updatedAt: 1 }
+const service: TtsServiceRes = { id: 'same-service', name: 'Voice', provider: 'openai', baseUrl: null, model: 'voice-model', defaultVoice: 'alloy', options: {}, credentialsConfigured: true, enabled: true, order: 10, createdAt: 1, updatedAt: 1 }
 const segment = { id: 'private-local-segment', text: 'Explicit read-aloud sentence', cfi: 'epubcfi(/6/2)', chapterIndex: 0 }
 const options = { voiceId: '', rate: 1 }
 let client: QueryClient

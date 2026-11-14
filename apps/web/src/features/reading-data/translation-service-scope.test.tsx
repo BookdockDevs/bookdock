@@ -6,11 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SelectedTextTranslationRequest } from '@bookdock/shared'
 
 import { streamTranslation } from '@/api/client'
-import { aiConfigKey, useAiConfig, useActivateAiProfile } from '@/api/hooks/useAi'
+import { aiConfigKey, useAiConfig } from '@/api/hooks/useAi'
 import { translationConfigKey, useSaveTranslationConfig, useTranslationConfig } from '@/api/hooks/useTranslationConfig'
 import { useAuthStore } from '@/stores/auth.store'
 
-const input: SelectedTextTranslationRequest = { text: 'Explicit selection', targetLang: 'zh-Hans', channel: { kind: 'ai', profileId: null, model: null } }
+const input: SelectedTextTranslationRequest = { text: 'Explicit selection', targetLang: 'zh-Hans', channel: { kind: 'ai', modelId: null } }
 const account = (id: string) => ({ id, username: id, role: 'member' })
 const response = () => new Response('{"type":"delta","text":"translated"}\n{"type":"done"}\n')
 let client: QueryClient
@@ -96,27 +96,26 @@ describe('translation service configuration ownership', () => {
     await waitFor(() => expect(settle).toHaveLength(4))
     await act(async () => {
       settle[2]!(new Response(JSON.stringify({ data: { ...input, targetLang: 'en' } })))
-      settle[3]!(new Response(JSON.stringify({ data: { profiles: [], model: 'next-model' } })))
+      settle[3]!(new Response(JSON.stringify({ data: { connections: [], models: [], defaultModelId: 'next-model' } })))
       settle[0]!(new Response(JSON.stringify({ data: { ...input, targetLang: 'ja' } })))
-      settle[1]!(new Response(JSON.stringify({ data: { profiles: [], model: 'private-old-model' } })))
+      settle[1]!(new Response(JSON.stringify({ data: { connections: [], models: [], defaultModelId: 'private-old-model' } })))
     })
-    await waitFor(() => expect(result.current.ai.data?.data.model).toBe('next-model'))
+    await waitFor(() => expect(result.current.ai.data?.data.defaultModelId).toBe('next-model'))
     expect(result.current.translation.data?.data.targetLang).toBe('en')
     expect(client.getQueryData(aiConfigKey('first'))).toBeUndefined()
     expect(client.getQueryData(translationConfigKey('first'))).toBeUndefined()
   })
 
-  it('refuses paused preference and profile activation writes after switching accounts', async () => {
-    const { result } = renderHook(() => ({ save: useSaveTranslationConfig(), activate: useActivateAiProfile() }), { wrapper })
+  it('refuses paused preference writes after switching accounts', async () => {
+    const { result } = renderHook(() => ({ save: useSaveTranslationConfig() }), { wrapper })
     onlineManager.setOnline(false)
     let save!: Promise<unknown>
-    let activate!: Promise<unknown>
-    act(() => { save = result.current.save.mutateAsync(input); activate = result.current.activate.mutateAsync('same-profile') })
-    const rejected = [expect(save).rejects.toHaveProperty('name', 'AbortError'), expect(activate).rejects.toHaveProperty('name', 'AbortError')]
-    await waitFor(() => expect(result.current.save.isPaused && result.current.activate.isPaused).toBe(true))
+    act(() => { save = result.current.save.mutateAsync(input) })
+    const rejected = expect(save).rejects.toHaveProperty('name', 'AbortError')
+    await waitFor(() => expect(result.current.save.isPaused).toBe(true))
     act(() => useAuthStore.getState().setAuth(account('next')))
     await act(async () => { onlineManager.setOnline(true); await client.resumePausedMutations() })
-    await Promise.all(rejected)
+    await rejected
     expect(fetch).not.toHaveBeenCalled()
     expect(client.getQueryData(aiConfigKey('next'))).toBeUndefined()
     expect(client.getQueryData(translationConfigKey('next'))).toBeUndefined()

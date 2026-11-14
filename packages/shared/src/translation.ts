@@ -8,14 +8,18 @@ export const TRANSLATION_LANGUAGES = [
   { id: 'ru', label: 'Русский' }, { id: 'pt', label: 'Português' },
 ] as const
 export const translationLanguageSchema = z.enum(['zh-Hans', 'zh-Hant', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'ru', 'pt'])
+/**
+ * `modelId` is the internal AI model id, not an upstream model name, so the
+ * remembered choice survives credential and discovery changes. Null follows
+ * the account default.
+ */
 export const translationChannelSchema = z.object({
   kind: z.literal('ai'),
-  profileId: z.string().min(1).max(100).nullable().default(null),
-  model: z.string().trim().min(1).max(200).nullable().default(null),
+  modelId: z.string().min(1).max(200).nullable().default(null),
 }).strict()
 export const translationPreferencesSchema = z.object({
   targetLang: translationLanguageSchema.default('zh-Hans'),
-  channel: translationChannelSchema.default({ kind: 'ai', profileId: null, model: null }),
+  channel: translationChannelSchema.default({ kind: 'ai', modelId: null }),
 }).strict()
 export const selectedTextTranslationRequestSchema = translationPreferencesSchema.extend({
   text: z.string().trim().min(1).max(TRANSLATION_MAX_CHARS),

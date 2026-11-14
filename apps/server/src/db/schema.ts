@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 
-import type { ReadingTimeFragment, ReadingCoverageInterval, AiChatJobRes, AccessTokenPermission, ActivityAudience, ActivityEventType, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiNormalizedEvent, AiRetryRecipe, AiThreadSettings, TocRulePattern, AnnotationAnchorFragment } from '@bookdock/shared'
+import type { ReadingTimeFragment, ReadingCoverageInterval, AiChatJobRes, AccessTokenPermission, ActivityAudience, ActivityEventType, AiCitation, AiContextReceipt, AiGenerationDiagnostics, AiGenerationUsage, AiModelCapabilities, AiNormalizedEvent, AiPromptScope, AiProvider, AiRetryRecipe, AiThreadSettings, TocRulePattern, AnnotationAnchorFragment } from '@bookdock/shared'
 import type { ProgressFileData } from '../lib/progress-file'
 
 export const users = sqliteTable('users', {
@@ -72,11 +72,76 @@ export const ttsServices = sqliteTable('tts_services', {
   defaultVoice: text('default_voice'),
   options: text('options', { mode: 'json' }).$type<Record<string, string | number | boolean>>().notNull().default({}),
   encryptedSecrets: text('encrypted_secrets'),
+  // Definition visibility; personal enable/order choices live in the `tts`
+  // settings document so a consumer never mutates the publisher's row.
+  availability: text('availability', { enum: ['user', 'instance'] }).notNull().default('user'),
+  // Creation order used as the fallback when the caller has no personal order.
+  sortOrder: integer('sort_order').notNull().default(0),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   userNameIdx: uniqueIndex('tts_services_user_name_idx').on(table.userId, table.name),
   userUpdatedIdx: index('tts_services_user_updated_idx').on(table.userId, table.updatedAt),
+  availabilityIdx: index('tts_services_availability_idx').on(table.availability),
+}))
+
+// Provider connections. Credentials stay encrypted here and are only ever
+// returned as `apiKeyConfigured`; a published connection is usable by other
+// accounts without handing them the secret.
+export const aiConnections = sqliteTable('ai_connections', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  provider: text('provider').$type<AiProvider>().notNull(),
+  baseUrl: text('base_url'),
+  encryptedApiKey: text('encrypted_api_key'),
+  availability: text('availability', { enum: ['user', 'instance'] }).notNull().default('user'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userUpdatedIdx: index('ai_connections_user_updated_idx').on(table.userId, table.updatedAt),
+  availabilityIdx: index('ai_connections_availability_idx').on(table.availability),
+}))
+
+// Model entries inherit ownership through their connection: no duplicate
+// user_id FK. `enabled` is the publisher's exposure switch; personal order and
+// visibility choices live in the `ai` settings document.
+export const aiModels = sqliteTable('ai_models', {
+  id: text('id').primaryKey(),
+  connectionId: text('connection_id').notNull().references(() => aiConnections.id, { onDelete: 'cascade' }),
+  upstreamModelId: text('upstream_model_id').notNull(),
+  name: text('name').notNull(),
+  enabled: integer('enabled').notNull().default(1),
+  // Manual capability override; null falls back to discovery metadata.
+  capabilities: text('capabilities', { mode: 'json' }).$type<AiModelCapabilities | null>(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  connectionUpstreamUnique: uniqueIndex('ai_models_connection_upstream_unique').on(table.connectionId, table.upstreamModelId),
+}))
+
+// Quick commands are definitions with one owner, not entries in the personal
+// `ai` settings document: a published command keeps a single definition row and
+// every consumer stores only their enable/order choices in `aiPrompts`.
+// Built-in presets are copied per account, so `(user_id, seed_key)` is the
+// stable identity restore-defaults upserts on instead of inserting duplicates.
+export const aiPrompts = sqliteTable('ai_prompts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  seedKey: text('seed_key'),
+  name: text('name').notNull(),
+  prompt: text('prompt').notNull(),
+  scope: text('scope', { enum: ['selection', 'reading', 'both'] }).$type<AiPromptScope>().notNull().default('both'),
+  // The publisher's default; the caller's own switch lives in `aiPrompts` settings.
+  enabled: integer('enabled').notNull().default(1),
+  sortOrder: integer('sort_order').notNull().default(0),
+  availability: text('availability', { enum: ['user', 'instance'] }).notNull().default('user'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  userOrderIdx: index('ai_prompts_user_order_idx').on(table.userId, table.sortOrder),
+  userSeedKeyUnique: uniqueIndex('ai_prompts_user_seed_key_unique').on(table.userId, table.seedKey),
+  availabilityIdx: index('ai_prompts_availability_idx').on(table.availability),
 }))
 
 export const aiThreads = sqliteTable('ai_threads', {
@@ -186,11 +251,15 @@ export const textReplacements = sqliteTable('text_replacements', {
   textOffset: integer('text_offset'),
   originalText: text('original_text'),
   relocation: text('relocation', { enum: ['ok', 'unresolved'] }).notNull().default('ok'),
+  // Only user-global pattern rules may be published; book-bound patterns and
+  // point patches always stay private to their creator.
+  availability: text('availability', { enum: ['user', 'instance'] }).notNull().default('user'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   userBookIdx: index('text_replacements_user_book_idx').on(table.userId, table.bookId),
   versionIdx: index('text_replacements_book_version_idx').on(table.bookVersionId),
+  availabilityIdx: index('text_replacements_availability_idx').on(table.availability),
 }))
 
 // Per-book enable overrides for pattern rules: a row's existence is the override,
@@ -205,7 +274,9 @@ export const textReplacementOverrides = sqliteTable('text_replacement_overrides'
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
-  bookReplacementUnique: uniqueIndex('text_replacement_overrides_book_replacement_unique').on(table.bookId, table.replacementId),
+  // Unique per consuming account: two users may override the same shared rule
+  // on the same shared book.
+  userBookReplacementUnique: uniqueIndex('text_replacement_overrides_user_book_replacement_unique').on(table.userId, table.bookId, table.replacementId),
   userBookIdx: index('text_replacement_overrides_user_book_idx').on(table.userId, table.bookId),
   versionIdx: index('text_replacement_overrides_book_version_idx').on(table.bookVersionId),
 }))
@@ -241,11 +312,13 @@ export const tocRules = sqliteTable('toc_rules', {
   enabled: integer('enabled').notNull().default(1),
   sortOrder: integer('sort_order').notNull().default(0),
   patterns: text('patterns', { mode: 'json' }).$type<TocRulePattern[]>().notNull().default([]),
+  availability: text('availability', { enum: ['user', 'instance'] }).notNull().default('user'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
   userIdx: index('toc_rules_user_idx').on(table.userId, table.sortOrder),
   userSeedKeyUnique: uniqueIndex('toc_rules_user_seed_key_unique').on(table.userId, table.seedKey),
+  availabilityIdx: index('toc_rules_availability_idx').on(table.availability),
 }))
 
 export const readingRecords = sqliteTable('reading_records', {

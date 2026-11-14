@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { TRANSLATION_LANGUAGES, TRANSLATION_MAX_CHARS, isAiEmbeddingModel, type AiConfigRes, type AiProfileRes, type TranslationChannel, type TranslationPreferences } from '@bookdock/shared'
+import { TRANSLATION_LANGUAGES, TRANSLATION_MAX_CHARS, isAiEmbeddingModel, type AiConfigRes, type TranslationPreferences } from '@bookdock/shared'
 
 import { ApiError, streamTranslation } from '@/api/client'
 import { useSaveTranslationConfig } from '@/api/hooks/useTranslationConfig'
@@ -22,49 +22,11 @@ interface TranslationContentProps {
   onClose: () => void
 }
 
-const isModelChatCapable = (model: { id: string; name?: string | null }) =>
-  !isAiEmbeddingModel({ id: model.id, name: model.name ?? model.id })
+/** Chat-capable, exposed models the caller may execute; publishing state is filtered server-side. */
+const chatModelsOf = (config: AiConfigRes) =>
+  (config.models ?? []).filter((model) => model.enabled && !isAiEmbeddingModel({ id: model.upstreamModelId, name: model.name }))
 
-const getProfileChatModels = (profile: { models: { id: string; name: string }[] }) =>
-  (profile.models ?? []).filter(isModelChatCapable)
-
-const isProfileUsable = (profile: { model?: string | null; models: { id: string; name: string }[] }) => {
-  const chatModels = getProfileChatModels(profile)
-  if (chatModels.length > 0) return true
-  if (profile.model && isModelChatCapable({ id: profile.model, name: profile.model })) return true
-  return false
-}
-
-function resolveValidChannel(
-  current: TranslationChannel,
-  profiles: AiProfileRes[] | undefined,
-): { channel: TranslationChannel; available: boolean } {
-  const usableProfiles = (profiles ?? []).filter(isProfileUsable)
-  if (usableProfiles.length === 0) {
-    return { channel: { kind: 'ai', profileId: null, model: null }, available: false }
-  }
-
-  let profile = current.profileId ? usableProfiles.find((p) => p.id === current.profileId) : null
-  if (!profile) {
-    profile = usableProfiles[0]!
-  }
-
-  const chatModels = getProfileChatModels(profile)
-  let resolvedModel: string | null = null
-
-  if (current.profileId === profile.id && current.model && chatModels.some((m) => m.id === current.model)) {
-    resolvedModel = current.model
-  } else if (profile.model && isModelChatCapable({ id: profile.model, name: profile.model })) {
-    resolvedModel = null
-  } else if (chatModels.length > 0) {
-    resolvedModel = chatModels[0]!.id
-  }
-
-  return {
-    channel: { kind: 'ai', profileId: profile.id, model: resolvedModel },
-    available: true,
-  }
-}
+const hasAiService = (config: AiConfigRes) => chatModelsOf(config).length > 0
 
 function RetryIcon() {
   return (
@@ -100,11 +62,7 @@ export default function TranslationContent({ bookId, text, preferences, config, 
   const id = useId()
   const client = useQueryClient()
   const save = useSaveTranslationConfig()
-  const initialResolved = resolveValidChannel(preferences.channel, config.profiles)
-  const [draft, setDraft] = useState<TranslationPreferences>(() => ({
-    ...preferences,
-    channel: initialResolved.channel,
-  }))
+  const [draft, setDraft] = useState<TranslationPreferences>(preferences)
   const [request, setRequest] = useState(draft)
   const [attempt, setAttempt] = useState(0)
   const [stopped, setStopped] = useState(false)
@@ -127,26 +85,10 @@ export default function TranslationContent({ bookId, text, preferences, config, 
     }
   }, [isTruncated])
 
-  useEffect(() => {
-    setDraft((prev) => {
-      const check = resolveValidChannel(prev.channel, config.profiles)
-      if (!check.available && (prev.channel.profileId !== null || prev.channel.model !== null)) {
-        const updated: TranslationPreferences = { ...prev, channel: check.channel }
-        setRequest(updated)
-        return updated
-      }
-      if (check.available && (prev.channel.profileId !== check.channel.profileId || prev.channel.model !== check.channel.model)) {
-        const updated: TranslationPreferences = { ...prev, channel: check.channel }
-        setRequest(updated)
-        return updated
-      }
-      return prev
-    })
-  }, [config.profiles])
-
-  const channelCheck = resolveValidChannel(request.channel, config.profiles)
-  const available = ownsRequest && channelCheck.available && Boolean(request.channel.profileId)
-  const hasAnyServices = (config.profiles ?? []).some(isProfileUsable)
+  // A stale saved model id counts as absent: the picker shows the empty state
+  // and the server-side chain picks the model, exactly like chat does.
+  const available = ownsRequest && hasAiService(config)
+  const hasAnyServices = hasAiService(config)
   const key = ['translation', 'result', accountId, id, attempt, bookId, request] as const
 
   const result = useQuery({
@@ -155,7 +97,7 @@ export default function TranslationContent({ bookId, text, preferences, config, 
       await Promise.resolve()
       signal.throwIfAborted()
       if (!requestAccountId || useAuthStore.getState().user?.id !== requestAccountId) throw new DOMException('Translation account changed', 'AbortError')
-      if (preferences.channel.profileId === null && request.channel.profileId) {
+      if (preferences.channel.modelId === null && request.channel.modelId) {
         save.mutate(request, { onError: (error) => notify.error(getUserErrorNotification(error)) })
       }
       setOutput('')
@@ -187,13 +129,13 @@ export default function TranslationContent({ bookId, text, preferences, config, 
     ? _('translation.notConfigured')
     : !available
       ? _('translation.unavailable')
-      : stopped
-        ? _('translation.stopped')
-        : result.isError
-          ? _(`translation.${failure === 'AI_BUSY' ? 'busy' : failure === 'AI_RATE_LIMITED' ? 'rateLimited' : failure === 'AI_NOT_CONFIGURED' ? 'notConfigured' : failure === 'AI_NOT_ALLOWED' ? 'notAllowed' : failure === 'AI_TIMEOUT' ? 'timeout' : failure === 'VALIDATION_ERROR' ? 'unavailable' : 'failed'}`)
-          : busy
-            ? _('translation.translating')
-            : ''
+        : stopped
+          ? _('translation.stopped')
+          : result.isError
+            ? _(`translation.${failure === 'AI_BUSY' ? 'busy' : failure === 'AI_RATE_LIMITED' ? 'rateLimited' : failure === 'AI_NOT_CONFIGURED' ? 'notConfigured' : failure === 'AI_NOT_ALLOWED' ? 'notAllowed' : failure === 'AI_TIMEOUT' ? 'timeout' : failure === 'VALIDATION_ERROR' ? 'unavailable' : 'failed'}`)
+            : busy
+              ? _('translation.translating')
+              : ''
 
   async function changeTargetLang(targetLang: typeof draft.targetLang) {
     await client.cancelQueries({ queryKey: key })
@@ -417,7 +359,7 @@ export default function TranslationContent({ bookId, text, preferences, config, 
               </p>
             )}
 
-            {(failure === 'AI_NOT_CONFIGURED' || failure === 'AI_NOT_ALLOWED' || failure === 'VALIDATION_ERROR') && (
+            {(failure === 'AI_NOT_CONFIGURED' || failure === 'AI_NOT_ALLOWED' || failure === 'AI_MODEL_UNAVAILABLE' || failure === 'VALIDATION_ERROR') && (
               <a
                 href={"/settings?section=reading&focus=ai"}
                 onClick={onClose}

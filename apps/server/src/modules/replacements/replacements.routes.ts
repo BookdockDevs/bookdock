@@ -1,11 +1,13 @@
 import { Hono } from 'hono'
 
-import { replacementCreateSchema, replacementOverrideSchema, replacementUpdateSchema, ruleBatchDeleteSchema } from '@bookdock/shared'
+import { replacementCreateSchema, replacementOverrideSchema, replacementReorderSchema, replacementUpdateSchema, ruleBatchDeleteSchema } from '@bookdock/shared'
+import type { TextReplacementRes } from '@bookdock/shared'
 
+import { assertCanPublish } from '../../lib/publish-permission'
 import { readRuleTransferFile } from '../../lib/rule-transfer'
 import { AppError } from '../../middleware/error'
 
-import { createReplacement, deleteGlobalReplacements, deleteReplacement, importReplacements, listReplacements, setReplacementOverride, updateReplacement } from './replacements.service'
+import { createReplacement, deleteGlobalReplacements, deleteReplacement, importReplacements, listReplacements, reorderReplacements, setReplacementOverride, updateReplacement } from './replacements.service'
 
 const replacementRoutes = new Hono()
 
@@ -25,6 +27,7 @@ replacementRoutes.post('/', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
+  assertCanPublish(user.role, parsed.data.availability)
   const replacement = await createReplacement(user.id, parsed.data)
   return c.json({ data: replacement }, 201)
 })
@@ -47,6 +50,15 @@ replacementRoutes.post('/import', async (c) => {
   return c.json({ data: imported }, 201)
 })
 
+replacementRoutes.put('/reorder', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('FORBIDDEN', 'Guest sessions cannot manage text replacements')
+  const body = await c.req.json().catch(() => { throw new AppError('VALIDATION_ERROR', 'Invalid JSON') })
+  const parsed = replacementReorderSchema.safeParse(body)
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
+  return c.json({ data: reorderReplacements(user.id, parsed.data.replacementIds) } satisfies { data: TextReplacementRes[] })
+})
+
 replacementRoutes.put('/:replacementId', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'FORBIDDEN', message: 'Guest sessions cannot manage text replacements' } }, 403)
@@ -56,6 +68,7 @@ replacementRoutes.put('/:replacementId', async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
+  assertCanPublish(user.role, parsed.data.availability)
   const replacement = await updateReplacement(user.id, replacementId, parsed.data)
   return c.json({ data: replacement })
 })

@@ -1,23 +1,32 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 
-import type { TtsProvider, TtsServiceCreateReq, TtsServiceRes, TtsServiceUpdateReq } from '@bookdock/shared'
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
-import { useCreateTtsService, useDeleteTtsService, useTestTtsService, useTestTtsServiceDraft, useTtsProviders, useTtsServices, useUpdateTtsService } from '@/api/hooks/useTts'
+import type { ResourceAvailability, TtsProvider, TtsServiceCreateReq, TtsServiceRes, TtsServiceUpdateReq } from '@bookdock/shared'
+
+import { useCreateTtsService, useDeleteTtsService, useReorderTtsServices, useTestTtsService, useTestTtsServiceDraft, useTtsProviders, useTtsServices, useUpdateTtsService } from '@/api/hooks/useTts'
+import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import PasswordInput from '@/components/ui/PasswordInput'
 import { validatePasswordInputs } from '@/components/ui/password-input-validation'
 import QueryErrorState from '@/components/ui/QueryErrorState'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
-import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
+import SmartMenu, { menuItemClass } from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
 
+import EditModeButton from './EditModeButton'
 import SettingsCard from './SettingsCard'
 import TtsProviderIcon from './TtsProviderIcon'
+import TtsServiceRow from './TtsServiceRow'
+import { PlusIcon } from './row-icons'
 
 interface TtsFormState {
   id?: string
@@ -28,6 +37,8 @@ interface TtsFormState {
   defaultVoice: string
   options: Record<string, string | number | boolean>
   secrets: Record<string, string>
+  /** Publication scope; only the instance owner may change it. */
+  availability: ResourceAvailability
 }
 
 const FALLBACK_PROVIDERS: { id: TtsProvider; kind: 'native' | 'openai-compatible'; defaultBaseUrl: string | null; defaultModel: string | null }[] = [
@@ -51,22 +62,6 @@ const PROVIDER_NAMES: Record<TtsProvider, string> = {
   'openai-compatible': 'OpenAI',
 }
 
-function EditIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-    </svg>
-  )
-}
-
-function TrashIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-    </svg>
-  )
-}
-
 function HeadphonesIcon({ className }: { className?: string }) {
   return (
     <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -87,6 +82,7 @@ function makeForm(provider: TtsProvider, catalog: typeof FALLBACK_PROVIDERS, ser
     defaultVoice: service?.defaultVoice ?? '',
     options: service?.options ?? (provider === 'azure' ? { region: 'global' } : {}),
     secrets: {},
+    availability: service?.availability ?? 'user',
   }
 }
 
@@ -102,35 +98,51 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
   const create = useCreateTtsService()
   const update = useUpdateTtsService()
   const remove = useDeleteTtsService()
+  const reorder = useReorderTtsServices()
   const test = useTestTtsService()
   const testDraft = useTestTtsServiceDraft()
   const [form, setForm] = useState<TtsFormState | null>(null)
-  const [providerMenuOpen, setProviderMenuOpen] = useState(false)
-  const providerMenuRef = useRef<HTMLDivElement>(null)
+  const { open: menuOpen, anchor: menuAnchor, menuRef, btnRef: menuBtnRef, close: closeMenu, toggleFromButton } = useMenuAnchor()
+  const [editing, setEditing] = useState(false)
+  const [draftIds, setDraftIds] = useState<string[] | null>(null)
   const [pendingDelete, setPendingDelete] = useState<TtsServiceRes | null>(null)
   const [stateAccountId, setStateAccountId] = useState(user?.id ?? null)
   const ownsState = stateAccountId === (user?.id ?? null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   useEffect(() => {
     if (ownsState) return
     setForm(null)
     setPendingDelete(null)
-    setProviderMenuOpen(false)
+    setEditing(false)
+    setDraftIds(null)
     setStateAccountId(user?.id ?? null)
   }, [ownsState, user?.id])
-  const services = useMemo(() => servicesData?.data ?? [], [servicesData])
+  const savedServices = useMemo(() => servicesData?.data ?? [], [servicesData])
+  // Edit mode reorders a local draft; browsing always shows the persisted order.
+  const services = useMemo(() => {
+    if (!editing || !draftIds) return savedServices
+    const byId = new Map(savedServices.map((service) => [service.id, service]))
+    return [...draftIds.flatMap((id) => byId.get(id) ? [byId.get(id)!] : []), ...savedServices.filter((service) => !draftIds.includes(service.id))]
+  }, [savedServices, editing, draftIds])
+  const isOwner = user?.role === 'owner'
+  const busy = create.isPending || update.isPending || remove.isPending || reorder.isPending
   const ownsSession = () => Boolean(user && useAuthStore.getState().user?.id === user.id && ownsState)
   const showError = (error: unknown) => { if (ownsSession()) notify.error(getUserErrorNotification(error, 'settings.ttsOperationFailed')) }
-  useDismissiblePopup(providerMenuOpen, providerMenuRef, () => setProviderMenuOpen(false))
 
   function openCreate(provider: TtsProvider) {
     if (!ownsSession()) return
-    setProviderMenuOpen(false)
+    closeMenu()
     setForm(makeForm(provider, providers))
   }
 
   function openEdit(service: TtsServiceRes) {
     if (!ownsSession()) return
     setForm(makeForm(service.provider, providers, service))
+  }
+
+  function toggleEnabled(service: TtsServiceRes, enabled: boolean) {
+    if (!ownsSession()) return
+    update.mutate({ id: service.id, body: { enabled } }, { onError: showError })
   }
 
   function save() {
@@ -144,7 +156,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
       options: form.options,
     }
     if (form.id) {
-      const body: TtsServiceUpdateReq = { ...common, secrets: Object.fromEntries(Object.entries(form.secrets).filter(([, value]) => value.trim())) }
+      const body: TtsServiceUpdateReq = { ...common, availability: form.availability, secrets: Object.fromEntries(Object.entries(form.secrets).filter(([, value]) => value.trim())) }
       update.mutate({ id: form.id, body }, { onSuccess: () => { if (ownsSession()) { setForm(null); notify.success({ key: 'settings.ttsSaved' }) } }, onError: showError })
     } else {
       const body: TtsServiceCreateReq = { ...common, secrets: Object.fromEntries(Object.entries(form.secrets).filter(([, value]) => value.trim())) }
@@ -154,8 +166,49 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
 
   function confirmDelete() {
     if (!pendingDelete || !ownsSession()) return
-    remove.mutate(pendingDelete.id, { onSuccess: () => { if (!ownsSession()) return; if (form?.id === pendingDelete.id) setForm(null); notify.success({ key: 'settings.ttsDeleted' }) }, onError: showError })
+    const serviceId = pendingDelete.id
+    remove.mutate(serviceId, {
+      onSuccess: () => {
+        if (!ownsSession()) return
+        if (form?.id === serviceId) setForm(null)
+        // Keep the edit-mode draft in step, or submitting a stale id would be rejected.
+        setDraftIds((current) => current?.filter((id) => id !== serviceId) ?? current)
+        notify.success({ key: 'settings.ttsDeleted' })
+      },
+      onError: showError,
+    })
     setPendingDelete(null)
+  }
+
+  function toggleEditing() {
+    if (busy) return
+    closeMenu()
+    if (!editing) {
+      setDraftIds(savedServices.map((service) => service.id))
+      setEditing(true)
+      return
+    }
+    const draft = draftIds ?? []
+    const sourceIds = savedServices.map((service) => service.id)
+    // The server demands the exact current set: drop ids removed elsewhere and
+    // append ones this draft never saw (another tab) rather than sending a
+    // partial order it would reject.
+    const nextOrder = [...draft.filter((id) => sourceIds.includes(id)), ...sourceIds.filter((id) => !draft.includes(id))]
+    setEditing(false)
+    if (nextOrder.every((id, index) => id === sourceIds[index])) {
+      setDraftIds(null)
+      return
+    }
+    reorder.mutate(nextOrder, { onSuccess: () => setDraftIds(null), onError: (error) => { setDraftIds(null); showError(error) } })
+  }
+
+  function onDragEnd({ active, over }: DragEndEvent) {
+    if (!editing || busy || !over || active.id === over.id) return
+    const currentIds = services.map((service) => service.id)
+    const from = currentIds.indexOf(String(active.id))
+    const to = currentIds.indexOf(String(over.id))
+    if (from < 0 || to < 0) return
+    setDraftIds(arrayMove(currentIds, from, to))
   }
 
   function testCurrent() {
@@ -183,35 +236,59 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
         className="scroll-mt-6"
         icon={<HeadphonesIcon className="h-5 w-5" />}
         iconBgClass="bg-sky-500/10 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"
-        title={_('settings.tts')}
+        title={
+          <span className="flex items-baseline gap-1.5">
+            <span>{_('settings.tts')}</span>
+            {services.length > 0 && <span className="text-xs font-normal tabular-nums text-stone-400 dark:text-stone-500">· {services.length}</span>}
+          </span>
+        }
         action={
           !isGuest ? (
-            <div ref={providerMenuRef} className="relative shrink-0">
+            <div className="flex shrink-0 items-center gap-1">
+              {services.length > 0 && (
+                <EditModeButton
+                  active={editing}
+                  disabled={busy}
+                  onClick={toggleEditing}
+                />
+              )}
               <button
+                ref={menuBtnRef}
                 type="button"
-                onClick={() => setProviderMenuOpen((value) => !value)}
-                className="inline-flex items-center gap-1 rounded-lg border border-stone-200 px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800"
+                disabled={editing || busy}
+                onClick={(event) => toggleFromButton(event, 'below')}
+                aria-expanded={menuOpen}
+                aria-label={_('settings.ttsAdd')}
+                title={_('settings.ttsAdd')}
+                className={`flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200 ${menuOpen ? 'bg-stone-100 text-stone-800 dark:bg-stone-800 dark:text-stone-200' : ''}`}
               >
-                <span>{_('settings.ttsAdd')}</span>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
+                <PlusIcon />
               </button>
-              {providerMenuOpen && (
-                <div className="absolute right-0 z-10 mt-2 w-max min-w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg dark:border-stone-700 dark:bg-stone-900">
-                  {providers.map((provider) => (
-                    <button
-                      key={provider.id}
-                      type="button"
-                      onClick={() => openCreate(provider.id)}
-                      className="flex w-full items-center gap-2 truncate whitespace-nowrap px-3 py-2 text-left text-xs text-stone-700 hover:bg-stone-50 dark:text-stone-200 dark:hover:bg-stone-800"
-                      title={PROVIDER_NAMES[provider.id]}
-                    >
-                      <TtsProviderIcon provider={provider.id} className="h-5 w-5" />
-                      <span className="truncate">{PROVIDER_NAMES[provider.id]}</span>
-                    </button>
-                  ))}
-                </div>
+              {menuOpen && (
+                <SmartMenu
+                  triggerRef={menuBtnRef}
+                  innerRef={menuRef}
+                  anchor={menuAnchor}
+                  size={{ width: 'auto', height: providers.length * 36 + 8 }}
+                  minWidth={180}
+                  maxWidth={260}
+                  onClose={closeMenu}
+                >
+                  <div className="flex flex-col gap-0.5">
+                    {providers.map((provider) => (
+                      <button
+                        key={provider.id}
+                        type="button"
+                        onClick={() => openCreate(provider.id)}
+                        className={menuItemClass}
+                        title={PROVIDER_NAMES[provider.id]}
+                      >
+                        <TtsProviderIcon provider={provider.id} className="h-5 w-5" />
+                        <span className="truncate">{PROVIDER_NAMES[provider.id]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </SmartMenu>
               )}
             </div>
           ) : undefined
@@ -245,46 +322,24 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
         ) : services.length === 0 ? (
           <SettingsEmptyState>{_('settings.ttsEmpty')}</SettingsEmptyState>
         ) : (
-          <div className="divide-y divide-stone-100 dark:divide-stone-800">
-            {services.map((service) => (
-              <div key={service.id} className="group flex items-center gap-3 py-3">
-                <TtsProviderIcon provider={service.provider} className="h-8 w-8" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-stone-800 dark:text-stone-100">{service.name}</p>
-                  <p className="mt-0.5 truncate text-xs text-stone-400">
-                    {PROVIDER_NAMES[service.provider]}
-                    {service.model ? ` · ${service.model}` : ''}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:has-[:focus-visible]:opacity-100">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      if (e.detail > 0) e.currentTarget.blur()
-                      openEdit(service)
-                    }}
-                    aria-label={_('library.edit')}
-                    title={_('library.edit')}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                  >
-                    <EditIcon />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      if (e.detail > 0) e.currentTarget.blur()
-                      setPendingDelete(service)
-                    }}
-                    aria-label={_('settings.fontsDelete')}
-                    title={_('settings.fontsDelete')}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-                  >
-                    <TrashIcon />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={services.map((service) => service.id)} strategy={verticalListSortingStrategy}>
+              <ul className="divide-y divide-stone-100 dark:divide-stone-800">
+                {services.map((service) => (
+                  <TtsServiceRow
+                    key={service.id}
+                    service={service}
+                    editing={editing}
+                    disabled={busy}
+                    onToggle={(enabled) => toggleEnabled(service, enabled)}
+                    canEdit={service.mine}
+                    onEdit={() => openEdit(service)}
+                    onDelete={() => setPendingDelete(service)}
+                  />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
         )}
       </SettingsCard>
 
@@ -301,10 +356,12 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
         <Modal title={_(form.id ? 'settings.ttsEdit' : 'settings.ttsAdd')} onClose={() => setForm(null)}>
           <TtsServiceForm
             form={form}
+            canEdit={isOwner && servicesData?.data.some((service) => service.id === form.id && service.mine) === true}
             savedCredentialsAvailable={servicesData?.data.some((service) => service.id === form.id && service.credentialsConfigured) === true}
             setForm={setForm}
             onSave={save}
             onTest={testCurrent}
+            onCancel={() => setForm(null)}
             saving={create.isPending || update.isPending}
             testing={test.isPending || testDraft.isPending}
           />
@@ -314,7 +371,27 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
   )
 }
 
-function TtsServiceForm({ form, setForm, onSave, onTest, saving, testing, savedCredentialsAvailable }: { savedCredentialsAvailable: boolean; form: TtsFormState; setForm: (value: TtsFormState) => void; onSave: () => void; onTest: () => void; saving: boolean; testing: boolean }) {
+function TtsServiceForm({
+  form,
+  setForm,
+  onSave,
+  onTest,
+  onCancel,
+  saving,
+  testing,
+  savedCredentialsAvailable,
+  canEdit,
+}: {
+  savedCredentialsAvailable: boolean
+  canEdit: boolean
+  form: TtsFormState
+  setForm: (value: TtsFormState) => void
+  onSave: () => void
+  onTest: () => void
+  onCancel: () => void
+  saving: boolean
+  testing: boolean
+}) {
   const _ = useTranslation()
   const field = 'h-9 rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 dark:border-stone-700'
   const set = (patch: Partial<TtsFormState>) => setForm({ ...form, ...patch })
@@ -322,17 +399,111 @@ function TtsServiceForm({ form, setForm, onSave, onTest, saving, testing, savedC
   const isAliyun = form.provider === 'aliyun'
   const isAzure = form.provider === 'azure'
   const needsModel = !isAliyun && !isAzure
-  const testButton = <button type="button" disabled={testing} onClick={onTest} aria-label={_('settings.ttsTest')} title={_('settings.ttsTest')} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-stone-200"><TestIcon className={testing ? 'animate-pulse' : undefined} /></button>
-  return <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (validatePasswordInputs(event)) onSave() }}>
-    <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsName')}</span><input required value={form.name} onChange={(event) => set({ name: event.target.value })} className={field} /></label>
-    {isAzure ? <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>Region</span><input required value={String(form.options.region ?? '')} onChange={(event) => set({ options: { ...form.options, region: event.target.value } })} placeholder="global" className={field} /></label> : <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsBaseUrl')}</span><input value={form.baseUrl} onChange={(event) => set({ baseUrl: event.target.value })} className={field} /></label>}
-    {needsModel && <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsModel')}</span><div className="flex items-center gap-1"><input required value={form.model} onChange={(event) => set({ model: event.target.value })} className={`${field} min-w-0 flex-1`} />{testButton}</div></label>}
-    {isAliyun ? <><div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>App Key</span><PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label="App Key" secret disabled={saving} required={!form.id} value={form.secrets.appKey ?? ''} onChange={(event) => setSecret('appKey', event.target.value)} className={field} /></div><label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>Access Key ID</span><input required={!form.id} value={form.secrets.accessKeyId ?? ''} onChange={(event) => setSecret('accessKeyId', event.target.value)} className={field} /></label><div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>Access Key Secret</span><PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label="Access Key Secret" secret disabled={saving} required={!form.id} value={form.secrets.accessKeySecret ?? ''} onChange={(event) => setSecret('accessKeySecret', event.target.value)} className={field} /></div></> : <div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsApiKey')}</span><PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label={_('settings.ttsApiKey')} secret disabled={saving} required={!form.id} value={form.secrets.apiKey ?? ''} onChange={(event) => setSecret('apiKey', event.target.value)} autoComplete="new-password" className={field} /></div>}
-    {savedCredentialsAvailable && <p className="text-xs leading-5 text-stone-400">{_('settings.ttsSecretHint')}</p>}
-    <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsDefaultVoice')}</span><input value={form.defaultVoice} onChange={(event) => set({ defaultVoice: event.target.value })} placeholder={isAzure ? 'zh-CN-XiaoxiaoNeural' : form.provider === 'mimo' ? '冰糖' : form.provider === 'minimax' ? 'Chinese (Mandarin)_Male_Announcer' : 'alloy'} className={field} /></label>
-    {form.provider === 'openai' && <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsInstructions')}</span><textarea value={String(form.options.instructions ?? '')} onChange={(event) => set({ options: { ...form.options, instructions: event.target.value } })} className="min-h-20 rounded-lg border border-stone-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-stone-700" /></label>}
-    <div className="flex justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">{!needsModel && testButton}<button type="submit" disabled={saving} className="rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900">{_(saving ? 'passwordInput.saving' : 'settings.ttsSave')}</button></div>
-  </form>
+
+  return (
+    <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (validatePasswordInputs(event)) onSave() }}>
+      <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+        <span>{_('settings.ttsName')}</span>
+        <input required value={form.name} onChange={(event) => set({ name: event.target.value })} className={field} />
+      </label>
+      {isAzure ? (
+        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+          <span>Region</span>
+          <input required value={String(form.options.region ?? '')} onChange={(event) => set({ options: { ...form.options, region: event.target.value } })} placeholder="global" className={field} />
+        </label>
+      ) : (
+        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+          <span>{_('settings.ttsBaseUrl')}</span>
+          <input value={form.baseUrl} onChange={(event) => set({ baseUrl: event.target.value })} className={field} />
+        </label>
+      )}
+      {needsModel && (
+        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+          <span>{_('settings.ttsModel')}</span>
+          <input required value={form.model} onChange={(event) => set({ model: event.target.value })} className={field} />
+        </label>
+      )}
+      {isAliyun ? (
+        <>
+          <div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+            <span>App Key</span>
+            <PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label="App Key" secret disabled={saving} required={!form.id} value={form.secrets.appKey ?? ''} onChange={(event) => setSecret('appKey', event.target.value)} className={field} />
+          </div>
+          <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+            <span>Access Key ID</span>
+            <input required={!form.id} value={form.secrets.accessKeyId ?? ''} onChange={(event) => setSecret('accessKeyId', event.target.value)} className={field} />
+          </label>
+          <div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+            <span>Access Key Secret</span>
+            <PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label="Access Key Secret" secret disabled={saving} required={!form.id} value={form.secrets.accessKeySecret ?? ''} onChange={(event) => setSecret('accessKeySecret', event.target.value)} className={field} />
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+          <span>{_('settings.ttsApiKey')}</span>
+          <PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label={_('settings.ttsApiKey')} secret disabled={saving} required={!form.id} value={form.secrets.apiKey ?? ''} onChange={(event) => setSecret('apiKey', event.target.value)} autoComplete="new-password" className={field} />
+        </div>
+      )}
+      {savedCredentialsAvailable && <p className="text-xs leading-5 text-stone-400">{_('settings.ttsSecretHint')}</p>}
+      <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+        <span>{_('settings.ttsDefaultVoice')}</span>
+        <input value={form.defaultVoice} onChange={(event) => set({ defaultVoice: event.target.value })} placeholder={isAzure ? 'zh-CN-XiaoxiaoNeural' : form.provider === 'mimo' ? '冰糖' : form.provider === 'minimax' ? 'Chinese (Mandarin)_Male_Announcer' : 'alloy'} className={field} />
+      </label>
+      {form.provider === 'openai' && (
+        <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
+          <span>{_('settings.ttsInstructions')}</span>
+          <textarea value={String(form.options.instructions ?? '')} onChange={(event) => set({ options: { ...form.options, instructions: event.target.value } })} className="min-h-20 rounded-lg border border-stone-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-stone-700" />
+        </label>
+      )}
+      {form.id && canEdit && (
+        <fieldset className="space-y-1.5">
+          <legend className="text-xs text-stone-400 dark:text-stone-500">{_('settings.resourceScope')}</legend>
+          <SegmentedControl
+            ariaLabel={_('settings.resourceScope')}
+            fullWidth
+            size="md"
+            pending={saving}
+            value={form.availability}
+            onChange={(value) => set({ availability: value })}
+            options={(['user', 'instance'] as ResourceAvailability[]).map((value) => ({
+              value,
+              label: _(value === 'user' ? 'settings.resourceScopeUser' : 'settings.resourceScopeInstance'),
+            }))}
+          />
+        </fieldset>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={testing || saving}
+          onClick={onTest}
+        >
+          <TestIcon className={testing ? 'animate-pulse text-blue-500' : 'text-stone-400'} />
+          <span>{_(testing ? 'settings.ttsTesting' : 'settings.ttsTest')}</span>
+        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={saving || testing}
+            onClick={onCancel}
+          >
+            {_('common.cancel')}
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={saving || testing}
+          >
+            {_(saving ? 'passwordInput.saving' : 'settings.ttsSave')}
+          </Button>
+        </div>
+      </div>
+    </form>
+  )
 }
 
 function TestIcon({ className }: { className?: string }) {

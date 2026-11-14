@@ -181,7 +181,8 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
   const startMenuRef = useRef<HTMLDivElement>(null)
   const servicesQuery = useTtsServices()
   const { data: servicesData } = servicesQuery
-  const services = servicesData?.data ?? []
+  // Disabled services stay configured but are not offered as an engine.
+  const services = servicesData?.data.filter((service) => service.enabled) ?? []
   const ttsEngine = useUiStore((s) => s.ttsEngine)
   const ttsServiceId = useUiStore((s) => s.ttsServiceId)
   const setTtsEngine = useUiStore((s) => s.setTtsEngine)

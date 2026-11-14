@@ -13,12 +13,13 @@ const mocks = vi.hoisted(() => ({
   deleteRules: vi.fn(),
   reorder: vi.fn(),
   restore: vi.fn(),
+  updateRule: vi.fn(),
   drag: null as ((event: unknown) => void) | null,
 }))
 
 const initialRules: TocRuleRes[] = [
-  { id: 'rule-1', name: '规则一', enabled: true, sortOrder: 0, patterns: [{ level: 1, regex: '^一', replacement: null, enabled: true }], builtIn: true, createdAt: 1, updatedAt: 1 },
-  { id: 'rule-2', name: '规则二', enabled: false, sortOrder: 1, patterns: [{ level: 1, regex: '^二', replacement: null, enabled: true }], builtIn: false, createdAt: 2, updatedAt: 2 },
+  { id: 'rule-1', name: '规则一', enabled: true, sortOrder: 0, patterns: [{ level: 1, regex: '^一', replacement: null, enabled: true }], builtIn: true, mine: true, availability: 'user', createdAt: 1, updatedAt: 1 },
+  { id: 'rule-2', name: '规则二', enabled: false, sortOrder: 1, patterns: [{ level: 1, regex: '^二', replacement: null, enabled: true }], builtIn: false, mine: true, availability: 'user', createdAt: 2, updatedAt: 2 },
 ]
 
 vi.mock('@/api/hooks/useTocRules', () => ({
@@ -27,7 +28,7 @@ vi.mock('@/api/hooks/useTocRules', () => ({
   useDeleteTocRules: () => ({ mutate: mocks.deleteRules, isPending: false }),
   useReorderTocRules: () => ({ mutate: mocks.reorder, isPending: false }),
   useSeedTocRules: () => ({ mutate: mocks.restore, isPending: false }),
-  useUpdateTocRule: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateTocRule: () => ({ mutate: mocks.updateRule, isPending: false }),
   useImportTocRules: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
@@ -55,10 +56,11 @@ async function readExport(blob: Blob) {
 
 beforeEach(() => {
   useToastStore.getState().clearToasts()
-  mocks.query = { data: { data: [...initialRules] } }
+  mocks.query = { data: { restoreAvailable: true, data: [...initialRules] } }
   mocks.deleteRules.mockReset()
   mocks.reorder.mockReset()
   mocks.restore.mockReset()
+  mocks.updateRule.mockReset()
 })
 
 describe('TocRulesSettingsSection', () => {
@@ -154,6 +156,19 @@ describe('TocRulesSettingsSection', () => {
     expect(mocks.deleteRules).toHaveBeenCalledTimes(2)
   })
 
+  it('deletes a single rule from its row through the confirm dialog', async () => {
+    render(<TocRulesSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: 'settings.editModeEnter' }))
+    const row = within(screen.getAllByRole('listitem')[0]!).getByRole('button', { name: 'settings.ruleDelete' })
+    fireEvent.click(row)
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('规则一')
+    expect(mocks.deleteRules).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'settings.confirmDeleteAction' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'settings.confirmDeleteAction' }))
+    const [body] = mocks.deleteRules.mock.calls[0]!
+    expect(body).toEqual({ ruleIds: ['rule-1'] })
+  })
+
   it('reconciles deletion, edits, and restoration with a reordered draft before completion', () => {
     const { rerender } = render(<TocRulesSettingsSection />)
     fireEvent.click(screen.getByRole('button', { name: 'settings.editModeEnter' }))
@@ -162,7 +177,7 @@ describe('TocRulesSettingsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'settings.ruleDeleteSelected' }))
     fireEvent.click(screen.getByRole('button', { name: 'settings.confirmDeleteAction' }))
     act(() => {
-      mocks.query = { data: { data: [{ ...initialRules[1]!, name: 'edited' }] } }
+      mocks.query = { data: { restoreAvailable: true, data: [{ ...initialRules[1]!, name: 'edited' }] } }
       mocks.deleteRules.mock.calls[0]![1].onSuccess()
     })
     rerender(<TocRulesSettingsSection />)
@@ -171,7 +186,7 @@ describe('TocRulesSettingsSection', () => {
     expect(screen.getByRole('button', { name: 'settings.ruleDeleteSelected' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'settings.tocRulesRestore' }))
     expect(mocks.restore).toHaveBeenCalled()
-    mocks.query = { data: { data: [{ ...initialRules[1]!, name: 'edited' }, initialRules[0]!] } }
+    mocks.query = { data: { restoreAvailable: true, data: [{ ...initialRules[1]!, name: 'edited' }, initialRules[0]!] } }
     rerender(<TocRulesSettingsSection />)
     expect(screen.getAllByRole('listitem').map((node) => node.textContent)).toEqual(['editedL1', '规则一L1'])
     act(() => mocks.drag!({ active: { id: 'rule-1' }, over: { id: 'rule-2' } }))
@@ -179,12 +194,44 @@ describe('TocRulesSettingsSection', () => {
     expect(mocks.reorder).toHaveBeenCalledWith(['rule-1', 'rule-2'], expect.objectContaining({ onError: expect.any(Function) }))
   })
 
+  it('lists a published rule for use but keeps its definition with the publisher', () => {
+    mocks.query = { data: { restoreAvailable: true, data: [
+      ...initialRules,
+      { ...initialRules[1]!, id: 'shared', name: '公共规则', availability: 'instance', mine: false },
+    ] } }
+    render(<TocRulesSettingsSection />)
+
+    expect(screen.getByText('公共规则')).toBeInTheDocument()
+    expect(screen.getByText('settings.resourceScopeInstance')).toBeInTheDocument()
+    // The personal switch stays available without touching the definition.
+    fireEvent.click(screen.getAllByRole('switch')[2]!)
+    expect(mocks.updateRule).toHaveBeenCalledWith({ id: 'shared', body: { enabled: true } }, expect.any(Object))
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.editModeEnter' }))
+    // select-all + the two own rows; the shared row cannot be selected or edited
+    expect(screen.getAllByRole('checkbox')).toHaveLength(3)
+    expect(screen.getAllByRole('button', { name: 'settings.tocRulesEditShort' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'settings.ruleDelete' })).toHaveLength(2)
+    expect(screen.getByRole('checkbox', { name: 'settings.ruleSelectAll' })).toBeEnabled()
+  })
+
   it('allows restoring an empty list from edit mode', () => {
-    mocks.query = { data: { data: [] } }
+    mocks.query = { data: { restoreAvailable: true, data: [] } }
     render(<TocRulesSettingsSection />)
     fireEvent.click(screen.getByRole('button', { name: 'settings.editModeEnter' }))
     fireEvent.click(screen.getByRole('button', { name: 'settings.tocRulesRestore' }))
     expect(mocks.restore).toHaveBeenCalled()
     expect(screen.getByRole('checkbox', { name: 'settings.ruleSelectAll' })).toBeDisabled()
+  })
+
+  it('hides the restore action while every built-in preset is present', () => {
+    mocks.query = { data: { restoreAvailable: false, data: [...initialRules] } }
+    render(<TocRulesSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: 'settings.editModeEnter' }))
+    expect(screen.queryByRole('button', { name: 'settings.tocRulesRestore' })).toBeNull()
+    const actions = screen.getByRole('button', { name: 'settings.editModeExit' }).parentElement!
+    expect(within(actions).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual([
+      'settings.ruleExportSelected', 'settings.ruleDeleteSelected', 'settings.editModeExit',
+    ])
   })
 })

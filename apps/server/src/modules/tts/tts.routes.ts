@@ -3,12 +3,14 @@ import { Hono } from 'hono'
 import {
   ttsEdgeSpeechSchema,
   ttsServiceCreateSchema,
+  ttsServiceOrderSchema,
   ttsServiceUpdateSchema,
   ttsSpeechSchema,
   type TtsProviderRes,
   type TtsServiceRes,
 } from '@bookdock/shared'
 
+import { assertCanPublish } from '../../lib/publish-permission'
 import { synthesizeEdgeSpeech } from './edge-tts'
 import {
   createTtsService,
@@ -16,6 +18,7 @@ import {
   listTtsProviders,
   listTtsServices,
   listTtsVoices,
+  reorderTtsServices,
   synthesizeSpeech,
   testTtsServiceDraft,
   testTtsService,
@@ -37,6 +40,7 @@ ttsRoutes.post('/services', async (c) => {
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = ttsServiceCreateSchema.safeParse(await c.req.json())
   if (!parsed.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid TTS service', details: parsed.error.flatten() } }, 400)
+  assertCanPublish(user.role, parsed.data.availability)
   return c.json({ data: createTtsService(user.id, parsed.data) } satisfies { data: TtsServiceRes }, 201)
 })
 
@@ -48,11 +52,21 @@ ttsRoutes.get('/services/:id', (c) => {
   return c.json({ data: service } satisfies { data: TtsServiceRes })
 })
 
+// Registered before `/services/:id` so the literal path is not read as an id.
+ttsRoutes.put('/services/order', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const parsed = ttsServiceOrderSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid TTS service order' } }, 400)
+  return c.json({ data: reorderTtsServices(user.id, parsed.data.ids) } satisfies { data: TtsServiceRes[] })
+})
+
 ttsRoutes.put('/services/:id', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   const parsed = ttsServiceUpdateSchema.safeParse(await c.req.json())
   if (!parsed.success) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid TTS service', details: parsed.error.flatten() } }, 400)
+  assertCanPublish(user.role, parsed.data.availability)
   return c.json({ data: updateTtsService(user.id, c.req.param('id'), parsed.data) } satisfies { data: TtsServiceRes })
 })
 

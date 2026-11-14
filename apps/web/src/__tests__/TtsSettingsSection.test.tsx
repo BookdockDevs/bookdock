@@ -16,9 +16,15 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client.clear(); useAuthStore.getState().clearAuth(); vi.unstubAllGlobals() })
 
 function mount() { return render(<QueryClientProvider client={client}><TtsSettingsSection /></QueryClientProvider>) }
+// The provider menu ignores a re-open within 150 ms of its own close, so two
+// scripted opens in a row need that window to pass.
+async function openProviderMenu() {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 160)) })
+  fireEvent.click(screen.getByRole('button', { name: 'settings.ttsAdd' }))
+}
 async function openDraft() {
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
-  fireEvent.click(screen.getByText('settings.ttsAdd'))
+  await openProviderMenu()
 }
 
 describe('speech service management account drafts', () => {
@@ -34,7 +40,7 @@ describe('speech service management account drafts', () => {
     await waitFor(() => expect(screen.queryByLabelText('settings.ttsName')).not.toBeInTheDocument())
     expect(document.querySelector('input[type="password"]')).toBeNull()
     expect(vi.mocked(fetch).mock.calls.every(([, request]) => !request?.method || request.method === 'GET')).toBe(true)
-    fireEvent.click(screen.getByText('settings.ttsAdd'))
+    await openProviderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }))
     expect(screen.getByLabelText('settings.ttsName')).not.toHaveValue('Private draft')
     expect(document.querySelector('input[type="password"]')).toHaveValue('')
@@ -42,10 +48,25 @@ describe('speech service management account drafts', () => {
   it.each([true, false])('only shows the keep-credentials hint for configured services (%s)', async (credentialsConfigured) => {
     vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify({ data: String(url).endsWith('/providers')
       ? [{ id: 'openai', kind: 'openai-compatible', defaultBaseUrl: 'https://example.test', defaultModel: null }]
-      : [{ id: 'service-1', name: 'Saved voice', provider: 'openai', baseUrl: null, model: null, defaultVoice: null, options: {}, credentialsConfigured, createdAt: 1, updatedAt: 1 }] })))
+      : [{ id: 'service-1', name: 'Saved voice', provider: 'openai', baseUrl: null, model: null, defaultVoice: null, options: {}, credentialsConfigured, enabled: true, order: 10, availability: 'user', mine: true, createdAt: 1, updatedAt: 1 }] })))
     mount()
-    fireEvent.click(await screen.findByRole('button', { name: 'library.edit' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'settings.editModeEnter' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'settings.ttsEdit' }))
     expect(Boolean(screen.queryByText('settings.ttsSecretHint'))).toBe(credentialsConfigured)
+  })
+
+  it('parks a service through the row switch instead of deleting it', async () => {
+    vi.mocked(fetch).mockImplementation(async (url, request) => {
+      if (String(url).endsWith('/providers')) return new Response(JSON.stringify({ data: [] }))
+      if (request?.method === 'PUT') return new Response(JSON.stringify({ data: null }))
+      return new Response(JSON.stringify({ data: [{ id: 'service-1', name: 'Saved voice', provider: 'openai', baseUrl: null, model: null, defaultVoice: null, options: {}, credentialsConfigured: true, enabled: true, order: 10, createdAt: 1, updatedAt: 1 }] }))
+    })
+    mount()
+    fireEvent.click(await screen.findByRole('switch', { name: 'Saved voice' }))
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, request]) => request?.method === 'PUT')).toBe(true))
+    const put = vi.mocked(fetch).mock.calls.find(([, request]) => request?.method === 'PUT')!
+    expect(String(put[0])).toContain('/tts/services/service-1')
+    expect(JSON.parse(String(put[1]?.body))).toEqual({ enabled: false })
   })
 
   it('does not show the keep-credentials hint for a new service', async () => {
@@ -56,4 +77,20 @@ describe('speech service management account drafts', () => {
     expect(screen.queryByText('settings.ttsSecretHint')).not.toBeInTheDocument()
   })
 
+  it('triggers draft test and cancels form from the dialog footer', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify({ data: String(url).endsWith('/providers') ? [{ id: 'openai', kind: 'openai-compatible', defaultBaseUrl: 'https://example.test', defaultModel: null }] : [] })))
+    mount()
+    await openDraft()
+    fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }))
+
+    const testBtn = screen.getByRole('button', { name: 'settings.ttsTest' })
+    expect(testBtn).toBeInTheDocument()
+    fireEvent.click(testBtn)
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, request]) => String(request?.method).toUpperCase() === 'POST')).toBe(true))
+
+    const cancelBtn = screen.getByRole('button', { name: 'common.cancel' })
+    expect(cancelBtn).toBeInTheDocument()
+    fireEvent.click(cancelBtn)
+    await waitFor(() => expect(screen.queryByLabelText('settings.ttsName')).not.toBeInTheDocument())
+  })
 })

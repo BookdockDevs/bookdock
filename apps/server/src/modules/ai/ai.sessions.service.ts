@@ -29,7 +29,7 @@ interface AiThreadContext {
 }
 
 function normalizeThreadSettings(value: unknown): AiThreadSettings {
-  const raw = value && typeof value === 'object' ? value as { readingScope?: unknown; enabledTools?: unknown; assistantModeId?: unknown } : {}
+  const raw = value && typeof value === 'object' ? value as { readingScope?: unknown; enabledTools?: unknown; assistantModeId?: unknown; modelId?: unknown } : {}
   const readingScope: AiReadingScope = raw.readingScope === 'full_book'
     ? 'full_book'
     : DEFAULT_THREAD_SETTINGS.readingScope
@@ -39,7 +39,8 @@ function normalizeThreadSettings(value: unknown): AiThreadSettings {
   const assistantModeId = typeof raw.assistantModeId === 'string' && raw.assistantModeId.trim()
     ? raw.assistantModeId.trim().slice(0, 100)
     : DEFAULT_THREAD_SETTINGS.assistantModeId
-  return { readingScope, enabledTools, assistantModeId }
+  const modelId = typeof raw.modelId === 'string' && raw.modelId.trim() ? raw.modelId.trim().slice(0, 200) : undefined
+  return { readingScope, enabledTools, assistantModeId, ...(modelId ? { modelId } : {}) }
 }
 
 function assertBookOwnership(userId: string, bookId: string) {
@@ -312,7 +313,7 @@ export function prepareAiThread(userId: string, bookId: string, threadId: string
     const thread = ownedThread(userId, threadId)
     if (thread.bookId !== bookId) throw new AppError('AI_THREAD_NOT_FOUND', 'AI thread does not belong to this book')
     const effectiveSettings = normalizeThreadSettings({ ...normalizeThreadSettings(thread.settings), ...settings })
-    if (settings && (settings.readingScope !== undefined || settings.enabledTools !== undefined || settings.assistantModeId !== undefined)) {
+    if (settings && (settings.readingScope !== undefined || settings.enabledTools !== undefined || settings.assistantModeId !== undefined || settings.modelId !== undefined)) {
       getDb().update(aiThreads).set({ settings: effectiveSettings, updatedAt: Date.now() }).where(and(
         eq(aiThreads.id, thread.id),
         eq(aiThreads.userId, userId),

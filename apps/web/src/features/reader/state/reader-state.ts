@@ -5,6 +5,8 @@ export interface AiPendingQuickCommand {
   id: string
   name: string
   prompt: string
+  /** Server-side definition reference when the command came from the account's list. */
+  promptId?: string
 }
 
 export interface SidebarScrollPosition {

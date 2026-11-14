@@ -57,6 +57,13 @@ function footerRevealed() {
   return control!.className.includes('-translate-y-12')
 }
 
+/** The header wrapper toggles pointer-events while the chrome is revealed. */
+function headerRevealed() {
+  const wrapper = document.querySelector('[data-reader-canvas] > div.absolute.inset-x-0.top-0 > div')
+  expect(wrapper).not.toBeNull()
+  return wrapper!.className.includes('pointer-events-auto')
+}
+
 describe('reader chrome hot zone', () => {
   it('ignores moves over the selection bubble but still summons from the strip', async () => {
     render(<QueryClientProvider client={client}><Reader /></QueryClientProvider>)
@@ -84,6 +91,36 @@ describe('reader chrome hot zone', () => {
       await waitFor(() => expect(footerRevealed()).toBe(true))
     } finally {
       bubble.remove()
+    }
+  })
+
+  it('ignores moves over the unpinned sidebar overlay in both chrome bands', async () => {
+    render(<QueryClientProvider client={client}><Reader /></QueryClientProvider>)
+    await waitFor(() => expect(client.getQueryData(['book', 'reader-book'])).toEqual({ data: book }))
+
+    const canvas = document.querySelector('[data-reader-canvas]') as HTMLElement
+    canvas.getBoundingClientRect = () => ({
+      left: 0, top: 0, right: 1200, bottom: 800, width: 1200, height: 800, x: 0, y: 0, toJSON: () => ({}),
+    }) as DOMRect
+
+    // The unlocked sidebar is absolutely positioned, so it overlays the canvas
+    // while the canvas rect still spans the full window — the band geometry
+    // alone would summon the chrome from the panel's own top/bottom rows.
+    const sidebar = document.createElement('div')
+    sidebar.id = 'reader-navigation'
+    document.body.appendChild(sidebar)
+    try {
+      fireEvent.pointerMove(sidebar, { clientX: 600, clientY: 20, buttons: 0 })
+      expect(headerRevealed()).toBe(false)
+
+      fireEvent.pointerMove(sidebar, { clientX: 600, clientY: 780, buttons: 0 })
+      expect(footerRevealed()).toBe(false)
+
+      // Control: the same header-band point without the sidebar under the pointer.
+      fireEvent.pointerMove(document.body, { clientX: 600, clientY: 20, buttons: 0 })
+      await waitFor(() => expect(headerRevealed()).toBe(true))
+    } finally {
+      sidebar.remove()
     }
   })
 })
