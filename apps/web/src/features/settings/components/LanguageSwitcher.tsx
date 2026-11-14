@@ -20,7 +20,6 @@ export default function LanguageSwitcher() {
     <div className="flex items-center justify-between gap-4 py-2">
       <div className="min-w-0">
         <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.language')}</p>
-        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.languageHint')}</p>
       </div>
       <SegmentedControl
         ariaLabel={_('settings.language')}

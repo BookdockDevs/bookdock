@@ -67,7 +67,7 @@ export default function DictionaryEditor({ item, isOwner, saving, onClose, onSav
               label: _(value === 'user' ? 'settings.fontsScopeUser' : 'settings.fontsScopeInstance'),
             }))}
           />
-          {!isOwner && <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{_('settings.fontsScopeOwnerHint')}</p>}
+          {!isOwner && <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{_('settings.dictionariesScopeOwnerHint')}</p>}
         </fieldset>
 
         <div className="flex flex-col gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:bg-stone-800/60 dark:text-stone-400">

@@ -2,6 +2,20 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Simplified settings labels and help text across general, library, reading, access control, and integration settings. Key-retention guidance appears only for saved credentials; font and dictionary availability labels and owner-only hints are clearer, and device-font import guidance is visible in the import menu.
+- Moved sidebar drag-sorting guidance into a click-to-open information bubble beside sidebar navigation options, removing the repeated inline sorting descriptions. Simplified Legado import guidance while keeping access-link and token warnings explicit.
+- Distinguished server disk and cache controls from device storage, clarified trash retention and permanent-deletion behavior, and removed redundant descriptions from the About links. Updated Chinese and English copy together.
+- Aligned the select-all and selection-count bars in TOC and text-replacement rule edit modes, with consistent spacing, dividers, and count alignment.
+
+### Fixed
+
+- Font and dictionary rows no longer apply general visual transitions to drag transforms, keeping sortable positioning separate from hover and selection effects.
+- Confirmation dialogs keep their action label while a request is pending unless a custom progress label is supplied; pending indicators and interaction locks remain in place.
+
 ## [0.8.4] - 2026-11-14
 
 ### Added
@@ -1240,6 +1254,20 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [待发布]
+
+#### 调整
+
+- 精简通用、书库、阅读、访问控制及集成设置的名称和说明。仅在已有凭证时提示留空保留密钥；明确字体和词典的可用范围及实例所有者权限，并在字体导入菜单中直接展示本机保存说明。
+- 将侧栏拖拽排序说明移到「侧栏导航项」旁的点击气泡中，移除重复的行内排序说明；精简开源阅读导入指引，保留免登录链接和访问令牌的关键提醒。
+- 区分服务器磁盘、缓存与本机存储，明确回收站保留期限和永久删除行为，移除关于页面链接的重复说明，中英文文案同步调整。
+- 统一目录规则和文本替换编辑模式下的全选、选中数量栏，调整间距、分隔线和计数对齐。
+
+#### 修复
+
+- 字体和词典列表的通用视觉过渡不再作用于拖拽位移，避免与排序动画叠加。
+- 确认弹窗提交期间默认保留操作按钮原文案，仍显示等待状态并锁定操作；显式指定进度文案时继续使用该文案。
 
 ### [0.8.4] - 2026-11-14
 

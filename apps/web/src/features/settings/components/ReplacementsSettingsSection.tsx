@@ -203,8 +203,8 @@ export default function ReplacementsSettingsSection() {
         }
       >
       {editing && (
-        <div className="flex items-center gap-3 pb-2 text-xs text-stone-500 dark:text-stone-400">
-          <label className="flex cursor-pointer items-center gap-2">
+        <div className="flex items-center justify-between gap-3 border-b border-stone-100 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
+          <label className="flex cursor-pointer items-center gap-2 font-medium text-stone-600 dark:text-stone-300">
             <input type="checkbox" checked={rules.length > 0 && selectedRules.length === rules.length}
               ref={(node) => { if (node) node.indeterminate = selectedRules.length > 0 && selectedRules.length < rules.length }}
               disabled={busy || !listReady || rules.length === 0}
@@ -212,7 +212,7 @@ export default function ReplacementsSettingsSection() {
               className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300" />
             {_('settings.ruleSelectAll')}
           </label>
-          <span>{_('settings.ruleSelectedCount', { count: selectedRules.length })}</span>
+          <span className="shrink-0 tabular-nums">{_('settings.ruleSelectedCount', { count: selectedRules.length })}</span>
         </div>
       )}
 

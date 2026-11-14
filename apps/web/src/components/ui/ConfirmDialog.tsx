@@ -285,7 +285,7 @@ export default function ConfirmDialog({
                 </svg>
               )
             )}
-            <span>{submitting ? (submittingLabel ?? _('library.confirmSubmitting')) : confirmLabel}</span>
+            <span>{submitting ? (submittingLabel ?? confirmLabel) : confirmLabel}</span>
           </Button>
         </div>
       </div>

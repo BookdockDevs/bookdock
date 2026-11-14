@@ -1,9 +1,13 @@
+import { useId } from 'react'
+
 import { LIBRARY_SORT_MODES, type LibrarySortMode, type RecentlyReadStyle, type SidebarModule } from '@bookdock/shared'
 
 import SegmentedControl from '@/components/ui/SegmentedControl'
 import Toggle from '@/components/ui/Toggle'
+import SmartMenu from '@/components/ui/SmartMenu'
 import TaxonomyIcon from '@/features/library/components/TaxonomyIcon'
 import { useTranslation } from '@/hooks/useTranslation'
+import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { nextSidebarSort, sidebarSortDir, type SortDir } from '@/features/library/sort-modes'
@@ -31,7 +35,7 @@ interface SegOption {
 
 interface SegRowProps {
   label: string
-  hint: string
+  hint?: string
   options: SegOption[]
   onSelect: (value: string) => void
 }
@@ -42,7 +46,7 @@ function SegRow({ label, hint, options, onSelect }: SegRowProps) {
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
       <div className="min-w-0">
         <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
-        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
+        {hint && <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>}
       </div>
       <SegmentedControl
         wrap
@@ -69,7 +73,7 @@ function SegRow({ label, hint, options, onSelect }: SegRowProps) {
 
 interface ToggleRowProps {
   label: string
-  hint: string
+  hint?: string
   checked: boolean
   onChange: (checked: boolean) => void
 }
@@ -79,7 +83,7 @@ function ToggleRow({ label, hint, checked, onChange }: ToggleRowProps) {
     <div className="flex items-center justify-between gap-x-4 py-3">
       <div className="min-w-0">
         <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
-        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
+        {hint && <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>}
       </div>
       <Toggle checked={checked} onChange={onChange} ariaLabel={label} />
     </div>
@@ -95,17 +99,44 @@ interface ModuleOption {
 
 interface MultiPillRowProps {
   label: string
-  hint: string
+  hint?: string
   options: ModuleOption[]
   onToggle: (key: SidebarModule) => void
 }
 
 function MultiPillRow({ label, hint, options, onToggle }: MultiPillRowProps) {
+  const _ = useTranslation()
+  const help = useMenuAnchor()
+  const helpId = useId()
+
   return (
     <div className="flex items-center justify-between gap-x-4 py-3">
-      <div className="min-w-0">
+      <div className="flex min-w-0 items-center gap-1.5">
         <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
-        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
+        {hint && (
+          <button
+            ref={help.btnRef}
+            type="button"
+            aria-label={_('settings.prefSidebarModulesHelp')}
+            aria-expanded={help.open}
+            aria-controls={help.open ? helpId : undefined}
+            aria-haspopup="dialog"
+            onClick={(event) => help.toggleFromButton(event, 'below')}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11v5M12 8h.01" />
+            </svg>
+          </button>
+        )}
+        {hint && help.open && (
+          <SmartMenu triggerRef={help.btnRef} innerRef={help.menuRef} anchor={help.anchor} size={{ width: 'auto', height: 64 }} maxWidth={280} onClose={help.close}>
+            <div id={helpId} role="dialog" aria-label={_('settings.prefSidebarModulesHelp')} className="max-w-64 p-2 text-xs leading-relaxed text-stone-500 dark:text-stone-400">
+              {hint}
+            </div>
+          </SmartMenu>
+        )}
       </div>
       <SegmentedControl
         multiple
@@ -181,21 +212,19 @@ export default function LibraryPreferenceRows() {
     <>
       <ToggleRow
         label={_('settings.prefReadingStats')}
-        hint={_('settings.prefReadingStatsHint')}
         checked={readingStatsEnabled}
         onChange={(checked) => update.mutate({ readingStatsEnabled: checked })}
       />
       <Divider />
       <SegRow
         label={_('settings.prefRecentlyRead')}
-        hint={_('settings.prefRecentlyReadHint')}
         options={recentlyReadOptions}
         onSelect={(value) => update.mutate({ recentlyReadStyle: value as RecentlyReadStyle })}
       />
       <Divider />
       <MultiPillRow
         label={_('settings.prefSidebarModules')}
-        hint={_('settings.prefSidebarModulesHint')}
+        hint={_('settings.prefSidebarSortHint')}
         options={[
           { key: 'shelves', label: _('settings.sidebarModuleShelves'), iconKind: 'shelf', active: enabledModules.includes('shelves') },
           { key: 'categories', label: _('settings.sidebarModuleCategories'), iconKind: 'category', active: enabledModules.includes('categories') },
@@ -208,7 +237,6 @@ export default function LibraryPreferenceRows() {
           <Divider />
           <SegRow
             label={_('settings.prefShelfSort')}
-            hint={_('settings.prefShelfSortHint')}
             options={sidebarOptions(shelfSort)}
             onSelect={(value) => update.mutate({ shelfSort: nextSidebarSort(shelfSort, value as LibrarySortMode) })}
           />
@@ -219,7 +247,6 @@ export default function LibraryPreferenceRows() {
           <Divider />
           <SegRow
             label={_('settings.prefCategorySort')}
-            hint={_('settings.prefCategorySortHint')}
             options={sidebarOptions(categorySort)}
             onSelect={(value) => update.mutate({ categorySort: nextSidebarSort(categorySort, value as LibrarySortMode) })}
           />
@@ -230,7 +257,6 @@ export default function LibraryPreferenceRows() {
           <Divider />
           <SegRow
             label={_('settings.prefTagSort')}
-            hint={_('settings.prefTagSortHint')}
             options={sidebarOptions(tagSort)}
             onSelect={(value) => update.mutate({ tagSort: nextSidebarSort(tagSort, value as LibrarySortMode) })}
           />

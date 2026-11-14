@@ -142,7 +142,7 @@ export default function StorageConnectionsSection() {
         }
         iconBgClass="bg-sky-500/10 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"
         title={_('settings.storageConnectionsTitle') || '外部存储'}
-        description={_('settings.storageConnectionsDesc') || '连接 WebDAV、S3 等存储服务，浏览并批量导入图书。'}
+        description={_('settings.storageConnectionsDesc')}
         action={
           <Button type="button" variant="secondary" size="sm" onClick={handleOpenAdd} className="shrink-0 whitespace-nowrap gap-1.5">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

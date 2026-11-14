@@ -66,6 +66,13 @@ describe('FontsSettingsSection', () => {
     vi.unstubAllGlobals()
   })
 
+  it('shows the device storage explanation inside the import menu', () => {
+    render(<FontsSettingsSection />)
+    expect(screen.queryByText('仅保存在当前浏览器，不上传服务器')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '添加字体' }))
+    expect(screen.getByText('仅保存在当前浏览器，不上传服务器')).toBeVisible()
+  })
+
   it('renders uploaded, builtin and system fonts in one catalog', () => {
     render(<FontsSettingsSection />)
 
@@ -78,8 +85,8 @@ describe('FontsSettingsSection', () => {
     expect(screen.queryByText('woff2')).not.toBeInTheDocument()
     expect(screen.queryByText('2.0 MB')).not.toBeInTheDocument()
     expect(screen.queryByText('512 KB')).not.toBeInTheDocument()
-    expect(screen.getByText('个人')).toBeInTheDocument()
-    expect(screen.getByText('实例')).toBeInTheDocument()
+    expect(screen.getByText('仅自己')).toBeInTheDocument()
+    expect(screen.getByText('所有用户')).toBeInTheDocument()
     expect(screen.getAllByText('在线')).toHaveLength(4)
     expect(screen.getAllByText('系统')).toHaveLength(6)
     expect(screen.queryByText('自定义')).not.toBeInTheDocument()
@@ -101,7 +108,7 @@ describe('FontsSettingsSection', () => {
     expect(rows[2]?.querySelector('button[aria-label="编辑字体"]')).toBeNull()
     expect(rows[1]?.querySelector('button[aria-label="加载字体"]')?.parentElement).toBe(rows[1]?.querySelector('p')?.parentElement)
     expect(rows[1]?.querySelector('button[role="switch"]')?.parentElement).toBe(rows[1]?.lastElementChild)
-    expect(Array.from(rows[2]?.children ?? []).filter((child) => child.tagName === 'SPAN').map((child) => child.textContent)).toEqual(['个人'])
+    expect(Array.from(rows[2]?.children ?? []).filter((child) => child.tagName === 'SPAN').map((child) => child.textContent)).toEqual(['仅自己'])
     expect(rows[2]?.querySelector('button[role="switch"]')).toBe(rows[2]?.lastElementChild?.lastElementChild)
     fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     expect(rows[0]?.querySelector('button[aria-label="编辑字体"]')).toBeNull()
@@ -155,7 +162,7 @@ describe('FontsSettingsSection', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '编辑字体' })[0])
     expect(screen.getByText('hand.ttf')).toBeInTheDocument()
     expect(screen.queryByText('类型')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '实例' }))
+    fireEvent.click(screen.getByRole('button', { name: '所有用户' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(updateScope.mutateAsync).toHaveBeenCalledWith({ id: 'f1', scope: 'instance' }))
@@ -234,7 +241,7 @@ describe('FontsSettingsSection', () => {
     expect(screen.getByText('宋体')).toBeInTheDocument()
     expect(screen.getByText('手写体')).toBeInTheDocument()
     expect(screen.getByText('本机')).toBeInTheDocument()
-    expect(screen.queryByText('个人')).not.toBeInTheDocument()
+    expect(screen.queryByText('仅自己')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '添加字体' }))
     expect(screen.getByText('添加到本机')).toBeInTheDocument()
     expect(screen.queryByText('添加到服务器')).not.toBeInTheDocument()

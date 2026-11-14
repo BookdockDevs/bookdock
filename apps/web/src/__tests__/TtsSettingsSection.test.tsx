@@ -39,4 +39,21 @@ describe('speech service management account drafts', () => {
     expect(screen.getByLabelText('settings.ttsName')).not.toHaveValue('Private draft')
     expect(document.querySelector('input[type="password"]')).toHaveValue('')
   })
+  it.each([true, false])('only shows the keep-credentials hint for configured services (%s)', async (credentialsConfigured) => {
+    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify({ data: String(url).endsWith('/providers')
+      ? [{ id: 'openai', kind: 'openai-compatible', defaultBaseUrl: 'https://example.test', defaultModel: null }]
+      : [{ id: 'service-1', name: 'Saved voice', provider: 'openai', baseUrl: null, model: null, defaultVoice: null, options: {}, credentialsConfigured, createdAt: 1, updatedAt: 1 }] })))
+    mount()
+    fireEvent.click(await screen.findByRole('button', { name: 'library.edit' }))
+    expect(Boolean(screen.queryByText('settings.ttsSecretHint'))).toBe(credentialsConfigured)
+  })
+
+  it('does not show the keep-credentials hint for a new service', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify({ data: String(url).endsWith('/providers') ? [{ id: 'openai', kind: 'openai-compatible', defaultBaseUrl: 'https://example.test', defaultModel: null }] : [] })))
+    mount()
+    await openDraft()
+    fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }))
+    expect(screen.queryByText('settings.ttsSecretHint')).not.toBeInTheDocument()
+  })
+
 })

@@ -301,6 +301,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
         <Modal title={_(form.id ? 'settings.ttsEdit' : 'settings.ttsAdd')} onClose={() => setForm(null)}>
           <TtsServiceForm
             form={form}
+            savedCredentialsAvailable={servicesData?.data.some((service) => service.id === form.id && service.credentialsConfigured) === true}
             setForm={setForm}
             onSave={save}
             onTest={testCurrent}
@@ -313,7 +314,7 @@ export default function TtsSettingsSection({ id }: { id?: string }) {
   )
 }
 
-function TtsServiceForm({ form, setForm, onSave, onTest, saving, testing }: { form: TtsFormState; setForm: (value: TtsFormState) => void; onSave: () => void; onTest: () => void; saving: boolean; testing: boolean }) {
+function TtsServiceForm({ form, setForm, onSave, onTest, saving, testing, savedCredentialsAvailable }: { savedCredentialsAvailable: boolean; form: TtsFormState; setForm: (value: TtsFormState) => void; onSave: () => void; onTest: () => void; saving: boolean; testing: boolean }) {
   const _ = useTranslation()
   const field = 'h-9 rounded-lg border border-stone-200 bg-transparent px-3 text-sm outline-none focus:border-blue-500 dark:border-stone-700'
   const set = (patch: Partial<TtsFormState>) => setForm({ ...form, ...patch })
@@ -327,9 +328,9 @@ function TtsServiceForm({ form, setForm, onSave, onTest, saving, testing }: { fo
     {isAzure ? <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>Region</span><input required value={String(form.options.region ?? '')} onChange={(event) => set({ options: { ...form.options, region: event.target.value } })} placeholder="global" className={field} /></label> : <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsBaseUrl')}</span><input value={form.baseUrl} onChange={(event) => set({ baseUrl: event.target.value })} className={field} /></label>}
     {needsModel && <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsModel')}</span><div className="flex items-center gap-1"><input required value={form.model} onChange={(event) => set({ model: event.target.value })} className={`${field} min-w-0 flex-1`} />{testButton}</div></label>}
     {isAliyun ? <><div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>App Key</span><PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label="App Key" secret disabled={saving} required={!form.id} value={form.secrets.appKey ?? ''} onChange={(event) => setSecret('appKey', event.target.value)} className={field} /></div><label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>Access Key ID</span><input required={!form.id} value={form.secrets.accessKeyId ?? ''} onChange={(event) => setSecret('accessKeyId', event.target.value)} className={field} /></label><div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>Access Key Secret</span><PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label="Access Key Secret" secret disabled={saving} required={!form.id} value={form.secrets.accessKeySecret ?? ''} onChange={(event) => setSecret('accessKeySecret', event.target.value)} className={field} /></div></> : <div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsApiKey')}</span><PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label={_('settings.ttsApiKey')} secret disabled={saving} required={!form.id} value={form.secrets.apiKey ?? ''} onChange={(event) => setSecret('apiKey', event.target.value)} autoComplete="new-password" className={field} /></div>}
+    {savedCredentialsAvailable && <p className="text-xs leading-5 text-stone-400">{_('settings.ttsSecretHint')}</p>}
     <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsDefaultVoice')}</span><input value={form.defaultVoice} onChange={(event) => set({ defaultVoice: event.target.value })} placeholder={isAzure ? 'zh-CN-XiaoxiaoNeural' : form.provider === 'mimo' ? '冰糖' : form.provider === 'minimax' ? 'Chinese (Mandarin)_Male_Announcer' : 'alloy'} className={field} /></label>
     {form.provider === 'openai' && <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300"><span>{_('settings.ttsInstructions')}</span><textarea value={String(form.options.instructions ?? '')} onChange={(event) => set({ options: { ...form.options, instructions: event.target.value } })} className="min-h-20 rounded-lg border border-stone-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-stone-700" /></label>}
-    <p className="text-xs leading-5 text-stone-400">{_('settings.ttsSecretHint')}</p>
     <div className="flex justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">{!needsModel && testButton}<button type="submit" disabled={saving} className="rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900">{_(saving ? 'passwordInput.saving' : 'settings.ttsSave')}</button></div>
   </form>
 }

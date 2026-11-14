@@ -217,7 +217,7 @@ export default function LegadoSettingsSection() {
                 {isMobile ? (
                   <a
                     href={importHref || undefined}
-                    title={_('settings.legadoOneClickImportHint')}
+                    title={_('settings.legadoOneClickImport')}
                     aria-label={_('settings.legadoOneClickImport')}
                     aria-disabled={!sourceUrl}
                     className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-xs transition-all ${
@@ -340,9 +340,6 @@ export default function LegadoSettingsSection() {
             <div className="space-y-1 px-2 text-center text-balance">
               <p className="text-xs font-medium text-stone-800 dark:text-stone-200">
                 {_('settings.legadoQrScanTip')}
-              </p>
-              <p className="text-xs leading-relaxed text-stone-500 dark:text-stone-400">
-                {_('settings.legadoQrScanSubTip')}
               </p>
             </div>
             <div className="pt-1">

@@ -54,7 +54,7 @@ describe('AboutSettingsSection in-app update', () => {
     renderSection([{ phase: 'download', outcome: 'active', currentVersion: CURRENT, targetVersion: TARGET }])
 
     expect(screen.getByRole('button', { name: `v${CURRENT}` })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /项目地址/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /GitHub 仓库/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '检查更新' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '立即更新' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '查看更新状态' })).not.toBeInTheDocument()

@@ -48,7 +48,7 @@ export default function DictionaryRow({ item, isOwner, editing, disabled, onTogg
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
-        'flex items-center gap-2.5 rounded-lg border border-stone-200/80 bg-stone-50/50 px-3 py-2.5 transition-all dark:border-stone-800/80 dark:bg-stone-900/40',
+        'flex items-center gap-2.5 rounded-lg border border-stone-200/80 bg-stone-50/50 px-3 py-2.5 transition-[background-color,border-color,opacity,box-shadow] dark:border-stone-800/80 dark:bg-stone-900/40',
         !item.enabled && 'opacity-60 bg-transparent dark:bg-transparent',
         isDragging && 'relative z-10 opacity-70 shadow-md ring-1 ring-stone-400/30',
       )}

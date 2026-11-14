@@ -60,7 +60,7 @@ export default function InstanceSettingsSection() {
   }
   const modeHints: Record<RegistrationMode, string> = {
     closed: _('admin.registrationModeClosedHint'),
-    invite: _('admin.registrationModeInviteHint'),
+    invite: '',
     open: _('admin.registrationModeOpenHint'),
   }
 
@@ -74,7 +74,7 @@ export default function InstanceSettingsSection() {
       <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('admin.registrationMode')}</p>
-          <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{modeHints[registrationMode]}</p>
+          {modeHints[registrationMode] && <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{modeHints[registrationMode]}</p>}
         </div>
         <SegmentedControl
           role="radiogroup"

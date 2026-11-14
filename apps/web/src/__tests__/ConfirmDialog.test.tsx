@@ -175,6 +175,8 @@ describe('ConfirmDialog', () => {
     fireEvent.click(confirmBtn)
     expect(onConfirm).toHaveBeenCalledTimes(1)
     expect(confirmBtn).toBeDisabled()
+    expect(confirmBtn).toHaveTextContent('Delete')
+    expect(screen.getByRole('alertdialog')).toHaveAttribute('aria-busy', 'true')
     expect(cancelBtn).toBeDisabled()
 
     // Escape and cancel button cannot dismiss while pending
@@ -190,5 +192,14 @@ describe('ConfirmDialog', () => {
     // Can dismiss after completion
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses a custom pending label when provided', async () => {
+    let finish!: () => void
+    render(<ConfirmDialog title="Upload" message="Confirm" confirmLabel="Upload" submittingLabel="Uploading…" onConfirm={() => new Promise<void>((resolve) => { finish = resolve })} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+    expect(screen.getByRole('button', { name: 'Uploading…' })).toBeDisabled()
+    finish()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Upload' })).toBeEnabled())
   })
 })

@@ -100,6 +100,7 @@ describe('LegadoSettingsSection', () => {
     renderSection({ legado: { enabled: true, authMode: 'accessKey' } })
 
     expect(screen.getByRole('switch', { name: '免登录访问' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('链接包含访问凭证，持有者可通过书源使用你有权访问的书籍。请勿公开分享。')).toBeVisible()
     await waitFor(() => {
       expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toContain('key=bd_src_secret')
     })
@@ -203,7 +204,7 @@ describe('LegadoSettingsSection', () => {
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument()
       expect(screen.getByText('书源扫码导入')).toBeInTheDocument()
-      expect(screen.getByText('打开开源阅读「书源管理 - 二维码导入」')).toBeInTheDocument()
+      expect(screen.getByText('在开源阅读中打开「书源管理 → 二维码导入」')).toBeInTheDocument()
     })
   })
 
@@ -229,7 +230,7 @@ describe('LegadoSettingsSection', () => {
   it('toggles EPUB media inclusion', async () => {
     renderSection({ legado: { enabled: true, includeEpubMedia: true } })
 
-    const toggle = screen.getByRole('switch', { name: '包含媒体内容' })
+    const toggle = screen.getByRole('switch', { name: '包含 EPUB 媒体' })
     expect(toggle).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(toggle)
 

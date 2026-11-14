@@ -138,9 +138,7 @@ describe('TocRulesSettingsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'settings.ruleDeleteSelected' }))
     expect(screen.getByRole('alertdialog')).toHaveTextContent('规则一')
     expect(mocks.deleteRules).not.toHaveBeenCalled()
-    // ConfirmDialog now awaits onConfirm and swaps the confirm label to
-    // "submitting" while the promise is in flight, so the button has to be
-    // waited back to its resting label before it can be located again.
+    // Wait for the previous confirmation to finish before confirming again.
     const confirmButton = async () => {
       await waitFor(() =>
         expect(screen.getByRole('button', { name: 'settings.confirmDeleteAction' })).toBeEnabled())

@@ -77,6 +77,18 @@ describe('AiSettingsSection', () => {
     )
   })
 
+  it('only explains keeping a key when the edited provider has saved credentials', () => {
+    const config = useAiConfig()
+    const profiles = config.data!.data.profiles!
+    profiles[0]!.apiKeyConfigured = true
+    const view = render(<AiSettingsSection />)
+    fireEvent.click(screen.getAllByRole('button', { name: '编辑 AI 供应商' })[0]!)
+    expect(screen.getByText('留空则保留已保存的密钥')).toBeInTheDocument()
+    profiles[0]!.apiKeyConfigured = false
+    view.rerender(<AiSettingsSection />)
+    expect(screen.queryByText('留空则保留已保存的密钥')).not.toBeInTheDocument()
+  })
+
   it('fetches provider models as candidates and only persists explicitly added models', async () => {
     useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'owner' } })
     const fetchMutate = vi.fn()
@@ -294,7 +306,7 @@ describe('AiSettingsSection', () => {
     expect(screen.queryByRole('button', { name: '自定义兼容接口' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'DeepSeek' }))
     expect(screen.getByLabelText('接口地址')).toHaveAttribute('readonly')
-    expect(screen.getByText('成员使用供应商默认地址；自定义接口地址由 Owner 管理。')).toBeInTheDocument()
+    expect(screen.getByText('使用供应商默认地址，自定义地址需由实例所有者配置')).toBeInTheDocument()
   })
 
   it('shows guests a hint instead of configuration controls', () => {
@@ -302,7 +314,7 @@ describe('AiSettingsSection', () => {
 
     render(<AiSettingsSection />)
 
-    expect(screen.getByText('游客不能配置 AI 供应商；登录后可在这里添加自己的供应商。')).toBeInTheDocument()
+    expect(screen.getByText('登录后可配置 AI 供应商。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '编辑 AI 供应商' })).toBeNull()
   })
 

@@ -282,7 +282,7 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
                 triggerRef={importMenu.btnRef}
                 innerRef={importMenu.menuRef}
                 anchor={importMenu.anchor}
-                size={{ width: 180, height: serverImportAllowed ? 80 : 44 }}
+                size={{ width: 240, height: serverImportAllowed ? 104 : 68 }}
                 onClose={importMenu.close}
               >
                 <div className="flex flex-col gap-0.5">
@@ -304,13 +304,15 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
                     type="button"
                     className={`${menuItemClass} disabled:cursor-not-allowed disabled:opacity-50`}
                     disabled={!deviceImportReady}
-                    title={_('settings.fontsImportDeviceHint')}
                     onClick={() => {
                       importMenu.close()
                       deviceInputRef.current?.click()
                     }}
                   >
-                    {_('library.sourceLocal')}
+                    <span className="flex min-w-0 flex-col items-start gap-0.5 whitespace-normal text-left">
+                      <span>{_('library.sourceLocal')}</span>
+                      <span className="text-xs font-normal text-stone-500 dark:text-stone-400">{_('settings.fontsImportDeviceHint')}</span>
+                    </span>
                   </button>
                 </div>
               </SmartMenu>

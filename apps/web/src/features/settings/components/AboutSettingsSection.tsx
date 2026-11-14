@@ -335,9 +335,6 @@ export default function AboutSettingsSection() {
                   <h3 className="text-xs font-medium text-stone-800 transition-colors group-hover:text-stone-900 dark:text-stone-200 dark:group-hover:text-stone-100">
                     {_('settings.aboutRepository')}
                   </h3>
-                  <p className="mt-0.5 text-[11px] text-stone-400 dark:text-stone-500">
-                    {_('settings.aboutRepositoryDesc')}
-                  </p>
                 </div>
               </div>
               <span className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-all group-hover:text-stone-700 dark:text-stone-500 dark:group-hover:text-stone-300">
@@ -361,9 +358,6 @@ export default function AboutSettingsSection() {
                   <h3 className="text-xs font-medium text-stone-800 transition-colors group-hover:text-stone-900 dark:text-stone-200 dark:group-hover:text-stone-100">
                     {_('settings.aboutReleases')}
                   </h3>
-                  <p className="mt-0.5 text-[11px] text-stone-400 dark:text-stone-500">
-                    {_('settings.aboutReleasesDesc')}
-                  </p>
                 </div>
               </div>
               <span className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-all group-hover:text-stone-700 dark:text-stone-500 dark:group-hover:text-stone-300">
