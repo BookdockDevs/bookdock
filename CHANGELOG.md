@@ -12,6 +12,8 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- Prefetched the reader Data sidebar's statistics and first page of records after the reading overview loads, reducing the wait on first open while retaining version consistency checks.
+- Completed missing interface translations, including the review editor, and removed unused translation keys.
 - AI settings separate provider connections from models. Add one connection per provider, choose which discovered models are exposed, and test models on demand — all in one dialog per connection. Chat and translation remember the model you last used on each surface and only list enabled models; a choice that no longer resolves is ignored, and the next available model serves the request.
 - The reading settings cards (speech, fonts, dictionaries, TOC rules, quick commands) share one edit-mode interaction: rows show enable switches, and edit, delete and drag ordering appear only in edit mode. AI provider entries show just the endpoint, and section titles carry item counts.
 - Simplified settings labels and help text across general, library, reading, access control and integration settings. Key-retention guidance appears only for saved credentials, and sidebar sorting guidance moved into a click-to-open information bubble.
@@ -1278,6 +1280,8 @@ All notable changes to Bookdock are documented here.
 
 #### 调整
 
+- 阅读器加载阅读概览后会提前获取数据侧页的统计和首屏记录，减少首次打开时的等待，同时保留数据版本一致性检查。
+- 补齐界面翻译，包括书评编辑器，并清理不再使用的翻译键。
 - 设置 → 阅读的朗读卡片改用与字体、词典、目录规则一致的编辑模式：行右侧是启用开关，改名、删除和拖拽排序收在铅笔按钮之后（此处按钮提示为「完成」，因为该列表不是「保存排序」语义）。供应商列表改为由「+」图标按钮打开，菜单定位与同页其他卡片一致。
 - 精简通用、书库、阅读、访问控制及集成设置的名称和说明。仅在已有凭证时提示留空保留密钥；明确字体和词典的可用范围及实例所有者权限，并在字体导入菜单中直接展示本机保存说明。
 - 将侧栏拖拽排序说明移到「侧栏导航项」旁的点击气泡中，移除重复的行内排序说明；精简开源阅读导入指引，保留免登录链接和访问令牌的关键提醒。

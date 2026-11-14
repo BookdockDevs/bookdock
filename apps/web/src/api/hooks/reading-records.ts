@@ -397,7 +397,14 @@ export function usePrefetchBookReadingStats(bookId: string | undefined) {
       networkMode: local ? 'always' : 'online',
       queryFn: () => local ? local.getReadingRecords() : apiGet<{ data: ReadingRecordBookDetailRes }>(withReveal(`/reading-records/book/${bookId}`)),
     })
-    void queryClient.prefetchQuery(readingLedgerOptions(bookId, local))
+    let cancelled = false
+    void queryClient.fetchQuery(readingLedgerOptions(bookId, local)).then((ledger) => {
+      if (cancelled || ledger.data.dataVersion === undefined) return
+      const version = ledger.data.dataVersion
+      void queryClient.prefetchQuery(readingLedgerStatsOptions(bookId, undefined, version, local))
+      void queryClient.prefetchInfiniteQuery(readingSessionsOptions(bookId, undefined, version, local))
+    }).catch(() => {})
+    return () => { cancelled = true }
   }, [bookId, local, queryClient])
 }
 

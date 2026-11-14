@@ -9,18 +9,26 @@ vi.mock('@/api/client', () => ({ apiGet: vi.fn().mockResolvedValue({ data: {} })
 vi.mock('@/lib/reveal-hidden', () => ({ withReveal: (path: string) => path }))
 
 describe('reading stats prefetch', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => { vi.resetAllMocks(); vi.mocked(apiGet).mockResolvedValue({ data: {} } as never) })
 
-  it('warms the live total and ledger queries without fetching the retired mixed detail feed', async () => {
+  it('warms the ledger and the matching version of the sidebar queries', async () => {
+    vi.mocked(apiGet).mockImplementation(async (path) => {
+      if (path.endsWith('/ledger')) return { data: { dataVersion: 7 } } as never
+      if (path.includes('/sessions?')) return { data: { dataVersion: 7, items: [], nextCursor: null } } as never
+      return { data: { dataVersion: 7 } } as never
+    })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
     renderHook(() => usePrefetchBookReadingStats('b1'), { wrapper })
 
-    await waitFor(() => expect(client.getQueryData(['reading-records', 'ledger', 'b1'])).toEqual({ data: {} }))
-    expect(client.getQueryData(['reading-records', 'book', 'b1'])).toEqual({ data: {} })
+    await waitFor(() => expect(client.getQueryData(['reading-records', 'ledger-sessions', 'b1', undefined, undefined, 7])).toBeDefined())
+    expect(client.getQueryData(['reading-records', 'book', 'b1'])).toBeDefined()
+    expect(client.getQueryData(['reading-records', 'ledger-stats', 'b1', undefined, undefined, 7])).toBeDefined()
     expect(vi.mocked(apiGet).mock.calls.map(([path]) => path)).toEqual([
       '/reading-records/book/b1',
       '/reading-records/book/b1/ledger',
+      '/reading-records/book/b1/stats',
+      '/reading-records/book/b1/sessions?limit=50',
     ])
     client.clear()
   })
@@ -35,7 +43,7 @@ describe('reading stats prefetch', () => {
 })
 
 describe('scoped reading queries', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => { vi.resetAllMocks(); vi.mocked(apiGet).mockResolvedValue({ data: {} } as never) })
 
   it('keeps per-book period caches separate and respects disabled queries', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
