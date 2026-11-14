@@ -202,17 +202,6 @@ export default function SelectionBar({ selectedKeys, onClear, onComplete = onCle
       const showResult = succeeded > 0 ? notify.warning : notify.error
       showResult(
         { key: succeeded > 0 ? 'library.batchPartial' : 'library.batchFailed', params: { action: _(actionKey), succeeded, failed } },
-        {
-          duration: 'persistent',
-          action: {
-            label: _('library.batchRetryFailed'),
-            onClick: () => {
-              void runBatch(action, successKey, actionKey, failedKeys).then((ok) => {
-                if (ok) onComplete()
-              })
-            },
-          },
-        },
       )
     }
     setMarking(false)
@@ -262,7 +251,7 @@ export default function SelectionBar({ selectedKeys, onClear, onComplete = onCle
         onRetainSelection?.(failedKeys)
         notify.warning(
           { key: succeeded > 0 ? 'library.batchPartial' : 'library.batchFailed', params: { action: _(actionKey), succeeded, failed } },
-          { duration: 'persistent', dedupeKey: retryDedupeKey, undo: batchUndo, action: { label: _('library.batchRetryFailed'), onClick: () => { void runPrivateBatchUpdate(update, successKey, actionKey, failedKeys, retryDedupeKey).then((ok) => { if (ok) onComplete() }) } } },
+          { dedupeKey: retryDedupeKey, undo: batchUndo },
         )
       } else {
         notify.success({ key: successKey, params: { count: succeeded } }, { dedupeKey: retryDedupeKey, undo: batchUndo })

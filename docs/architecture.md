@@ -1051,18 +1051,14 @@ ownership, expiry and post-operation state inside the database transaction
 that restores it. Receipts expire 120 seconds after issue. Responses include a
 per-user generation and absolute expiry so delayed responses cannot replace a
 newer opportunity and the client never advertises a receipt beyond its
-server-confirmed deadline. A retryable server failure may keep the receipt
-usable on the server, but the client does not extend the visible retry entry
-without a new confirmed expiry. The operation's ordinary success notification
-is augmented with the undo icon; partial success keeps its failed-item retry
-action and adds the undo icon to that same notification. The undo entry is
+server-confirmed deadline. The operation's ordinary success notification
+is augmented with the undo icon; partial success may also offer undo for the
+successful changes while retaining failed items in the selection. The undo entry is
 bounded by a 10-second notification lifetime and the absolute receipt deadline;
-pointer/focus pauses do not extend server validity. A retryable failure keeps
-the undo action in its original slot, with the same deadline and expiry cleanup,
-so a partial operation's failed-item retry action remains available. While a
+pointer/focus pauses do not extend server validity. A failed undo clears the
+client opportunity and reports that undo did not complete. While a
 restore request is running the notification stays visible until its response.
-On success, a normal notification becomes a regular short-lived success notice;
-a partial notice preserves its failed-item retry action and lifetime. Removing
+On success, the notification becomes a regular short-lived success notice. Removing
 the focused undo control must also release the notification's focus pause, since
 browsers may not dispatch blur when a focused node is removed. Closing the
 notification or changing account clears the browser opportunity, and responses

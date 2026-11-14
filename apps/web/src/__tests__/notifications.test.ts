@@ -102,49 +102,21 @@ describe('notify', () => {
     expect(useToastStore.getState().toasts[0]?.secondaryAction).toBeUndefined()
   })
 
-  it('keeps the partial retry action in its slot after an undo failure and retry', async () => {
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({ error: { code: 'INTERNAL_ERROR' } }) })
-      .mockResolvedValueOnce({ ok: true }))
-    const receipt = { token: 'partial-retry-receipt', label: 'Undo' }
-    const retry = vi.fn()
-    publishUndoOpportunity({ ...receipt, expiresAt: Date.now() + 120_000, generation: 501 })
-    const id = notify.warning({ key: 'library.batchPartial', params: { action: '置顶', succeeded: 2, failed: 1 } }, {
-      dedupeKey: 'partial-retry', duration: 'persistent', action: { label: '重试失败项', onClick: retry }, undo: receipt,
-    })
+  it.each(['server', 'network', 'local'])('clears the undo opportunity after a %s failure', async (failure) => {
+    const request = vi.fn()
+    if (failure === 'server') request.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: { code: 'INTERNAL_ERROR' } }) })
+    else request.mockRejectedValue(new Error('unavailable'))
+    vi.stubGlobal('fetch', request)
+    const receipt = { token: `failed-${failure}`, label: 'Undo' }
+    publishUndoOpportunity({ ...receipt, expiresAt: Date.now() + 120_000, generation: 502, ...(failure === 'local' ? { execute: async () => { throw new Error('unavailable') } } : {}) })
+    const id = notify.success('Pinned', { undo: receipt })
 
     await runUndo()
-    expect(useToastStore.getState().toasts[0]).toMatchObject({
-      id, action: { label: '重试失败项' }, secondaryAction: { icon: 'retry' }, undoActionSlot: 'secondaryAction',
-    })
-
-    await runUndo()
-
-    expect(useToastStore.getState().toasts[0]).toMatchObject({
-      id, action: { label: '重试失败项' }, secondaryAction: undefined,
-      message: { key: 'undo.partialSucceeded' }, duration: 'persistent',
-    })
-    expect(retry).not.toHaveBeenCalled()
-    expect(fetch).toHaveBeenCalledTimes(2)
-  })
-
-  it('clears the hotkey opportunity when a retry icon expires', async () => {
-    vi.useFakeTimers()
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false, status: 503, json: async () => ({ error: { code: 'INTERNAL_ERROR' } }),
-    }))
-    const receipt = { token: 'expiring-retry-receipt', label: 'Undo' }
-    publishUndoOpportunity({ ...receipt, expiresAt: Date.now() + 5_000, generation: 502 })
-    notify.success('Pinned', { undo: receipt })
-
-    await runUndo()
-    expect(hasUndoOpportunity()).toBe(true)
-    expect(useToastStore.getState().toasts[0]?.action?.icon).toBe('retry')
-
-    vi.advanceTimersByTime(5_000)
-
+    expect(useToastStore.getState().toasts[0]).toMatchObject({ id, type: 'error', message: { key: 'undo.retryableFailure' }, duration: 9_000 })
+    expect(useToastStore.getState().toasts[0]?.action).toBeUndefined()
     expect(hasUndoOpportunity()).toBe(false)
-    expect(useToastStore.getState().toasts).toHaveLength(0)
+    await runUndo()
+    expect(request).toHaveBeenCalledTimes(failure === 'local' ? 0 : 1)
   })
 
   it('does not log out a new account when an old undo request returns 401', async () => {

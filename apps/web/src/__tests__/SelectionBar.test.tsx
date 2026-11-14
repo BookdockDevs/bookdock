@@ -343,6 +343,7 @@ describe('SelectionBar', () => {
     expect(apiPatch).toHaveBeenCalledWith('/books/batch/update', { ids: ['a', 'b'], pinned: true })
     await waitFor(() => expect(onRetainSelection).toHaveBeenCalledWith(['server:b']))
     expect(useToastStore.getState().toasts[0]).toMatchObject({ type: 'warning', message: { key: 'library.batchPartial', params: { succeeded: 1, failed: 1 } } })
+    expect(useToastStore.getState().toasts[0]?.action).toBeUndefined()
   })
 
   it('reports complete batch failure as an error and retains all failed items', async () => {

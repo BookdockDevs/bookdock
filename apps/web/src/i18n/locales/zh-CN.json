@@ -979,7 +979,7 @@
     "serverUploadDisabled": "管理员已禁止上传到服务器"
   },
   "reader": {
-    "fontServiceUnavailable": "字体服务暂不可用，已使用设备字体继续阅读",
+    "fontServiceUnavailable": "字体列表加载失败，阅读字体可能受影响",
     "deviceFontUnavailable": "{{total}} 个本机字体无法读取，已回退可用字体",
     "positionUnavailableAfterEdit": "书籍内容已更新，无法恢复之前的阅读位置。",
     "coverageUnavailableAfterEdit": "书籍内容已更新，之前的阅读统计无法自动对应。",
@@ -2145,7 +2145,7 @@
     "action": "撤销",
     "running": "正在撤销",
     "retry": "重试撤销",
-    "retryableFailure": "撤销暂时失败，请重试",
+    "retryableFailure": "撤销未完成",
     "permissionChanged": "当前账号权限已变化，无法撤销",
     "conflict": "相关内容已变化，无法撤销",
     "expired": "撤销机会已过期",

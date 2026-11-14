@@ -11,7 +11,6 @@ import { useDeviceFontStore } from '@/features/device-fonts/store'
 import { useDeviceFontUrls } from '@/features/device-fonts/urls'
 import { resolveReadingTheme } from '@/lib/reading-theme'
 import { notify } from '@/lib/notifications'
-import { useTranslation } from '@/hooks/useTranslation'
 import { FoliateReader } from '../renderers/FoliateReader'
 import { resolveDualFont } from '../fonts'
 import type { BookReader, ClickAreaMode, MarginalField, RendererEvents } from '../types'
@@ -191,16 +190,13 @@ export function useReaderRenderer({
   // fonts query is still loading an uploaded id resolves to the system
   // fallback; fontCss changing re-triggers the applyFont effect below.
   const fontsQuery = useFonts(resolvedFonts === undefined)
-  const { isError: fontsError, refetch: retryFonts } = fontsQuery
-  const _ = useTranslation()
+  const { isError: fontsError } = fontsQuery
   const fontsData = resolvedFonts === undefined ? fontsQuery.data ?? (fontsQuery.isError ? { data: [] } : undefined) : { data: resolvedFonts }
   useEffect(() => {
     if (resolvedFonts === undefined && fontsError) {
-      notify.warning({ key: 'reader.fontServiceUnavailable' }, { dedupeKey: 'reader-font-service', action: {
-        label: _('common.retry'), onClick: () => { void retryFonts() },
-      } })
+      notify.warning({ key: 'reader.fontServiceUnavailable' }, { dedupeKey: 'reader-font-service' })
     }
-  }, [resolvedFonts, fontsError, retryFonts, _])
+  }, [resolvedFonts, fontsError])
   // Device fonts load independently of the server font list, login state and
   // library source; the catalog must be ready before the resolution below.
   const deviceFonts = useDeviceFontStore((s) => s.fonts)

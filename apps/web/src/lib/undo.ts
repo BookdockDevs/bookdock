@@ -99,26 +99,31 @@ export function publishUndoOpportunity(receipt: { token: string; expiresAt?: num
   expirationByUser.set(userId, expiresAt)
 }
 
-function undoSlotPatch(label: string, icon: 'loading' | 'retry', disabled: boolean, undoInSecondary: boolean, duration?: number) {
-  const action = { label, icon, ...(disabled ? { disabled: true } : {}), keepOpen: true, onClick: () => undefined, onExpire: () => clearUndo() }
+function undoSlotPatch(label: string, undoInSecondary: boolean) {
+  const action = { label, icon: 'loading' as const, disabled: true, keepOpen: true, onClick: () => undefined, onExpire: () => clearUndo() }
   return {
     ...(undoInSecondary ? { secondaryAction: action } : { action }),
-    ...(duration !== undefined ? { duration } : {}),
   }
 }
 
 function setRunningToast(toastId: string, undoInSecondary: boolean): void {
   useToastStore.getState().updateToast(toastId, {
-    ...undoSlotPatch(i18n.t('undo.running'), 'loading', true, undoInSecondary),
+    ...undoSlotPatch(i18n.t('undo.running'), undoInSecondary),
     duration: 'persistent' as const,
   })
 }
 
-function setRetryableToast(toastId: string, undoInSecondary: boolean): void {
+function setFailedToast(toastId: string, undoInSecondary: boolean): void {
+  clearUndo()
   useToastStore.getState().updateToast(toastId, {
     message: { key: 'undo.retryableFailure' },
     type: 'error',
-    ...undoSlotPatch(i18n.t('undo.retry'), 'retry', false, undoInSecondary, Math.max(1, Math.min(10_000, expiresAt - Date.now()))),
+    ...(undoInSecondary ? { secondaryAction: undefined } : { action: undefined }),
+    duration: 9_000,
+    undoActionSlot: undefined,
+    undoFallbackDuration: undefined,
+    priority: undefined,
+    hardExpiresAt: undefined,
   })
 }
 
@@ -186,15 +191,13 @@ export async function runUndo(): Promise<void> {
     } catch (error) {
       if (currentGeneration !== generation || token !== currentToken) return
       running = false
-      // Local vault errors carry a category; a moved-on target cannot be
-      // retried, while storage failures can, matching the remote mapping.
       const category = (error as { category?: string } | null | undefined)?.category
       if (category === 'conflict' || category === 'unavailable-content' || category === 'invalid-input') {
         token = null
         execute = null
         setConflictToast(currentToastId, undoInSecondary)
       } else {
-        setRetryableToast(currentToastId, undoInSecondary)
+        setFailedToast(currentToastId, undoInSecondary)
       }
     }
     return
@@ -207,7 +210,7 @@ export async function runUndo(): Promise<void> {
       if (retryable) {
         if (currentGeneration !== generation || token !== currentToken) return
         running = false
-        setRetryableToast(currentToastId, undoInSecondary)
+        setFailedToast(currentToastId, undoInSecondary)
         return
       }
       if (response.status === 401) {
@@ -263,7 +266,7 @@ export async function runUndo(): Promise<void> {
   } catch {
     if (currentGeneration !== generation || token !== currentToken) return
     running = false
-    setRetryableToast(currentToastId, undoInSecondary)
+    setFailedToast(currentToastId, undoInSecondary)
   }
 }
 

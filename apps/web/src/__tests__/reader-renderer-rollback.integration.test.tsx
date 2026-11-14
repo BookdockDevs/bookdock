@@ -182,6 +182,7 @@ describe('Reader staged-renderer rollback with the real renderer hook', () => {
     await waitFor(() => expect(mockState.instances).toHaveLength(1))
     await waitFor(() => expect(mockState.instances[0]?.mountCount).toBe(1))
     expect(useToastStore.getState().toasts.some((toast) => toast.dedupeKey === 'reader-font-service')).toBe(true)
+    expect(useToastStore.getState().toasts.find((toast) => toast.dedupeKey === 'reader-font-service')?.action).toBeUndefined()
   })
 
   it('reuses the parked renderer, position and source after the candidate mount fails', async () => {
