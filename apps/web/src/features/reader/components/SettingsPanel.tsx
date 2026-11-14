@@ -8,13 +8,16 @@ import { resolveReadingTheme, PRESET_READING_THEMES, type CustomReadingTheme } f
 import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { useFonts } from '@/api/hooks/useFonts'
+import { useInstanceInfo } from '@/features/auth/hooks'
+import { useDeviceFontStore } from '@/features/device-fonts/store'
+import i18n from '@/i18n/i18n'
 import { useLocalReader } from '../../reading-data/reader-source-context'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { useViewSettings } from '../view-settings-context'
 import { MARGINAL_FIELDS } from '../lib/marginals'
 import type { MarginalField } from '../types'
 import type { PerBookSettingKey, PerBookSettingValue } from '../lib/view-settings'
-import { buildFontOptions, ensureBuiltinFontLoaded, ensureBuiltinFontsLoaded, ensureUploadedFontLoaded, useFontLoaderStore, type FontOption } from '../fonts'
+import { buildFontOptions, ensureBuiltinFontLoaded, ensureDeviceFontFace, ensureUploadedFontLoaded, releaseDeviceFontFace, useFontLoaderStore, type FontOption } from '../fonts'
 import { useReaderState } from '../state/reader-state'
 import { DownloadIcon, SpinnerIcon } from './annotation-icons'
 import ReadingPresetPicker from './ReadingPresetPicker'
@@ -335,8 +338,27 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
 
   const local = useLocalReader()
   const serviceAccount = useAuthStore((state) => state.user)
+  // Members of instances that keep resource uploads off must not see (or
+  // trigger) the upstream download of never-fetched builtin fonts; owners and
+  // unrestricted instances are unaffected. Unknown policy stays permissive.
+  const { data: instanceInfo } = useInstanceInfo({ enabled: !local })
+  const builtinDownloadsAllowed = serviceAccount?.role === 'owner' || instanceInfo?.data.allowUserResourceUpload !== false
   const { data: fontsData } = useFonts(!local || Boolean(serviceAccount))
   const uploadedFonts = useMemo(() => local && !serviceAccount ? [] : fontsData?.data ?? [], [fontsData, local, serviceAccount])
+  // Device fonts load independently of the server font list, login state and
+  // library source.
+  const deviceFontStatus = useDeviceFontStore((s) => s.status)
+  const deviceFonts = useDeviceFontStore((s) => s.fonts)
+  const devicePreferences = useDeviceFontStore((s) => s.preferences)
+  const deviceOrder = useDeviceFontStore((s) => s.order)
+  const deviceSelection = useDeviceFontStore((s) => s.selection)
+  useEffect(() => {
+    void useDeviceFontStore.getState().ensureLoaded()
+  }, [])
+  const deviceCatalog = useMemo(
+    () => ({ fonts: deviceFonts, preferences: devicePreferences, order: deviceOrder }),
+    [deviceFonts, devicePreferences, deviceOrder],
+  )
   const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
   const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
   const fontLatinIds = useFontLoaderStore((s) => s.latinIds)
@@ -428,52 +450,118 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
 
   const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
 
+  // Rebuild the catalog when the UI language changes: localized font names
+  const uiLanguage = i18n.language
   const fontOptions = useMemo(
-    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds, latinIds: fontLatinIds }, fontPreferences, fontOrder),
+    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds, latinIds: fontLatinIds }, fontPreferences, fontOrder, deviceCatalog, builtinDownloadsAllowed),
     // loaded/loading ids feed a builtin option's status icon
-    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontLatinIds, fontPreferences, fontOrder],
+    // uiLanguage: buildFontOptions resolves localized names per UI language
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontLatinIds, fontPreferences, fontOrder, deviceCatalog, builtinDownloadsAllowed, uiLanguage],
   )
   const enabledFontOptions = useMemo(() => fontOptions.filter((option) => option.enabled), [fontOptions])
   const enabledCjkOptions = useMemo(() => enabledFontOptions.filter((option) => !option.latin), [enabledFontOptions])
   const [fontsExpanded, setFontsExpanded] = useState(false)
   const [cjkExpanded, setCjkExpanded] = useState(false)
+  // A device selection overrides the synced font ids on this device only; the
+  // readingConfig blob never receives a device reference.
+  const effectiveFontFamily = deviceSelection.primary ?? fontFamily
+  const effectiveCjkFontFamily = deviceSelection.cjk ?? cjkFontFamily
 
   // Selecting applies immediately (font-display: swap renders the fallback
-  // first); the click only kicks off the download as visual feedback
+  // first); the click only kicks off the download as visual feedback. A device
+  // pick writes the device-local selection instead of the synced font ids; a
+  // server/system pick clears the device override so the synced chain resumes.
   function onSelectFont(opt: FontOption) {
-    setFontFamily(opt.id)
+    if (opt.source === 'device') {
+      useDeviceFontStore.getState().selectPrimary(opt.id)
+    } else {
+      if (deviceSelection.primary) useDeviceFontStore.getState().selectPrimary(null)
+      setFontFamily(opt.id)
+    }
     if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
   }
 
   function onSelectCjkFont(opt: FontOption) {
-    setCjkFontFamily(opt.id)
+    if (opt.source === 'device') {
+      useDeviceFontStore.getState().selectCjk(opt.id)
+    } else {
+      if (deviceSelection.cjk) useDeviceFontStore.getState().selectCjk(null)
+      setCjkFontFamily(opt.id)
+    }
     if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
   }
 
+  // Visible builtin identities: gated members see only already-loaded faces,
+  // so the preloader never triggers downloads of never-fetched entries. The
+  // joined id list is a stable dep — rebuilding fontOptions on a latin
+  // classification change must not re-run this effect.
+  const visibleBuiltinIds = useMemo(
+    () => fontOptions.filter((option) => option.builtin).map((option) => option.builtin!.id).join(' '),
+    [fontOptions],
+  )
   // Mount the public builtin stylesheets when the font list is visible. The
   // browser fetches each font file only when a rendered chip needs that face.
+  // Device faces are pooled references, held only while the panel shows them.
   useEffect(() => {
     if (section !== 'font') return
-    ensureBuiltinFontsLoaded()
+    if (visibleBuiltinIds) visibleBuiltinIds.split(' ').forEach((id) => ensureBuiltinFontLoaded(id))
     uploadedFonts.forEach((f) => void ensureUploadedFontLoaded(f))
-  }, [section, uploadedFonts])
+    deviceFonts.forEach((font) => { void ensureDeviceFontFace(font) })
+    return () => {
+      deviceFonts.forEach((font) => releaseDeviceFontFace(font.id))
+    }
+  }, [section, uploadedFonts, deviceFonts, visibleBuiltinIds])
 
+  // A dangling device selection (font deleted/disabled on this device) clears
+  // itself; the synced selection resumes. Only trusted once the device catalog
+  // has loaded, so a fresh mount never clears a selection that is about to
+  // reappear.
   useEffect(() => {
-    if (enabledFontOptions.some((option) => option.id === fontFamily)) return
+    if (deviceFontStatus !== 'ready') return
+    if (deviceSelection.primary && !enabledFontOptions.some((option) => option.id === deviceSelection.primary)) {
+      useDeviceFontStore.getState().selectPrimary(null)
+    }
+    if (deviceSelection.cjk && !enabledCjkOptions.some((option) => option.id === deviceSelection.cjk)) {
+      useDeviceFontStore.getState().selectCjk(null)
+    }
+  }, [deviceFontStatus, deviceSelection, enabledFontOptions, enabledCjkOptions])
+
+  // Auto-fallback routes by the fallback's source: a device fallback becomes
+  // the device selection (never the synced account ids), a server/system
+  // fallback clears the device override and writes the account settings.
+  useEffect(() => {
+    if (enabledFontOptions.some((option) => option.id === effectiveFontFamily)) return
     const fallback = enabledFontOptions[0]
-    if (fallback) setFontFamily(fallback.id)
-  }, [enabledFontOptions, fontFamily, setFontFamily])
+    if (!fallback || deviceFontStatus !== 'ready') return
+    if (fallback.source === 'device') {
+      if (deviceSelection.primary !== fallback.id) useDeviceFontStore.getState().selectPrimary(fallback.id)
+    } else {
+      if (deviceSelection.primary) useDeviceFontStore.getState().selectPrimary(null)
+      setFontFamily(fallback.id)
+    }
+  }, [enabledFontOptions, effectiveFontFamily, setFontFamily, deviceFontStatus, deviceSelection])
 
   useEffect(() => {
-    if (enabledCjkOptions.some((option) => option.id === cjkFontFamily)) return
-    const fallback = enabledCjkOptions[0] ?? enabledFontOptions[0]
-    if (fallback) setCjkFontFamily(fallback.id)
-  }, [enabledCjkOptions, enabledFontOptions, cjkFontFamily, setCjkFontFamily])
+    if (enabledCjkOptions.some((option) => option.id === effectiveCjkFontFamily)) return
+    // No CJK candidate at all (every non-latin font disabled): leave the cjk
+    // selection untouched instead of writing a latin font into it — the
+    // dangling-clear effect would immediately undo it, and the two effects
+    // would ping-pong forever. The renderer's resolution already falls back.
+    const fallback = enabledCjkOptions[0]
+    if (!fallback || deviceFontStatus !== 'ready') return
+    if (fallback.source === 'device') {
+      if (deviceSelection.cjk !== fallback.id) useDeviceFontStore.getState().selectCjk(fallback.id)
+    } else {
+      if (deviceSelection.cjk) useDeviceFontStore.getState().selectCjk(null)
+      setCjkFontFamily(fallback.id)
+    }
+  }, [enabledCjkOptions, effectiveCjkFontFamily, setCjkFontFamily, deviceFontStatus, deviceSelection])
 
   const shouldCollapsePrimary = enabledFontOptions.length > FONT_CHIPS_VISIBLE + 1
   let visibleFontOptions = (!shouldCollapsePrimary || fontsExpanded) ? enabledFontOptions : enabledFontOptions.slice(0, FONT_CHIPS_VISIBLE)
   if (shouldCollapsePrimary && !fontsExpanded) {
-    const selectedIndex = enabledFontOptions.findIndex((o) => o.id === fontFamily)
+    const selectedIndex = enabledFontOptions.findIndex((o) => o.id === effectiveFontFamily)
     if (selectedIndex >= FONT_CHIPS_VISIBLE) {
       // The selection must stay visible: it takes the last visible slot and
       // the original occupant shifts into the hidden tail
@@ -484,7 +572,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
   const shouldCollapseCjk = enabledCjkOptions.length > FONT_CHIPS_VISIBLE + 1
   let visibleCjkOptions = (!shouldCollapseCjk || cjkExpanded) ? enabledCjkOptions : enabledCjkOptions.slice(0, FONT_CHIPS_VISIBLE)
   if (shouldCollapseCjk && !cjkExpanded) {
-    const selectedIndex = enabledCjkOptions.findIndex((o) => o.id === cjkFontFamily)
+    const selectedIndex = enabledCjkOptions.findIndex((o) => o.id === effectiveCjkFontFamily)
     if (selectedIndex >= FONT_CHIPS_VISIBLE) {
       // The selection must stay visible: it takes the last visible slot and
       // the original occupant shifts into the hidden tail
@@ -492,7 +580,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
     }
   }
 
-  const selectedPrimaryFont = enabledFontOptions.find((o) => o.id === fontFamily)
+  const selectedPrimaryFont = enabledFontOptions.find((o) => o.id === effectiveFontFamily)
   const showCjkFontPicker = selectedPrimaryFont?.latin ?? false
 
   // Per-book layer (F1): when inside the reader, the first-batch settings
@@ -606,7 +694,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
                 <button
                   key={opt.id}
                   onClick={() => onSelectFont(opt)}
-                  className={fontChipClass(fontFamily === opt.id)}
+                  className={fontChipClass(effectiveFontFamily === opt.id)}
                   style={{ fontFamily: opt.stack }}
                 >
                   {opt.name}
@@ -629,7 +717,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
                   <button
                     key={opt.id}
                     onClick={() => onSelectCjkFont(opt)}
-                    className={fontChipClass(cjkFontFamily === opt.id)}
+                    className={fontChipClass(effectiveCjkFontFamily === opt.id)}
                     style={{ fontFamily: opt.stack }}
                   >
                     {opt.name}

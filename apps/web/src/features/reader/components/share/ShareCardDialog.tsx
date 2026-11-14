@@ -16,10 +16,14 @@ import { notify } from '@/lib/notifications'
 import { formatAuthorList } from '@/lib/utils'
 import { getUserDisplayName, useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
+import i18n from '@/i18n/i18n'
+import { useInstanceInfo } from '@/features/auth/hooks'
 
 import { markEscConsumed } from '../../lib/esc-consumed'
 
 import { useReaderState } from '../../state/reader-state'
+import { useDeviceFontStore } from '@/features/device-fonts/store'
+import { ensureDeviceFontFace, releaseDeviceFontFace } from '../../fonts'
 import { buildFontOptions, ensureBuiltinFontLoaded, resolveDualFont, useFontLoaderStore, waitForCardFont, type FontOption } from '../../fonts'
 import { CloseIcon, CopyIcon, DownloadIcon, SpinnerIcon } from '../annotation-icons'
 import ShareCard, { SHARE_CARD_WIDTH } from './ShareCard'
@@ -50,6 +54,11 @@ export default function ShareCardDialog({ bookId, fallbackTitle, fallbackAuthor 
   const fontPreferences = useUiStore((s) => s.fontPreferences)
   const fontOrder = useUiStore((s) => s.fontOrder)
   const local = useLocalReader()
+  const serviceAccount = useAuthStore((s) => s.user)
+  // Same builtin-download policy as the settings page: members of instances
+  // that keep resource uploads off never see never-fetched builtin fonts
+  const { data: instanceInfo } = useInstanceInfo({ enabled: !local })
+  const builtinDownloadsAllowed = serviceAccount?.role === 'owner' || instanceInfo?.data.allowUserResourceUpload !== false
   const bookQuery = useQuery({
     queryKey: ['book', local?.namespace ?? bookId],
     networkMode: local ? 'always' : 'online',
@@ -64,13 +73,29 @@ export default function ShareCardDialog({ bookId, fallbackTitle, fallbackAuthor 
   const fontsPending = fontsEnabled && fontsQuery.isPending
   const fontsError = fontsEnabled && fontsQuery.isError
   const uploadedFonts = useMemo(() => fontsData?.data ?? [], [fontsData])
+  // Device fonts join the picker regardless of the server font list state
+  const deviceFontStatus = useDeviceFontStore((s) => s.status)
+  const deviceFonts = useDeviceFontStore((s) => s.fonts)
+  const devicePreferences = useDeviceFontStore((s) => s.preferences)
+  const deviceOrder = useDeviceFontStore((s) => s.order)
+  useEffect(() => {
+    if (shareTarget) void useDeviceFontStore.getState().ensureLoaded()
+  }, [shareTarget])
+  const deviceCatalog = useMemo(
+    () => ({ fonts: deviceFonts, preferences: devicePreferences, order: deviceOrder }),
+    [deviceFonts, devicePreferences, deviceOrder],
+  )
   const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
   const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
   const fontLatinIds = useFontLoaderStore((s) => s.latinIds)
+  // Rebuild the catalog when the UI language changes: localized font names
+  const uiLanguage = i18n.language
   const fontOptions = useMemo(
-    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds, latinIds: fontLatinIds }, fontPreferences, fontOrder),
+    () => buildFontOptions(uploadedFonts, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds, latinIds: fontLatinIds }, fontPreferences, fontOrder, deviceCatalog, builtinDownloadsAllowed),
     // loaded/loading ids feed a builtin option's status icon
-    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontLatinIds, fontPreferences, fontOrder],
+    // uiLanguage: buildFontOptions resolves localized names per UI language
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [uploadedFonts, fontLoadedIds, fontLoadingIds, fontLatinIds, fontPreferences, fontOrder, deviceCatalog, builtinDownloadsAllowed, uiLanguage],
   )
   const enabledFontOptions = useMemo(() => fontOptions.filter((option) => option.enabled), [fontOptions])
   const enabledCjkOptions = useMemo(() => enabledFontOptions.filter((option) => !option.latin), [enabledFontOptions])
@@ -84,21 +109,33 @@ export default function ShareCardDialog({ bookId, fallbackTitle, fallbackAuthor 
   const [prefs, setPrefs] = useState<ShareCardPrefs>(loadShareCardPrefs)
 
   useEffect(() => {
-    if (!shareTarget || fontsPending || fontsError) return
+    if (!shareTarget || fontsPending || fontsError || deviceFontStatus !== 'ready') return
     const primaryFallback = enabledFontOptions[0]
     const cjkFallback = enabledCjkOptions[0] ?? primaryFallback
     const patch: Partial<ShareCardPrefs> = {}
     if (!enabledFontOptions.some((option) => option.id === prefs.font) && primaryFallback) patch.font = primaryFallback.id
     if (!enabledCjkOptions.some((option) => option.id === prefs.cjkFont) && cjkFallback) patch.cjkFont = cjkFallback.id
     if (Object.keys(patch).length > 0) setPrefs((current) => ({ ...current, ...patch }))
-  }, [enabledFontOptions, enabledCjkOptions, prefs.font, prefs.cjkFont, shareTarget, fontsPending, fontsError])
+  }, [enabledFontOptions, enabledCjkOptions, prefs.font, prefs.cjkFont, shareTarget, fontsPending, fontsError, deviceFontStatus])
 
   const resolvedFont = useMemo(
-    () => resolveDualFont(prefs.font, prefs.cjkFont, uploadedFonts, fontPreferences, fontOrder),
+    () => resolveDualFont(prefs.font, prefs.cjkFont, uploadedFonts, fontPreferences, fontOrder, deviceCatalog, {}, builtinDownloadsAllowed),
     // The resolver reads the session glyph classification from the font store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [prefs.font, prefs.cjkFont, uploadedFonts, fontPreferences, fontOrder, fontLatinIds],
+    [prefs.font, prefs.cjkFont, uploadedFonts, fontPreferences, fontOrder, fontLatinIds, deviceCatalog, builtinDownloadsAllowed],
   )
+  // Register the selected device faces in the main document so the card
+  // preview renders them; the pooled URLs live as long as the dialog does.
+  const selectedDeviceFonts = [...new Set([resolvedFont.primary.device, resolvedFont.companion.device].filter((font) => font !== undefined))]
+  const selectedDeviceKey = selectedDeviceFonts.map((font) => font.id).join('\u0000')
+  useEffect(() => {
+    if (!shareTarget || selectedDeviceFonts.length === 0) return
+    selectedDeviceFonts.forEach((font) => { void ensureDeviceFontFace(font) })
+    return () => {
+      selectedDeviceFonts.forEach((font) => releaseDeviceFontFace(font.id))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareTarget, selectedDeviceKey])
   const book = bookQuery.data?.data
   const title = book?.title ?? fallbackTitle ?? ''
   const bookAuthor = useMemo(

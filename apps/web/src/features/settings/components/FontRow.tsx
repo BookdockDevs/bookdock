@@ -56,7 +56,9 @@ export default function FontRow({ font, isOwner, disabled, sorting, onToggle, on
     animateLayoutChanges: () => false,
   })
   const uploaded = font.uploaded
-  const canDelete = font.source === 'uploaded' && !!uploaded && (uploaded.mine || isOwner)
+  const isDevice = font.source === 'device'
+  // Device fonts belong to this browser: always manageable, no role check
+  const canDelete = isDevice || (font.source === 'uploaded' && !!uploaded && (uploaded.mine || isOwner))
   const badge = 'inline-flex shrink-0 rounded border border-stone-200 px-1.5 py-0.5 text-[10px] text-stone-400 dark:border-stone-700'
 
   return (
@@ -116,6 +118,8 @@ export default function FontRow({ font, isOwner, disabled, sorting, onToggle, on
         <>
           {uploaded ? (
             <span className={badge}>{_(uploaded.scope === 'instance' ? 'settings.fontsScopeInstance' : 'settings.fontsScopeUser')}</span>
+          ) : isDevice ? (
+            <span className={badge}>{_('settings.fontsScopeDevice')}</span>
           ) : (
             <span className={badge}>{_(font.source === 'builtin' ? 'settings.fontsBuiltIn' : 'settings.fontsSystem')}</span>
           )}
@@ -127,7 +131,7 @@ export default function FontRow({ font, isOwner, disabled, sorting, onToggle, on
 
       {sorting && (
         <div className="flex shrink-0 items-center gap-1">
-          {font.source === 'uploaded' && (
+          {(uploaded || isDevice) && (
             <button
               type="button"
               onClick={onEdit}

@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { FontListItem } from '@bookdock/shared'
 
 import {
   BUILTIN_FONTS,
   buildFontOptions,
+  ensureDeviceFontFace,
   builtinImportCss,
   canRenderCjk,
   ensureBuiltinFontLoaded,
@@ -12,6 +13,7 @@ import {
   fontCssFor,
   isBuiltinFontLoaded,
   isCjkFontName,
+  releaseDeviceFontFace,
   resolveCjkFont,
   resolveDualFont,
   resolveFont,
@@ -20,7 +22,15 @@ import {
   uploadedFontAlias,
   useFontLoaderStore,
 } from '../features/reader/fonts'
+import { IDBFactory } from 'fake-indexeddb'
+import { Blob as NativeBlob, File as NativeFile } from 'node:buffer'
+import { webcrypto } from 'node:crypto'
+
 import { FONT_OPTIONS, READER_GLYPH_FALLBACK } from '../features/reader/types'
+import { DeviceFontStore } from '../features/device-fonts/db'
+import { useDeviceFontStore } from '../features/device-fonts/store'
+import { acquireDeviceFontUrl, peekDeviceFontUrl, releaseDeviceFontUrl, useDeviceFontUrlStore } from '../features/device-fonts/urls'
+import { useUiStore } from '../stores/ui.store'
 
 import i18n from '../i18n/i18n'
 
@@ -404,5 +414,289 @@ describe('buildFontOptions', () => {
     )
     expect(options.find((o) => o.id === 'serif')?.latin).toBe(false)
     expect(options.find((o) => o.id === 'lxgw-wenkai')?.latin).toBe(false)
+  })
+})
+
+let leaseCounter = 0
+
+describe('device fonts', () => {
+  const deviceFont = {
+    id: 'device-testfont1',
+    family: 'Device SimSun',
+    fileName: 'device-simsun.ttf',
+    format: 'ttf' as const,
+    size: 4096,
+    contentHash: 'hash',
+    createdAt: 0,
+  }
+  const deviceCatalog = { fonts: [deviceFont], preferences: {}, order: [] }
+
+  beforeEach(() => {
+    useDeviceFontStore.setState({ status: 'ready', fonts: [deviceFont], preferences: {}, order: [], selection: { primary: null, cjk: null } })
+    useFontLoaderStore.setState({ loadedIds: [], loadingIds: [], latinIds: [] })
+  })
+
+  it('lets the merged device order interleave device fonts anywhere', () => {
+    const second = { ...deviceFont, id: 'device-testfont2', family: 'Device Kaiti', createdAt: 1 }
+    // Unified local order: the device font sits between the system entries
+    const options = buildFontOptions([], useFontLoaderStore.getState(), {}, [], {
+      fonts: [second, deviceFont],
+      preferences: {},
+      order: ['sans-serif', deviceFont.id, 'serif', second.id],
+    })
+    const ids = options.map((option) => option.id)
+    expect(ids.indexOf(deviceFont.id)).toBeGreaterThan(ids.indexOf('sans-serif'))
+    expect(ids.indexOf(deviceFont.id)).toBeLessThan(ids.indexOf('serif'))
+    expect(ids.indexOf(second.id)).toBeGreaterThan(ids.indexOf('serif'))
+    expect(options.find((option) => option.id === deviceFont.id)?.source).toBe('device')
+    expect(options.find((option) => option.id === deviceFont.id)?.stack).toBe(`"bd-font-${deviceFont.id}", ${READER_GLYPH_FALLBACK}, serif`)
+  })
+
+  it('trails device fonts after the synced catalog while the local order is empty', () => {
+    const second = { ...deviceFont, id: 'device-testfont2', family: 'Device Kaiti', createdAt: 1 }
+    const options = buildFontOptions([], useFontLoaderStore.getState(), {}, [], {
+      fonts: [second, deviceFont],
+      preferences: {},
+      order: [],
+    })
+    const ids = options.map((option) => option.id)
+    // Both trail the synced catalog, in catalog sequence
+    expect(ids.indexOf(second.id)).toBeGreaterThan(ids.indexOf('sans-en'))
+    expect(ids.indexOf(deviceFont.id)).toBeGreaterThan(ids.indexOf(second.id))
+    expect(options.filter((option) => option.source === 'device')).toHaveLength(2)
+  })
+
+  it('applies device-local display names and enabled flags without touching server preferences', () => {
+    const options = buildFontOptions([], useFontLoaderStore.getState(), { sansserifother: { displayName: 'server-side' } }, [], {
+      fonts: [deviceFont],
+      preferences: { [deviceFont.id]: { displayName: '手写体', enabled: false } },
+      order: [],
+    })
+    const device = options.find((option) => option.id === deviceFont.id)!
+    expect(device.name).toBe('手写体')
+    expect(device.enabled).toBe(false)
+    expect(options.find((option) => option.id === 'sans-serif')?.name).toBe('黑体')
+  })
+
+  it('separates device identity from same-named server ids', () => {
+    const serverRow: FontListItem = { id: 'device-testfont1', family: 'Server Twin', fileName: 'twin.woff2', format: 'woff2', size: 1, scope: 'user', mine: true, createdAt: 0 }
+    const resolved = resolveFont('device-testfont1', [serverRow], {}, [], deviceCatalog)
+    // Same id from both sources resolves by explicit source, not bare id
+    expect(resolved.device).toBe(deviceFont)
+    expect(resolved.uploaded).toBeUndefined()
+    expect(resolved.name).toBe(deviceFont.family)
+    expect(resolved.stack).toBe(`"bd-font-${deviceFont.id}", ${READER_GLYPH_FALLBACK}, serif`)
+  })
+
+  it('falls back when the selected device font is disabled', () => {
+    const resolved = resolveFont(deviceFont.id, [], {}, [], {
+      fonts: [deviceFont],
+      preferences: { [deviceFont.id]: { enabled: false } },
+      order: [],
+    })
+    expect(resolved.device).toBeUndefined()
+    expect(resolved.stack).toBe(FONT_OPTIONS[0].value)
+  })
+
+  it('builds the device face from the pooled URL and never from a server address', () => {
+    const resolved = resolveFont(deviceFont.id, [], {}, [], deviceCatalog)
+    expect(fontCssFor(resolved)).toBe('')
+    const css = fontCssFor(resolved, { [deviceFont.id]: 'blob:https://example.test/uuid' })
+    expect(css).toContain(`font-family: "${uploadedFontAlias(deviceFont.id)}"`)
+    expect(css).toContain('src: url("blob:https://example.test/uuid")')
+    expect(css).toContain('format("truetype")')
+    expect(css).not.toContain('/api/v1/fonts/')
+    expect(css).not.toContain(window.location.origin)
+  })
+
+  it('resolves a CJK device primary and a device CJK companion with their faces', () => {
+    const dual = resolveDualFont(deviceFont.id, deviceFont.id, [], {}, [], deviceCatalog, {
+      [deviceFont.id]: 'blob:https://example.test/uuid',
+    })
+    expect(dual.stack).toBe(`"bd-font-${deviceFont.id}", ${READER_GLYPH_FALLBACK}, serif`)
+    expect(dual.css).toContain('blob:https://example.test/uuid')
+  })
+
+  it('merges a latin primary with a device CJK companion and inlines both faces', () => {
+    const dual = resolveDualFont('serif-en', deviceFont.id, [], {}, [], deviceCatalog, {
+      [deviceFont.id]: 'blob:https://example.test/companion',
+    })
+    expect(dual.stack.startsWith('"Georgia", ')).toBe(true)
+    expect(dual.stack).toContain(`"bd-font-${deviceFont.id}"`)
+    // serif-en is a system stack (no css of its own); the device companion
+    // contributes its pooled face
+    expect(dual.css).toContain('blob:https://example.test/companion')
+    expect(dual.css).not.toContain('/api/v1/fonts/')
+  })
+
+  it('omits the device face from the css while its URL is not pooled yet', () => {
+    const dual = resolveDualFont('serif-en', deviceFont.id, [], {}, [], deviceCatalog)
+    expect(dual.css).toBe('')
+  })
+
+  describe('device face lease', () => {
+    // One shared in-memory factory: the URL pool caches its connection, so
+    // both tests must hit the same IndexedDB instance
+    beforeAll(() => {
+      vi.stubGlobal('indexedDB', new IDBFactory())
+      vi.stubGlobal('crypto', webcrypto)
+      vi.stubGlobal('Blob', NativeBlob)
+      vi.stubGlobal('File', NativeFile)
+      vi.stubGlobal('URL', class extends URL {
+        static createObjectURL = vi.fn(() => `blob:mock-${++leaseCounter}`)
+        static revokeObjectURL = vi.fn()
+      })
+    })
+
+  it('cancels a face lease released before the async load resolves, without leaking the URL', async () => {
+    let revoked: string | null = null
+    vi.mocked(URL.revokeObjectURL).mockImplementation((url: string) => { revoked = url })
+    const database = new DeviceFontStore('bookdock-device-fonts')
+    const bytes = new Uint8Array(12)
+    new DataView(bytes.buffer).setUint32(0, 0x00010000)
+    const imported = await database.import(new NativeFile([bytes], 'lease.ttf') as unknown as File)
+    const font = { ...deviceFont, id: imported.font.id }
+
+    const pending = ensureDeviceFontFace(font)
+    // Unmount races the async load: the synchronous release must cancel it
+    releaseDeviceFontFace(font.id)
+    expect(await pending).toBeNull()
+    expect(useDeviceFontUrlStore.getState().urls).toEqual({})
+    expect(revoked).toBe('blob:mock-1')
+  })
+
+  it('pairs ensure/release for a mounted preview surface and removes the style on release', async () => {
+    const database = new DeviceFontStore('bookdock-device-fonts')
+    const bytes = new Uint8Array(12)
+    new DataView(bytes.buffer).setUint32(0, 0x00010000)
+    const imported = await database.import(new NativeFile([bytes], 'mounted.ttf') as unknown as File)
+    const font = { ...deviceFont, id: imported.font.id }
+    const selector = `style[data-bd-device-font="${font.id}"]`
+
+    const url = await ensureDeviceFontFace(font)
+    expect(url).toBe('blob:mock-2')
+    expect(document.head.querySelector(selector)).not.toBeNull()
+    // A second consumer shares the lease; one release keeps it mounted
+    await ensureDeviceFontFace(font)
+    releaseDeviceFontFace(font.id)
+    expect(document.head.querySelector(selector)).not.toBeNull()
+    releaseDeviceFontFace(font.id)
+    expect(document.head.querySelector(selector)).toBeNull()
+    expect(useDeviceFontUrlStore.getState().urls).toEqual({})
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-2')
+  })
+
+  it('keeps a re-ensured lease independent of the cancelled one it replaced', async () => {
+    const database = new DeviceFontStore('bookdock-device-fonts')
+    const bytes = new Uint8Array(12)
+    new DataView(bytes.buffer).setUint32(0, 0x00010000)
+    const imported = await database.import(new NativeFile([bytes], 'reentry.ttf') as unknown as File)
+    const font = { ...deviceFont, id: imported.font.id }
+    const selector = `style[data-bd-device-font="${font.id}"]`
+
+    const cancelled = ensureDeviceFontFace(font)
+    releaseDeviceFontFace(font.id)
+    const renewed = ensureDeviceFontFace(font)
+    expect(await cancelled).toBeNull()
+    const url = await renewed
+    expect(url).toMatch(/^blob:mock-/)
+    // The cancelled lease must not have removed or corrupted the new entry
+    expect(document.head.querySelector(selector)).not.toBeNull()
+    releaseDeviceFontFace(font.id)
+    expect(document.head.querySelector(selector)).toBeNull()
+    expect(useDeviceFontUrlStore.getState().urls).toEqual({})
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(url)
+  })
+
+  it('does not revoke a URL the reader still holds when a preview lease is cancelled', async () => {
+    const database = new DeviceFontStore('bookdock-device-fonts')
+    const bytes = new Uint8Array(12)
+    new DataView(bytes.buffer).setUint32(0, 0x00010000)
+    const imported = await database.import(new NativeFile([bytes], 'readerhold.ttf') as unknown as File)
+    const font = { ...deviceFont, id: imported.font.id }
+
+    const readerUrl = await acquireDeviceFontUrl(font.id)
+    const pending = ensureDeviceFontFace(font)
+    releaseDeviceFontFace(font.id)
+    expect(await pending).toBeNull()
+    // The preview release must not have consumed the reader's pool reference
+    expect(peekDeviceFontUrl(font.id)).toBe(readerUrl)
+    releaseDeviceFontUrl(font.id)
+    expect(peekDeviceFontUrl(font.id)).toBeNull()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(readerUrl)
+  })
+  })
+
+  it('hides never-fetched builtins when builtin downloads are not allowed, keeping loaded ones', () => {
+    const loaded = BUILTIN_FONTS[0]!
+    // A stale in-flight entry (link events never fire in jsdom) must not
+    // resurrect a never-confirmed builtin for gated viewers
+    useFontLoaderStore.setState({ loadedIds: [loaded.id], loadingIds: ['lxgw-wenkai'], latinIds: [] })
+    const gated = buildFontOptions([], useFontLoaderStore.getState(), {}, [], deviceCatalog, false)
+    const builtinIds = gated.filter((option) => option.source === 'builtin').map((option) => option.id)
+    expect(builtinIds).toEqual([loaded.id])
+    // Unrestricted callers keep the full catalog
+    expect(buildFontOptions([], useFontLoaderStore.getState(), {}, [], deviceCatalog, true)
+      .filter((option) => option.source === 'builtin')).toHaveLength(BUILTIN_FONTS.length)
+  })
+
+  it('falls back instead of resolving a never-fetched builtin for gated viewers', () => {
+    useFontLoaderStore.setState({ loadedIds: [], loadingIds: [], latinIds: [] })
+    const gated = resolveFont('lxgw-wenkai', [], {}, [], deviceCatalog, false)
+    expect(gated.builtin).toBeUndefined()
+    expect(gated.stack).toBe(FONT_OPTIONS[0].value)
+    // Unloaded builtin as CJK companion also falls back to an available face
+    const dual = resolveDualFont('serif-en', 'lxgw-wenkai', [], {}, [], deviceCatalog, {}, false)
+    expect(dual.companion.builtin).toBeUndefined()
+    // Allowed viewers resolve it normally
+    expect(resolveFont('lxgw-wenkai', [], {}, [], deviceCatalog, true).builtin).toBeDefined()
+  })
+
+  it('prefers the localized name for the UI language, then any other, then family', () => {
+    const names = { '409': 'Source Han Sans', '804': '思源黑体' }
+    const options = buildFontOptions([], useFontLoaderStore.getState(), {}, [], {
+      fonts: [{ ...deviceFont, localNames: names }],
+      preferences: {},
+      order: [],
+    })
+    expect(options.find((option) => option.id === deviceFont.id)?.name).toBe('思源黑体')
+
+    // No record for the UI language falls back to any other language's name
+    const enOnly = buildFontOptions([], useFontLoaderStore.getState(), {}, [], {
+      fonts: [{ ...deviceFont, localNames: { '409': 'Source Han Sans' } }],
+      preferences: {},
+      order: [],
+    })
+    expect(enOnly.find((option) => option.id === deviceFont.id)?.name).toBe('Source Han Sans')
+
+    // Without localNames the cross-language family applies
+    const noNames = buildFontOptions([], useFontLoaderStore.getState(), {}, [], {
+      fonts: [deviceFont],
+      preferences: {},
+      order: [],
+    })
+    expect(noNames.find((option) => option.id === deviceFont.id)?.name).toBe(deviceFont.family)
+  })
+
+  it('applies localized names to uploaded server fonts too', () => {
+    const uploaded: FontListItem = { ...uploadedFont, localNames: { '804': '我的手写体' } }
+    const options = buildFontOptions([uploaded])
+    expect(options.find((option) => option.id === 'abc123')?.name).toBe('我的手写体')
+  })
+
+  it('keeps device presentation in the device store, disjoint from the synced ui store', () => {
+    const { setFontPreference, setFontOrder } = useUiStore.getState()
+    setFontPreference('serif', { displayName: 'server-side name' })
+    setFontOrder(['serif'])
+    useDeviceFontStore.getState().setPreference(deviceFont.id, { displayName: 'device-side name' })
+    useDeviceFontStore.getState().selectPrimary(deviceFont.id)
+
+    // pickSettings reads only the ui store, so no device reference can enter
+    // the account payload; the two stores never share preference keys
+    const syncedPreferences = useUiStore.getState().fontPreferences
+    expect(Object.keys(syncedPreferences)).toEqual(['serif'])
+    expect(useUiStore.getState().fontOrder).toEqual(['serif'])
+    expect(useDeviceFontStore.getState().preferences[deviceFont.id]).toEqual({ displayName: 'device-side name' })
+    expect(useDeviceFontStore.getState().selection.primary).toBe(deviceFont.id)
   })
 })

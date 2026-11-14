@@ -1220,6 +1220,9 @@ export interface FontListItem {
   id: string
   /** Family name parsed from the sfnt name table, falling back to the file name */
   family: string
+  /** Windows LANGID (hex key) → localized display name, extracted at upload
+   *  time; null for rows uploaded before localized extraction existed */
+  localNames?: Record<string, string> | null
   fileName: string
   format: 'ttf' | 'otf' | 'woff' | 'woff2'
   size: number

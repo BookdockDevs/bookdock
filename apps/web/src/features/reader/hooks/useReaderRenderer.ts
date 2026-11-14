@@ -4,7 +4,11 @@ import type { ReaderBookProvider } from '../content/book-provider'
 import type { readReaderShortcuts } from '../lib/reader-shortcuts'
 
 import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
+import { useAuthStore } from '@/stores/auth.store'
 import { useFonts } from '@/api/hooks/useFonts'
+import { useInstanceInfo } from '@/features/auth/hooks'
+import { useDeviceFontStore } from '@/features/device-fonts/store'
+import { useDeviceFontUrls } from '@/features/device-fonts/urls'
 import { resolveReadingTheme } from '@/lib/reading-theme'
 import { notify } from '@/lib/notifications'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -197,6 +201,25 @@ export function useReaderRenderer({
       } })
     }
   }, [resolvedFonts, fontsError, retryFonts, _])
+  // Device fonts load independently of the server font list, login state and
+  // library source; the catalog must be ready before the resolution below.
+  const deviceFonts = useDeviceFontStore((s) => s.fonts)
+  const devicePreferences = useDeviceFontStore((s) => s.preferences)
+  const deviceOrder = useDeviceFontStore((s) => s.order)
+  const deviceSelection = useDeviceFontStore((s) => s.selection)
+  useEffect(() => {
+    void useDeviceFontStore.getState().ensureLoaded()
+  }, [])
+  const deviceCatalog = useMemo(
+    () => ({ fonts: deviceFonts, preferences: devicePreferences, order: deviceOrder }),
+    [deviceFonts, devicePreferences, deviceOrder],
+  )
+  // Same builtin-download policy as the settings page: a gated member whose
+  // synced selection references a never-fetched builtin falls back instead of
+  // triggering an upstream fetch
+  const serviceAccount = useAuthStore((s) => s.user)
+  const { data: instanceInfo } = useInstanceInfo()
+  const builtinDownloadsAllowed = serviceAccount?.role === 'owner' || instanceInfo?.data.allowUserResourceUpload !== false
   const preparedUrlRef = useRef('')
   if (!url || !ready) {
     preparedUrlRef.current = ''
@@ -213,9 +236,29 @@ export function useReaderRenderer({
   const mountedHere = Boolean(liveMount) && liveMount!.bookId === bookId
     && liveMount!.url === url && liveMount!.mountGeneration === mountGeneration
   const canMount = Boolean(url) && ((ready && preparedUrlRef.current === url) || mountedHere)
-  const resolvedFont = resolveDualFont(fontFamily, cjkFontFamily, fontsData?.data ?? [], fontPreferences, fontOrder)
+  // A device font selection overrides the account's synced font ids on this
+  // device only; the readingConfig blob is never given a device reference.
+  const effectiveFontFamily = deviceSelection.primary ?? fontFamily
+  const effectiveCjkFontFamily = deviceSelection.cjk ?? cjkFontFamily
+  const resolvedFont = resolveDualFont(effectiveFontFamily, effectiveCjkFontFamily, fontsData?.data ?? [], fontPreferences, fontOrder, deviceCatalog, {}, builtinDownloadsAllowed)
+  const selectedDeviceIds = useMemo(
+    () => [...new Set([resolvedFont.primary.device?.id, resolvedFont.companion.device?.id].filter((id): id is string => Boolean(id)))],
+    [resolvedFont],
+  )
+  const { urls: deviceFontUrls, missing: missingDeviceFonts } = useDeviceFontUrls(selectedDeviceIds)
+  // Second resolution with the pooled URLs held by this reader: device faces
+  // only enter the iframe stylesheet once their blob URL is available.
   const fontStack = resolvedFont.stack
-  const fontCss = resolvedFont.css
+  const fontCss = resolveDualFont(effectiveFontFamily, effectiveCjkFontFamily, fontsData?.data ?? [], fontPreferences, fontOrder, deviceCatalog, deviceFontUrls, builtinDownloadsAllowed).css
+  // A device font whose file no longer resolves (record deleted elsewhere in a
+  // shared browser, storage evicted, blob lost) releases its device selection
+  // slot so the synced account selection resumes, and stays readable via the
+  // fallback stack.
+  useEffect(() => {
+    if (missingDeviceFonts.length === 0) return
+    useDeviceFontStore.getState().clearSelectionFor(missingDeviceFonts)
+    notify.warning({ key: 'reader.deviceFontUnavailable', params: { total: missingDeviceFonts.length } }, { dedupeKey: `device-font-missing-${missingDeviceFonts.join(',')}` })
+  }, [missingDeviceFonts])
 
   const onRelocatedRef = useRef(onRelocated)
   const onReadyRef = useRef(onReady)

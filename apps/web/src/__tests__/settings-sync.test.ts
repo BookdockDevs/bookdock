@@ -12,6 +12,8 @@ import { customThemesFromSync } from '../lib/reading-theme'
 import { writeStoredSettings } from '../lib/settings-cache'
 import { useToastStore } from '../stores/toast.store'
 import { READER_SHORTCUT_DEFAULTS, readerShortcutStorageKey } from '../features/reader/lib/reader-shortcuts'
+import { useDeviceFontStore } from '../features/device-fonts/store'
+import { SettingsPanel } from '../features/reader/components/SettingsPanel'
 
 const theme = { id: 't1', name: 'Theme', colors: { bg: '#fff', fg: '#000', primary: '#00f' } }
 
@@ -61,11 +63,12 @@ describe('SettingsSync persistence', () => {
     vi.useRealTimers()
   })
 
-  function mountSync() {
+  function mountSync(withPanel = false) {
     return render(createElement(
       QueryClientProvider,
       { client: new QueryClient() },
       createElement(SettingsSync),
+      withPanel ? createElement(SettingsPanel) : null,
     ))
   }
 
@@ -333,6 +336,74 @@ describe('SettingsSync persistence', () => {
     useUiStore.getState().setCustomThemes([other])
 
     expect(useUiStore.getState().customThemes).toEqual([other])
+  })
+
+  it('keeps device font preferences, order and selection out of the account payload', async () => {
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    const deviceFont = { id: 'device-sync1', family: 'Device Serif', fileName: 'd.ttf', format: 'ttf' as const, size: 1, contentHash: 'h', createdAt: 0 }
+    useDeviceFontStore.setState({
+      status: 'ready',
+      fonts: [deviceFont],
+      preferences: { [deviceFont.id]: { displayName: '手写体', enabled: true } },
+      order: [deviceFont.id],
+      selection: { primary: deviceFont.id, cjk: null },
+    })
+    useUiStore.getState().setFontSize(28)
+    await vi.advanceTimersByTimeAsync(1000)
+
+    const puts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(puts.length).toBeGreaterThan(0)
+    for (const [, init] of puts) expect(String(init?.body)).not.toContain('device-sync1')
+
+    // Selecting a device font is a device-only write: no account request at all
+    const callsBefore = vi.mocked(fetch).mock.calls.length
+    useDeviceFontStore.getState().selectCjk('device-sync2')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(vi.mocked(fetch).mock.calls.length).toBe(callsBefore)
+  })
+
+  it('keeps device font presentation across logout', async () => {
+    mountSync()
+    await vi.runAllTimersAsync()
+    useDeviceFontStore.setState({
+      status: 'ready',
+      preferences: { 'device-sync1': { displayName: '手写体' } },
+      selection: { primary: 'device-sync1', cjk: null },
+    })
+
+    useAuthStore.getState().clearAuth()
+
+    expect(useUiStore.getState().fontPreferences).toEqual({})
+    expect(useDeviceFontStore.getState().preferences['device-sync1']).toEqual({ displayName: '手写体' })
+    expect(useDeviceFontStore.getState().selection).toEqual({ primary: 'device-sync1', cjk: null })
+  })
+
+  it('auto-fallback onto a device font never reaches the account payload', async () => {
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    // Only the device font is enabled, so the SettingsPanel auto-fallback
+    // targets it; the fallback must write the device selection, not the
+    // synced account font ids.
+    const deviceFont = { id: 'device-fb1', family: 'Device SimSun', fileName: 'd.ttf', format: 'ttf' as const, size: 1, contentHash: 'h', createdAt: 0 }
+    const onlyDeviceEnabled = Object.fromEntries([
+      'sans-serif', 'serif', 'kaiti', 'fangsong', 'serif-en', 'sans-en',
+      'noto-serif-sc', 'noto-sans-sc', 'lxgw-wenkai', 'literata',
+    ].map((id) => [id, { enabled: false }]))
+    useUiStore.setState({ fontPreferences: onlyDeviceEnabled })
+    useDeviceFontStore.setState({ status: 'ready', fonts: [deviceFont], preferences: {}, order: [], selection: { primary: null, cjk: null } })
+    mountSync(true)
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(useDeviceFontStore.getState().selection).toEqual({ primary: deviceFont.id, cjk: deviceFont.id })
+    expect(useUiStore.getState().fontFamily).toBe('sans-serif')
+    const puts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')
+    for (const [, init] of puts) expect(String(init?.body)).not.toContain('device-fb1')
+    // Reset the shared ui store state for later tests in this file
+    useUiStore.setState({ fontPreferences: baseline.fontPreferences })
+    useDeviceFontStore.setState({ status: 'idle', fonts: [], preferences: {}, order: [], selection: { primary: null, cjk: null } })
   })
 
   it('keeps anonymous preferences local without a database account', async () => {

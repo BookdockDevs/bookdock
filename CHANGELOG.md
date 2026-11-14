@@ -2,6 +2,19 @@
 
 All notable changes to Bookdock are documented here.
 
+## [0.8.4] - 2026-11-14
+
+### Added
+
+- Added device fonts as a fourth font source. Import TTF, OTF, WOFF, and WOFF2 files (up to 100 MB each) into the current browser's site storage without uploading them; device fonts work logged in, as a guest, or offline, on both device and server books, and survive logout and account switches. Manage them from the same fonts page with rename, enable/disable, drag ordering, and delete; they can interleave freely with the other sources in the shared sort order.
+- The fonts page "+" button now offers "Add to server" and "Add to device" entries. Device import stays available to guests and when the instance disables member uploads; a failed server font list only shows an inline error and never blocks device fonts.
+- Font display names now prefer the name matching your interface language (for example the Chinese name of a CJK font), falling back to other languages and the file name. Manual renames always win. Device fonts and newly uploaded server fonts extract these localized names, including from WOFF files; fonts uploaded before this release keep their existing family name.
+
+### Changed
+
+- Raised the per-file font size limit from 20 MB to 100 MB, for both device imports and server uploads (`FONT_UPLOAD_MAX_BYTES` default).
+- When the instance disables member resource uploads, members no longer see builtin fonts that were never downloaded, and selecting a font can no longer trigger an upstream download; already-downloaded builtin fonts remain usable. The instance owner keeps the full catalog with download entries, and unrestricted instances are unaffected.
+
 ## [0.8.3] - 2026-11-14
 
 ### Highlights
@@ -1227,6 +1240,19 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [0.8.4] - 2026-11-14
+
+#### 新增
+
+- 新增第四种字体来源「本机字体」。支持导入 TTF、OTF、WOFF、WOFF2 文件（单个最大 100 MB），仅保存在当前浏览器的站点存储中，不上传服务器；登录、游客或离线状态均可用，本机书籍与服务器书籍通用，退出登录和切换账号不影响。与系统、在线、服务器字体在同一页面管理，支持改名、启停、拖拽排序和删除，可与任意来源自由混排。
+- 字体页的「+」按钮改为「添加到服务器」与「添加到本机」两个入口。本机导入对游客和关闭资源上传的实例始终可用；服务器字体列表加载失败只显示内联提示，不影响本机字体。
+- 字体显示名称优先匹配当前界面语言（例如中日韩字体显示中文名），无对应语言时回退其他语言和文件名；手动改名始终优先。本机字体与本次之后上传的服务器字体都会提取本地化名称（WOFF 也支持）；在此之前上传的字体沿用原有家族名。
+
+#### 调整
+
+- 字体单文件大小上限从 20 MB 提升到 100 MB（本机导入与服务器上传一致，`FONT_UPLOAD_MAX_BYTES` 默认值）。
+- 实例关闭「上传阅读资源」后，普通成员不再显示从未下载过的内置字体，选择字体也不会触发上游下载；已下载的内置字体仍可使用。实例所有者保留完整目录和下载入口，未关闭该开关的实例不受影响。
 
 ### [0.8.3] - 2026-11-14
 

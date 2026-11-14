@@ -220,6 +220,9 @@ export const fonts = sqliteTable('fonts', {
   contentHash: text('content_hash').notNull(),
   size: integer('size').notNull(),
   createdAt: integer('created_at').notNull(),
+  // JSON map of Windows LANGID (hex) → localized display name; null for rows
+  // uploaded before 0065_font_local_names
+  localNames: text('local_names'),
 }, (table) => ({
   userContentHashIdx: uniqueIndex('fonts_user_content_hash_idx').on(table.userId, table.contentHash),
   contentHashIdx: index('fonts_content_hash_idx').on(table.contentHash),

@@ -21,7 +21,7 @@ const envSchema = z.object({
   DB_PATH: z.string().optional(),
   JWT_SECRET: z.string().optional(),
   UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(104857600),
-  FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(20971520),
+  FONT_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(104857600),
   // Disk budget for the rebuildable builtin-font shard cache; evicted entries
   // are simply re-fetched from the upstream CDN on the next request.
   FONT_CACHE_MAX_MB: z.coerce.number().int().positive().default(512),

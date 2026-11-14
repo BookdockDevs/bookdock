@@ -6,6 +6,7 @@ import { useUpdateFontScope } from '@/api/hooks/useFonts'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import SegmentedControl from '@/components/ui/SegmentedControl'
+import { useDeviceFontStore } from '@/features/device-fonts/store'
 import type { FontOption } from '@/features/reader/fonts'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -23,6 +24,7 @@ export default function FontEditor({ font, isOwner, onClose }: FontEditorProps) 
   const updateScope = useUpdateFontScope()
   const setFontPreference = useUiStore((state) => state.setFontPreference)
   const uploaded = font.uploaded
+  const device = font.device
   const [name, setName] = useState(font.name)
   const [scope, setScope] = useState<FontScope>(uploaded?.scope ?? 'user')
 
@@ -37,10 +39,15 @@ export default function FontEditor({ font, isOwner, onClose }: FontEditorProps) 
     }
 
     try {
-      if (uploaded && isOwner && scope !== uploaded.scope) {
-        await updateScope.mutateAsync({ id: uploaded.id, scope })
+      if (device) {
+        // Device fonts are device-owned: the display name stays local
+        useDeviceFontStore.getState().setPreference(device.id, { displayName: trimmedName })
+      } else {
+        if (uploaded && isOwner && scope !== uploaded.scope) {
+          await updateScope.mutateAsync({ id: uploaded.id, scope })
+        }
+        setFontPreference(font.id, { displayName: trimmedName })
       }
-      setFontPreference(font.id, { displayName: trimmedName })
       notify.success({ key: 'toast.fontSaved' })
       onClose()
     } catch (error) {
@@ -83,13 +90,13 @@ export default function FontEditor({ font, isOwner, onClose }: FontEditorProps) 
           </fieldset>
         )}
 
-        {uploaded && (
+        {(uploaded || device) && (
           <div className="flex min-w-0 items-center gap-2.5 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:bg-stone-800/60 dark:text-stone-400">
             <svg className="h-4 w-4 shrink-0 text-stone-400 dark:text-stone-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M6 3h8l4 4v14H6z" />
               <path d="M14 3v5h5M9 13h6M9 17h6" />
             </svg>
-            <span className="min-w-0 truncate" title={uploaded.fileName}>{uploaded.fileName}</span>
+            <span className="min-w-0 truncate" title={(uploaded ?? device)!.fileName}>{(uploaded ?? device)!.fileName}</span>
           </div>
         )}
 

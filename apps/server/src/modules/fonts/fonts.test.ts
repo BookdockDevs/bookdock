@@ -83,19 +83,38 @@ function seedUser(db: ReturnType<typeof createTestDb>, username: string, role: '
   return { id, username, role }
 }
 
-function buildSfnt(family: string): Buffer {
-  const str = Buffer.from(family, 'utf16le').swap16()
-  const rec = Buffer.alloc(12)
-  rec.writeUInt16BE(3, 0)
-  rec.writeUInt16BE(1, 2)
-  rec.writeUInt16BE(0x409, 4)
-  rec.writeUInt16BE(16, 6)
-  rec.writeUInt16BE(str.length, 8)
-  rec.writeUInt16BE(0, 10)
+interface SfntNameRecord { platform: number; language: number; nameId: number; value: string }
+
+function buildSfntTable(records: SfntNameRecord[]): Buffer {
+  const recs: Buffer[] = []
+  const strings: Buffer[] = []
+  let relativeOffset = 0
+  for (const record of records) {
+    const str = Buffer.from(record.value, 'utf16le').swap16()
+    const rec = Buffer.alloc(12)
+    rec.writeUInt16BE(record.platform, 0)
+    rec.writeUInt16BE(1, 2)
+    rec.writeUInt16BE(record.language, 4)
+    rec.writeUInt16BE(record.nameId, 6)
+    rec.writeUInt16BE(str.length, 8)
+    rec.writeUInt16BE(relativeOffset, 10)
+    relativeOffset += str.length
+    recs.push(rec)
+    strings.push(str)
+  }
   const header6 = Buffer.alloc(6)
-  header6.writeUInt16BE(1, 2)
-  header6.writeUInt16BE(6 + 12, 4)
-  const nameTable = Buffer.concat([header6, rec, str])
+  header6.writeUInt16BE(records.length, 2)
+  header6.writeUInt16BE(6 + records.length * 12, 4)
+  return Buffer.concat([header6, ...recs, ...strings])
+}
+
+function buildSfnt(family: string): Buffer {
+  return buildSfntFromNameTable(buildSfntTable([
+    { platform: 3, language: 0x409, nameId: 16, value: family },
+  ]))
+}
+
+function buildSfntFromNameTable(nameTable: Buffer): Buffer {
   const header = Buffer.alloc(12)
   header.writeUInt32BE(0x00010000, 0)
   header.writeUInt16BE(1, 4)
@@ -188,11 +207,100 @@ describe('fonts routes', () => {
 
   it('rejects files over the size limit with 413', async () => {
     const app = createApp(owner)
-    const big = new File([new Uint8Array(20 * 1024 * 1024 + 1)], 'big.ttf')
+    const big = new File([new Uint8Array(100 * 1024 * 1024 + 1)], 'big.ttf')
     const res = await app.request(uploadRequest(big))
     expect(res.status).toBe(413)
     const body = (await res.json()) as { error: { code: string } }
     expect(body.error.code).toBe('UPLOAD_TOO_LARGE')
+  })
+
+  it('extracts localized display names for later uploads', async () => {
+    const app = createApp(owner)
+    const nameTable = buildSfntTable([
+      { platform: 3, language: 0x409, nameId: 16, value: 'Source Han Sans' },
+      { platform: 3, language: 0x804, nameId: 4, value: '思源黑体' },
+      { platform: 3, language: 0x804, nameId: 1, value: '思源黑体族' },
+    ])
+    const res = await app.request(uploadRequest(new File([buildSfntFromNameTable(nameTable)], 'shs.ttf')))
+    expect(res.status).toBe(201)
+    const data = (await res.json() as { data: FontListItem }).data
+    expect(data.family).toBe('Source Han Sans')
+    expect(data.localNames).toEqual({ '409': 'Source Han Sans', '804': '思源黑体' })
+  })
+
+  it('inflates woff1 name tables and skips woff2', async () => {
+    const { deflateSync } = await import('node:zlib')
+    // A long value makes deflate actually shrink the table (a tiny table can
+    // grow, which real WOFF encoders store uncompressed); names are trimmed,
+    // so the filler sits in the middle
+    const compressedValue = 'Compressed ' + 'F'.repeat(400) + 'ace'
+    const nameTable = buildSfntTable([
+      { platform: 3, language: 0x409, nameId: 16, value: compressedValue },
+    ])
+    const compressed = deflateSync(nameTable)
+    // WOFF1 header (44 bytes) + one 20-byte table directory entry + data
+    const offset = 64
+    const container = Buffer.alloc(offset + compressed.length)
+    container.write('wOFF', 0, 'ascii')
+    container.writeUInt16BE(1, 12)
+    container.write('name', 44, 'ascii')
+    container.writeUInt32BE(offset, 48)
+    container.writeUInt32BE(compressed.length, 52)
+    container.writeUInt32BE(nameTable.length, 56)
+    compressed.copy(container, offset)
+
+    const app = createApp(owner)
+    const woff = new File([container], 'face.woff')
+    const res = await app.request(uploadRequest(woff))
+    expect(res.status).toBe(201)
+    const data = (await res.json() as { data: FontListItem }).data
+    expect(data.family).toBe(compressedValue)
+    expect(data.localNames).toEqual({ '409': compressedValue })
+
+    // woff2 is not parsed: family falls back to the file base name
+    const woff2 = Buffer.alloc(12)
+    woff2.write('wOF2', 0, 'ascii')
+    const res2 = await app.request(uploadRequest(new File([woff2], 'face2.woff2')))
+    expect(res2.status).toBe(201)
+    const data2 = (await res2.json() as { data: FontListItem }).data
+    expect(data2.family).toBe('face2')
+    expect(data2.localNames).toBeNull()
+  })
+
+  it('rejects woff name tables that claim or produce oversized output', async () => {
+    const { parseFontNames } = await import('../../lib/font-name')
+    const { deflateSync } = await import('node:zlib')
+
+    const nameTable = buildSfntTable([{ platform: 3, language: 0x409, nameId: 16, value: 'Tiny' }])
+    const compressed = deflateSync(nameTable)
+    // A table declaring a huge original length never inflates
+    const declaring = Buffer.alloc(64 + compressed.length)
+    declaring.write('wOFF', 0, 'ascii')
+    declaring.writeUInt16BE(1, 12)
+    declaring.write('name', 44, 'ascii')
+    declaring.writeUInt32BE(64, 48)
+    declaring.writeUInt32BE(compressed.length, 52)
+    declaring.writeUInt32BE(2 * 1024 * 1024, 56)
+    compressed.copy(declaring, 64)
+    expect(parseFontNames(declaring)).toEqual({ family: null, localNames: null })
+
+    // A compression bomb is rejected by the inflate output cap itself, not
+    // the declared-length pre-check: the header declares a plausible 900 KB
+    // (< the 1 MB cap) while the actual table inflates to 2 MB. The table
+    // carries a real name record, so a missing output cap would make this
+    // test fail with a parsed family instead of rejecting.
+    const bombTable = Buffer.alloc(2 * 1024 * 1024)
+    buildSfntTable([{ platform: 3, language: 0x409, nameId: 16, value: 'Bombed' + 'x'.repeat(32000) }]).copy(bombTable, 0)
+    const bombCompressed = deflateSync(bombTable)
+    const bomb = Buffer.alloc(64 + bombCompressed.length)
+    bomb.write('wOFF', 0, 'ascii')
+    bomb.writeUInt16BE(1, 12)
+    bomb.write('name', 44, 'ascii')
+    bomb.writeUInt32BE(64, 48)
+    bomb.writeUInt32BE(bombCompressed.length, 52)
+    bomb.writeUInt32BE(900 * 1024, 56)
+    bombCompressed.copy(bomb, 64)
+    expect(parseFontNames(bomb)).toEqual({ family: null, localNames: null })
   })
 
   it('returns the existing row when the same user re-uploads the same content', async () => {

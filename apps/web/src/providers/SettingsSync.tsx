@@ -14,6 +14,7 @@ import { fetchSettings, readStoredSettings } from '@/lib/settings-cache'
 import { useAuthStore } from '@/stores/auth.store'
 import { useSettingsSyncStore } from '@/stores/settings-sync.store'
 import { PENDING_SETTINGS_STORAGE_KEY, useUiStore } from '@/stores/ui.store'
+import { useDeviceFontStore } from '@/features/device-fonts/store'
 
 const SYNC_CHANNEL = 'bd-settings'
 const SESSION_ID = Math.random().toString(36).slice(2)
@@ -145,6 +146,9 @@ function applySettings(settings: Partial<SettingsRes>) {
       }
       return patch
     })
+    // The device-local merged font order keeps its device fonts in place and
+    // re-sorts the rest per the synced intent (see device-fonts/store.ts)
+    if (Array.isArray(settings.fontOrder)) useDeviceFontStore.getState().reconcileOrder(settings.fontOrder)
     if (Array.isArray(settings.selectionToolbarOrder)) {
       try { localStorage.setItem('bd-selection-toolbar-order', JSON.stringify(settings.selectionToolbarOrder)) } catch { /* ignore */ }
     }

@@ -8,7 +8,7 @@ import { getStorage } from '../../storage'
 import { AppError } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { sha256 } from '../../lib/hash'
-import { parseFontFamily } from '../../lib/font-name'
+import { parseFontNames } from '../../lib/font-name'
 
 const FONT_EXTENSIONS = ['ttf', 'otf', 'woff', 'woff2'] as const
 type FontFormat = (typeof FONT_EXTENSIONS)[number]
@@ -18,6 +18,17 @@ export function fontKey(hash: string, ext: string): string {
 }
 
 function toListItem(row: typeof fonts.$inferSelect, userId: string | null): FontListItem {
+  let localNames: FontListItem['localNames'] = null
+  if (row.localNames) {
+    try {
+      const parsed: unknown = JSON.parse(row.localNames)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        localNames = Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+      }
+    } catch {
+      // A malformed blob falls back to the cross-language family
+    }
+  }
   return {
     id: row.id,
     family: row.family,
@@ -27,6 +38,7 @@ function toListItem(row: typeof fonts.$inferSelect, userId: string | null): Font
     scope: row.scope,
     mine: row.userId === userId,
     createdAt: row.createdAt,
+    localNames,
   }
 }
 
@@ -58,9 +70,10 @@ export async function uploadFont(userId: string, file: File, scope: FontScope): 
     .get()
   if (existing) return toListItem(existing, userId)
 
-  const family =
-    (format === 'ttf' || format === 'otf' ? parseFontFamily(buffer) : null) ??
-    file.name.replace(/\.[^.]+$/, '')
+  // ttf/otf parse directly; woff1 inflates its name table; woff2 (Brotli)
+  // is not parsed and falls back to the file name
+  const names = format === 'woff2' ? { family: null, localNames: null } : parseFontNames(buffer)
+  const family = names.family ?? file.name.replace(/\.[^.]+$/, '')
 
   const key = fontKey(contentHash, format)
   const storage = getStorage()
@@ -74,6 +87,7 @@ export async function uploadFont(userId: string, file: File, scope: FontScope): 
     userId,
     scope,
     family,
+    localNames: names.localNames ? JSON.stringify(names.localNames) : null,
     fileName: file.name,
     format,
     contentHash,

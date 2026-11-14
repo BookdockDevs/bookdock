@@ -1,10 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { act, render, screen, fireEvent, within } from '@testing-library/react'
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
+import { act, cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import { SettingsPanel } from '../features/reader/components/SettingsPanel'
 import { useFontLoaderStore } from '../features/reader/fonts'
+import { useDeviceFontStore } from '../features/device-fonts/store'
+import type { DeviceFontMeta } from '../features/device-fonts/db'
 import { useUiStore } from '../stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
+import { useInstanceInfo } from '@/features/auth/hooks'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import type { TextReplacementRes } from '@bookdock/shared'
 import { LocalReaderContext, type LocalReaderSession } from '@/features/reading-data/reader-source-context'
@@ -13,6 +16,14 @@ import { useAuthStore } from '@/stores/auth.store'
 vi.mock('@/api/hooks/useFonts', () => ({
   useFonts: vi.fn(() => ({ data: { data: [] } })),
 }))
+
+vi.mock('@/features/auth/hooks', () => ({
+  useInstanceInfo: vi.fn(() => ({ data: undefined })),
+}))
+
+const mockInstanceInfo = (allowUserResourceUpload: boolean | undefined) => {
+  vi.mocked(useInstanceInfo).mockReturnValue({ data: allowUserResourceUpload === undefined ? undefined : { data: { allowUserResourceUpload } } } as ReturnType<typeof useInstanceInfo>)
+}
 
 vi.mock('@/api/hooks/useReplacements', () => ({
   useBookReplacements: vi.fn(() => ({ data: { data: [] } })),
@@ -26,7 +37,28 @@ const mockUploadedFonts = (fonts: unknown[]) => {
   vi.mocked(useFonts).mockReturnValue({ data: { data: fonts } } as ReturnType<typeof useFonts>)
 }
 
+const deviceFont: DeviceFontMeta = {
+  id: 'device-fb1',
+  family: 'Device SimSun',
+  fileName: 'device-simsun.ttf',
+  format: 'ttf',
+  size: 4096,
+  contentHash: 'hash',
+  createdAt: 0,
+}
+
+// Every system and builtin id disabled, leaving only the device font enabled
+const ONLY_DEVICE_ENABLED = Object.fromEntries([
+  'sans-serif', 'serif', 'kaiti', 'fangsong', 'serif-en', 'sans-en',
+  'noto-serif-sc', 'noto-sans-sc', 'lxgw-wenkai', 'literata',
+].map((id) => [id, { enabled: false }]))
+
 describe('SettingsPanel', () => {
+  afterEach(() => {
+    useDeviceFontStore.setState({ status: 'idle', fonts: [], preferences: {}, order: [], selection: { primary: null, cjk: null } })
+    useUiStore.setState({ fontPreferences: {} })
+  })
+
   it('allows local theme creation and uses connected font resources independently of book authority', () => {
     useAuthStore.setState({ user: { id: 'font-account', username: 'Reader', role: 'user' } })
     try {
@@ -301,6 +333,70 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(screen.getByText('简体'))
     expect(useUiStore.getState().chineseConversion).toBe('off')
+  })
+
+  it('auto-fallback onto a device font writes the device selection, never the account settings', async () => {
+    useDeviceFontStore.setState({ status: 'ready', fonts: [deviceFont], preferences: {}, order: [], selection: { primary: null, cjk: null } })
+    useUiStore.setState({ fontPreferences: ONLY_DEVICE_ENABLED })
+    render(<SettingsPanel />)
+
+    await waitFor(() => {
+      expect(useDeviceFontStore.getState().selection).toEqual({ primary: deviceFont.id, cjk: deviceFont.id })
+    })
+    expect(useUiStore.getState().fontFamily).toBe('sans-serif')
+    expect(useUiStore.getState().cjkFontFamily).toBe('sans-serif')
+    expect(useUiStore.getState().readingConfig).not.toContain(deviceFont.id)
+    // The load→classify→rebuild loop guard: classification state stays stable
+    const latinBefore = useFontLoaderStore.getState().latinIds
+    await act(async () => {})
+    await act(async () => {})
+    expect(Object.is(useFontLoaderStore.getState().latinIds, latinBefore)).toBe(true)
+  })
+
+  it('leaves the cjk selection untouched when only a latin device font is enabled', async () => {
+    // A latin device font is not a CJK candidate: writing it into the cjk
+    // slot and clearing it again would ping-pong between the two effects
+    const latinDeviceFont: DeviceFontMeta = { ...deviceFont, id: 'device-latin1', family: 'Latin Device Text' }
+    useDeviceFontStore.setState({ status: 'ready', fonts: [latinDeviceFont], preferences: {}, order: [], selection: { primary: null, cjk: null } })
+    useUiStore.setState({ fontPreferences: ONLY_DEVICE_ENABLED })
+    render(<SettingsPanel />)
+
+    await waitFor(() => expect(useDeviceFontStore.getState().selection.primary).toBe(latinDeviceFont.id))
+    expect(useDeviceFontStore.getState().selection.cjk).toBeNull()
+    const selectionBefore = useDeviceFontStore.getState().selection
+    await act(async () => {})
+    await act(async () => {})
+    // Reference equality: no clear/write ping-pong touched the selection
+    expect(useDeviceFontStore.getState().selection).toBe(selectionBefore)
+    expect(useUiStore.getState().cjkFontFamily).toBe('sans-serif')
+    expect(useUiStore.getState().readingConfig).not.toContain(latinDeviceFont.id)
+  })
+
+  it('non-device auto-fallback clears the device override and writes the account settings', async () => {
+    useDeviceFontStore.setState({ status: 'ready', fonts: [], preferences: {}, order: [], selection: { primary: 'device-gone', cjk: null } })
+    useUiStore.setState({ fontPreferences: { 'sans-serif': { enabled: false } } })
+    render(<SettingsPanel />)
+
+    await waitFor(() => expect(useUiStore.getState().fontFamily).toBe('serif'))
+    expect(useDeviceFontStore.getState().selection.primary).toBeNull()
+    expect(useUiStore.getState().readingConfig).toContain('"fontFamily":"serif"')
+    expect(useUiStore.getState().readingConfig).not.toContain('device-gone')
+  })
+
+  it('hides never-fetched builtins from members of instances that keep resource uploads off', () => {
+    useAuthStore.setState({ user: { id: 'reader', username: 'reader', role: 'user' } })
+    mockInstanceInfo(false)
+    render(<SettingsPanel />)
+
+    // No builtin is loaded in this environment: none of them appear
+    expect(within(primaryRow()).queryByText('霞鹜文楷')).not.toBeInTheDocument()
+    expect(within(primaryRow()).getByText('宋体')).toBeInTheDocument()
+
+    // The instance owner keeps the full catalog with download entries
+    cleanup()
+    useAuthStore.setState({ user: { id: 'owner', username: 'owner', role: 'owner' } })
+    render(<SettingsPanel />)
+    expect(within(primaryRow()).getByText('霞鹜文楷')).toBeInTheDocument()
   })
 
   it('changes reading mode in display section', () => {

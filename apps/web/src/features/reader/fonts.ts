@@ -4,6 +4,9 @@ import { BUILTIN_FONTS as SHARED_BUILTIN_FONTS } from '@bookdock/shared'
 import type { BuiltinFont as SharedBuiltinFont, FontListItem, FontPreferences } from '@bookdock/shared'
 
 import { BASE_URL } from '@/api/client'
+import type { DeviceFontMeta } from '@/features/device-fonts/db'
+import { acquireDeviceFontUrl, releaseDeviceFontUrl } from '@/features/device-fonts/urls'
+import { deviceFontCatalogSnapshot } from '@/features/device-fonts/store'
 import i18n from '@/i18n/i18n'
 
 import { FONT_OPTIONS, READER_GLYPH_FALLBACK } from './types'
@@ -35,10 +38,23 @@ export interface ResolvedFont {
   latin: boolean
   builtin?: BuiltinFont
   uploaded?: FontListItem
+  device?: DeviceFontMeta
 }
 
-/** Uploaded fonts get an alias family name so they can never be confused with
- *  a same-named system font */
+/** Device-local catalog passed explicitly so callers can memoize on it.
+ *  `order` is the device-local display order of ALL font ids (system, builtin,
+ *  uploaded and device alike — the unified-shelf rule); it never leaves the
+ *  device. Empty falls back to the synced `fontOrder`. */
+export interface DeviceFontCatalog {
+  fonts: DeviceFontMeta[]
+  preferences: FontPreferences
+  order: string[]
+}
+
+/** Uploaded and device fonts get an alias family name so they can never be
+ *  confused with a same-named system font. Device ids carry a `device-`
+ *  prefix of different length than server nanoid ids, so the alias strings
+ *  cannot collide across sources. */
 export function uploadedFontAlias(id: string): string {
   return `bd-font-${id}`
 }
@@ -48,11 +64,14 @@ export function resolveFont(
   uploaded: FontListItem[] = [],
   preferences: FontPreferences = {},
   fontOrder: string[] = [],
+  device: DeviceFontCatalog = deviceFontCatalogSnapshot(),
+  builtinDownloadsAllowed = true,
 ): ResolvedFont {
-  const options = buildFontOptions(uploaded, useFontLoaderStore.getState(), preferences, fontOrder)
+  const options = buildFontOptions(uploaded, useFontLoaderStore.getState(), preferences, fontOrder, device, builtinDownloadsAllowed)
   const candidates = options.filter((option) => option.id === id)
   const selected = candidates.find((option) => option.source === 'system')
     ?? candidates.find((option) => option.source === 'builtin')
+    ?? candidates.find((option) => option.source === 'device')
     ?? candidates[0]
   const option = selected?.enabled
     ? selected
@@ -65,6 +84,7 @@ export function resolveFont(
     latin: option.latin,
     builtin: option.builtin,
     uploaded: option.uploaded,
+    device: option.device,
   }
 }
 
@@ -91,8 +111,10 @@ export function resolveCjkFont(
   uploaded: FontListItem[] = [],
   preferences: FontPreferences = {},
   fontOrder: string[] = [],
+  device: DeviceFontCatalog = deviceFontCatalogSnapshot(),
+  builtinDownloadsAllowed = true,
 ): ResolvedFont {
-  const options = buildFontOptions(uploaded, useFontLoaderStore.getState(), preferences, fontOrder)
+  const options = buildFontOptions(uploaded, useFontLoaderStore.getState(), preferences, fontOrder, device, builtinDownloadsAllowed)
   const cjk = options.filter((option) => !option.latin)
   const selected = cjk.find((option) => option.id === id && option.enabled)
     ?? cjk.find((option) => option.enabled)
@@ -104,6 +126,7 @@ export function resolveCjkFont(
     latin: selected.latin,
     builtin: selected.builtin,
     uploaded: selected.uploaded,
+    device: selected.device,
   }
 }
 
@@ -116,16 +139,19 @@ export function resolveDualFont(
   uploaded: FontListItem[] = [],
   preferences: FontPreferences = {},
   fontOrder: string[] = [],
+  device: DeviceFontCatalog = deviceFontCatalogSnapshot(),
+  deviceUrls: Record<string, string> = {},
+  builtinDownloadsAllowed = true,
 ): DualFont {
-  const primary = resolveFont(primaryId, uploaded, preferences, fontOrder)
-  const companion = resolveCjkFont(cjkId, uploaded, preferences, fontOrder)
+  const primary = resolveFont(primaryId, uploaded, preferences, fontOrder, device, builtinDownloadsAllowed)
+  const companion = resolveCjkFont(cjkId, uploaded, preferences, fontOrder, device, builtinDownloadsAllowed)
   if (!primary.latin || primary.stack === companion.stack) {
-    return { name: primary.name, stack: primary.stack, css: fontCssFor(primary), primary, companion }
+    return { name: primary.name, stack: primary.stack, css: fontCssFor(primary, deviceUrls), primary, companion }
   }
   return {
     name: primary.name,
     stack: `${stackFirstFamily(primary.stack)}, ${companion.stack}`,
-    css: [fontCssFor(primary), fontCssFor(companion)].filter(Boolean).join('\n'),
+    css: [fontCssFor(primary, deviceUrls), fontCssFor(companion, deviceUrls)].filter(Boolean).join('\n'),
     primary,
     companion,
   }
@@ -152,15 +178,30 @@ export function uploadedFaceCss(font: FontListItem): string {
 }`
 }
 
+/** Device fonts resolve to a pooled blob URL by the caller; '' when the URL
+ *  has not been acquired yet (the fallback stack stays readable meanwhile) */
+export function deviceFaceCss(font: DeviceFontMeta, url: string): string {
+  return `@font-face {
+  font-family: "${uploadedFontAlias(font.id)}";
+  src: url("${url}") format("${FONT_FORMAT_MAP[font.format]}");
+  font-display: swap;
+}`
+}
+
 export function builtinImportCss(cssUrl: string): string {
   return `@import url("${cssUrl}");`
 }
 
 /** CSS snippet prepended to the iframe stylesheet for the resolved font;
- *  '' for system stacks which need no loading */
-export function fontCssFor(resolved: ResolvedFont): string {
+ *  '' for system stacks which need no loading, and for device fonts whose
+ *  pooled blob URL is not (yet) held by the caller */
+export function fontCssFor(resolved: ResolvedFont, deviceUrls: Record<string, string> = {}): string {
   if (resolved.builtin) return builtinImportCss(resolved.builtin.cssUrl)
   if (resolved.uploaded) return uploadedFaceCss(resolved.uploaded)
+  if (resolved.device) {
+    const url = deviceUrls[resolved.device.id]
+    return url ? deviceFaceCss(resolved.device, url) : ''
+  }
   return ''
 }
 
@@ -285,33 +326,41 @@ export function ensureBuiltinFontLoaded(id: string): void {
 
 /** Wait until the selected face is available before html-to-image snapshots
  *  the card. `document.fonts.ready` alone can resolve before a newly inserted
- *  stylesheet has declared its @font-face rules. */
+ *  stylesheet has declared its @font-face rules. A device face acquired here
+ *  is released again — card previews hold their own reference for the dialog
+ *  lifetime. */
 export async function waitForCardFont(font: ResolvedFont, text: string): Promise<void> {
-  if (font.builtin) {
-    ensureBuiltinFontLoaded(font.builtin.id)
-    const link = Array.from(document.head.querySelectorAll<HTMLLinkElement>('link[data-bd-font]'))
-      .find((item) => item.dataset.bdFont === font.builtin?.id)
-    if (link && link.dataset.loaded !== 'true') {
-      await new Promise<void>((resolve, reject) => {
-        const cleanup = () => {
-          link.removeEventListener('load', loaded)
-          link.removeEventListener('error', failed)
-        }
-        const loaded = () => { cleanup(); resolve() }
-        const failed = () => { cleanup(); reject(new Error('card font stylesheet unavailable')) }
-        link.addEventListener('load', loaded, { once: true })
-        link.addEventListener('error', failed, { once: true })
-        if (link.dataset.loaded === 'true') loaded()
-        else if (link.dataset.failed === 'true') failed()
-      })
+  const deviceHeld = font.device ? await ensureDeviceFontFace(font.device) : undefined
+  try {
+    if (font.device && !deviceHeld) throw new Error('card font file unavailable')
+    if (font.builtin) {
+      ensureBuiltinFontLoaded(font.builtin.id)
+      const link = Array.from(document.head.querySelectorAll<HTMLLinkElement>('link[data-bd-font]'))
+        .find((item) => item.dataset.bdFont === font.builtin?.id)
+      if (link && link.dataset.loaded !== 'true') {
+        await new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            link.removeEventListener('load', loaded)
+            link.removeEventListener('error', failed)
+          }
+          const loaded = () => { cleanup(); resolve() }
+          const failed = () => { cleanup(); reject(new Error('card font stylesheet unavailable')) }
+          link.addEventListener('load', loaded, { once: true })
+          link.addEventListener('error', failed, { once: true })
+          if (link.dataset.loaded === 'true') loaded()
+          else if (link.dataset.failed === 'true') failed()
+        })
+      }
     }
+    if (font.uploaded) await ensureUploadedFontLoaded(font.uploaded)
+    const family = font.stack.split(',')[0].trim()
+    if (typeof document.fonts?.load !== 'function') return
+    await Promise.all([400, 500, 600, 700].map(async (weight) => {
+      await document.fonts.load(`${weight} 16px ${family}`, text || '汉')
+    }))
+  } finally {
+    if (font.device) releaseDeviceFontFace(font.device.id)
   }
-  if (font.uploaded) await ensureUploadedFontLoaded(font.uploaded)
-  const family = font.stack.split(',')[0].trim()
-  if (typeof document.fonts?.load !== 'function') return
-  await Promise.all([400, 500, 600, 700].map(async (weight) => {
-    await document.fonts.load(`${weight} 16px ${family}`, text || '汉')
-  }))
 }
 
 export function ensureBuiltinFontsLoaded(): void {
@@ -336,11 +385,13 @@ export function isCjkFontName(name: string): boolean {
 }
 
 function setUploadedLatin(id: string, latin: boolean): void {
-  useFontLoaderStore.setState((s) => ({
-    latinIds: latin
-      ? (s.latinIds.includes(id) ? s.latinIds : [...s.latinIds, id])
-      : s.latinIds.filter((v) => v !== id),
-  }))
+  useFontLoaderStore.setState((s) => {
+    const has = s.latinIds.includes(id)
+    // Unchanged classification keeps the same state reference: a new array on
+    // every call would re-render subscribers into a load→classify→re-load loop
+    if (latin === has) return s
+    return { latinIds: latin ? [...s.latinIds, id] : s.latinIds.filter((v) => v !== id) }
+  })
 }
 
 /** Idempotently register an uploaded font in the main document via an inline
@@ -384,9 +435,100 @@ export function canRenderCjk(familyAlias: string): boolean {
   }
 }
 
-export type FontOptionSource = 'uploaded' | 'builtin' | 'system'
+interface DeviceFaceEntry {
+  style: HTMLStyleElement | null
+  refs: number
+  ready: Promise<string | null>
+  /** Pooled URL once this entry's acquire completed; null while pending */
+  url: string | null
+  /** Whether this entry already gave its own pooled reference back */
+  poolReleased: boolean
+}
+
+const injectedDeviceEntries = new Map<string, DeviceFaceEntry>()
+
+function releaseEntryPool(entry: DeviceFaceEntry, id: string): void {
+  if (entry.url && !entry.poolReleased) {
+    entry.poolReleased = true
+    releaseDeviceFontUrl(id)
+  }
+}
+
+function dropEntry(id: string, entry: DeviceFaceEntry): void {
+  // Identity check: a cancelled entry must never remove a newer entry that a
+  // re-ensure registered under the same font id
+  if (injectedDeviceEntries.get(id) === entry) injectedDeviceEntries.delete(id)
+}
+
+async function loadDeviceFace(font: DeviceFontMeta, entry: DeviceFaceEntry): Promise<string | null> {
+  // Storage read failures resolve to null like a missing file: consumers fall
+  // back and notify instead of surfacing an unhandled rejection
+  const url = await acquireDeviceFontUrl(font.id).catch(() => null)
+  entry.url = url
+  if (!url) {
+    dropEntry(font.id, entry)
+    return null
+  }
+  // Released while the load was in flight: give this entry's pooled reference
+  // back and leave nothing mounted, so a cancelled surface cannot leak the URL
+  if (entry.refs <= 0) {
+    releaseEntryPool(entry, font.id)
+    dropEntry(font.id, entry)
+    return null
+  }
+  const style = document.createElement('style')
+  style.dataset.bdDeviceFont = font.id
+  style.textContent = deviceFaceCss(font, url)
+  document.head.appendChild(style)
+  entry.style = style
+  if (typeof document.fonts?.load === 'function') {
+    try {
+      await document.fonts.load(`16px "${uploadedFontAlias(font.id)}"`)
+      setUploadedLatin(font.id, !canRenderCjk(uploadedFontAlias(font.id)))
+    } catch (err) {
+      console.warn(`[fonts] failed to load device font ${font.id}:`, err)
+    }
+  }
+  return url
+}
+
+/** Register a device font in the main document for preview surfaces (settings
+ *  list, reader settings chips, share card). Unlike uploaded fonts the backing
+ *  blob URL is pooled, so every caller holds one reference and must pair its
+ *  ensure with a releaseDeviceFontFace — the lease is registered synchronously,
+ *  so releasing before the async load finishes still cancels cleanly, and a
+ *  release→re-ensure race creates an independent lease instead of corrupting
+ *  the cancelled one. The promise resolves to null when the file no longer
+ *  resolves from device storage (or the lease was cancelled). */
+export function ensureDeviceFontFace(font: DeviceFontMeta): Promise<string | null> {
+  const existing = injectedDeviceEntries.get(font.id)
+  if (existing) {
+    existing.refs += 1
+    return existing.ready
+  }
+  if (!isCjkFontName(font.family)) setUploadedLatin(font.id, true)
+  const entry: DeviceFaceEntry = { style: null, refs: 1, ready: null!, url: null, poolReleased: false }
+  entry.ready = loadDeviceFace(font, entry)
+  injectedDeviceEntries.set(font.id, entry)
+  return entry.ready
+}
+
+export function releaseDeviceFontFace(id: string): void {
+  const entry = injectedDeviceEntries.get(id)
+  if (!entry) return
+  entry.refs -= 1
+  if (entry.refs > 0) return
+  injectedDeviceEntries.delete(id)
+  entry.style?.remove()
+  // The pool reference is only released when this entry actually holds one:
+  // a release racing a pending acquire leaves the give-back to loadDeviceFace,
+  // which knows whether the acquire completed and whose reference it is.
+  releaseEntryPool(entry, id)
+}
+
+export type FontOptionSource = 'uploaded' | 'builtin' | 'system' | 'device'
 /** idle = builtin never fetched (download icon); loading = in flight
- *  (spinner); ready = nothing to show (uploaded/system are always ready) */
+ *  (spinner); ready = nothing to show (uploaded/device/system are always ready) */
 export type FontOptionStatus = 'idle' | 'loading' | 'ready'
 
 export interface FontOption {
@@ -400,6 +542,31 @@ export interface FontOption {
   latin: boolean
   builtin?: BuiltinFont
   uploaded?: FontListItem
+  device?: DeviceFontMeta
+}
+
+/** Display name for locally extracted localized names: prefer the record
+ *  matching the current UI language, then any other language. The manual
+ *  rename always wins upstream of this helper. */
+const FONT_NAME_LANGUAGE_PREFERENCE: Record<string, number[]> = {
+  'zh-CN': [0x804, 0x404, 0xc04, 0x1404, 0x411, 0x412],
+  'zh-TW': [0x404, 0xc04, 0x1404, 0x804, 0x411, 0x412],
+  'zh-HK': [0xc04, 0x1404, 0x404, 0x804, 0x411, 0x412],
+  en: [0x409],
+}
+
+export function localizedFontName(localNames?: Record<string, string> | null): string | null {
+  if (!localNames) return null
+  const preferred = FONT_NAME_LANGUAGE_PREFERENCE[i18n.language] ?? []
+  for (const langId of preferred) {
+    const value = localNames[langId.toString(16)]
+    if (value) return value
+  }
+  // No record for the UI language: any other language's name, then family
+  for (const value of Object.values(localNames)) {
+    if (value) return value
+  }
+  return null
 }
 
 function fontPresentation(id: string, fallbackName: string, preferences: FontPreferences) {
@@ -427,15 +594,32 @@ export const DEFAULT_FONT_ORDER: string[] = [
 
 /** Single ordered list shared by the settings page and both font pickers.
  *  The loader snapshot is an explicit parameter so callers can memoize on it
- *  (default: current store state). */
+ *  (default: current store state). Device fonts trail the synced list in
+ *  their own device-local order — they never enter the synced fontOrder. */
+/** When member resource uploads are disabled (and the viewer is not the
+ *  owner), builtin fonts that were never downloaded stay invisible: showing
+ *  them would let the viewer trigger an upstream fetch the instance policy
+ *  forbids. Already-loaded entries remain usable. */
 export function buildFontOptions(
   uploaded: FontListItem[] = [],
   loader: Pick<FontLoaderState, 'loadedIds' | 'loadingIds'> & { latinIds?: string[] } = useFontLoaderStore.getState(),
   preferences: FontPreferences = {},
   fontOrder: string[] = [],
+  device: DeviceFontCatalog = deviceFontCatalogSnapshot(),
+  builtinDownloadsAllowed = true,
 ): FontOption[] {
   const { loadedIds, loadingIds } = loader
   const latinIds = loader.latinIds ?? []
+  const visibleBuiltins = builtinDownloadsAllowed ? BUILTIN_FONTS : BUILTIN_FONTS.filter((f) => loadedIds.includes(f.id))
+  const deviceOptions = [...device.fonts].map((f) => ({
+      id: f.id,
+      ...fontPresentation(f.id, localizedFontName(f.localNames) ?? f.family, device.preferences),
+      stack: `"${uploadedFontAlias(f.id)}", ${READER_GLYPH_FALLBACK}, serif`,
+      source: 'device' as const,
+      status: 'ready' as const,
+      latin: latinIds.includes(f.id),
+      device: f,
+    }))
   const options: FontOption[] = [
     ...FONT_OPTIONS.map((f) => ({
       id: f.id,
@@ -445,7 +629,7 @@ export function buildFontOptions(
       status: 'ready' as const,
       latin: f.latin ?? false,
     })),
-    ...BUILTIN_FONTS.map((f) => ({
+    ...visibleBuiltins.map((f) => ({
       id: f.id,
       ...fontPresentation(f.id, f.name, preferences),
       stack: f.family,
@@ -460,23 +644,34 @@ export function buildFontOptions(
     })),
     ...uploaded.map((f) => ({
       id: f.id,
-      ...fontPresentation(f.id, f.family, preferences),
+      ...fontPresentation(f.id, localizedFontName(f.localNames) ?? f.family, preferences),
       stack: `"${uploadedFontAlias(f.id)}", ${READER_GLYPH_FALLBACK}, serif`,
       source: 'uploaded' as const,
       status: 'ready' as const,
       latin: latinIds.includes(f.id),
       uploaded: f,
     })),
+    ...deviceOptions,
   ]
 
-  const activeOrder = fontOrder.length > 0 ? fontOrder : DEFAULT_FONT_ORDER
-  const positions = new Map(activeOrder.map((id, index) => [id, index]))
-  return [...options].sort((left, right) => {
-    const leftPosition = positions.get(left.id)
-    const rightPosition = positions.get(right.id)
-    if (leftPosition === undefined && rightPosition === undefined) return 0
-    if (leftPosition === undefined) return 1
-    if (rightPosition === undefined) return -1
-    return leftPosition - rightPosition
-  })
+  // One merged display order for every source: the device-local merged order
+  // wins when present (a drag interleaves device fonts freely), otherwise the
+  // synced fontOrder applies and device fonts trail. Ids missing from the
+  // base order sort after it: device ones by catalog sequence, the rest by
+  // the synced fontOrder.
+  const base = device.order.length > 0
+    ? device.order
+    : (fontOrder.length > 0 ? fontOrder : DEFAULT_FONT_ORDER)
+  const positions = new Map(base.map((id, index) => [id, index]))
+  const tail = base.length
+  // Ids the base order does not know (fresh imports, newly uploaded fonts)
+  // trail it in natural catalog sequence: system, builtin, uploaded, device.
+  const sourceRank = (option: FontOption): number =>
+    option.source === 'system' ? 0 : option.source === 'builtin' ? 1 : option.source === 'uploaded' ? 2 : 3
+  const sortKey = (option: FontOption): number => {
+    const position = positions.get(option.id)
+    if (position !== undefined) return position
+    return tail + sourceRank(option) * 1000
+  }
+  return [...options].sort((left, right) => sortKey(left) - sortKey(right))
 }

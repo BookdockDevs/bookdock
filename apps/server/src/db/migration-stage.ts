@@ -21,6 +21,7 @@ export const INSTANCE_INVITES_TAG = '0061_instance_invites'
 export const AI_CHAT_JOBS_TAG = '0062_ai_chat_jobs'
 export const ANCHOR_EVIDENCE_TAG = '0063_anchor_evidence'
 export const MEMBER_RESOURCE_UPLOAD_TAG = '0064_member_resource_upload_switch'
+export const FONT_LOCAL_NAMES_TAG = '0065_font_local_names'
 
 /** Guarded revert of 0061_instance_invites and 0062_ai_chat_jobs for legacy-fixture
  * tests that reset the migration watermark and re-run the chain from an earlier
@@ -237,7 +238,7 @@ export function migrateBeforeBookRetirementIncluding(
   // Older partial fixtures lack book_reviews, so stage only the archive/annotation portion there.
   // MEMBER_RESOURCE_UPLOAD_TAG keeps the drizzle `instance` shape and its
   // settings queries consistent across service-test fixtures.
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG, FONT_LOCAL_NAMES_TAG])
   migrateWithTagFilter(
     db,
     options,
