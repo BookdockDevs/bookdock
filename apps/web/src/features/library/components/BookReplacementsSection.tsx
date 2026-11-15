@@ -88,7 +88,7 @@ export default function BookReplacementsSection({
       ) : rows.length === 0 ? (
         <SettingsEmptyState>{_('reader.replacementsEmptyCreate')}</SettingsEmptyState>
       ) : (
-        <ul className="divide-y divide-stone-100 dark:divide-stone-800">
+        <ul className="space-y-1.5">
           {rows.map((rule) =>
             rule.matchType === 'point' ? (
               <PointRow
@@ -152,7 +152,7 @@ function BookScopedRow({
   return (
     <li
       className={cn(
-        'group flex items-center gap-3 rounded-xl p-2.5 transition-colors hover:bg-stone-50 dark:hover:bg-stone-800/40',
+        'group flex items-center justify-between gap-3 rounded-xl border border-stone-500/10 bg-stone-500/[0.02] p-2.5 transition-colors hover:border-stone-500/20 hover:bg-stone-500/10',
         !effective && 'opacity-60',
       )}
     >
@@ -167,12 +167,16 @@ function BookScopedRow({
             >
               {rule.name}
             </p>
-            <p className="mt-0.5 truncate font-mono text-xs text-stone-400 dark:text-stone-500">
-              <span className={cn(!replacement && 'line-through')}>{rule.pattern}</span>
+            <p className="mt-1 truncate font-mono text-xs text-stone-500 dark:text-stone-400">
+              <span className={cn('rounded bg-stone-500/10 px-1.5 py-0.5 text-stone-700 dark:text-stone-300', !replacement && 'line-through text-stone-400 dark:text-stone-500')}>
+                {rule.pattern}
+              </span>
               {replacement && (
                 <>
-                  <span> → </span>
-                  <span className={cn(effective && 'text-emerald-600 dark:text-emerald-400')}>{replacement}</span>
+                  <span className="text-stone-400 dark:text-stone-500"> → </span>
+                  <span className={cn('rounded px-1.5 py-0.5 font-medium', effective ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-stone-500/10 text-stone-400 dark:text-stone-500')}>
+                    {replacement}
+                  </span>
                 </>
               )}
             </p>
@@ -184,11 +188,13 @@ function BookScopedRow({
               !effective ? 'text-stone-400 dark:text-stone-500' : 'text-stone-800 dark:text-stone-200',
             )}
           >
-            <span className={cn(!replacement && 'line-through')}>{rule.pattern}</span>
+            <span className={cn('rounded bg-stone-500/10 px-1.5 py-0.5 text-stone-800 dark:text-stone-200', !replacement && 'line-through text-stone-400 dark:text-stone-500')}>
+              {rule.pattern}
+            </span>
             {replacement && (
               <>
                 <span className="font-normal text-stone-400 dark:text-stone-500"> → </span>
-                <span className={cn(effective ? 'text-emerald-600 dark:text-emerald-400' : 'text-stone-400 dark:text-stone-500')}>
+                <span className={cn('rounded px-1.5 py-0.5 font-medium', effective ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-stone-500/10 text-stone-400 dark:text-stone-500')}>
                   {replacement}
                 </span>
               </>
@@ -196,10 +202,12 @@ function BookScopedRow({
           </p>
         )}
       </div>
-      {count !== undefined && <MatchCountBadge count={count} />}
-      <StatusBadge effective={effective} bookScoped />
-      <Toggle checked={effective} onChange={onToggle} ariaLabel={_('library.replacementsToggle')} />
-      <RowActions onEdit={onEdit} onDelete={onDelete} />
+      <div className="flex shrink-0 items-center gap-2">
+        {count !== undefined && <MatchCountBadge count={count} />}
+        <StatusBadge effective={effective} bookScoped />
+        <Toggle checked={effective} onChange={onToggle} ariaLabel={_('library.replacementsToggle')} />
+        <RowActions onEdit={onEdit} onDelete={onDelete} />
+      </div>
     </li>
   )
 }
@@ -225,7 +233,7 @@ function BookReplacementRow({
   return (
     <li
       className={cn(
-        'group flex items-center gap-3 rounded-xl p-2.5 transition-colors hover:bg-stone-50 dark:hover:bg-stone-800/40',
+        'group flex items-center justify-between gap-3 rounded-xl border border-stone-500/10 bg-stone-500/[0.02] p-2.5 transition-colors hover:border-stone-500/20 hover:bg-stone-500/10',
         !effective && 'opacity-60',
       )}
     >
@@ -240,12 +248,16 @@ function BookReplacementRow({
             >
               {rule.name}
             </p>
-            <p className="mt-0.5 truncate font-mono text-xs text-stone-400 dark:text-stone-500">
-              <span className={cn(!replacement && 'line-through')}>{rule.pattern}</span>
+            <p className="mt-1 truncate font-mono text-xs text-stone-500 dark:text-stone-400">
+              <span className={cn('rounded bg-stone-500/10 px-1.5 py-0.5 text-stone-700 dark:text-stone-300', !replacement && 'line-through text-stone-400 dark:text-stone-500')}>
+                {rule.pattern}
+              </span>
               {replacement && (
                 <>
-                  <span> → </span>
-                  <span className={cn(effective && 'text-emerald-600 dark:text-emerald-400')}>{replacement}</span>
+                  <span className="text-stone-400 dark:text-stone-500"> → </span>
+                  <span className={cn('rounded px-1.5 py-0.5 font-medium', effective ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-stone-500/10 text-stone-400 dark:text-stone-500')}>
+                    {replacement}
+                  </span>
                 </>
               )}
             </p>
@@ -257,11 +269,13 @@ function BookReplacementRow({
               !effective ? 'text-stone-400 dark:text-stone-500' : 'text-stone-800 dark:text-stone-200',
             )}
           >
-            <span className={cn(!replacement && 'line-through')}>{rule.pattern}</span>
+            <span className={cn('rounded bg-stone-500/10 px-1.5 py-0.5 text-stone-800 dark:text-stone-200', !replacement && 'line-through text-stone-400 dark:text-stone-500')}>
+              {rule.pattern}
+            </span>
             {replacement && (
               <>
                 <span className="font-normal text-stone-400 dark:text-stone-500"> → </span>
-                <span className={cn(effective ? 'text-emerald-600 dark:text-emerald-400' : 'text-stone-400 dark:text-stone-500')}>
+                <span className={cn('rounded px-1.5 py-0.5 font-medium', effective ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-stone-500/10 text-stone-400 dark:text-stone-500')}>
                   {replacement}
                 </span>
               </>
@@ -269,10 +283,12 @@ function BookReplacementRow({
           </p>
         )}
       </div>
-      {count !== undefined && <MatchCountBadge count={count} />}
-      <StatusBadge effective={effective} override={override} />
-      <Toggle checked={effective} onChange={onToggle} ariaLabel={_('library.replacementsToggle')} />
-      <RowActions onEdit={onEdit} onDelete={onDelete} />
+      <div className="flex shrink-0 items-center gap-2">
+        {count !== undefined && <MatchCountBadge count={count} />}
+        <StatusBadge effective={effective} override={override} />
+        <Toggle checked={effective} onChange={onToggle} ariaLabel={_('library.replacementsToggle')} />
+        <RowActions onEdit={onEdit} onDelete={onDelete} />
+      </div>
     </li>
   )
 }
@@ -308,7 +324,7 @@ function PointRow({
   return (
     <li
       className={cn(
-        'group flex items-center gap-3 rounded-xl p-2.5 transition-colors hover:bg-stone-50 dark:hover:bg-stone-800/40',
+        'group flex items-center justify-between gap-3 rounded-xl border border-stone-500/10 bg-stone-500/[0.02] p-2.5 transition-colors hover:border-stone-500/20 hover:bg-stone-500/10',
         !effective && 'opacity-60',
       )}
     >
@@ -323,7 +339,7 @@ function PointRow({
           {replacement && (
             <>
               <span className="font-normal text-stone-400 dark:text-stone-500"> → </span>
-              <span className={cn(effective ? 'text-emerald-600 dark:text-emerald-400' : 'text-stone-400 dark:text-stone-500')}>
+              <span className={cn('rounded px-1.5 py-0.5 font-medium', effective ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-stone-500/10 text-stone-400 dark:text-stone-500')}>
                 {replacement}
               </span>
             </>
@@ -335,25 +351,27 @@ function PointRow({
               <button
                 type="button"
                 onClick={() => onJump(patch.spineHref!, patch.textOffset, patch.replacement)}
-                className="inline-flex max-w-full items-center rounded-full border border-stone-200/80 bg-stone-100/70 px-2 py-0.5 text-[11px] text-stone-500 transition-colors hover:border-stone-300 hover:bg-stone-200/70 dark:border-stone-700/80 dark:bg-stone-800/60 dark:text-stone-400 dark:hover:border-stone-600 dark:hover:bg-stone-800"
+                className="inline-flex max-w-full items-center rounded-full border border-stone-500/15 bg-stone-500/5 px-2 py-0.5 text-[11px] text-stone-500 transition-colors hover:border-stone-500/30 hover:bg-stone-500/10 dark:text-stone-400"
               >
                 <span className="truncate">{chapter}</span>
               </button>
             ) : (
-              <span className="inline-flex max-w-full items-center rounded-full border border-stone-200/80 bg-stone-100/70 px-2 py-0.5 text-[11px] text-stone-500 dark:border-stone-700/80 dark:bg-stone-800/60 dark:text-stone-400 truncate">
+              <span className="inline-flex max-w-full items-center rounded-full border border-stone-500/15 bg-stone-500/5 px-2 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 truncate">
                 {chapter}
               </span>
             )}
           </div>
         )}
       </div>
-      {(invalid || unresolved) && (
-        <span className="shrink-0 rounded border border-red-300 px-1.5 py-0.5 text-[11px] text-red-500 dark:border-red-800 dark:text-red-400">
-          {_('reader.replacementsInvalidBadge')}
-        </span>
-      )}
-      <Toggle checked={patch.enabled && !unresolved} onChange={onToggle} ariaLabel={_('settings.replacementsEnabled')} disabled={unresolved} />
-      <RowActions onEdit={onEdit} onDelete={onDelete} />
+      <div className="flex shrink-0 items-center gap-2">
+        {(invalid || unresolved) && (
+          <span className="shrink-0 rounded-md border border-red-500/25 bg-red-500/10 px-1.5 py-0.5 text-[11px] font-medium text-red-600 dark:text-red-400">
+            {_('reader.replacementsInvalidBadge')}
+          </span>
+        )}
+        <Toggle checked={patch.enabled && !unresolved} onChange={onToggle} ariaLabel={_('settings.replacementsEnabled')} disabled={unresolved} />
+        <RowActions onEdit={onEdit} onDelete={onDelete} />
+      </div>
     </li>
   )
 }
@@ -370,10 +388,14 @@ function StatusBadge({ effective, override, bookScoped }: { effective: boolean; 
   return (
     <span
       className={cn(
-        'shrink-0 rounded border px-1.5 py-0.5 text-[11px]',
-        effective
-          ? 'border-stone-200 text-stone-500 dark:border-stone-700 dark:text-stone-400'
-          : 'border-stone-200 text-stone-400 dark:border-stone-700 dark:text-stone-500',
+        'shrink-0 rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors',
+        override
+          ? effective
+            ? 'border-stone-500/25 bg-stone-500/10 text-stone-700 dark:text-stone-200'
+            : 'border-stone-500/15 bg-stone-500/5 text-stone-400 dark:text-stone-500'
+          : effective
+            ? 'border-stone-500/15 bg-stone-500/5 text-stone-600 dark:text-stone-300'
+            : 'border-stone-500/10 bg-transparent text-stone-400 dark:text-stone-500',
       )}
     >
       {_(key)}
@@ -383,8 +405,15 @@ function StatusBadge({ effective, override, bookScoped }: { effective: boolean; 
 
 function MatchCountBadge({ count }: { count: number }) {
   const _ = useTranslation()
+  if (count === 0) {
+    return (
+      <span className="shrink-0 text-[11px] tabular-nums text-stone-400/70 dark:text-stone-500/70">
+        {_('reader.replacementsMatches', { count })}
+      </span>
+    )
+  }
   return (
-    <span className="shrink-0 text-[11px] tabular-nums text-stone-400 dark:text-stone-500">
+    <span className="shrink-0 inline-flex items-center rounded-full bg-stone-500/10 px-2 py-0.5 text-[11px] font-medium tabular-nums text-stone-600 dark:text-stone-300">
       {_('reader.replacementsMatches', { count })}
     </span>
   )
@@ -395,9 +424,9 @@ function MatchCountBadge({ count }: { count: number }) {
 function RowActions({ onEdit, onDelete }: { onEdit?: () => void; onDelete?: () => void }) {
   const _ = useTranslation()
   const actionBtn =
-    'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
+    'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-500/10 hover:text-stone-700 dark:hover:text-stone-200'
   return (
-    <>
+    <div className="flex shrink-0 items-center gap-0.5">
       {onEdit && (
         <button
           type="button"
@@ -417,7 +446,7 @@ function RowActions({ onEdit, onDelete }: { onEdit?: () => void; onDelete?: () =
           onClick={onDelete}
           aria-label={_('library.delete')}
           title={_('library.delete')}
-          className={`${actionBtn} hover:bg-red-50 hover:text-red-600 dark:hover:bg-stone-800 dark:hover:text-red-400`}
+          className={`${actionBtn} hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400`}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
@@ -425,6 +454,6 @@ function RowActions({ onEdit, onDelete }: { onEdit?: () => void; onDelete?: () =
           </svg>
         </button>
       )}
-    </>
+    </div>
   )
 }

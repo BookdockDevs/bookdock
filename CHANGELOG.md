@@ -10,6 +10,7 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- Improved the reader text replacements dialog with semi-transparent card items, refined pattern and replacement syntax badges, muted zero-match indicators, clustered action buttons, and theme-adaptive hover states that blend into sepia, light, and dark reading palettes without jarring cold-white highlights.
 - Refreshed the default AI provider models for Claude, Gemini, DeepSeek, GLM, Kimi, MiniMax, and MiMo; kept Qwen's rolling alias, corrected MiMo's fallback API URL, and renamed the Moonshot provider to Kimi.
 - Organized Legado discovery around one selected library with a full-width library picker, and added author/file-size sorting for all libraries plus last-read/progress sorting for personal libraries. Search and discovery previews now fall back to book metadata descriptions and are capped at 80 characters.
 
@@ -1294,6 +1295,7 @@ All notable changes to Bookdock are documented here.
 
 #### 优化
 
+- 优化阅读器文本替换弹窗的视觉与交互呈现：列表项改用与阅读器明暗/羊皮纸配色深度融合的半透明微质感卡片，消除悬停时的生硬冷白底色；规则模式与替换词采用轻量语法标签展示，弱化零匹配计数噪音，并将编辑与删除操作收拢分组。
 - 更新 Claude、Gemini、DeepSeek、智谱 GLM、Kimi、MiniMax 和 MiMo 的 AI 供应商默认模型；保留通义千问的系列别名、修正 MiMo 备用 API 地址，并将 Moonshot 供应商名称简化为“Kimi”。
 - 优化 Legado 发现页，按当前书库展示入口，书库选择独占一行，并新增按作者和文件大小排序的支持；个人书库另支持按最近阅读和阅读进度排序。搜索与发现结果缺少简介时会回退到书籍元数据简介，预览最多 80 个字符。
 
