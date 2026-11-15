@@ -410,7 +410,7 @@ export default function Reader() {
   // Pins the `dark:` axis for the whole reader chrome subtree to the reading
   // theme's brightness instead of the system preference (see index.css).
   const readingTone = useUiStore(selectReadingTone)
-  const dialogInset = !isTouch && (sidebarOpen || toolbarLocked) ? 56 + (sidebarOpen ? sidebarWidth : 0) : 0
+  const dialogInset = !isTouch && toolbarLocked ? 56 + (sidebarOpen ? sidebarWidth : 0) : 0
   const createAnnotation = useCreateAnnotation(id)
   const deleteAnnotation = useDeleteAnnotation(id)
   const { data: annotations } = useAnnotations(id, { enabled: !isGuest && !revisionQuarantined })
@@ -1021,9 +1021,9 @@ export default function Reader() {
       footerLeaveTimerRef.current = null
     }
     setSettingsOpen(false)
-    const dismissibleSidebarOpen = sidebarOpen && (isTouch || !toolbarLocked)
+    const dismissibleSidebarOpen = sidebarOpen && isTouch
     if (dismissibleSidebarOpen) setSidebarOpen(false)
-  }, [isTouch, setSidebarOpen, sidebarOpen, toolbarLocked])
+  }, [isTouch, setSidebarOpen, sidebarOpen])
 
   // One definition of "toggle the reading chrome", shared by the middle-tap
   // gesture and the space key: the dismissal rules (locked desktop sidebar is
@@ -1033,14 +1033,14 @@ export default function Reader() {
     // Tap-to-toggle: anything visible (pinned bars, summoned bars, settings popover,
     // or a dismissible sidebar) closes on tap. A locked desktop sidebar is
     // persistent and must not participate in reading-chrome dismissal.
-    const dismissibleSidebarOpen = sidebarOpen && (isTouch || !toolbarLocked)
+    const dismissibleSidebarOpen = sidebarOpen && isTouch
     const isShowing = chromePinned || headerVisible || footerVisible || settingsOpen || dismissibleSidebarOpen
     if (isShowing) {
       dismissChrome()
     } else {
       setChromePinned(true)
     }
-  }, [chromePinned, headerVisible, footerVisible, settingsOpen, sidebarOpen, isTouch, toolbarLocked, dismissChrome])
+  }, [chromePinned, headerVisible, footerVisible, settingsOpen, sidebarOpen, isTouch, dismissChrome])
 
   const settingsSync = useSettingsSyncStore()
   const resolvedBoundPresetId = useUiStore((s) => s.boundPresetId)
@@ -1861,12 +1861,12 @@ export default function Reader() {
   }, [currentChapterIndex, chapterFraction, chaptersQuery.data, rate, totalChars])
 
   const onToggleSettings = useCallback(() => {
-    if (!toolbarLocked) setSidebarOpen(false)
+    if (isTouch) setSidebarOpen(false)
     setTtsOpen(false)
     setAutoReadingOpen(false)
     clearReaderSelection(rendererRef.current)
     setSettingsOpen((v) => !v)
-  }, [setSidebarOpen, toolbarLocked])
+  }, [isTouch, setSidebarOpen])
 
   const onToggleTts = useCallback(() => {
     setSettingsOpen(false)

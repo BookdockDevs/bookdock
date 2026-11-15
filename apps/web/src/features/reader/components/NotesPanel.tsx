@@ -12,6 +12,7 @@ import { notify } from '@/lib/notifications'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 
 import { useReaderApi } from '../hooks/useReaderApi'
+import { useIsTouch } from '../hooks/useIsTouch'
 import { useAuthStore } from '@/stores/auth.store'
 import { useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { kindOf, type NoteSort } from '../hooks/useNotesFilter'
@@ -71,6 +72,7 @@ export const NotesPanel = memo(function NotesPanel({
   hideSelectionToolbar = false,
 }: NotesPanelProps) {
   const _ = useTranslation()
+  const isTouch = useIsTouch()
   const { renderer } = useReaderApi()
   const deleteAnnotation = useDeleteAnnotation(bookId)
   const updateAnnotation = useUpdateAnnotation(bookId)
@@ -228,7 +230,7 @@ export const NotesPanel = memo(function NotesPanel({
       return
     }
     renderer?.display(item.cfiRange)
-    if (!locked) onClose?.()
+    if (!locked && isTouch) onClose?.()
   }
 
   function openIdeaDetail(item: AnnotationRes) {

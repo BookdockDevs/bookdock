@@ -619,7 +619,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
           ref={styleRef}
           data-reader-selection-toolbar
           onPointerDown={(event) => { if (event.button === 0 && event.pointerType !== 'touch' && (event.target as Element).closest('button')) event.preventDefault() }}
-          className="fixed z-50 flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_6px_rgba(0,0,0,0.06),0_6px_16px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="fixed z-[60] flex h-10 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_6px_rgba(0,0,0,0.06),0_6px_16px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{ left: bar.styleLeft, top: bar.styleTop, maxWidth: bar.styleWidth }}
         >
           {HIGHLIGHT_STYLES.map((s) => (
@@ -684,7 +684,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
         ref={barRef}
         data-reader-selection-toolbar
         onPointerDown={(event) => { if (event.button === 0 && event.pointerType !== 'touch' && (event.target as Element).closest('button')) event.preventDefault() }}
-        className="fixed z-50 flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_8px_rgba(0,0,0,0.08),0_10px_25px_-5px_rgba(0,0,0,0.18)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="fixed z-[60] flex h-11 w-max max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 px-2 text-[var(--bd-read-text)] shadow-[0_2px_8px_rgba(0,0,0,0.08),0_10px_25px_-5px_rgba(0,0,0,0.18)] backdrop-blur-md dark:border-stone-700/80 dark:shadow-[0_4px_24px_rgba(0,0,0,0.65)] dark:ring-1 dark:ring-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{ left: bar.left, top: bar.top, maxWidth: bar.width }}
       >
         {actions.map((a) => (
@@ -710,7 +710,7 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
           role="menu"
           data-testid="selection-ai-commands"
           aria-label={_('reader.aiQuickCommands')}
-          className="fixed z-[51] overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] rounded-xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 p-1.5 text-[var(--bd-read-text)] shadow-[0_4px_12px_rgba(0,0,0,0.1),0_12px_28px_-6px_rgba(0,0,0,0.2)] backdrop-blur-md"
+          className="fixed z-[61] overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] rounded-xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)]/95 p-1.5 text-[var(--bd-read-text)] shadow-[0_4px_12px_rgba(0,0,0,0.1),0_12px_28px_-6px_rgba(0,0,0,0.2)] backdrop-blur-md"
           style={{
             left: Math.min(
               Math.max(8, aiMenuAnchor.left - 8),

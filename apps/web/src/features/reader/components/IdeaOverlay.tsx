@@ -539,7 +539,7 @@ export function IdeaOverlay({
   return createPortal(
     <div
       data-reader-modal=""
-      className={`fixed inset-0 z-50 flex flex-col bg-black/50 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm ${readingTone} ${dialogLayout.className}`}
+      className={`fixed inset-0 z-[70] flex flex-col bg-black/50 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm ${readingTone} ${dialogLayout.className}`}
       style={dialogLayout.style}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()

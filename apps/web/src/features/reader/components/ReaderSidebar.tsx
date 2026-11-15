@@ -40,17 +40,39 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
 
   const SIDEBAR_MIN = 200
   const SIDEBAR_MAX = 640
+  const SIDEBAR_MIN_HEIGHT = 320
   const DEFAULT_SIDEBAR_WIDTH = 288
+  const TOOL_DOCK_WIDTH = 56
+
   const [locked, setLocked] = useState(toolbarLocked)
   const [hovered, setHovered] = useState(false)
-  // Touch uses a bottom control sheet; the desktop dock keeps its hover/lock behavior.
+  const [floatingActive, setFloatingActive] = useState(false)
+
+  // Touch uses a bottom control sheet; desktop dock keeps its hover/lock behavior.
   const mobileControlsVisible = isTouch && (chromePinned || sidebarOpen)
   const panelRef = useRef<NavigationPanelRef>(null)
 
   const [panelWidth, setPanelWidth] = useState(sidebarWidth)
-  const [resizing, setResizing] = useState(false)
-  const resizingRef = useRef(false)
+  const [floatingHeight, setFloatingHeight] = useState<number | null>(() => {
+    try {
+      const val = localStorage.getItem('bd-floating-sidebar-height')
+      if (!val) return null
+      const n = Number(val)
+      return Number.isFinite(n) && n >= 320 ? n : null
+    } catch {
+      return null
+    }
+  })
+  const floatingHeightRef = useRef(floatingHeight)
+
+  type ResizeDirection = 'width' | 'height' | 'corner' | null
+  const [resizingDir, setResizingDir] = useState<ResizeDirection>(null)
+  const resizingDirRef = useRef<ResizeDirection>(null)
   const panelRefWidth = useRef(panelWidth)
+
+  const dockRef = useRef<HTMLDivElement>(null)
+  const sidebarContainerRef = useRef<HTMLDivElement>(null)
+  const pointerPosRef = useRef<{ clientX: number; clientY: number } | null>(null)
 
   useEffect(() => {
     setLocked(toolbarLocked)
@@ -65,9 +87,9 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
   }, [activeNavTab, guestReadOnly, setActiveNavTab])
 
   useEffect(() => {
-    if (resizing) return
+    if (resizingDir) return
     setSidebarWidth(panelWidth)
-  }, [panelWidth, resizing, setSidebarWidth])
+  }, [panelWidth, resizingDir, setSidebarWidth])
 
   // Settle the unreported reading segment so the stats tab shows fresh numbers
   const statsTabActive = sidebarOpen && activeNavTab === 'stats'
@@ -75,38 +97,72 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
     if (statsTabActive) onStatsTabOpen()
   }, [statsTabActive, onStatsTabOpen])
 
-  const dragState = useRef({ clientX: 0, width: 0 })
+  const dragStartRef = useRef({ clientX: 0, clientY: 0, width: 0, height: 0 })
 
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    if (e.button !== 0 || resizingRef.current) return
+  const handleResizeStart = useCallback((direction: 'width' | 'height' | 'corner') => (e: React.PointerEvent) => {
+    if (e.button !== 0 || resizingDirRef.current) return
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
     panelRefWidth.current = panelWidth
-    resizingRef.current = true
-    dragState.current.width = panelWidth
-    dragState.current.clientX = e.clientX
-    setResizing(true)
+    resizingDirRef.current = direction
+    setResizingDir(direction)
+    const currentHeight = sidebarContainerRef.current?.getBoundingClientRect().height ?? (window.innerHeight - 128)
+    dragStartRef.current = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      width: panelWidth,
+      height: currentHeight,
+    }
     document.body.classList.add('reader-resizing')
+    if (direction === 'height') {
+      document.body.classList.add('reader-resizing-row')
+    } else if (direction === 'corner') {
+      document.body.classList.add('reader-resizing-corner')
+    } else {
+      document.body.classList.add('reader-resizing-col')
+    }
   }, [panelWidth])
 
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!resizingRef.current) return
-    const delta = e.clientX - dragState.current.clientX
-    const next = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, dragState.current.width + delta))
-    setPanelWidth(next)
-    panelRefWidth.current = next
+  const handleResizeMove = useCallback((e: React.PointerEvent) => {
+    const dir = resizingDirRef.current
+    if (!dir) return
+    if (dir === 'width' || dir === 'corner') {
+      const deltaX = e.clientX - dragStartRef.current.clientX
+      const nextW = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, dragStartRef.current.width + deltaX))
+      setPanelWidth(nextW)
+      panelRefWidth.current = nextW
+    }
+    if (dir === 'height' || dir === 'corner') {
+      const deltaY = e.clientY - dragStartRef.current.clientY
+      const maxHeight = window.innerHeight - 80
+      const nextH = Math.max(SIDEBAR_MIN_HEIGHT, Math.min(maxHeight, dragStartRef.current.height + deltaY))
+      setFloatingHeight(nextH)
+      floatingHeightRef.current = nextH
+    }
   }, [])
 
-  const handlePointerUp = useCallback(() => {
-    if (!resizingRef.current) return
-    resizingRef.current = false
-    setResizing(false)
-    document.body.classList.remove('reader-resizing')
-    setSidebarWidth(panelRefWidth.current)
+  const handleResizeEnd = useCallback(() => {
+    const dir = resizingDirRef.current
+    if (!dir) return
+    resizingDirRef.current = null
+    setResizingDir(null)
+    document.body.classList.remove('reader-resizing', 'reader-resizing-col', 'reader-resizing-row', 'reader-resizing-corner')
+    if (dir === 'width' || dir === 'corner') {
+      setSidebarWidth(panelRefWidth.current)
+    }
+    if (dir === 'height' || dir === 'corner') {
+      try {
+        if (floatingHeightRef.current == null) {
+          localStorage.removeItem('bd-floating-sidebar-height')
+        } else {
+          localStorage.setItem('bd-floating-sidebar-height', String(floatingHeightRef.current))
+        }
+      } catch {}
+    }
   }, [setSidebarWidth])
 
   useEffect(() => () => {
-    document.body.classList.remove('reader-resizing')
+    document.body.classList.remove('reader-resizing', 'reader-resizing-col', 'reader-resizing-row', 'reader-resizing-corner')
   }, [])
 
   const handleResetWidth = useCallback(() => {
@@ -115,74 +171,69 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
     setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)
   }, [setSidebarWidth])
 
+  const handleResetHeight = useCallback(() => {
+    setFloatingHeight(null)
+    floatingHeightRef.current = null
+    try {
+      localStorage.removeItem('bd-floating-sidebar-height')
+    } catch {}
+  }, [])
+
+  const handleResetBoth = useCallback(() => {
+    handleResetWidth()
+    handleResetHeight()
+  }, [handleResetWidth, handleResetHeight])
+
+  const isPointerInCorridor = useCallback(() => {
+    if (!pointerPosRef.current) return false
+    const { clientX, clientY } = pointerPosRef.current
+    return clientX <= 70 && clientY >= 48 && clientY <= 380
+  }, [])
+
   const handleNavTab = useCallback((tab: NavTab) => {
     if (sidebarOpen && activeNavTab === tab) {
       panelRef.current?.saveScroll()
-      dismissCooldownRef.current = true
-      setJustDismissed(true)
-      setHovered(false)
-      setFloatingActive(false)
+      if (isPointerInCorridor()) {
+        setHovered(true)
+        setFloatingActive(true)
+      }
       setSidebarOpen(false)
     } else {
       if (sidebarOpen) panelRef.current?.saveScroll()
       setActiveNavTab(tab)
       setSidebarOpen(true)
-      // Only explicit dock clicks are remembered — programmatic handoffs
-      // (selection → AI) must not become next session's startup tab
       setNavTabRemembered(tab)
     }
-  }, [sidebarOpen, activeNavTab, setActiveNavTab, setSidebarOpen, setNavTabRemembered])
-
-  const [floatingActive, setFloatingActive] = useState(false)
-  const [justDismissed, setJustDismissed] = useState(false)
-  const dismissCooldownRef = useRef(false)
-  const prevOpenRef = useRef(sidebarOpen)
-  const dockRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (prevOpenRef.current && !sidebarOpen) {
-      setJustDismissed(true)
-      dismissCooldownRef.current = true
-      const timer = setTimeout(() => {
-        setJustDismissed(false)
-      }, 300)
-      return () => clearTimeout(timer)
-    }
-    prevOpenRef.current = sidebarOpen
-  }, [sidebarOpen])
+  }, [sidebarOpen, activeNavTab, isPointerInCorridor, setActiveNavTab, setSidebarOpen, setNavTabRemembered])
 
   const handleClosePanel = useCallback(() => {
-    dismissCooldownRef.current = true
-    setJustDismissed(true)
     panelRef.current?.saveScroll()
-    setHovered(false)
-    setFloatingActive(false)
     setSidebarOpen(false)
   }, [setSidebarOpen])
 
   // Floating dock corridor: starts below the 48px header and ends around y=380px,
   // matching the spatial envelope of the floating capsule.
-  // In synthetic unit tests without explicit clientY, clientY is 0 or null.
   const isWithinFloatingCorridor = useCallback((clientY?: number | null) => {
     if (clientY == null || clientY === 0) return true
     return clientY >= 48 && clientY <= 380
   }, [])
 
   const handleHoverPointerEnter = useCallback((e: React.PointerEvent) => {
-    if (locked || sidebarOpen || justDismissed || dismissCooldownRef.current) return
+    if (locked || sidebarOpen) return
     if (!isWithinFloatingCorridor(e.clientY)) return
     const isLeftEdge = e.clientX == null || e.clientX <= 70
     if (isLeftEdge) {
       setHovered(true)
       setFloatingActive(true)
     }
-  }, [locked, sidebarOpen, justDismissed, isWithinFloatingCorridor])
+  }, [locked, sidebarOpen, isWithinFloatingCorridor])
 
   const handleHoverPointerMove = useCallback((e: React.PointerEvent) => {
-    if (locked || sidebarOpen || justDismissed || dismissCooldownRef.current) return
+    pointerPosRef.current = { clientX: e.clientX, clientY: e.clientY }
+    if (locked || sidebarOpen) return
     const inCorridor = isWithinFloatingCorridor(e.clientY)
     const isLeftEdge = (e.clientX == null || e.clientX <= 70) && inCorridor
-    const isOverDock = Boolean(dockRef.current?.contains(e.target as Node))
+    const isOverDock = inCorridor && Boolean(dockRef.current?.contains(e.target as Node))
     if (!isLeftEdge && !isOverDock) {
       if (hovered) setHovered(false)
       return
@@ -191,29 +242,27 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
       setHovered(true)
       setFloatingActive(true)
     }
-  }, [locked, sidebarOpen, justDismissed, hovered, isWithinFloatingCorridor])
+  }, [locked, sidebarOpen, hovered, isWithinFloatingCorridor])
 
   const handleHoverPointerLeave = useCallback(() => {
+    pointerPosRef.current = null
     setHovered(false)
-    dismissCooldownRef.current = false
   }, [])
 
   useEffect(() => {
     if (isTouch) return
     const updateFloatingHover = (clientX: number, clientY: number, buttons: number, hasSelection: boolean, target?: EventTarget | null) => {
+      pointerPosRef.current = { clientX, clientY }
       if (locked || sidebarOpen) return
       const inZone = clientX <= 70 && clientY >= 48 && clientY <= 380
-      const overDock = target instanceof Node && Boolean(dockRef.current?.contains(target))
-      if (dismissCooldownRef.current) {
-        if (!inZone && !overDock) dismissCooldownRef.current = false
-        return
-      }
-      if (justDismissed) return
+      const overDock = clientY >= 48 && clientY <= 380 && target instanceof Node && Boolean(dockRef.current?.contains(target))
       if (buttons || hasSelection || window.getSelection()?.type === 'Range') return
       if (inZone || overDock) {
         setHovered(true)
         setFloatingActive(true)
-      } else if (hovered) setHovered(false)
+      } else if (hovered) {
+        setHovered(false)
+      }
     }
     const onPointerMove = (event: PointerEvent) => updateFloatingHover(event.clientX, event.clientY, event.buttons, false, event.target)
     const onFramePointerMove = (event: Event) => {
@@ -221,8 +270,8 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
       if (detail) updateFloatingHover(detail.clientX, detail.clientY, detail.buttons, detail.hasSelection)
     }
     const onWindowLeave = () => {
+      pointerPosRef.current = null
       setHovered(false)
-      dismissCooldownRef.current = false
     }
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('reader-pointermove', onFramePointerMove)
@@ -234,7 +283,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
       window.removeEventListener('pointerleave', onWindowLeave)
       window.removeEventListener('blur', onWindowLeave)
     }
-  }, [isTouch, locked, sidebarOpen, justDismissed, hovered])
+  }, [isTouch, locked, sidebarOpen, hovered])
 
   // Once mouse leaves the floating dock, allow fade out before dropping floating state
   useEffect(() => {
@@ -252,141 +301,30 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
 
   const themeModeTitle = _('reader.themeModeTitle', { mode: _(`theme.${readingThemeMode}`) })
 
-  const isFloatingDock = !isTouch && !locked && !sidebarOpen && !justDismissed && floatingActive
-
-  const toolbarVisible = isTouch
-    ? mobileControlsVisible
-    : locked || hovered || sidebarOpen
-
-  const collapsed = !toolbarVisible
-  const panelLocked = isTouch ? false : locked
-
-  const TOOL_DOCK_WIDTH = 56
-
-  const totalWidth = isTouch
-    ? undefined
-    : sidebarOpen
-      ? TOOL_DOCK_WIDTH + panelWidth
-      : locked
-        ? TOOL_DOCK_WIDTH
-        : 8
-
-  const toolDock = (
-    <div
-      ref={dockRef}
-      data-testid="reader-tool-dock"
-      data-toast-obstacle={isTouch && mobileControlsVisible ? '' : undefined}
+  const themeToggleFooter = (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      title={themeModeTitle}
+      aria-label={themeModeTitle}
       className={cn(
-        'flex shrink-0 border-[var(--bd-read-accent)]',
-        isTouch
-          ? 'order-2 h-[calc(3.5rem+env(safe-area-inset-bottom))] w-full items-center border-t px-1 pb-[env(safe-area-inset-bottom)]'
-          : isFloatingDock
-            ? 'absolute left-3 top-16 z-50 h-auto w-12 flex-col items-center gap-1.5 rounded-2xl border border-[var(--bd-read-accent)]/80 p-1 shadow-2xl backdrop-blur-md before:pointer-events-auto before:absolute before:-left-3 before:top-0 before:h-full before:w-3 before:content-[\'\']'
-            : 'order-none h-full w-[56px] flex-col items-center border-r py-3',
-        collapsed ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',
-        !resizing && 'transition-opacity duration-150',
+        'relative z-10 pointer-events-auto flex shrink-0 items-center justify-center rounded-xl text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current',
+        isTouch ? 'h-12 min-w-12 [&_svg]:h-5 [&_svg]:w-5' : 'h-10 w-10',
       )}
-      style={isFloatingDock
-        ? { backgroundColor: 'color-mix(in srgb, var(--bd-read-bg) 92%, transparent)' }
-        : { backgroundColor: 'var(--bd-read-bg)' }
-      }
     >
-      <ToolDock
-        activeNavTab={activeNavTab}
-        sidebarOpen={sidebarOpen}
-        locked={locked}
-        floating={isFloatingDock}
-        statsDisabled={statsDisabled}
-        guestReadOnly={guestReadOnly}
-        hideLock={isTouch}
-        mobile={isTouch}
-        onNavTab={handleNavTab}
-        onToggleLock={() => setLocked(!locked)}
-        footer={
-          <button
-            type="button"
-            onClick={toggleTheme}
-            title={themeModeTitle}
-            aria-label={themeModeTitle}
-            className={cn(
-              'relative z-10 pointer-events-auto flex shrink-0 items-center justify-center rounded-xl text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current',
-              isTouch ? 'h-12 min-w-12 [&_svg]:h-5 [&_svg]:w-5' : 'h-10 w-10',
-            )}
-          >
-            {readingThemeMode === 'system' ? (
-              <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="13" rx="1.5" /><path d="M8 21h8M12 17v4" /></svg>
-            ) : readingThemeMode === 'dark' ? (
-              <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
-            ) : (
-              <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
-            )}
-          </button>
-        }
-      />
-    </div>
+      {readingThemeMode === 'system' ? (
+        <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="13" rx="1.5" /><path d="M8 21h8M12 17v4" /></svg>
+      ) : readingThemeMode === 'dark' ? (
+        <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
+      ) : (
+        <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
+      )}
+    </button>
   )
 
-  const resizeTrack = sidebarOpen && !isTouch ? (
-    <div
-      data-testid="reader-sidebar-resize-handle"
-      className={cn(
-        'group absolute left-full top-0 h-full w-2 touch-none border-l reader-resize-cursor transition-colors duration-150',
-        resizing ? 'border-[var(--bd-read-primary)]/50' : 'border-[var(--bd-read-accent)]/40',
-      )}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      onLostPointerCapture={handlePointerUp}
-      onDoubleClick={handleResetWidth}
-      title="双击恢复默认宽度"
-    >
-      <span
-        className={cn(
-          'pointer-events-none absolute left-1/2 top-1/2 h-7 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full transition-opacity duration-150',
-          resizing
-            ? 'bg-[var(--bd-read-primary)]/60 opacity-100'
-            : 'bg-[var(--bd-read-sub)]/40 opacity-0 group-hover:opacity-100',
-        )}
-      />
-    </div>
-  ) : null
-
-  const navigationPanel = (
-    <div
-      className={cn(
-        'relative flex shrink-0 overflow-hidden',
-        isTouch
-          ? cn('order-1 w-full h-0 transition-[height]', sidebarOpen && (activeNavTab === 'ai' ? 'h-[80dvh] max-h-[720px]' : 'h-[65dvh] max-h-[520px]'))
-          : cn('order-none h-full', !resizing && 'transition-[width] duration-200 will-change-[width]', sidebarOpen ? '' : 'w-0'),
-      )}
-      style={isTouch
-        ? { backgroundColor: 'var(--bd-read-bg)' }
-        : { width: sidebarOpen ? panelWidth : 0, backgroundColor: 'var(--bd-read-bg)' }}
-    >
-      <div
-        className={cn('h-full shrink-0', isTouch && 'w-full')}
-        style={isTouch ? undefined : { width: panelWidth }}
-      >
-        <NavigationPanel
-          key={bookId}
-          ref={panelRef}
-          bookId={bookId}
-          tocPositionReady={tocPositionReady}
-          open={sidebarOpen}
-          locked={panelLocked}
-          sidebarWidth={panelWidth}
-          statsDisabled={statsDisabled}
-          guestReadOnly={guestReadOnly}
-          footerVisible={footerVisible}
-          mobileDockVisible={mobileDockVisible}
-          onFooterSummon={onFooterSummon}
-          onClose={handleClosePanel}
-        />
-      </div>
-    </div>
-  )
-
+  // -------------------------------------------------------------
+  // BRANCH 1: Touch / Mobile View (Bottom Sheet)
+  // -------------------------------------------------------------
   if (isTouch) {
     return (
       <>
@@ -403,35 +341,310 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
           className={cn(
             'fixed inset-x-0 bottom-0 z-50 flex flex-col overflow-visible',
             mobileControlsVisible ? 'translate-y-0' : 'pointer-events-none translate-y-full',
-            !resizing && 'transition-transform duration-200',
+            !resizingDir && 'transition-transform duration-200',
           )}
         >
-          {navigationPanel}
-          {toolDock}
+          <div
+            className={cn(
+              'order-1 w-full overflow-hidden bg-[var(--bd-read-bg)] transition-[height]',
+              sidebarOpen && (activeNavTab === 'ai' ? 'h-[80dvh] max-h-[720px]' : 'h-[65dvh] max-h-[520px]'),
+              !sidebarOpen && 'h-0',
+            )}
+          >
+            <div className="h-full w-full">
+              <NavigationPanel
+                key={bookId}
+                ref={panelRef}
+                bookId={bookId}
+                tocPositionReady={tocPositionReady}
+                open={sidebarOpen}
+                locked={false}
+                sidebarWidth={panelWidth}
+                statsDisabled={statsDisabled}
+                guestReadOnly={guestReadOnly}
+                footerVisible={footerVisible}
+                mobileDockVisible={mobileDockVisible}
+                onFooterSummon={onFooterSummon}
+                onClose={handleClosePanel}
+              />
+            </div>
+          </div>
+          <div
+            ref={dockRef}
+            data-testid="reader-tool-dock"
+            data-toast-obstacle={mobileControlsVisible ? '' : undefined}
+            className={cn(
+              'order-2 flex h-[calc(3.5rem+env(safe-area-inset-bottom))] w-full shrink-0 items-center border-t border-[var(--bd-read-accent)] px-1 pb-[env(safe-area-inset-bottom)] bg-[var(--bd-read-bg)]',
+              mobileControlsVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
+            )}
+          >
+            <ToolDock
+              activeNavTab={activeNavTab}
+              sidebarOpen={sidebarOpen}
+              locked={false}
+              floating={false}
+              statsDisabled={statsDisabled}
+              guestReadOnly={guestReadOnly}
+              hideLock={true}
+              mobile={true}
+              onNavTab={handleNavTab}
+              onToggleLock={() => {}}
+              footer={themeToggleFooter}
+            />
+          </div>
         </div>
       </>
     )
   }
 
+  // -------------------------------------------------------------
+  // BRANCH 2: Pinned Desktop Sidebar (In-layout Side Column)
+  // -------------------------------------------------------------
+  if (locked) {
+    return (
+      <div
+        ref={sidebarContainerRef}
+        id="reader-navigation"
+        data-testid="reader-sidebar"
+        className="relative flex h-full shrink-0 z-40 overflow-visible"
+        style={{ width: sidebarOpen ? TOOL_DOCK_WIDTH + panelWidth : TOOL_DOCK_WIDTH }}
+      >
+        <div
+          ref={dockRef}
+          data-testid="reader-tool-dock"
+          className="order-none h-full w-[56px] flex shrink-0 flex-col items-center border-r border-[var(--bd-read-accent)] py-3 bg-[var(--bd-read-bg)] opacity-100"
+        >
+          <ToolDock
+            activeNavTab={activeNavTab}
+            sidebarOpen={sidebarOpen}
+            locked={true}
+            floating={false}
+            statsDisabled={statsDisabled}
+            guestReadOnly={guestReadOnly}
+            hideLock={false}
+            mobile={false}
+            onNavTab={handleNavTab}
+            onToggleLock={() => setLocked(false)}
+            footer={themeToggleFooter}
+          />
+        </div>
+        <div
+          className={cn(
+            'order-none h-full flex shrink-0 overflow-hidden bg-[var(--bd-read-bg)]',
+            !resizingDir && 'transition-[width] duration-200 will-change-[width]',
+          )}
+          style={{ width: sidebarOpen ? panelWidth : 0 }}
+        >
+          <div className="h-full shrink-0" style={{ width: panelWidth }}>
+            <NavigationPanel
+              key={bookId}
+              ref={panelRef}
+              bookId={bookId}
+              tocPositionReady={tocPositionReady}
+              open={sidebarOpen}
+              locked={true}
+              sidebarWidth={panelWidth}
+              statsDisabled={statsDisabled}
+              guestReadOnly={guestReadOnly}
+              footerVisible={footerVisible}
+              mobileDockVisible={mobileDockVisible}
+              onFooterSummon={onFooterSummon}
+            />
+          </div>
+        </div>
+        {sidebarOpen && (
+          <div
+            data-testid="reader-sidebar-resize-handle"
+            className={cn(
+              'group absolute left-full top-0 h-full w-2 touch-none border-l reader-resize-cursor transition-colors duration-150',
+              resizingDir === 'width' ? 'border-[var(--bd-read-primary)]/50' : 'border-[var(--bd-read-accent)]/40',
+            )}
+            onPointerDown={handleResizeStart('width')}
+            onPointerMove={handleResizeMove}
+            onPointerUp={handleResizeEnd}
+            onPointerCancel={handleResizeEnd}
+            onLostPointerCapture={handleResizeEnd}
+            onDoubleClick={handleResetWidth}
+            title="双击恢复默认宽度"
+          >
+            <span
+              className={cn(
+                'pointer-events-none absolute left-1/2 top-1/2 h-7 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full transition-opacity duration-150',
+                resizingDir === 'width'
+                  ? 'bg-[var(--bd-read-primary)]/60 opacity-100'
+                  : 'bg-[var(--bd-read-sub)]/40 opacity-0 group-hover:opacity-100',
+              )}
+            />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // -------------------------------------------------------------
+  // BRANCH 3: Unpinned Floating Mode
+  // -------------------------------------------------------------
+  if (sidebarOpen) {
+    return (
+      <div
+        ref={sidebarContainerRef}
+        id="reader-navigation"
+        data-testid="reader-sidebar"
+        className={cn(
+          'absolute left-3 top-16 z-[45] flex rounded-2xl shadow-2xl ring-1 ring-[var(--bd-read-accent)]/80 backdrop-blur-md overflow-hidden',
+          floatingHeight == null ? 'bottom-16' : '',
+        )}
+        style={{
+          width: 48 + panelWidth,
+          backgroundColor: 'var(--bd-read-bg)',
+          ...(floatingHeight != null ? { height: floatingHeight, maxHeight: 'calc(100vh - 5rem)' } : {}),
+        }}
+      >
+        {/* Dock Column */}
+        <div
+          ref={dockRef}
+          data-testid="reader-tool-dock"
+          className="order-none flex h-full w-12 shrink-0 flex-col items-center border-r border-[var(--bd-read-accent)]/60 p-1 opacity-100"
+        >
+          <ToolDock
+            activeNavTab={activeNavTab}
+            sidebarOpen={true}
+            locked={false}
+            floating={false}
+            statsDisabled={statsDisabled}
+            guestReadOnly={guestReadOnly}
+            hideLock={false}
+            mobile={false}
+            onNavTab={handleNavTab}
+            onToggleLock={() => setLocked(true)}
+            footer={themeToggleFooter}
+          />
+        </div>
+
+        {/* Panel Column */}
+        <div className="relative flex h-full shrink-0 overflow-hidden" style={{ width: panelWidth }}>
+          <div className="h-full shrink-0" style={{ width: panelWidth }}>
+            <NavigationPanel
+              key={bookId}
+              ref={panelRef}
+              bookId={bookId}
+              tocPositionReady={tocPositionReady}
+              open={true}
+              locked={false}
+              sidebarWidth={panelWidth}
+              statsDisabled={statsDisabled}
+              guestReadOnly={guestReadOnly}
+              footerVisible={footerVisible}
+              mobileDockVisible={mobileDockVisible}
+              onFooterSummon={onFooterSummon}
+            />
+          </div>
+        </div>
+
+        {/* Right Width Resize Handle */}
+        <div
+          data-testid="reader-sidebar-resize-handle"
+          className="group absolute right-0 top-0 h-full w-2.5 touch-none reader-resize-cursor z-20"
+          onPointerDown={handleResizeStart('width')}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          onPointerCancel={handleResizeEnd}
+          onLostPointerCapture={handleResizeEnd}
+          onDoubleClick={handleResetWidth}
+          title="双击恢复默认宽度"
+        >
+          <span
+            className={cn(
+              'pointer-events-none absolute right-0.5 top-1/2 h-7 w-0.5 -translate-y-1/2 rounded-full transition-opacity duration-150',
+              resizingDir === 'width' || resizingDir === 'corner'
+                ? 'bg-[var(--bd-read-primary)]/60 opacity-100'
+                : 'bg-[var(--bd-read-sub)]/40 opacity-0 group-hover:opacity-100',
+            )}
+          />
+        </div>
+
+        {/* Bottom Height Resize Handle */}
+        <div
+          data-testid="reader-sidebar-resize-handle-bottom"
+          className="group absolute bottom-0 left-0 w-full h-2.5 touch-none cursor-row-resize z-20"
+          onPointerDown={handleResizeStart('height')}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          onPointerCancel={handleResizeEnd}
+          onLostPointerCapture={handleResizeEnd}
+          onDoubleClick={handleResetHeight}
+          title="双击恢复默认高度"
+        >
+          <span
+            className={cn(
+              'pointer-events-none absolute left-1/2 bottom-0.5 h-0.5 w-7 -translate-x-1/2 rounded-full transition-opacity duration-150',
+              resizingDir === 'height' || resizingDir === 'corner'
+                ? 'bg-[var(--bd-read-primary)]/60 opacity-100'
+                : 'bg-[var(--bd-read-sub)]/40 opacity-0 group-hover:opacity-100',
+            )}
+          />
+        </div>
+
+        {/* Corner 2D Resize Handle */}
+        <div
+          data-testid="reader-sidebar-resize-handle-corner"
+          className="group absolute right-0 bottom-0 h-4 w-4 touch-none cursor-nwse-resize z-30 flex items-center justify-center"
+          onPointerDown={handleResizeStart('corner')}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          onPointerCancel={handleResizeEnd}
+          onLostPointerCapture={handleResizeEnd}
+          onDoubleClick={handleResetBoth}
+          title="双击恢复默认尺寸"
+        >
+          <span
+            className={cn(
+              'pointer-events-none absolute right-1.5 bottom-1.5 h-2 w-2 rounded-br-[3px] border-r-2 border-b-2 transition-opacity duration-150',
+              resizingDir === 'corner'
+                ? 'border-[var(--bd-read-primary)]/70 opacity-100'
+                : 'border-[var(--bd-read-sub)]/40 opacity-0 group-hover:opacity-100',
+            )}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // Standalone Capsule Dock when closed
+  const isCapsuleVisible = hovered && floatingActive
   return (
     <div
       id="reader-navigation"
       data-testid="reader-sidebar"
-      className={cn(
-        locked ? 'relative flex h-full shrink-0' : 'absolute left-0 top-0 bottom-0 flex',
-        isFloatingDock ? 'overflow-visible -mr-2' : (!locked && !justDismissed) || sidebarOpen ? 'overflow-visible' : 'overflow-hidden',
-        sidebarOpen || hovered ? 'z-[60]' : 'z-40',
-        !locked && !sidebarOpen && !hovered && 'pointer-events-none',
-        !resizing && 'transition-[width] duration-200 will-change-[width]',
-      )}
-      style={{ width: totalWidth }}
-      onPointerEnter={handleHoverPointerEnter}
-      onPointerMove={handleHoverPointerMove}
-      onPointerLeave={handleHoverPointerLeave}
+      className="contents absolute top-16 pointer-events-none"
     >
-      {toolDock}
-      {navigationPanel}
-      {resizeTrack}
+      <div
+        ref={dockRef}
+        data-testid="reader-tool-dock"
+        className={cn(
+          'absolute left-3 top-16 z-[45] h-auto w-12 flex flex-col items-center gap-1.5 rounded-2xl border border-[var(--bd-read-accent)]/80 p-1 shadow-2xl backdrop-blur-md before:pointer-events-auto before:absolute before:-left-3 before:top-0 before:h-full before:w-3 before:content-[\'\'] transition-opacity duration-150',
+          floatingActive ? '-mr-2' : '',
+          isCapsuleVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
+        )}
+        style={{ backgroundColor: 'color-mix(in srgb, var(--bd-read-bg) 92%, transparent)' }}
+        onPointerEnter={handleHoverPointerEnter}
+        onPointerMove={handleHoverPointerMove}
+        onPointerLeave={handleHoverPointerLeave}
+      >
+        <ToolDock
+          activeNavTab={activeNavTab}
+          sidebarOpen={false}
+          locked={false}
+          floating={true}
+          statsDisabled={statsDisabled}
+          guestReadOnly={guestReadOnly}
+          hideLock={false}
+          mobile={false}
+          onNavTab={handleNavTab}
+          onToggleLock={() => setLocked(true)}
+          footer={themeToggleFooter}
+        />
+      </div>
     </div>
   )
 })

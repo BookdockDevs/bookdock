@@ -177,7 +177,7 @@ export default function Modal({
     <div
       {...containerProps}
       data-reader-modal={reader ? '' : containerProps?.['data-reader-modal']}
-      className={`fixed inset-0 z-50 flex justify-center overscroll-none bg-black/50 pb-[env(safe-area-inset-bottom)] ${placement} ${dialogLayout.className} animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
+      className={`fixed inset-0 z-[70] flex justify-center overscroll-none bg-black/50 pb-[env(safe-area-inset-bottom)] ${placement} ${dialogLayout.className} animate-modal-backdrop ${containerProps?.className ?? ''}`.trim()}
       style={{ ...dialogLayout.style, ...containerProps?.style }}
       onClick={onClose}
     >

@@ -4,6 +4,10 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Refactored the desktop unpinned reader sidebar into an independent floating island card with adjustable width (200–640 px), height (320 px to viewport bound), and corner 2D resizing, with double-click reset and pointer capture cursor locking.
+
 ### Changed
 
 - Refreshed the default AI provider models for Claude, Gemini, DeepSeek, GLM, Kimi, MiniMax, and MiMo; kept Qwen's rolling alias, corrected MiMo's fallback API URL, and renamed the Moonshot provider to Kimi.
@@ -1283,6 +1287,10 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### [未发布]
+
+#### 新增
+
+- 桌面端未固定侧栏重构为独立的悬浮岛卡片与紧凑胶囊，支持右边界宽度（200–640 px）、底部高度（320 px 起）及右下角双向拖拽调节尺寸，支持双击手柄重置为默认大小，并在拖拽时锁定指针光标。
 
 #### 优化
 

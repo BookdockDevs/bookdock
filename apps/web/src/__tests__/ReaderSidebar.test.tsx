@@ -119,10 +119,9 @@ describe('ReaderSidebar on pointer devices', () => {
   it('keeps the hover summon: collapsed strip reveals the dock on hover', () => {
     const { container } = renderSidebar(false)
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
-    expect(outerEl(container).style.width).toBe('8px')
-    fireEvent.pointerEnter(outerEl(container))
+    fireEvent.pointerEnter(dockEl(container))
     expect(dockEl(container)).toHaveClass('opacity-100')
-    fireEvent.pointerLeave(outerEl(container))
+    fireEvent.pointerLeave(dockEl(container))
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
   })
 
@@ -130,7 +129,7 @@ describe('ReaderSidebar on pointer devices', () => {
     const { container } = renderSidebar(false)
     const sidebar = outerEl(container)
 
-    expect(sidebar).toHaveClass('overflow-visible', 'pointer-events-none')
+    expect(sidebar).toHaveClass('pointer-events-none')
     expect(screen.queryByTestId('reader-floating-hover-zone')).toBeNull()
     fireEvent.pointerMove(window, { clientX: 60, clientY: 80 })
     expect(dockEl(container)).toHaveClass('opacity-100')
@@ -148,14 +147,17 @@ describe('ReaderSidebar on pointer devices', () => {
 
   it('keeps unpinned sidebar in absolute overlay to never affect content layout', () => {
     const { container } = renderSidebar(false)
-    expect(outerEl(container)).toHaveClass('absolute', 'left-0', 'top-0', 'bottom-0')
+    expect(outerEl(container)).toHaveClass('absolute', 'top-16')
     expect(outerEl(container)).not.toHaveClass('relative', 'shrink-0')
   })
 
   it('shows the lock button and the resize handle, and no backdrop', () => {
-    act(() => useReaderState.setState({ sidebarOpen: true }))
+    act(() => {
+      useUiStore.setState({ toolbarLocked: true })
+      useReaderState.setState({ sidebarOpen: true })
+    })
     renderSidebar(false)
-    expect(screen.getByTitle('固定工具栏')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /(取消)?固定工具栏/ })).toBeInTheDocument()
     expect(screen.getByTestId('reader-sidebar-resize-handle')).toHaveClass('reader-resize-cursor', 'absolute', 'left-full', 'w-2')
     expect(screen.queryByTestId('sidebar-backdrop')).toBeNull()
   })
@@ -179,7 +181,10 @@ describe('ReaderSidebar on pointer devices', () => {
   })
 
   it('keeps the resize handle outside the navigation panel scrollbar', () => {
-    act(() => useReaderState.setState({ sidebarOpen: true }))
+    act(() => {
+      useUiStore.setState({ toolbarLocked: true })
+      useReaderState.setState({ sidebarOpen: true })
+    })
     const { container } = renderSidebar(false)
     const handle = screen.getByTestId('reader-sidebar-resize-handle')
     const content = screen.getByTestId('navigation-panel').parentElement!
@@ -195,6 +200,7 @@ describe('ReaderSidebar on pointer devices', () => {
 
   it.each(['pointerup', 'pointercancel', 'lostpointercapture'])('ends resizing on %s and ignores later movement', (endEvent) => {
     act(() => {
+      useUiStore.setState({ toolbarLocked: true })
       useReaderState.setState({ sidebarOpen: true })
       useUiStore.setState({ sidebarWidth: 288 })
     })
@@ -227,30 +233,29 @@ describe('ReaderSidebar on pointer devices', () => {
   it('summons dock when hovering along the floating dock corridor and ignores header zone', () => {
     const { container } = renderSidebar(false)
     // Header zone (y < 48): does not summon floating dock to protect header back button
-    fireEvent.pointerEnter(outerEl(container), { clientY: 24 })
+    fireEvent.pointerEnter(dockEl(container), { clientY: 24 })
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
 
     // Floating dock corridor where TOC button lives (y = 80): summons dock
-    fireEvent.pointerEnter(outerEl(container), { clientY: 80 })
+    fireEvent.pointerEnter(dockEl(container), { clientY: 80 })
     expect(dockEl(container)).toHaveClass('opacity-100')
-    expect(outerEl(container).style.width).toBe('8px')
+    expect(dockEl(container)).toHaveClass('w-12')
 
     // Moving down into lower reading zone (y > 380): collapses dock
-    fireEvent.pointerMove(outerEl(container), { clientY: 500 })
+    fireEvent.pointerMove(dockEl(container), { clientY: 500 })
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
 
     // Re-entering floating dock corridor: summons dock
-    fireEvent.pointerMove(outerEl(container), { clientY: 80 })
+    fireEvent.pointerMove(dockEl(container), { clientY: 80 })
     expect(dockEl(container)).toHaveClass('opacity-100')
 
     // Leaves dock: collapses
-    fireEvent.pointerLeave(outerEl(container))
+    fireEvent.pointerLeave(dockEl(container))
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
   })
 
   it('ignores iframe selection and drag movement, then allows a fresh hover after dismissal', async () => {
     const { container } = renderSidebar(false)
-    const sidebar = outerEl(container)
     act(() => useReaderState.setState({ sidebarOpen: true }))
     fireEvent.click(screen.getByTitle('目录'))
     expect(useReaderState.getState().sidebarOpen).toBe(false)
@@ -274,33 +279,26 @@ describe('ReaderSidebar on pointer devices', () => {
     }))
     expect(dockEl(container)).toHaveClass('opacity-100')
 
-    fireEvent.pointerLeave(sidebar)
+    fireEvent.pointerLeave(dockEl(container))
   })
 
   it('renders a floating island dock decoupled from top and bottom bars when unlocked', () => {
     const { container } = renderSidebar(false)
-    fireEvent.pointerEnter(outerEl(container))
-    const dock = dockEl(container)
-    expect(dock).toHaveClass('absolute', 'left-3', 'top-16', 'rounded-2xl', 'backdrop-blur-md')
-    expect(outerEl(container)).toHaveClass('-mr-2')
+    fireEvent.pointerEnter(dockEl(container))
+    expect(dockEl(container)).toHaveClass('absolute', 'left-3', 'top-16', 'rounded-2xl', 'backdrop-blur-md')
+    expect(dockEl(container)).toHaveClass('w-12')
   })
 
   it('does not flash as floating dock when closing unpinned sidebar', async () => {
     act(() => useReaderState.setState({ sidebarOpen: true }))
     const { container } = renderSidebar(false)
     const dock = dockEl(container)
-    expect(dock).toHaveClass('order-none', 'h-full', 'w-[56px]')
-    expect(dock).not.toHaveClass('absolute', 'rounded-2xl')
+    expect(dock).toHaveClass('w-12')
+    expect(outerEl(container)).toHaveClass('absolute', 'left-3', 'top-16')
 
     act(() => useReaderState.setState({ sidebarOpen: false }))
 
-    expect(dockEl(container)).toHaveClass('order-none', 'h-full', 'w-[56px]')
-    expect(dockEl(container)).not.toHaveClass('absolute', 'left-3', 'top-16')
-    expect(outerEl(container)).toHaveClass('overflow-hidden')
-    expect(outerEl(container)).not.toHaveClass('-mr-2')
-    expect(outerEl(container).style.width).toBe('8px')
-
-    await waitFor(() => expect(outerEl(container)).toHaveClass('overflow-visible'))
+    expect(dockEl(container)).toHaveClass('absolute', 'left-3', 'top-16', 'w-12')
   })
 
   it('collapses cleanly without flashing floating dock when clicking active tab button', async () => {
@@ -311,12 +309,136 @@ describe('ReaderSidebar on pointer devices', () => {
     fireEvent.click(tocBtn)
 
     expect(useReaderState.getState().sidebarOpen).toBe(false)
-    expect(dockEl(container)).toHaveClass('order-none', 'h-full', 'w-[56px]', 'opacity-0')
-    expect(dockEl(container)).not.toHaveClass('absolute', 'left-3', 'top-16')
-    expect(outerEl(container)).toHaveClass('overflow-hidden')
-    expect(outerEl(container).style.width).toBe('8px')
+    expect(dockEl(container)).toHaveClass('absolute', 'left-3', 'top-16', 'w-12')
+  })
 
-    await waitFor(() => expect(outerEl(container)).toHaveClass('overflow-visible'))
+  it('renders a floating island card decoupled from top and bottom bars when unlocked and open', () => {
+    act(() => useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' }))
+    const { container } = renderSidebar(false)
+    const sidebar = outerEl(container)
+
+    expect(sidebar).toHaveClass('absolute', 'top-16', 'bottom-16', 'rounded-2xl', 'shadow-2xl')
+    expect(sidebar).not.toHaveClass('left-0', 'top-0')
+    expect(sidebar.style.backgroundColor).toContain('var(--bd-read-bg)')
+  })
+
+  it('keeps floating island open on outside clicks and only toggles closed via active dock button', () => {
+    act(() => useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' }))
+    renderSidebar(false)
+
+    // Outside clicks (reading surface, body, modals, toolbar) do NOT dismiss on desktop
+    fireEvent.pointerDown(document.body)
+    expect(useReaderState.getState().sidebarOpen).toBe(true)
+
+    // Only clicking the active dock icon explicitly toggles it closed
+    const tocBtn = screen.getByTitle('目录')
+    fireEvent.click(tocBtn)
+    expect(useReaderState.getState().sidebarOpen).toBe(false)
+  })
+
+  it('retains floating island layout and does not revert to fixed sidebar during close dismissal', () => {
+    act(() => useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' }))
+    const { container } = renderSidebar(false)
+    const sidebar = outerEl(container)
+
+    expect(sidebar).toHaveClass('absolute', 'top-16', 'bottom-16', 'rounded-2xl')
+
+    act(() => useReaderState.setState({ sidebarOpen: false }))
+
+    expect(outerEl(container)).toHaveClass('absolute', 'top-16')
+    expect(outerEl(container)).not.toHaveClass('left-0', 'top-0')
+    expect(dockEl(container)).toHaveClass('rounded-2xl')
+  })
+
+  it('adjusts floating island height with bottom resize handle and resets on double click', () => {
+    act(() => {
+      useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' })
+    })
+    renderSidebar(false)
+    const bottomHandle = screen.getByTestId('reader-sidebar-resize-handle-bottom')
+    const capture = vi.fn()
+    bottomHandle.setPointerCapture = capture
+    const pointer = (type: string, clientY: number, button = 0) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientY, button })
+      Object.defineProperty(event, 'pointerId', { value: 1 })
+      fireEvent(bottomHandle, event)
+    }
+
+    pointer('pointerdown', 400)
+    expect(capture).toHaveBeenCalledWith(1)
+    expect(document.body).toHaveClass('reader-resizing-row')
+    pointer('pointermove', 480)
+    pointer('pointerup', 480)
+    expect(document.body).not.toHaveClass('reader-resizing-row')
+    expect(localStorage.getItem('bd-floating-sidebar-height')).not.toBeNull()
+
+    fireEvent.doubleClick(bottomHandle)
+    expect(localStorage.getItem('bd-floating-sidebar-height')).toBeNull()
+  })
+
+  it('adjusts width and height with corner resize handle and resets on double click', () => {
+    act(() => {
+      useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' })
+    })
+    renderSidebar(false)
+    const cornerHandle = screen.getByTestId('reader-sidebar-resize-handle-corner')
+    const capture = vi.fn()
+    cornerHandle.setPointerCapture = capture
+    const pointer = (type: string, clientX: number, clientY: number) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY, button: 0 })
+      Object.defineProperty(event, 'pointerId', { value: 1 })
+      fireEvent(cornerHandle, event)
+    }
+
+    pointer('pointerdown', 300, 400)
+    expect(capture).toHaveBeenCalledWith(1)
+    expect(document.body).toHaveClass('reader-resizing-corner')
+    pointer('pointermove', 350, 450)
+    pointer('pointerup', 350, 450)
+    expect(document.body).not.toHaveClass('reader-resizing-corner')
+
+    fireEvent.doubleClick(cornerHandle)
+    expect(useUiStore.getState().sidebarWidth).toBe(288)
+    expect(localStorage.getItem('bd-floating-sidebar-height')).toBeNull()
+  })
+
+  it('summons the floating dock when hovering the corridor after dismissal timeout without leaving first', async () => {
+    act(() => useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' }))
+    const { container } = renderSidebar(false)
+    act(() => useReaderState.setState({ sidebarOpen: false }))
+
+    // Wait past the 300ms dismissal timer
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 350))
+    })
+
+    // Hover directly in the corridor
+    act(() => {
+      fireEvent(window, new CustomEvent('reader-pointermove', {
+        detail: { clientX: 20, clientY: 100, buttons: 0, hasSelection: false },
+      }))
+    })
+
+    expect(dockEl(container)).toHaveClass('absolute', 'left-3', 'top-16')
+    expect(dockEl(container)).not.toHaveClass('opacity-0')
+  })
+
+  it('seamlessly transitions to floating dock capsule without flashing hidden when collapsing while pointer is in corridor', () => {
+    act(() => useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' }))
+    const { container } = renderSidebar(false)
+
+    // Simulate mouse positioned over the dock button in the corridor
+    fireEvent(window, new CustomEvent('reader-pointermove', {
+      detail: { clientX: 30, clientY: 100, buttons: 0, hasSelection: false },
+    }))
+
+    const tocBtn = screen.getByTitle('目录')
+    fireEvent.click(tocBtn)
+
+    expect(useReaderState.getState().sidebarOpen).toBe(false)
+    // Dock smoothly remains in place as the capsule
+    expect(dockEl(container)).toHaveClass('absolute', 'left-3', 'top-16')
+    expect(dockEl(container)).not.toHaveClass('opacity-0')
   })
 })
 

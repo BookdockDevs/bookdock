@@ -180,7 +180,7 @@ export default function ShareCardDialog({ bookId, fallbackTitle, fallbackAuthor 
     return createPortal(
       <div
         data-reader-modal=""
-        className={`fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
+        className={`fixed inset-0 z-[70] flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
         style={dialogLayout.style}
         onClick={() => setShareTarget(null)}
       >
@@ -275,7 +275,7 @@ export default function ShareCardDialog({ bookId, fallbackTitle, fallbackAuthor 
   return createPortal(
     <div
       data-reader-modal=""
-      className={`fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
+      className={`fixed inset-0 z-[70] flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm sm:items-center sm:p-4 ${dialogLayout.className} animate-modal-backdrop`}
       style={dialogLayout.style}
       onClick={() => setShareTarget(null)}
     >

@@ -155,7 +155,7 @@ export default function ConfirmDialog({
     <div
       data-settings-toggle=""
       className={cn(
-        'fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-xs overscroll-none sm:items-center sm:p-4 animate-modal-backdrop',
+        'fixed inset-0 z-[70] flex items-end justify-center bg-black/50 p-0 pb-[env(safe-area-inset-bottom)] backdrop-blur-xs overscroll-none sm:items-center sm:p-4 animate-modal-backdrop',
         dialogLayout.className,
       )}
       style={dialogLayout.style}

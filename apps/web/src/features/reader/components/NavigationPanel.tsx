@@ -4,6 +4,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { isAccessRevocationError } from '@/lib/error-message'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useReaderApi } from '../hooks/useReaderApi'
+import { useIsTouch } from '../hooks/useIsTouch'
 import { READER_SESSION_ID, useReaderState } from '../state/reader-state'
 import type { NavTab, SearchResult, SearchStatus } from '../types'
 import { useAnnotations, useBatchDeleteAnnotations } from '../hooks/useAnnotations'
@@ -205,6 +206,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   ref,
 ) {
   const _ = useTranslation()
+  const isTouch = useIsTouch()
   const tab = useReaderState((s) => s.activeNavTab)
   const tocItems = useReaderState((s) => s.tocItems)
   const tocBookId = useReaderState((s) => s.tocBookId)
@@ -672,8 +674,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     // highlighted independently of when relocation confirms the destination.
     if (renderer) void renderer.display(href)
     else setPendingTocHref(href)
-    if (!locked) onClose?.()
-  }, [locked, onClose, renderer, setPendingNavigationHref, setPendingTocHref])
+    if (!locked && isTouch) onClose?.()
+  }, [isTouch, locked, onClose, renderer, setPendingNavigationHref, setPendingTocHref])
 
   const handleItemClick = useCallback((node: TocNode) => {
     goTo(node.href)
@@ -937,7 +939,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           autoJumpOnCompleteRef.current = false
           setSearchIndex(0)
           void renderer.display(results[0].cfi)
-          if (!locked) onClose?.()
+          if (!locked && isTouch) onClose?.()
         }
       }
     } finally {
@@ -972,7 +974,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     if (!r) return
     setSearchIndex(index)
     void renderer?.display(r.cfi)
-    if (!locked) onClose?.()
+    if (!locked && isTouch) onClose?.()
   }
 
   function handleNextResult() {

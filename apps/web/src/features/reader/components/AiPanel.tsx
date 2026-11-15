@@ -20,7 +20,6 @@ import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-messa
 import { formatDate, formatDateTime, formatTime } from '@/lib/format-date'
 import { notify } from '@/lib/notifications'
 import { getAuthSessionRevision, getUserDisplayName, useAuthStore } from '@/stores/auth.store'
-import { useUiStore } from '@/stores/ui.store'
 
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useBookChapters } from '../hooks/useBookChapters'
@@ -546,7 +545,6 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const setSidebarOpen = useReaderState((s) => s.setSidebarOpen)
   const { renderer } = useReaderApi()
   const isTouch = useIsTouch()
-  const toolbarLocked = useUiStore((s) => s.toolbarLocked)
   const annotationsQuery = useAnnotations(bookId)
   const createAnnotation = useCreateAnnotation(bookId)
   const [prompt, setPrompt] = useState(initialMemory.prompt)
@@ -1824,7 +1822,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     if (!renderer) return
     try {
       await renderer.display(target)
-      if (isTouch || !toolbarLocked) setSidebarOpen(false)
+      if (isTouch) setSidebarOpen(false)
     } catch {
       notify.warning({ key: 'reader.aiCitationUnavailable' })
     }

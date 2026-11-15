@@ -87,6 +87,16 @@ body.reader-resizing * {
   user-select: none !important;
 }
 
+body.reader-resizing-row,
+body.reader-resizing-row * {
+  cursor: row-resize !important;
+}
+
+body.reader-resizing-corner,
+body.reader-resizing-corner * {
+  cursor: nwse-resize !important;
+}
+
 body.reader-resizing iframe {
   pointer-events: none !important;
 }
