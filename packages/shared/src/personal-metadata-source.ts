@@ -28,6 +28,10 @@ export const personalMetadataFieldsSchema = z.object({
   language: optionalText,
   coverUrl: optionalText,
   sourceUrl: optionalText,
+  series: optionalText,
+  seriesIndex: optionalText,
+  category: optionalText,
+  tags: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
 })
 
 export const personalMetadataCandidateSchema = personalMetadataFieldsSchema.extend({

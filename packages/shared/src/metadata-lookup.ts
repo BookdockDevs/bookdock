@@ -23,6 +23,7 @@ export const metadataSearchSchema = z.object({
 })
 export const metadataDetailSchema = z.union([
   z.object({ provider: z.literal('douban'), id: z.string().regex(/^\d{1,20}$/) }),
+  z.object({ provider: z.literal('qidian'), id: z.string().regex(/^\d{1,20}$/) }),
   z.object({ provider: z.literal('weread'), id: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/) }),
   z.object({ provider: z.string().regex(personalProviderPattern), id: z.string().min(1).max(256) }),
 ])
@@ -51,6 +52,10 @@ export interface MetadataCandidate {
   language?: string
   coverUrl?: string
   sourceUrl: string
+  series?: string
+  seriesIndex?: string
+  category?: string
+  tags?: string[]
 }
 
 export interface MetadataSearchResponse {

@@ -21,5 +21,16 @@ describe('personal metadata source contract', () => {
     expect(personalMetadataCandidateSchema.safeParse({ id: '123', title: 'Book' }).success).toBe(true)
     expect(personalMetadataCandidateSchema.safeParse({ id: '123' }).success).toBe(false)
     expect(personalMetadataFieldsSchema.parse({ description: '  text\n' })).toEqual({ description: '  text\n' })
+    expect(personalMetadataFieldsSchema.parse({
+      series: 'Foundation',
+      seriesIndex: '1',
+      category: 'Science Fiction',
+      tags: ['classic', 'space'],
+    })).toEqual({
+      series: 'Foundation',
+      seriesIndex: '1',
+      category: 'Science Fiction',
+      tags: ['classic', 'space'],
+    })
   })
 })

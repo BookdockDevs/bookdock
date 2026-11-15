@@ -3,7 +3,7 @@ import { metadataConfigUpdateSchema, metadataConnectionTestSchema, metadataCover
 import type { MetadataProviderId } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
-import { fetchMetadataCover, getDoubanMetadata, metadataConfiguration, searchMetadata, updateMetadataSecret } from './metadata-lookup.service'
+import { fetchMetadataCover, getDoubanMetadata, getQidianMetadata, metadataConfiguration, searchMetadata, updateMetadataSecret } from './metadata-lookup.service'
 import { getPersonalSourceDetail, searchPersonalSource } from './personal-source.service'
 import { getWeReadKey, getWeReadMetadata, searchWeRead } from './weread.service'
 
@@ -64,9 +64,20 @@ routes.post('/detail', async (c) => {
     return c.json({ data: await getPersonalSourceDetail(c.get('user')!.id, personalSourceId, parsed.data.id) })
   }
   if (parsed.data.provider === 'douban') return c.json({ data: await getDoubanMetadata(parsed.data.id) })
+  if (parsed.data.provider === 'qidian') return c.json({ data: await getQidianMetadata(parsed.data.id) })
   const key = getWeReadKey(c.get('user')!.id)
   if (!key) throw new AppError('VALIDATION_ERROR', 'WeRead API key is not configured')
   return c.json({ data: await getWeReadMetadata(key, parsed.data.id) })
+})
+
+routes.get('/cover', async (c) => {
+  const parsed = metadataCoverSchema.safeParse(c.req.query())
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid cover request')
+  const cover = await fetchMetadataCover(parsed.data.provider as MetadataProviderId, parsed.data.url)
+  return c.body(Uint8Array.from(cover.bytes), 200, {
+    'Content-Type': cover.contentType,
+    'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+  })
 })
 
 routes.post('/cover', async (c) => {

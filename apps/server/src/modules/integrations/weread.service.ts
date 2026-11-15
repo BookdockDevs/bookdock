@@ -82,7 +82,7 @@ function candidate(book: Record<string, unknown>): MetadataCandidate | null {
     const url = new URL(text(book.deepLink, 2048) ?? '')
     if (url.protocol === 'https:' && url.hostname === 'weread.qq.com' && !url.port && !url.username && !url.password && url.pathname === '/book-detail') sourceUrl = url.href
   } catch { /* The source link is optional. */ }
-  return { id, provider: 'weread', title, authors: author ? [author] : [], description: description.trim() ? description : undefined, publisher: text(book.publisher, 200), published: published === '1970-01-01' ? undefined : published, isbn: text(book.isbn, 20), coverUrl: image(book.cover), sourceUrl }
+  return { id, provider: 'weread', title, authors: author ? [author] : [], description: description.trim() ? description : undefined, publisher: text(book.publisher, 200), published: published === '1970-01-01' ? undefined : published, isbn: text(book.isbn, 20), category: text(book.category, 100), coverUrl: image(book.cover), sourceUrl }
 }
 
 export async function searchWeRead(key: string, query: string, scope: WeReadSearchScope = 'all'): Promise<MetadataCandidate[]> {

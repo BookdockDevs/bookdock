@@ -267,7 +267,7 @@ describe('metadata lookup draft', () => {
       if (path === '/integrations/metadata-lookup/search') {
         return Promise.resolve({ data: [{ id: 'src-1', provider: 'personal:my-source', title: 'Personal hit', authors: [], sourceUrl: '' }] })
       }
-      return Promise.resolve({ data: { title: 'Detail title', description: 'Personal detail', authors: ['Author A'] } })
+      return Promise.resolve({ data: { title: 'Detail title', description: 'Personal detail', authors: ['Author A'], series: 'Saga', seriesIndex: '3' } })
     })
     const apply = vi.fn()
     renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover onApply={apply} onClose={vi.fn()} />)
@@ -278,7 +278,7 @@ describe('metadata lookup draft', () => {
     expect(api.apiPost).toHaveBeenCalledWith('/integrations/metadata-lookup/detail', { provider: 'personal:my-source', id: 'src-1' }, expect.anything())
     await screen.findByText('Detail title')
     fireEvent.click(screen.getByRole('button', { name: '应用' }))
-    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.objectContaining({ authors: 'Author A', description: 'My description' }), undefined))
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.objectContaining({ authors: 'Author A', description: 'My description', series: 'Saga', seriesIndex: '3' }), undefined))
   })
 
   it('fetches personal covers client-side before falling back to the server proxy', async () => {
@@ -367,6 +367,68 @@ describe('metadata lookup draft', () => {
 
     finishCover(new Response(webp, { status: 200, headers: { 'content-type': 'image/webp' } }))
     await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.anything(), expect.any(File)))
+  })
+
+  it('passes scraped classification (category and tags) to onApply when present', async () => {
+    const apply = vi.fn()
+    api.apiPost.mockResolvedValueOnce({
+      data: [{
+        id: '/works/OL1W',
+        provider: 'openlibrary',
+        title: 'Sci-Fi Classic',
+        authors: ['Author X'],
+        category: '科幻小说',
+        tags: ['硬科幻', '太空歌剧'],
+        sourceUrl: 'https://openlibrary.org/works/OL1W',
+      }],
+    })
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover onApply={apply} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Sci-Fi Classic/ }))
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'My title', authors: 'Author X' }),
+      undefined,
+      { category: '科幻小说', tags: ['硬科幻', '太空歌剧'] },
+    ))
+  })
+
+  it('applies scraped fields when the cover cannot be fetched', async () => {
+    api.apiPost.mockResolvedValueOnce({
+      data: [{ id: '/works/OL1W', provider: 'openlibrary', title: 'Source title', authors: ['Writer'], coverUrl: 'https://covers.openlibrary.org/b/id/1-M.jpg', sourceUrl: 'https://openlibrary.org/works/OL1W' }],
+    })
+    api.apiPostBlob.mockRejectedValueOnce(new Error('blocked'))
+    const apply = vi.fn()
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover={false} onApply={apply} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Source title/ }))
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    await vi.waitFor(() => expect(notifications.error).toHaveBeenCalled())
+    // The failed cover costs the cover only: the fields still apply.
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.objectContaining({ authors: 'Writer' }), undefined))
+  })
+
+  it('keeps search tags when the detail returns an empty tag list', async () => {
+    api.apiGet.mockImplementation((path: string) => {
+      if (path === '/integrations/personal-sources') {
+        return Promise.resolve({ data: [{ sourceId: 'my-source', name: 'My Source', version: '1.0.0', originType: 'zip', hasIcon: false, hasDetail: true, createdAt: 1 }] })
+      }
+      return Promise.resolve({ data: { googlebooks: false, weread: false } })
+    })
+    api.apiPost.mockImplementation((path: string) => {
+      if (path === '/integrations/metadata-lookup/search') {
+        return Promise.resolve({ data: [{ id: 'src-1', provider: 'personal:my-source', title: 'Hit', authors: ['Writer'], category: '武侠', tags: ['江湖'], sourceUrl: '' }] })
+      }
+      return Promise.resolve({ data: { title: 'Hit', tags: [] } })
+    })
+    const apply = vi.fn()
+    renderDialog(<MetadataLookupDialog draft={draft} limited={false} hasCover={false} onApply={apply} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '豆瓣' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'My Source' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Hit/ }))
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: '应用' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.anything(), undefined, { category: '武侠', tags: ['江湖'] }))
   })
 })
 

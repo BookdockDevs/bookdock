@@ -15,6 +15,10 @@ interface BookClassificationEditorProps {
   onCategoryChange: (value: { categoryId: string | null; categoryTemplateKey?: undefined } | { categoryId?: undefined; categoryTemplateKey: string }) => void
   onTagChange: Dispatch<SetStateAction<Set<string>>>
   tags: { id: string; name: string }[]
+  // Scraped tags that do not exist yet: they are created on save, so they have
+  // no id to select and must be rendered apart from the real ones.
+  pendingTagNames?: string[]
+  onRemovePendingTag?: (name: string) => void
   onCreateTag: (name: string) => Promise<string>
   creatingTag?: boolean
   allowTemplates?: boolean
@@ -29,6 +33,8 @@ export default function BookClassificationEditor({
   onCategoryChange,
   onTagChange,
   tags,
+  pendingTagNames = [],
+  onRemovePendingTag,
   onCreateTag,
   creatingTag,
   allowTemplates = true,
@@ -38,6 +44,11 @@ export default function BookClassificationEditor({
   const { data: categoriesData } = useLibraryCategories(libraryId)
 
   const selectedTags = tags.filter((tag) => tagIds.has(tag.id))
+  // A pending name can become a real tag from the picker first; showing both
+  // would look like a duplicate, and save resolves to the existing row anyway.
+  const pendingTags = pendingTagNames.filter(
+    (name) => !tags.some((tag) => tag.name.toLowerCase() === name.toLowerCase()),
+  )
 
   return (
     <section className={className}>
@@ -74,6 +85,28 @@ export default function BookClassificationEditor({
               aria-label={`${_('reader.delete')} ${tag.name}`}
               title={`${_('reader.delete')} ${tag.name}`}
               onClick={() => onTagChange((current) => toggleSetItem(current, tag.id))}
+              className="flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </span>
+        ))}
+
+        {/* Pending Tag Pills: scraped names that only exist once the dialog is saved */}
+        {pendingTags.map((name) => (
+          <span
+            key={`pending:${name}`}
+            title={_('library.pendingTagHint')}
+            className="inline-flex min-h-[28px] items-center gap-1 rounded-full border border-dashed border-stone-300 bg-transparent py-0.5 pl-2.5 pr-1 text-xs font-medium text-stone-500 dark:border-stone-600 dark:text-stone-400 select-none"
+          >
+            <span>{name}</span>
+            <button
+              type="button"
+              aria-label={`${_('reader.delete')} ${name}`}
+              title={`${_('reader.delete')} ${name}`}
+              onClick={() => onRemovePendingTag?.(name)}
               className="flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200"
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

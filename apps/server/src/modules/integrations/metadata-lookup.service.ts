@@ -92,7 +92,10 @@ export async function searchMetadata(provider: MetadataProviderId, query: string
       if (!/^\d+$/.test(id) || !title) return []
       const author = text(book.bAuth)
       const description = typeof book.desc === 'string' ? book.desc : ''
-      return [{ id, provider, title, authors: author ? [author] : [], description: description.trim() ? description : undefined, coverUrl: `https://bookcover.yuewen.com/qdbimg/349573/${id}/300`, sourceUrl: `https://www.qidian.com/book/${id}/` }]
+      const category = text(book.catName) ?? text(book.cat)
+      const tagName = text(book.tagName) ?? text(book.tag)
+      const tags = tagName ? [tagName] : undefined
+      return [{ id, provider, title, authors: author ? [author] : [], description: description.trim() ? description : undefined, category, tags, coverUrl: `https://bookcover.yuewen.com/qdbimg/349573/${id}/300`, sourceUrl: `https://www.qidian.com/book/${id}/` }]
     })
   }
   if (provider === 'bangumi') {
@@ -108,11 +111,14 @@ export async function searchMetadata(provider: MetadataProviderId, query: string
       const infobox = Array.isArray(book.infobox) ? book.infobox as Array<Record<string, unknown>> : []
       const field = (name: string, max = 500) => text(infobox.find((entry) => entry.key === name)?.value, max)
       const author = field('作者')
+      const series = field('系列')
       const description = typeof book.summary === 'string' ? book.summary : ''
+      const rawTags = Array.isArray(book.tags) ? (book.tags as Array<Record<string, unknown>>).map((t) => text(t.name)).filter((t): t is string => Boolean(t)) : []
+      const tags = rawTags.length > 0 ? rawTags : undefined
       const images = book.images as Record<string, unknown> | undefined
       const rawCover = text(images?.medium, 2048)
       const coverUrl = rawCover && /^https:\/\/lain\.bgm\.tv\/r\/800\/pic\/cover\/[a-zA-Z0-9_./-]+\.(jpg|jpeg|png|webp)$/.test(rawCover) ? rawCover : undefined
-      return [{ id, provider, title, authors: author ? [author] : [], description: description.trim() ? description : undefined, publisher: field('出版社', 200), published: field('发售日', 50) ?? text(book.date, 50), isbn: field('ISBN', 20), coverUrl, sourceUrl: `https://bgm.tv/subject/${id}` }]
+      return [{ id, provider, title, authors: author ? [author] : [], description: description.trim() ? description : undefined, publisher: field('出版社', 200), published: field('发售日', 50) ?? text(book.date, 50), isbn: field('ISBN', 20), series, tags, coverUrl, sourceUrl: `https://bgm.tv/subject/${id}` }]
     })
   }
   if (provider === 'openlibrary') {
@@ -152,7 +158,9 @@ export async function searchMetadata(provider: MetadataProviderId, query: string
         const url = thumbnail && new URL(thumbnail)
         if (url && url.protocol === 'https:' && url.hostname === 'books.google.com' && url.pathname === '/books/content' && !url.port && !url.username && !url.password) coverUrl = url.href
       } catch { /* An invalid image URL is treated as missing. */ }
-      return [{ id, provider, title, authors: Array.isArray(book?.authors) ? book.authors.map((v) => text(v)).filter((v): v is string => Boolean(v)).slice(0, 10) : [], description, publisher: text(book?.publisher, 200), published: text(book?.publishedDate, 50), language: text(book?.language, 20), isbn: text(isbn?.identifier, 20), coverUrl, sourceUrl: `https://books.google.com/books?id=${encodeURIComponent(id)}` }]
+      const rawCategories = Array.isArray(book?.categories) ? (book.categories as unknown[]).map((v) => text(v)).filter((v): v is string => Boolean(v)) : []
+      const category = rawCategories[0]
+      return [{ id, provider, title, authors: Array.isArray(book?.authors) ? book.authors.map((v) => text(v)).filter((v): v is string => Boolean(v)).slice(0, 10) : [], description, publisher: text(book?.publisher, 200), published: text(book?.publishedDate, 50), language: text(book?.language, 20), isbn: text(isbn?.identifier, 20), category, coverUrl, sourceUrl: `https://books.google.com/books?id=${encodeURIComponent(id)}` }]
     })
   }
   throw new AppError('VALIDATION_ERROR', 'Metadata source is not available')
@@ -162,6 +170,53 @@ export async function getDoubanMetadata(id: string): Promise<MetadataCandidate> 
   if (!/^\d{1,20}$/.test(id)) throw new AppError('VALIDATION_ERROR', 'Invalid Douban book ID')
   const html = await request(`https://book.douban.com/subject/${id}/`, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36', 'Accept-Encoding': 'identity' } })
   return parseDoubanDetail(html, id)
+}
+
+export async function getQidianMetadata(id: string): Promise<MetadataCandidate> {
+  if (!/^\d{1,20}$/.test(id)) throw new AppError('VALIDATION_ERROR', 'Invalid Qidian book ID')
+  const html = await request(`https://m.qidian.com/book/${id}/`, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+      Referer: 'https://m.qidian.com/',
+    },
+  })
+  const match = html.match(/<script\b[^>]*\bid=["']vite-plugin-ssr_pageContext["'][^>]*>([\s\S]*?)<\/script>/i)
+  if (!match?.[1]) throw new AppError('VALIDATION_ERROR', 'Qidian detail response could not be read')
+  const data = parseResponse<{ pageContext?: { pageProps?: { pageData?: { bookInfo?: Record<string, unknown> } } } }>(match[1])
+  const book = data.pageContext?.pageProps?.pageData?.bookInfo
+  if (!book || typeof book !== 'object') throw new AppError('VALIDATION_ERROR', 'Invalid Qidian detail response')
+  const title = text(book.bookName) ?? text(book.bName)
+  if (!title) throw new AppError('VALIDATION_ERROR', 'Invalid Qidian book record')
+  const author = text(book.authorName) ?? text(book.bAuth)
+  const rawDesc = typeof book.desc === 'string' ? book.desc : ''
+  const description = rawDesc
+    .split(/<br\s*\/?>|\r?\n/gi)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n')
+  const category = text(book.chanName) ?? text(book.catName) ?? text(book.subCateName) ?? text(book.cat)
+  const tags: string[] = []
+  if (Array.isArray(book.bookLabels)) {
+    for (const item of book.bookLabels) {
+      if (item && typeof item === 'object' && typeof (item as { tag?: unknown }).tag === 'string') {
+        const t = (item as { tag: string }).tag.trim()
+        if (t && !tags.includes(t)) tags.push(t)
+      }
+    }
+  }
+  const singleTag = text(book.tagName) ?? text(book.tag)
+  if (singleTag && !tags.includes(singleTag)) tags.push(singleTag)
+  return {
+    id,
+    provider: 'qidian',
+    title,
+    authors: author ? [author] : [],
+    description: description || undefined,
+    category,
+    tags: tags.length > 0 ? tags : undefined,
+    coverUrl: `https://bookcover.yuewen.com/qdbimg/349573/${id}/300`,
+    sourceUrl: `https://www.qidian.com/book/${id}/`,
+  }
 }
 
 export async function fetchMetadataCover(provider: MetadataProviderId, source: string): Promise<{ bytes: Buffer; contentType: string }> {

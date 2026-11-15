@@ -11,7 +11,7 @@ vi.mock('./metadata-lookup.service', () => ({
   updateMetadataSecret: vi.fn(() => ({ googlebooks: true })),
   searchMetadata: vi.fn(async () => []),
   getDoubanMetadata: vi.fn(async (id: string) => ({ id, provider: 'douban' })),
-  fetchMetadataCover: vi.fn(),
+  fetchMetadataCover: vi.fn(async () => ({ bytes: Buffer.from('image-data'), contentType: 'image/jpeg' })),
 }))
 vi.mock('./weread.service', () => ({
   getWeReadKey: vi.fn(() => 'test-key'),
@@ -75,5 +75,19 @@ describe('metadata lookup permissions', () => {
     const detail = await app.request('/metadata/detail', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: 'personal:my-source', id: '1' }) })
     expect(await detail.json()).toEqual({ data: null })
     expect(getPersonalSourceDetail).toHaveBeenCalledWith('member', 'my-source', '1')
+  })
+
+  it('proxies metadata covers via GET and POST for authenticated users', async () => {
+    const member = appFor('member')
+    const getRes = await member.request('/metadata/cover?provider=douban&url=https%3A%2F%2Fimg9.doubanio.com%2Fview%2Fsubject%2Fs%2Fpublic%2Fs123.jpg')
+    expect(getRes.status).toBe(200)
+    expect(getRes.headers.get('content-type')).toBe('image/jpeg')
+    expect(getRes.headers.get('cache-control')).toContain('public')
+
+    const postRes = await member.request('/metadata/cover', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: 'douban', url: 'https://img9.doubanio.com/view/subject/s/public/s123.jpg' }) })
+    expect(postRes.status).toBe(200)
+    expect(postRes.headers.get('content-type')).toBe('image/jpeg')
+
+    expect((await appFor(null).request('/metadata/cover?provider=douban&url=https%3A%2F%2Fimg9.doubanio.com%2Fview%2Fsubject%2Fs%2Fpublic%2Fs123.jpg')).status).toBe(401)
   })
 })

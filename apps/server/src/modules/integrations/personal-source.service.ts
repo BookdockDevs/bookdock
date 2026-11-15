@@ -61,27 +61,77 @@ async function loadEntryText(userId: string, sourceId: string): Promise<string> 
   return Buffer.concat(parts).toString('utf8')
 }
 
+function boundedText(value: string | undefined, max: number): string | undefined {
+  const text = value?.trim()
+  return text ? text.slice(0, max) : undefined
+}
+
+function normalizeTags(value: string[] | undefined): string[] | undefined {
+  const tags = (value ?? [])
+    .map((tag) => tag.trim().slice(0, 100))
+    .filter((tag, index, all) => tag !== '' && all.indexOf(tag) === index)
+    .slice(0, 50)
+  return tags.length > 0 ? tags : undefined
+}
+
+// Sources frequently return protocol-relative ("//cdn/x.jpg") or http cover
+// URLs. The browser would resolve a protocol-relative URL against the Bookdock
+// origin and the cover proxy rejects it, so personal covers are normalized
+// rather than dropped; anything that is still not a public https URL is.
+function normalizeCoverUrl(value: string | undefined): string | undefined {
+  const text = value?.trim()
+  if (!text) return undefined
+  const upgraded = text.startsWith('//') ? `https:${text}` : text.replace(/^http:\/\//i, 'https://')
+  try {
+    const url = new URL(upgraded)
+    if (url.protocol !== 'https:' || url.username || url.password || url.port) return undefined
+  } catch { return undefined }
+  return upgraded
+}
+
 // Search values and detail values both flow through here: empty and
 // whitespace-only text is dropped, descriptions keep their source whitespace,
-// and a missing source URL falls back to the package repository.
+// and a missing source URL falls back to the package repository. Every
+// optional field the contract exposes has to be copied here, or a search-only
+// source loses it before the lookup UI ever sees the candidate.
 function adaptCandidate(sourceId: string, fallbackSourceUrl: string | null, candidate: PersonalMetadataCandidate): MetadataCandidate {
-  const bounded = (value: string | undefined, max: number): string | undefined => {
-    const text = value?.trim()
-    return text ? text.slice(0, max) : undefined
-  }
-  const coverUrl = bounded(candidate.coverUrl, 2048)
   return {
     id: candidate.id.slice(0, 256),
     provider: `personal:${sourceId}`,
     title: candidate.title.slice(0, 500),
     authors: (candidate.authors ?? []).map((author) => author.trim()).filter(Boolean).slice(0, 10),
-    description: bounded(candidate.description, 20_000),
-    publisher: bounded(candidate.publisher, 200),
-    published: bounded(candidate.published, 50),
-    isbn: bounded(candidate.isbn, 20),
-    language: bounded(candidate.language, 20),
-    coverUrl: coverUrl?.startsWith('https://') ? coverUrl : undefined,
-    sourceUrl: bounded(candidate.sourceUrl, 2048) ?? fallbackSourceUrl ?? '',
+    description: boundedText(candidate.description, 20_000),
+    publisher: boundedText(candidate.publisher, 200),
+    published: boundedText(candidate.published, 50),
+    isbn: boundedText(candidate.isbn, 20),
+    language: boundedText(candidate.language, 20),
+    coverUrl: normalizeCoverUrl(candidate.coverUrl),
+    sourceUrl: boundedText(candidate.sourceUrl, 2048) ?? fallbackSourceUrl ?? '',
+    series: boundedText(candidate.series, 200),
+    seriesIndex: boundedText(candidate.seriesIndex, 50),
+    category: boundedText(candidate.category, 200),
+    tags: normalizeTags(candidate.tags),
+  }
+}
+
+// Detail values reach the lookup UI without going through adaptCandidate, so
+// they get the same bounds; only the search result supplies ids and the source
+// URL fallback.
+function adaptDetail(fields: PersonalMetadataFields): PersonalMetadataFields {
+  return {
+    title: boundedText(fields.title, 500),
+    authors: (fields.authors ?? []).map((author) => author.trim()).filter(Boolean).slice(0, 10),
+    description: boundedText(fields.description, 20_000),
+    publisher: boundedText(fields.publisher, 200),
+    published: boundedText(fields.published, 50),
+    isbn: boundedText(fields.isbn, 20),
+    language: boundedText(fields.language, 20),
+    coverUrl: normalizeCoverUrl(fields.coverUrl),
+    sourceUrl: boundedText(fields.sourceUrl, 2048),
+    series: boundedText(fields.series, 200),
+    seriesIndex: boundedText(fields.seriesIndex, 50),
+    category: boundedText(fields.category, 200),
+    tags: normalizeTags(fields.tags),
   }
 }
 
@@ -98,5 +148,5 @@ export async function getPersonalSourceDetail(userId: string, sourceId: string, 
   if (!row.hasDetail) return null
   const entry = await loadEntryText(userId, sourceId)
   const result = await runPersonalSource(entry, 'getDetail', id, { fetch: fetchThroughHost })
-  return result as PersonalMetadataFields | null
+  return result ? adaptDetail(result as PersonalMetadataFields) : null
 }

@@ -64,6 +64,21 @@ export async function assertPublicHttpsUrl(source: string): Promise<URL> {
   return url
 }
 
+// Responses are decoded with the charset they declare. The sandbox has no
+// TextDecoder, so this is the only place a GBK/GB18030 source page can be
+// decoded correctly — a source cannot compensate for mojibake afterwards.
+export function decodeResponseText(bytes: Buffer, contentType: string | null): string {
+  const declared = /charset=["']?([\w-]+)/i.exec(contentType ?? '')?.[1]
+  // HTML pages frequently declare the encoding only inside the document head.
+  const sniffed = declared ?? /<meta[^>]+charset=["']?([\w-]+)/i.exec(bytes.subarray(0, 2048).toString('latin1'))?.[1]
+  const label = sniffed?.toLowerCase()
+  let text: string | undefined
+  if (label && label !== 'utf-8' && label !== 'utf8') {
+    try { text = new TextDecoder(label).decode(bytes) } catch { /* Unknown or unsupported label: fall back to UTF-8. */ }
+  }
+  return (text ?? bytes.toString('utf8')).replace(/^\uFEFF/, '')
+}
+
 export async function fetchThroughHost(url: string, init: PersonalSourceFetchInit = {}): Promise<PersonalSourceFetchResult> {
   const target = await assertPublicHttpsUrl(url)
   const method = (init.method ?? 'GET').toUpperCase()
@@ -102,5 +117,5 @@ export async function fetchThroughHost(url: string, init: PersonalSourceFetchIni
   } finally {
     await reader.cancel().catch(() => {})
   }
-  return { status: response.status, body: Buffer.concat(parts).toString('utf8') }
+  return { status: response.status, body: decodeResponseText(Buffer.concat(parts), response.headers.get('content-type')) }
 }

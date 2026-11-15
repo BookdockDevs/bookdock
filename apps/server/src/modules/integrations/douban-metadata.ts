@@ -76,10 +76,26 @@ export function parseDoubanDetail(html: string, id: string): MetadataCandidate {
     return value?.slice(0, max)
   }
   const author = field('作者', 500)
+  const series = field('丛书', 300)
   const report = elements(document, (node) => attr(node, 'id') === 'link-report')[0]
   const intros = report ? elements(report, (node) => hasClass(node, 'intro')) : []
   const intro = intros.at(-1)
   const paragraphs = intro ? elements(intro, (node) => node.tagName === 'p').map((node) => content(node).trim()).filter(Boolean) : []
   const image = elements(document, (node) => attr(node, 'property') === 'og:image')[0]
-  return { id, provider: 'douban', title, authors: author ? [author] : [], description: paragraphs.join('\n') || undefined, publisher: field('出版社', 200), published: field('出版年', 50), isbn: field('ISBN', 20), coverUrl: cover(attr(image, 'content')), sourceUrl: `https://book.douban.com/subject/${id}/` }
+  const tagNodes = elements(document, (node) => node.tagName === 'a' && hasClass(node, 'tag'))
+  const tags = tagNodes.map((n) => content(n).trim()).filter(Boolean)
+  return {
+    id,
+    provider: 'douban',
+    title,
+    authors: author ? [author] : [],
+    description: paragraphs.join('\n') || undefined,
+    publisher: field('出版社', 200),
+    published: field('出版年', 50),
+    isbn: field('ISBN', 20),
+    series: series || undefined,
+    tags: tags.length > 0 ? tags : undefined,
+    coverUrl: cover(attr(image, 'content')),
+    sourceUrl: `https://book.douban.com/subject/${id}/`,
+  }
 }

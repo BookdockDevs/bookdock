@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import * as client from '../../db/client'
 import * as schema from '../../db/schema'
 import { createId } from '../../lib/id'
-import { listPersonalSources } from './personal-source.service'
+import { getPersonalSourceDetail, listPersonalSources, searchPersonalSource } from './personal-source.service'
 import { installPersonalSourceFromZip } from './personal-source-install'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
@@ -111,11 +111,11 @@ function createMemoryStorage() {
   return { driver, files }
 }
 
-async function sourceZip(id: string, version: string, withIcon: boolean): Promise<File> {
+async function sourceZip(id: string, version: string, withIcon: boolean, entry = 'export default { async search() { return [] } }'): Promise<File> {
   const manifest = JSON.stringify({ id, name: id, version, apiVersion: 1, entry: 'index.js', ...(withIcon ? { icon: 'icon.png' } : {}) })
   const zip = new JSZip()
   zip.file('manifest.json', manifest)
-  zip.file('index.js', 'export default { async search() { return [] } }')
+  zip.file('index.js', entry)
   if (withIcon) zip.file('icon.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
   const buffer = await zip.generateAsync({ type: 'nodebuffer' })
   return new File([buffer], `${id}.zip`)
@@ -160,5 +160,81 @@ describe('personal source overwrite install', () => {
     await installPersonalSourceFromZip(otherId, await sourceZip('shared-id', '0.9.0', false))
     expect(listPersonalSources(userId)[0]?.version).toBe('0.1.0')
     expect(listPersonalSources(otherId)[0]?.version).toBe('0.9.0')
+  })
+})
+
+describe('personal source candidate adaptation', () => {
+  let db: ReturnType<typeof createTestDb>
+  let userId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    userId = seedUser(db, 'owner')
+  })
+
+  // A search-only source is the only chance to carry classification: it never
+  // gets a detail request, so the host adaptation must not drop these fields.
+  it('keeps classification and series fields from a search-only source', async () => {
+    const entry = `
+      export default {
+        async search() {
+          return [{ id: '1', title: ' Book ', category: ' 玄幻 ', tags: ['爽文', '爽文', '无限流'], series: ' Series ', seriesIndex: '2' }]
+        },
+      }
+    `
+    await installPersonalSourceFromZip(userId, await sourceZip('classifier', '0.1.0', false, entry))
+    const [candidate] = await searchPersonalSource(userId, 'classifier', 'book')
+    expect(candidate).toMatchObject({
+      id: '1',
+      title: 'Book',
+      category: '玄幻',
+      tags: ['爽文', '无限流'],
+      series: 'Series',
+      seriesIndex: '2',
+    })
+  })
+
+  // A protocol-relative URL would resolve against the Bookdock origin in the
+  // browser and be rejected by the cover proxy, so it is normalized here.
+  it('normalizes protocol-relative and http cover URLs', async () => {
+    const entry = `
+      export default {
+        async search() {
+          return [
+            { id: '1', title: 'Relative', coverUrl: '//cdn.example.com/a.jpg' },
+            { id: '2', title: 'Plain', coverUrl: 'http://cdn.example.com/b.jpg' },
+            { id: '3', title: 'Port', coverUrl: 'https://cdn.example.com:8443/c.jpg' },
+            { id: '4', title: 'None', coverUrl: 'not a url' },
+          ]
+        },
+      }
+    `
+    await installPersonalSourceFromZip(userId, await sourceZip('covers', '0.1.0', false, entry))
+    const candidates = await searchPersonalSource(userId, 'covers', 'book')
+    expect(candidates.map((candidate) => candidate.coverUrl)).toEqual([
+      'https://cdn.example.com/a.jpg',
+      'https://cdn.example.com/b.jpg',
+      undefined,
+      undefined,
+    ])
+  })
+
+  it('applies the same bounds and cover normalization to detail values', async () => {
+    const entry = `
+      export default {
+        async search() { return [] },
+        async getDetail() {
+          return { description: 'x'.repeat(25000), coverUrl: '//cdn.example.com/d.jpg', tags: [' a ', 'a', 'b'], series: ' S ' }
+        },
+      }
+    `
+    await installPersonalSourceFromZip(userId, await sourceZip('detail-bounds', '0.1.0', false, entry))
+    const detail = await getPersonalSourceDetail(userId, 'detail-bounds', '1')
+    expect(detail?.description).toHaveLength(20_000)
+    expect(detail?.coverUrl).toBe('https://cdn.example.com/d.jpg')
+    expect(detail?.tags).toEqual(['a', 'b'])
+    expect(detail?.series).toBe('S')
   })
 })

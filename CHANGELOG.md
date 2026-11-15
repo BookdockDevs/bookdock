@@ -7,18 +7,24 @@ All notable changes to Bookdock are documented here.
 ### Added
 
 - Refactored the desktop unpinned reader sidebar into an independent floating island card with adjustable width (200–640 px), height (320 px to viewport bound), and corner 2D resizing, with double-click reset and pointer capture cursor locking.
+- Scraped results now carry series, series index, category and tags. Applying a lookup fills the classification fields of the edit draft: an exact category name wins over a broader one, a name that matches a library category template is created on save, and tag names the library does not have yet wait as pending chips until the dialog is saved.
 
 ### Changed
 
 - Improved the reader text replacements dialog with semi-transparent card items, refined pattern and replacement syntax badges, muted zero-match indicators, clustered action buttons, and theme-adaptive hover states that blend into sepia, light, and dark reading palettes without jarring cold-white highlights.
 - Refreshed the default AI provider models for Claude, Gemini, DeepSeek, GLM, Kimi, MiniMax, and MiMo; kept Qwen's rolling alias, corrected MiMo's fallback API URL, and renamed the Moonshot provider to Kimi.
 - Organized Legado discovery around one selected library with a full-width library picker, and added author/file-size sorting for all libraries plus last-read/progress sorting for personal libraries. Search and discovery previews now fall back to book metadata descriptions and are capped at 80 characters.
+- Reworked the metadata lookup dialog into a two-column layout: compact candidate rows with clamped summaries on the left, and a detail preview with the large cover, publisher details, taxonomy badges and the full description on the right.
 
 ### Fixed
 
 - Fixed directory auto-locate failing to scroll when returning to earlier chapters (such as via the history capsule) after visiting tail chapters. When the table of contents reaches maximum scroll, fully visible chapters now correctly commit their placed position instead of leaving stale scroll tracking that suppressed subsequent relocations.
 - History capsule navigation now maintains pinned chrome across chapter transitions, keeping the footer and companion controls visible while interacting.
 - Fixed TXT-to-EPUB downloads flattening nested chapter navigation. Server and device exports retain the saved hierarchy, embed current book details and cover, and respect the selected text replacement option. A cover that cannot be read or supported now stops the export with an error.
+- Fixed Qidian detail lookups. Its mobile pages now redirect and ship a Vite-based SSR payload, which broke category, tag and multi-paragraph summary extraction.
+- Fixed scraped covers that failed to load. Cover hosts that reject hotlinked requests (such as Douban shards answering 403 or 418) now fall back to the smaller thumbnail and then to a server-side proxy cached for a day, and a cover that still fails is reported on its own instead of discarding the rest of the result.
+- Fixed personal source responses being decoded as UTF-8 regardless of the declared encoding. Bodies now follow the `charset` from the response header or the document head, and unknown labels fall back to UTF-8, so GBK sources return readable text.
+- Fixed protocol-relative and plain-HTTP cover URLs from personal sources being dropped. They are upgraded to HTTPS now, and detail values get the same normalization instead of reaching the browser unnormalized.
 
 ## [0.8.4] - 2026-11-15
 
@@ -1294,18 +1300,24 @@ All notable changes to Bookdock are documented here.
 #### 新增
 
 - 桌面端未固定侧栏重构为独立的悬浮岛卡片与紧凑胶囊，支持右边界宽度（200–640 px）、底部高度（320 px 起）及右下角双向拖拽调节尺寸，支持双击手柄重置为默认大小，并在拖拽时锁定指针光标。
+- 刮削结果现在会带出系列、系列序号、分类与标签，应用后直接填充编辑草稿的归类字段：分类优先匹配同名项，命中库内分类模板的在保存时创建；尚不存在的标签名以待创建状态排队，仅在保存时才创建。
 
 #### 优化
 
 - 优化阅读器文本替换弹窗的视觉与交互呈现：列表项改用与阅读器明暗/羊皮纸配色深度融合的半透明微质感卡片，消除悬停时的生硬冷白底色；规则模式与替换词采用轻量语法标签展示，弱化零匹配计数噪音，并将编辑与删除操作收拢分组。
 - 更新 Claude、Gemini、DeepSeek、智谱 GLM、Kimi、MiniMax 和 MiMo 的 AI 供应商默认模型；保留通义千问的系列别名、修正 MiMo 备用 API 地址，并将 Moonshot 供应商名称简化为“Kimi”。
 - 优化 Legado 发现页，按当前书库展示入口，书库选择独占一行，并新增按作者和文件大小排序的支持；个人书库另支持按最近阅读和阅读进度排序。搜索与发现结果缺少简介时会回退到书籍元数据简介，预览最多 80 个字符。
+- 重构刮削信息弹窗：左侧候选列表紧凑排列并对简介单行截断，右侧为包含高清封面、出版信息、分类标签徽标及完整多段简介的预览面板。
 
 #### 修复
 
 - 修复访问全书末尾章节后返回前序章节（如通过历史胶囊跳转）时目录未重新定位的问题。当目录列表已滚动触底时，可视区域内的章节能正常提交定位记录，避免残留旧的章节索引阻断后续切章时的自动滚动。
 - 历史胶囊跳转时保持控制栏常驻，避免切章定位后底栏与操作按钮过早自动收起。
 - 修复 TXT 下载为 EPUB 时目录层级被压平的问题。服务器和本机书籍导出时保留已保存的目录层级，嵌入当前书籍信息和封面，并按所选文本版本应用替换规则；封面无法读取或格式不受支持时会提示并停止导出。
+- 修复起点详情解析失败的问题。其移动端页面改为重定向并改用 Vite SSR 数据块渲染，导致分类、标签与多段简介无法提取。
+- 修复刮削封面加载失败的问题。对拒绝外链的图床（如豆瓣不同 CDN 节点返回 HTTP 403 / 418）改为先降级到小尺寸缩略图、再走服务端代理（缓存一天），仍失败时单独提示，不再连带丢弃其余刮削结果。
+- 修复自定义刮削源响应固定按 UTF-8 解析的问题。现按响应头或文档头部的 `charset` 解码，未知编码回退 UTF-8，GBK 页面不再乱码。
+- 修复自定义刮削源的协议相对与 HTTP 封面地址被直接丢弃的问题。现统一升级为 HTTPS，详情返回值同样归一，此前这类地址会在浏览器端解析到本站域名而无法取图。
 
 ### [0.8.4] - 2026-11-15
 

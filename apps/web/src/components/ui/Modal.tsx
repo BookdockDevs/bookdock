@@ -25,7 +25,7 @@ interface ModalProps {
   /** Spread onto the backdrop (e.g. the settings-popover ignore flag) */
   containerProps?: HTMLAttributes<HTMLDivElement> & Record<string, unknown>
   variant?: 'default' | 'reader'
-  size?: 'sm' | 'default' | 'xl' | 'wide' | 'idea'
+  size?: 'sm' | 'default' | 'xl' | 'wide' | '3xl' | '4xl' | 'idea'
   centered?: boolean
   initialFocus?: 'dialog' | 'firstFocusable'
   panelClassName?: string
@@ -79,7 +79,19 @@ export default function Modal({
   // class themselves to keep the `dark:` axis on the reading theme.
   const readingTone = useUiStore(selectReadingTone)
   const width =
-    size === 'wide' ? 'max-w-2xl' : size === 'xl' ? 'max-w-xl' : size === 'idea' ? 'max-w-[420px]' : size === 'sm' ? 'max-w-sm' : 'max-w-lg'
+    size === '4xl'
+      ? 'max-w-4xl'
+      : size === '3xl'
+        ? 'max-w-3xl'
+        : size === 'wide'
+          ? 'max-w-2xl'
+          : size === 'xl'
+            ? 'max-w-xl'
+            : size === 'idea'
+              ? 'max-w-[420px]'
+              : size === 'sm'
+                ? 'max-w-sm'
+                : 'max-w-lg'
   const placement = centered ? 'items-center p-4' : 'items-end p-0 sm:items-center sm:p-4'
   const panelShape = centered ? 'max-h-[calc(100dvh-2rem)] rounded-2xl' : 'max-h-[calc(100dvh-1rem)] rounded-t-2xl sm:max-h-[85vh] sm:rounded-2xl'
   const btn = reader

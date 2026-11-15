@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchMetadataCover, getDoubanMetadata, searchMetadata } from './metadata-lookup.service'
+import { fetchMetadataCover, getDoubanMetadata, getQidianMetadata, searchMetadata } from './metadata-lookup.service'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -50,10 +50,27 @@ describe('metadata lookup', () => {
     expect(await searchMetadata('qidian', 'Title')).toEqual([{ id: '123', provider: 'qidian', title: 'Title', authors: ['Author'], description: 'Description', coverUrl: 'https://bookcover.yuewen.com/qdbimg/349573/123/300', sourceUrl: 'https://www.qidian.com/book/123/' }])
   })
 
+  it('fetches Qidian detail and preserves multiline description breaks', async () => {
+    const data = { pageContext: { pageProps: { pageData: { bookInfo: { bName: 'Detail Book', bAuth: 'Qidian Author', desc: 'First line.<br>Second line.<br>Third line.', catName: '玄幻', tagName: '东方玄幻' } } } } }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(`<script id="vite-plugin-ssr_pageContext">${JSON.stringify(data)}</script>`)))
+    const detail = await getQidianMetadata('123')
+    expect(detail).toEqual({
+      id: '123',
+      provider: 'qidian',
+      title: 'Detail Book',
+      authors: ['Qidian Author'],
+      description: 'First line.\nSecond line.\nThird line.',
+      category: '玄幻',
+      tags: ['东方玄幻'],
+      coverUrl: 'https://bookcover.yuewen.com/qdbimg/349573/123/300',
+      sourceUrl: 'https://www.qidian.com/book/123/',
+    })
+  })
+
   it('maps Bangumi book infobox fields without guessing authors from tags', async () => {
-    const data = { data: [{ id: 12, name: 'Title', summary: 'Description', infobox: [{ key: '作者', value: 'Author' }, { key: 'ISBN', value: '9781234567890' }], images: { medium: 'https://lain.bgm.tv/r/800/pic/cover/l/ab/12/example.jpg' } }] }
+    const data = { data: [{ id: 12, name: 'Title', summary: 'Description', infobox: [{ key: '作者', value: 'Author' }, { key: 'ISBN', value: '9781234567890' }, { key: '系列', value: 'SeriesName' }], tags: [{ name: 'Sci-Fi' }], images: { medium: 'https://lain.bgm.tv/r/800/pic/cover/l/ab/12/example.jpg' } }] }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(data))))
-    expect((await searchMetadata('bangumi', 'Title'))[0]).toMatchObject({ title: 'Title', authors: ['Author'], isbn: '9781234567890', provider: 'bangumi' })
+    expect((await searchMetadata('bangumi', 'Title'))[0]).toMatchObject({ title: 'Title', authors: ['Author'], isbn: '9781234567890', series: 'SeriesName', tags: ['Sci-Fi'], provider: 'bangumi' })
   })
 
   it('preserves plain-text Qidian and Bangumi description whitespace and omits blank descriptions', async () => {
@@ -81,12 +98,12 @@ describe('metadata lookup', () => {
   it('loads Douban candidates and fetches details only for the selected book', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('<div class="result-list"><div class="result"><a class="nbg" title="A &amp; B" onclick="moreurl(this,{sid: 123})"><img src="https://img3.doubanio.com/view/subject/s/public/s123.jpg"></a><span class="subject-cast">Writer / Publisher / 2020</span></div></div>'))
-      .mockResolvedValueOnce(new Response('<meta property="og:image" content="https://img3.doubanio.com/view/subject/l/public/s123.jpg"><span property="v:itemreviewed">A &amp; B</span><div id="info"><span class="pl">作者</span>: Writer<br><span class="pl">出版社:</span> Publisher<br><span class="pl">出版年:</span> 2020<br><span class="pl">ISBN:</span> 9781234567890<br></div><div id="link-report"><div class="intro"><p>Introduction.</p></div></div>'))
+      .mockResolvedValueOnce(new Response('<meta property="og:image" content="https://img3.doubanio.com/view/subject/l/public/s123.jpg"><span property="v:itemreviewed">A &amp; B</span><div id="info"><span class="pl">作者</span>: Writer<br><span class="pl">出版社:</span> Publisher<br><span class="pl">出版年:</span> 2020<br><span class="pl">ISBN:</span> 9781234567890<br><span class="pl">丛书:</span> 经典系列<br></div><div id="link-report"><div class="intro"><p>Introduction.</p></div></div><div id="db-tags-section"><a class="tag">科幻</a><a class="tag">悬疑</a></div>'))
     vi.stubGlobal('fetch', fetchMock)
     const candidates = await searchMetadata('douban', 'A & B')
     expect(candidates).toMatchObject([{ id: '123', title: 'A & B', authors: ['Writer'], provider: 'douban' }])
     expect(fetchMock).toHaveBeenCalledOnce()
-    expect(await getDoubanMetadata('123')).toMatchObject({ title: 'A & B', authors: ['Writer'], publisher: 'Publisher', published: '2020', isbn: '9781234567890', description: 'Introduction.', coverUrl: 'https://img3.doubanio.com/view/subject/l/public/s123.jpg' })
+    expect(await getDoubanMetadata('123')).toMatchObject({ title: 'A & B', authors: ['Writer'], publisher: 'Publisher', published: '2020', isbn: '9781234567890', description: 'Introduction.', series: '经典系列', tags: ['科幻', '悬疑'], coverUrl: 'https://img3.doubanio.com/view/subject/l/public/s123.jpg' })
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
