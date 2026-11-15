@@ -443,6 +443,29 @@ describe('exportEpubBook', () => {
     expect(chapter).not.toContain('<p>第一段文字内容</p>')
   })
 
+  it('preserves chapter hierarchy and current metadata in exported EPUB', async () => {
+    const file = new File(['第1章 第一节\n\n正文一\n\n第2章 第二节\n\n正文二'], 'nested.txt', { type: 'text/plain' })
+    const uploaded = await uploadBook(ownerId, file)
+    const id = uploaded.book.id
+    const link = db.select().from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, id)).get()!
+    db.update(schema.libraryBooks).set({ title: '新的 & 书名', author: '甲', authors: ['甲', '乙'] }).where(eq(schema.libraryBooks.id, link.libraryBookId)).run()
+    const revision = db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.bookVersionId, id)).get()!
+    const meta = revision.meta as { chapters: Array<{ level: number }> }
+    expect(meta.chapters.length).toBeGreaterThanOrEqual(2)
+    meta.chapters[0]!.level = 1
+    meta.chapters[1]!.level = 2
+    db.update(schema.contentRevisions).set({ meta: { ...meta, bookmeta: { publisher: '出版社', description: '简介', isbn: '123', series: '系列', seriesIndex: 0, subjects: ['科幻'] } } }).where(eq(schema.contentRevisions.id, revision.id)).run()
+    const zip = await JSZip.loadAsync((await exportEpubBook(ownerId, id, true)).buffer)
+    const opf = await zip.file('OEBPS/content.opf')!.async('string')
+    expect(opf).toContain('<dc:title>新的 &amp; 书名</dc:title>')
+    expect(opf).toContain('<dc:creator>乙</dc:creator>')
+    expect(opf).toContain('<dc:publisher>出版社</dc:publisher>')
+    expect(opf).toContain('<dc:description>简介</dc:description>')
+    expect(opf).toContain('name="calibre:series_index" content="0"')
+    const ncx = await zip.file('OEBPS/toc.ncx')!.async('string')
+    expect(ncx).toMatch(/<navPoint id="navpoint-1"[\s\S]*<navPoint id="navpoint-2"[\s\S]*<\/navPoint>\s*<\/navPoint>/)
+  })
+
   it('returns the unreplaced content for the plain variant even with rules', async () => {
     await createReplacement(ownerId, { pattern: '第一段', replacement: '改后段' })
     const { buffer } = await exportEpubBook(ownerId, bookId, true)
@@ -468,14 +491,11 @@ describe('exportEpubBook', () => {
     expect([...cover]).toEqual([0x89, 0x50, 0x4e, 0x47])
   })
 
-  it('exports without a cover when the cover blob is missing (silent degradation)', async () => {
+  it('rejects export when the configured cover blob is missing', async () => {
     const missingLbv = client.getDb().select().from(schema.libraryBookVersions)
       .where(eq(schema.libraryBookVersions.bookVersionId, bookId)).get()!
     client.getDb().update(schema.libraryBooks).set({ coverKey: `blobs/co/${createId('hash')}.cover.jpg` }).where(eq(schema.libraryBooks.id, missingLbv.libraryBookId)).run()
-    const { buffer } = await exportEpubBook(ownerId, bookId)
-    const zip = await JSZip.loadAsync(buffer)
-    const opf = await zip.file('OEBPS/content.opf')!.async('string')
-    expect(opf).not.toContain('cover-image')
+    await expect(exportEpubBook(ownerId, bookId)).rejects.toMatchObject({ code: 'EXPORT_COVER_FAILED' })
   })
 
   it('rejects EPUB books with UNSUPPORTED_FORMAT', async () => {

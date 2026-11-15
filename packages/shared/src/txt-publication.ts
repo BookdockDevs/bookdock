@@ -1,3 +1,5 @@
+import type { BookMetadata } from './contract'
+
 export interface TxtToEpubChapter {
   id: string
   title: string
@@ -11,6 +13,7 @@ export interface TxtToEpubMetadata {
   authors?: string[]
   language?: string
   id?: string
+  bookmeta?: BookMetadata
 }
 
 export interface TxtToEpubCover {
@@ -66,19 +69,24 @@ function buildChapterXhtml(title: string, content: string): string {
 </html>`
 }
 
+export function buildTxtEpubMetadata(metadata: TxtToEpubMetadata, hasCover: boolean): string {
+  const id = metadata.id ?? 'bookdock-unknown'
+  const title = metadata.title || 'Untitled'
+  const authors = metadata.authors?.length ? metadata.authors : [metadata.author || 'Unknown']
+  const info = metadata.bookmeta
+  const element = (name: string, value?: string) => value ? `    <dc:${name}>${escapeXml(value)}</dc:${name}>\n` : ''
+  const languages = info?.languages?.length ? info.languages : [metadata.language || info?.language || 'zh-CN']
+  return `  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="BookId">${escapeXml(id)}</dc:identifier>
+    <dc:title>${escapeXml(title)}</dc:title>
+${authors.map((author) => element('creator', author)).join('')}${languages.map((language) => element('language', language)).join('')}${element('publisher', info?.publisher)}${element('date', info?.published)}${element('description', info?.description)}${element('rights', info?.rights)}${element('source', info?.source)}${element('identifier', info?.identifier)}${element('identifier', info?.isbn)}${(info?.subjects ?? []).map((subject) => element('subject', subject)).join('')}${(info?.contributors ?? []).map((contributor) => element('contributor', contributor.name)).join('')}${info?.series ? `    <meta name="calibre:series" content="${escapeXml(info.series)}" />\n` : ''}${info?.seriesIndex != null ? `    <meta name="calibre:series_index" content="${info.seriesIndex}" />\n` : ''}${hasCover ? '    <meta name="cover" content="cover-image" />\n' : ''}  </metadata>`
+}
+
 function buildContentOpf(
   metadata: TxtToEpubMetadata,
   chapterFiles: string[],
   cover?: TxtToEpubCover
 ): string {
-  const id = metadata.id ?? 'bookdock-unknown'
-  const title = metadata.title || 'Untitled'
-  const authors = metadata.authors?.length ? metadata.authors : [metadata.author || 'Unknown']
-  const language = metadata.language || 'zh-CN'
-
-  const coverMeta = cover
-    ? `    <meta name="cover" content="cover-image" />\n`
-    : ''
   const coverItem = cover
     ? `    <item id="cover-image" href="cover.${cover.ext}" media-type="${COVER_MEDIA_TYPES[cover.ext]}" />\n`
     : ''
@@ -96,12 +104,7 @@ function buildContentOpf(
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="BookId">${escapeXml(id)}</dc:identifier>
-    <dc:title>${escapeXml(title)}</dc:title>
-${authors.map((author) => `    <dc:creator>${escapeXml(author)}</dc:creator>`).join('\n')}
-    <dc:language>${escapeXml(language)}</dc:language>
-${coverMeta}  </metadata>
+${buildTxtEpubMetadata(metadata, !!cover)}
   <manifest>
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
     <item id="style" href="style.css" media-type="text/css" />

@@ -5,7 +5,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import JSZip from 'jszip'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-import { prepareLocalTxt } from './prepare-txt'
+import { prepareEditedLocalTxt, prepareLocalTxt } from './prepare-txt'
 import { processLocalEpub, describeEditorEpub, readEditorResource } from './epub-editor'
 import { processEpubInWorker } from './epub-editor-worker'
 import { readLocalEpub, saveLocalEpub } from './publication-editor'
@@ -59,4 +59,30 @@ it('applies actual local replacement rules to a generated TXT file without chang
   const output = await prepareLocalBookFile(txtRef, 'txt', true, new AbortController().signal, repository)
   expect(await output.text()).toContain('Prepared output.')
   expect(await (await repository.getFile(txtRef)).text()).toBe(await original.text())
+})
+
+
+it('exports local TXT with current metadata, cover and saved navigation for both text choices', async () => {
+  const txtRef = { ...ref, bookId: 'txt-epub-download' }
+  const original = new Blob(['Chapter 1\n\nOriginal text.'])
+  const prepared = await prepareEditedLocalTxt({ baseRevisionId: 'txt-before', chapters: [{ id: 'vol', title: 'Volume', level: 1, content: '' }, { id: 'ch', title: 'Chapter 1', level: 2, content: 'Original text.' }] }, 'source.txt', 'Old title', 'txt-before')
+  await repository.addBook({ ref: txtRef, content: { book: txtRef, contentId: 'txt-before' }, textSource: prepared.source, format: 'txt', title: 'New title', authors: ['One', 'Two'], catalog: { metadata: { publisher: 'Publisher', description: 'Description' } }, availability: 'available', size: original.size, version: 0, createdAt: 1, updatedAt: 1 }, original, new Blob(['cover'], { type: 'image/png' }), prepared)
+  await repository.mutateReplacement('epub-editor', 'rule', { create: { pattern: 'Original text.', replacement: 'Prepared output.' } })
+  const sourceZip = await JSZip.loadAsync(new Uint8Array(await prepared.publication.arrayBuffer()))
+  const sourceToc = await sourceZip.file('OEBPS/toc.ncx')!.async('string')
+  for (const edited of [false, true]) {
+    const output = await prepareLocalBookFile(txtRef, 'epub', edited, new AbortController().signal, repository)
+    const zip = await JSZip.loadAsync(new Uint8Array(await output.arrayBuffer()))
+    const opf = await zip.file('OEBPS/content.opf')!.async('string')
+    expect(opf).toContain('<dc:title>New title</dc:title>')
+    expect(opf).toContain('<dc:creator>Two</dc:creator>')
+    expect(opf).toContain('<dc:publisher>Publisher</dc:publisher>')
+    expect(await zip.file('OEBPS/cover.png')!.async('string')).toBe('cover')
+    const toc = await zip.file('OEBPS/toc.ncx')!.async('string')
+    expect(sourceToc).toContain('Old title')
+    expect(toc).toContain('New title')
+    expect(toc).toMatch(/<navPoint[^>]*>[\s\S]*<navPoint[^>]*>[\s\S]*<\/navPoint>\s*<\/navPoint>/)
+    const chapter = await zip.file('OEBPS/chapter-0002.xhtml')!.async('string')
+    expect(chapter).toContain(edited ? 'Prepared output.' : 'Original text.')
+  }
 })

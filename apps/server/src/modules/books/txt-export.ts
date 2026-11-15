@@ -1,4 +1,5 @@
 import { DOMParser } from '@xmldom/xmldom'
+import type { BookMetadata } from '@bookdock/shared'
 import JSZip from 'jszip'
 
 import { loadEpubSpineMarkup } from '../../formats/epub'
@@ -152,26 +153,25 @@ export async function exportEpubBook(
   const { book, rules, buffer } = await loadExportInput(userId, bookId, plain, opts)
   const chapters = await extractReplacedChapters(buffer, rules)
 
-  // A missing or unreadable cover never fails the export (silent degradation).
   let cover: TxtToEpubCover | undefined
   if (book.coverKey) {
     const ext = book.coverKey.split('.').pop()?.toLowerCase()
-    if (ext === 'jpg' || ext === 'png' || ext === 'webp') {
-      try {
-        const storage = getStorage()
-        if (await storage.exists(book.coverKey)) {
-          cover = { data: await bufferFromStream(await storage.get(book.coverKey)), ext }
-        }
-      } catch {
-        // keep the export going without a cover
-      }
+    if (ext !== 'jpg' && ext !== 'png' && ext !== 'webp') throw new AppError('EXPORT_COVER_FAILED', 'Book cover format is unsupported')
+    try {
+      const storage = getStorage()
+      if (!(await storage.exists(book.coverKey))) throw new Error('Cover missing')
+      cover = { data: await bufferFromStream(await storage.get(book.coverKey)), ext }
+    } catch {
+      throw new AppError('EXPORT_COVER_FAILED', 'Book cover could not be read')
     }
   }
 
-  const bookmeta = (book.meta as Record<string, unknown> | undefined)?.bookmeta as { language?: string } | undefined
+  const meta = book.meta as { bookmeta?: BookMetadata; chapters?: Array<{ level?: number }> }
+  const levels = meta.chapters
+  if (!levels || levels.length !== chapters.length) throw new AppError('BOOK_FILE_MISSING', 'Book chapter hierarchy is unavailable')
   const epub = await convertTxtToEpub(
-    { title: book.title, author: book.author || undefined, id: book.id, language: bookmeta?.language },
-    chapters.map((c, i) => ({ id: `ch-${i}`, title: c.title, level: 1 })),
+    { title: book.title, author: book.author || undefined, authors: book.authors, id: book.id, bookmeta: { ...meta.bookmeta, subjects: [...new Set([...(meta.bookmeta?.subjects ?? []), ...book.tags])] } },
+    chapters.map((c, i) => ({ id: `ch-${i}`, title: c.title, level: levels[i]?.level ?? 1 })),
     (i) => chapters[i]!.paragraphs.join('\n\n'),
     cover,
   )

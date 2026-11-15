@@ -28,6 +28,7 @@ export const ERROR_KEYS: Record<string, string> = {
   REPLACEMENT_NOT_FOUND: 'errors.notFound',
   TOC_RULE_NOT_FOUND: 'errors.notFound',
   BOOK_FILE_MISSING: 'errors.bookFileMissing',
+  EXPORT_COVER_FAILED: 'errors.exportCoverFailed',
   ALREADY_OWNS_SOURCE: 'library.collectAlready',
   TOKEN_NOT_FOUND: 'errors.notFound',
   LIBRARY_NOT_FOUND: 'errors.notFound',

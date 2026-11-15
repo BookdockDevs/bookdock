@@ -230,8 +230,9 @@ export default function DownloadDialog({ books, userId, onClose }: DownloadDialo
             {(batch ? ['keep', 'epub', 'txt'] as const : ['epub', 'txt'] as const).map((format) => (
               <button key={format} type="button" aria-pressed={choice.format === format}
                 onClick={() => { setChoice({ ...choice, format }); setError(''); setFailedIds([]); filesRef.current = {}; setFiles({}) }}
-                className={`flex-1 rounded-xl border px-3 py-2 text-sm transition-colors ${choice.format === format ? 'border-stone-500 bg-stone-100 dark:bg-stone-800' : 'border-stone-200 hover:bg-stone-50 dark:border-stone-700 dark:hover:bg-stone-800'}`}>
-                {format === 'keep' ? _('library.downloadKeepFormats') : format.toUpperCase()}
+                className={`relative flex flex-1 items-center gap-2 rounded-xl border p-3 text-left text-xs font-semibold transition-all ${choice.format === format ? 'border-stone-800 bg-stone-50/70 text-stone-900 shadow-2xs dark:border-stone-300 dark:bg-stone-800/80 dark:text-stone-100' : 'border-stone-200/90 bg-white text-stone-900 hover:border-stone-300 dark:border-stone-800 dark:bg-stone-900/60 dark:text-stone-50 dark:hover:border-stone-700'}`}>
+                <span className="min-w-0 flex-1">{format === 'keep' ? _('library.downloadKeepFormats') : format.toUpperCase()}</span>
+                {choice.format === format && <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>}
               </button>
             ))}
           </div>
@@ -239,11 +240,12 @@ export default function DownloadDialog({ books, userId, onClose }: DownloadDialo
         {supportsEdited && (
           <fieldset disabled={preparing} className="space-y-2">
             <legend className="text-xs text-stone-500">{_('library.downloadContent')}</legend>
-            <div className="flex gap-4 text-sm">
+            <div className="flex gap-2">
               {[false, true].map((value) => (
-                <label key={String(value)} className="flex items-center gap-2">
-                  <input type="radio" name="download-content" checked={edited === value} onChange={() => { setChoice({ ...choice, edited: value }); setError(''); setFailedIds([]); filesRef.current = {}; setFiles({}) }} />
-                  {_('library.' + (value ? 'edited' : 'original'))}
+                <label key={String(value)} className={`relative flex flex-1 cursor-pointer items-center gap-2 rounded-xl border p-3 text-left text-xs font-semibold transition-all focus-within:ring-2 focus-within:ring-stone-400 ${edited === value ? 'border-stone-800 bg-stone-50/70 text-stone-900 shadow-2xs dark:border-stone-300 dark:bg-stone-800/80 dark:text-stone-100' : 'border-stone-200/90 bg-white text-stone-900 hover:border-stone-300 dark:border-stone-800 dark:bg-stone-900/60 dark:text-stone-50 dark:hover:border-stone-700'}`}>
+                  <input className="sr-only" type="radio" name="download-content" checked={edited === value} onChange={() => { setChoice({ ...choice, edited: value }); setError(''); setFailedIds([]); filesRef.current = {}; setFiles({}) }} />
+                  <span className="min-w-0 flex-1">{_('library.' + (value ? 'edited' : 'original'))}</span>
+                  {edited === value && <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>}
                 </label>
               ))}
             </div>

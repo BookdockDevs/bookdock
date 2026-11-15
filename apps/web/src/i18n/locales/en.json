@@ -253,6 +253,7 @@
     "shelfNameTaken": "That shelf name is already in use",
     "tagNameTaken": "That tag name is already in use",
     "bookFileMissing": "The book file is missing",
+    "exportCoverFailed": "The book cover could not be read or processed; the EPUB was not created",
     "forbidden": "You do not have permission to perform this action",
     "invalidInput": "The provided input is invalid",
     "loadFailed": "Loading failed. Please try again.",

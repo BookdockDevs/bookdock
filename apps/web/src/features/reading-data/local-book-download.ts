@@ -1,3 +1,7 @@
+import JSZip from 'jszip'
+import { ApiError } from '@/api/client'
+import { buildTxtEpubMetadata } from '@bookdock/shared'
+
 import { applyReplacementsWithWorker } from '../reader/lib/text-replacements'
 import { processEpubInWorker } from '../local-library/epub-editor-worker'
 import type { ClientBookRef } from '@bookdock/shared'
@@ -11,11 +15,17 @@ export async function prepareLocalBookFile(ref: ClientBookRef, format: 'epub' | 
   signal.throwIfAborted()
   const book = await repository.getBook(ref)
   const file = await repository.getFile(ref)
+  if (book.format === 'txt' && format === 'epub' && isDeviceBook(ref) && book.catalog?.tagIds?.length) {
+    const organization = await repository.getOrganization(ref.scope.vaultId)
+    const tags = organization.items.filter((item) => item.kind === 'tag' && book.catalog?.tagIds?.includes(item.id)).map((item) => item.name)
+    book.catalog.metadata = { ...book.catalog.metadata, subjects: [...new Set([...(book.catalog.metadata?.subjects ?? []), ...tags])] }
+  }
   signal.throwIfAborted()
-  if (book.format === 'txt' && !edited) return format === 'epub' ? repository.getPublicationFile(ref) : repository.getNormalizedText(ref)
+  if (book.format === 'txt' && !edited && format === 'txt') return repository.getNormalizedText(ref)
   const rules = edited && isDeviceBook(ref) ? (await repository.readReplacements(ref.scope.vaultId, ref.bookId)).data.filter((rule) => rule.locationAvailable !== false) : []
   if (book.format === 'txt') {
     const publication = await repository.getPublicationFile(ref)
+    if (!edited && format === 'epub') return packageLocalTxtEpub(publication, book, await repository.getCover(ref), signal)
     const loaded = await processEpubInWorker({ file: publication }, signal)
     const documents = []
     for (const document of loaded.source.documents) {
@@ -33,7 +43,7 @@ export async function prepareLocalBookFile(ref: ClientBookRef, format: 'epub' | 
       return new Blob([texts.join('\n\n')], { type: 'text/plain;charset=utf-8' })
     }
     const saved = await processEpubInWorker({ file: publication, draft: { ...loaded.source, documents, baseRevisionId: book.content!.contentId } }, signal)
-    return saved.file ?? publication
+    return packageLocalTxtEpub(saved.file ?? publication, book, await repository.getCover(ref), signal)
   }
   if (format === 'epub') return file
   const lease = await localEpubProvider(JSON.stringify([ref, book.content?.contentId]), file).open(await loadFoliateEngine(), signal)
@@ -59,4 +69,39 @@ export async function prepareLocalBookFile(ref: ClientBookRef, format: 'epub' | 
     }
     return new Blob([chapters.join('\n\n')], { type: 'text/plain;charset=utf-8' })
   } finally { lease.release() }
+}
+
+async function packageLocalTxtEpub(publication: Blob, book: Awaited<ReturnType<LocalLibraryRepository['getBook']>>, cover: Blob | null, signal: AbortSignal): Promise<Blob> {
+  signal.throwIfAborted()
+  const zip = await JSZip.loadAsync(new Uint8Array(await publication.arrayBuffer()))
+  const entry = zip.file('OEBPS/content.opf')
+  if (!entry) throw new Error('Book package is missing')
+  let opf = await entry.async('string')
+  const metadata = buildTxtEpubMetadata({ title: book.title, authors: book.authors, id: book.content?.contentId, bookmeta: book.catalog?.metadata }, !!cover)
+  if (!/<metadata\b[^>]*>[\s\S]*?<\/metadata>/.test(opf)) throw new Error('Book package metadata is missing')
+  opf = opf.replace(/<metadata\b[^>]*>[\s\S]*?<\/metadata>/, () => metadata.trimStart())
+  if (cover) {
+    const formats: Record<string, { ext: string; media: string }> = {
+      'image/jpeg': { ext: 'jpg', media: 'image/jpeg' },
+      'image/png': { ext: 'png', media: 'image/png' },
+      'image/webp': { ext: 'webp', media: 'image/webp' },
+    }
+    const format = formats[cover.type]
+    if (!format) throw new ApiError('EXPORT_COVER_FAILED', 'Book cover format is unsupported')
+    let coverBytes: ArrayBuffer
+    try { coverBytes = await cover.arrayBuffer() } catch { throw new ApiError('EXPORT_COVER_FAILED', 'Book cover could not be read') }
+    zip.file(`OEBPS/cover.${format.ext}`, new Uint8Array(coverBytes), { createFolders: false })
+    opf = opf.replace('</manifest>', `    <item id="cover-image" href="cover.${format.ext}" media-type="${format.media}" />\n  </manifest>`)
+  }
+  zip.file('OEBPS/content.opf', opf, { createFolders: false })
+  const tocEntry = zip.file('OEBPS/toc.ncx')
+  if (tocEntry) {
+    const toc = await tocEntry.async('string')
+    const title = book.title.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]!)
+    zip.file('OEBPS/toc.ncx', toc.replace(/(<docTitle>\s*<text>)[\s\S]*?(<\/text>\s*<\/docTitle>)/, (_, start: string, end: string) => `${start}${title}${end}`), { createFolders: false })
+  }
+  signal.throwIfAborted()
+  const result = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' })
+  signal.throwIfAborted()
+  return new Blob([result], { type: 'application/epub+zip' })
 }

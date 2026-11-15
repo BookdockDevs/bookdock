@@ -594,7 +594,7 @@ export type { TxtLocalDraft, EpubLocalDraft } from './local-editor-draft-schema'
 export * from './client-reading'
 export * from './client-catalog'
 
-export { buildTxtEpubEntries, TXT_EPUB_ARTIFACT_VERSION } from './txt-publication'
+export { buildTxtEpubEntries, buildTxtEpubMetadata, TXT_EPUB_ARTIFACT_VERSION } from './txt-publication'
 export type { TxtEpubEntry, TxtToEpubChapter, TxtToEpubCover, TxtToEpubMetadata } from './txt-publication'
 
 export { countWords } from './text-metrics'

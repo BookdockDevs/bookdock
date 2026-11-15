@@ -253,6 +253,7 @@
     "shelfNameTaken": "书架名称已存在，请换一个",
     "tagNameTaken": "标签名称已存在，请换一个",
     "bookFileMissing": "书籍文件不存在",
+    "exportCoverFailed": "无法读取或处理书籍封面，EPUB 未生成",
     "forbidden": "没有权限执行此操作",
     "invalidInput": "输入内容不正确",
     "loadFailed": "加载失败，请重试",

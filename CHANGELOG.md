@@ -8,6 +8,10 @@ All notable changes to Bookdock are documented here.
 
 - Refreshed the default AI provider models for Claude, Gemini, DeepSeek, GLM, Kimi, MiniMax, and MiMo; kept Qwen's rolling alias, corrected MiMo's fallback API URL, and renamed the Moonshot provider to Kimi.
 
+### Fixed
+
+- Fixed TXT-to-EPUB downloads flattening nested chapter navigation. Server and device exports retain the saved hierarchy, embed current book details and cover, and respect the selected text replacement option. A cover that cannot be read or supported now stops the export with an error.
+
 ## [0.8.4] - 2026-11-15
 
 ### Highlights
@@ -1282,6 +1286,10 @@ All notable changes to Bookdock are documented here.
 #### 优化
 
 - 更新 Claude、Gemini、DeepSeek、智谱 GLM、Kimi、MiniMax 和 MiMo 的 AI 供应商默认模型；保留通义千问的系列别名、修正 MiMo 备用 API 地址，并将 Moonshot 供应商名称简化为“Kimi”。
+
+#### 修复
+
+- 修复 TXT 下载为 EPUB 时目录层级被压平的问题。服务器和本机书籍导出时保留已保存的目录层级，嵌入当前书籍信息和封面，并按所选文本版本应用替换规则；封面无法读取或格式不受支持时会提示并停止导出。
 
 ### [0.8.4] - 2026-11-15
 
