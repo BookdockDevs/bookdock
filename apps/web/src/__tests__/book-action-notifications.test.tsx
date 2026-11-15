@@ -79,7 +79,7 @@ describe('book action notifications', () => {
     const { result } = renderHook(() => useMoveBooksToShelf(), { wrapper: wrapper(queryClient) })
     result.current.mutate({ books: [{ id: 'a' }, { id: 'b' }], shelfId: 'shelf-1' })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(apiClient.apiPatch).toHaveBeenCalledWith('/books/batch/move-shelf', { ids: ['a', 'b'], shelfId: 'shelf-1' })
+    expect(apiClient.apiPatch).toHaveBeenCalledWith('/books/batch/organize', { ids: ['a', 'b'], shelfId: 'shelf-1' })
     expect(notify.warning).not.toHaveBeenCalled()
   })
 

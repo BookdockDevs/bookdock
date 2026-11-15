@@ -99,7 +99,6 @@ export async function readProgressFile(userId: string, bookId: string): Promise<
     return null
   }
 
-  // Fallback to legacy file only when migration is not yet completed
   const legacy = await readLegacyKey(progressKey(userId, bookId))
   if (legacy) {
     const readFraction = unionLength(legacy.intervals ?? [])

@@ -1111,7 +1111,7 @@ membership changes, pinning, card hiding, moving a card to trash, and deleting
 reader notes. A single detail save
 that changes both classification and tags uses one `/books/:id/organization`
 request and one receipt, so both changes undo together. Shelf moves from the
-library hook use `/books/batch/move-shelf`, which captures successful changed
+library hook use `/books/batch/organize`, which captures successful changed
 rows in one receipt and preserves its per-item success/failure summary. Other
 batch operations also use one
 receipt containing only successful changed rows; the notification reports

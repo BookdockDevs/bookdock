@@ -24,6 +24,10 @@ All notable changes to Bookdock are documented here.
 - The shared modal footer and both append-content dialog footers no longer register as toast obstacles, so notifications stay in the viewport corner instead of jumping above the open dialog.
 - The book detail dialog and the shared-library work editor now save metadata, classification, tags and the cover in one request instead of a chain of updates, so a failure can no longer leave the metadata applied while the cover or tags stay behind.
 - Compacted book detail, shared work, and metadata lookup tag lists: when a book has more than 5 tags, the first 4 tags stay inline alongside a `+N` overflow chip that opens a popover to browse and filter the full tag list, keeping reading progress and primary action buttons within the cover viewport. The tag editor also constrains its height with clean scrolling so long tag sets never stretch classification forms.
+- Batched reading history loading: opening a book's reading history in the reader drawer now fetches the ledger overview, reading statistics, and recent sessions in a single aggregated request (`GET /api/v1/reading-records/overview/book/:bookId`), reducing network round-trips while guaranteeing cross-dataset snapshot consistency.
+- Deduplicated book detail queries in library membership hooks: `useBookMembership` now delegates to the `useBook` query cache, eliminating duplicate parallel `/api/v1/books/:id` fetches when checking shelves and tags simultaneously.
+- Consolidated user profile updates into `PATCH /api/v1/auth/me` (covering username, bio, and automated timezone reporting) and removed deprecated single-field profile endpoints.
+- Disabling the trash bin in settings no longer purges existing deleted books. Trashed items are retained safely and can be restored or emptied after re-enabling the trash feature, and the confirmation dialog clarifies this retention behavior.
 
 ### Fixed
 
@@ -39,6 +43,7 @@ All notable changes to Bookdock are documented here.
 ### Upgrade notes
 
 - On upgrade, server and device libraries convert existing category and tag assignments and their visibility, pinning, and order preferences to the new format. The conversion stops on data that cannot be migrated safely rather than discarding it.
+- On upgrade, legacy reading display settings previously stored in book content revisions are automatically migrated to user-scoped reader settings, preserving customized preferences.
 
 ## [0.8.4] - 2026-11-15
 
@@ -1331,6 +1336,10 @@ All notable changes to Bookdock are documented here.
 - 共享弹窗的底部操作栏与两个追加内容弹窗的底栏不再标记为浮动通知避让障碍物，通知保持停靠于视口右下角，不再被弹窗顶起。
 - 书籍详情弹窗与共享书库编辑弹窗改为单次请求保存元数据、归类、标签与封面，不再串联多次更新，失败时不会出现元数据已生效而封面或标签未跟上的情况。
 - 优化书籍详情、共享书库与刮削弹窗中的标签呈现：当书籍标签超过 5 个时，行内仅展示前 4 个标签并追加 `+N` 折叠胶囊，点击弹出浮层查看全部标签并支持快速筛选，避免大量标签向下挤压阅读进度与操作按钮；标签编辑区同步加入高度限制与内联滚动，防止长标签列表过度撑大分类表单。
+- 优化单本书籍阅读数据加载：阅读器抽屉中的阅读记录面板改为通过单次聚合请求（`GET /api/v1/reading-records/overview/book/:bookId`）获取账本总览、统计指标与首屏阅读记录，减少网络往返并保证多维统计数据在并发下的快照一致性。
+- 统一图书归属查询缓存：`useBookMembership` 复用 `useBook` 详情查询缓存，消除书架和标签同时展示时并发发起的重复 `/api/v1/books/:id` 请求。
+- 整合个人资料更新接口：统一通过 `PATCH /api/v1/auth/me` 更新用户名、个人简介与时区，清理冗余的独立字段更新端点。
+- 关闭回收站设置时不再清空已删除书籍：现有回收站内容予以安全保留并在重新启用后可继续恢复或清理，确认弹窗同步明确该保留行为。
 
 #### 修复
 
@@ -1346,6 +1355,7 @@ All notable changes to Bookdock are documented here.
 #### 升级说明
 
 - 升级时会将服务器和本机书库现有的分类、标签归属及其隐藏、置顶和排序偏好转换为新格式。遇到无法安全迁移的数据时会停止转换，不会直接丢弃。
+- 升级时会自动将此前保存在书籍内容修订中的历史阅读设置迁移至用户级阅读设置表，保留个性化阅读偏好。
 
 ### [0.8.4] - 2026-11-15
 

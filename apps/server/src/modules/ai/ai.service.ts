@@ -1402,7 +1402,7 @@ function reserveAiRequest(userId: string) {
 
 export async function translateAiSelection(
   userId: string, role: string,
-  input: import('@bookdock/shared').TranslationRequest,
+  input: import('@bookdock/shared').TranslationRequest & { bookId: string },
   signal: AbortSignal, onText: (text: string) => void,
 ) {
   if (role !== 'owner' && role !== 'member') throw new AppError('AI_NOT_ALLOWED', 'Login required')

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 
 import {
+  readingBookOverviewQuerySchema,
   readingRecordCreateSchema,
   readingRecordHourlySchema,
   readingRecordRangeSchema,
@@ -13,7 +14,7 @@ import {
 } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
-import { changeReadingRound, claimReadingTimer, deleteReadingArchive, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, releaseReadingTimer } from './reading-ledger.service'
+import { changeReadingRound, claimReadingTimer, getReadingBookOverview, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, releaseReadingTimer } from './reading-ledger.service'
 
 import {
   addReadingTime,
@@ -41,6 +42,18 @@ function serverToday(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
+readingRecordsRoutes.get('/book/:bookId/overview', async (c) => {
+  const parsed = readingBookOverviewQuerySchema.safeParse(c.req.query())
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid overview query', parsed.error.flatten())
+  const showHidden = c.req.query('showHidden') === '1'
+  const data = await getReadingBookOverview(c.get('user')!.id, c.req.param('bookId'), {
+    from: parsed.data.from,
+    to: parsed.data.to,
+    limit: parsed.data.limit,
+  }, showHidden)
+  return c.json({ data })
+})
+
 readingRecordsRoutes.get('/book/:bookId/ledger', async (c) => {
   return c.json({ data: await getReadingLedgerOverview(c.get('user')!.id, c.req.param('bookId'), c.req.query('showHidden') === '1') })
 })
@@ -55,11 +68,6 @@ readingRecordsRoutes.get('/book/:bookId/sessions', async (c) => {
   const parsed = readingLedgerSessionsQuerySchema.safeParse(c.req.query())
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid reading session page', parsed.error.flatten())
   return c.json({ data: await getReadingLedgerSessions(c.get('user')!.id, c.req.param('bookId'), parsed.data, c.req.query('showHidden') === '1') })
-})
-
-readingRecordsRoutes.delete('/book/:bookId/ledger', (c) => {
-  deleteReadingArchive(c.get('user')!.id, c.req.param('bookId'))
-  return c.json({ data: { ok: true } })
 })
 
 readingRecordsRoutes.post('/book/:bookId/round', async (c) => {

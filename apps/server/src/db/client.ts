@@ -9,8 +9,6 @@ import * as schema from './schema'
 import { config } from '../config'
 import { migrateBeforeBookRetirement } from './migration-stage'
 import { repairReadingLedgerSchema } from './reading-ledger-repair'
-import { reconcileContentEditorMigration } from './content-editor-migration'
-import { reconcilePersonalSourceMigration } from './personal-source-migration'
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
@@ -312,8 +310,6 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
     throw new Error('Identity retirement blocked: Guest has legacy TTS configuration')
   }
 
-  reconcileContentEditorMigration(db, migrationsFolder)
-  reconcilePersonalSourceMigration(db, migrationsFolder)
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
   migrate(db, { migrationsFolder })
   // 0066 AI foundation: legacy profile bundles and the translation pick become
@@ -327,6 +323,8 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
   const { migrateLegacyAiPrompts } = await import('../modules/ai/ai-prompts-migration')
   migrateLegacyAiPrompts(db)
   repairReadingLedgerSchema(db)
+  const { migrateAllLegacyBookSettings } = await import('../modules/books/reader-settings.service')
+  migrateAllLegacyBookSettings(db)
   const { migrateCategoryShelfSeparation } = await import('../modules/libraries/category-shelf-migration')
   migrateCategoryShelfSeparation(db)
   const { migrateBookClassificationValues } = await import('../modules/libraries/book-classification-migration')
@@ -339,8 +337,6 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
   // The work-level publication meta has no editor any more, so a leftover value
   // would be unreachable yet still shadow the parsed file. Drop it once.
   dropWorkLevelBookmeta(db)
-  const { importProgressFiles } = await import('../modules/progress/progress-migration')
-  await importProgressFiles(db)
 }
 
 /**

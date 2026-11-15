@@ -21,7 +21,7 @@ import { errorHandler } from '../../middleware/error'
 import { createId } from '../../lib/id'
 import { executeUndoReceipt } from '../../lib/undo'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
-import { readProgressFile } from '../../lib/progress-file'
+import { readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { registerParser } from '../../formats/registry'
 import { normalizeText, TxtParser } from '../../formats/txt'
 import booksRoutes from './books.routes'
@@ -36,6 +36,7 @@ import {
   trashPrivateBatch,
   restoreBook,
   deleteBook,
+  emptyTrash,
   purgeExpiredTrash,
   purgeTrashToCapacity,
   purgeAllExpiredTrash,
@@ -1043,16 +1044,19 @@ describe('trash disabled mode (routes)', () => {
     expect((await app.request('/api/v1/books/trash', { method: 'DELETE' })).status).toBe(403)
   })
 
-  it('purges all trashed books when PUT /settings disables trash', async () => {
+  it('does not silently purge trashed books when PUT /settings disables trash', async () => {
     const trashed = seedBook(db, ownerId, { deletedAt: Date.now() })
     const active = seedBook(db, ownerId)
     mem.files.set(trashed.filePath, Buffer.from('x'))
 
     const response = await putTrash({ trash: { enabled: false } })
     expect(response.status).toBe(200)
+    expect(libraryBookOf(db, trashed.id)).toBeDefined()
+    expect(libraryBookOf(db, active.id)).toBeDefined()
+
+    await emptyTrash(ownerId)
     expect(libraryBookOf(db, trashed.id)).toBeUndefined()
     expect(libraryBookOf(db, active.id)).toBeDefined()
-    expect(mem.files.has(trashed.filePath)).toBe(false)
   })
 
   it('merges the toggle onto stored settings instead of replacing them', async () => {
@@ -1244,14 +1248,9 @@ describe('reader settings (per-book reading settings)', () => {
     expect(metaOf().boundPresetId).toBeUndefined()
   })
 
-  it('migrates legacy A/C settings and removes them from revision metadata', () => {
-    db.update(schema.contentRevisions).set({ meta: { viewSettings: { fontSize: 20 }, boundPresetId: 'preset-old', bookmeta: { publisher: 'ACME' } } })
-      .where(eq(schema.contentRevisions.bookVersionId, book.id)).run()
-    expect(getReaderBookSettings(ownerId, book.id)).toEqual({ viewSettings: { fontSize: 20 }, boundPresetId: 'preset-old' })
-    const meta = metaOf()
-    expect(meta.bookmeta).toEqual({ publisher: 'ACME' })
-    expect(meta.viewSettings).toBeUndefined()
-    expect(meta.boundPresetId).toBeUndefined()
+  it('reads reader settings directly from book states without probing revision metadata', () => {
+    updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 20 }, boundPresetId: 'preset-stored' })
+    expect(getReaderBookSettings(ownerId, book.id)).toEqual({ viewSettings: { fontSize: 20 }, boundPresetId: 'preset-stored' })
   })
 
   it('clears each user-level setting without touching content metadata', () => {
@@ -3141,9 +3140,7 @@ describe('appendTxtBookContent', () => {
   it('keeps the CFI and scales fraction-based progress after appending', async () => {
     const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
     const preview = await previewAppendTxtBookContent(ownerId, book.id, '第三章 归来\n\n正文三')
-    const store = storage.getStorage()
-    const progressKey = `progress/${ownerId}/${book.id}.json`
-    await store.put(progressKey, Buffer.from(JSON.stringify({
+    await writeProgressFile(ownerId, book.id, {
       cfi: 'chapter-0002.xhtml#epubcfi(/6/4/4)',
       chapter: '第二章 旅途',
       chapterIndex: 1,
@@ -3152,7 +3149,7 @@ describe('appendTxtBookContent', () => {
       intervals: [[0.1, 0.42]],
       rateSamples: [{ at: 1, fraction: 0.4 }],
       updatedAt: 123,
-    }), 'utf-8'))
+    })
     db.update(schema.bookStates).set({ readStatus: 'finished' })
       .where(and(eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, book.id))).run()
 
@@ -3328,9 +3325,7 @@ describe('reTocBook', () => {
       patterns: [{ level: 1, regex: '^=== (.+)$', replacement: '$1' }],
     })
 
-    const store = storage.getStorage()
-    const progressKey = `progress/${ownerId}/${book.id}.json`
-    await store.put(progressKey, Buffer.from(JSON.stringify({
+    await writeProgressFile(ownerId, book.id, {
       cfi: 'chapter-0002.xhtml#epubcfi(/6/4/4)',
       chapter: '第一章',
       percent: 42,
@@ -3338,7 +3333,7 @@ describe('reTocBook', () => {
       intervals: [[0.1, 0.42]],
       rateSamples: [{ at: 1, seconds: 30 }],
       updatedAt: 123,
-    }), 'utf-8'))
+    })
 
     await reTocBook(ownerId, book.id, rule.id)
     const data = (await readProgressFile(ownerId, book.id))!
@@ -3355,17 +3350,16 @@ describe('reTocBook', () => {
       patterns: [{ level: 1, regex: '^第[一二三四五六七八九十]+章 .+$' }],
     })
     const { book } = await seedTxtBook('第一章 启程\n\n正文一\n\n第二章 旅途\n\n正文二')
-    const store = storage.getStorage()
     await reTocBook(ownerId, book.id, rule.id)
 
-    const progressKey = `progress/${ownerId}/${book.id}.json`
-    await store.put(progressKey, Buffer.from(JSON.stringify({
+    await writeProgressFile(ownerId, book.id, {
       cfi: 'chapter-0001.xhtml#epubcfi(/6/4/4)',
       chapter: '第一章 启程',
       percent: 30,
       fraction: 0.3,
+      intervals: [],
       updatedAt: 123,
-    }), 'utf-8'))
+    })
 
     await reTocBook(ownerId, book.id, rule.id)
     const data = (await readProgressFile(ownerId, book.id))!

@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import type { ReadingLedgerSession, ReadingRange } from '@bookdock/shared'
 
-import { localDateString, readingRecordBookKey, useBookReadingLedgerStats, useBookReadingSessions, useDeleteSession, useReadingLedger, useReadingLedgerRecovery } from '@/api/hooks/reading-records'
+import { localDateString, readingRecordBookKey, useBookReadingSessions, useDeleteSession, useReadingBookOverview, useReadingLedgerRecovery } from '@/api/hooks/reading-records'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import AddRecordDialog from '@/features/reader/components/AddRecordDialog'
@@ -23,10 +23,18 @@ interface BookReadingDataProps { bookId: string; onDeleted?: () => void; range?:
 export default function BookReadingData({ bookId, range, onSelectDate }: BookReadingDataProps) {
   const _ = useTranslation()
   const local = useLocalReader()
-  const ledgerQuery = useReadingLedger(bookId)
-  const dataVersion = ledgerQuery.data?.data?.dataVersion
-  const statsQuery = useBookReadingLedgerStats(bookId, range, dataVersion)
-  const sessionsQuery = useBookReadingSessions(bookId, range, dataVersion)
+  const overviewQuery = useReadingBookOverview(bookId, range)
+  const overview = overviewQuery.data?.data
+  const dataVersion = overview?.dataVersion
+  const ledger = overview?.ledger
+  const initialSessions = overview?.sessions
+  const sessionsQuery = useBookReadingSessions(bookId, range, dataVersion, {
+    initialData: initialSessions ? {
+      pages: [{ data: initialSessions }],
+      pageParams: [undefined],
+    } : undefined,
+    enabled: Boolean(overview),
+  })
   const deleteMutation = useDeleteSession()
   const queryClient = useQueryClient()
   const [localSelectedDate, setSelectedDate] = useState<string | null>(null)
@@ -50,9 +58,8 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
     setAddRecordOpen(false)
     setDeletingBusy(false)
   }
-  const ledger = ledgerQuery.data?.data
   const currentRound = ledger?.rounds.find((r) => r.id === ledger.currentRoundId) ?? ledger?.rounds.at(-1)
-  const statsVersionMismatch = Boolean(ledger?.dataVersion !== undefined && statsQuery.data?.data && statsQuery.data.data.dataVersion !== ledger.dataVersion)
+  const statsVersionMismatch = Boolean(dataVersion !== undefined && overview?.stats?.dataVersion !== undefined && overview.stats.dataVersion !== dataVersion)
   const sessionsVersionStable = useMemo(() => {
     const pages = sessionsQuery.data?.pages ?? []
     const pageVersion = pages[0]?.data.dataVersion
@@ -65,16 +72,18 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
   const recovery = useReadingLedgerRecovery(bookId, hasVersionMismatch, range)
 
   const handleRetry = () => {
-    if (hasVersionMismatch || recovery.failed) { recovery.retry(); return }
-    void ledgerQuery.refetch()
-    void statsQuery.refetch()
+    recovery.retry()
+    void overviewQuery.refetch()
     void queryClient.resetQueries({ queryKey: readingRecordBookKey('ledger-sessions', bookId, local?.namespace) })
   }
-  const stats = statsVersionMismatch ? undefined : statsQuery.data?.data
+  const stats = statsVersionMismatch ? undefined : overview?.stats
   const sessions = useMemo(() => {
     const pages = sessionsQuery.data?.pages ?? []
-    return sessionsVersionStable ? pages.flatMap((page) => page.data.items) : pages[0]?.data.items ?? []
-  }, [sessionsQuery.data, sessionsVersionStable])
+    if (pages.length > 0) {
+      return sessionsVersionStable ? pages.flatMap((page) => page.data.items) : pages[0]?.data.items ?? []
+    }
+    return initialSessions?.items ?? []
+  }, [sessionsQuery.data, sessionsVersionStable, initialSessions])
   const includeLegacy = true
   const distribution = useMemo(() => {
     const result = {
@@ -360,11 +369,11 @@ export default function BookReadingData({ bookId, range, onSelectDate }: BookRea
   </>
 
   if (hasVersionMismatch && recovery.failed) {
-    return <><QueryErrorState isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />{dialogs}</>
+    return <><QueryErrorState isRetrying={overviewQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />{dialogs}</>
   }
-  if (hasVersionMismatch || ledgerQuery.isPending || statsQuery.isPending || sessionsQuery.isPending) return <><div role="status" className="h-48 animate-pulse rounded-3xl bg-stone-500/10" />{dialogs}</>
-  if (ledgerQuery.isError || statsQuery.isError || sessionsQuery.isError || !ledger) {
-    return <><QueryErrorState isRetrying={ledgerQuery.isFetching || statsQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />{dialogs}</>
+  if (hasVersionMismatch || overviewQuery.isPending) return <><div role="status" className="h-48 animate-pulse rounded-3xl bg-stone-500/10" />{dialogs}</>
+  if (overviewQuery.isError || !ledger) {
+    return <><QueryErrorState isRetrying={overviewQuery.isFetching || sessionsQuery.isFetching} onRetry={handleRetry} />{dialogs}</>
   }
 
   return (

@@ -21,12 +21,11 @@ export const translationPreferencesSchema = z.object({
   targetLang: translationLanguageSchema.default('zh-Hans'),
   channel: translationChannelSchema.default({ kind: 'ai', modelId: null }),
 }).strict()
-export const selectedTextTranslationRequestSchema = translationPreferencesSchema.extend({
+export const translationRequestSchema = translationPreferencesSchema.extend({
   text: z.string().trim().min(1).max(TRANSLATION_MAX_CHARS),
+  bookId: z.string().min(1).max(100).optional(),
 }).strict()
-export const translationRequestSchema = selectedTextTranslationRequestSchema.extend({
-  bookId: z.string().min(1).max(100),
-}).strict()
+export const selectedTextTranslationRequestSchema = translationRequestSchema
 export type TranslationChannel = z.infer<typeof translationChannelSchema>
 export type TranslationPreferences = z.infer<typeof translationPreferencesSchema>
 export type TranslationRequest = z.infer<typeof translationRequestSchema>

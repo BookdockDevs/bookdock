@@ -144,20 +144,19 @@ describe('external API routes', () => {
       return { method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=x' }, body: parts.join('\r\n') }
     }
 
-    const filed = await createApp().request('/api/v1/ext/books', form({ libraryId: 'lib1', categoryId: 'cat1', shelfId: 'shelf1' }))
+    const filed = await createApp().request('/api/v1/ext/books', form({ libraryId: 'lib1', categoryPath: JSON.stringify(['cat1']), shelfId: 'shelf1' }))
     expect(filed.status).toBe(201)
-    expect(uploadCatalogBook).toHaveBeenCalledWith('lib1', USER.id, expect.any(File), expect.objectContaining({ categoryId: 'cat1', shelfId: 'shelf1' }))
+    expect(uploadCatalogBook).toHaveBeenCalledWith('lib1', USER.id, expect.any(File), expect.objectContaining({ categoryPath: ['cat1'], shelfId: 'shelf1' }))
 
     vi.clearAllMocks()
     const privateShelf = await createApp().request('/api/v1/ext/books', form({ shelfId: 'shelf2' }))
     expect(privateShelf.status).toBe(201)
-    expect(uploadBook).toHaveBeenCalledWith(USER.id, expect.any(File), { shelfId: 'shelf2' }, expect.anything())
+    expect(uploadBook).toHaveBeenCalledWith(USER.id, expect.any(File), { shelfId: 'shelf2', categoryPath: undefined }, expect.anything())
 
     vi.clearAllMocks()
-    const uncategorized = await createApp().request('/api/v1/ext/books', form({ categoryId: 'cat1' }))
-    expect(uncategorized.status).toBe(400)
-    expect(uploadCatalogBook).not.toHaveBeenCalled()
-    expect(uploadBook).not.toHaveBeenCalled()
+    const privateCategory = await createApp().request('/api/v1/ext/books', form({ categoryPath: JSON.stringify(['cat1']) }))
+    expect(privateCategory.status).toBe(201)
+    expect(uploadBook).toHaveBeenCalledWith(USER.id, expect.any(File), { shelfId: undefined, categoryPath: ['cat1'] }, expect.anything())
   })
 
   it('trashes a version and checks the named library before acting on it', async () => {

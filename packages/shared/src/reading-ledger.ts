@@ -147,6 +147,14 @@ export interface ReadingLedgerSessionPage {
   hasMore: boolean
 }
 
+/** Aggregated overview response for a single book to eliminate client fan-out */
+export interface ReadingBookOverviewRes {
+  dataVersion: number
+  ledger: ReadingLedgerOverview
+  stats: ReadingLedgerStatsRes
+  sessions: ReadingLedgerSessionPage
+}
+
 export interface ReadingTimerClaim {
   granted: boolean
   ownerDeviceId: string
@@ -171,6 +179,10 @@ export const readingTimerClaimSchema = z.object({
 export const readingTimerReleaseSchema = z.object({ deviceId: z.string().min(1).max(100), activityAt: z.number().int().positive().optional() })
 export const readingLedgerStatsQuerySchema = z.object({
   from: readingDateSchema.optional(), to: readingDateSchema.optional(),
+}).refine((value) => !value.from || !value.to || value.from <= value.to, { message: 'Range ends before it starts', path: ['to'] })
+export const readingBookOverviewQuerySchema = z.object({
+  from: readingDateSchema.optional(), to: readingDateSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
 }).refine((value) => !value.from || !value.to || value.from <= value.to, { message: 'Range ends before it starts', path: ['to'] })
 export const readingLedgerSessionsQuerySchema = z.object({
   from: readingDateSchema.optional(), to: readingDateSchema.optional(),

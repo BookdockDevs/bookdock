@@ -15,6 +15,49 @@ vi.mock('@/api/hooks/reading-records', async (original) => ({
   useReadingRound: () => ({ mutate: state.mutate, isPending: false }),
   useDeleteSession: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateSession: () => ({ mutate: vi.fn(), isPending: false }),
+  useReadingBookOverview: (_bookId: string, range?: ReadingRange) => {
+    const ledger = state.ledger
+    if (!ledger) return { data: undefined, isPending: true, isError: false, isFetching: false, refetch: vi.fn() }
+    const sessions = ledger.sessions ?? []
+    const coverage = Math.max(ledger.coverage ?? 0, ...sessions.flatMap((session) => session.coverage.map(([, end]) => end)))
+    const distribution = ledgerTimeDistribution(sessions, range)
+    for (const day of ledger.legacyDaily ?? []) if ((!range?.from || day.date >= range.from) && (!range?.to || day.date <= range.to)) distribution.days.set(day.date, (distribution.days.get(day.date) ?? 0) + day.durationSeconds)
+    const scopedWords = ledgerScopedWords(sessions, range).words + (!range?.from && !range?.to ? (ledger.legacyIntervals ?? []).reduce((sum, [start, end]) => sum + end - start, 0) * (ledger.legacyWordCount ?? 0) : 0)
+    const allItems = sessions.filter((session) => {
+      const dates = session.contributionDates ?? [session.date]
+      return (!range?.from || dates.some((date) => date >= range.from!)) && (!range?.to || dates.some((date) => date <= range.to!))
+    })
+    const items = allItems.slice(0, 50)
+    return {
+      data: {
+        data: {
+          dataVersion: 1,
+          ledger,
+          stats: {
+            dataVersion: 1,
+            totalSeconds: [...distribution.days.values()].reduce((sum, value) => sum + value, 0),
+            totalWordsRead: Math.round(scopedWords),
+            wordState: 'known',
+            readingDays: [...distribution.days.values()].filter((value) => value >= 60).length,
+            daily: [...distribution.days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, durationSeconds]) => ({ date, durationSeconds, totalWordsRead: null, wordState: 'known', progressDelta: 0, cumulativeCoverage: coverage })),
+            hourly: [],
+            legacyDaily: (ledger.legacyDaily ?? []).filter((day) => (!range?.from || day.date >= range.from) && (!range?.to || day.date <= range.to)),
+            remainingSeconds: null,
+          },
+          sessions: {
+            dataVersion: 1,
+            items,
+            nextCursor: items.length < allItems.length ? 'next' : null,
+            hasMore: items.length < allItems.length,
+          },
+        },
+      },
+      isPending: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    }
+  },
   useBookReadingLedgerStats: (_bookId: string, range?: ReadingRange) => {
     const ledger = state.ledger
     const sessions = ledger?.sessions ?? []

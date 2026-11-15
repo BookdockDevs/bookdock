@@ -4493,7 +4493,14 @@ export function setBookOrganization(userId: string, bookId: string, input: BookM
         ...(categoryChanged ? { categoryRoot: before.categoryRoot, categoryLeaf: before.categoryLeaf } : {}),
         updatedAt: Date.now(),
       }).where(eq(libraryBooks.id, libraryBookId)).run()
-      if (addedTags.length || removedTags.length) setBookTagValues(tx, libraryBookId, previousTags)
+      if (addedTags.length || removedTags.length) {
+        const currentTagsList = readBookTagValues(tx, libraryBookId)
+        const restoredTags = currentTagsList.filter((name) => !addedTags.includes(name))
+        for (const name of removedTags) {
+          if (!restoredTags.includes(name)) restoredTags.push(name)
+        }
+        setBookTagValues(tx, libraryBookId, restoredTags)
+      }
     }))
   }
 }
@@ -4713,7 +4720,7 @@ export function organizePrivateBatch(userId: string, input: BatchOrganizeReq, un
       }
     }))
   }
-  return { count: ids.length }
+  return { count: ids.length, succeeded: ids.length, failed: 0, failedIds: [] }
 }
 
 export function updatePrivateBatch(userId: string, input: PrivateBatchUpdateReq, undo?: { token?: string }) {

@@ -116,7 +116,6 @@ extRoutes.post('/books', async (c) => {
     }
   }
   const shelfId = typeof body['shelfId'] === 'string' && body['shelfId'] ? body['shelfId'] : undefined
-  if (categoryPath && !libraryId) throw new AppError('VALIDATION_ERROR', 'Category placement requires a libraryId')
   const normalizeTitle = isTitleNormalizeEnabled(user.id)
   // Two upload paths because the domain has two: uploadBook always writes to the
   // caller's private library, while uploadCatalogBook targets a named one and
@@ -124,7 +123,7 @@ extRoutes.post('/books', async (c) => {
   // what lets a client re-run the same folder safely.
   const result = libraryId
     ? await uploadCatalogBook(libraryId, user.id, file, { normalizeTitle, categoryPath, shelfId })
-    : await uploadBook(user.id, file, { shelfId }, { normalizeTitle }).then((r) => ({
+    : await uploadBook(user.id, file, { shelfId, categoryPath }, { normalizeTitle }).then((r) => ({
       bookVersionId: r.book.id,
       duplicated: r.duplicated,
     }))

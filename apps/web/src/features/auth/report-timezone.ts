@@ -1,4 +1,4 @@
-import { apiPut } from '@/api/client'
+import { apiPatch } from '@/api/client'
 
 /**
  * Report the browser's IANA zone to the server.
@@ -19,6 +19,6 @@ export async function reportBrowserTimezone(userId: string): Promise<void> {
   if (!zone) return
   const marker = `bd-timezone:${userId}`
   if (sessionStorage.getItem(marker) === zone) return
-  await apiPut('/auth/timezone', { timezone: zone })
+  await apiPatch('/auth/me', { timezone: zone })
   sessionStorage.setItem(marker, zone)
 }

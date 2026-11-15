@@ -276,6 +276,12 @@ export interface UpdateTimezoneReq {
   timezone: string | null
 }
 
+export interface UpdateMeReq {
+  username?: string
+  bio?: string
+  timezone?: string | null
+}
+
 /** Account-mutation responses (username change, avatar upload): the fresh self profile */
 export interface AccountRes {
   id: string
@@ -1470,10 +1476,6 @@ export interface BookMeta {
   fileName?: string
   /** Total word count of the book (sum of chapter word counts) */
   wordCount?: number
-  /** @deprecated Legacy migration input; current responses expose readerSettings instead. */
-  viewSettings?: ViewSettings
-  /** @deprecated Legacy migration input; current responses expose readerSettings instead. */
-  boundPresetId?: string
   /** TOC rule pinned to this book (id); dangling id falls back to auto-scoring
    * then the built-in default patterns. `tocRuleAuto` records that the pin was
    * chosen by auto-scoring, not by the user. */

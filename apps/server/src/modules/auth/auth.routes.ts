@@ -9,6 +9,7 @@ import {
   setupSchema,
   updateInstanceSchema,
   updateBioSchema,
+  updateMeSchema,
   updateTimezoneSchema,
   updateUsernameSchema,
   type AccountRes,
@@ -32,6 +33,7 @@ import {
   revokeSession,
   setupUser,
   updateInstanceSettings,
+  updateUserProfile,
   updateTimezone,
 } from './auth.service'
 import {
@@ -212,6 +214,20 @@ authRoutes.get('/me', (c) => {
   const user = c.get('user')
   const tokenPermissions = c.get('tokenPermissions')
   return c.json({ data: user ? { ...user, guest: false, ...(tokenPermissions ? { tokenPermissions } : {}) } : { user: null, guest: true } })
+})
+
+authRoutes.patch('/me', async (c) => {
+  const user = c.get('user')
+  if (!user) {
+    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401)
+  }
+  const body = await c.req.json().catch(() => null)
+  const parsed = updateMeSchema.safeParse(body)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const result = updateUserProfile(user.id, parsed.data)
+  return c.json({ data: result })
 })
 
 authRoutes.delete('/account', async (c) => {

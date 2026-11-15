@@ -611,6 +611,54 @@ export function changeUsername(userId: string, username: string): AccountRes {
   }
 }
 
+export function updateUserProfile(
+  userId: string,
+  input: { username?: string; bio?: string; timezone?: string | null }
+): AccountRes & { bio?: string | null; timezone?: string | null } {
+  const db = getDb()
+  const updates: Record<string, unknown> = { updatedAt: Date.now() }
+
+  if (input.username !== undefined) {
+    if (findUsernameCollision(db, input.username, userId)) {
+      throw new AppError('USERNAME_TAKEN', 'Username is already taken')
+    }
+    updates.username = input.username
+    updates.usernameNormalized = normalizeUsername(input.username)
+  }
+
+  if (input.bio !== undefined) {
+    updates.bio = input.bio
+  }
+
+  if (input.timezone !== undefined) {
+    updates.timezone = input.timezone
+  }
+
+  try {
+    db.update(users).set(updates).where(eq(users.id, userId)).run()
+  } catch (err) {
+    if (isUsernameUniqueConstraint(err)) throw new AppError('USERNAME_TAKEN', 'Username is already taken')
+    throw err
+  }
+
+  if (input.username !== undefined) {
+    invalidateUserCache(userId)
+  }
+
+  const row = db.select().from(users).where(eq(users.id, userId)).get()
+  if (!row) throw new AppError('USER_NOT_FOUND')
+
+  return {
+    id: row.id,
+    username: row.username,
+    role: isInstanceOwner(row.id) ? 'owner' : 'member',
+    avatarKey: row.avatarKey,
+    privateLibraryId: getPrivateLibraryId(row.id),
+    bio: row.bio,
+    timezone: row.timezone,
+  }
+}
+
 export function updateBio(userId: string, bio: string) {
   const db = getDb()
   db.update(users).set({ bio, updatedAt: Date.now() }).where(eq(users.id, userId)).run()

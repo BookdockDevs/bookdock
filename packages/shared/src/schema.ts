@@ -821,6 +821,20 @@ export const updateTimezoneSchema = z.object({
     .nullable(),
 })
 
+/** Unified profile update schema for PATCH /api/v1/users/me */
+export const updateMeSchema = z.object({
+  username: z.string().transform(sanitizeUsername).pipe(z.string().min(1).max(AUTH_REGISTER_USERNAME_MAX_LENGTH)).optional(),
+  bio: z.string().trim().max(500).optional(),
+  timezone: z.string().trim().max(64)
+    .refine((value) => value === '' || isSupportedTimeZone(value), { message: 'Unknown time zone' })
+    .transform((value) => (value === '' ? null : value))
+    .nullable()
+    .optional(),
+}).refine(
+  (data) => data.username !== undefined || data.bio !== undefined || data.timezone !== undefined,
+  { message: 'At least one profile field is required' },
+)
+
 export const updateInstanceSchema = z.object({
   registrationMode: registrationModeSchema.optional(),
   allowRegistration: z.boolean().optional(),

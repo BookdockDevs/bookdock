@@ -19,7 +19,7 @@ import * as storage from '../../storage'
 import { getOverview, listBooks } from '../archive/archive.service'
 import { getDaily, getSummary } from './reading-records.service'
 import { noteArchive } from '../annotations/note-archive.service'
-import { addLedgerReading, changeReadingRound, claimReadingTimer, deleteLedgerSession, deleteReadingArchive, getReadingLedger, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, rebuildAllReadingProjections, releaseReadingTimer, updateLedgerSession } from './reading-ledger.service'
+import { addLedgerReading, changeReadingRound, claimReadingTimer, deleteLedgerSession, deleteReadingArchive, getReadingBookOverview, getReadingLedger, getReadingLedgerOverview, getReadingLedgerSessions, getReadingLedgerStats, rebuildAllReadingProjections, releaseReadingTimer, updateLedgerSession } from './reading-ledger.service'
 
 const migrationsFolder = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../db/migrations')
 
@@ -350,6 +350,12 @@ describe('reading ledger service', () => {
     await addLedgerReading('u1', { bookId: 'v1', date: '2026-11-03', source: 'auto', durationSeconds: 120, startFraction: 0, endFraction: 0.1 })
     const ledger = await getReadingLedgerOverview('u1', 'v1')
     expect(ledger.earliestDate).toBe('2026-10-31')
+
+    const overview = await getReadingBookOverview('u1', 'v1')
+    expect(overview.dataVersion).toBe(ledger.dataVersion)
+    expect(overview.ledger.earliestDate).toBe('2026-10-31')
+    expect(overview.stats).toBeDefined()
+    expect(overview.sessions.items.length).toBeGreaterThan(0)
   })
 
   it('projects ledger coverage through a persisted revision map before using legacy scaling', async () => {

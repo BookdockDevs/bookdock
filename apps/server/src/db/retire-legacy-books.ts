@@ -11,8 +11,8 @@ import type { getDb } from './client'
 import { libraryMigrationLog } from './schema'
 
 const dependentTables = [
-  'reading_records', 'reading_sessions', 'ai_threads', 'ai_book_indexes',
-  'ai_chunks', 'ai_chunk_embeddings', 'text_replacements', 'text_replacement_overrides',
+  'reading_records', 'reading_sessions', 'ai_threads',
+  'text_replacements', 'text_replacement_overrides',
 ]
 
 /** One-time bridge. Frozen snapshots never replace subsequently edited values. */

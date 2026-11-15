@@ -32,7 +32,7 @@ describe('useMoveBooksToShelf', () => {
     result.current.mutate({ books: [{ id: 'b1' }, { id: 'b2' }], shelfId: 's1' })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(apiClient.apiPatch).toHaveBeenCalledExactlyOnceWith('/books/batch/move-shelf', { ids: ['b1', 'b2'], shelfId: 's1' })
+    expect(apiClient.apiPatch).toHaveBeenCalledExactlyOnceWith('/books/batch/organize', { ids: ['b1', 'b2'], shelfId: 's1' })
   })
 
   it('sends shelfId null when moving out of a shelf', async () => {
@@ -41,7 +41,7 @@ describe('useMoveBooksToShelf', () => {
     result.current.mutate({ books: [{ id: 'b1' }], shelfId: null })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(apiClient.apiPatch).toHaveBeenCalledWith('/books/batch/move-shelf', { ids: ['b1'], shelfId: null })
+    expect(apiClient.apiPatch).toHaveBeenCalledWith('/books/batch/organize', { ids: ['b1'], shelfId: null })
   })
 
   it('invalidates the batch-selection snapshot so the organize dialog re-reads membership', async () => {

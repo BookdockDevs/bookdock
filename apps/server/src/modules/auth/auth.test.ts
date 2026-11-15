@@ -656,6 +656,25 @@ describe('auth module', () => {
       expect(getUserTimezone(id)).toBeNull()
     })
 
+    it('updates profile fields atomically via PATCH /me', async () => {
+      const id = await insertUser(db, { username: 'leo', password: 'password123' })
+      const app = createAuthApp({ id, username: 'leo', role: 'member' })
+      const res = await app.request('/api/v1/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'leo_new', bio: 'My bio', timezone: 'Asia/Tokyo' }),
+      })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.data.username).toBe('leo_new')
+      expect(body.data.bio).toBe('My bio')
+      expect(body.data.timezone).toBe('Asia/Tokyo')
+      const row = db.select().from(schema.users).where(eq(schema.users.id, id)).get()
+      expect(row?.username).toBe('leo_new')
+      expect(row?.bio).toBe('My bio')
+      expect(row?.timezone).toBe('Asia/Tokyo')
+    })
+
     it('rejects guest-injected sessions', async () => {
       const app = new Hono()
       app.onError(errorHandler)

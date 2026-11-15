@@ -12,7 +12,6 @@ import {
   updateSettings,
   updateTrashSettings,
 } from './settings.service'
-import { emptyTrash } from '../books/books.service'
 import { revokeLegadoAccessKey } from '../books/legado-access.service'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import type { IntegrationsSettings, ProfileSettings, SettingsRes, TrashSettings } from '@bookdock/shared'
@@ -82,9 +81,6 @@ settingsRoutes.put('/', async (c) => {
       maxTrashBytes: trash.maxTrashBytes ?? current.maxTrashBytes,
       enabled: trash.enabled ?? current.enabled,
     }
-    // Turning trash off is destructive by design: the UI confirms that the
-    // current contents will be permanently deleted, and this honors that.
-    if (merged.enabled === false) await emptyTrash(user.id)
     updateTrashSettings(user.id, merged)
   }
   // Echo the merged result, not the request patch: the patch is missing every

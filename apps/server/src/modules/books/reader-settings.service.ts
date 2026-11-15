@@ -1,29 +1,16 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, eq, ne, sql } from 'drizzle-orm'
 
 import { readerBookSettingsSchema } from '@bookdock/shared'
 import type { ReaderBookSettings, ViewSettings } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { contentRevisions, libraryBookVersions, libraries, settings } from '../../db/schema'
+import { contentRevisions, libraries, libraryBookVersions, settings } from '../../db/schema'
 import { createId } from '../../lib/id'
 
 const READER_BOOK_SETTINGS_PREFIX = 'reader.book:'
 
 function settingsKey(bookId: string) {
   return `${READER_BOOK_SETTINGS_PREFIX}${bookId}`
-}
-
-function privateLink(userId: string, bookId: string) {
-  const db = getDb()
-  const library = db.select({ id: libraries.id }).from(libraries).where(and(
-    eq(libraries.userId, userId),
-    eq(libraries.type, 'private'),
-  )).get()
-  if (!library) return null
-  return db.select({ kind: libraryBookVersions.kind }).from(libraryBookVersions).where(and(
-    eq(libraryBookVersions.libraryId, library.id),
-    eq(libraryBookVersions.bookVersionId, bookId),
-  )).get() ?? null
 }
 
 function storedSettings(userId: string, bookId: string): ReaderBookSettings | null {
@@ -54,33 +41,82 @@ function saveSettings(userId: string, bookId: string, value: ReaderBookSettings)
   db.insert(settings).values({ id: createId('setting'), userId, key, value }).run()
 }
 
-function migrateLegacySettings(userId: string, bookId: string): ReaderBookSettings {
-  const link = privateLink(userId, bookId)
-  if (!link || link.kind === 'shared') return {}
+export function migrateAllLegacyBookSettings(db: ReturnType<typeof getDb>) {
+  const tables = new Set(
+    (db.all(sql.raw("SELECT name FROM sqlite_master WHERE type = 'table'")) as Array<{ name: string }>).map(({ name }) => name),
+  )
+  if (!tables.has('content_revisions') || !tables.has('settings')) return
 
-  const revision = getDb().select().from(contentRevisions)
-    .where(eq(contentRevisions.bookVersionId, bookId))
-    .orderBy(desc(contentRevisions.revisionNo))
-    .all().at(0)
-  const meta = (revision?.meta ?? {}) as Record<string, unknown>
-  const legacyViewSettings = readerBookSettingsSchema.shape.viewSettings.safeParse(meta.viewSettings)
-  const legacyBoundPresetId = readerBookSettingsSchema.shape.boundPresetId.safeParse(meta.boundPresetId)
-  const migrated: ReaderBookSettings = {
-    ...(legacyViewSettings.success && legacyViewSettings.data !== undefined && legacyViewSettings.data !== null ? { viewSettings: legacyViewSettings.data } : {}),
-    ...(legacyBoundPresetId.success && legacyBoundPresetId.data !== undefined && legacyBoundPresetId.data !== null ? { boundPresetId: legacyBoundPresetId.data } : {}),
+  const candidateRevisions = db.all(sql.raw(
+    "SELECT id, book_version_id, revision_no, meta FROM content_revisions WHERE meta LIKE '%viewSettings%' OR meta LIKE '%boundPresetId%'"
+  )) as Array<{ id: string; book_version_id: string; revision_no: number; meta: string | Record<string, unknown> | null }>
+
+  if (candidateRevisions.length === 0) return
+
+  const bookVersionIds = [...new Set(candidateRevisions.map((r) => r.book_version_id))]
+
+  for (const bookVersionId of bookVersionIds) {
+    // Find the ACTUAL latest revision for this bookVersionId across all content_revisions
+    const latestRow = db.all(sql.raw(
+      `SELECT id, meta FROM content_revisions WHERE book_version_id = '${bookVersionId.replace(/'/g, "''")}' ORDER BY revision_no DESC LIMIT 1`
+    ))[0] as { id: string; meta: string | Record<string, unknown> | null } | undefined
+
+    if (latestRow) {
+      const rawMeta = typeof latestRow.meta === 'string' ? JSON.parse(latestRow.meta) : (latestRow.meta ?? {})
+      const meta = (rawMeta && typeof rawMeta === 'object') ? (rawMeta as Record<string, unknown>) : {}
+      const legacyViewSettings = readerBookSettingsSchema.shape.viewSettings.safeParse(meta.viewSettings)
+      const legacyBoundPresetId = readerBookSettingsSchema.shape.boundPresetId.safeParse(meta.boundPresetId)
+
+      const migrated: ReaderBookSettings = {
+        ...(legacyViewSettings.success && legacyViewSettings.data !== undefined && legacyViewSettings.data !== null ? { viewSettings: legacyViewSettings.data } : {}),
+        ...(legacyBoundPresetId.success && legacyBoundPresetId.data !== undefined && legacyBoundPresetId.data !== null ? { boundPresetId: legacyBoundPresetId.data } : {}),
+      }
+
+      if (Object.keys(migrated).length > 0) {
+        const link = db.select({
+          userId: libraries.userId,
+        }).from(libraryBookVersions)
+          .innerJoin(libraries, eq(libraries.id, libraryBookVersions.libraryId))
+          .where(and(
+            eq(libraryBookVersions.bookVersionId, bookVersionId),
+            eq(libraries.type, 'private'),
+            ne(libraryBookVersions.kind, 'shared'),
+          ))
+          .get()
+
+        if (link?.userId) {
+          const key = `${READER_BOOK_SETTINGS_PREFIX}${bookVersionId}`
+          const existing = db.select({ id: settings.id }).from(settings).where(and(
+            eq(settings.userId, link.userId),
+            eq(settings.key, key),
+          )).get()
+          if (!existing) {
+            db.insert(settings).values({
+              id: createId('setting'),
+              userId: link.userId,
+              key,
+              value: migrated,
+            }).run()
+          }
+        }
+      }
+    }
+
+    // Clean up all candidate revisions that contain legacy fields for this bookVersionId
+    const revisionsToClean = candidateRevisions.filter((r) => r.book_version_id === bookVersionId)
+    for (const row of revisionsToClean) {
+      const rawMeta = typeof row.meta === 'string' ? JSON.parse(row.meta) : (row.meta ?? {})
+      const meta = (rawMeta && typeof rawMeta === 'object') ? { ...(rawMeta as Record<string, unknown>) } : {}
+      delete meta.viewSettings
+      delete meta.boundPresetId
+      db.update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, row.id)).run()
+    }
   }
-  if (revision && Object.keys(migrated).length > 0) {
-    delete meta.viewSettings
-    delete meta.boundPresetId
-    getDb().update(contentRevisions).set({ meta }).where(eq(contentRevisions.id, revision.id)).run()
-    saveSettings(userId, bookId, migrated)
-  }
-  return migrated
 }
 
 export function getReaderBookSettings(userId: string | null, bookId: string): ReaderBookSettings {
   if (userId === null) return {}
-  return storedSettings(userId, bookId) ?? migrateLegacySettings(userId, bookId)
+  return storedSettings(userId, bookId) ?? {}
 }
 
 export function updateReaderBookSettings(userId: string, bookId: string, input: { viewSettings?: ViewSettings | null; boundPresetId?: string | null }) {

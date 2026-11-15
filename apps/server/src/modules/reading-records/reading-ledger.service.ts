@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { and, desc, eq, inArray, lte, or, sql } from 'drizzle-orm'
 
-import type { ReadingCoverageInterval, ReadingLedgerOverview, ReadingLedgerRes, ReadingLedgerSession, ReadingLedgerSessionPage, ReadingLedgerStatsRes, ReadingRecordConflictDetails, ReadingRecordCreateReq, ReadingSessionUpdateReq, ReadingTimerClaim, ReadingWordState } from '@bookdock/shared'
+import type { ReadingBookOverviewRes, ReadingCoverageInterval, ReadingLedgerOverview, ReadingLedgerRes, ReadingLedgerSession, ReadingLedgerSessionPage, ReadingLedgerStatsRes, ReadingRecordConflictDetails, ReadingRecordCreateReq, ReadingSessionUpdateReq, ReadingTimerClaim, ReadingWordState } from '@bookdock/shared'
 import { acceptsReadingTimerClaim } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
@@ -925,6 +925,31 @@ export async function getReadingLedgerSessions(userId: string, bookId: string, o
   const last = pageRows.at(-1)
   const nextCursor = hasMore && last ? encodeReadingCursor(last.sortDate, last.sortStartedAt, last.id) : null
   return { dataVersion: state.factVersion, items, nextCursor, hasMore }
+}
+
+export async function getReadingBookOverview(
+  userId: string,
+  bookId: string,
+  options: { from?: string; to?: string; limit?: number } = {},
+  showHidden = false
+): Promise<ReadingBookOverviewRes> {
+  const maxAttempts = 5
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const [ledger, stats, sessions] = await Promise.all([
+      getReadingLedgerOverview(userId, bookId, showHidden),
+      getReadingLedgerStats(userId, bookId, { from: options.from, to: options.to }, showHidden),
+      getReadingLedgerSessions(userId, bookId, { from: options.from, to: options.to, limit: options.limit }, showHidden),
+    ])
+    if (ledger.dataVersion === stats.dataVersion && ledger.dataVersion === sessions.dataVersion) {
+      return {
+        dataVersion: ledger.dataVersion,
+        ledger,
+        stats,
+        sessions,
+      }
+    }
+  }
+  throw new AppError('READING_OVERVIEW_CONFLICT', 'Reading overview versions conflicted during concurrent update, please retry')
 }
 
 export function rebuildAllReadingProjections(userId?: string) {

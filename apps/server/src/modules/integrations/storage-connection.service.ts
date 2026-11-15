@@ -14,7 +14,7 @@ import type {
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { libraries, settings, storageConnections } from '../../db/schema'
+import { libraries, storageConnections } from '../../db/schema'
 import { createId } from '../../lib/id'
 import type { RemoteBrowseClient } from '../../lib/remote-client'
 import { S3Client } from '../../lib/s3'
@@ -42,51 +42,7 @@ function toStorageConnectionRes(row: typeof storageConnections.$inferSelect): St
   }
 }
 
-function maybeMigrateLegacyWebDav(userId: string): void {
-  const db = getDb()
-  const existingRows = db
-    .select({ id: storageConnections.id })
-    .from(storageConnections)
-    .where(eq(storageConnections.userId, userId))
-    .all()
-
-  if (existingRows.length > 0) return
-
-  const legacySetting = db
-    .select()
-    .from(settings)
-    .where(and(eq(settings.userId, userId), eq(settings.key, 'webdav')))
-    .get()
-
-  if (!legacySetting || !legacySetting.value) return
-
-  const val = legacySetting.value as {
-    url?: string
-    username?: string
-    encryptedPassword?: string
-    basePath?: string
-  }
-
-  if (!val.url || !val.username) return
-
-  const now = Date.now()
-  db.insert(storageConnections).values({
-    id: createId('storage_conn'),
-    userId,
-    name: '我的网盘',
-    provider: 'webdav',
-    endpoint: val.url,
-    username: val.username,
-    encryptedPassword: val.encryptedPassword,
-    basePath: val.basePath || '/',
-    isDefault: true,
-    createdAt: now,
-    updatedAt: now,
-  }).run()
-}
-
 export function listStorageConnections(userId: string): StorageConnectionRes[] {
-  maybeMigrateLegacyWebDav(userId)
   const db = getDb()
 
   // Stable oldest-first order: positions never shift when a new connection

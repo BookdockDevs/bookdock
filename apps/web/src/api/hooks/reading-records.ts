@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { infiniteQueryOptions, queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type {
+  ReadingBookOverviewRes,
   ReadingLedgerOverview,
   ReadingLedgerSessionPage,
   ReadingLedgerSession,
@@ -290,8 +291,18 @@ function readingSessionsOptions(bookId: string, range?: ReadingRange, dataVersio
   })
 }
 
-export function useBookReadingSessions(bookId: string, range?: ReadingRange, dataVersion?: number) {
-  return useInfiniteQuery(readingSessionsOptions(bookId, range, dataVersion, useLocalReader()))
+export function useBookReadingSessions(
+  bookId: string,
+  range?: ReadingRange,
+  dataVersion?: number,
+  options?: { initialData?: { pages: Array<{ data: ReadingLedgerSessionPage }>; pageParams: Array<string | undefined> }; enabled?: boolean },
+) {
+  const local = useLocalReader()
+  return useInfiniteQuery({
+    ...readingSessionsOptions(bookId, range, dataVersion, local),
+    ...(options?.initialData ? { initialData: options.initialData } : {}),
+    enabled: (options?.enabled ?? true) && !!bookId,
+  })
 }
 
 export function useReadingLedgerRecovery(bookId: string, mismatch: boolean, range?: ReadingRange) {
@@ -333,6 +344,15 @@ export function useReadingLedgerRecovery(bookId: string, mismatch: boolean, rang
           if (run.cancelled) return
           if (stats.data.dataVersion === version && sessions.pages.length === 1
             && sessions.pages[0].data.dataVersion === version) {
+            queryClient.setQueryData([...readingRecordBookKey('book-overview', bookId, local?.namespace), from, to], {
+              data: {
+                dataVersion: version,
+                ledger: ledger.data,
+                stats: stats.data,
+                sessions: sessions.pages[0].data,
+              },
+            })
+            void queryClient.invalidateQueries({ queryKey: readingRecordBookKey('book-overview', bookId, local?.namespace) })
             setResult({ scope, failed: false })
             return
           }
@@ -490,6 +510,37 @@ function readingLedgerOptions(bookId: string, local?: LocalReaderSession | null)
 
 export function useReadingLedger(bookId: string, options: { enabled?: boolean } = {}) {
   return useQuery({ ...readingLedgerOptions(bookId, useLocalReader()), enabled: !!bookId && options.enabled !== false })
+}
+
+export function useReadingBookOverview(bookId: string, range?: ReadingRange, options: { enabled?: boolean } = {}) {
+  const local = useLocalReader()
+  const params = new URLSearchParams()
+  if (range?.from) params.set('from', range.from)
+  if (range?.to) params.set('to', range.to)
+  const query = params.toString()
+  return useQuery({
+    queryKey: [...readingRecordBookKey('book-overview', bookId, local?.namespace), range?.from, range?.to],
+    networkMode: local ? 'always' : 'online',
+    queryFn: async () => {
+      if (local) {
+        const [ledger, stats, sessions] = await Promise.all([
+          local.getReadingLedger(),
+          local.getReadingStats(range),
+          local.getReadingSessions(range),
+        ])
+        return {
+          data: {
+            dataVersion: ledger.data.dataVersion,
+            ledger: ledger.data,
+            stats: stats.data,
+            sessions: sessions.data,
+          } as ReadingBookOverviewRes,
+        }
+      }
+      return apiGet<{ data: ReadingBookOverviewRes }>(withReveal(`/reading-records/book/${bookId}/overview${query ? `?${query}` : ''}`))
+    },
+    enabled: !!bookId && options.enabled !== false,
+  })
 }
 
 export function useReadingRound(bookId: string) {

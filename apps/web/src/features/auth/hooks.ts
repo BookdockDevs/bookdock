@@ -14,6 +14,7 @@ import type {
   RegisterRes,
   UpdateInstanceReq,
   UpdateBioReq,
+  UpdateMeReq,
   UpdateUserReq,
   UpdateUsernameReq,
 } from '@bookdock/shared'
@@ -115,13 +116,15 @@ export function useChangePassword() {
   })
 }
 
-export function useUpdateUsername() {
+export function useUpdateProfile() {
   const updateUser = useAuthStore((s) => s.updateUser)
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: UpdateUsernameReq) => apiPost<{ data: AccountRes }>('/auth/username', body),
+    mutationFn: (body: UpdateMeReq) => apiPatch<{ data: AccountRes & { bio?: string; timezone?: string } }>('/auth/me', body),
     onSuccess: (res) => {
-      updateUser({ username: res.data.username })
+      if (res.data.username) {
+        updateUser({ username: res.data.username })
+      }
       void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
       void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
       void invalidateActivityQueries(queryClient)
@@ -129,16 +132,20 @@ export function useUpdateUsername() {
   })
 }
 
+export function useUpdateUsername() {
+  const updateProfile = useUpdateProfile()
+  return {
+    ...updateProfile,
+    mutateAsync: (body: UpdateUsernameReq) => updateProfile.mutateAsync(body),
+  }
+}
+
 export function useUpdateBio() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: UpdateBioReq) => apiPost<{ data: { bio: string } }>('/auth/bio', body),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['reviews', 'author'] })
-      void invalidateActivityQueries(queryClient)
-      void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY })
-    },
-  })
+  const updateProfile = useUpdateProfile()
+  return {
+    ...updateProfile,
+    mutateAsync: (body: UpdateBioReq) => updateProfile.mutateAsync(body),
+  }
 }
 
 export function useUploadAvatar() {

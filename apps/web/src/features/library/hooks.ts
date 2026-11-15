@@ -744,9 +744,10 @@ function invalidateSharedTaxonomy(queryClient: QueryClient, libraryId: string | 
   void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
 }
 
-/** Private-library tag endpoints live at /tags; a shared library nests under it. */
+/** Prefer library-scoped endpoints; fall back to private shortcut if target library is unknown. */
 function acctPath(libraryId: string | null, suffix: string): string {
-  return libraryId ? `/libraries/${libraryId}/${suffix}` : `/${suffix}`
+  const targetId = libraryId ?? useAuthStore.getState().user?.privateLibraryId
+  return targetId ? `/libraries/${targetId}/${suffix}` : `/${suffix}`
 }
 
 
@@ -2812,32 +2813,20 @@ export function useUpdateBookMembership() {
 }
 
 export function useBookMembership(bookId: string | null, options: { shelves?: boolean; tags?: boolean; ref?: ClientBookRef | null } = {}) {
-  const local = useLocalCatalog()
-  const vault = useVaultOperations()
-  const vaultScope = useVaultScope()
-  // A ref-less caller is a surface already pinned to one device book (the
-  // reader's own panels), so the context answers for it.
-  const isLocalBook = isDeviceBook(options.ref) || (Boolean(local) && !options.ref)
-  const bookRef = options.ref ?? { scope: vaultScope, bookId: bookId! }
   const checkShelves = options.shelves ?? false
   const checkTags = options.tags ?? true
+  const enabled = Boolean(bookId && (checkShelves || checkTags))
+  const bookQuery = useBook(enabled ? bookId : null, options.ref)
+
   return {
-    shelves: useQuery({
-      networkMode: isLocalBook ? 'always' : 'online',
-      queryKey: isLocalBook ? catalogQueryKey(bookRef.scope, 'book-shelves', bookRef.bookId) : ['books', bookId, 'shelves'],
-      queryFn: async ({ signal }) => isLocalBook
-        ? { data: (await vault.detail(bookRef, signal)).book.catalog?.shelfId ?? null }
-        : guardedRemoteCatalogRead<{ data: string | null }>(`/books/${bookId}/shelves`, signal),
-      enabled: Boolean(bookId && checkShelves),
-    }),
-    tags: useQuery({
-      networkMode: isLocalBook ? 'always' : 'online',
-      queryKey: isLocalBook ? catalogQueryKey(bookRef.scope, 'book-tags', bookRef.bookId) : ['books', bookId, 'tags'],
-      queryFn: async ({ signal }) => isLocalBook
-        ? { data: (await vault.detail(bookRef, signal)).book.catalog?.tags ?? [] }
-        : guardedRemoteCatalogRead<{ data: string[] }>(`/books/${bookId}/tags`, signal),
-      enabled: Boolean(bookId && checkTags),
-    }),
+    shelves: {
+      ...bookQuery,
+      data: bookQuery.data ? { data: bookQuery.data.data.shelfId ?? null } : undefined,
+    },
+    tags: {
+      ...bookQuery,
+      data: bookQuery.data ? { data: bookQuery.data.data.tags ?? [] } : undefined,
+    },
   }
 }
 
@@ -2878,10 +2867,13 @@ export function useMoveBooksToShelf() {
         succeeded += items.length
       }
       if (server.length) {
-        const result = await apiPatch<{ data: { succeeded: number; failed: number; failedIds: string[] }; undo?: UndoReceipt }>('/books/batch/move-shelf', { ids: server.map((book) => book.id), shelfId })
-        succeeded += result.data.succeeded
-        failed += result.data.failed
-        failedIds.push(...result.data.failedIds.map((id) => `server:${id}`))
+        const result = await apiPatch<{ data: { count?: number; succeeded?: number; failed?: number; failedIds?: string[] }; undo?: UndoReceipt }>('/books/batch/organize', { ids: server.map((book) => book.id), shelfId })
+        const count = result.data.succeeded ?? result.data.count ?? server.length
+        succeeded += count
+        failed += result.data.failed ?? 0
+        if (result.data.failedIds) {
+          failedIds.push(...result.data.failedIds.map((id) => `server:${id}`))
+        }
         undo = result.undo
       }
       return { succeeded, failed, failedIds, undo }
