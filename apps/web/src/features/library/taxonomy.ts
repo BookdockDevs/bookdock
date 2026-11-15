@@ -51,24 +51,12 @@ export function categoryChoices(categories: ClientCategoryView[]) {
   }))
 }
 
-// A scraped category name rarely equals a library category ("都市生活" and
-// "科幻小说" both extend one), so an exact case-insensitive match wins first;
-// otherwise the longest existing name the scraped one starts or ends with is
-// used. Length ordering matters: "轻小说" must not fall back to a broader
-// "小说" when both exist.
+// Categories resolve the way tags do: only a case-insensitive name match reuses
+// an existing row. A scraped name that matches nothing is created on save, so
+// "都市生活" never silently lands in "都市" and a broad category cannot swallow
+// a specific one.
 export function matchCategoryByName(categories: ClientCategoryView[], rawName: string): ClientCategoryView | undefined {
   const target = rawName.trim().toLowerCase()
   if (!target) return undefined
-  const exact = categories.find((category) => category.name.trim().toLowerCase() === target)
-  if (exact) return exact
-  let best: ClientCategoryView | undefined
-  let bestLength = 0
-  for (const category of categories) {
-    const name = category.name.trim().toLowerCase()
-    if (!name || name.length <= bestLength) continue
-    if (!target.startsWith(name) && !target.endsWith(name)) continue
-    best = category
-    bestLength = name.length
-  }
-  return best
+  return categories.find((category) => category.name.trim().toLowerCase() === target)
 }

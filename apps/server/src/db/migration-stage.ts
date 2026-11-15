@@ -23,6 +23,7 @@ export const ANCHOR_EVIDENCE_TAG = '0063_anchor_evidence'
 export const MEMBER_RESOURCE_UPLOAD_TAG = '0064_member_resource_upload_switch'
 export const FONT_LOCAL_NAMES_TAG = '0065_font_local_names'
 export const READING_RESOURCES_AI_FOUNDATION_TAG = '0066_reading_resources_ai_foundation'
+export const BOOK_DESCRIPTION_OVERRIDE_TAG = '0067_book_description_override'
 
 /** Guarded revert of 0061_instance_invites and 0062_ai_chat_jobs for legacy-fixture
  * tests that reset the migration watermark and re-run the chain from an earlier
@@ -47,6 +48,9 @@ export function revertInstanceAndAiJobsSchema(
   // 0065/0066 reading-resource and AI structure; kept in one place so every
   // fixture that resets the watermark reverts the same set.
   revertReadingResourceSchema(sqlite)
+  // 0067 adds a card-local column on a table every legacy fixture keeps; its
+  // ledger row replays too, so the column has to go with the watermark reset.
+  if (table('library_books') && columns('library_books').has('description_override')) sqlite.exec('ALTER TABLE library_books DROP COLUMN description_override')
 }
 
 /** Guarded revert of 0065/0066 reading-resource and AI structure for fixtures
@@ -269,7 +273,7 @@ export function migrateBeforeBookRetirementIncluding(
   // Older partial fixtures lack book_reviews, so stage only the archive/annotation portion there.
   // MEMBER_RESOURCE_UPLOAD_TAG keeps the drizzle `instance` shape and its
   // settings queries consistent across service-test fixtures.
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG, FONT_LOCAL_NAMES_TAG, READING_RESOURCES_AI_FOUNDATION_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG, FONT_LOCAL_NAMES_TAG, READING_RESOURCES_AI_FOUNDATION_TAG, BOOK_DESCRIPTION_OVERRIDE_TAG])
   migrateWithTagFilter(
     db,
     options,
@@ -299,6 +303,7 @@ function repairHybridShelfSchema(db: Parameters<typeof migrate>[0]) {
   if (!shelfColumns.has('hidden')) db.run(sql`ALTER TABLE shelves ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
   if (!shelfColumns.has('updated_at')) db.run(sql`ALTER TABLE shelves ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`)
   if (!libraryBookColumns.has('shelf_id')) db.run(sql`ALTER TABLE library_books ADD COLUMN shelf_id TEXT REFERENCES shelves(id) ON DELETE SET NULL`)
+  if (!libraryBookColumns.has('description_override')) db.run(sql`ALTER TABLE library_books ADD COLUMN description_override TEXT`)
   db.run(sql`CREATE INDEX IF NOT EXISTS shelves_library_sort_idx ON shelves(library_id, sort_order)`)
   db.run(sql`CREATE UNIQUE INDEX IF NOT EXISTS shelves_library_name_unique ON shelves(library_id, name)`)
   db.run(sql`CREATE INDEX IF NOT EXISTS library_books_shelf_idx ON library_books(shelf_id)`)

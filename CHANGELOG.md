@@ -7,7 +7,8 @@ All notable changes to Bookdock are documented here.
 ### Added
 
 - Refactored the desktop unpinned reader sidebar into an independent floating island card with adjustable width (200–640 px), height (320 px to viewport bound), and corner 2D resizing, with double-click reset and pointer capture cursor locking.
-- Scraped results now carry series, series index, category and tags. Applying a lookup fills the classification fields of the edit draft: an exact category name wins over a broader one, a name that matches a library category template is created on save, and tag names the library does not have yet wait as pending chips until the dialog is saved.
+- Scraped results now carry series, series index, category and tags. Applying a lookup fills the classification fields of the edit draft: a category reuses a library category of the same name and is otherwise created on save, matching how tag names the library does not have yet wait as pending chips until the dialog is saved.
+- Collected shared-library books can now keep their own description in the personal library. Editing the summary on a collected card stores a card-local override and leaves the shared version untouched, and a restore action returns the card to the shared summary.
 
 ### Changed
 
@@ -15,6 +16,8 @@ All notable changes to Bookdock are documented here.
 - Refreshed the default AI provider models for Claude, Gemini, DeepSeek, GLM, Kimi, MiniMax, and MiMo; kept Qwen's rolling alias, corrected MiMo's fallback API URL, and renamed the Moonshot provider to Kimi.
 - Organized Legado discovery around one selected library with a full-width library picker, and added author/file-size sorting for all libraries plus last-read/progress sorting for personal libraries. Search and discovery previews now fall back to book metadata descriptions and are capped at 80 characters.
 - Reworked the metadata lookup dialog into a two-column layout: compact candidate rows with clamped summaries on the left, and a detail preview with the large cover, publisher details, taxonomy badges and the full description on the right.
+- The shared modal footer and both append-content dialog footers no longer register as toast obstacles, so notifications stay in the viewport corner instead of jumping above the open dialog.
+- The book detail dialog and the shared-library work editor now save metadata, classification, tags and the cover in one request instead of a chain of updates, so a failure can no longer leave the metadata applied while the cover or tags stay behind.
 
 ### Fixed
 
@@ -25,6 +28,7 @@ All notable changes to Bookdock are documented here.
 - Fixed scraped covers that failed to load. Cover hosts that reject hotlinked requests (such as Douban shards answering 403 or 418) now fall back to the smaller thumbnail and then to a server-side proxy cached for a day, and a cover that still fails is reported on its own instead of discarding the rest of the result.
 - Fixed personal source responses being decoded as UTF-8 regardless of the declared encoding. Bodies now follow the `charset` from the response header or the document head, and unknown labels fall back to UTF-8, so GBK sources return readable text.
 - Fixed protocol-relative and plain-HTTP cover URLs from personal sources being dropped. They are upgraded to HTTPS now, and detail values get the same normalization instead of reaching the browser unnormalized.
+- Fixed undo after an edit that saved the metadata but left a newly applied cover behind, and finished with no feedback. One save now yields one undo that restores metadata, classification, tags and cover together, and its result is always reported even after the original notification expired.
 
 ## [0.8.4] - 2026-11-15
 
@@ -1300,7 +1304,8 @@ All notable changes to Bookdock are documented here.
 #### 新增
 
 - 桌面端未固定侧栏重构为独立的悬浮岛卡片与紧凑胶囊，支持右边界宽度（200–640 px）、底部高度（320 px 起）及右下角双向拖拽调节尺寸，支持双击手柄重置为默认大小，并在拖拽时锁定指针光标。
-- 刮削结果现在会带出系列、系列序号、分类与标签，应用后直接填充编辑草稿的归类字段：分类优先匹配同名项，命中库内分类模板的在保存时创建；尚不存在的标签名以待创建状态排队，仅在保存时才创建。
+- 刮削结果现在会带出系列、系列序号、分类与标签，应用后直接填充编辑草稿的归类字段：同名分类直接复用，库内没有的则在保存时创建，与尚不存在的标签名以待创建状态排队、仅在保存时才创建的行为一致。
+- 收藏的共享书库书籍支持在个人书库中自定义简介。在收藏卡片上编辑简介会保存为该卡片私有的覆盖值，不影响共享版本，并可一键恢复为共享简介。
 
 #### 优化
 
@@ -1308,6 +1313,8 @@ All notable changes to Bookdock are documented here.
 - 更新 Claude、Gemini、DeepSeek、智谱 GLM、Kimi、MiniMax 和 MiMo 的 AI 供应商默认模型；保留通义千问的系列别名、修正 MiMo 备用 API 地址，并将 Moonshot 供应商名称简化为“Kimi”。
 - 优化 Legado 发现页，按当前书库展示入口，书库选择独占一行，并新增按作者和文件大小排序的支持；个人书库另支持按最近阅读和阅读进度排序。搜索与发现结果缺少简介时会回退到书籍元数据简介，预览最多 80 个字符。
 - 重构刮削信息弹窗：左侧候选列表紧凑排列并对简介单行截断，右侧为包含高清封面、出版信息、分类标签徽标及完整多段简介的预览面板。
+- 共享弹窗的底部操作栏与两个追加内容弹窗的底栏不再标记为浮动通知避让障碍物，通知保持停靠于视口右下角，不再被弹窗顶起。
+- 书籍详情弹窗与共享书库编辑弹窗改为单次请求保存元数据、归类、标签与封面，不再串联多次更新，失败时不会出现元数据已生效而封面或标签未跟上的情况。
 
 #### 修复
 
@@ -1318,6 +1325,7 @@ All notable changes to Bookdock are documented here.
 - 修复刮削封面加载失败的问题。对拒绝外链的图床（如豆瓣不同 CDN 节点返回 HTTP 403 / 418）改为先降级到小尺寸缩略图、再走服务端代理（缓存一天），仍失败时单独提示，不再连带丢弃其余刮削结果。
 - 修复自定义刮削源响应固定按 UTF-8 解析的问题。现按响应头或文档头部的 `charset` 解码，未知编码回退 UTF-8，GBK 页面不再乱码。
 - 修复自定义刮削源的协议相对与 HTTP 封面地址被直接丢弃的问题。现统一升级为 HTTPS，详情返回值同样归一，此前这类地址会在浏览器端解析到本站域名而无法取图。
+- 修复编辑保存后撤销仍残留新封面、且撤销完成没有任何提示的问题。现在一次保存只生成一条撤销记录，元数据、归类、标签与封面一并回滚，撤销结果也一定会提示，即使原通知已经过期。
 
 ### [0.8.4] - 2026-11-15
 

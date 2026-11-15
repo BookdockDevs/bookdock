@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, editorEpubSaveSchema, editorTxtSaveSchema, LOCAL_IMPORT_MAX_IMAGES, LOCAL_IMPORT_MAX_PAYLOAD_BYTES, localBookDuplicateCheckSchema, localBookImportPayloadSchema, privateBatchShelfSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
+import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, editorEpubSaveSchema, editorTxtSaveSchema, LOCAL_IMPORT_MAX_IMAGES, LOCAL_IMPORT_MAX_PAYLOAD_BYTES, localBookDuplicateCheckSchema, localBookImportPayloadSchema, privateBatchShelfSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, bookSaveSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -26,6 +26,7 @@ import {
   setBookMembership,
   setBookTags,
   setBookOrganization,
+  savePrivateBook,
   getBookShelf,
   getBookTags,
   stripMetaChapters,
@@ -43,6 +44,7 @@ import {
 } from './books.service'
 import { updateReaderBookSettings } from './reader-settings.service'
 import { undoReceiptPayload as undoReceipt } from '../../lib/undo'
+import { readJsonOrMultipartPayload } from '../../lib/multipart-payload'
 import { forkLocalBook } from '../libraries/fork.service'
 import { getPrivateBookMetadataSource } from '../libraries/metadata-source.service'
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
@@ -472,6 +474,21 @@ booksRoutes.patch('/:id', async (c) => {
   }
   const undo: { token?: string } = {}
   const book = await updateBook(user.id, id, parsed.data, undo)
+  return c.json({ data: book, ...(undo.token ? { undo: undoReceipt(undo.token) } : {}) })
+})
+
+// One editor save: card metadata, classification and cover in a single
+// transaction behind a single undo receipt. Replaces the old fan-out into
+// PATCH /:id + PUT /:id/organization + PUT|DELETE /:id/cover, whose parallel
+// receipts cancelled each other out and left the cover outside undo entirely.
+booksRoutes.post('/:id/save', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const { payload, files } = await readJsonOrMultipartPayload(c)
+  const parsed = bookSaveSchema.safeParse(payload)
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid save request', parsed.error.flatten())
+  const undo: { token?: string } = {}
+  const book = await savePrivateBook(user.id, c.req.param('id'), parsed.data, files['cover'], undo)
   return c.json({ data: book, ...(undo.token ? { undo: undoReceipt(undo.token) } : {}) })
 })
 

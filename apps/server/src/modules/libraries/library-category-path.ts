@@ -2,7 +2,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 
 import type * as schema from '../../db/schema'
-import { libraryCategories } from '../../db/schema'
+import { libraryBooks, libraryCategories } from '../../db/schema'
 import { createId } from '../../lib/id'
 
 type Database = BetterSQLite3Database<typeof schema>
@@ -42,4 +42,36 @@ export function resolveOrCreateCategoryPath(
     parentId = resolvedId
   }
   return resolvedId
+}
+
+/**
+ * Remove categories a save created that nothing uses any more, deepest first so
+ * a parent with no children of its own also goes.
+ *
+ * Undo calls this after restoring a book's previous category: a scraped
+ * classification that no longer has a book should leave the tree exactly as it
+ * was, instead of a row the user has to hunt down in the sidebar. Categories
+ * that already existed before the save are never candidates — only the ids the
+ * same write created.
+ */
+export function pruneEmptyCategories(
+  tx: Pick<Database, 'select' | 'delete'>,
+  libraryId: string,
+  userId: string,
+  createdIds: readonly string[],
+) {
+  for (const categoryId of [...createdIds].reverse()) {
+    const category = tx.select({ parentId: libraryCategories.parentId }).from(libraryCategories)
+      .where(and(
+        eq(libraryCategories.id, categoryId),
+        eq(libraryCategories.libraryId, libraryId),
+        eq(libraryCategories.userId, userId),
+      )).get()
+    if (!category) continue
+    const hasBooks = tx.select({ id: libraryBooks.id }).from(libraryBooks)
+      .where(eq(libraryBooks.categoryId, categoryId)).get()
+    const hasChildren = tx.select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(eq(libraryCategories.parentId, categoryId)).get()
+    if (!hasBooks && !hasChildren) tx.delete(libraryCategories).where(eq(libraryCategories.id, categoryId)).run()
+  }
 }

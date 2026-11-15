@@ -456,6 +456,13 @@
       "when": 1794400000000,
       "tag": "0066_reading_resources_ai_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794500000000,
+      "tag": "0067_book_description_override",
+      "breakpoints": true
     }
   ]
 }

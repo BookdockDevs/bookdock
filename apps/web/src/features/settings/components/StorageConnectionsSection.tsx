@@ -490,7 +490,6 @@ export function StorageConnectionDialog({ mode, connection, onClose, onSuccess }
                   anchor={providerMenu.anchor}
                   size={{ width: 200, height: 110 }}
                   onClose={providerMenu.close}
-                  className="!z-[60]"
                 >
                   <div className="py-1">
                     {(['webdav', 's3'] as const).map((id) => (

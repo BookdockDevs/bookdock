@@ -4,6 +4,31 @@ import { AppError } from '../middleware/error'
 
 export const UNDO_RECEIPT_TTL_MS = 120_000
 
+/**
+ * Order-insensitive deep equality for undo snapshots.
+ *
+ * A save records the `before` and `after` value of every column it wrote, and
+ * the restore step refuses to run when the row no longer holds `after` — that
+ * is what keeps undo from silently overwriting a later edit. Plain
+ * `JSON.stringify` is not enough: a value that made a round trip through
+ * SQLite's JSON columns can come back with a different key order (or with
+ * `null` where the caller wrote `undefined`), which would report a conflict on
+ * an untouched row.
+ */
+export function sameSnapshotValue(left: unknown, right: unknown): boolean {
+  return stableSnapshot(left) === stableSnapshot(right)
+}
+
+function stableSnapshot(value: unknown): string {
+  if (value === undefined || value === null) return 'null'
+  if (Array.isArray(value)) return `[${value.map(stableSnapshot).join(',')}]`
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSnapshot(record[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
 interface UndoReceipt {
   userId: string
   expiresAt: number

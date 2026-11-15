@@ -19,6 +19,7 @@ const apiPatch = vi.fn()
 const apiPut = vi.fn()
 const apiDelete = vi.fn()
 const apiUpload = vi.fn()
+const apiSave = vi.fn()
 let downloadRules: { enabled: boolean; effectiveEnabled: boolean }[] = []
 /** Review context for the book/work under test; the review endpoints answer with it. */
 let reviewContext: unknown = { composer: null, own: null, summary: null, reviews: [] }
@@ -53,6 +54,7 @@ vi.mock('@/api/client', async (original) => ({
   apiPut: (...args: unknown[]) => apiPut(...args),
   apiDelete: (...args: unknown[]) => apiDelete(...args),
   apiUpload: (...args: unknown[]) => apiUpload(...args),
+  apiSave: (...args: unknown[]) => apiSave(...args),
 }))
 
 vi.mock('@/api/hooks/useReplacements', () => ({
@@ -151,6 +153,18 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={new QueryClient()}>{children}<DownloadDialogHost /></QueryClientProvider>
 }
 
+/** The dialog saves everything through one request; assertions read its payload. */
+function lastSave() {
+  const call = apiSave.mock.calls.at(-1)
+  if (!call) throw new Error('the dialog never called the save endpoint')
+  const [path, payload, files] = call as [
+    string,
+    { book?: Record<string, unknown>; organization?: Record<string, unknown>; cover?: string },
+    Record<string, File> | undefined,
+  ]
+  return { path, payload, files: files ?? {} }
+}
+
 function renderDialog() {
   return render(<BookDetailDialog book={book} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
 }
@@ -165,6 +179,7 @@ beforeEach(async () => {
   apiPut.mockResolvedValue({})
   apiDelete.mockResolvedValue({})
   apiUpload.mockResolvedValue({})
+  apiSave.mockResolvedValue({ data: {} })
   updateBookMutateAsync.mockResolvedValue({ data: book })
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:cover-preview') })
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
@@ -187,23 +202,22 @@ beforeEach(async () => {
 })
 
 describe('BookDetailDialog classification editor', () => {
-  it('waits for the combined organization save before closing the editor', async () => {
-    let finishOrganization!: () => void
-    apiPut.mockImplementationOnce(() => new Promise((resolve) => { finishOrganization = () => resolve({}) }))
+  it('waits for the combined save before closing the editor', async () => {
+    let finishSave!: () => void
+    apiSave.mockImplementationOnce(() => new Promise((resolve) => { finishSave = () => resolve({ data: {} }) }))
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(apiPut).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(apiSave).toHaveBeenCalledTimes(1))
     expect(screen.getByRole('button', { name: '保存...' })).toBeDisabled()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    await act(async () => { finishOrganization() })
+    await act(async () => { finishSave() })
     await waitFor(() => expect(screen.queryByRole('button', { name: '保存...' })).not.toBeInTheDocument())
     expect(useToastStore.getState().toasts).toHaveLength(1)
   })
 
   it('keeps a complete save failure as an inline error without reporting partial success', async () => {
-    apiPatch.mockRejectedValueOnce(new TypeError('Network failed'))
-    apiPut.mockRejectedValueOnce(new TypeError('Network failed')).mockRejectedValueOnce(new TypeError('Network failed'))
+    apiSave.mockRejectedValueOnce(new TypeError('Network failed'))
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -236,7 +250,7 @@ describe('BookDetailDialog classification editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryId: 'category-1', tagIds: [] })
+      expect(lastSave().payload.organization).toEqual({ categoryId: 'category-1', tagIds: [] })
     })
   })
 
@@ -263,7 +277,7 @@ describe('BookDetailDialog classification editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryId: null, tagIds: [] })
+      expect(lastSave().payload.organization).toEqual({ categoryId: null, tagIds: [] })
     })
   })
 })
@@ -281,7 +295,7 @@ describe('BookDetailDialog tag chips', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryId: null, tagIds: ['tag-1'] })
+      expect(lastSave().payload.organization).toEqual({ categoryId: null, tagIds: ['tag-1'] })
     })
   })
 
@@ -297,7 +311,7 @@ describe('BookDetailDialog tag chips', () => {
     await waitFor(() => expect(createTagMutate).toHaveBeenCalledWith('科幻'))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => {
-      expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryId: null, tagIds: ['tag-new'] })
+      expect(lastSave().payload.organization).toEqual({ categoryId: null, tagIds: ['tag-new'] })
     })
   })
 
@@ -336,10 +350,10 @@ describe('BookDetailDialog recommended categories', () => {
     fireEvent.click(screen.getByRole('button', { name: '分类' }))
     fireEvent.click(screen.getByText('推荐分类'))
     fireEvent.click(screen.getByRole('radio', { name: '文学 / 散文随笔' }))
-    expect(apiPut).not.toHaveBeenCalled()
+    expect(apiSave).not.toHaveBeenCalled()
     expect(createShelfMutate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryTemplateKey: 'literature.essays', tagIds: [] }))
+    await waitFor(() => expect(lastSave().payload.organization).toEqual({ categoryTemplateKey: 'literature.essays', tagIds: [] }))
   })
 
   it('cancels a selected recommendation without creating or saving a category', () => {
@@ -349,7 +363,7 @@ describe('BookDetailDialog recommended categories', () => {
     fireEvent.click(screen.getByText('推荐分类'))
     fireEvent.click(screen.getByRole('radio', { name: '文学 / 散文随笔' }))
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(apiPut).not.toHaveBeenCalled()
+    expect(apiSave).not.toHaveBeenCalled()
     expect(createShelfMutate).not.toHaveBeenCalled()
   })
 })
@@ -364,10 +378,11 @@ describe('BookDetailDialog cover draft', () => {
     fireEvent.change(input, { target: { files: [file] } })
 
     await waitFor(() => expect(screen.getByRole('img')).toHaveAttribute('src', 'blob:cover-preview'))
-    expect(apiUpload).not.toHaveBeenCalled()
+    expect(apiSave).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(apiUpload).toHaveBeenCalledWith('/books/book-1/cover', file, 'PUT'))
+    await waitFor(() => expect(lastSave().payload.cover).toBe('replace'))
+    expect(lastSave().files.cover).toBe(file)
   })
 
   it('discards a selected cover when editing is cancelled', async () => {
@@ -380,7 +395,7 @@ describe('BookDetailDialog cover draft', () => {
 
     const cancelButtons = screen.getAllByRole('button', { name: '取消' })
     fireEvent.click(cancelButtons[cancelButtons.length - 1])
-    expect(apiUpload).not.toHaveBeenCalled()
+    expect(apiSave).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(screen.getByRole('img')).toHaveAttribute('src', '/api/v1/books/book-1/cover?v=auto')
@@ -391,10 +406,11 @@ describe('BookDetailDialog cover draft', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     fireEvent.click(screen.getByRole('button', { name: '移除封面' }))
-    expect(apiDelete).not.toHaveBeenCalled()
+    expect(apiSave).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/books/book-1/cover'))
+    await waitFor(() => expect(lastSave().payload.cover).toBe('remove'))
+    expect(lastSave().files).toEqual({})
   })
 
   it('shows cover copy and download buttons when a cover image exists', () => {
@@ -425,9 +441,8 @@ describe('BookDetailDialog cover palette', () => {
     expect(screen.getByRole('button', { name: 'Sage Green' })).toHaveAttribute('aria-pressed', 'true')
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(apiPatch).toHaveBeenCalled())
-    const body = apiPatch.mock.calls[0][1] as { coverPaletteId?: string | null }
-    expect(body.coverPaletteId).toBe('sage')
+    await waitFor(() => expect(apiSave).toHaveBeenCalled())
+    expect(lastSave().payload.book).toMatchObject({ coverPaletteId: 'sage' })
   })
 
   it('pre-selects the swatch pinned in detail meta', () => {
@@ -446,9 +461,8 @@ describe('BookDetailDialog cover palette', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    await waitFor(() => expect(apiPatch).toHaveBeenCalled())
-    const body = apiPatch.mock.calls[0][1] as { coverPaletteId?: string | null }
-    expect(body.coverPaletteId).toBeNull()
+    await waitFor(() => expect(apiSave).toHaveBeenCalled())
+    expect(lastSave().payload.book).toMatchObject({ coverPaletteId: null })
   })
 
   it('hides the palette button while a real cover is shown', () => {
@@ -931,9 +945,9 @@ describe('BookDetailDialog description draft', () => {
     fireEvent.change(description, { target: { value: '  第一行\n第二行' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    await waitFor(() => expect(apiPatch).toHaveBeenCalled())
-    const body = apiPatch.mock.calls[0][1] as { bookmeta: { description?: string } }
-    expect(body.bookmeta.description).toBe('  第一行\n第二行')
+    await waitFor(() => expect(apiSave).toHaveBeenCalled())
+    const book = lastSave().payload.book as { bookmeta: { description?: string } }
+    expect(book.bookmeta.description).toBe('  第一行\n第二行')
   })
 })
 
@@ -964,9 +978,9 @@ describe('BookDetailDialog identifier', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(LONG_IDENTIFIER))
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(apiPatch).toHaveBeenCalled())
-    const body = apiPatch.mock.calls[0][1] as { bookmeta: Record<string, unknown> }
-    expect(body.bookmeta).toHaveProperty('identifier', LONG_IDENTIFIER)
+    await waitFor(() => expect(apiSave).toHaveBeenCalled())
+    const book = lastSave().payload.book as { bookmeta: Record<string, unknown> }
+    expect(book.bookmeta).toHaveProperty('identifier', LONG_IDENTIFIER)
   })
 })
 
@@ -988,7 +1002,7 @@ describe('BookDetailDialog direct metadata editing', () => {
     fireEvent.change(dialog.getByRole('textbox', { name: '书名' }), { target: { value: ' New Title ' } })
     fireEvent.click(dialog.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(updateBookMutateAsync).toHaveBeenCalledWith({ bookId: 'book-1', title: 'New Title' }))
-    expect(apiPut).not.toHaveBeenCalled()
+    expect(apiSave).not.toHaveBeenCalled()
   })
 
   it('edits all authors together while preserving left-click author filtering', async () => {
@@ -1162,7 +1176,7 @@ describe('BookDetailDialog pinned cover editing', () => {
     // The ref travels with the call so the hook can route by book instead of
     // guessing from the surrounding view.
     expect(removeCoverMutate).toHaveBeenCalledWith(expect.objectContaining({ bookId: 'book-1' }))
-    expect(apiPut).not.toHaveBeenCalled()
+    expect(apiSave).not.toHaveBeenCalled()
     expect(updateBookMutate).not.toHaveBeenCalled()
   })
 

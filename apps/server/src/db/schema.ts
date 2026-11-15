@@ -606,6 +606,10 @@ export const libraryBooks = sqliteTable('library_books', {
   // derived-at-write scalar for sort/filter/search (see architecture.md).
   authors: text('authors', { mode: 'json' }).$type<string[]>().notNull().default([]),
   description: text('description').notNull().default(''),
+  // Card-local summary. Null = inherit the revision's `bookmeta.description`,
+  // which is the only option on a collected card: its revision belongs to the
+  // shared library and the immutable-content boundary forbids rewriting it.
+  descriptionOverride: text('description_override'),
   coverKey: text('cover_key'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),

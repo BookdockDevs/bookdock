@@ -1,22 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
-import type { CatalogBook, CatalogBookUpdateReq, CatalogVersion, CatalogVersionUpdateReq, MetadataProviderId } from '@bookdock/shared'
+import type { CatalogBook, CatalogBookUpdateReq, CatalogVersion, CatalogVersionUpdateReq, MetadataProviderId, UndoReceipt } from '@bookdock/shared'
 
+import { apiSave } from '@/api/client'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { invalidateActivityQueries } from '@/features/activity/hooks'
 import { formatAuthorList } from '@/lib/utils'
 
 import { versionOrdinal } from '../book-row'
+import { matchCategoryByName } from '../taxonomy'
 import {
   useCatalogVersionMetadataSource,
   useCreateLibraryTag,
+  useLibraryCategories,
   useLibraryTags,
-  useRemoveCatalogVersionCover,
-  useUpdateCatalogBook,
-  useUpdateCatalogVersion,
-  useUploadCatalogVersionCover,
 } from '../hooks'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
 import BookCoverEditor from './book-detail/BookCoverEditor'
@@ -26,6 +27,7 @@ import { isMachineIdentifier, parseAuthorList, type MetaFormValues } from './boo
 import MetadataLookupDialog from './book-detail/MetadataLookupDialog'
 import MetadataLookupDropdown from './book-detail/MetadataLookupDropdown'
 import { hasRestorableField, sourceTextForField, type DraftTextField } from './book-detail/metadata-source'
+import { mergePendingTagNames } from './book-detail/pending-tags'
 import VersionSelect from './VersionSelect'
 
 interface WorkEditDialogProps {
@@ -124,13 +126,11 @@ function buildInitialDrafts(versions: CatalogVersion[]): Record<string, VersionD
 
 export default function WorkEditDialog({ work, libraryId, version, onClose }: WorkEditDialogProps) {
   const _ = useTranslation()
-  const updateBook = useUpdateCatalogBook()
-  const updateVersion = useUpdateCatalogVersion()
-  const uploadVersionCover = useUploadCatalogVersionCover()
-  const removeVersionCover = useRemoveCatalogVersionCover()
+  const queryClient = useQueryClient()
 
   const { data: tagsData } = useLibraryTags(libraryId)
   const createTag = useCreateLibraryTag()
+  const { data: categoriesData } = useLibraryCategories(libraryId)
 
   const [initialDrafts] = useState<Record<string, VersionDraft>>(() => buildInitialDrafts(work.versions))
   const [drafts, setDrafts] = useState<Record<string, VersionDraft>>(() => ({ ...initialDrafts }))
@@ -144,6 +144,12 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
   const [categoryId, setCategoryId] = useState<string | null>(work.categoryId)
   const [categoryTemplateKey, setCategoryTemplateKey] = useState<string | undefined>(undefined)
   const [tagIds, setTagIds] = useState<Set<string>>(() => new Set(work.tags.map((t) => t.id)))
+  // Scraped tag names that are not in this library yet: created on save only, so
+  // closing the dialog or dropping them leaves no orphan tags behind.
+  const [pendingTagNames, setPendingTagNames] = useState<string[]>([])
+  // A scraped category name that matches nothing here is created on save, the
+  // same way pending tags are.
+  const [pendingCategoryName, setPendingCategoryName] = useState<string | null>(null)
   const [defaultVersionLinkId, setDefaultVersionLinkId] = useState<string | null>(
     work.defaultVersionLinkId || work.versions[0]?.id || null,
   )
@@ -207,8 +213,8 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
     })
   }
 
-  const saving = updateBook.isPending || updateVersion.isPending
-    || uploadVersionCover.isPending || removeVersionCover.isPending || createTag.isPending
+  const [savingSave, setSaving] = useState(false)
+  const saving = savingSave || createTag.isPending
 
   const invalidVersion = work.versions.find((v) => drafts[v.id] && !drafts[v.id].title.trim())
 
@@ -255,78 +261,97 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
       return
     }
 
-    const bookPatch: CatalogBookUpdateReq = {}
+    const bookPatch: CatalogBookUpdateReq & { tagNames?: string[] } = {}
     if (categoryTemplateKey) bookPatch.categoryTemplateKey = categoryTemplateKey
+    else if (pendingCategoryName) bookPatch.categoryName = pendingCategoryName
     else if (categoryId !== work.categoryId) bookPatch.categoryId = categoryId
+    // Scraped tags only became names: they ride along with the save and the
+    // server creates the missing ones, so an abandoned dialog leaves no rows.
     const initialTagIds = work.tags.map((t) => t.id)
     const nextTagIds = [...tagIds]
-    if (nextTagIds.length !== initialTagIds.length || nextTagIds.some((id) => !initialTagIds.includes(id))) {
+    const tagsChanged = nextTagIds.length !== initialTagIds.length || nextTagIds.some((id) => !initialTagIds.includes(id))
+    if (tagsChanged || pendingTagNames.length > 0) {
       bookPatch.tagIds = nextTagIds
+      if (pendingTagNames.length > 0) bookPatch.tagNames = pendingTagNames
     }
     if (work.versions.length > 1 && defaultVersionLinkId !== work.defaultVersionLinkId) {
       bookPatch.defaultVersionLinkId = defaultVersionLinkId
     }
 
+    type VersionSave = { id: string; patch?: CatalogVersionUpdateReq; cover?: 'replace' | 'remove' }
+    const versionSaves: VersionSave[] = []
+    const coverFiles: Record<string, File> = {}
+    for (const v of work.versions) {
+      const d = drafts[v.id]
+      const initial = initialDrafts[v.id]
+      if (!d || !initial) continue
+      const save: VersionSave = { id: v.id }
+      if (d.coverRemovalPending) save.cover = 'remove'
+      else if (d.pendingCoverFile) {
+        save.cover = 'replace'
+        coverFiles[`cover:${v.id}`] = d.pendingCoverFile
+      }
+
+      const versionPatch: CatalogVersionUpdateReq = {}
+      const name = d.name.trim()
+      if (name !== initial.name.trim()) versionPatch.name = name
+      const title = d.title.trim()
+      if (title !== initial.title) versionPatch.title = title
+      const authors = parseAuthorList(d.authors)
+      if (authors.join('\n') !== parseAuthorList(initial.authors).join('\n')) versionPatch.authors = authors
+      if (d.description !== initial.description) versionPatch.description = d.description
+
+      // Unknown keys ride along: the patch replaces the whole override
+      // object, so rebuilding from the seven owned fields alone would drop
+      // anything the editor cannot show.
+      const rawMeta = v.meta ?? {}
+      const untouched = Object.fromEntries(
+        Object.entries(rawMeta).filter(([key]) => !(KNOWN_META_KEYS as readonly string[]).includes(key)),
+      )
+      const nextMeta = { ...untouched, ...metaRecord(d) }
+      if (JSON.stringify(nextMeta) !== JSON.stringify({ ...untouched, ...metaRecord(initial) })) {
+        versionPatch.meta = nextMeta
+      }
+
+      if (Object.keys(versionPatch).length > 0) save.patch = versionPatch
+      if (save.patch || save.cover) versionSaves.push(save)
+    }
+
+    if (Object.keys(bookPatch).length === 0 && versionSaves.length === 0) {
+      notify.info({ key: 'library.catalogNoChanges' })
+      onClose()
+      return
+    }
+
+    setSaving(true)
     try {
-      const requests: Promise<unknown>[] = []
-      if (Object.keys(bookPatch).length > 0) {
-        requests.push(updateBook.mutateAsync({ libraryId, libraryBookId: work.id, patch: bookPatch }))
-      }
-
-      for (const v of work.versions) {
-        const d = drafts[v.id]
-        const initial = initialDrafts[v.id]
-        if (!d || !initial) continue
-
-        if (d.coverRemovalPending) {
-          requests.push(removeVersionCover.mutateAsync({ libraryId, libraryBookId: work.id, versionLinkId: v.id }))
-        } else if (d.pendingCoverFile) {
-          requests.push(uploadVersionCover.mutateAsync({ libraryId, libraryBookId: work.id, versionLinkId: v.id, file: d.pendingCoverFile }))
-        }
-
-        const versionPatch: CatalogVersionUpdateReq = {}
-        const name = d.name.trim()
-        if (name !== initial.name.trim()) versionPatch.name = name
-        const title = d.title.trim()
-        if (title !== initial.title) versionPatch.title = title
-        const authors = parseAuthorList(d.authors)
-        if (authors.join('\n') !== parseAuthorList(initial.authors).join('\n')) versionPatch.authors = authors
-        if (d.description !== initial.description) versionPatch.description = d.description
-
-        // Unknown keys ride along: the patch replaces the whole override
-        // object, so rebuilding from the seven owned fields alone would drop
-        // anything the editor cannot show.
-        const rawMeta = v.meta ?? {}
-        const untouched = Object.fromEntries(
-          Object.entries(rawMeta).filter(([key]) => !(KNOWN_META_KEYS as readonly string[]).includes(key)),
-        )
-        const nextMeta = { ...untouched, ...metaRecord(d) }
-        if (JSON.stringify(nextMeta) !== JSON.stringify({ ...untouched, ...metaRecord(initial) })) {
-          versionPatch.meta = nextMeta
-        }
-
-        if (Object.keys(versionPatch).length > 0) {
-          requests.push(updateVersion.mutateAsync({ libraryId, libraryBookId: work.id, versionLinkId: v.id, patch: versionPatch }))
-        }
-      }
-
-      if (requests.length === 0) {
-        notify.info({ key: 'library.catalogNoChanges' })
-        onClose()
-        return
-      }
-      const results = await Promise.allSettled(requests)
-      const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-      if (failures.length) {
-        const succeeded = results.length - failures.length
-        if (succeeded > 0) notify.warning({ key: 'library.catalogSavePartial', params: { succeeded, failed: failures.length } })
-        else notify.error(getUserErrorNotification(failures[0].reason, 'library.catalogWorkSaveFailed'))
-        return
-      }
-      notify.success(_('library.catalogWorkSaved'))
+      // One request, one transaction, one undo receipt: the dialog used to fire
+      // a patch per row plus one upload per cover, none of which undo could
+      // describe as a single action.
+      const saved = await apiSave<{ data: unknown; undo?: UndoReceipt }>(
+        `/libraries/${libraryId}/books/${work.id}/save`,
+        {
+          ...(Object.keys(bookPatch).length > 0 ? { work: bookPatch } : {}),
+          ...(versionSaves.length > 0 ? { versions: versionSaves } : {}),
+        },
+        coverFiles,
+      )
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] }),
+        queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'categories'] }),
+        queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] }),
+        queryClient.invalidateQueries({ queryKey: ['batch-selection'] }),
+        queryClient.invalidateQueries({ queryKey: ['books'] }),
+        queryClient.invalidateQueries({ queryKey: ['book'] }),
+        invalidateActivityQueries(queryClient, libraryId),
+      ])
+      if (saved.undo) notify.success(_('library.catalogWorkSaved'), { undo: saved.undo })
+      else notify.success(_('library.catalogWorkSaved'))
       onClose()
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'library.catalogWorkSaveFailed'))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -446,9 +471,14 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
             onCategoryChange={(value) => {
               setCategoryId(value.categoryId ?? null)
               setCategoryTemplateKey(value.categoryTemplateKey)
+              setPendingCategoryName(null)
             }}
             onTagChange={setTagIds}
             tags={tagsData?.data ?? []}
+            pendingTagNames={pendingTagNames}
+            onRemovePendingTag={(name) => setPendingTagNames((prev) => prev.filter((tag) => tag !== name))}
+            pendingCategoryName={pendingCategoryName}
+            onRemovePendingCategory={() => setPendingCategoryName(null)}
             onCreateTag={async (name) => (await createTag.mutateAsync({ libraryId, name })).data.id}
             creatingTag={createTag.isPending}
           />
@@ -475,7 +505,7 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
           initialProvider={metadataLookup.provider}
           autoSearch={metadataLookup.autoSearch}
           onClose={() => setMetadataLookup({ open: false })}
-          onApply={(next, cover) => {
+          onApply={(next, cover, classification) => {
             const current: Record<DraftTextField, string> = {
               title: activeDraft.title,
               authors: activeDraft.authors,
@@ -494,6 +524,36 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
             }
             if (Object.keys(patch).length > 0) updateDraft(activeVersion.id, patch)
             if (cover) handleCoverFilePicked(cover)
+            if (classification) {
+              if (classification.category?.trim()) {
+                const rawCat = classification.category.trim()
+                // Exact name or nothing: an unknown one is created by the save.
+                const existing = matchCategoryByName(categoriesData?.data ?? [], rawCat)
+                setCategoryId(existing?.id ?? null)
+                setCategoryTemplateKey(undefined)
+                setPendingCategoryName(existing ? null : rawCat)
+              }
+              if (classification.tags?.length) {
+                const currentTags = tagsData?.data ?? []
+                const toAddIds: string[] = []
+                const toAddNames: string[] = []
+                for (const tagName of classification.tags) {
+                  const trimmed = tagName.trim()
+                  if (!trimmed) continue
+                  const found = currentTags.find((t) => t.name.toLowerCase() === trimmed.toLowerCase())
+                  if (found) toAddIds.push(found.id)
+                  else toAddNames.push(trimmed)
+                }
+                if (toAddIds.length > 0) {
+                  setTagIds((prev) => new Set([...prev, ...toAddIds]))
+                }
+                if (toAddNames.length > 0) {
+                  // Deferred to save: creating them here would persist tags even
+                  // when the dialog is cancelled right after scraping.
+                  setPendingTagNames((prev) => mergePendingTagNames(prev, toAddNames))
+                }
+              }
+            }
             setMetadataLookup({ open: false })
           }}
         />

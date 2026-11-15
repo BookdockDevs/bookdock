@@ -121,8 +121,8 @@ export default function SmartMenu({
     '--slide-y': position.dir === 'down' ? '-4px' : '4px',
   } as React.CSSProperties
 
-  // Portaled to body: fixed + z-50 only escapes ancestors that create a
-  // stacking context (e.g. the sticky sidebar) when the DOM node is a root child.
+  // Portaled to body: fixed + z-[100] escapes ancestors and dialogs/modals (z-[70])
+  // so menus remain cleanly on top of whichever surface spawned them.
   return createPortal(
     <div
       id={id}
@@ -135,7 +135,7 @@ export default function SmartMenu({
         e.stopPropagation()
       }}
       className={cn(
-        'fixed z-50 rounded-xl border p-1 shadow-xl backdrop-blur-md',
+        'fixed z-[100] rounded-xl border p-1 shadow-xl backdrop-blur-md',
         autoWidth && 'w-max',
         themeClass,
         className,

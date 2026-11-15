@@ -471,7 +471,7 @@ export default function AppendContentModal({ target, onClose }: AppendContentMod
         )}
 
         {saveError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{_(saveError)}</p>}
-        <div data-toast-obstacle="" className="flex items-center justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
+        <div className="flex items-center justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
           <Button variant="secondary" onClick={onClose} disabled={isSaving}>{_('library.cancel')}</Button>
           <Button onClick={handleSave} disabled={!hasInput || isSaving}>
             {isSaving ? (

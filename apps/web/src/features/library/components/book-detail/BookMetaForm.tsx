@@ -28,8 +28,15 @@ interface BookMetaFormProps {
    * the version name and the default-version badge here. */
   headerSlot?: ReactNode
   identifier?: string
-  /** Hides the description and the extended groups (library-owned books). */
+  /**
+   * Hides the extended publication groups (library-owned books, whose shared
+   * revision the card may not rewrite). The description stays: a collected card
+   * carries its own copy in a card-level override.
+   */
   limited?: boolean
+  /** Rendered beside the description label: the "custom / restore" affordance
+   * a collected card needs once its summary stops following the library. */
+  descriptionNote?: ReactNode
   source?: BookMetadataSourceRes | null
   sourceError?: unknown
   onRetrySource?: () => void
@@ -63,6 +70,7 @@ export default function BookMetaForm({
   headerSlot,
   identifier,
   limited = false,
+  descriptionNote,
   source = null,
   sourceError = null,
   onRetrySource,
@@ -191,27 +199,30 @@ export default function BookMetaForm({
         </div>
       </section>
 
+      <div>
+        <label htmlFor={`${idBase}-description`} className={labelClass}>
+          <span className="flex min-w-0 items-center gap-2">
+            {_('library.descriptionSection')}
+            {descriptionNote}
+          </span>
+          <span className="shrink-0 text-[11px] font-normal text-stone-400 dark:text-stone-500">{values.description.length} / 4000</span>
+        </label>
+        <div className="relative">
+          <textarea
+            id={`${idBase}-description`}
+            rows={6}
+            aria-label={_('library.descriptionSection') as string}
+            maxLength={4000}
+            value={values.description}
+            onChange={(e) => setField('description', e.target.value)}
+            className={cn(textareaClass, descriptionRestore && actionInset)}
+          />
+          {descriptionRestore}
+        </div>
+      </div>
+
       {!limited && (
         <>
-          <div>
-            <label htmlFor={`${idBase}-description`} className={labelClass}>
-              <span>{_('library.descriptionSection')}</span>
-              <span className="text-[11px] font-normal text-stone-400 dark:text-stone-500">{values.description.length} / 4000</span>
-            </label>
-            <div className="relative">
-              <textarea
-                id={`${idBase}-description`}
-                rows={6}
-                aria-label={_('library.descriptionSection') as string}
-                maxLength={4000}
-                value={values.description}
-                onChange={(e) => setField('description', e.target.value)}
-                className={cn(textareaClass, descriptionRestore && actionInset)}
-              />
-              {descriptionRestore}
-            </div>
-          </div>
-
           <div>
             <button
               type="button"

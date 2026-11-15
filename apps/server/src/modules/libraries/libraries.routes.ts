@@ -9,6 +9,7 @@ import {
   catalogUploadSchema,
   catalogVersionMoveSchema,
   catalogVersionUpdateSchema,
+  catalogWorkSaveSchema,
   collectBookSchema,
   editorEpubSaveSchema,
   editorTxtSaveSchema,
@@ -67,6 +68,7 @@ import {
   updateCatalogBook,
   updateCatalogBookCover,
   updateCatalogVersion,
+  saveCatalogWork,
   updateCatalogVersionCover,
   getCatalogBatchSelection,
   organizeCatalogBatch,
@@ -77,6 +79,7 @@ import { appendCityVersionContent, getVersionTocState, previewCityAppend, previe
 import { listSearchAuthors } from './search-expression'
 import { AppError } from '../../middleware/error'
 import { undoReceiptPayload } from '../../lib/undo'
+import { readJsonOrMultipartPayload } from '../../lib/multipart-payload'
 import { decodeTextBuffer } from '../../formats/txt'
 import { getEditorAccess, getEditorEpubContent, saveManagedEditorEpubContent, saveManagedEditorTxtContent } from '../books/content-editor.service'
 
@@ -421,6 +424,23 @@ librariesRoutes.patch('/:id/books/:bookId', async (c) => {
   }
   const book = await updateCatalogBook(user.id, c.req.param('id'), c.req.param('bookId'), parsed.data)
   return c.json({ data: book })
+})
+
+// One catalog-editor save: work patch, every version patch and every cover in
+// a single transaction behind a single undo receipt. Replaces the dialog's old
+// fan-out of one PATCH per row plus one upload per cover, which no receipt
+// could describe as one action.
+librariesRoutes.post('/:id/books/:bookId/save', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
+  const { payload, files } = await readJsonOrMultipartPayload(c)
+  const parsed = catalogWorkSaveSchema.safeParse(payload)
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid save request', details: parsed.error.flatten() } }, 400)
+  }
+  const undo: { token?: string } = {}
+  const book = await saveCatalogWork(user.id, c.req.param('id'), c.req.param('bookId'), parsed.data, files, undo)
+  return c.json({ data: book, ...(undo.token ? { undo: undoReceiptPayload(undo.token) } : {}) })
 })
 
 librariesRoutes.put('/:id/books/:bookId/cover', async (c) => {

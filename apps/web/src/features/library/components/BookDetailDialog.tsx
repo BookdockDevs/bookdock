@@ -10,7 +10,7 @@ import { localReviewBookContext } from '@/features/local-library/reviews'
 import type { ClientLibraryBookView, CatalogBook, Library, MetadataProviderId, Review, UndoReceipt } from '@bookdock/shared'
 import { clientScopeKey } from '@bookdock/shared'
 
-import { apiDelete, apiPatch, apiPut, apiUpload } from '@/api/client'
+import { apiSave } from '@/api/client'
 import { useBookChapters } from '@/api/hooks/useBookChapters'
 import { READING_RECORDS_KEY } from '@/api/hooks/reading-records'
 import Modal from '@/components/ui/Modal'
@@ -20,7 +20,8 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import type { ToastMessage } from '@/stores/toast.store'
 
-import { invalidateDeviceMembershipQueries, useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useTags, useCreateTag, useVersionTocState, useLibraries } from '../hooks'
+import { invalidateDeviceMembershipQueries, useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useTags, useCreateTag, useLibraryCategories, useVersionTocState, useLibraries } from '../hooks'
+import { matchCategoryByName } from '../taxonomy'
 import { warmEditorEntry } from '@/features/content-editor/lib/editor-entry-prefetch'
 
 import AppendContentModal from './AppendContentModal'
@@ -34,6 +35,7 @@ import MetadataLookupDropdown from './book-detail/MetadataLookupDropdown'
 import type { DraftTextField } from './book-detail/metadata-source'
 import { applySourceAllToDraft, applySourceFieldToDraft, hasRestorableField, PRIVATE_ALL_TEXT_FIELDS, PRIVATE_B_TEXT_FIELDS } from './book-detail/metadata-source'
 import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
+import { mergePendingTagNames } from './book-detail/pending-tags'
 import { draftFrom, draftToBookmetaPreserving, isMachineIdentifier, parseAuthorList, type MetaDraft } from './book-detail/types'
 import TocRulePicker from './TocRulePicker'
 import VersionSelect from './VersionSelect'
@@ -86,6 +88,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const privateLibraryId = isLocalBook ? null : user?.privateLibraryId ?? librariesData?.data.find((library) => library.type === 'private')?.id ?? null
   const { data: tagsData } = useTags({ fallbackAnonymous: isLocalBook })
   const createTag = useCreateTag()
+  const { data: categoriesData } = useLibraryCategories(privateLibraryId)
 
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -100,6 +103,12 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null)
   const [categorySel, setCategorySel] = useState<{ categoryId?: string | null; categoryTemplateKey?: string }>({ categoryId: null })
   const [tagSel, setTagSel] = useState<Set<string>>(new Set())
+  // Scraped tag names that are not in the library yet. They stay here until the
+  // dialog is saved, so closing or removing them leaves no orphan tags behind.
+  const [pendingTagNames, setPendingTagNames] = useState<string[]>([])
+  // A scraped category name that matches no library category follows the same
+  // rule as tags: it is created by the save, never by applying a lookup.
+  const [pendingCategoryName, setPendingCategoryName] = useState<string | null>(null)
 
   const [tocRuleOpen, setTocRuleOpen] = useState(false)
   const [appendContentOpen, setAppendContentOpen] = useState(false)
@@ -240,6 +249,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setMetadataLookup({ open: false })
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
+    setPendingTagNames([])
+    setPendingCategoryName(null)
   }, [])
 
   const closeDialog = useCallback(() => {
@@ -269,6 +280,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setDraft(null)
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
+    setPendingTagNames([])
+    setPendingCategoryName(null)
     setTocRuleOpen(false)
     setAppendContentOpen(false)
     setReviewSubView('detail')
@@ -298,6 +311,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
     setCategorySel({ categoryId: displayBook.categoryId ?? null })
+    setPendingTagNames([])
+    setPendingCategoryName(null)
     setTagSel(
       new Set(
         detail?.tagIds ??
@@ -346,47 +361,47 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
         discardEdit()
         return
       }
-      const patch: Record<string, unknown> = {
-        title,
-        author: authors[0] ?? '',
-        authors,
-      }
-      if (!isEditLibraryOwned) {
-        patch.bookmeta = draftToBookmetaPreserving(bookmeta, draft)
-        patch.coverPaletteId = draft.coverPaletteId
-      }
-      const requests: Promise<{ undo?: UndoReceipt }>[] = [
-        apiPatch<{ undo?: UndoReceipt }>(`/books/${book.id}`, patch),
-        apiPut<{ undo?: UndoReceipt }>(`/books/${book.id}/organization`, {
+      // One request, one transaction, one undo receipt. The dialog used to fire
+      // metadata + organization + cover separately, which no single undo could
+      // describe — the cover was not undoable at all, and parallel receipts
+      // cancelled each other out.
+      const coverOp = coverRemovalPending ? 'remove' : pendingCoverFile ? 'replace' : undefined
+      const saved = await apiSave<{ data: unknown; undo?: UndoReceipt }>(`/books/${book.id}/save`, {
+        book: {
+          title,
+          author: authors[0] ?? '',
+          authors,
+          // A collected card owns its summary but not the shared revision, so
+          // the text travels as a card-level override instead of bookmeta.
+          ...(isEditLibraryOwned
+            ? { descriptionOverride: draft.description.trim() ? draft.description : null }
+            : { bookmeta: draftToBookmetaPreserving(bookmeta, draft), coverPaletteId: draft.coverPaletteId }),
+        },
+        organization: {
           ...(categorySel.categoryTemplateKey
             ? { categoryTemplateKey: categorySel.categoryTemplateKey }
-            : { categoryId: categorySel.categoryId }),
+            : pendingCategoryName
+              ? { categoryName: pendingCategoryName }
+              : { categoryId: categorySel.categoryId ?? null }),
           tagIds: [...tagSel],
-        }),
-      ]
-      if (coverRemovalPending) {
-        requests.push(apiDelete<{ undo?: UndoReceipt }>(`/books/${book.id}/cover`))
-      } else if (pendingCoverFile) {
-        requests.push(apiUpload<{ undo?: UndoReceipt }>(`/books/${book.id}/cover`, pendingCoverFile, 'PUT'))
-      }
-      const results = await Promise.allSettled(requests)
+          // Names the library has never seen are created by the save itself, so
+          // backing out of the dialog leaves nothing behind.
+          ...(pendingTagNames.length > 0 ? { tagNames: pendingTagNames } : {}),
+        },
+        ...(coverOp ? { cover: coverOp } : {}),
+      }, coverOp === 'replace' && pendingCoverFile ? { cover: pendingCoverFile } : {})
+
       queryClient.invalidateQueries({ queryKey: ['books'] })
       queryClient.invalidateQueries({ queryKey: ['book', book.id] })
       queryClient.invalidateQueries({ queryKey: ['shelves'] })
       queryClient.invalidateQueries({ queryKey: ['tags'] })
       queryClient.invalidateQueries({ queryKey: ['libraries', privateLibraryId, 'categories'] })
       queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
-      const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-      if (failed.length > 0) {
-        const reason = getUserErrorNotification(failed[0]!.reason, 'toast.updateBookFailed')
-        setSaveError(failed.length < results.length
-          ? { key: 'library.bookUpdatePartial', params: { succeeded: results.length - failed.length, failed: failed.length, reason: _(reason.key) } }
-          : reason)
-      } else {
-        const organizationResult = results[1]
-        notify.success({ key: 'toast.bookUpdated' }, { undo: organizationResult?.status === 'fulfilled' ? organizationResult.value.undo : undefined })
-        discardEdit()
-      }
+      setPendingTagNames([])
+      setPendingCategoryName(null)
+      if (saved.undo) notify.success({ key: 'toast.bookUpdated' }, { undo: saved.undo })
+      else notify.success({ key: 'toast.bookUpdated' })
+      discardEdit()
     } catch (err) {
       setSaveError(getUserErrorNotification(err, 'toast.updateBookFailed'))
     } finally {
@@ -659,6 +674,18 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
                 onChange={(patch) => setDraft((prev) => (prev ? { ...prev, ...patch } : prev))}
                 identifier={identifier}
                 limited={isEditLibraryOwned}
+                descriptionNote={isEditLibraryOwned ? (
+                  detail?.descriptionOverridden && draft.description.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => setDraft((prev) => (prev ? { ...prev, description: '' } : prev))}
+                      disabled={saving}
+                      className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-normal text-amber-700 transition-colors hover:bg-amber-100 disabled:opacity-60 dark:bg-amber-500/15 dark:text-amber-300 dark:hover:bg-amber-500/25"
+                    >
+                      {_('library.descriptionOverrideRestore')}
+                    </button>
+                  ) : undefined
+                ) : undefined}
                 source={sourceData}
                 sourceError={metadataSource.isError ? metadataSource.error : null}
                 onRetrySource={() => void metadataSource.refetch()}
@@ -685,16 +712,68 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
                 }
               />
 
-              {metadataLookup.open && draft && <MetadataLookupDialog draft={draft} limited={isEditLibraryOwned} hasCover={Boolean(pendingCoverFile || displayBook.coverKey || displayBook.format === 'epub')} initialProvider={metadataLookup.provider} autoSearch={metadataLookup.autoSearch} onClose={() => setMetadataLookup({ open: false })} onApply={(next, cover) => { setDraft(next); if (cover) handleCoverFile(cover); setMetadataLookup({ open: false }) }} />}
+              {metadataLookup.open && draft && (
+                <MetadataLookupDialog
+                  draft={draft}
+                  limited={false}
+                  hasCover={Boolean(pendingCoverFile || displayBook.coverKey || displayBook.format === 'epub')}
+                  initialProvider={metadataLookup.provider}
+                  autoSearch={metadataLookup.autoSearch}
+                  onClose={() => setMetadataLookup({ open: false })}
+                  onApply={(next, cover, classification) => {
+                    setDraft(next)
+                    if (cover) handleCoverFile(cover)
+                    if (classification) {
+                      if (classification.category?.trim()) {
+                        const rawCat = classification.category.trim()
+                        // Same rule as tags: only an exact name reuses a row,
+                        // anything else is created by the save.
+                        const existing = matchCategoryByName(categoriesData?.data ?? [], rawCat)
+                        setCategorySel({ categoryId: existing?.id ?? null })
+                        setPendingCategoryName(existing ? null : rawCat)
+                      }
+                      if (classification.tags?.length) {
+                        const currentTags = tagsData?.data ?? []
+                        const toAddIds: string[] = []
+                        const toAddNames: string[] = []
+                        for (const tagName of classification.tags) {
+                          const trimmed = tagName.trim()
+                          if (!trimmed) continue
+                          const found = currentTags.find((t) => t.name.toLowerCase() === trimmed.toLowerCase())
+                          if (found) toAddIds.push(found.id)
+                          else toAddNames.push(trimmed)
+                        }
+                        if (toAddIds.length > 0) {
+                          setTagSel((prev) => new Set([...prev, ...toAddIds]))
+                        }
+                        if (toAddNames.length > 0) {
+                          // Creating the tag here would leave an orphan row as soon
+                          // as the user backs out of the dialog, so the name waits
+                          // for handleSave to turn it into a real tag.
+                          setPendingTagNames((prev) => mergePendingTagNames(prev, toAddNames))
+                        }
+                      }
+                    }
+                    setMetadataLookup({ open: false })
+                  }}
+                />
+              )}
               <BookClassificationEditor
                 className="mt-4 border-t border-stone-100 pt-3.5 dark:border-stone-800"
                 libraryId={privateLibraryId}
                 categoryId={categorySel.categoryId ?? null}
                 categoryTemplateKey={categorySel.categoryTemplateKey}
                 tagIds={tagSel}
-                onCategoryChange={(value) => setCategorySel(value)}
+                onCategoryChange={(value) => {
+                  setCategorySel(value)
+                  setPendingCategoryName(null)
+                }}
                 onTagChange={setTagSel}
                 tags={tagsData?.data ?? []}
+                pendingTagNames={pendingTagNames}
+                onRemovePendingTag={(name) => setPendingTagNames((prev) => prev.filter((tag) => tag !== name))}
+                pendingCategoryName={pendingCategoryName}
+                onRemovePendingCategory={() => setPendingCategoryName(null)}
                 onCreateTag={async (name) => (await createTag.mutateAsync(name)).data.id}
                 creatingTag={createTag.isPending}
               />

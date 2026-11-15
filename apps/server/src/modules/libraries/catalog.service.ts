@@ -1,8 +1,10 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm'
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 
 import { compileSearchExpression } from './search-expression'
 
 import { getDb } from '../../db/client'
+import type * as schemaTypes from '../../db/schema'
 import {
   blobs,
   bookStates,
@@ -20,7 +22,7 @@ import {
 import { AppError } from '../../middleware/error'
 import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
-import { issueUndoReceipt } from '../../lib/undo'
+import { issueUndoReceipt, sameSnapshotValue } from '../../lib/undo'
 import { getStorage } from '../../storage'
 import { blobKey, coverThumbnailKey, detectImageExtension, generateCoverThumbnail } from '../../lib/cover'
 import { sha256 } from '../../lib/hash'
@@ -52,10 +54,14 @@ import {
   type CatalogListRes,
   type CatalogVersion,
   type CatalogVersionUpdateReq,
+  type CatalogWorkSaveReq,
   type HiddenReason,
   type LibraryVersionKind,
 } from '@bookdock/shared'
-import { resolveOrCreateCategoryPath } from './library-category-path'
+import { pruneEmptyCategories, resolveOrCreateCategoryPath } from './library-category-path'
+import { deleteUnusedCreatedTags, resolveTagSet } from '../tags/tag-resolve'
+
+type Database = BetterSQLite3Database<typeof schemaTypes>
 
 /**
  * Catalog reads and metadata management (5.1/5.3). Every entry point resolves
@@ -990,16 +996,32 @@ export async function getCatalogBook(actorId: string, libraryId: string, library
  * written straight onto the row would be discarded by the next projection.
  * Private libraries keep the work row as the editable source.
  */
-export async function updateCatalogBook(actorId: string, libraryId: string, libraryBookId: string, patch: CatalogBookUpdateReq) {
-  const db = getDb()
-  await requireLibraryManager(actorId, libraryId)
-  const work = getWork(libraryId, libraryBookId)
-  const projected = isSharedLibrary(db, libraryId)
-  if (patch.categoryId !== undefined && patch.categoryTemplateKey !== undefined) {
-    throw new AppError('VALIDATION_ERROR', 'Choose an existing category or a recommendation')
+/**
+ * Apply one work patch inside the caller's transaction.
+ *
+ * Split out of `updateCatalogBook` so the catalog editor's single-request save
+ * can compose it with version patches and cover writes in one transaction,
+ * while the standalone PATCH endpoint keeps behaving exactly as before.
+ */
+function applyCatalogBookPatch(
+  tx: Database,
+  args: {
+    libraryId: string
+    actorId: string
+    work: typeof libraryBooks.$inferSelect
+    projected: boolean
+    patch: CatalogBookUpdateReq & { tagNames?: string[] }
+  },
+): { createdTagIds: string[] } {
+  const { libraryId, actorId, work, projected, patch } = args
+  if (patch.categoryId !== undefined && (patch.categoryTemplateKey !== undefined || patch.categoryName !== undefined)) {
+    throw new AppError('VALIDATION_ERROR', 'Choose an existing category, a recommendation or a new name')
   }
   const templatePath = patch.categoryTemplateKey ? categoryTemplatePath(patch.categoryTemplateKey) : undefined
   if (patch.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
+  // A scraped name rides along with the save like tagNames does: created only
+  // when the save actually runs, so a cancelled dialog leaves nothing behind.
+  const categoryPath = templatePath ?? (patch.categoryName ? [patch.categoryName] : undefined)
   const updates: Partial<typeof libraryBooks.$inferInsert> = { updatedAt: Date.now() }
   // Redirected to the default version when the row is a projection.
   const leadPatch: Partial<typeof libraryBookVersions.$inferInsert> = {}
@@ -1032,13 +1054,13 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
     // lookup to this library and work, so a foreign id reads as NOT_FOUND
     // instead of leaking another work's existence.
     if (patch.defaultVersionLinkId !== null) {
-      getVersionLink(libraryId, libraryBookId, patch.defaultVersionLinkId)
+      getVersionLink(libraryId, work.id, patch.defaultVersionLinkId)
     }
     updates.defaultVersionLinkId = patch.defaultVersionLinkId
   }
   if (patch.categoryId !== undefined) {
     if (patch.categoryId !== null) {
-      const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
+      const category = tx.select({ id: libraryCategories.id }).from(libraryCategories)
         .where(and(eq(libraryCategories.id, patch.categoryId), eq(libraryCategories.libraryId, libraryId))).get()
       if (!category) throw new AppError('CATEGORY_NOT_FOUND')
     }
@@ -1046,29 +1068,41 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
   }
   // Taxonomy moves with the metadata, so a rename and a retag are one action and
   // one transaction rather than two calls that can half-apply.
-  db.transaction((tx) => {
-    if (templatePath) updates.categoryId = resolveOrCreateCategoryPath(tx, libraryId, actorId, templatePath)
-    tx.update(libraryBooks).set(updates).where(eq(libraryBooks.id, work.id)).run()
-    // Work fields belong to the default version in a shared catalog, so they
-    // are written there and then projected back onto the row.
-    const wroteLead = Object.keys(leadPatch).length > 0
-    if (wroteLead) {
-      const lead = resolveLeadLink(tx, libraryId, work.id)
-      if (!lead) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
-      tx.update(libraryBookVersions).set({ ...leadPatch, updatedAt: Date.now() })
-        .where(eq(libraryBookVersions.id, lead.id)).run()
+  if (categoryPath) updates.categoryId = resolveOrCreateCategoryPath(tx, libraryId, actorId, categoryPath)
+  tx.update(libraryBooks).set(updates).where(eq(libraryBooks.id, work.id)).run()
+  // Work fields belong to the default version in a shared catalog, so they
+  // are written there and then projected back onto the row.
+  const wroteLead = Object.keys(leadPatch).length > 0
+  if (wroteLead) {
+    const lead = resolveLeadLink(tx, libraryId, work.id)
+    if (!lead) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
+    tx.update(libraryBookVersions).set({ ...leadPatch, updatedAt: Date.now() })
+      .where(eq(libraryBookVersions.id, lead.id)).run()
+  }
+  // A new default version changes the lead, so re-project the work row from
+  // the (now updated) pointer instead of keeping the old edition's values.
+  if (patch.defaultVersionLinkId !== undefined || wroteLead) syncWorkProjection(tx, libraryId, work.id)
+  if (patch.categoryId !== undefined || categoryPath) {
+    const nextCategoryId = updates.categoryId ?? null
+    for (const categoryId of new Set([work.categoryId, nextCategoryId])) {
+      if (categoryId) tx.update(libraryCategories).set({ updatedAt: updates.updatedAt }).where(eq(libraryCategories.id, categoryId)).run()
     }
-    // A new default version changes the lead, so re-project the work row from
-    // the (now updated) pointer instead of keeping the old edition's values.
-    if (patch.defaultVersionLinkId !== undefined || wroteLead) syncWorkProjection(tx, libraryId, work.id)
-    if (patch.categoryId !== undefined || templatePath) {
-      const nextCategoryId = updates.categoryId ?? null
-      for (const categoryId of new Set([work.categoryId, nextCategoryId])) {
-        if (categoryId) tx.update(libraryCategories).set({ updatedAt: updates.updatedAt }).where(eq(libraryCategories.id, categoryId)).run()
-      }
-    }
-    if (patch.tagIds !== undefined) setWorkTags(tx, libraryId, work.id, patch.tagIds)
-  })
+  }
+  let createdTagIds: string[] = []
+  if (patch.tagIds !== undefined || patch.tagNames !== undefined) {
+    const resolved = resolveTagSet(tx, libraryId, actorId, { tagIds: patch.tagIds, tagNames: patch.tagNames })
+    createdTagIds = resolved.createdIds
+    setWorkTags(tx, libraryId, work.id, resolved.tagIds)
+  }
+  return { createdTagIds }
+}
+
+export async function updateCatalogBook(actorId: string, libraryId: string, libraryBookId: string, patch: CatalogBookUpdateReq) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  const work = getWork(libraryId, libraryBookId)
+  const projected = isSharedLibrary(db, libraryId)
+  db.transaction((tx) => applyCatalogBookPatch(tx, { libraryId, actorId, work, projected, patch }))
   return getCatalogBook(actorId, libraryId, work.id)
 }
 
@@ -1258,19 +1292,16 @@ export async function removeCatalogBookCover(actorId: string, libraryId: string,
  * editors therefore write explicit values instead of a "follow work" action.
  * A version is always addressable inside its own library only.
  */
-export async function updateCatalogVersion(
-  actorId: string,
-  libraryId: string,
-  libraryBookId: string,
-  versionLinkId: string,
+/**
+ * Apply one version patch to its row. The caller owns the transaction and the
+ * work-projection refresh, because the editor save writes several versions at
+ * once and only needs one refresh at the end.
+ */
+function applyCatalogVersionPatch(
+  tx: Database,
+  link: typeof libraryBookVersions.$inferSelect,
   patch: CatalogVersionUpdateReq,
 ) {
-  const db = getDb()
-  await requireLibraryManager(actorId, libraryId)
-  // getVersionLink already scopes the lookup to this library and work, so it
-  // also proves the work exists here; no separate work read is needed now that
-  // a version patch no longer writes the work row.
-  const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
   const updates: Partial<typeof libraryBookVersions.$inferInsert> = { updatedAt: Date.now() }
   if (patch.name !== undefined) updates.name = patch.name
   if (patch.title !== undefined) updates.title = patch.title
@@ -1295,8 +1326,24 @@ export async function updateCatalogVersion(
   // Version meta replaces wholesale; an editor writes null for a cleared
   // publication field so it masks the lower layers instead of inheriting them.
   if (patch.meta !== undefined) updates.meta = patch.meta ?? {}
+  tx.update(libraryBookVersions).set(updates).where(eq(libraryBookVersions.id, link.id)).run()
+}
+
+export async function updateCatalogVersion(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  versionLinkId: string,
+  patch: CatalogVersionUpdateReq,
+) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  // getVersionLink already scopes the lookup to this library and work, so it
+  // also proves the work exists here; no separate work read is needed now that
+  // a version patch no longer writes the work row.
+  const link = getVersionLink(libraryId, libraryBookId, versionLinkId)
   db.transaction((tx) => {
-    tx.update(libraryBookVersions).set(updates).where(eq(libraryBookVersions.id, link.id)).run()
+    applyCatalogVersionPatch(tx, link, patch)
     syncWorkProjection(tx, libraryId, libraryBookId)
   })
   const book = await getCatalogBook(actorId, libraryId, libraryBookId)
@@ -1375,6 +1422,221 @@ export async function removeCatalogVersionCover(
   const updated = book.versions.find((v) => v.id === link.id)
   if (!updated) throw new AppError('LIBRARY_VERSION_NOT_FOUND', 'Library version not found')
   return updated
+}
+
+/** Work columns a catalog save can write, in restore order. */
+const SAVE_WORK_COLUMNS = [
+  'title', 'author', 'authors', 'description', 'meta', 'categoryId', 'hidden', 'pinnedAt', 'coverKey', 'defaultVersionLinkId',
+] as const
+
+/** Version columns a catalog save can write, in restore order. */
+const SAVE_VERSION_COLUMNS = ['name', 'title', 'author', 'authors', 'description', 'coverKey', 'meta', 'status'] as const
+
+type SaveWorkColumn = typeof SAVE_WORK_COLUMNS[number]
+type SaveVersionColumn = typeof SAVE_VERSION_COLUMNS[number]
+
+function readWorkSaveState(reader: Pick<ReturnType<typeof getDb>, 'select'>, libraryBookId: string) {
+  return reader.select({
+    title: libraryBooks.title,
+    author: libraryBooks.author,
+    authors: libraryBooks.authors,
+    description: libraryBooks.description,
+    meta: libraryBooks.meta,
+    categoryId: libraryBooks.categoryId,
+    hidden: libraryBooks.hidden,
+    pinnedAt: libraryBooks.pinnedAt,
+    coverKey: libraryBooks.coverKey,
+    defaultVersionLinkId: libraryBooks.defaultVersionLinkId,
+  }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+}
+
+function readVersionSaveState(reader: Pick<ReturnType<typeof getDb>, 'select'>, linkId: string) {
+  return reader.select({
+    name: libraryBookVersions.name,
+    title: libraryBookVersions.title,
+    author: libraryBookVersions.author,
+    authors: libraryBookVersions.authors,
+    description: libraryBookVersions.description,
+    coverKey: libraryBookVersions.coverKey,
+    meta: libraryBookVersions.meta,
+    status: libraryBookVersions.status,
+  }).from(libraryBookVersions).where(eq(libraryBookVersions.id, linkId)).get()
+}
+
+async function stageCoverBlob(file: File) {
+  const buffer = Buffer.from(await file.arrayBuffer())
+  if (buffer.length > 5 * 1024 * 1024) throw new AppError('UPLOAD_TOO_LARGE')
+  const ext = detectImageExtension(buffer)
+  if (!ext) throw new AppError('UNSUPPORTED_FORMAT', 'Cover must be a PNG, JPEG, GIF, SVG or WebP image')
+  const storage = getStorage()
+  const coverKey = blobKey(sha256(buffer), `.cover.${ext}`)
+  await storage.put(coverKey, buffer)
+  const thumb = await generateCoverThumbnail(buffer, ext)
+  if (thumb) await storage.put(coverThumbnailKey(coverKey), thumb)
+  return { coverKey, size: buffer.length }
+}
+
+async function discardStagedCover(coverKey: string) {
+  const db = getDb()
+  const storage = getStorage()
+  for (const key of [coverKey, coverThumbnailKey(coverKey)]) {
+    if (db.select({ key: blobs.key }).from(blobs).where(eq(blobs.key, key)).get()) continue
+    if (await storage.exists(key)) await storage.delete(key)
+  }
+}
+
+/**
+ * One catalog-editor save: work metadata, classification, every version patch
+ * and every cover in a single transaction behind a single undo receipt.
+ *
+ * The dialog used to fan out into a work PATCH plus one PATCH and one cover
+ * call per version. Nothing there was undoable, and once receipts existed they
+ * would have cancelled each other out anyway (only a user's newest receipt
+ * survives), so "undo my edit" could never have described the whole save.
+ *
+ * Tag names arrive with the save for the same reason as the private editor: an
+ * abandoned dialog must not leave tag rows behind.
+ */
+export async function saveCatalogWork(
+  actorId: string,
+  libraryId: string,
+  libraryBookId: string,
+  input: CatalogWorkSaveReq,
+  files: Record<string, File>,
+  undo?: { token?: string },
+) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  const work = getWork(libraryId, libraryBookId)
+  const projected = isSharedLibrary(db, libraryId)
+  const workPatch: CatalogBookUpdateReq & { tagNames?: string[] } = input.work ?? {}
+  const items = input.versions ?? []
+  // Resolve every version up front: a foreign id must fail before anything is
+  // written or any cover blob is staged.
+  const targets = items.map((item) => ({ item, link: getVersionLink(libraryId, libraryBookId, item.id) }))
+  if (new Set(targets.map((target) => target.link.id)).size !== targets.length) {
+    throw new AppError('VALIDATION_ERROR', 'A version appears twice in one save')
+  }
+
+  const stagedCovers = new Map<string, { coverKey: string; size: number }>()
+  for (const { item } of targets) {
+    if (item.cover !== 'replace') continue
+    const file = files[`cover:${item.id}`]
+    if (!file) throw new AppError('VALIDATION_ERROR', 'Cover file is required')
+    stagedCovers.set(item.id, await stageCoverBlob(file))
+  }
+
+  const beforeWork = readWorkSaveState(db, libraryBookId)
+  if (!beforeWork) throw new AppError('LIBRARY_BOOK_NOT_FOUND', 'Library book not found')
+  const beforeVersions = targets.map(({ link }) => ({ id: link.id, state: readVersionSaveState(db, link.id) }))
+  const beforeTags = db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
+    .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
+  const categoriesBefore = new Set(db.select({ id: libraryCategories.id }).from(libraryCategories)
+    .where(eq(libraryCategories.libraryId, libraryId)).all().map((row) => row.id))
+  const now = Date.now()
+  let createdTagIds: string[] = []
+
+  try {
+    db.transaction((tx) => {
+      if (Object.keys(workPatch).length > 0) {
+        createdTagIds = applyCatalogBookPatch(tx, { libraryId, actorId, work, projected, patch: workPatch }).createdTagIds
+      }
+      for (const { item, link } of targets) {
+        if (item.patch) applyCatalogVersionPatch(tx, link, item.patch)
+        const staged = stagedCovers.get(item.id)
+        if (staged) {
+          tx.update(libraryBookVersions).set({ coverKey: staged.coverKey, updatedAt: now })
+            .where(eq(libraryBookVersions.id, link.id)).run()
+          tx.insert(blobs).values({ key: staged.coverKey, size: staged.size, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+        } else if (item.cover === 'remove') {
+          tx.update(libraryBookVersions).set({ coverKey: null, updatedAt: now })
+            .where(eq(libraryBookVersions.id, link.id)).run()
+        }
+      }
+      // Version edits move the projection when they touch the lead version, so
+      // the refresh has to run after the last version write, not in the middle.
+      if (targets.length > 0) syncWorkProjection(tx, libraryId, libraryBookId)
+    })
+  } catch (error) {
+    for (const staged of stagedCovers.values()) await discardStagedCover(staged.coverKey)
+    throw error
+  }
+
+  const afterWork = readWorkSaveState(db, libraryBookId)
+  const afterVersions = targets.map(({ link }) => ({ id: link.id, state: readVersionSaveState(db, link.id) }))
+  const afterTags = db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
+    .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
+  const changedWorkColumns = SAVE_WORK_COLUMNS.filter((column) => !sameSnapshotValue(beforeWork[column], afterWork?.[column]))
+  const changedVersions = beforeVersions
+    .map((before) => {
+      const after = afterVersions.find((candidate) => candidate.id === before.id)?.state
+      const columns = SAVE_VERSION_COLUMNS.filter((column) => !sameSnapshotValue(before.state?.[column], after?.[column]))
+      return { id: before.id, columns, before: before.state, after }
+    })
+    .filter((entry) => entry.columns.length > 0)
+  const tagsChanged = beforeTags.length !== afterTags.length || beforeTags.some((tagId) => !afterTags.includes(tagId))
+  const createdCategoryIds = db.select({ id: libraryCategories.id }).from(libraryCategories)
+    .where(eq(libraryCategories.libraryId, libraryId)).all()
+    .map((row) => row.id).filter((id) => !categoriesBefore.has(id))
+
+  if (undo && (changedWorkColumns.length > 0 || changedVersions.length > 0 || tagsChanged)) {
+    const createdTagsForUndo = [...createdTagIds]
+    undo.token = issueUndoReceipt(actorId, () => db.transaction((tx) => {
+      const currentWork = readWorkSaveState(tx, libraryBookId)
+      if (!currentWork) throw new AppError('UNDO_CONFLICT', 'The work no longer exists')
+      for (const column of changedWorkColumns) {
+        if (!sameSnapshotValue(currentWork[column as SaveWorkColumn], afterWork?.[column as SaveWorkColumn])) {
+          throw new AppError('UNDO_CONFLICT', 'The work was edited after this save')
+        }
+      }
+      for (const version of changedVersions) {
+        const current = readVersionSaveState(tx, version.id)
+        if (!current) throw new AppError('UNDO_CONFLICT', 'A version was removed after this save')
+        for (const column of version.columns) {
+          if (!sameSnapshotValue(current[column as SaveVersionColumn], version.after?.[column as SaveVersionColumn])) {
+            throw new AppError('UNDO_CONFLICT', 'A version was edited after this save')
+          }
+        }
+      }
+      if (tagsChanged) {
+        const currentTags = tx.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
+          .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
+        const sameSet = currentTags.length === afterTags.length && currentTags.every((tagId) => afterTags.includes(tagId))
+        if (!sameSet) throw new AppError('UNDO_CONFLICT', 'The work tags changed after this save')
+      }
+      if (changedWorkColumns.length > 0) {
+        tx.update(libraryBooks).set({
+          ...Object.fromEntries(changedWorkColumns.map((column) => [column, beforeWork[column as SaveWorkColumn]])),
+          updatedAt: Date.now(),
+        }).where(eq(libraryBooks.id, libraryBookId)).run()
+      }
+      for (const version of changedVersions) {
+        tx.update(libraryBookVersions).set({
+          ...Object.fromEntries(version.columns.map((column) => [column, version.before?.[column as SaveVersionColumn]])),
+          updatedAt: Date.now(),
+        }).where(eq(libraryBookVersions.id, version.id)).run()
+      }
+      if (tagsChanged) {
+        tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
+        if (beforeTags.length > 0) {
+          tx.insert(libraryBookTags).values(beforeTags.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
+        }
+        for (const tagId of new Set([...beforeTags, ...afterTags])) {
+          tx.update(libraryTags).set({ updatedAt: Date.now() }).where(eq(libraryTags.id, tagId)).run()
+        }
+      }
+      // Restoring the row is not enough in a shared catalog: the work row is a
+      // projection of the default version, so put it back through the same
+      // one-way copy the save used instead of reconstructing it by hand.
+      if (changedWorkColumns.length > 0 || changedVersions.length > 0) {
+        syncWorkProjection(tx, libraryId, libraryBookId)
+      }
+      deleteUnusedCreatedTags(tx, createdTagsForUndo)
+      pruneEmptyCategories(tx, libraryId, actorId, createdCategoryIds)
+    }))
+  }
+
+  return getCatalogBook(actorId, libraryId, libraryBookId)
 }
 
 function getVersionLink(libraryId: string, libraryBookId: string, versionLinkId: string) {

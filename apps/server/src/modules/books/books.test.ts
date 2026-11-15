@@ -64,6 +64,7 @@ import {
   getBookCover,
   getBookCoverContent,
   removeBookCover,
+  savePrivateBook,
   cleanupStagedUpload,
 } from './books.service'
 import { getReaderBookSettings, updateReaderBookSettings } from './reader-settings.service'
@@ -3777,5 +3778,118 @@ describe('private library search expressions', () => {
     const expression = { kind: 'field', field: 'tag', value: 'fake', id: 'foreign', start: 0, end: 8 }
     await expect(listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, undefined, false, JSON.stringify(expression))).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     expect(await listSearchAuthors(ownerId)).toEqual(['A', 'B'])
+  })
+})
+
+/**
+ * One dialog save is one transaction and one undo receipt. These cover the two
+ * things the old fan-out could not do: put the cover back with the metadata,
+ * and leave no taxonomy behind when the scrape's new tags are undone.
+ */
+describe('savePrivateBook', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let libraryId: string
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    ownerId = seedUser(db, 'owner')
+    libraryId = ensureLibrary(db, ownerId)
+  })
+
+  function makeTag(name: string) {
+    const id = createId('tag')
+    const now = Date.now()
+    db.insert(fullSchema.libraryTags).values({
+      id, libraryId, userId: ownerId, name, sortOrder: 0, pinned: false, hidden: false, createdAt: now, updatedAt: now,
+    }).run()
+    return id
+  }
+
+  function coverFile() {
+    return new File([Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>')], 'cover.svg', { type: 'image/svg+xml' })
+  }
+
+  it('applies metadata, classification and cover in one call', async () => {
+    const book = seedBook(db, ownerId, { title: 'Before' })
+    const tagId = makeTag('已有')
+    const undo: { token?: string } = {}
+
+    const saved = await savePrivateBook(ownerId, book.id, {
+      book: { title: 'After', descriptionOverride: '自己的简介' },
+      organization: {
+        categoryTemplateKey: 'literature.essays',
+        tagIds: [tagId],
+        tagNames: ['新标签'],
+      },
+      cover: 'replace',
+    }, coverFile(), undo)
+
+    expect(saved.title).toBe('After')
+    expect(saved.meta.bookmeta).toMatchObject({ description: '自己的简介' })
+    expect(saved.descriptionOverridden).toBe(true)
+    expect(saved.coverKey).toMatch(/^blobs\/[0-9a-f]{2}\/[0-9a-f]{64}\.cover\.svg$/)
+    expect(saved.tags?.sort()).toEqual(['新标签', '已有'].sort())
+    // A recommendation resolves to its whole path, so the card lands on the leaf.
+    expect(saved.categoryName).toBe('散文随笔')
+    expect(undo.token).toBeTruthy()
+  })
+
+  it('restores metadata, taxonomy and cover together, then drops what it created', async () => {
+    const book = seedBook(db, ownerId, { title: 'Before' })
+    const existingId = makeTag('已有')
+    linkLibraryTag(db, book.id, existingId)
+    const before = libraryBookOf(db, book.id)!
+    const undo: { token?: string } = {}
+
+    await savePrivateBook(ownerId, book.id, {
+      book: { title: 'After' },
+      organization: { categoryTemplateKey: 'literature.essays', tagIds: [existingId], tagNames: ['一次性标签'] },
+      cover: 'replace',
+    }, coverFile(), undo)
+
+    const createdTag = db.select().from(fullSchema.libraryTags)
+      .where(eq(fullSchema.libraryTags.name, '一次性标签')).get()
+    expect(createdTag).toBeTruthy()
+    // A two-level template creates the parent as well as the leaf.
+    expect(db.select().from(fullSchema.libraryCategories)
+      .where(eq(fullSchema.libraryCategories.libraryId, libraryId)).all()).toHaveLength(2)
+
+    await executeUndoReceipt(ownerId, undo.token!)
+
+    const after = libraryBookOf(db, book.id)!
+    expect(after.title).toBe('Before')
+    expect(after.coverKey).toBe(before.coverKey)
+    expect(after.categoryId).toBe(before.categoryId)
+    expect(db.select({ tagId: fullSchema.libraryBookTags.tagId }).from(fullSchema.libraryBookTags)
+      .where(eq(fullSchema.libraryBookTags.libraryBookId, before.id)).all()).toEqual([{ tagId: existingId }])
+    // The tag and the category this save created are gone again: undo restores
+    // the book, not just its links.
+    expect(db.select().from(fullSchema.libraryTags)
+      .where(eq(fullSchema.libraryTags.name, '一次性标签')).get()).toBeUndefined()
+    expect(db.select().from(fullSchema.libraryCategories)
+      .where(eq(fullSchema.libraryCategories.libraryId, libraryId)).all()).toEqual([])
+  })
+
+  it('refuses to undo after the book changed again', async () => {
+    const book = seedBook(db, ownerId, { title: 'Before' })
+    const undo: { token?: string } = {}
+    await savePrivateBook(ownerId, book.id, { book: { title: 'After' } }, undefined, undo)
+    await savePrivateBook(ownerId, book.id, { book: { title: 'Later' } })
+    await expect(executeUndoReceipt(ownerId, undo.token!)).rejects.toMatchObject({ code: 'UNDO_CONFLICT' })
+  })
+
+  it('keeps a whitespace-only override as "inherit"', async () => {
+    const book = seedBook(db, ownerId, { title: 'Before' })
+    const saved = await savePrivateBook(ownerId, book.id, { book: { descriptionOverride: '   ' } })
+    expect(saved.descriptionOverridden).toBe(false)
+    expect(libraryBookOf(db, book.id)?.descriptionOverride).toBeNull()
+  })
+
+  it('rejects a cover operation without the file', async () => {
+    const book = seedBook(db, ownerId, { title: 'Before' })
+    await expect(savePrivateBook(ownerId, book.id, { cover: 'replace' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
   })
 })

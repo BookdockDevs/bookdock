@@ -449,7 +449,7 @@ export default function ContentAppendModal({
         )}
 
         {/* Footer actions - 100% matching AppendContentModal */}
-        <div data-toast-obstacle="" className="flex items-center justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
+        <div className="flex items-center justify-end gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
           <Button variant="secondary" onClick={onClose}>
             {_('library.cancel') || '取消'}
           </Button>

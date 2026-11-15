@@ -1528,6 +1528,15 @@ export interface BookDetailRes extends BookListItem {
   revisionId?: string
   filePath: string
   meta: BookMeta
+  /**
+   * Card-local summary the user wrote for a collected card. Null/absent = the
+   * summary is inherited from the revision's `meta.bookmeta.description`.
+   * `meta.bookmeta.description` already carries the effective value, so this is
+   * only what the editor needs to tell "custom" from "inherited".
+   */
+  descriptionOverride?: string | null
+  /** True when `descriptionOverride` is in effect (non-empty). */
+  descriptionOverridden?: boolean
   readerSettings: ReaderBookSettings
   tagIds?: string[]
   cfi?: string | null

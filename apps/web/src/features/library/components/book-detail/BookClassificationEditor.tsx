@@ -19,6 +19,10 @@ interface BookClassificationEditorProps {
   // no id to select and must be rendered apart from the real ones.
   pendingTagNames?: string[]
   onRemovePendingTag?: (name: string) => void
+  // A scraped category the library does not have yet: created on save, so it is
+  // shown apart from the selected category instead of pretending to exist.
+  pendingCategoryName?: string | null
+  onRemovePendingCategory?: () => void
   onCreateTag: (name: string) => Promise<string>
   creatingTag?: boolean
   allowTemplates?: boolean
@@ -35,6 +39,8 @@ export default function BookClassificationEditor({
   tags,
   pendingTagNames = [],
   onRemovePendingTag,
+  pendingCategoryName,
+  onRemovePendingCategory,
   onCreateTag,
   creatingTag,
   allowTemplates = true,
@@ -65,6 +71,25 @@ export default function BookClassificationEditor({
           allowTemplates={allowTemplates}
           onChange={onCategoryChange}
         />
+        {pendingCategoryName && !categoryId && !categoryTemplateKey ? (
+          <span
+            title={_('library.pendingCategoryHint')}
+            className="ml-1.5 inline-flex min-h-[28px] items-center gap-1 rounded-full border border-dashed border-stone-300 bg-transparent py-0.5 pl-2.5 pr-1 align-middle text-xs font-medium text-stone-500 dark:border-stone-600 dark:text-stone-400 select-none"
+          >
+            <span>{pendingCategoryName}</span>
+            <button
+              type="button"
+              aria-label={`${_('reader.delete')} ${pendingCategoryName}`}
+              title={`${_('reader.delete')} ${pendingCategoryName}`}
+              onClick={() => onRemovePendingCategory?.()}
+              className="flex h-4 w-4 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </span>
+        ) : null}
       </div>
 
       {/* Tags Section */}

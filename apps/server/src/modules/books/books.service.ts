@@ -29,7 +29,7 @@ import { effectiveTocRules, getTocRuleForExecution } from '../toc-rules/toc-rule
 import { AppError } from '../../middleware/error'
 import { recordActivityEvent } from '../../lib/activity-events'
 import { createId } from '../../lib/id'
-import { issueUndoReceipt } from '../../lib/undo'
+import { issueUndoReceipt, sameSnapshotValue } from '../../lib/undo'
 import { assertCanContribute, assertLibraryBrowsable, assertMutableContent, ensurePrivateLibrary, getOwnsSourceVersionIds, isLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
 import { assertUserUploadAllowed } from '../auth/auth.service'
 import { categoryFilter, libraryOrderBy, classifyWorkHidden, getWorkHiddenDetail, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
@@ -44,14 +44,15 @@ import { capturePrivateArchiveSnapshots, deleteOwnedIdeasInTx, deleteOwnedReview
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey, detectImageExtension, blobKey, generateCoverThumbnail } from '../../lib/cover'
 import { log } from '../../lib/logger'
-import { categoryTemplatePath, LibrarySearchError, normalizeAuthors, type AppendContentCandidate, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type BookMembershipReq, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PrivateBatchShelfReq, type PrivateBatchUpdateReq, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
+import { categoryTemplatePath, LibrarySearchError, normalizeAuthors, type AppendContentCandidate, type BookSaveReq, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type BookMembershipReq, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PrivateBatchShelfReq, type PrivateBatchUpdateReq, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
 
 import { compileSearchExpression } from '../libraries/search-expression'
 
 import { getReaderBookSettings } from './reader-settings.service'
 import { enqueueReaderArchivePreparation } from './reader-content.service'
 import { readTxtEpubCandidate, sameEpubArchive } from './txt-epub-correspondence'
-import { resolveOrCreateCategoryPath } from '../libraries/library-category-path'
+import { pruneEmptyCategories, resolveOrCreateCategoryPath } from '../libraries/library-category-path'
+import { deleteUnusedCreatedTags, resolveTagSet } from '../tags/tag-resolve'
 
 /**
  * The effective TOC preset for a book: the pinned rule id in books.meta
@@ -195,6 +196,7 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
       )
       OR ${bookVersions.format} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.description')} LIKE ${pattern} ESCAPE '!'
+      OR coalesce(${libraryBooks.descriptionOverride}, '') LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.series')} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.subjects')} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.publisher')} LIKE ${pattern} ESCAPE '!'
@@ -1413,7 +1415,21 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     ? db.select({ name: shelves.name }).from(shelves).where(eq(shelves.id, lb.shelfId)).get()
     : null
   const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
-  const meta = revisionMeta
+  // Card-local summary wins over the revision's own bookmeta. A collected card
+  // owns its row but not the revision behind it, so writing the summary into
+  // `meta.bookmeta` would 403 under the immutable-content rule; the column is
+  // the only place the edit can live. Reads fold it back in so every consumer
+  // (detail, editor, Legado export) keeps reading one field.
+  const descriptionOverride = lb.descriptionOverride?.trim() ? lb.descriptionOverride : null
+  const meta = descriptionOverride === null ? revisionMeta : {
+    ...revisionMeta,
+    bookmeta: {
+      ...(revisionMeta.bookmeta && typeof revisionMeta.bookmeta === 'object' && !Array.isArray(revisionMeta.bookmeta)
+        ? revisionMeta.bookmeta as Record<string, unknown>
+        : {}),
+      description: descriptionOverride,
+    },
+  }
   // 7.7: the UI needs to know a card is library-owned (hide content edits) and
   // which city it came from. A deleted source keeps its id, loses its name.
   const sourceLibrary = lbv.sourceLibraryId
@@ -1472,6 +1488,10 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
       : null,
     // A private row is a collected card by definition.
     collected: true,
+    // Only what the editor needs to tell "custom summary" from "inherited":
+    // `meta.bookmeta.description` already carries the effective text.
+    descriptionOverride,
+    descriptionOverridden: descriptionOverride !== null,
   }
 }
 
@@ -2789,11 +2809,18 @@ export async function getBookEpubBuffer(userId: string | null, bookId: string, o
   return bufferFromStream(await storage.get(book.filePath))
 }
 
-export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; authors?: string[]; hidden?: boolean; bookmeta?: BookMetadata; tocRuleId?: string | null; coverPaletteId?: CoverPaletteId | null }, undo?: { token?: string }) {
+export async function updateBook(userId: string, bookId: string, data: { readStatus?: string; progress?: number; pinned?: boolean; title?: string; author?: string; authors?: string[]; hidden?: boolean; bookmeta?: BookMetadata; descriptionOverride?: string | null; tocRuleId?: string | null; coverPaletteId?: CoverPaletteId | null }, undo?: { token?: string }) {
   const db = getDb()
   const { libraryBookId, libraryBookVersionId, kind } = resolveLibraryBook(userId, bookId)
-  const before = db.select({ libraryId: libraryBooks.libraryId, ownerId: libraryBooks.userId, shelfId: libraryBooks.shelfId, hidden: libraryBooks.hidden })
-    .from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+  const before = db.select({
+    libraryId: libraryBooks.libraryId,
+    ownerId: libraryBooks.userId,
+    shelfId: libraryBooks.shelfId,
+    hidden: libraryBooks.hidden,
+    title: libraryBooks.title,
+    author: libraryBooks.author,
+    authors: libraryBooks.authors,
+  }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
   const beforePin = db.select({ pinnedAt: libraryBookVersions.pinnedAt }).from(libraryBookVersions)
     .where(eq(libraryBookVersions.id, libraryBookVersionId)).get()?.pinnedAt ?? null
   const now = Date.now()
@@ -2838,7 +2865,11 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
   if (data.pinned !== undefined && (beforePin !== null) !== data.pinned) {
     db.update(libraryBookVersions).set({ pinnedAt: data.pinned ? now : null }).where(eq(libraryBookVersions.id, libraryBookVersionId)).run()
   }
-  if (data.title || data.author !== undefined || data.authors !== undefined || data.hidden !== undefined) {
+  const descriptionOverride = data.descriptionOverride === undefined
+    ? undefined
+    : data.descriptionOverride?.trim() ? data.descriptionOverride : null
+  if (data.title || data.author !== undefined || data.authors !== undefined || data.hidden !== undefined
+    || descriptionOverride !== undefined) {
     const normalized = data.authors !== undefined || data.author !== undefined
       ? normalizeAuthors({ author: data.author, authors: data.authors })
       : null
@@ -2848,6 +2879,9 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
       // Card-local hide flag: hiding a collected B only hides the caller's
       // own card, never the shared source (same boundary as title/pin).
       ...(data.hidden !== undefined ? { hidden: data.hidden } : {}),
+      // Card-local summary; null means "inherit the revision's description"
+      // again, which is the only way to write a B's intro at all.
+      ...(descriptionOverride !== undefined ? { descriptionOverride } : {}),
       updatedAt: now,
     }).where(eq(libraryBooks.id, libraryBookId)).run()
   }
@@ -2887,7 +2921,7 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
     // design (same as title/author on the card); never a new revision.
     db.update(contentRevisions).set({ meta: baseMeta }).where(eq(contentRevisions.id, latestRevision.id)).run()
   }
-  if (data.title || data.author !== undefined || data.authors !== undefined || data.hidden !== undefined || touchedMeta || data.pinned !== undefined || data.readStatus !== undefined || data.progress !== undefined) {
+  if (data.title || data.author !== undefined || data.authors !== undefined || data.hidden !== undefined || descriptionOverride !== undefined || touchedMeta || data.pinned !== undefined || data.readStatus !== undefined || data.progress !== undefined) {
     db.update(libraryBooks).set({ updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
   }
   // Card-local fields stay editable on a B whose source died (title, pin,
@@ -2899,7 +2933,7 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
     .where(and(eq(libraries.id, before.libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()
   const changedPin = data.pinned !== undefined && (beforePin !== null) !== data.pinned
   const changedHidden = data.hidden !== undefined && before?.hidden !== data.hidden
-  if (privateLibrary && before?.ownerId === userId && (changedPin || changedHidden)) {
+  if (undo && privateLibrary && before?.ownerId === userId && (changedPin || changedHidden)) {
     const afterPin = data.pinned ? now : null
     const afterHidden = data.hidden
     undoToken = issueUndoReceipt(userId, () => db.transaction((tx) => {
@@ -2920,6 +2954,300 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
   const book = stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true, showHidden: true }))
   if (undo) undo.token = undoToken
   return book
+}
+
+/** The card columns a dialog save can write, in the order they are restored. */
+const SAVE_CARD_COLUMNS = [
+  'title', 'author', 'authors', 'hidden', 'descriptionOverride', 'coverKey', 'categoryId', 'shelfId',
+] as const
+
+type SaveCardColumn = typeof SAVE_CARD_COLUMNS[number]
+
+function readSaveCardState(reader: Pick<ReturnType<typeof getDb>, 'select'>, libraryBookId: string) {
+  return reader.select({
+    title: libraryBooks.title,
+    author: libraryBooks.author,
+    authors: libraryBooks.authors,
+    hidden: libraryBooks.hidden,
+    descriptionOverride: libraryBooks.descriptionOverride,
+    coverKey: libraryBooks.coverKey,
+    categoryId: libraryBooks.categoryId,
+    shelfId: libraryBooks.shelfId,
+  }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+}
+
+/**
+ * One editor save: card metadata, classification and cover in a single
+ * transaction behind a single undo receipt.
+ *
+ * The dialog used to fire three parallel requests (metadata, organization,
+ * cover). That broke undo in two ways the UI could not paper over: only the
+ * user's newest receipt survives on the server, so the parallel receipts
+ * cancelled each other and a "composite" token half-failed silently; and the
+ * cover had no receipt at all, which is why undoing a scrape brought the
+ * summary back but left the new artwork in place.
+ *
+ * Tag names now arrive with the save instead of being created up front, so an
+ * abandoned dialog leaves no rows behind and a rollback takes the new tags with
+ * it. Undo removes the tags this save created once nothing links to them.
+ */
+export async function savePrivateBook(
+  userId: string,
+  bookId: string,
+  input: BookSaveReq,
+  file?: File,
+  undo?: { token?: string },
+) {
+  const db = getDb()
+  const { libraryId, libraryBookId, libraryBookVersionId, kind } = resolveLibraryBook(userId, bookId)
+  const library = db.select({ id: libraries.id }).from(libraries)
+    .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()
+  if (!library) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const before = readSaveCardState(db, libraryBookId)
+  if (!before) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+  const card = input.book ?? {}
+  const organization = input.organization
+  // Same immutability gate as the single-field endpoints: a collected card may
+  // edit itself, never the shared revision behind it. `descriptionOverride`
+  // exists precisely so the summary stays editable under that rule.
+  if (card.bookmeta !== undefined || card.coverPaletteId !== undefined || card.tocRuleId !== undefined) {
+    assertMutableContent(kind)
+  }
+
+  // Validation first, so a rejected save never stages a cover blob.
+  if (organization?.shelfId) {
+    const shelf = db.select({ id: shelves.id }).from(shelves)
+      .where(and(eq(shelves.id, organization.shelfId), eq(shelves.libraryId, libraryId))).get()
+    if (!shelf) throw new AppError('SHELF_NOT_FOUND')
+  }
+  if (organization?.categoryId) {
+    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(and(eq(libraryCategories.id, organization.categoryId), eq(libraryCategories.libraryId, libraryId))).get()
+    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
+  }
+  const templatePath = organization?.categoryTemplateKey
+    ? categoryTemplatePath(organization.categoryTemplateKey)
+    : undefined
+  if (organization?.categoryTemplateKey && !templatePath) {
+    throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
+  }
+  // A scraped category name the library does not have yet rides along with the
+  // save, exactly like tagNames, so an abandoned dialog leaves no empty row.
+  const categoryPathToCreate = templatePath
+    ?? (organization?.categoryName ? [organization.categoryName] : undefined)
+  if (input.cover === 'replace' && !file) throw new AppError('VALIDATION_ERROR', 'Cover file is required')
+  const storage = getStorage()
+  let stagedCoverKey: string | undefined
+  let stagedCoverSize = 0
+  if (input.cover === 'replace' && file) {
+    const buffer = Buffer.from(await file.arrayBuffer())
+    if (buffer.length > 5 * 1024 * 1024) throw new AppError('UPLOAD_TOO_LARGE')
+    const ext = detectImageExtension(buffer)
+    if (!ext) throw new AppError('UNSUPPORTED_FORMAT', 'Cover must be a PNG, JPEG, GIF, SVG or WebP image')
+    stagedCoverKey = blobKey(sha256(buffer), `.cover.${ext}`)
+    stagedCoverSize = buffer.length
+    await storage.put(stagedCoverKey, buffer)
+    const thumb = await generateCoverThumbnail(buffer, ext)
+    if (thumb) await storage.put(coverThumbnailKey(stagedCoverKey), thumb)
+  }
+
+  const latestRevision = db.select().from(contentRevisions)
+    .where(eq(contentRevisions.bookVersionId, bookId)).orderBy(desc(contentRevisions.revisionNo)).all().at(0)
+  const beforeMeta = latestRevision
+    ? JSON.parse(JSON.stringify(latestRevision.meta ?? {})) as Record<string, unknown>
+    : undefined
+  let nextMeta = beforeMeta
+  if (latestRevision) {
+    const meta = { ...(beforeMeta ?? {}) }
+    let touched = false
+    if (card.bookmeta !== undefined) {
+      meta.bookmeta = card.bookmeta
+      touched = true
+    }
+    if (card.tocRuleId !== undefined) {
+      if (card.tocRuleId === null) {
+        delete meta.tocRuleId
+        delete meta.tocRuleAuto
+      } else {
+        const rule = getTocRuleForExecution(userId, card.tocRuleId)
+        if (!rule) throw new AppError('TOC_RULE_NOT_FOUND')
+        meta.tocRuleId = card.tocRuleId
+        meta.tocRuleAuto = false
+      }
+      touched = true
+    }
+    if (card.coverPaletteId !== undefined) {
+      if (card.coverPaletteId === null) delete meta.coverPaletteId
+      else meta.coverPaletteId = card.coverPaletteId
+      touched = true
+    }
+    // The suppression flag is how a private version remembers "this package has
+    // no artwork". A collected card's revision belongs to the library and is
+    // read by every library sharing it, so its flag is never touched here.
+    if (input.cover !== undefined && kind !== 'shared') {
+      if (input.cover === 'replace') delete meta.coverSuppressed
+      else meta.coverSuppressed = true
+      touched = true
+    }
+    if (touched) nextMeta = meta
+  }
+
+  const beforePin = db.select({ pinnedAt: libraryBookVersions.pinnedAt }).from(libraryBookVersions)
+    .where(eq(libraryBookVersions.id, libraryBookVersionId)).get()?.pinnedAt ?? null
+  const previousTags = db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
+    .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
+  const categoriesBefore = categoryPathToCreate
+    ? new Set(db.select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(eq(libraryCategories.libraryId, libraryId)).all().map((row) => row.id))
+    : new Set<string>()
+  const now = Date.now()
+  let createdTagIds: string[] = []
+  let nextTagIds = previousTags
+
+  try {
+    db.transaction((tx) => {
+      const current = tx.select({ id: libraryBooks.id }).from(libraryBooks)
+        .where(eq(libraryBooks.id, libraryBookId)).get()
+      if (!current) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+
+      const normalized = card.authors !== undefined || card.author !== undefined
+        ? normalizeAuthors({ author: card.author, authors: card.authors })
+        : null
+      const descriptionOverride = card.descriptionOverride === undefined
+        ? undefined
+        : card.descriptionOverride?.trim() ? card.descriptionOverride : null
+      let categoryId = organization?.categoryId
+      if (categoryPathToCreate) categoryId = resolveOrCreateCategoryPath(tx, libraryId, userId, categoryPathToCreate)
+      tx.update(libraryBooks).set({
+        ...(card.title ? { title: card.title } : {}),
+        ...(normalized ? { author: normalized.author, authors: normalized.authors } : {}),
+        ...(card.hidden !== undefined ? { hidden: card.hidden } : {}),
+        ...(descriptionOverride !== undefined ? { descriptionOverride } : {}),
+        ...(stagedCoverKey !== undefined ? { coverKey: stagedCoverKey } : {}),
+        ...(input.cover === 'remove' ? { coverKey: null } : {}),
+        ...(organization?.shelfId !== undefined ? { shelfId: organization.shelfId } : {}),
+        ...(categoryId !== undefined ? { categoryId } : {}),
+        updatedAt: now,
+      }).where(eq(libraryBooks.id, libraryBookId)).run()
+
+      if (card.pinned !== undefined && (beforePin !== null) !== card.pinned) {
+        tx.update(libraryBookVersions).set({ pinnedAt: card.pinned ? now : null })
+          .where(eq(libraryBookVersions.id, libraryBookVersionId)).run()
+      }
+      if (nextMeta && latestRevision) {
+        tx.update(contentRevisions).set({ meta: nextMeta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+      }
+      if (organization && (organization.tagIds !== undefined || organization.tagNames !== undefined)) {
+        const resolved = resolveTagSet(tx, libraryId, userId, {
+          tagIds: organization.tagIds,
+          tagNames: organization.tagNames,
+        })
+        createdTagIds = resolved.createdIds
+        nextTagIds = resolved.tagIds
+        tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
+        if (nextTagIds.length > 0) {
+          tx.insert(libraryBookTags).values(nextTagIds.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
+        }
+        for (const tagId of new Set([...previousTags, ...nextTagIds])) {
+          tx.update(libraryTags).set({ updatedAt: now }).where(eq(libraryTags.id, tagId)).run()
+        }
+      }
+      if (organization?.shelfId !== undefined && before.shelfId) {
+        tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, before.shelfId)).run()
+      }
+      if (categoryId !== undefined) {
+        for (const id of new Set([before.categoryId, categoryId])) {
+          if (id) tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, id)).run()
+        }
+      }
+      if (stagedCoverKey) {
+        tx.insert(blobs).values({ key: stagedCoverKey, size: stagedCoverSize, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
+      }
+    })
+  } catch (error) {
+    if (stagedCoverKey) await cleanupStagedCover(stagedCoverKey)
+    throw error
+  }
+
+  const after = readSaveCardState(db, libraryBookId)
+  const afterPin = db.select({ pinnedAt: libraryBookVersions.pinnedAt }).from(libraryBookVersions)
+    .where(eq(libraryBookVersions.id, libraryBookVersionId)).get()?.pinnedAt ?? null
+  const afterMeta = latestRevision
+    ? db.select({ meta: contentRevisions.meta }).from(contentRevisions)
+      .where(eq(contentRevisions.id, latestRevision.id)).get()?.meta as Record<string, unknown> | undefined
+    : undefined
+  const afterTags = db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
+    .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
+  const changedColumns = SAVE_CARD_COLUMNS.filter((column) => !sameSnapshotValue(before[column], after?.[column]))
+  const pinChanged = beforePin !== afterPin
+  const metaChanged = beforeMeta !== undefined && afterMeta !== undefined && !sameSnapshotValue(beforeMeta, afterMeta)
+  const tagsChanged = previousTags.length !== afterTags.length
+    || previousTags.some((tagId) => !afterTags.includes(tagId))
+  const createdCategoryIds = categoryPathToCreate
+    ? db.select({ id: libraryCategories.id }).from(libraryCategories)
+      .where(eq(libraryCategories.libraryId, libraryId)).all()
+      .map((row) => row.id).filter((id) => !categoriesBefore.has(id))
+    : []
+
+  if (undo && (changedColumns.length > 0 || pinChanged || metaChanged || tagsChanged)) {
+    const createdTagsForUndo = [...createdTagIds]
+    undo.token = issueUndoReceipt(userId, () => db.transaction((tx) => {
+      const ownerLibrary = tx.select({ id: libraries.id }).from(libraries)
+        .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()
+      const current = readSaveCardState(tx, libraryBookId)
+      if (!ownerLibrary || !current) {
+        throw new AppError('UNDO_CONFLICT', 'The book is no longer in your private library')
+      }
+      for (const column of changedColumns) {
+        if (!sameSnapshotValue(current[column as SaveCardColumn], after?.[column as SaveCardColumn])) {
+          throw new AppError('UNDO_CONFLICT', 'The book was edited after this save')
+        }
+      }
+      const pin = tx.select({ pinnedAt: libraryBookVersions.pinnedAt }).from(libraryBookVersions)
+        .where(eq(libraryBookVersions.id, libraryBookVersionId)).get()
+      if (pinChanged && (!pin || pin.pinnedAt !== afterPin)) {
+        throw new AppError('UNDO_CONFLICT', 'The book pin changed after this save')
+      }
+      if (metaChanged && latestRevision) {
+        const revision = tx.select({ meta: contentRevisions.meta }).from(contentRevisions)
+          .where(eq(contentRevisions.id, latestRevision.id)).get()
+        if (!revision || !sameSnapshotValue(revision.meta, afterMeta)) {
+          throw new AppError('UNDO_CONFLICT', 'The book metadata changed after this save')
+        }
+      }
+      if (tagsChanged) {
+        const currentTags = tx.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
+          .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
+        const sameSet = currentTags.length === afterTags.length && currentTags.every((tagId) => afterTags.includes(tagId))
+        if (!sameSet) throw new AppError('UNDO_CONFLICT', 'The book tags changed after this save')
+      }
+      tx.update(libraryBooks).set({
+        ...Object.fromEntries(changedColumns.map((column) => [column, before[column as SaveCardColumn]])),
+        updatedAt: Date.now(),
+      }).where(eq(libraryBooks.id, libraryBookId)).run()
+      if (pinChanged) {
+        tx.update(libraryBookVersions).set({ pinnedAt: beforePin })
+          .where(eq(libraryBookVersions.id, libraryBookVersionId)).run()
+      }
+      if (metaChanged && latestRevision && beforeMeta) {
+        tx.update(contentRevisions).set({ meta: beforeMeta }).where(eq(contentRevisions.id, latestRevision.id)).run()
+      }
+      if (tagsChanged) {
+        tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
+        if (previousTags.length > 0) {
+          tx.insert(libraryBookTags).values(previousTags.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
+        }
+        for (const tagId of new Set([...previousTags, ...afterTags])) {
+          tx.update(libraryTags).set({ updatedAt: Date.now() }).where(eq(libraryTags.id, tagId)).run()
+        }
+      }
+      deleteUnusedCreatedTags(tx, createdTagsForUndo)
+      pruneEmptyCategories(tx, libraryId, userId, createdCategoryIds)
+    }))
+  }
+
+  const saved = stripMetaChapters(await resolvePrivateBook(userId, bookId, { allowDeleted: true, skipSourceCheck: true, showHidden: true }))
+  return saved
 }
 
 export async function updateBookCover(userId: string, bookId: string, file: File) {

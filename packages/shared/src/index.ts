@@ -390,8 +390,11 @@ export {
   readerBookSettingsSchema,
   readRevisionSchema,
   bookUpdateSchema,
+  bookSaveSchema,
   systemUpdateStartSchema,
 } from './schema'
+
+export type { BookSaveReq } from './schema'
 
 export { ErrorCode, ErrorHttpStatus } from './errors'
 export * from './reader-content'
@@ -447,6 +450,8 @@ export type {
   CatalogUploadReq,
   CatalogBookUpdateReq,
   CatalogVersionUpdateReq,
+  CatalogVersionSaveReq,
+  CatalogWorkSaveReq,
   CollectBookReq,
   CollectBookRes,
   PushVersionReq,
@@ -490,6 +495,8 @@ export {
   privateBatchShelfSchema,
   privateBatchTrashSchema,
   catalogVersionUpdateSchema,
+  catalogVersionSaveSchema,
+  catalogWorkSaveSchema,
   catalogVersionMoveSchema,
   catalogSimilarQuerySchema,
   collectBookSchema,

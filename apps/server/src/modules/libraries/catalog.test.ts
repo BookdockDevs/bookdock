@@ -14,6 +14,7 @@ import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
+import { executeUndoReceipt } from '../../lib/undo'
 import { registerParser } from '../../formats/registry'
 import { TxtParser } from '../../formats/txt'
 import { EpubParser } from '../../formats/epub'
@@ -44,6 +45,7 @@ import {
   updateCatalogBookCover,
   updateCatalogVersion,
   updateCatalogVersionCover,
+  saveCatalogWork,
 } from './catalog.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -1755,5 +1757,94 @@ describe('shared library catalog', () => {
     // The version override still resolves through the effective merge.
     expect((await getCatalogBook(ownerId, privateLibraryId, created.libraryBookId)).versions[0].effective.title)
       .toBe('Version Override')
+  })
+})
+
+/**
+ * The catalog editor used to write a work patch, one patch per version and one
+ * upload per cover as separate requests. A save is now one transaction with one
+ * receipt, which is the only shape that lets undo describe the whole edit.
+ */
+describe('saveCatalogWork', () => {
+  let db: ReturnType<typeof createTestDb>
+  let ownerId: string
+  let libraryId: string
+
+  function txtFile(name: string, body: string) {
+    return new File([body], name, { type: 'text/plain' })
+  }
+
+  beforeEach(() => {
+    db = createTestDb()
+    vi.spyOn(client, 'getDb').mockReturnValue(db)
+    vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
+    registerParser(new TxtParser())
+    ownerId = createId('user')
+    db.insert(schema.users).values({ id: ownerId, username: 'owner', passwordHash: null, role: 'owner', createdAt: 1 }).run()
+    libraryId = createId('lib')
+    db.insert(schema.libraries).values({
+      id: libraryId, userId: ownerId, type: 'shared', name: 'City',
+      description: '', visibility: 'public', createdAt: 1, updatedAt: 1,
+    }).run()
+  })
+
+  it('applies work, version and cover changes together and undoes all of them', async () => {
+    const uploaded = await uploadCatalogBook(libraryId, ownerId, txtFile('save-work.txt', '第一章\n甲'), { title: 'Before' })
+    const before = await getCatalogBook(ownerId, libraryId, uploaded.libraryBookId)
+    const undo: { token?: string } = {}
+    const cover = new File([Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"></svg>')], 'c.svg', { type: 'image/svg+xml' })
+
+    const saved = await saveCatalogWork(ownerId, libraryId, uploaded.libraryBookId, {
+      work: { tagNames: ['刮削标签'], categoryTemplateKey: 'literature.essays' },
+      versions: [{ id: uploaded.versionLinkId!, patch: { title: 'After', description: 'New summary' }, cover: 'replace' }],
+    }, { [`cover:${uploaded.versionLinkId}`]: cover }, undo)
+
+    expect(saved.title).toBe('After')
+    expect(saved.description).toBe('New summary')
+    expect(saved.tags.map((tag) => tag.name)).toEqual(['刮削标签'])
+    expect(saved.categoryId).toBeTruthy()
+    const savedVersion = saved.versions.find((version) => version.id === uploaded.versionLinkId)!
+    expect(savedVersion.coverKey).toBeTruthy()
+    // A shared catalog projects the lead version onto the work row.
+    expect(saved.coverKey).toBe(savedVersion.coverKey)
+    expect(undo.token).toBeTruthy()
+
+    await executeUndoReceipt(ownerId, undo.token!)
+
+    const restored = await getCatalogBook(ownerId, libraryId, uploaded.libraryBookId)
+    expect(restored.title).toBe(before.title)
+    expect(restored.description).toBe(before.description)
+    expect(restored.tags).toEqual([])
+    expect(restored.categoryId).toBeNull()
+    const beforeVersion = before.versions.find((version) => version.id === uploaded.versionLinkId)!
+    const restoredVersion = restored.versions.find((version) => version.id === uploaded.versionLinkId)!
+    // The upload had already pinned "Before" on the version row, so undo has to
+    // put that value back rather than blank the field.
+    expect(restoredVersion.title).toBe(beforeVersion.title)
+    expect(restoredVersion.description).toBe(beforeVersion.description)
+    expect(restoredVersion.coverKey).toBe(beforeVersion.coverKey)
+    // The tag and category this save created are gone again.
+    expect(db.select().from(schema.libraryTags).where(eq(schema.libraryTags.name, '刮削标签')).all()).toEqual([])
+    expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.libraryId, libraryId)).all()).toEqual([])
+  })
+
+  it('refuses to undo a save that was edited again afterwards', async () => {
+    const uploaded = await uploadCatalogBook(libraryId, ownerId, txtFile('save-conflict.txt', '第一章\n乙'), { title: 'Before' })
+    const undo: { token?: string } = {}
+    await saveCatalogWork(ownerId, libraryId, uploaded.libraryBookId, {
+      versions: [{ id: uploaded.versionLinkId!, patch: { title: 'After' } }],
+    }, {}, undo)
+    await updateCatalogVersion(ownerId, libraryId, uploaded.libraryBookId, uploaded.versionLinkId!, { title: 'Later' })
+    await expect(executeUndoReceipt(ownerId, undo.token!)).rejects.toMatchObject({ code: 'UNDO_CONFLICT' })
+  })
+
+  it('rejects a version that repeats in one save', async () => {
+    const uploaded = await uploadCatalogBook(libraryId, ownerId, txtFile('save-dupe.txt', '第一章\n丙'), { title: 'Before' })
+    await expect(saveCatalogWork(ownerId, libraryId, uploaded.libraryBookId, {
+      versions: [
+        { id: uploaded.versionLinkId!, patch: { title: 'A' } },
+        { id: uploaded.versionLinkId!, patch: { title: 'B' } },
+      ],
+    }, {})).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
   })
 })

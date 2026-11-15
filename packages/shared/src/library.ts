@@ -509,6 +509,8 @@ export const catalogBookUpdateSchema = z.object({
   description: z.string().max(4000).optional(),
   categoryId: z.string().min(1).max(128).nullable().optional(),
   categoryTemplateKey: z.string().min(1).max(128).optional(),
+  /** Category name resolved (or created) inside the same save, like `tagNames`. */
+  categoryName: z.string().trim().min(1).max(100).optional(),
   /** Replaces the work's whole tag set; every id must belong to this library. */
   tagIds: z.array(z.string().min(1).max(128)).optional(),
   /** Work-level hide; manager-only like every other catalog write. */
@@ -549,6 +551,33 @@ export const catalogVersionUpdateSchema = z.object({
 })
 
 export type CatalogVersionUpdateReq = z.infer<typeof catalogVersionUpdateSchema>
+
+/**
+ * One catalog-editor save = one request = one undo receipt. The dialog used to
+ * fan out into a work patch plus one patch and one cover call per version, and
+ * the undo log could describe none of them (parallel receipts also cancelled
+ * each other out, since only a user's newest receipt survives).
+ *
+ * `tagNames` rides along for the same reason as the private editor: the dialog
+ * only knows the names scraped from a source, and creating them ahead of a save
+ * leaves orphan rows behind whenever the user backs out.
+ */
+export const catalogVersionSaveSchema = z.object({
+  id: z.string().min(1).max(128),
+  patch: catalogVersionUpdateSchema.optional(),
+  /** `replace` requires the multipart `cover:<versionLinkId>` file. */
+  cover: z.enum(['replace', 'remove']).optional(),
+})
+
+export const catalogWorkSaveSchema = z.object({
+  work: catalogBookUpdateSchema.extend({
+    tagNames: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  }).optional(),
+  versions: z.array(catalogVersionSaveSchema).max(100).optional(),
+})
+
+export type CatalogVersionSaveReq = z.infer<typeof catalogVersionSaveSchema>
+export type CatalogWorkSaveReq = z.infer<typeof catalogWorkSaveSchema>
 
 /** 5.5: re-group a misfiled version under another work of the same library. */
 export const catalogVersionMoveSchema = z.object({

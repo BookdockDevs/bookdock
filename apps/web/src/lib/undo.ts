@@ -106,6 +106,28 @@ function undoSlotPatch(label: string, undoInSecondary: boolean) {
   }
 }
 
+/**
+ * Report an undo outcome where the user will actually see it.
+ *
+ * The undo affordance lives inside the toast that announced the save, so the
+ * natural way to report the result is to rewrite that toast. It is not reliable
+ * on its own: the toast can be evicted by a higher-priority one, expire, or be
+ * dropped with its queue entry between the click and the response, and
+ * `updateToast` is a silent no-op for an id that no longer exists — which is
+ * how "撤销" could complete with no feedback at all. When the original toast is
+ * gone, post a fresh one instead of losing the outcome.
+ */
+function finishToast(
+  toastId: string,
+  update: Parameters<ReturnType<typeof useToastStore.getState>['updateToast']>[1],
+  fallback: { key: string; type: 'success' | 'error' | 'warning' | 'info' },
+): void {
+  const state = useToastStore.getState()
+  const exists = [...state.toasts, ...state.queuedToasts].some((toast) => toast.id === toastId)
+  if (exists) state.updateToast(toastId, update)
+  else state.addToast({ key: fallback.key }, fallback.type)
+}
+
 function setRunningToast(toastId: string, undoInSecondary: boolean): void {
   useToastStore.getState().updateToast(toastId, {
     ...undoSlotPatch(i18n.t('undo.running'), undoInSecondary),
@@ -115,7 +137,7 @@ function setRunningToast(toastId: string, undoInSecondary: boolean): void {
 
 function setFailedToast(toastId: string, undoInSecondary: boolean): void {
   clearUndo()
-  useToastStore.getState().updateToast(toastId, {
+  finishToast(toastId, {
     message: { key: 'undo.retryableFailure' },
     type: 'error',
     ...(undoInSecondary ? { secondaryAction: undefined } : { action: undefined }),
@@ -124,11 +146,11 @@ function setFailedToast(toastId: string, undoInSecondary: boolean): void {
     undoFallbackDuration: undefined,
     priority: undefined,
     hardExpiresAt: undefined,
-  })
+  }, { key: 'undo.retryableFailure', type: 'error' })
 }
 
 function setConflictToast(toastId: string, undoInSecondary: boolean): void {
-  useToastStore.getState().updateToast(toastId, {
+  finishToast(toastId, {
     message: { key: 'undo.conflict' },
     type: 'error',
     ...(undoInSecondary ? { secondaryAction: undefined } : { action: undefined }),
@@ -137,7 +159,7 @@ function setConflictToast(toastId: string, undoInSecondary: boolean): void {
     undoFallbackDuration: undefined,
     priority: undefined,
     hardExpiresAt: undefined,
-  })
+  }, { key: 'undo.conflict', type: 'error' })
 }
 
 export async function runUndo(): Promise<void> {
@@ -176,7 +198,7 @@ export async function runUndo(): Promise<void> {
       token = null
       running = false
       execute = null
-      useToastStore.getState().updateToast(currentToastId, {
+      finishToast(currentToastId, {
         message: { key: 'undo.succeeded' },
         type: 'success',
         action: undefined,
@@ -186,7 +208,7 @@ export async function runUndo(): Promise<void> {
         undoFallbackDuration: undefined,
         priority: undefined,
         hardExpiresAt: undefined,
-      })
+      }, { key: 'undo.succeeded', type: 'success' })
       window.dispatchEvent(new CustomEvent('bd:undo-complete', { detail: { queryKeys } }))
     } catch (error) {
       if (currentGeneration !== generation || token !== currentToken) return
@@ -249,7 +271,7 @@ export async function runUndo(): Promise<void> {
     running = false
     const partial = undoInSecondary && currentToast?.action
     const partialParams = typeof currentToast?.message === 'object' ? currentToast.message.params : undefined
-    useToastStore.getState().updateToast(currentToastId, {
+    finishToast(currentToastId, {
       message: partial
         ? { key: 'undo.partialSucceeded', params: { succeeded: partialParams?.succeeded ?? 0, failed: partialParams?.failed ?? 0 } }
         : { key: 'undo.succeeded' },
@@ -261,7 +283,7 @@ export async function runUndo(): Promise<void> {
       undoFallbackDuration: undefined,
       priority: undefined,
       hardExpiresAt: undefined,
-    })
+    }, { key: 'undo.succeeded', type: 'success' })
     window.dispatchEvent(new CustomEvent('bd:undo-complete', { detail: { queryKeys } }))
   } catch {
     if (currentGeneration !== generation || token !== currentToken) return

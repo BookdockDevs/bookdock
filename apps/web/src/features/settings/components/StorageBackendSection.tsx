@@ -709,7 +709,6 @@ function StorageConfigModal({ config, connections, onClose }: StorageConfigModal
                 addNewLabel={_('settings.storageBackendConnectionAddNew')}
                 triggerClassName="border-stone-200/90 bg-stone-50/80 py-1.5 shadow-2xs hover:bg-stone-100 dark:bg-stone-800/80 dark:hover:bg-stone-700 cursor-pointer"
                 menuWidth={180}
-                menuClassName="!z-[60]"
                 ariaLabel={_('settings.storageLocationLabel') || '存储目标'}
               />
             </div>

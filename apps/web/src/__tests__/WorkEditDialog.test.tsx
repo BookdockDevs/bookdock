@@ -30,7 +30,13 @@ const HOOKS = vi.hoisted(() => ({
   useCatalogVersionMetadataSource: vi.fn(),
 }))
 
+const apiSave = vi.hoisted(() => vi.fn())
+
 vi.mock('../features/library/hooks', () => HOOKS)
+vi.mock('../api/client', async (original) => ({
+  ...await original<typeof import('../api/client')>(),
+  apiSave: (...args: unknown[]) => apiSave(...args),
+}))
 vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), info: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
 
 global.URL.createObjectURL = vi.fn(() => 'blob:mock-cover-preview')
@@ -78,6 +84,7 @@ describe('WorkEditDialog', () => {
     HOOKS.useUploadCatalogVersionCover.mockReturnValue({ mutateAsync: uploadVersionCover, isPending: false })
     HOOKS.useRemoveCatalogVersionCover.mockReturnValue({ mutateAsync: removeVersionCover, isPending: false })
     HOOKS.useCatalogVersionMetadataSource.mockReturnValue({ data: undefined, isFetching: false, isError: false, refetch: vi.fn() })
+    apiSave.mockResolvedValue({ data: {} })
   })
 
   function renderDialog(target = work(), targetVersionIndex = 0) {
@@ -93,6 +100,22 @@ describe('WorkEditDialog', () => {
         />
       </QueryClientProvider>,
     )
+  }
+
+  /** The dialog saves everything through one request; assertions read its payload. */
+  function lastSave() {
+    const call = apiSave.mock.calls.at(-1)
+    if (!call) throw new Error('the dialog never called the save endpoint')
+    const [path, payload, files] = call as [
+      string,
+      { work?: Record<string, unknown>; versions?: Array<{ id: string; patch?: Record<string, unknown>; cover?: string }> },
+      Record<string, File> | undefined,
+    ]
+    return { path, payload, files: files ?? {} }
+  }
+
+  function versionSave(id = 'lbv1') {
+    return lastSave().payload.versions?.find((item) => item.id === id)
   }
 
   function mockLookupFetch(candidates: unknown[]) {
@@ -121,11 +144,11 @@ describe('WorkEditDialog', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '作者' }), { target: { value: 'Someone Else' } })
     fireEvent.change(screen.getByRole('textbox', { name: '简介' }), { target: { value: 'A new tale' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(updateVersion).toHaveBeenCalledWith({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1',
+    await waitFor(() => expect(versionSave()).toEqual({
+      id: 'lbv1',
       patch: { title: 'City Book 2', authors: ['Someone Else'], description: 'A new tale' },
     }))
-    expect(updateBook).not.toHaveBeenCalled()
+    expect(lastSave().payload.work).toBeUndefined()
   })
 
   it('applies a metadata lookup to the current version without writing the work row', async () => {
@@ -138,10 +161,29 @@ describe('WorkEditDialog', () => {
       fireEvent.click(screen.getByLabelText('替换已有信息'))
       fireEvent.click(screen.getByRole('button', { name: '应用' }))
       fireEvent.click(screen.getByRole('button', { name: '保存' }))
-      await waitFor(() => expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({
-        versionLinkId: 'lbv1', patch: expect.objectContaining({ title: 'Matched title', authors: ['Matched author'] }),
-      })))
-      expect(updateBook).not.toHaveBeenCalled()
+      await waitFor(() => expect(versionSave()?.patch).toMatchObject({ title: 'Matched title', authors: ['Matched author'] }))
+      expect(lastSave().payload.work).toBeUndefined()
+    } finally { fetchMock.mockRestore() }
+  })
+
+  it('keeps scraped tags pending until the dialog is saved', async () => {
+    const createTag = vi.fn(async (input: { name: string }) => ({ data: { id: `tag-${input.name}` } }))
+    HOOKS.useCreateLibraryTag.mockReturnValue({ mutateAsync: createTag, isPending: false })
+    const fetchMock = mockLookupFetch([{ id: '/works/OL1W', provider: 'openlibrary', title: 'Matched title', authors: [], tags: ['天文', 'classic'], sourceUrl: 'https://openlibrary.org/works/OL1W' }])
+    try {
+      renderDialog()
+      fireEvent.click(screen.getByRole('button', { name: '刮削' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /Open Library/ }))
+      fireEvent.click(await screen.findByRole('button', { name: /Matched title/ }))
+      fireEvent.click(screen.getByRole('button', { name: '应用' }))
+      // Applying only queues the unknown name: backing out must leave no tag row.
+      expect(await screen.findByText('天文')).toBeInTheDocument()
+      expect(createTag).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+      // The name travels with the save and the server creates it, so a failed
+      // or abandoned save cannot leave a tag row behind.
+      await waitFor(() => expect(lastSave().payload.work).toMatchObject({ tagIds: ['t1'], tagNames: ['天文'] }))
+      expect(createTag).not.toHaveBeenCalled()
     } finally { fetchMock.mockRestore() }
   })
 
@@ -149,20 +191,18 @@ describe('WorkEditDialog', () => {
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(notify.info).toHaveBeenCalledWith({ key: 'library.catalogNoChanges' }))
-    expect(updateBook).not.toHaveBeenCalled()
-    expect(updateVersion).not.toHaveBeenCalled()
+    expect(apiSave).not.toHaveBeenCalled()
     expect(notify.success).not.toHaveBeenCalled()
   })
 
-  it('reports partially saved work and version changes without closing', async () => {
-    updateBook.mockResolvedValueOnce({ data: {} })
-    updateVersion.mockRejectedValueOnce(new Error('Offline'))
+  it('keeps the dialog open when the single save request fails', async () => {
+    apiSave.mockRejectedValueOnce(new Error('Offline'))
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'new' }))
     fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: 'Saved title' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(notify.warning).toHaveBeenCalledWith({ key: 'library.catalogSavePartial', params: { succeeded: 1, failed: 1 } }))
+    await waitFor(() => expect(notify.error).toHaveBeenCalled())
     expect(notify.success).not.toHaveBeenCalled()
     expect(screen.getByRole('textbox', { name: '书名' })).toHaveValue('Saved title')
   })
@@ -179,8 +219,7 @@ describe('WorkEditDialog', () => {
       fireEvent.click(screen.getByRole('button', { name: '应用' }))
       fireEvent.click(screen.getByRole('button', { name: '保存' }))
       expect(notify.warning).toHaveBeenCalledWith({ key: 'library.catalogDescriptionTooLong' })
-      expect(updateBook).not.toHaveBeenCalled()
-      expect(updateVersion).not.toHaveBeenCalled()
+      expect(apiSave).not.toHaveBeenCalled()
     } finally { fetchMock.mockRestore() }
   })
 
@@ -200,16 +239,13 @@ describe('WorkEditDialog', () => {
     fireEvent.change(screen.getByLabelText('出版商'), { target: { value: '三联书店' } })
     fireEvent.change(screen.getByLabelText('系列'), { target: { value: '经典文库' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(updateVersion).toHaveBeenCalledWith({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1',
-      patch: {
-        meta: {
-          publisher: '三联书店', series: '经典文库', published: null, language: null,
-          isbn: null, subjects: null, seriesIndex: null,
-        },
+    await waitFor(() => expect(versionSave()?.patch).toEqual({
+      meta: {
+        publisher: '三联书店', series: '经典文库', published: null, language: null,
+        isbn: null, subjects: null, seriesIndex: null,
       },
     }))
-    expect(updateBook).not.toHaveBeenCalled()
+    expect(lastSave().payload.work).toBeUndefined()
   })
 
   it('preserves unknown meta keys when saving version metadata', async () => {
@@ -223,10 +259,10 @@ describe('WorkEditDialog', () => {
     renderDialog(work({ versions: [v] }))
     fireEvent.change(screen.getByLabelText('出版商'), { target: { value: '三联书店' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({
-      patch: { meta: expect.objectContaining({ publisher: '三联书店', translator: '译者' }) },
-    })))
-    expect(updateBook).not.toHaveBeenCalled()
+    await waitFor(() => expect(versionSave()?.patch).toEqual({
+      meta: expect.objectContaining({ publisher: '三联书店', translator: '译者' }),
+    }))
+    expect(lastSave().payload.work).toBeUndefined()
   })
 
   it('uploads a new version cover image', async () => {
@@ -234,18 +270,16 @@ describe('WorkEditDialog', () => {
     const file = new File(['fake-cover-bytes'], 'cover.png', { type: 'image/png' })
     fireEvent.change(screen.getByTestId('version-cover-input') as HTMLInputElement, { target: { files: [file] } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(uploadVersionCover).toHaveBeenCalledWith({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', file,
-    }))
+    await waitFor(() => expect(versionSave()?.cover).toBe('replace'))
+    expect(lastSave().files['cover:lbv1']).toBe(file)
   })
 
   it('removes an existing version cover image', async () => {
     renderDialog(work({ versions: [version({ coverKey: 'blobs/existing-version-cover.jpg' })] }))
     fireEvent.click(screen.getByRole('button', { name: '移除封面' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(removeVersionCover).toHaveBeenCalledWith({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1',
-    }))
+    await waitFor(() => expect(versionSave()?.cover).toBe('remove'))
+    expect(lastSave().files).toEqual({})
   })
 
   it('sets default version when work has multiple versions', async () => {
@@ -256,9 +290,7 @@ describe('WorkEditDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '设为默认版本' }))
     expect(screen.getAllByText('默认').length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(updateBook).toHaveBeenCalledWith({
-      libraryId: 'lib_city', libraryBookId: 'lb1', patch: { defaultVersionLinkId: 'lbv2' },
-    }))
+    await waitFor(() => expect(lastSave().payload.work).toEqual({ defaultVersionLinkId: 'lbv2' }))
   })
 
   it('switches and edits multiple versions in a single save session', async () => {
@@ -270,12 +302,8 @@ describe('WorkEditDialog', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: '版本 2' }))
     fireEvent.change(screen.getByPlaceholderText('版本 2'), { target: { value: '精装版' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(updateVersion).toHaveBeenCalledWith({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1', patch: { name: '修订版' },
-    }))
-    expect(updateVersion).toHaveBeenCalledWith({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv2', patch: { name: '精装版' },
-    })
+    await waitFor(() => expect(versionSave('lbv1')).toEqual({ id: 'lbv1', patch: { name: '修订版' } }))
+    expect(versionSave('lbv2')).toEqual({ id: 'lbv2', patch: { name: '精装版' } })
   })
 
   it('restores file values directly into the draft without immediate writes', async () => {
@@ -289,10 +317,8 @@ describe('WorkEditDialog', () => {
     await waitFor(() => expect(screen.getByDisplayValue('File Title')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: '恢复来源值' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({
-      libraryId: 'lib_city', libraryBookId: 'lb1', versionLinkId: 'lbv1',
-    })))
-    const patch = updateVersion.mock.calls[0][0].patch
+    await waitFor(() => expect(versionSave()?.patch).toBeDefined())
+    const patch = versionSave()?.patch ?? {}
     expect(patch.title).toBe('File Title')
     expect(patch.meta).toMatchObject({ publisher: 'File Press' })
   })
@@ -345,8 +371,8 @@ describe('WorkEditDialog', () => {
     })] }))
     fireEvent.click(within(screen.getByLabelText('系列').parentElement!).getByRole('button', { name: '恢复文件值' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(updateVersion).toHaveBeenCalled())
-    expect(updateVersion.mock.calls[0][0].patch.meta).toMatchObject({ series: 'File Series', seriesIndex: 5 })
+    await waitFor(() => expect(versionSave()?.patch?.meta).toBeDefined())
+    expect(versionSave()?.patch?.meta).toMatchObject({ series: 'File Series', seriesIndex: 5 })
   })
 
   it('creates and selects a new tag through the shared popover', async () => {
@@ -362,9 +388,8 @@ describe('WorkEditDialog', () => {
     await waitFor(() => expect(createTag).toHaveBeenCalledWith({ libraryId: 'lib_city', name: '硬核' }))
     await act(async () => { completeCreation(createdTag) })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(updateBook).toHaveBeenCalledWith(expect.objectContaining({
-      patch: expect.objectContaining({ tagIds: ['t1', 't_new'] }),
-    })))
+    await waitFor(() => expect(lastSave().payload.work).toMatchObject({ tagIds: ['t1', 't_new'] }))
+    expect(lastSave().payload.work).not.toHaveProperty('tagNames')
   })
 
   it('offers category recommendations and sends the template key to the work patch', async () => {
@@ -375,9 +400,7 @@ describe('WorkEditDialog', () => {
     fireEvent.click(screen.getByText('推荐分类'))
     fireEvent.click(screen.getByRole('radio', { name: templateName }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(updateBook).toHaveBeenCalledWith({
-      libraryId: 'lib_city', libraryBookId: 'lb1', patch: { categoryTemplateKey: template.key },
-    }))
-    expect(updateVersion).not.toHaveBeenCalled()
+    await waitFor(() => expect(lastSave().payload.work).toEqual({ categoryTemplateKey: template.key }))
+    expect(lastSave().payload.versions).toBeUndefined()
   })
 })

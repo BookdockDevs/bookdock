@@ -888,9 +888,22 @@ export const bookMembershipSchema = z.object({
   categoryId: z.string().min(1).nullable().optional(),
   categoryTemplateKey: z.string().min(1).max(128).optional(),
   tagIds: z.array(z.string().min(1)).optional(),
-}).refine((value) => value.categoryId === undefined || value.categoryTemplateKey === undefined, {
-  message: 'Choose an existing category or a recommendation', path: ['categoryTemplateKey'],
-})
+  /**
+   * Tag names to resolve inside the same write. The editor cannot create tags
+   * ahead of a save any more (an abandoned dialog must leave no rows behind),
+   * so the names ride along and the server creates only the missing ones.
+   */
+  tagNames: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  /**
+   * Category name to resolve inside the same write, mirroring `tagNames`: a
+   * scraped category the library does not have yet is created on save instead
+   * of sending the client through a second request.
+   */
+  categoryName: z.string().trim().min(1).max(100).optional(),
+}).refine(
+  (value) => value.categoryId === undefined || (value.categoryTemplateKey === undefined && value.categoryName === undefined),
+  { message: 'Choose an existing category, a recommendation or a new name', path: ['categoryTemplateKey'] },
+)
 
 export const bookUploadOptionsSchema = z.object({
   allowCorresponding: z.enum(['true', 'false']).optional().transform((value) => value === 'true'),
@@ -963,10 +976,33 @@ export const bookUpdateSchema = z.object({
   authors: authorListSchema.optional(),
   hidden: z.boolean().optional(),
   bookmeta: bookMetadataSchema.optional(),
+  /**
+   * Card-local summary that wins over `bookmeta.description` on read, so a
+   * collected card can carry its own intro without rewriting the shared
+   * revision (the immutable-content boundary forbids that). Null clears back to
+   * inheriting the revision's description; an empty string does the same,
+   * because an empty summary and no custom summary mean the same thing.
+   */
+  descriptionOverride: z.string().max(4000).nullable().optional(),
   // null removes the pinned TOC rule and restores automatic selection
   tocRuleId: z.string().nullable().optional(),
   // null clears the pinned placeholder-cover palette (falls back to the id hash)
   coverPaletteId: z.enum(COVER_PALETTE_IDS).nullable().optional(),
 })
+
+/**
+ * One dialog save = one request = one undo receipt. The private book editor
+ * used to fan out into metadata + organization + cover calls, which the undo
+ * log could not describe as a single action (and whose parallel receipts
+ * cancelled each other out, since only the user's newest one survives).
+ */
+export const bookSaveSchema = z.object({
+  book: bookUpdateSchema.omit({ readStatus: true, progress: true }).optional(),
+  organization: bookMembershipSchema.optional(),
+  /** `replace` requires the multipart `cover` file; `remove` clears the card cover. */
+  cover: z.enum(['replace', 'remove']).optional(),
+})
+
+export type BookSaveReq = z.infer<typeof bookSaveSchema>
 
 export const readRevisionSchema = z.object({ revisionId: z.string().min(1).max(128) })

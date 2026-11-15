@@ -150,6 +150,19 @@ async function parseError(res: Response): Promise<ApiError> {
   return new ApiError(code, body?.error?.message ?? res.statusText, body?.error?.details, res.status)
 }
 
+/** Publish a receipt carried by a non-JSON-body response (uploads, saves). */
+function publishUndoFromBody(
+  body: { undo?: { token: string; expiresAt?: number; generation?: number } } | null | undefined,
+  path: string,
+  requestUserId: string | null,
+  requestSessionRevision: number,
+): void {
+  if (!body?.undo || typeof body.undo.token !== 'string') return
+  if (requestUserId !== (useAuthStore.getState().user?.id ?? null)) return
+  if (requestSessionRevision !== getAuthSessionRevision()) return
+  publishUndoOpportunity({ ...body.undo, queryKeys: undoQueryKeys(path, 'POST') })
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const requestUserId = useAuthStore.getState().user?.id ?? null
   const requestSessionRevision = getAuthSessionRevision()
@@ -167,11 +180,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw await parseError(res)
   }
   const body = await res.json() as T & { undo?: { token: string; expiresAt?: number; generation?: number } }
-  if (body && typeof body === 'object' && body.undo && typeof body.undo.token === 'string'
-    && requestUserId === (useAuthStore.getState().user?.id ?? null)
-    && requestSessionRevision === getAuthSessionRevision()) {
-    publishUndoOpportunity({ ...body.undo, queryKeys: undoQueryKeys(path, options?.method ?? 'GET') })
-  }
+  publishUndoFromBody(body, path, requestUserId, requestSessionRevision)
   return body
 }
 
@@ -197,6 +206,34 @@ export async function apiPostBlob(path: string, body: unknown, signal?: AbortSig
     throw await parseError(res)
   }
   return res.blob()
+}
+
+/**
+ * One editor save: a JSON document plus optional files in a single request.
+ *
+ * The server answers with one undo receipt for the whole save, so this is the
+ * only write path that lets "撤销" put metadata, classification and cover back
+ * together. `apiUpload` cannot be reused blindly because its XHR branch exists
+ * for progress reporting and never published receipts.
+ */
+export async function apiSave<T>(
+  path: string,
+  payload: unknown,
+  files: Record<string, File> = {},
+): Promise<T> {
+  const requestUserId = useAuthStore.getState().user?.id ?? null
+  const requestSessionRevision = getAuthSessionRevision()
+  const form = new FormData()
+  form.append('payload', JSON.stringify(payload))
+  for (const [name, file] of Object.entries(files)) form.append(name, file, file.name)
+  const res = await fetch(`${BASE_URL}${path}`, { method: 'POST', body: form })
+  if (!res.ok) {
+    if (res.status === 401) handleUnauthorized(path, requestSessionRevision)
+    throw await parseError(res)
+  }
+  const body = await res.json() as T & { undo?: { token: string; expiresAt?: number; generation?: number } }
+  publishUndoFromBody(body, path, requestUserId, requestSessionRevision)
+  return body
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {

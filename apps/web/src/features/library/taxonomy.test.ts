@@ -9,21 +9,19 @@ function category(id: string, name: string): ClientCategoryView {
 }
 
 describe('matchCategoryByName', () => {
-  it('prefers an exact name over a broader suffix match', () => {
+  it('matches an existing name exactly, ignoring case and padding', () => {
     const categories = [category('1', '小说'), category('2', '轻小说')]
-    // Array order must not decide the result: "轻小说" must not be filed under "小说".
     expect(matchCategoryByName(categories, '轻小说')?.id).toBe('2')
     expect(matchCategoryByName(categories, ' 轻小说 ')?.id).toBe('2')
   })
 
-  it('matches a site category that extends a library category', () => {
-    expect(matchCategoryByName([category('1', '都市')], '都市生活')?.id).toBe('1')
-    expect(matchCategoryByName([category('1', '小说')], '科幻小说')?.id).toBe('1')
-  })
-
-  it('picks the longest matching suffix when no exact name exists', () => {
-    const categories = [category('1', '小说'), category('2', '科幻小说')]
-    expect(matchCategoryByName(categories, '硬核科幻小说')?.id).toBe('2')
+  it('never widens to a broader category that shares a substring', () => {
+    // Categories resolve like tags: a near miss is created on save rather than
+    // silently filed under something the user did not choose.
+    expect(matchCategoryByName([category('1', '都市')], '都市生活')).toBeUndefined()
+    expect(matchCategoryByName([category('1', '小说')], '科幻小说')).toBeUndefined()
+    expect(matchCategoryByName([category('1', '小说')], '轻小说')).toBeUndefined()
+    expect(matchCategoryByName([category('1', '小说'), category('2', '科幻小说')], '硬核科幻小说')).toBeUndefined()
   })
 
   it('returns undefined for an empty or unmatched name', () => {

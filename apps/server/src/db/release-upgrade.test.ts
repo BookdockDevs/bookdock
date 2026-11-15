@@ -123,7 +123,7 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
   expect(sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at').all()).toEqual(upgradedLedger)
   const after = retainedTables.map((table) => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
   const libraryBooksIndex = retainedTables.indexOf('library_books')
-  after[libraryBooksIndex] = (after[libraryBooksIndex] as Array<Record<string, unknown>>).map(({ shelf_id: _shelfId, ...row }) => row)
+  after[libraryBooksIndex] = (after[libraryBooksIndex] as Array<Record<string, unknown>>).map(({ shelf_id: _shelfId, description_override: _descriptionOverride, ...row }) => row)
   // The work-projection startup migration intentionally copies the work's
   // publication fields onto NULL version overrides; assert the backfill and
   // exclude the fields from the byte-for-byte no-loss comparison.
