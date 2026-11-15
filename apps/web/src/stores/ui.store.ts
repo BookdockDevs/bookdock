@@ -248,8 +248,8 @@ interface UiState {
   // Reader sidebar prefs
   toolbarLocked: boolean
   sidebarWidth: number
-  /** Last explicit open/closed choice while locked; seeds the sidebar on book
-   *  open (locked + open). Device-local like toolbarLocked. */
+  /** Last explicit open/closed choice for the desktop sidebar (pinned or floating);
+   *  seeds the sidebar on book open. Device-local like toolbarLocked. */
   sidebarRememberedOpen: boolean
   /** Last sidebar tab the user picked explicitly; seeds the tab on book open.
    *  Device-local like toolbarLocked. */

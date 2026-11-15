@@ -32,7 +32,6 @@ const apiGet = vi.fn((url: string) =>
     : Promise.resolve({ data: [] }),
 )
 const createShelfMutate = vi.fn()
-const createTagMutate = vi.fn()
 const updateBookMutate = vi.fn()
 const updateBookMutateAsync = vi.fn()
 const uploadCoverMutate = vi.fn()
@@ -105,7 +104,6 @@ vi.mock('../features/library/hooks', () => ({
   useTags: () => ({ data: { data: [{ id: 'tag-1', name: '小说', bookCount: 1 }] } }),
   useDeviceTaxonomy: () => ({ data: { categories: deviceCategories, tags: deviceTags }, isLoading: false, isError: false }),
   useCreateShelf: () => ({ mutateAsync: createShelfMutate, isPending: false }),
-  useCreateTag: () => ({ mutateAsync: createTagMutate, isPending: false }),
   useUpdateBook: () => ({ mutate: updateBookMutate, mutateAsync: updateBookMutateAsync, isPending: quickEditPending }),
   useUpdateBookMembership: () => ({ mutate: updateMembershipMutate, isPending: quickEditPending }),
   useUploadCover: () => ({ mutate: uploadCoverMutate, mutateAsync: vi.fn(), isPending: quickEditPending }),
@@ -198,7 +196,6 @@ beforeEach(async () => {
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
   createShelfMutate.mockResolvedValue({ data: { id: 'shelf-new', name: '科幻' } })
   vi.mocked(useBookReplacements).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useBookReplacements>)
-  createTagMutate.mockResolvedValue({ data: { id: 'tag-new' } })
   membershipShelf = null
   membershipTags = []
   bookDetail = undefined
@@ -337,7 +334,7 @@ describe('BookDetailDialog classification editor', () => {
   })
 
   it('saves an existing category from the classification selector', async () => {
-    sharedCategories = [{ id: 'category-1', libraryId: 'private', userId: 'test-user', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 }]
+    sharedCategories = [{ id: '["Fiction"]', path: ['Fiction'], libraryId: 'private', userId: 'test-user', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1, subtreeBookCount: 1 }]
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
@@ -346,7 +343,7 @@ describe('BookDetailDialog classification editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(lastSave().payload.organization).toEqual({ categoryId: 'category-1', tagIds: [] })
+      expect(lastSave().payload.organization).toEqual({ categoryPath: ['Fiction'], tags: [] })
     })
   })
 
@@ -361,8 +358,8 @@ describe('BookDetailDialog classification editor', () => {
     expect(screen.getByRole('button', { name: '分类' })).toBeInTheDocument()
   })
 
-  it('saves uncategorized as categoryId null', async () => {
-    sharedCategories = [{ id: 'category-1', libraryId: 'private', userId: 'test-user', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 }]
+  it('saves uncategorized as a null category path', async () => {
+    sharedCategories = [{ id: '["Fiction"]', path: ['Fiction'], libraryId: 'private', userId: 'test-user', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1, subtreeBookCount: 1 }]
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
@@ -373,7 +370,7 @@ describe('BookDetailDialog classification editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(lastSave().payload.organization).toEqual({ categoryId: null, tagIds: [] })
+      expect(lastSave().payload.organization).toEqual({ categoryPath: null, tags: [] })
     })
   })
 })
@@ -391,11 +388,11 @@ describe('BookDetailDialog tag chips', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
-      expect(lastSave().payload.organization).toEqual({ categoryId: null, tagIds: ['tag-1'] })
+      expect(lastSave().payload.organization).toEqual({ categoryPath: null, tags: ['小说'] })
     })
   })
 
-  it('creates a tag from the inline chip and auto-selects it', async () => {
+  it('adds a tag value from the inline chip and auto-selects it', async () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
@@ -404,10 +401,9 @@ describe('BookDetailDialog tag chips', () => {
     fireEvent.change(input, { target: { value: '科幻' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    await waitFor(() => expect(createTagMutate).toHaveBeenCalledWith('科幻'))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => {
-      expect(lastSave().payload.organization).toEqual({ categoryId: null, tagIds: ['tag-new'] })
+      expect(lastSave().payload.organization).toEqual({ categoryPath: null, tags: ['科幻'] })
     })
   })
 
@@ -420,7 +416,6 @@ describe('BookDetailDialog tag chips', () => {
     fireEvent.change(input, { target: { value: '科幻' } })
     fireEvent.keyDown(input, { key: 'Escape' })
 
-    expect(createTagMutate).not.toHaveBeenCalled()
     expect(screen.queryByPlaceholderText('搜索标签…')).toBeNull()
     expect(screen.getByRole('button', { name: '新建标签' })).toBeInTheDocument()
   })
@@ -434,12 +429,30 @@ describe('BookDetailDialog tag chips', () => {
     fireEvent.change(input, { target: { value: '科幻' } })
     fireEvent.mouseDown(document.body)
 
-    expect(createTagMutate).not.toHaveBeenCalled()
     expect(screen.queryByPlaceholderText('搜索标签…')).toBeNull()
   })
 })
 
 describe('BookDetailDialog recommended categories', () => {
+  it('keeps a scraped category name instead of mapping it to a template path', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = input instanceof Request ? input.url : String(input)
+      const body = url.includes('/integrations/personal-sources')
+        ? { data: [] }
+        : { data: [{ id: '/works/OL1W', provider: 'openlibrary', title: 'Matched title', authors: [], category: '武侠', sourceUrl: 'https://openlibrary.org/works/OL1W' }] }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    try {
+      renderDialog()
+      fireEvent.click(screen.getByRole('button', { name: '刮削' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /Open Library/ }))
+      fireEvent.click(await screen.findByRole('button', { name: /Matched title/ }))
+      fireEvent.click(screen.getByRole('button', { name: '应用' }))
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(lastSave().payload.organization).toMatchObject({ categoryPath: ['武侠'], tags: [] }))
+    } finally { fetchMock.mockRestore() }
+  })
+
   it('saves a selected recommendation atomically and does not create it before save', async () => {
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
@@ -449,7 +462,7 @@ describe('BookDetailDialog recommended categories', () => {
     expect(apiSave).not.toHaveBeenCalled()
     expect(createShelfMutate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(lastSave().payload.organization).toEqual({ categoryTemplateKey: 'literature.essays', tagIds: [] }))
+    await waitFor(() => expect(lastSave().payload.organization).toEqual({ categoryPath: ['文学', '散文随笔'], tags: [] }))
   })
 
   it('cancels a selected recommendation without creating or saving a category', () => {

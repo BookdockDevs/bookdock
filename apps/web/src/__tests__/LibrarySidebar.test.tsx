@@ -57,9 +57,11 @@ vi.mock('../features/library/hooks', () => ({
   useCreateLibraryCategory: vi.fn(),
   useUpdateLibraryCategory: vi.fn(),
   useDeleteLibraryCategory: vi.fn(),
+  useClearLibraryCategory: vi.fn(),
   useCreateLibraryTag: vi.fn(),
   useUpdateLibraryTag: vi.fn(),
   useDeleteLibraryTag: vi.fn(),
+  useClearLibraryTag: vi.fn(),
   useUpdateLibrary: vi.fn(),
 }))
 

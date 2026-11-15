@@ -137,6 +137,53 @@ describe('Reader loading shell', () => {
     expect(screen.getByTestId('reader-loading-surface')).toBeInTheDocument()
   })
 
+  it('keeps ReaderSidebar mounted and open on first paint when toolbar is unlocked (floating) and remembered open', async () => {
+    vi.mocked(apiGet).mockImplementation(() => new Promise(() => {}))
+    act(() => {
+      useUiStore.setState({ toolbarLocked: false, sidebarRememberedOpen: true })
+    })
+
+    await act(async () => {
+      render(
+        <QueryClientProvider client={client}>
+          <Reader />
+        </QueryClientProvider>,
+      )
+    })
+
+    const sidebar = screen.getByTestId('reader-sidebar')
+    expect(sidebar).toBeInTheDocument()
+    expect(sidebar).toHaveAttribute('data-open', 'true')
+    expect(sidebar).toHaveAttribute('data-tab', 'toc')
+  })
+
+  it('persists sidebarRememberedOpen when toggling sidebarOpen even while toolbar is unlocked', async () => {
+    vi.mocked(apiGet).mockImplementation(() => new Promise(() => {}))
+    act(() => {
+      useUiStore.setState({ toolbarLocked: false, sidebarRememberedOpen: true })
+    })
+
+    await act(async () => {
+      render(
+        <QueryClientProvider client={client}>
+          <Reader />
+        </QueryClientProvider>,
+      )
+    })
+
+    expect(useUiStore.getState().sidebarRememberedOpen).toBe(true)
+
+    act(() => {
+      useReaderState.setState({ sidebarOpen: false })
+    })
+    expect(useUiStore.getState().sidebarRememberedOpen).toBe(false)
+
+    act(() => {
+      useReaderState.setState({ sidebarOpen: true })
+    })
+    expect(useUiStore.getState().sidebarRememberedOpen).toBe(true)
+  })
+
   it('transitions to the not-found screen when bookQuery settles with empty data', async () => {
     let resolveBook!: (value: { data: null }) => void
     vi.mocked(apiGet).mockImplementation((path) => {

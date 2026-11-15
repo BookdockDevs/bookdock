@@ -36,7 +36,6 @@ import type { DraftTextField } from './book-detail/metadata-source'
 import { applySourceAllToDraft, applySourceFieldToDraft, hasRestorableField, PRIVATE_ALL_TEXT_FIELDS, PRIVATE_B_TEXT_FIELDS } from './book-detail/metadata-source'
 import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
 import { draftFrom, draftToBookmetaPreserving, isMachineIdentifier, parseAuthorList, type MetaDraft } from './book-detail/types'
-import { categoryTemplatePath, matchCategoryTemplateKey } from '@bookdock/shared'
 import TocRulePicker from './TocRulePicker'
 import VersionSelect from './VersionSelect'
 import WorkDetailBody from './WorkDetailBody'
@@ -703,8 +702,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
                     if (classification) {
                       if (classification.category?.trim()) {
                         const rawCat = classification.category.trim()
-                        const template = matchCategoryTemplateKey(rawCat)
-                        setCategoryPath(template ? categoryTemplatePath(template) ?? [rawCat] : [rawCat])
+                        setCategoryPath([rawCat])
                       }
                       if (classification.tags?.length) {
                         setTagSel((prev) => new Set([...prev, ...classification.tags!.map((name) => name.trim()).filter(Boolean)]))

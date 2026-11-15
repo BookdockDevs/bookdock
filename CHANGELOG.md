@@ -6,9 +6,11 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
-- Refactored the desktop unpinned reader sidebar into an independent floating island card with adjustable width (200–640 px), height (320 px to viewport bound), and corner 2D resizing, with double-click reset and pointer capture cursor locking.
+- Refactored the desktop unpinned reader sidebar into an independent floating island card with adjustable width (200–640 px), height (320 px to viewport bound), and corner 2D resizing, with double-click reset and pointer capture cursor locking. The floating sidebar now remembers its open or collapsed state across reading sessions, aligning with the pinned sidebar behavior.
 - Scraped results now carry series, series index, category and tags. Applying a lookup fills the edit draft; classification changes are saved with the book.
 - Collected shared-library books can now keep their own description in the personal library. Editing the summary on a collected card stores a card-local override and leaves the shared version untouched, and a restore action returns the card to the shared summary.
+- The taxonomy management directory (shelves, categories, and tags) now supports drag-and-drop reordering with multi-column responsive grid layouts and floating drag previews. For two-level categories, subcategories can be moved under another root category by dragging directly onto its card (with an active drop indicator slot), or promoted to an independent root category by dropping onto a dedicated promotion card or via the row action menu.
+- Navigating to a filtered library view from the taxonomy directory now automatically switches the sidebar to the corresponding tab (shelves, categories, or tags), expands the parent category when filtering by a subcategory, and smoothly scrolls the active filter entry into view.
 
 ### Changed
 
@@ -21,6 +23,7 @@ All notable changes to Bookdock are documented here.
 - Reworked the metadata lookup dialog into a two-column layout: compact candidate rows with clamped summaries on the left, and a detail preview with the large cover, publisher details, taxonomy badges and the full description on the right.
 - The shared modal footer and both append-content dialog footers no longer register as toast obstacles, so notifications stay in the viewport corner instead of jumping above the open dialog.
 - The book detail dialog and the shared-library work editor now save metadata, classification, tags and the cover in one request instead of a chain of updates, so a failure can no longer leave the metadata applied while the cover or tags stay behind.
+- Compacted book detail, shared work, and metadata lookup tag lists: when a book has more than 5 tags, the first 4 tags stay inline alongside a `+N` overflow chip that opens a popover to browse and filter the full tag list, keeping reading progress and primary action buttons within the cover viewport. The tag editor also constrains its height with clean scrolling so long tag sets never stretch classification forms.
 
 ### Fixed
 
@@ -1310,9 +1313,11 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
-- 桌面端未固定侧栏重构为独立的悬浮岛卡片与紧凑胶囊，支持右边界宽度（200–640 px）、底部高度（320 px 起）及右下角双向拖拽调节尺寸，支持双击手柄重置为默认大小，并在拖拽时锁定指针光标。
+- 桌面端未固定侧栏重构为独立的悬浮岛卡片与紧凑胶囊，支持右边界宽度（200–640 px）、底部高度（320 px 起）及右下角双向拖拽调节尺寸，支持双击手柄重置为默认大小并在拖拽时锁定指针光标；悬浮侧栏现在与固定侧栏统一保持展开/折叠状态记忆，重新进入阅读页时自动恢复。
 - 刮削结果现在会带出系列、系列序号、分类与标签。应用后填充编辑草稿，分类和标签随书籍一起保存。
 - 收藏的共享书库书籍支持在个人书库中自定义简介。在收藏卡片上编辑简介会保存为该卡片私有的覆盖值，不影响共享版本，并可一键恢复为共享简介。
+- 书架、分类与标签管理页面全面支持拖拽排序，适配 PC 宽屏多列网格布局并提供平滑跟随光标的半透明悬浮拖拽卡片（DragOverlay）。对于两级分类结构，支持将子分类直接拖拽到其他一级分类卡片（呈现目标吸附槽提示）以调整所属上级，或拖至专属的移出卡片（亦可通过条目菜单一键操作）升为独立一级根分类。
+- 从分类或标签管理页点击条目跳转筛选时，侧栏会自动同步切换至对应的 Tab 面板（书架、分类或标签），在筛选子分类时自动展开父级节点，并将当前活跃项平滑滚动定位至可视区域。
 
 #### 优化
 
@@ -1325,6 +1330,7 @@ All notable changes to Bookdock are documented here.
 - 重构刮削信息弹窗：左侧候选列表紧凑排列并对简介单行截断，右侧为包含高清封面、出版信息、分类标签徽标及完整多段简介的预览面板。
 - 共享弹窗的底部操作栏与两个追加内容弹窗的底栏不再标记为浮动通知避让障碍物，通知保持停靠于视口右下角，不再被弹窗顶起。
 - 书籍详情弹窗与共享书库编辑弹窗改为单次请求保存元数据、归类、标签与封面，不再串联多次更新，失败时不会出现元数据已生效而封面或标签未跟上的情况。
+- 优化书籍详情、共享书库与刮削弹窗中的标签呈现：当书籍标签超过 5 个时，行内仅展示前 4 个标签并追加 `+N` 折叠胶囊，点击弹出浮层查看全部标签并支持快速筛选，避免大量标签向下挤压阅读进度与操作按钮；标签编辑区同步加入高度限制与内联滚动，防止长标签列表过度撑大分类表单。
 
 #### 修复
 

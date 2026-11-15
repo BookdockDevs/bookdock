@@ -8,7 +8,7 @@ import { useAuthStore } from '@/stores/auth.store'
 import type { AnnotationRes } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPost, apiPut } from '@/api/client'
-import { useCreateLibraryCategory, useCreateLibraryTag, useDeleteLibraryCategory, useDeleteLibraryTag, useToggleShelfHidden, useToggleTagHidden, useUpdateLibraryCategory, useUpdateLibraryTag } from '@/features/library/hooks'
+import { useClearLibraryCategory, useClearLibraryTag, useToggleShelfHidden, useToggleTagHidden, useUpdateLibraryCategory, useUpdateLibraryTag } from '@/features/library/hooks'
 import { useBatchDeleteAnnotations } from '@/features/reader/hooks/useAnnotations'
 import { notify } from '@/lib/notifications'
 
@@ -45,29 +45,26 @@ describe('operation feedback', () => {
     client.clear()
   })
 
-  it('notifies shared taxonomy submissions but keeps pin and visibility success quiet', async () => {
+  it('notifies taxonomy renames and clears but keeps pin and visibility success quiet', async () => {
     const { client, wrapper } = setup()
     const { result } = renderHook(() => ({
-      category: useCreateLibraryCategory(), tag: useCreateLibraryTag(),
+      clearCategory: useClearLibraryCategory(), clearTag: useClearLibraryTag(),
       updateCategory: useUpdateLibraryCategory(), updateTag: useUpdateLibraryTag(),
-      deleteCategory: useDeleteLibraryCategory(), deleteTag: useDeleteLibraryTag(),
     }), { wrapper })
     await act(async () => {
-      await result.current.category.mutateAsync({ libraryId: 'lib', name: 'Fiction' })
-      await result.current.tag.mutateAsync({ libraryId: 'lib', name: 'Classic' })
-      await result.current.updateCategory.mutateAsync({ libraryId: 'lib', categoryId: 'cat', patch: { parentId: null } })
-      await result.current.updateTag.mutateAsync({ libraryId: 'lib', tagId: 'tag', patch: { name: 'New' } })
-      await result.current.deleteCategory.mutateAsync({ libraryId: 'lib', categoryId: 'cat' })
-      await result.current.deleteTag.mutateAsync({ libraryId: 'lib', tagId: 'tag' })
+      await result.current.updateCategory.mutateAsync({ libraryId: 'lib', path: ['Fiction'], patch: { name: 'Literature' } })
+      await result.current.updateTag.mutateAsync({ libraryId: 'lib', name: 'Classic', patch: { renamedTo: 'Favorite' } })
+      await result.current.clearCategory.mutateAsync({ libraryId: 'lib', path: ['Literature'] })
+      await result.current.clearTag.mutateAsync({ libraryId: 'lib', name: 'Favorite' })
     })
     expect(vi.mocked(notify.success).mock.calls.map(([message]) => message)).toEqual([
-      { key: 'toast.categoryCreated' }, { key: 'toast.tagCreated' }, { key: 'toast.categoryUpdated' },
-      { key: 'toast.tagRenamed' }, { key: 'toast.categoryDeleted' }, { key: 'toast.tagDeleted' },
+      { key: 'toast.categoryUpdated' }, { key: 'toast.tagRenamed' },
+      { key: 'toast.categoryCleared' }, { key: 'toast.tagCleared' },
     ])
     vi.mocked(notify.success).mockClear()
     await act(async () => {
-      await result.current.updateCategory.mutateAsync({ libraryId: 'lib', categoryId: 'cat', patch: { pinned: true } })
-      await result.current.updateTag.mutateAsync({ libraryId: 'lib', tagId: 'tag', patch: { hidden: true } })
+      await result.current.updateCategory.mutateAsync({ libraryId: 'lib', path: ['Literature'], patch: { pinned: true } })
+      await result.current.updateTag.mutateAsync({ libraryId: 'lib', name: 'Favorite', patch: { hidden: true } })
     })
     expect(notify.success).not.toHaveBeenCalled()
     client.clear()

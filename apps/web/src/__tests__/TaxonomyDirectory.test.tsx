@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Category } from '@bookdock/shared'
+import type { ClientCategoryView } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '@/api/client'
 import { notify } from '@/lib/notifications'
@@ -19,28 +19,53 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
 })
 
 function drop(id: string, targetId: string) {
-  act(() => drag.end?.({ active: { id: `directory:${id}`, data: { current: { entryId: id } } }, over: { id: `directory:${targetId}`, data: { current: { entryId: targetId } } } } as DragEndEvent))
+  act(() => drag.end?.({
+    active: { id: `directory:${id}`, data: { current: { entryId: id } } },
+    over: { id: targetId === 'directory:promote-to-root' ? targetId : `directory:${targetId}`, data: { current: { entryId: targetId } } },
+  } as DragEndEvent))
 }
 
 vi.mock('@/api/client', async (importOriginal) => ({ ...await importOriginal<typeof import('@/api/client')>(), apiGet: vi.fn().mockResolvedValue({ data: [] }), apiPatch: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn() }))
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string, params?: { name?: string }) => params?.name ? `${key} ${params.name}` : key }))
 vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
 
-function category(id: string, parentId: string | null): Category {
-  return { id, libraryId: 'lib', userId: 'owner', name: id, parentId, sortOrder: 0, pinned: false, hidden: false, bookCount: 1, subtreeBookCount: 2, createdAt: 1, updatedAt: 1 }
+function category(id: string, parentId: string | null): ClientCategoryView {
+  const path = parentId ? [parentId, id] : [id]
+  const key = JSON.stringify(path)
+  return {
+    id: key,
+    libraryId: 'lib',
+    name: id,
+    path,
+    parentId: parentId ? JSON.stringify([parentId]) : null,
+    sortOrder: 0,
+    pinned: false,
+    hidden: false,
+    bookCount: 1,
+    subtreeBookCount: 2,
+    createdAt: 1,
+    updatedAt: 1,
+  }
 }
 
 function setup(canManage = true) {
-  // The rebuilt taxonomy hooks query per-identity keys and stay disabled
-  // without an account, so the directory test runs as a signed-in member.
   useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false }, mutations: { retry: false } } })
-  client.setQueryData(['libraries', 'lib', 'categories'], { data: [category('Root', null), category('Child', 'Root'), category('Other', null)] })
-  client.setQueryData(['libraries', 'lib', 'tags'], { data: [{ ...category('Topic', null), bookCount: 1 }] })
+  client.setQueryData(['libraries', 'lib', 'categories', false], { data: [category('Root', null), category('Child', 'Root'), category('Other', null)] })
+  client.setQueryData(['libraries', 'lib', 'tags'], { data: [{ id: 'Topic', name: 'Topic', libraryId: 'lib', sortOrder: 0, pinned: false, hidden: false, bookCount: 1, createdAt: 1, updatedAt: 1 }] })
   client.setQueryData(['shelves', 'account', false], { data: [] })
   client.setQueryData(['tags', 'account', false], { data: [] })
   const navigate = vi.fn()
-  const props = { libraryId: 'lib', privateLibraryId: 'private-lib', sessionKey: `test-${Math.random()}`, panel: 'categories' as const, canManage, navSearch: navigate, onOpenNavigation: vi.fn() }
+  const props = {
+    libraryId: 'lib',
+    privateLibraryId: 'private-lib',
+    sessionKey: `test-${Math.random()}`,
+    panel: 'categories' as const,
+    source: 'server' as const,
+    canManage,
+    navSearch: navigate,
+    onOpenNavigation: vi.fn(),
+  }
   const result = render(<QueryClientProvider client={client}><TaxonomyDirectory {...props} /></QueryClientProvider>)
   return { ...result, navigate, client, props }
 }
@@ -61,7 +86,7 @@ describe('taxonomy directory', () => {
     ['tags', 'library.noTags'],
   ] as const)('shows the matching empty state for an empty %s collection', async (panel, emptyLabel) => {
     const { rerender, props, client } = setup()
-    if (panel === 'categories') act(() => client.setQueryData(['libraries', 'lib', 'categories'], { data: [] }))
+    if (panel === 'categories') act(() => client.setQueryData(['libraries', 'lib', 'categories', false], { data: [] }))
     if (panel === 'tags') act(() => client.setQueryData(['libraries', 'lib', 'tags'], { data: [] }))
     rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} panel={panel} /></QueryClientProvider>)
 
@@ -81,7 +106,7 @@ describe('taxonomy directory', () => {
     const { navigate } = setup()
     fireEvent.contextMenu(screen.getByText('Root'))
     fireEvent.click(screen.getByRole('button', { name: /Root library.bookCount/ }))
-    expect(navigate).toHaveBeenCalledWith({ category: 'Root', shelf: undefined, categoryScope: 'subtree', directory: undefined })
+    expect(navigate).toHaveBeenCalledWith({ category: JSON.stringify(['Root']), shelf: undefined, categoryScope: 'subtree', directory: undefined })
     expect(screen.queryByRole('button', { name: 'library.edit' })).toBeNull()
   })
 
@@ -93,16 +118,6 @@ describe('taxonomy directory', () => {
     expect(navigate).toHaveBeenCalledWith({ tag: 'Topic', directory: undefined })
   })
 
-  it('combines renaming and parent changes in one edit entry with matching icons', () => {
-    setup()
-    fireEvent.contextMenu(screen.getByText('Root'))
-    expect(screen.queryByText('library.moveCategory')).toBeNull()
-    expect(screen.getByRole('button', { name: 'library.newSubcategory' }).querySelector('svg')).not.toBeNull()
-    fireEvent.keyDown(window, { key: 'Escape' })
-    fireEvent.contextMenu(screen.getByText('Other'))
-    expect(screen.queryByText('library.moveCategory')).toBeNull()
-    expect(screen.getByRole('button', { name: 'library.edit' }).querySelector('svg')).not.toBeNull()
-  })
   it('finds child categories without losing their group and navigates without clearing other conditions', () => {
     const { navigate } = setup()
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Child' } })
@@ -111,7 +126,7 @@ describe('taxonomy directory', () => {
     expect(screen.queryByText('Other')).toBeNull()
     expect(navigate).not.toHaveBeenCalled()
     fireEvent.click(screen.getByText('Child'))
-    expect(navigate).toHaveBeenCalledWith({ category: 'Child', shelf: undefined, categoryScope: 'subtree', directory: undefined })
+    expect(navigate).toHaveBeenCalledWith({ category: JSON.stringify(['Root', 'Child']), shelf: undefined, categoryScope: 'subtree', directory: undefined })
   })
 
   it('exposes browse-only entries to ordinary readers', () => {
@@ -119,50 +134,41 @@ describe('taxonomy directory', () => {
     expect(screen.queryByText('library.manageDirectory')).toBeNull()
     expect(screen.queryByText('library.newCategory')).toBeNull()
     fireEvent.click(screen.getByText('Child'))
-    expect(navigate).toHaveBeenCalledWith({ category: 'Child', shelf: undefined, categoryScope: 'subtree', directory: undefined })
+    expect(navigate).toHaveBeenCalledWith({ category: JSON.stringify(['Root', 'Child']), shelf: undefined, categoryScope: 'subtree', directory: undefined })
   })
 
-  it('creates a child only under a root and submits the selected parent', async () => {
-    setup()
-    fireEvent.contextMenu(screen.getByText('Root'))
-    fireEvent.click(screen.getByText('library.newSubcategory'))
-    const dialog = screen.getByRole('dialog')
-    const parent = dialog.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!
-    expect(parent).toHaveTextContent('Root')
-    fireEvent.click(parent)
-    expect(within(dialog).queryByRole('button', { name: /Child/ })).toBeNull()
-    fireEvent.click(parent)
-    fireEvent.change(screen.getByPlaceholderText('library.categoryName'), { target: { value: 'New child' } })
-    fireEvent.click(screen.getByText('library.create'))
-    await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/libraries/lib/categories', { name: 'New child', parentId: 'Root' }))
-  })
-
-  it('keeps rename and move drafts after a rejected save', async () => {
-    vi.mocked(apiPatch).mockRejectedValueOnce(new Error('Rejected'))
-    setup()
-    fireEvent.contextMenu(screen.getByText('Child'))
-    fireEvent.click(screen.getByText('library.edit'))
-    expect(screen.getByText('library.editCategory')).toBeInTheDocument()
-    fireEvent.change(screen.getByPlaceholderText('library.categoryName'), { target: { value: 'Renamed child' } })
-    const dialog = screen.getByRole('dialog')
-    const parent = dialog.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!
-    fireEvent.click(parent)
-    fireEvent.click(within(document.querySelector<HTMLElement>('[data-smart-menu="true"]')!).getByRole('button', { name: /Other/ }))
-    fireEvent.click(screen.getByText('library.save'))
-    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/libraries/lib/categories/Child', { name: 'Renamed child', parentId: 'Other' }))
-    expect(screen.getByPlaceholderText('library.categoryName')).toHaveValue('Renamed child')
-    expect(parent).toHaveTextContent('Other')
-  })
-
-  it('submits the complete id set when the browsing list is filtered', async () => {
+  it('submits the complete keys set when the browsing list is filtered', async () => {
     const { client } = setup()
-    act(() => client.setQueryData(['libraries', 'lib', 'categories'], { data: [category('Root', null), category('Child', 'Root'), category('RootOther', null), category('Else', null)] }))
+    act(() => client.setQueryData(['libraries', 'lib', 'categories', false], {
+      data: [category('Root', null), category('Child', 'Root'), category('RootOther', null), category('Else', null)],
+    }))
     await screen.findByText('RootOther')
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Root' } })
     expect(screen.queryByText('Else')).toBeNull()
-    drop('Root', 'RootOther')
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/libraries/lib/categories/order', { categoryIds: ['RootOther', 'Child', 'Root', 'Else'] }))
+    drop(JSON.stringify(['Root']), JSON.stringify(['RootOther']))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/libraries/lib/categories/order', {
+      keys: [JSON.stringify(['RootOther']), JSON.stringify(['Root', 'Child']), JSON.stringify(['Root']), JSON.stringify(['Else'])],
+    }))
   })
+
+  it('supports dragging a subcategory into another root category', async () => {
+    setup()
+    drop(JSON.stringify(['Root', 'Child']), JSON.stringify(['Other']))
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/libraries/lib/categories', {
+      path: ['Root', 'Child'],
+      parentPath: ['Other'],
+    }))
+  })
+
+  it('supports dragging a subcategory out to promote to root category', async () => {
+    setup()
+    drop(JSON.stringify(['Root', 'Child']), 'directory:promote-to-root')
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/libraries/lib/categories', {
+      path: ['Root', 'Child'],
+      parentPath: null,
+    }))
+  })
+
   it('selects instead of navigating and prevents sorting in selection mode', async () => {
     const { navigate } = setup()
     fireEvent.click(screen.getByRole('button', { name: 'library.selectMode' }))
@@ -170,28 +176,22 @@ describe('taxonomy directory', () => {
     expect(screen.getByRole('button', { name: /Root/ })).toHaveAttribute('aria-pressed', 'true')
     expect(navigate).not.toHaveBeenCalled()
     expect(screen.queryByLabelText('library.moreActions')).toBeNull()
-    drop('Root', 'Other')
+    drop(JSON.stringify(['Root']), JSON.stringify(['Other']))
     expect(apiPut).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'library.selectMode' }))
     fireEvent.click(screen.getByText('Root'))
     expect(navigate).toHaveBeenCalledOnce()
   })
 
-  it('rejects cross-parent and read-only reorder operations', () => {
+  it('rejects reorder operations for read-only readers', () => {
     setup(false)
-    drop('Root', 'Other')
-    expect(apiPut).not.toHaveBeenCalled()
-  })
-
-  it('does not use sorting to move a child into another parent', () => {
-    setup()
-    drop('Child', 'Other')
+    drop(JSON.stringify(['Root']), JSON.stringify(['Other']))
     expect(apiPut).not.toHaveBeenCalled()
   })
 
   it('reuses the hidden icon and the direct menu-button entry point', async () => {
     const { client } = setup()
-    act(() => client.setQueryData(['libraries', 'lib', 'categories'], { data: [{ ...category('Root', null), hidden: true }, category('Child', 'Root')] }))
+    act(() => client.setQueryData(['libraries', 'lib', 'categories', false], { data: [{ ...category('Root', null), hidden: true }, category('Child', 'Root')] }))
     await waitFor(() => expect(screen.getAllByRole('img', { name: 'library.hiddenWorkStatus' })).toHaveLength(2))
     expect(screen.getByTitle('library.hiddenByParent')).toBeInTheDocument()
     expect(screen.queryByText('library.catalogUnlisted')).toBeNull()
@@ -199,9 +199,7 @@ describe('taxonomy directory', () => {
     expect(screen.getByText('library.edit')).toBeInTheDocument()
     expect(screen.getByText('library.show')).toBeInTheDocument()
   })
-
 })
-
 
 describe('directory batch selection', () => {
   function select(name: string) { fireEvent.click(screen.getByText(name)) }
@@ -223,7 +221,7 @@ describe('directory batch selection', () => {
 
   it('offers explicit target actions for mixed states', () => {
     const { client } = setup()
-    act(() => client.setQueryData(['libraries', 'lib', 'categories'], { data: [{ ...category('Root', null), pinned: true, hidden: true }, category('Other', null)] }))
+    act(() => client.setQueryData(['libraries', 'lib', 'categories', false], { data: [{ ...category('Root', null), pinned: true, hidden: true }, category('Other', null)] }))
     start()
     select('Root'); select('Other')
     for (const action of ['pin', 'unpin', 'hide', 'show']) expect(toolbar().getByRole('button', { name: `library.${action}` })).toBeInTheDocument()
@@ -232,12 +230,15 @@ describe('directory batch selection', () => {
   it('retains failed items and clears successful ones while applying one target value', async () => {
     setup()
     vi.mocked(apiGet).mockImplementation(async (url) => ({ data: String(url).endsWith('/categories') ? [category('Root', null), category('Child', 'Root'), category('Other', null)] : [] }) as never)
-    vi.mocked(apiPatch).mockImplementation(async (url) => { if (String(url).endsWith('/Other')) throw new Error('Rejected'); return { data: {} } as never })
+    vi.mocked(apiPatch).mockImplementation(async (_url, body) => {
+      if (body && typeof body === 'object' && 'path' in body && JSON.stringify((body as { path: string[] }).path) === JSON.stringify(['Other'])) throw new Error('Rejected')
+      return { data: {} } as never
+    })
     start(); select('Root'); select('Other')
     fireEvent.click(toolbar().getByRole('button', { name: 'library.pin' }))
     await waitFor(() => expect(toolbar().getByRole('button', { name: 'library.taxonomySelectAll' })).not.toBeDisabled())
-    expect(apiPatch).toHaveBeenCalledWith('/libraries/lib/categories/Root', { pinned: true })
-    expect(apiPatch).toHaveBeenCalledWith('/libraries/lib/categories/Other', { pinned: true })
+    expect(apiPatch).toHaveBeenCalledWith('/libraries/lib/categories', { path: ['Root'], pinned: true })
+    expect(apiPatch).toHaveBeenCalledWith('/libraries/lib/categories', { path: ['Other'], pinned: true })
     expect(screen.getByText('Root').closest('button')).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByText('Other').closest('button')).toHaveAttribute('aria-pressed', 'true')
     expect(notify.warning).toHaveBeenCalledWith({ key: 'library.taxonomyBatchPartial', params: { succeeded: 1, failed: 1 } })
@@ -245,12 +246,15 @@ describe('directory batch selection', () => {
 
   it('confirms category deletion and deletes selected children before selected parents', async () => {
     setup(); start(); select('Root'); select('Child')
-    fireEvent.click(toolbar().getByRole('button', { name: 'library.delete' }))
+    fireEvent.click(toolbar().getByRole('button', { name: 'library.clear' }))
     expect(apiDelete).not.toHaveBeenCalled()
-    expect(screen.getByText('library.taxonomyBatchDeleteCategories')).toBeInTheDocument()
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'library.delete' }))
-    await waitFor(() => expect(apiDelete).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(apiDelete).mock.calls.map(([url]) => url)).toEqual(['/libraries/lib/categories/Child', '/libraries/lib/categories/Root'])
+    expect(screen.getByText('library.taxonomyBatchClearCategories')).toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'library.clear' }))
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(apiPost).mock.calls.map(([url, body]) => [url, (body as { path: string[] }).path])).toEqual([
+      ['/libraries/lib/categories/clear', ['Root', 'Child']],
+      ['/libraries/lib/categories/clear', ['Root']],
+    ])
   })
 
   it('locks selection and duplicate requests while a batch is pending', async () => {
@@ -259,6 +263,7 @@ describe('directory batch selection', () => {
     vi.mocked(apiPatch).mockReturnValueOnce(new Promise((done) => { resolve = done }) as never)
     start(); select('Root')
     fireEvent.click(toolbar().getByRole('button', { name: 'library.pin' }))
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(1))
     expect(screen.getByRole('button', { name: 'library.selectMode' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'library.clearSelection' })).toBeDisabled()
     select('Child')
@@ -278,31 +283,18 @@ describe('directory batch selection', () => {
 
   it('updates private shelves and tags through their own endpoints', async () => {
     const { client, props, rerender } = setup()
-    client.setQueryData(['shelves', 'account', false], { data: [category('Shelf', null)] })
-    client.setQueryData(['tags', 'account', false], { data: [category('Tag', null)] })
+    client.setQueryData(['shelves', 'account', false], { data: [{ id: 'shelf-1', name: 'Shelf', bookCount: 1, hidden: false, pinned: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }] })
+    client.setQueryData(['tags', 'account', false], { data: [{ id: 'Tag', name: 'Tag', bookCount: 1, hidden: false, pinned: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }] })
     rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} libraryId={null} panel="shelves" /></QueryClientProvider>)
     start(); select('Shelf')
     fireEvent.click(toolbar().getByRole('button', { name: 'library.hide' }))
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/shelves/Shelf', { hidden: true }))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/shelves/shelf-1', { hidden: true }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'library.selectMode' })).not.toBeDisabled())
     rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} key="tags" libraryId={null} panel="tags" /></QueryClientProvider>)
-    client.setQueryData(['tags', 'account', false], { data: [category('Tag', null)] })
+    client.setQueryData(['tags', 'account', false], { data: [{ id: 'Tag', name: 'Tag', libraryId: null, sortOrder: 0, pinned: false, hidden: false, bookCount: 1, createdAt: 1, updatedAt: 1 }] })
     await screen.findByText('Tag')
     start(); select('Tag')
     fireEvent.click(toolbar().getByRole('button', { name: 'library.pin' }))
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/tags/Tag', { pinned: true }))
-  })
-
-  it('manages private categories through the private library category endpoint, separately from shelves', async () => {
-    const { client, props, rerender } = setup()
-    client.setQueryData(['libraries', 'private-lib', 'categories'], { data: [category('Private root', null)] })
-    rerender(<QueryClientProvider client={client}><TaxonomyDirectory {...props} libraryId={null} panel="categories" /></QueryClientProvider>)
-
-    fireEvent.contextMenu(await screen.findByText('Private root'))
-    fireEvent.click(screen.getByText('library.edit'))
-    fireEvent.change(screen.getByPlaceholderText('library.categoryName'), { target: { value: 'Renamed private root' } })
-    fireEvent.click(screen.getByText('library.save'))
-    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/libraries/private-lib/categories/Private root', { name: 'Renamed private root', parentId: null }))
-    expect(apiPut).not.toHaveBeenCalledWith('/shelves/Private root', expect.anything())
+    await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/tags', { name: 'Tag', pinned: true }))
   })
 })

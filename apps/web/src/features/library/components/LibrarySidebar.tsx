@@ -141,11 +141,27 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   useEffect(() => {
     if (activeLibraryId && panel === 'shelves') remember({ panel: 'categories' })
   }, [activeLibraryId, panel, remember])
+  const lastNavFilter = useRef({ tagId, categoryId, shelfId })
   useEffect(() => {
-    if (directory && directory !== panel && (!activeLibraryId || directory !== 'shelves')) {
-      remember({ panel: directory })
+    if (directory) {
+      if (directory !== panel && (!activeLibraryId || directory !== 'shelves')) {
+        remember({ panel: directory })
+      }
+      return
     }
-  }, [directory, panel, activeLibraryId, remember])
+    const prev = lastNavFilter.current
+    const changed = prev.tagId !== tagId || prev.categoryId !== categoryId || prev.shelfId !== shelfId
+    lastNavFilter.current = { tagId, categoryId, shelfId }
+    if (!changed) return
+
+    if (tagId && availableModules.includes('tags')) {
+      remember({ panel: 'tags' })
+    } else if (categoryId && availableModules.includes('categories')) {
+      remember({ panel: 'categories' })
+    } else if (shelfId && !activeLibraryId && availableModules.includes('shelves')) {
+      remember({ panel: 'shelves' })
+    }
+  }, [directory, tagId, categoryId, shelfId, panel, activeLibraryId, availableModules, remember])
   useEffect(() => {
     if (!availableModules.includes(panel as never)) {
       remember({ panel: availableModules[0] ?? (activeLibraryId ? 'categories' : 'shelves') })
@@ -179,7 +195,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   )
   const categories = useMemo(() => {
     const server = categoriesQuery.data?.data ?? EMPTY_CATEGORIES
-    const device = overlayCounts?.taxonomy.categories ?? EMPTY_CATEGORIES
+    const device = overlayCounts?.taxonomy?.categories ?? EMPTY_CATEGORIES
     const source = librarySearch?.source ?? null
     if (inLibrary || source === 'server') return server
     if (source === 'local') return device
@@ -189,7 +205,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
       merged.set(item.id, existing ? { ...existing, bookCount: existing.bookCount + item.bookCount, subtreeBookCount: existing.subtreeBookCount + item.subtreeBookCount } : item)
     }
     return [...merged.values()]
-  }, [categoriesQuery.data, overlayCounts?.taxonomy.categories, librarySearch?.source, inLibrary])
+  }, [categoriesQuery.data, overlayCounts?.taxonomy?.categories, librarySearch?.source, inLibrary])
   const categorySort = libraryPrefs?.categorySort ?? libraryPrefs?.shelfSort
   const categoryRows = useMemo(() => sortCategories(applyShelfOrder(categories, shelfOrderOverride), categorySort), [categories, shelfOrderOverride, categorySort])
   const shelves = panel === 'categories' ? categoryRows : shelfRows
@@ -214,7 +230,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
   }, [categoriesQuery.data, categoryId, sessionKey])
   const tags = useMemo(() => {
     const server = inLibrary ? libraryTagsQuery.data?.data ?? [] : tagsData?.data ?? []
-    const device = overlayCounts?.taxonomy.tags ?? []
+    const device = overlayCounts?.taxonomy?.tags ?? []
     const source = librarySearch?.source ?? null
     if (inLibrary || source === 'server') return sortSidebarItems(applyTagOrder(server, tagOrderOverride), libraryPrefs?.tagSort)
     if (source === 'local') return sortSidebarItems(device, libraryPrefs?.tagSort)
@@ -224,7 +240,7 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
       merged.set(item.id, existing ? { ...existing, bookCount: existing.bookCount + item.bookCount } : item)
     }
     return sortSidebarItems(applyTagOrder([...merged.values()], tagOrderOverride), libraryPrefs?.tagSort)
-  }, [inLibrary, libraryTagsQuery.data, tagsData, overlayCounts?.taxonomy.tags, tagOrderOverride, libraryPrefs?.tagSort, librarySearch?.source])
+  }, [inLibrary, libraryTagsQuery.data, tagsData, overlayCounts?.taxonomy?.tags, tagOrderOverride, libraryPrefs?.tagSort, librarySearch?.source])
   const taxonomyLoading = panel === 'categories' ? (!taxonomyLibraryId ? !librariesResolved : categoriesQuery.isLoading) : panel === 'shelves' ? shelvesLoading : (inLibrary ? (!activeLibraryId || libraryTagsQuery.isLoading) : tagsLoading)
   const { revealHidden } = useCatalogRevealHidden()
   const vaultCapable = useVaultCapable()
@@ -370,6 +386,17 @@ const LibrarySidebar = memo(function LibrarySidebar({ sessionKey = '', navSearch
     ro.observe(el)
     return () => ro.disconnect()
   }, [updateScrollShadows])
+
+  useEffect(() => {
+    if (!shelfId && !categoryId && !tagId) return
+    const timer = setTimeout(() => {
+      const activeEl = localNavRef.current?.querySelector<HTMLElement>('[data-active="true"]')
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }
+    }, 60)
+    return () => clearTimeout(timer)
+  }, [shelfId, categoryId, tagId, panel, session.expanded])
 
   function selectNavigation(patch: Partial<LibrarySearch>) {
     navSearch({ ...patch, directory: undefined, section: undefined })
@@ -1246,10 +1273,9 @@ function UncategorizedDropTarget({
 }
 
 /**
- * One taxonomy row, whichever library it came from. A private shelf is a
- * LibraryBook.categoryId and a shared library's category is the same table scoped
- * by libraryId, so the two response shapes are the same shape - including the
- * book count, which the server reports for both.
+ * One taxonomy row, whichever library it came from. Categories and tags are
+ * projections of book metadata with library-scoped preferences; shelves remain
+ * private entities. The sidebar uses the same compact row shape for each.
  */
 interface TaxonomyRow {
   id: string

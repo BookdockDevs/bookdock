@@ -32,10 +32,11 @@ import { buildMetaRows } from './meta-rows'
 import MetadataFieldDialog from './MetadataFieldDialog'
 import type { EditableMetadataField } from './metadata-field'
 import type { MoreActionsMenuItem } from './MoreActionsMenu'
+import OverflowTagList from './OverflowTagList'
 import RatingBadge from './RatingBadge'
 import ReadStatusChip from './ReadStatusChip'
 import ReadingProgress from './ReadingProgress'
-import { ActionIcon, FilterChip } from './ui'
+import { ActionIcon } from './ui'
 import ReviewEditor from '@/features/reviews/components/ReviewEditor'
 import ReviewPreviewSection from '@/features/reviews/components/ReviewPreviewSection'
 import { useReviewBookContext } from '@/features/reviews/hooks/useReviews'
@@ -387,9 +388,11 @@ export default function BookDetailView({
                 onChange={(value) => void changeCategory(value.categoryPath)}
               />
             )}
-            {memberTags.map((tag) => (
-              <FilterChip key={tag} prefix="#" label={tag} onClick={() => goToFilter({ tag })} />
-            ))}
+            <OverflowTagList
+              tags={memberTags}
+              maxVisible={4}
+              onTagClick={(tag) => goToFilter({ tag })}
+            />
           </div>
         )}
         reading={<ReadingProgress progress={displayBook.progress} lastReadAt={displayBook.lastReadAt} />}

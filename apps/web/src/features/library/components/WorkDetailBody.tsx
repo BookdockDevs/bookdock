@@ -35,8 +35,9 @@ import { buildMetaRows } from './book-detail/meta-rows'
 import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
 import RatingBadge from './book-detail/RatingBadge'
 import ReadingProgress from './book-detail/ReadingProgress'
-import { ActionIcon, FilterChip } from './book-detail/ui'
+import { ActionIcon } from './book-detail/ui'
 import DeleteVersionsDialog from './DeleteVersionsDialog'
+import OverflowTagList from './book-detail/OverflowTagList'
 import WorkEditDialog from './WorkEditDialog'
 import CatalogUploadSheet from './CatalogUploadSheet'
 
@@ -475,9 +476,11 @@ export default function WorkDetailBody({
               onFilter={() => goToFilter({ category: work.categoryPath ? classificationValueKey('category', work.categoryPath) : 'none', categoryScope: work.categoryPath?.length === 1 ? 'subtree' : 'direct' })}
               onChange={(value) => void changeCategory(value.categoryPath)}
             />
-            {work.tags.map((tag) => (
-              <FilterChip key={tag} prefix="#" label={tag} onClick={() => goToFilter({ tag })} />
-            ))}
+            <OverflowTagList
+              tags={work.tags}
+              maxVisible={4}
+              onTagClick={(tag) => goToFilter({ tag })}
+            />
           </div>
         )}
         reading={<ReadingProgress progress={progress} lastReadAt={lastReadAt} />}

@@ -41,13 +41,14 @@ interface TaxonomyEntryProps {
   onTogglePin: () => void
   onToggleHidden: () => void
   onNewChild?: () => void
+  onPromoteToRoot?: () => void
 }
 
 export default function TaxonomyEntry({ row, isTag = false, isCategory = false, directory = false, directoryHeading = false, sortableId = row.id,
   inheritedHidden = false, active = false, settling = false, selecting = false, selected = false,
   readOnly = false, orderingPending = false, title, isExpanded,
   indent = false, onClick, onOpen, onPointerEnter, onEdit, onDelete,
-  onTogglePin, onToggleHidden, onNewChild }: TaxonomyEntryProps) {
+  onTogglePin, onToggleHidden, onNewChild, onPromoteToRoot }: TaxonomyEntryProps) {
   const _ = useTranslation()
   const menu = useMenuAnchor()
   const dragged = useRef(false)
@@ -63,7 +64,7 @@ export default function TaxonomyEntry({ row, isTag = false, isCategory = false, 
     onPointerDownCapture={() => { dragged.current = false }}
     onPointerMoveCapture={() => { if (isDragging) dragged.current = true }}
     onContextMenu={hasMenu ? (event) => { event.preventDefault(); event.stopPropagation(); menu.openFromEvent(event) } : undefined}>
-    <button ref={setActivatorNodeRef} type="button" {...(readOnly || selecting || orderingPending ? {} : attributes)} {...listeners} title={title ?? (inheritedHidden ? _('library.hiddenByParent') : row.hidden ? _('library.catalogUnlisted') : undefined)}
+    <button ref={setActivatorNodeRef} type="button" data-active={active ? 'true' : undefined} {...(readOnly || selecting || orderingPending ? {} : attributes)} {...listeners} title={title ?? (inheritedHidden ? _('library.hiddenByParent') : row.hidden ? _('library.catalogUnlisted') : undefined)}
       onClick={() => { if (!dragged.current) onClick() }} onPointerEnter={onPointerEnter}
       aria-pressed={selecting ? selected : undefined}
       aria-expanded={isExpanded}
@@ -91,7 +92,7 @@ export default function TaxonomyEntry({ row, isTag = false, isCategory = false, 
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>
       </button>
     </div>}
-      {hasMenu && <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} anchor={menu.anchor} size={{ width: 152, height: onNewChild ? 224 : 186 }} onClose={menu.close}>
+      {hasMenu && <SmartMenu triggerRef={menu.btnRef} innerRef={menu.menuRef} anchor={menu.anchor} size={{ width: 160, height: 186 + (onNewChild ? 38 : 0) + (onPromoteToRoot ? 38 : 0) }} onClose={menu.close}>
         <MenuHeader title={row.name} subtitle={_('library.bookCount', { count: row.bookCount })}
           onClick={() => { menu.close(); (onOpen ?? onClick)() }} />
         <button
@@ -113,6 +114,12 @@ export default function TaxonomyEntry({ row, isTag = false, isCategory = false, 
             <path d="M3 7V3h6l2 3h10v14H3V7m9 4v6m-3-3h6" />
           </svg>
           {_('library.newSubcategory')}
+        </button>}
+        {onPromoteToRoot && <button type="button" onClick={() => { menu.close(); onPromoteToRoot() }} className={menuItemClass}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400" aria-hidden="true">
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+          {_('library.promoteToRoot')}
         </button>}
         <button
           type="button"

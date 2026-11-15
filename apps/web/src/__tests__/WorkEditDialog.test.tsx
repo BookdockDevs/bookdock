@@ -57,10 +57,10 @@ function version(overrides: Partial<CatalogBook['versions'][number]> = {}): Cata
 
 function work(overrides: Partial<CatalogBook> = {}): CatalogBook {
   return {
-    id: 'lb1', libraryId: 'lib_city', categoryId: 'cat1', title: 'City Book', author: 'Someone',
+    id: 'lb1', libraryId: 'lib_city', categoryPath: ['小说'], title: 'City Book', author: 'Someone',
     authors: ['Someone'], description: 'A tale', coverKey: null, meta: {}, hidden: false,
     effectiveHidden: false, hiddenReason: null, pinnedAt: null, deletedAt: null,
-    defaultVersionLinkId: null, tags: [{ id: 't1', name: 'classic' }],
+    defaultVersionLinkId: null, tags: ['classic'],
     versions: [version()], createdAt: 1, updatedAt: 1, ...overrides,
   } as CatalogBook
 }
@@ -76,7 +76,7 @@ describe('WorkEditDialog', () => {
     await i18n.changeLanguage('zh-CN')
     useAuthStore.setState({ user: { id: 'metadata-account', username: 'Owner', role: 'owner' } })
     HOOKS.useLibraryCategories.mockReturnValue({ data: { data: [{ id: 'cat1', name: '小说', parentId: null }, { id: 'cat2', name: '散文', parentId: null }] } })
-    HOOKS.useLibraryTags.mockReturnValue({ data: { data: [{ id: 't1', name: 'classic' }, { id: 't2', name: 'new' }] } })
+    HOOKS.useLibraryTags.mockReturnValue({ data: { data: [{ id: 'classic', name: 'classic' }, { id: 'new', name: 'new' }] } })
     HOOKS.useCreateLibraryCategory.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
     HOOKS.useCreateLibraryTag.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
     HOOKS.useUpdateCatalogBook.mockReturnValue({ mutateAsync: updateBook, isPending: false })
@@ -166,6 +166,19 @@ describe('WorkEditDialog', () => {
     } finally { fetchMock.mockRestore() }
   })
 
+  it('keeps a scraped category name instead of mapping it to a template path', async () => {
+    const fetchMock = mockLookupFetch([{ id: '/works/OL1W', provider: 'openlibrary', title: 'Matched title', authors: [], category: '武侠', sourceUrl: 'https://openlibrary.org/works/OL1W' }])
+    try {
+      renderDialog()
+      fireEvent.click(screen.getByRole('button', { name: '刮削' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: /Open Library/ }))
+      fireEvent.click(await screen.findByRole('button', { name: /Matched title/ }))
+      fireEvent.click(screen.getByRole('button', { name: '应用' }))
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+      await waitFor(() => expect(lastSave().payload.work).toMatchObject({ categoryPath: ['武侠'] }))
+    } finally { fetchMock.mockRestore() }
+  })
+
   it('keeps scraped tags pending until the dialog is saved', async () => {
     const createTag = vi.fn(async (input: { name: string }) => ({ data: { id: `tag-${input.name}` } }))
     HOOKS.useCreateLibraryTag.mockReturnValue({ mutateAsync: createTag, isPending: false })
@@ -176,13 +189,12 @@ describe('WorkEditDialog', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: /Open Library/ }))
       fireEvent.click(await screen.findByRole('button', { name: /Matched title/ }))
       fireEvent.click(screen.getByRole('button', { name: '应用' }))
-      // Applying only queues the unknown name: backing out must leave no tag row.
+      // Applying changes the draft only; backing out must not save it.
       expect(await screen.findByText('天文')).toBeInTheDocument()
       expect(createTag).not.toHaveBeenCalled()
       fireEvent.click(screen.getByRole('button', { name: '保存' }))
-      // The name travels with the save and the server creates it, so a failed
-      // or abandoned save cannot leave a tag row behind.
-      await waitFor(() => expect(lastSave().payload.work).toMatchObject({ tagIds: ['t1'], tagNames: ['天文'] }))
+      // The tag name travels directly in the work metadata.
+      await waitFor(() => expect(lastSave().payload.work).toMatchObject({ tags: ['classic', '天文'] }))
       expect(createTag).not.toHaveBeenCalled()
     } finally { fetchMock.mockRestore() }
   })
@@ -388,8 +400,8 @@ describe('WorkEditDialog', () => {
     await waitFor(() => expect(createTag).toHaveBeenCalledWith({ libraryId: 'lib_city', name: '硬核' }))
     await act(async () => { completeCreation(createdTag) })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(lastSave().payload.work).toMatchObject({ tagIds: ['t1', 't_new'] }))
-    expect(lastSave().payload.work).not.toHaveProperty('tagNames')
+    await waitFor(() => expect(lastSave().payload.work).toMatchObject({ tags: ['classic', '硬核'] }))
+    expect(lastSave().payload.work).not.toHaveProperty('tagIds')
   })
 
   it('offers category recommendations and sends the template key to the work patch', async () => {
@@ -400,7 +412,7 @@ describe('WorkEditDialog', () => {
     fireEvent.click(screen.getByText('推荐分类'))
     fireEvent.click(screen.getByRole('radio', { name: templateName }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(lastSave().payload.work).toEqual({ categoryTemplateKey: template.key }))
+    await waitFor(() => expect(lastSave().payload.work).toEqual({ categoryPath: ['文学', '散文随笔'] }))
     expect(lastSave().payload.versions).toBeUndefined()
   })
 })

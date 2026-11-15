@@ -83,22 +83,3 @@ export function categoryTemplatePath(key: string): string[] | undefined {
   }
   return undefined
 }
-
-export function matchCategoryTemplateKey(nameOrPath: string): string | undefined {
-  const trimmed = nameOrPath.trim()
-  if (!trimmed) return undefined
-  const parts = trimmed.split(/[/\\>、\s]+/).filter(Boolean)
-  const leaf = parts.at(-1)
-  const rootName = parts.length > 1 ? parts[0] : undefined
-
-  for (const root of CATEGORY_TEMPLATES) {
-    if (root.children) {
-      for (const child of root.children) {
-        if (rootName && root.name === rootName && child.name === leaf) return child.key
-        if (child.name === leaf || child.name === trimmed) return child.key
-      }
-    }
-    if (root.name === leaf || root.name === trimmed) return root.key
-  }
-  return undefined
-}

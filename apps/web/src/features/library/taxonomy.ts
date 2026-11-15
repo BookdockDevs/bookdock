@@ -50,13 +50,3 @@ export function categoryChoices(categories: ClientCategoryView[]) {
     name: categoryPath(categories, category.id).map((node) => node.name).join(' / '),
   }))
 }
-
-// Categories resolve the way tags do: only a case-insensitive name match reuses
-// an existing row. A scraped name that matches nothing is created on save, so
-// "都市生活" never silently lands in "都市" and a broad category cannot swallow
-// a specific one.
-export function matchCategoryByName(categories: ClientCategoryView[], rawName: string): ClientCategoryView | undefined {
-  const target = rawName.trim().toLowerCase()
-  if (!target) return undefined
-  return categories.find((category) => category.name.trim().toLowerCase() === target)
-}

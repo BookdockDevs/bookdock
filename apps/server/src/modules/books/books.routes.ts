@@ -694,8 +694,8 @@ booksRoutes.get('/:id/tags', async (c) => {
   const user = c.get('user')
   if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const bookId = c.req.param('id')
-  const tagIds = await getBookTags(user.id, bookId)
-  return c.json({ data: tagIds })
+  const tags = await getBookTags(user.id, bookId)
+  return c.json({ data: tags })
 })
 
 export default booksRoutes

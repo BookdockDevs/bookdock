@@ -719,7 +719,8 @@ async function rewriteLocalValue(
   patch: { name?: string | null; renamedTo?: string; parentPath?: string[] | null; pinned?: boolean; hidden?: boolean },
 ): Promise<{ data: null }> {
   const from = classificationValueKey(kind, value)
-  const next = patch.name !== undefined ? patch.name : patch.renamedTo
+  const leafName = Array.isArray(value) ? value[value.length - 1] : typeof value === 'string' ? value : undefined
+  const next = patch.name !== undefined ? patch.name : patch.renamedTo !== undefined ? patch.renamedTo : (kind === 'category' && patch.parentPath !== undefined ? leafName : undefined)
   const state = { ...(patch.pinned === undefined ? {} : { pinned: patch.pinned }), ...(patch.hidden === undefined ? {} : { hidden: patch.hidden }) }
   if (next !== undefined) {
     const to = next === null
@@ -791,15 +792,21 @@ export function useUpdateLibraryCategory() {
       return { data: null }
     },
     onSuccess: (res, vars) => {
-      const renamed = vars.patch.name !== undefined
+      const updated = vars.patch.name !== undefined || vars.patch.parentPath !== undefined
       if (vars.source !== 'server' && (user || local)) {
         void queryClient.invalidateQueries({ queryKey: ['client-catalog'] })
         invalidateDeviceMembershipQueries(queryClient)
       }
       if (vars.source !== 'local' && user && !local) invalidateSharedTaxonomy(queryClient, vars.libraryId)
+      void queryClient.invalidateQueries({
+        predicate: (q) => {
+          const first = q.queryKey[0]
+          return first === 'libraries' || first === 'categories'
+        },
+      })
       if (res.partial) {
         if (!vars.suppressPartialNotification) notify.warning({ key: 'library.taxonomySourcePartial' })
-      } else if (renamed) notify.success({ key: 'toast.categoryUpdated' })
+      } else if (updated) notify.success({ key: 'toast.categoryUpdated' })
     },
     onError: (error) => notify.error(getUserErrorNotification(error)),
   })

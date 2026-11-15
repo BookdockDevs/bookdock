@@ -1001,6 +1001,22 @@ describe('NavigationPanel', () => {
       expect(screen.getByText('第一章 开篇')).toBeInTheDocument()
       expect(clearSearch).toHaveBeenCalled()
     })
+
+    it('positions the search capsule at viewport center in floating mode and offsets in locked mode', async () => {
+      const { rerender } = render(<NavigationPanel bookId="book-1" open locked={false} sidebarWidth={300} />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })
+      await new Promise((r) => setTimeout(r, 500))
+
+      const capsule = screen.getByTestId('search-nav-capsule')
+      expect(capsule).toBeInTheDocument()
+      expect(capsule.parentElement).toBe(document.body)
+      expect(capsule.style.left).toBe('calc(50% + 0px)')
+
+      // When pinned/locked, offsets by (56 + sidebarWidth) / 2
+      rerender(<NavigationPanel bookId="book-1" open locked={true} sidebarWidth={300} />)
+      expect(capsule.style.left).toBe('calc(50% + 178px)')
+    })
   })
 
   describe('notes tab search and filter', () => {

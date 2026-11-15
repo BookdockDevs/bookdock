@@ -1,4 +1,5 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/hooks/useTranslation'
 import { isAccessRevocationError } from '@/lib/error-message'
@@ -1701,17 +1702,17 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         </div>
       </div>
       )}
-      {searchActive && searchResults.length > 0 && (
+      {searchActive && searchResults.length > 0 && typeof document !== 'undefined' && createPortal(
         <div
           data-testid="search-nav-capsule"
           className={cn(
-            'fixed z-[60] flex h-11 -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 px-2 shadow-xl backdrop-blur-md transition-[left] duration-200 ease-out',
+            'fixed z-[60] flex h-11 -translate-x-1/2 items-center gap-1 rounded-full border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 px-2 shadow-xl backdrop-blur-md transition-[left] duration-200 ease-out select-none whitespace-nowrap',
             mobileDockVisible
               ? 'bottom-[calc(4.75rem+env(safe-area-inset-bottom))]'
               : 'bottom-16',
           )}
           style={{
-            left: `calc(50% + ${(!mobileDockVisible && open ? 48 + (sidebarWidth ?? 288) : !mobileDockVisible ? 48 : 0) / 2}px)`,
+            left: `calc(50% + ${(!mobileDockVisible && locked ? (open ? 56 + (sidebarWidth ?? 288) : 56) : 0) / 2}px)`,
             animation: 'note-editor-in 140ms ease-out forwards',
             '--note-dx': '0px',
             '--note-dy': '6px',
@@ -1776,7 +1777,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           >
             <CloseIcon size={14} />
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
       {notesExportOpen && (
         <AnnotationExportDialog

@@ -1,15 +1,17 @@
 import { useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { closestCenter, DndContext, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
-import { arrayMove, rectSortingStrategy, SortableContext, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
+import { closestCenter, DndContext, DragOverlay, KeyboardSensor, PointerSensor, useDndContext, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
+import { arrayMove, rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
 import type { ClientCategoryView, ClientTaxonomyView } from '@bookdock/shared'
 
 import { notify } from '@/lib/notifications'
+import { cn } from '@/lib/utils'
 import { overlayTaxonomyDeviceCounts } from '@/features/local-library/catalog-view'
 import { useDataAuthority } from '@/features/reading-data/data-authority'
 import { catalogQueryKey } from '@/features/reading-data/catalog'
+import { applyShelfOrder, applyTagOrder } from '../dnd'
 
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -30,6 +32,7 @@ import ShelfDialog from './ShelfDialog'
 import TagDialog from './TagDialog'
 import TaxonomyEntry from './TaxonomyEntry'
 import TaxonomyEmptyState from './TaxonomyEmptyState'
+import TaxonomyIcon from './TaxonomyIcon'
 import TaxonomySelectionBar, { type TaxonomySelectionAction } from './TaxonomySelectionBar'
 
 interface TaxonomyDirectoryProps {
@@ -44,6 +47,81 @@ interface TaxonomyDirectoryProps {
 }
 
 const directoryLookups = new Map<string, Partial<Record<'shelves' | 'categories' | 'tags', string>>>()
+
+function PromoteCardDropZone() {
+  const _ = useTranslation()
+  const { setNodeRef, isOver } = useDroppable({ id: 'directory:promote-to-root' })
+  return (
+    <section
+      ref={setNodeRef}
+      className={cn(
+        'min-w-0 flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed py-5 px-4 text-center transition-all select-none min-h-[96px]',
+        isOver
+          ? 'border-stone-900 bg-stone-100/90 text-stone-900 shadow-md ring-2 ring-stone-900/20 dark:border-stone-100 dark:bg-stone-800 dark:text-stone-100'
+          : 'border-stone-300 bg-stone-50/40 text-stone-500 hover:border-stone-400 dark:border-stone-700 dark:bg-stone-900/20 dark:text-stone-400',
+      )}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+        <path d="M12 19V5M5 12l7-7 7 7" />
+      </svg>
+      <span className="text-xs font-semibold">{_('library.dropToPromoteCategory')}</span>
+      <span className="text-[11px] text-stone-400 dark:text-stone-500">{_('library.dropToPromoteHint')}</span>
+    </section>
+  )
+}
+
+function RootCategorySection({
+  root,
+  subcategories,
+  entry,
+  isDraggingSubcategory,
+  draggedParentId,
+}: {
+  root: ClientCategoryView
+  subcategories: ClientCategoryView[]
+  entry: (row: ClientCategoryView) => React.ReactNode
+  isDraggingSubcategory: boolean
+  draggedParentId: string | null
+}) {
+  const _ = useTranslation()
+  const { setNodeRef } = useDroppable({ id: `directory:root-container:${root.id}` })
+  const { over } = useDndContext()
+  const overId = over ? String(over.id) : null
+  const isOverThisRoot = Boolean(
+    overId && (
+      overId === `directory:root-container:${root.id}`
+      || overId === `directory:${root.id}`
+      || subcategories.some((child) => `directory:${child.id}` === overId)
+    ),
+  )
+  const isTargetRoot = isDraggingSubcategory && isOverThisRoot && root.id !== draggedParentId
+  return (
+    <section
+      ref={setNodeRef}
+      className={cn(
+        'min-w-0 rounded-xl border border-stone-200/80 bg-white p-2.5 shadow-sm transition-all dark:border-stone-800/80 dark:bg-stone-900/40',
+        isTargetRoot && 'ring-2 ring-stone-900 bg-stone-100/80 shadow-md dark:ring-stone-100 dark:bg-stone-800',
+      )}
+    >
+      {entry(root)}
+      {subcategories.length > 0 && (
+        <SortableContext items={subcategories.map((row) => `directory:${row.id}`)} strategy={verticalListSortingStrategy}>
+          <div className="mt-1 flex flex-col gap-1 pl-3.5 ml-2 border-l-2 border-stone-100 dark:border-stone-800/70">
+            {subcategories.map((child) => entry(child))}
+          </div>
+        </SortableContext>
+      )}
+      {isTargetRoot && (
+        <div className="mt-2 flex items-center gap-2 rounded-lg border-2 border-dashed border-stone-400 bg-stone-50/90 py-2 px-3 text-xs font-medium text-stone-800 animate-in fade-in-50 dark:border-stone-500 dark:bg-stone-800/90 dark:text-stone-100">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span>{_('library.moveToCategoryAsSub', { name: root.name })}</span>
+        </div>
+      )}
+    </section>
+  )
+}
 
 export default function TaxonomyDirectory({ libraryId, privateLibraryId, sessionKey, panel, source, canManage, navSearch, onOpenNavigation }: TaxonomyDirectoryProps) {
   const _ = useTranslation()
@@ -68,10 +146,13 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
   const [lookup, setLookup] = useState(() => directoryLookups.get(sessionKey) ?? {})
   const [selecting, setSelecting] = useState(false)
   const [selection, setSelection] = useState<Set<string>>(() => new Set())
+  const [shelfOrderOverride, setShelfOrderOverride] = useState<string[] | null>(null)
+  const [tagOrderOverride, setTagOrderOverride] = useState<string[] | null>(null)
+  const [categoryOrderOverride, setCategoryOrderOverride] = useState<string[] | null>(null)
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const dragJustEnded = useRef(false)
   const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
   const [shelfDialog, setShelfDialog] = useState<{ id?: string; name?: string } | null>(null)
@@ -95,36 +176,59 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
       if (panel !== 'categories') return []
       const server = categoriesQuery.data?.data ?? []
       const device = overlayCounts?.taxonomy.categories ?? []
-      if (libraryId || source === 'server') return sortCategories(server, prefs?.categorySort ?? prefs?.shelfSort)
-      if (source === 'local') return sortCategories(device, prefs?.categorySort ?? prefs?.shelfSort)
-      const merged = new Map(server.map((item) => [item.id, item]))
-      for (const item of device) {
-        const existing = merged.get(item.id)
-        merged.set(item.id, existing ? { ...existing, bookCount: existing.bookCount + item.bookCount, subtreeBookCount: existing.subtreeBookCount + item.subtreeBookCount } : item)
-      }
-      return sortCategories([...merged.values()], prefs?.categorySort ?? prefs?.shelfSort)
+      const base = (libraryId || source === 'server')
+        ? server
+        : source === 'local'
+          ? device
+          : (() => {
+              const merged = new Map(server.map((item) => [item.id, item]))
+              for (const item of device) {
+                const existing = merged.get(item.id)
+                merged.set(item.id, existing ? { ...existing, bookCount: existing.bookCount + item.bookCount, subtreeBookCount: existing.subtreeBookCount + item.subtreeBookCount } : item)
+              }
+              return [...merged.values()]
+            })()
+      return sortCategories(applyShelfOrder(base, categoryOrderOverride), prefs?.categorySort ?? prefs?.shelfSort)
     },
-    [categoriesQuery.data, overlayCounts?.taxonomy.categories, prefs?.categorySort, prefs?.shelfSort, panel, libraryId, source],
+    [categoriesQuery.data, overlayCounts?.taxonomy.categories, prefs?.categorySort, prefs?.shelfSort, panel, libraryId, source, categoryOrderOverride],
   )
   const shelves = useMemo(
-    () => sortSidebarItems(overlayTaxonomyDeviceCounts(shelvesQuery.data?.data ?? [], overlayCounts?.shelves), prefs?.shelfSort),
-    [shelvesQuery.data, overlayCounts?.shelves, prefs?.shelfSort],
+    () => sortSidebarItems(applyShelfOrder(overlayTaxonomyDeviceCounts(shelvesQuery.data?.data ?? [], overlayCounts?.shelves), shelfOrderOverride), prefs?.shelfSort),
+    [shelvesQuery.data, overlayCounts?.shelves, prefs?.shelfSort, shelfOrderOverride],
   )
   const tags = useMemo(
     () => {
-      if (libraryId || source === 'server') return sortSidebarItems(libraryId ? libraryTagsQuery.data?.data ?? [] : tagsQuery.data?.data ?? [], prefs?.tagSort)
-      const server = tagsQuery.data?.data ?? []
+      const server = libraryId ? libraryTagsQuery.data?.data ?? [] : tagsQuery.data?.data ?? []
       const device = overlayCounts?.taxonomy.tags ?? []
-      if (source === 'local') return sortSidebarItems(device, prefs?.tagSort)
-      const merged = new Map(server.map((item) => [item.id, item]))
-      for (const item of device) {
-        const existing = merged.get(item.id)
-        merged.set(item.id, existing ? { ...existing, bookCount: existing.bookCount + item.bookCount } : item)
-      }
-      return sortSidebarItems([...merged.values()], prefs?.tagSort)
+      const base = (libraryId || source === 'server')
+        ? server
+        : source === 'local'
+          ? device
+          : (() => {
+              const merged = new Map(server.map((item) => [item.id, item]))
+              for (const item of device) {
+                const existing = merged.get(item.id)
+                merged.set(item.id, existing ? { ...existing, bookCount: existing.bookCount + item.bookCount } : item)
+              }
+              return [...merged.values()]
+            })()
+      return sortSidebarItems(applyTagOrder(base, tagOrderOverride), prefs?.tagSort)
     },
-    [libraryId, libraryTagsQuery.data, tagsQuery.data, overlayCounts?.taxonomy.tags, prefs?.tagSort, source],
+    [libraryId, libraryTagsQuery.data, tagsQuery.data, overlayCounts?.taxonomy.tags, prefs?.tagSort, source, tagOrderOverride],
   )
+  const draggedCategory = useMemo(() => {
+    if (panel !== 'categories' || !activeDragId) return null
+    const entryId = activeDragId.replace(/^directory:/, '')
+    return categories.find((c) => c.id === entryId) ?? null
+  }, [panel, activeDragId, categories])
+  const draggedItem = useMemo(() => {
+    if (!activeDragId) return null
+    const entryId = activeDragId.replace(/^directory:/, '')
+    if (panel === 'categories') return categories.find((c) => c.id === entryId) ?? null
+    if (panel === 'tags') return tags.find((t) => t.id === entryId) ?? null
+    return shelves.find((s) => s.id === entryId) ?? null
+  }, [activeDragId, panel, categories, tags, shelves])
+  const isDraggingSubcategory = Boolean(draggedCategory?.parentId)
   const term = (lookup[panel] ?? '').trim().toLocaleLowerCase()
   const matches = (name: string) => name.toLocaleLowerCase().includes(term)
   const query = panel === 'tags' ? (libraryId ? libraryTagsQuery : tagsQuery) : panel === 'categories' ? categoriesQuery : shelvesQuery
@@ -191,56 +295,145 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
     }
   }
 
-  async function reorder(event: DragEndEvent) {
+  async function handleDragEnd(event: DragEndEvent) {
+    setActiveDragId(null)
     if (!canManage || selecting || orderingPending) return
     dragJustEnded.current = true
     setTimeout(() => { dragJustEnded.current = false }, 0)
-    if (!event.over || event.active.id === event.over.id) return
-    const id = event.active.data.current?.entryId as string | undefined
-    const targetId = event.over.data.current?.entryId as string | undefined
-    const entries = panel === 'tags' ? tags : panel === 'categories' ? categories : shelves
-    const row = entries.find((entry) => entry.id === id)
-    const target = entries.find((entry) => entry.id === targetId)
-    if (!row || !target) return
-    const parentId = 'parentId' in row ? row.parentId : null
-    if ('parentId' in target && target.parentId !== parentId) return
-    const siblings = panel === 'categories' ? categories.filter((category) => category.parentId === parentId) : entries
-    const ids = siblings.map((entry) => entry.id)
-    const moved = arrayMove(ids, ids.indexOf(row.id), ids.indexOf(target.id))
-    let position = 0
-    const complete = entries.map((entry) => ids.includes(entry.id) ? moved[position++]! : entry.id)
-    setOrderingPending(true)
-    try {
-      if (panel === 'tags') {
-        const deviceNames = new Set((overlayCounts?.taxonomy.tags ?? []).map((tag) => tag.name))
-        const serverNames = new Set((libraryId ? libraryTagsQuery.data?.data : tagsQuery.data?.data)?.map((tag) => tag.name) ?? [])
+    if (!event.over) return
+
+    const activeEntryId = (event.active.data.current?.entryId as string | undefined) ?? String(event.active.id).replace(/^directory:/, '')
+    const overId = String(event.over.id)
+    const overEntryId = (event.over.data.current?.entryId as string | undefined) ?? overId.replace(/^directory:(root-container:)?/, '')
+
+    if (panel === 'categories') {
+      const dragged = categories.find((c) => c.id === activeEntryId)
+      if (!dragged) return
+
+      // Drop on root plane (outside cards) or explicit promote drop target
+      if (overId === 'directory:root-plane' || overId === 'directory:promote-to-root') {
+        if (dragged.parentId) {
+          try {
+            await updateCategory.mutateAsync({
+              libraryId: categoryLibraryId,
+              path: dragged.path,
+              source,
+              patch: { parentPath: null },
+            })
+          } catch {
+            // Handled by mutation error notification
+          }
+        }
+        return
+      }
+
+      // If dragged is a subcategory
+      if (dragged.parentId) {
+        // Dropped onto a root category (or another root category's container or another root's child)
+        const target = categories.find((c) => c.id === overEntryId)
+        if (target) {
+          const targetParentId = target.parentId ?? target.id
+          if (targetParentId !== dragged.parentId) {
+            const targetRoot = categories.find((c) => c.id === targetParentId)
+            if (targetRoot) {
+              try {
+                await updateCategory.mutateAsync({
+                  libraryId: categoryLibraryId,
+                  path: dragged.path,
+                  source,
+                  patch: { parentPath: targetRoot.path },
+                })
+              } catch {
+                // Handled by mutation
+              }
+              return
+            }
+          }
+        }
+      }
+
+      if (activeEntryId === overEntryId) return
+
+      // Sibling reorder (root with root, or child with child under same parent)
+      const target = categories.find((c) => c.id === overEntryId)
+      if (!target) return
+      if (Boolean(dragged.parentId) !== Boolean(target.parentId)) return
+      if (dragged.parentId && dragged.parentId !== target.parentId) return
+
+      const siblings = categories.filter((c) => c.parentId === dragged.parentId)
+      const ids = siblings.map((c) => c.id)
+      const oldIndex = ids.indexOf(dragged.id)
+      const newIndex = ids.indexOf(target.id)
+      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return
+      const moved = arrayMove(ids, oldIndex, newIndex)
+      let pos = 0
+      const complete = categories.map((c) => ids.includes(c.id) ? moved[pos++]! : c.id)
+      setCategoryOrderOverride(complete)
+      setOrderingPending(true)
+      try {
+        const deviceKeys = new Set((overlayCounts?.taxonomy.categories ?? []).map((c) => c.id))
+        const serverKeys = new Set((categoriesQuery.data?.data ?? []).map((c) => c.id))
+        await reorderCategories.mutateAsync({
+          libraryId: categoryLibraryId,
+          keys: complete,
+          source,
+          localKeys: source === null ? complete.filter((key) => deviceKeys.has(key)) : undefined,
+          serverKeys: source === null ? complete.filter((key) => serverKeys.has(key)) : undefined,
+        })
+        updatePrefs.mutate({ categorySort: { mode: 'manual' } })
+      } catch {
+        setCategoryOrderOverride(null)
+      } finally {
+        setOrderingPending(false)
+      }
+      return
+    }
+
+    if (activeEntryId === overEntryId) return
+
+    if (panel === 'tags') {
+      const ordered = tags.map((t) => t.id)
+      const oldIndex = ordered.indexOf(activeEntryId)
+      const newIndex = ordered.indexOf(overEntryId)
+      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return
+      const next = arrayMove(ordered, oldIndex, newIndex)
+      setTagOrderOverride(next)
+      setOrderingPending(true)
+      try {
+        const deviceNames = new Set((overlayCounts?.taxonomy.tags ?? []).map((t) => t.name))
+        const serverNames = new Set((libraryId ? libraryTagsQuery.data?.data : tagsQuery.data?.data)?.map((t) => t.name) ?? [])
         await reorderLibraryTags.mutateAsync({
           libraryId,
-          names: complete,
+          names: next,
           source,
-          localNames: source === null ? complete.filter((name) => deviceNames.has(name)) : undefined,
-          serverNames: source === null ? complete.filter((name) => serverNames.has(name)) : undefined,
+          localNames: source === null ? next.filter((name) => deviceNames.has(name)) : undefined,
+          serverNames: source === null ? next.filter((name) => serverNames.has(name)) : undefined,
         })
         updatePrefs.mutate({ tagSort: { mode: 'manual' } })
-      } else {
-        if (panel === 'categories') {
-          const deviceKeys = new Set((overlayCounts?.taxonomy.categories ?? []).map((category) => category.id))
-          const serverKeys = new Set((categoriesQuery.data?.data ?? []).map((category) => category.id))
-          await reorderCategories.mutateAsync({
-            libraryId: categoryLibraryId,
-            keys: complete,
-            source,
-            localKeys: source === null ? complete.filter((key) => deviceKeys.has(key)) : undefined,
-            serverKeys: source === null ? complete.filter((key) => serverKeys.has(key)) : undefined,
-          })
-        }
-        else await reorderShelves.mutateAsync(complete)
-        updatePrefs.mutate({ shelfSort: { mode: 'manual' } })
+      } catch {
+        setTagOrderOverride(null)
+      } finally {
+        setOrderingPending(false)
       }
-    } catch {
-      // Mutation hooks own failure notifications and cache rollback.
-    } finally {
-      setOrderingPending(false)
+      return
+    }
+
+    if (panel === 'shelves') {
+      const ordered = shelves.map((s) => s.id)
+      const oldIndex = ordered.indexOf(activeEntryId)
+      const newIndex = ordered.indexOf(overEntryId)
+      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return
+      const next = arrayMove(ordered, oldIndex, newIndex)
+      setShelfOrderOverride(next)
+      setOrderingPending(true)
+      try {
+        await reorderShelves.mutateAsync(next)
+        updatePrefs.mutate({ shelfSort: { mode: 'manual' } })
+      } catch {
+        setShelfOrderOverride(null)
+      } finally {
+        setOrderingPending(false)
+      }
     }
   }
 
@@ -251,6 +444,14 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
     return <TaxonomyEntry key={row.id} row={{ ...row, bookCount: count }} isTag={isTag} isCategory={panel === 'categories'} directory directoryHeading={Boolean(category && !category.parentId)} sortableId={`directory:${row.id}`}
       inheritedHidden={Boolean(parent?.hidden)} readOnly={!canManage} selecting={selecting} selected={selection.has(row.id)} orderingPending={orderingPending || batchPending}
       title={category ? category.path.join(' / ') : row.name}
+      onPromoteToRoot={category?.parentId && canManage ? () => {
+        void updateCategory.mutateAsync({
+          libraryId: categoryLibraryId,
+          path: category.path,
+          source,
+          patch: { parentPath: null },
+        })
+      } : undefined}
       onClick={() => {
         if (dragJustEnded.current || batchLock.current) return
         if (selecting) {
@@ -376,34 +577,79 @@ export default function TaxonomyDirectory({ libraryId, privateLibraryId, session
         </div>
       </div>
     </header>
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(event) => void reorder(event)}>
-      {query.isLoading ? <div aria-busy="true" className="h-16 animate-pulse rounded-lg bg-stone-200/60 dark:bg-stone-800" /> : query.isError ? <QueryErrorState isRetrying={query.isFetching} onRetry={() => void query.refetch()} />
-      : panel === 'tags' ? showEmptyState ? <TaxonomyEmptyState type="tags" /> : <SortableContext items={tags.map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}><div className="grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{tags.filter((tag) => matches(tag.name)).map((tag) => entry(tag, true))}</div></SortableContext>
-        : panel === 'categories' ? (
-          showEmptyState ? <TaxonomyEmptyState type="categories" /> : <SortableContext items={categories.filter((row) => !row.parentId).map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}>
-            <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={(event: DragStartEvent) => setActiveDragId(String(event.active.id))}
+      onDragCancel={() => setActiveDragId(null)}
+      onDragEnd={(event) => void handleDragEnd(event)}
+    >
+      {query.isLoading ? (
+        <div aria-busy="true" className="h-16 animate-pulse rounded-lg bg-stone-200/60 dark:bg-stone-800" />
+      ) : query.isError ? (
+        <QueryErrorState isRetrying={query.isFetching} onRetry={() => void query.refetch()} />
+      ) : panel === 'tags' ? (
+        showEmptyState ? (
+          <TaxonomyEmptyState type="tags" />
+        ) : (
+          <SortableContext items={tags.map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+              {tags.filter((tag) => matches(tag.name)).map((tag) => entry(tag, true))}
+            </div>
+          </SortableContext>
+        )
+      ) : panel === 'categories' ? (
+        showEmptyState ? (
+          <TaxonomyEmptyState type="categories" />
+        ) : (
+          <SortableContext items={categories.filter((row) => !row.parentId).map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-1 items-start gap-3.5 lg:grid-cols-2 2xl:grid-cols-3">
               {categories.filter((category) => !category.parentId).map((root) => {
                 const children = categories.filter((category) => category.parentId === root.id && (matches(category.name) || matches(root.name)))
                 if (!matches(root.name) && children.length === 0) return null
                 return (
-                  <section
+                  <RootCategorySection
                     key={root.id}
-                    className="min-w-0 rounded-xl border border-stone-200/80 bg-white p-2 dark:border-stone-800/80 dark:bg-stone-900/40"
-                  >
-                    {entry(root)}
-                    {children.length > 0 && (
-                      <SortableContext items={categories.filter((row) => row.parentId === root.id).map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}>
-                        <div className="mt-1 grid grid-cols-1 gap-1 pl-3 xl:grid-cols-2">
-                          {children.map((child) => entry(child))}
-                        </div>
-                      </SortableContext>
-                    )}
-                  </section>
+                    root={root}
+                    subcategories={children}
+                    entry={entry}
+                    isDraggingSubcategory={isDraggingSubcategory}
+                    draggedParentId={draggedCategory?.parentId ?? null}
+                  />
                 )
               })}
+              {isDraggingSubcategory && <PromoteCardDropZone />}
             </div>
           </SortableContext>
-        ) : showEmptyState ? <TaxonomyEmptyState type="shelves" /> : <SortableContext items={shelves.map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}><div className="grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{shelves.filter((shelf) => matches(shelf.name)).map((shelf) => entry(shelf))}</div></SortableContext>}
+        )
+      ) : showEmptyState ? (
+        <TaxonomyEmptyState type="shelves" />
+      ) : (
+        <SortableContext items={shelves.map((row) => `directory:${row.id}`)} strategy={rectSortingStrategy}>
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {shelves.filter((shelf) => matches(shelf.name)).map((shelf) => entry(shelf))}
+          </div>
+        </SortableContext>
+      )}
+      <DragOverlay dropAnimation={{ duration: 150, easing: 'ease-out' }}>
+        {draggedItem ? (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-stone-200/90 bg-white px-3 py-2 text-stone-900 shadow-xl ring-2 ring-stone-900/10 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-50 min-h-10 select-none pointer-events-none">
+            <span className="flex min-w-0 items-center gap-2">
+              {panel === 'tags' ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-400">
+                  <path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.42 0l8.58-8.58a1 1 0 0 0 0-1.42z" /><circle cx="7" cy="7" r="1" />
+                </svg>
+              ) : (
+                <TaxonomyIcon kind={panel === 'categories' ? 'category' : 'shelf'} size={15} className="shrink-0 text-stone-400" />
+              )}
+              <span className="truncate font-medium text-[13px]">{draggedItem.name}</span>
+            </span>
+            <span className="rounded-full bg-stone-200/50 px-1.5 py-0.5 text-[11px] font-medium leading-none tabular-nums text-stone-500 dark:bg-stone-900/70 dark:text-stone-400">
+              {draggedItem.bookCount}
+            </span>
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
     {selecting && <TaxonomySelectionBar rows={selectedRows} pending={batchPending} canManage={canManage && !query.isError && !query.isLoading}
       clearValues={panel !== 'shelves'}

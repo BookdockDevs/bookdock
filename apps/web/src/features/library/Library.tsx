@@ -830,13 +830,11 @@ export default function Library() {
   // The active category's name must resolve against the library in context: a
   // category id from one library means nothing in the other.
   const activeShelfName = shelfId
-    ? (requestedLibraryId
-      ? libraryCategoriesQuery.data
-        ? libraryCategoriesQuery.data.data.find((c) => c.id === shelfId)?.name
-        : cachedTaxonomyNames.categories.find((c) => c.id === shelfId)?.name
-      : shelvesData
-        ? shelvesData.data.find((s) => s.id === shelfId)?.name
-        : cachedTaxonomyNames.categories.find((s) => s.id === shelfId)?.name)
+    ? (shelves.find((s) => s.id === shelfId)?.name
+      ?? (requestedLibraryId
+        ? libraryCategoriesQuery.data?.data.find((c) => c.id === shelfId)?.name
+        : shelvesData?.data.find((s) => s.id === shelfId)?.name)
+      ?? cachedTaxonomyNames.categories.find((c) => c.id === shelfId)?.name)
     : undefined
   const activeCategoryName = categoryId && categoryId !== 'none'
     ? (categories.some((category) => category.id === categoryId)
@@ -844,13 +842,12 @@ export default function Library() {
       : cachedTaxonomyNames.categories.find((category) => category.id === categoryId)?.name)
     : undefined
   const activeTagName = tagId
-    ? (requestedLibraryId
-      ? libraryTagsQuery.data
-        ? libraryTagsQuery.data.data.find((tag) => tag.id === tagId)?.name
-        : cachedTaxonomyNames.tags.find((tag) => tag.id === tagId)?.name
-      : tagsData
-        ? tagsData.data.find((tag) => tag.id === tagId)?.name
-        : cachedTaxonomyNames.tags.find((tag) => tag.id === tagId)?.name)
+    ? (tags.find((tag) => tag.id === tagId)?.name
+      ?? (requestedLibraryId
+        ? libraryTagsQuery.data?.data.find((tag) => tag.id === tagId)?.name
+        : tagsData?.data.find((tag) => tag.id === tagId)?.name)
+      ?? deviceTaxonomy.data?.tags.find((tag) => tag.id === tagId)?.name
+      ?? cachedTaxonomyNames.tags.find((tag) => tag.id === tagId)?.name)
     : undefined
   const metadataFilter = author
     ? { kind: 'author' as const, value: author }
@@ -861,8 +858,8 @@ export default function Library() {
   const filterNameUnknown = Boolean((shelfId && shelfId !== 'none' && !activeShelfName) || (categoryId && categoryId !== 'none' && !activeCategoryName) || (tagId && !activeTagName))
   const filterNamePending = Boolean(
     (shelfId && shelfId !== 'none' && !activeShelfName && shelvesQuery.isLoading)
-    || (categoryId && categoryId !== 'none' && !activeCategoryName && libraryCategoriesQuery.isLoading)
-    || (tagId && !activeTagName && (requestedLibraryId ? libraryTagsQuery.isLoading : tagsQuery.isLoading)),
+    || (categoryId && categoryId !== 'none' && !activeCategoryName && (libraryCategoriesQuery.isLoading || deviceTaxonomy.isLoading))
+    || (tagId && !activeTagName && (requestedLibraryId ? libraryTagsQuery.isLoading : (tagsQuery.isLoading || deviceTaxonomy.isLoading))),
   )
   const viewTitle = isLibraryActivity
     ? _('library.activity')

@@ -28,7 +28,7 @@ export default function BookClassificationEditor({ libraryId, categories, catego
     <div className="mb-2"><p className="text-xs font-semibold text-stone-500 dark:text-stone-400">{_('library.categories')}</p></div>
     <CategorySelectPopover categories={categories ?? categoriesData?.data ?? []} categoryPath={categoryPath} allowTemplates={allowTemplates} onChange={(value) => onCategoryChange(value.categoryPath)} />
     <div className="mb-2 mt-4"><p className="text-xs font-semibold text-stone-500 dark:text-stone-400">{_('library.tags')}</p></div>
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex max-h-36 flex-wrap items-center gap-1.5 overflow-y-auto custom-scrollbar p-0.5">
       {[...tags].map((name) => (
         <span key={name} className="inline-flex min-h-[28px] items-center gap-1 rounded-full border border-stone-200 bg-stone-100/90 py-0.5 pl-2.5 pr-1 text-xs font-medium text-stone-800 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 select-none">
           <span>{name}</span>

@@ -1619,12 +1619,12 @@ export default function Reader() {
   }, [renderer, annotations?.data, publicMarkers, displayedRevisionId, noteEditorRange, translationTarget, dictionaryTarget])
 
   useLayoutEffect(() => {
-    // A locked desktop toolbar is persistent by intent — reopen the sidebar
-    // with it, unless the user last collapsed it (remembered while locked).
-    // Touch devices have no lock, so the sidebar always starts closed.
+    // Desktop toolbar reopens the sidebar if the user had it open previously,
+    // whether pinned (side column) or unpinned (floating island).
+    // Touch devices have no desktop dock, so the bottom sheet always starts closed.
     const ui = useUiStore.getState()
     resetForBook(
-      !isTouch && ui.toolbarLocked && ui.sidebarRememberedOpen,
+      !isTouch && ui.sidebarRememberedOpen,
       ui.navTabRemembered,
       id,
     )
@@ -1639,16 +1639,16 @@ export default function Reader() {
     setCurrentContentCfi(null)
   }, [cacheId, id, resetForBook, syncHistoryCaps, isTouch])
 
-  // While locked, every open/closed toggle is a deliberate choice — remember
+  // On desktop, every open/closed toggle is a deliberate choice — remember
   // it (device-local) so the next book open honors it instead of forcing open.
   // Skip stale renders: on a cold refresh the seed effect above has already
   // opened the sidebar while this render still holds the initial `false`, and
   // recording that would wipe the memory before the seed value lands.
   useEffect(() => {
-    if (isTouch || !toolbarLocked) return
+    if (isTouch) return
     if (useReaderState.getState().sidebarOpen !== sidebarOpen) return
     useUiStore.getState().setSidebarRememberedOpen(sidebarOpen)
-  }, [sidebarOpen, toolbarLocked, isTouch])
+  }, [sidebarOpen, isTouch])
 
   // The displacement threshold scales with the chapter count (big books cap it
   // at two chapter widths); update it once the chapters arrive

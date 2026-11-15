@@ -14,12 +14,12 @@ describe('reader-state resetForBook', () => {
     expect(useReaderState.getState().activeNavTab).toBe('toc')
   })
 
-  it('seeds the sidebar open when initialSidebarOpen is true (locked toolbar)', () => {
+  it('seeds the sidebar open when initialSidebarOpen is true (pinned or floating)', () => {
     useReaderState.getState().resetForBook(true)
     expect(useReaderState.getState().sidebarOpen).toBe(true)
   })
 
-  it('seeds the remembered tab so a locked sidebar reopens where the user left it', () => {
+  it('seeds the remembered tab so the sidebar reopens where the user left it', () => {
     useReaderState.getState().resetForBook(true, 'notes')
     expect(useReaderState.getState().activeNavTab).toBe('notes')
     expect(useReaderState.getState().sidebarOpen).toBe(true)

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import Checkbox from '@/components/ui/Checkbox'
 import Modal from '@/components/ui/Modal'
 import MetadataLookupDropdown from './MetadataLookupDropdown'
+import OverflowTagList from './OverflowTagList'
 import { useTranslation } from '@/hooks/useTranslation'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
@@ -718,14 +719,7 @@ export default function MetadataLookupDialog({
                             <span>{selected.category}</span>
                           </span>
                         )}
-                        {selected.tags?.map((tag) => (
-                          <span
-                            key={tag}
-                            className="inline-flex items-center rounded-md bg-stone-100/80 px-1.5 py-0.5 text-xs text-stone-600 dark:bg-stone-800/80 dark:text-stone-400"
-                          >
-                            #{tag}
-                          </span>
-                        ))}
+                        <OverflowTagList tags={selected.tags ?? []} maxVisible={4} size="sm" />
                       </div>
                     )}
                   </div>

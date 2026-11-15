@@ -12,7 +12,6 @@ import { invalidateActivityQueries } from '@/features/activity/hooks'
 import { formatAuthorList } from '@/lib/utils'
 
 import { versionOrdinal } from '../book-row'
-import { categoryTemplatePath, matchCategoryTemplateKey } from '@bookdock/shared'
 import {
   useCatalogVersionMetadataSource,
   useLibraryTags,
@@ -496,8 +495,7 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
             if (classification) {
               if (classification.category?.trim()) {
                 const rawCat = classification.category.trim()
-                const template = matchCategoryTemplateKey(rawCat)
-                setCategoryPath(template ? categoryTemplatePath(template) ?? [rawCat] : [rawCat])
+                setCategoryPath([rawCat])
               }
               if (classification.tags?.length) {
                 setTagNames((prev) => new Set([...prev, ...classification.tags!.map((name) => name.trim()).filter(Boolean)]))
