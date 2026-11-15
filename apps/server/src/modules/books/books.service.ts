@@ -7,7 +7,7 @@ import { getDb } from '../../db/client'
 import { blobKeyReferenced, deleteBlobRowIfUnreferenced } from '../../db/blob-refs'
 import {
   blobs, bookVersions, bookStates, contentRevisions, libraries, libraryBooks,
-  libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, settings,
+  libraryBookTagValues, libraryBookVersions, settings,
   libraryMemberships, users as usersTable, shelves,
   highlights, bookmarks, aiThreads, textReplacements,
   readingArchives, readingDurationFacts, readingImportBindings, readingBookStats, readingContributions, readingHourlyStats, readingProjectionStates, readingRecords, readingRoundStats, readingRounds, readingSessions, readingWriteReceipts, bookReviews,
@@ -33,6 +33,7 @@ import { issueUndoReceipt, sameSnapshotValue } from '../../lib/undo'
 import { assertCanContribute, assertLibraryBrowsable, assertMutableContent, ensurePrivateLibrary, getOwnsSourceVersionIds, isLibraryManager, sourceStillReadable, sourceStillReadableSync } from '../libraries/library-access'
 import { assertUserUploadAllowed } from '../auth/auth.service'
 import { categoryFilter, libraryOrderBy, classifyWorkHidden, getWorkHiddenDetail, loadLibraryHiddenTaxonomy, workHiddenExclusion } from '../libraries/library-query'
+import { searchFieldFilter } from '../libraries/search-expression'
 import { resolveSharedVersionRead } from '../libraries/library-access'
 import { convertTxtToEpub, TXT_EPUB_ARTIFACT_VERSION } from '../../lib/txt-to-epub'
 import { sha256 } from '../../lib/hash'
@@ -44,15 +45,37 @@ import { capturePrivateArchiveSnapshots, deleteOwnedIdeasInTx, deleteOwnedReview
 import { deleteProgressFile, readProgressFile, writeProgressFile } from '../../lib/progress-file'
 import { coverThumbnailKey, detectImageExtension, blobKey, generateCoverThumbnail } from '../../lib/cover'
 import { log } from '../../lib/logger'
-import { categoryTemplatePath, LibrarySearchError, normalizeAuthors, type AppendContentCandidate, type BookSaveReq, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type BookMembershipReq, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PrivateBatchShelfReq, type PrivateBatchUpdateReq, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
+import { LibrarySearchError, normalizeAuthors, normalizeCategoryPath, normalizeTagNames, type AppendContentCandidate, type BookSaveReq, type AppendContentPreviewRes, type BatchOrganizeReq, type BatchSelectionItem, type BookFormat, type BookMetadata, type BookMembershipReq, type CoverPaletteId, type Chapter, type HiddenReason, type LibraryVersionKind, type PrivateBatchShelfReq, type PrivateBatchUpdateReq, type PublishedLinkInfo, type TocPreviewChapter, type TocPreviewRes, type TocRulePattern, type TrashSettings } from '@bookdock/shared'
 
 import { compileSearchExpression } from '../libraries/search-expression'
 
 import { getReaderBookSettings } from './reader-settings.service'
 import { enqueueReaderArchivePreparation } from './reader-content.service'
 import { readTxtEpubCandidate, sameEpubArchive } from './txt-epub-correspondence'
-import { pruneEmptyCategories, resolveOrCreateCategoryPath } from '../libraries/library-category-path'
-import { deleteUnusedCreatedTags, resolveTagSet } from '../tags/tag-resolve'
+
+/** A book's tag values, in their stored order. */
+function readBookTagValues(reader: Pick<ReturnType<typeof getDb>, 'select'>, libraryBookId: string): string[] {
+  return reader.select({ name: libraryBookTagValues.name }).from(libraryBookTagValues)
+    .where(eq(libraryBookTagValues.libraryBookId, libraryBookId))
+    .orderBy(libraryBookTagValues.sortOrder, libraryBookTagValues.name).all().map((row) => row.name)
+}
+
+/** Keep tag membership timestamps tied to actual additions and removals. */
+function setBookTagValues(tx: Pick<ReturnType<typeof getDb>, 'delete' | 'insert' | 'select' | 'update'>, libraryBookId: string, tags: string[]) {
+  const existing = tx.select({ id: libraryBookTagValues.id, name: libraryBookTagValues.name, sortOrder: libraryBookTagValues.sortOrder })
+    .from(libraryBookTagValues).where(eq(libraryBookTagValues.libraryBookId, libraryBookId)).all()
+  const nextNames = new Set(tags)
+  const currentNames = new Set(existing.map((row) => row.name))
+  const removed = existing.filter((row) => !nextNames.has(row.name)).map((row) => row.name)
+  if (removed.length) tx.delete(libraryBookTagValues).where(and(eq(libraryBookTagValues.libraryBookId, libraryBookId), inArray(libraryBookTagValues.name, removed))).run()
+  const added = tags.filter((name) => !currentNames.has(name))
+  if (added.length) tx.insert(libraryBookTagValues)
+    .values(added.map((name) => ({ id: createId('btv'), libraryBookId, name, sortOrder: tags.indexOf(name) }))).run()
+  for (const row of existing) {
+    const sortOrder = tags.indexOf(row.name)
+    if (sortOrder >= 0 && sortOrder !== row.sortOrder) tx.update(libraryBookTagValues).set({ sortOrder }).where(eq(libraryBookTagValues.id, row.id)).run()
+  }
+}
 
 /**
  * The effective TOC preset for a book: the pinned rule id in books.meta
@@ -138,7 +161,7 @@ export function scoreTocRules(userId: string, sample: string) {
   return pickedId ? rules.find((r) => r.id === pickedId) ?? null : null
 }
 
-export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tagId?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string, showHidden?: boolean, expression?: string, categoryId?: string) {
+export async function listBooks(userId: string, page: number, pageSize: number, search?: string, sortBy?: string, sortOrder?: string, shelfId?: string, tag?: string, format?: BookFormat, readStatus?: string, trash?: boolean, author?: string, series?: string, showHidden?: boolean, expression?: string, category?: string[] | 'none') {
   const db = getDb()
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.userId, userId), eq(libraries.type, 'private'))).get()
@@ -167,11 +190,9 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     // must itself be escaped first.
     const escaped = search.replace(/[!%_]/g, (m) => '!' + m)
     const pattern = '%' + escaped + '%'
-    const categoryMatch = sql`EXISTS (
-      SELECT 1 FROM ${libraryCategories} AS search_category
-      WHERE search_category.id = ${libraryBooks.categoryId}
-        AND search_category.library_id = ${library.id}
-        AND search_category.name LIKE ${pattern} ESCAPE '!'
+    const categoryMatch = sql`(
+      ${libraryBooks.categoryRoot} LIKE ${pattern} ESCAPE '!'
+      OR ${libraryBooks.categoryLeaf} LIKE ${pattern} ESCAPE '!'
     )`
     const shelfMatch = sql`EXISTS (
       SELECT 1 FROM ${shelves} AS search_shelf
@@ -180,12 +201,9 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
         AND search_shelf.name LIKE ${pattern} ESCAPE '!'
     )`
     const tagMatch = sql`EXISTS (
-      SELECT 1
-      FROM ${libraryBookTags} AS search_book_tag
-      INNER JOIN ${libraryTags} AS search_tag ON search_tag.id = search_book_tag.tag_id
+      SELECT 1 FROM ${libraryBookTagValues} AS search_book_tag
       WHERE search_book_tag.library_book_id = ${libraryBooks.id}
-        AND search_tag.library_id = ${library.id}
-        AND search_tag.name LIKE ${pattern} ESCAPE '!'
+        AND search_book_tag.name LIKE ${pattern} ESCAPE '!'
     )`
     return sql`(
       ${effTitle} LIKE ${pattern} ESCAPE '!'
@@ -222,13 +240,12 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   } else if (shelfId) {
     conditions.push(eq(libraryBooks.shelfId, shelfId))
   }
-  const categoryCondition = categoryFilter(categoryId, 'subtree', library.id)
+  const categoryCondition = categoryFilter(category, 'subtree')
   if (categoryCondition) {
     conditions.push(categoryCondition)
   }
-  if (tagId) {
-    const sub = db.select({ libraryBookId: libraryBookTags.libraryBookId }).from(libraryBookTags).where(eq(libraryBookTags.tagId, tagId))
-    conditions.push(sql`${libraryBooks.id} IN ${sub}`)
+  if (tag) {
+    conditions.push(sql`EXISTS (SELECT 1 FROM ${libraryBookTagValues} AS filter_book_tag WHERE filter_book_tag.library_book_id = ${libraryBooks.id} AND filter_book_tag.name = ${tag})`)
   }
   if (author) {
     // A single author matches the first-author mirror or any list element,
@@ -247,9 +264,13 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   if (expression) {
     conditions.push(compileSearchExpression(expression, library.id, false, (node) => {
       if (node.kind === 'text') return textMatch(node.value)
-      if (node.field === 'tag') return sql`EXISTS (SELECT 1 FROM ${libraryBookTags} WHERE ${libraryBookTags.libraryBookId} = ${libraryBooks.id} AND ${libraryBookTags.tagId} = ${node.id})`
+      if (node.field === 'tag' || node.field === 'category') {
+        const filter = searchFieldFilter(node)
+        if (filter.tag) return sql`EXISTS (SELECT 1 FROM ${libraryBookTagValues} WHERE ${libraryBookTagValues.libraryBookId} = ${libraryBooks.id} AND ${libraryBookTagValues.name} = ${filter.tag})`
+        const condition = categoryFilter(filter.category ?? 'none', 'subtree')
+        if (condition) return condition
+      }
       if (node.field === 'shelf') return node.id === 'none' ? isNull(libraryBooks.shelfId) : eq(libraryBooks.shelfId, node.id!)
-      if (node.field === 'category') return node.id === 'none' ? isNull(libraryBooks.categoryId) : eq(libraryBooks.categoryId, node.id!)
       if (node.field === 'format') return eq(bookVersions.format, node.value as BookFormat)
       if (node.field === 'status') return eq(effReadStatus, node.value)
       const predicate = sql`(${effAuthor} = ${node.value} OR EXISTS (SELECT 1 FROM json_each(coalesce(${libraryBookVersions.authors}, ${libraryBooks.authors}, '[]')) WHERE value = ${node.value}))`
@@ -299,8 +320,8 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     deletedAt: libraryBooks.deletedAt,
     shelfId: libraryBooks.shelfId,
     shelfName: shelves.name,
-    categoryId: libraryBooks.categoryId,
-    categoryName: libraryCategories.name,
+    categoryRoot: libraryBooks.categoryRoot,
+    categoryLeaf: libraryBooks.categoryLeaf,
     // Work-level hide; surfaced so the display toggle can badge rows.
     hidden: libraryBooks.hidden,
     // 7.7: a B carries its single source; A/C rows resolve to null.
@@ -314,7 +335,6 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
     .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
     .leftJoin(bookStates, and(eq(bookStates.bookVersionId, bookVersions.id), eq(bookStates.userId, userId)))
-    .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
     .leftJoin(shelves, eq(libraryBooks.shelfId, shelves.id))
     .where(where)
   // Pin-first is meaningless in the trash; there the chosen sort rules alone.
@@ -326,27 +346,22 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
     .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
     .innerJoin(bookVersions, eq(libraryBookVersions.bookVersionId, bookVersions.id))
     .leftJoin(bookStates, and(eq(bookStates.bookVersionId, bookVersions.id), eq(bookStates.userId, userId)))
-    .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
     .leftJoin(shelves, eq(libraryBooks.shelfId, shelves.id))
     .where(where).get()
   // Tag names are fetched per page in a second query: joining tags into
   // the paginated query would multiply rows per book and break LIMIT/OFFSET.
   const tagRows = rows.length > 0
-    ? db.select({ libraryBookId: libraryBookTags.libraryBookId, tagId: libraryBookTags.tagId, name: libraryTags.name })
-      .from(libraryBookTags)
-      .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
-      .where(inArray(libraryBookTags.libraryBookId, rows.map((b) => b.libraryBookId)))
+    ? db.select({ libraryBookId: libraryBookTagValues.libraryBookId, name: libraryBookTagValues.name })
+      .from(libraryBookTagValues)
+      .where(inArray(libraryBookTagValues.libraryBookId, rows.map((b) => b.libraryBookId)))
+      .orderBy(libraryBookTagValues.sortOrder, libraryBookTagValues.name)
       .all()
     : []
   const tagsByBook = new Map<string, string[]>()
-  const tagIdsByBook = new Map<string, string[]>()
   for (const row of tagRows) {
     const list = tagsByBook.get(row.libraryBookId) ?? []
     list.push(row.name)
     tagsByBook.set(row.libraryBookId, list)
-    const ids = tagIdsByBook.get(row.libraryBookId) ?? []
-    ids.push(row.tagId)
-    tagIdsByBook.set(row.libraryBookId, ids)
   }
   // 7.7: mark collected cards whose source is gone so the list can say so
   // before the reader refuses the file. Batched in two queries — existence of
@@ -382,11 +397,14 @@ export async function listBooks(userId: string, page: number, pageSize: number, 
   }) => {
     // Effective hide for badging: without reveal every row here is visible
     // by construction, so a reason only ever fires in reveal mode.
+    const categoryPath = b.categoryRoot ? [b.categoryRoot, ...(b.categoryLeaf ? [b.categoryLeaf] : [])] : null
     const detail = taxonomy
-      ? classifyWorkHidden({ hidden: b.hidden, shelfId: b.shelfId, categoryId: b.categoryId }, taxonomy, tagIdsByBook.get(_libraryBookId) ?? [])
+      ? classifyWorkHidden({ hidden: b.hidden, shelfId: b.shelfId, categoryRoot: b.categoryRoot, categoryLeaf: b.categoryLeaf }, taxonomy, tagsByBook.get(_libraryBookId) ?? [])
       : { reason: null as HiddenReason | null }
     return {
       ...b,
+      categoryPath,
+      categoryName: b.categoryLeaf ? `${b.categoryRoot} / ${b.categoryLeaf}` : b.categoryRoot,
       authors: versionAuthors ?? workAuthors ?? [],
       tags: tagsByBook.get(_libraryBookId) ?? [],
       effectiveHidden: detail.reason !== null,
@@ -659,34 +677,18 @@ export async function assertBookUploadAllowed(userId: string, libraryId?: string
 export async function uploadBook(
   userId: string,
   file: File,
-  membership?: { shelfId?: string | null; categoryId?: string | null; categoryTemplateKey?: string; tagIds?: string[] },
+  membership?: { shelfId?: string | null; categoryPath?: string[] | null; tags?: string[] },
   opts?: { normalizeTitle?: boolean; allowCorresponding?: boolean },
 ) {
   assertUserUploadAllowed(userId)
-  if (membership?.categoryId !== undefined && membership.categoryTemplateKey !== undefined) {
-    throw new AppError('VALIDATION_ERROR', 'Choose a category or a recommendation')
-  }
   const db = getDb()
   const library = { id: ensurePrivateLibrary(db, userId) }
-  const tagIds = [...new Set(membership?.tagIds ?? [])]
+  const categoryPath = normalizeCategoryPath(membership?.categoryPath)
+  const tags = normalizeTagNames(membership?.tags)
   if (membership?.shelfId) {
     const shelf = db.select({ id: shelves.id }).from(shelves)
       .where(and(eq(shelves.id, membership.shelfId), eq(shelves.libraryId, library.id))).get()
     if (!shelf) throw new AppError('SHELF_NOT_FOUND')
-  }
-  if (membership?.categoryId) {
-    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, membership.categoryId), eq(libraryCategories.libraryId, library.id))).get()
-    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
-  }
-  const templatePath = membership?.categoryTemplateKey ? categoryTemplatePath(membership.categoryTemplateKey) : undefined
-  if (membership?.categoryTemplateKey && !templatePath) {
-    throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
-  }
-  if (tagIds.length > 0) {
-    const existingTags = db.select({ count: sql<number>`count(*)` }).from(libraryTags)
-      .where(and(eq(libraryTags.libraryId, library.id), inArray(libraryTags.id, tagIds))).get()
-    if ((existingTags?.count ?? 0) !== tagIds.length) throw new AppError('TAG_NOT_FOUND')
   }
 
   const versionId = createId('book')
@@ -697,9 +699,9 @@ export async function uploadBook(
     // even for a duplicate. The category is deliberately not touched: it is a
     // single-value column and moving an already-shelved book silently would
     // be destructive - the UI surfaces the mismatch instead.
-    if (tagIds.length > 0) {
-      db.insert(libraryBookTags)
-        .values(tagIds.map((tagId) => ({ libraryBookId: duplicate.libraryBookId, tagId })))
+    if (tags.length > 0) {
+      db.insert(libraryBookTagValues)
+        .values(tags.map((name) => ({ id: createId('btv'), libraryBookId: duplicate.libraryBookId, name })))
         .onConflictDoNothing()
         .run()
     }
@@ -755,7 +757,7 @@ export async function uploadBook(
       }
       tx.insert(libraryBooks).values({
         id: libraryBookId, libraryId: library.id, userId, shelfId: membership?.shelfId ?? null,
-        categoryId: membership?.categoryId ?? (templatePath ? resolveOrCreateCategoryPath(tx, library.id, userId, templatePath) : null),
+        categoryRoot: categoryPath?.[0] ?? null, categoryLeaf: categoryPath?.[1] ?? null,
         title: upload.title, author: upload.author, authors: upload.authors, description: upload.description,
         coverKey: upload.coverKey, createdAt: now, updatedAt: now,
       }).run()
@@ -767,14 +769,11 @@ export async function uploadBook(
         userId, bookVersionId: versionId, readStatus: 'reading', percent: 0,
         cfi: null, chapter: null, lastReadAt: null, updatedAt: now,
       }).run()
-      if (tagIds.length > 0) {
-        tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).run()
+      if (tags.length > 0) {
+        tx.insert(libraryBookTagValues).values(tags.map((name, index) => ({ id: createId('btv'), libraryBookId, name, sortOrder: index }))).run()
       }
       if (membership?.shelfId) {
         tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, membership.shelfId)).run()
-      }
-      if (membership?.categoryId) {
-        tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, membership.categoryId)).run()
       }
     })
   } catch (err) {
@@ -803,9 +802,9 @@ export async function uploadCatalogBook(
   file: File,
   opts?: {
     libraryBookId?: string
-    categoryId?: string
+    categoryPath?: string[] | null
     shelfId?: string
-    tagIds?: string[]
+    tags?: string[]
     name?: string
     title?: string
     author?: string
@@ -818,22 +817,13 @@ export async function uploadCatalogBook(
   // Owner/admin only by default; members when the library opened uploads.
   await assertBookUploadAllowed(userId, libraryId)
   const libraryType = db.select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()?.type
-  const tagIds = [...new Set(opts?.tagIds ?? [])]
+  const categoryPath = normalizeCategoryPath(opts?.categoryPath)
+  const tags = normalizeTagNames(opts?.tags)
   if (opts?.shelfId) {
     if (libraryType !== 'private') throw new AppError('VALIDATION_ERROR', 'Shelves are only available in private libraries')
     const shelf = db.select({ id: shelves.id }).from(shelves)
       .where(and(eq(shelves.id, opts.shelfId), eq(shelves.libraryId, libraryId))).get()
     if (!shelf) throw new AppError('SHELF_NOT_FOUND')
-  }
-  if (opts?.categoryId) {
-    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, opts.categoryId), eq(libraryCategories.libraryId, libraryId))).get()
-    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
-  }
-  if (tagIds.length > 0) {
-    const existingTags = db.select({ count: sql<number>`count(*)` }).from(libraryTags)
-      .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, tagIds))).get()
-    if ((existingTags?.count ?? 0) !== tagIds.length) throw new AppError('TAG_NOT_FOUND')
   }
   // Grouping into an existing work (5.2): the work must live in the same
   // library, and the version must not be there yet. Member upload rights are
@@ -849,14 +839,14 @@ export async function uploadCatalogBook(
     if (!target) throw new AppError('LIBRARY_BOOK_NOT_FOUND')
   }
 
-  const canManageExistingWorkTags = tagIds.length > 0 && await isLibraryManager(userId, libraryId)
+  const canManageExistingWorkTags = tags.length > 0 && await isLibraryManager(userId, libraryId)
   const versionId = createId('book')
   const buffer = Buffer.from(await file.arrayBuffer())
   const duplicate = findPersonalVersionByBlob(libraryId, blobKey(sha256(buffer), '.epub'), file.name.toLowerCase().endsWith('.txt') ? 'txt' : 'epub')
   if (duplicate) {
     if (canManageExistingWorkTags) {
-      db.insert(libraryBookTags)
-        .values(tagIds.map((tagId) => ({ libraryBookId: duplicate.libraryBookId, tagId })))
+      db.insert(libraryBookTagValues)
+        .values(tags.map((name) => ({ id: createId('btv'), libraryBookId: duplicate.libraryBookId, name })))
         .onConflictDoNothing()
         .run()
     }
@@ -890,7 +880,8 @@ export async function uploadCatalogBook(
         : { author: upload.author, authors: upload.authors }
       if (!targetLibraryBookId) {
         tx.insert(libraryBooks).values({
-          id: libraryBookId, libraryId, userId, shelfId: opts?.shelfId ?? null, categoryId: opts?.categoryId ?? null,
+          id: libraryBookId, libraryId, userId, shelfId: opts?.shelfId ?? null,
+          categoryRoot: categoryPath?.[0] ?? null, categoryLeaf: categoryPath?.[1] ?? null,
           title: opts?.title ?? upload.title, author: workAuthors.author, authors: workAuthors.authors,
           description: upload.description, coverKey: upload.coverKey, createdAt: now, updatedAt: now,
         }).run()
@@ -933,11 +924,10 @@ export async function uploadCatalogBook(
               operationId: opts?.operationId, occurredAt: now,
             })
       }
-      if (tagIds.length > 0 && (!targetLibraryBookId || canManageExistingWorkTags)) {
-        tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
-      }
-      if (opts?.categoryId) {
-        tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, opts.categoryId)).run()
+      if (tags.length > 0 && (!targetLibraryBookId || canManageExistingWorkTags)) {
+        tx.insert(libraryBookTagValues)
+          .values(tags.map((name, index) => ({ id: createId('btv'), libraryBookId, name, sortOrder: index })))
+          .onConflictDoNothing().run()
       }
       if (opts?.shelfId) {
         tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, opts.shelfId)).run()
@@ -1287,10 +1277,10 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     lastReadAt: bookStates.lastReadAt,
   }).from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
-  const tagRows = db.select({ id: libraryTags.id, name: libraryTags.name })
-    .from(libraryBookTags)
-    .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
-    .where(eq(libraryBookTags.libraryBookId, work.id))
+  const tagRows = db.select({ name: libraryBookTagValues.name })
+    .from(libraryBookTagValues)
+    .where(eq(libraryBookTagValues.libraryBookId, work.id))
+    .orderBy(libraryBookTagValues.sortOrder, libraryBookTagValues.name)
     .all()
   const revisionMeta = (revision.meta ?? {}) as Record<string, unknown>
   const hiddenDetail = getWorkHiddenDetail(db, granted.library.id, work)
@@ -1320,11 +1310,8 @@ async function resolveLibraryRead(userId: string | null, bookId: string) {
     deletedAt: null,
     shelfId: null,
     shelfName: null,
-    categoryId: work.categoryId,
-    categoryName: work.categoryId
-      ? db.select({ name: libraryCategories.name }).from(libraryCategories).where(eq(libraryCategories.id, work.categoryId)).get()?.name ?? null
-      : null,
-    tagIds: tagRows.map((t) => t.id),
+    categoryPath: work.categoryRoot ? [work.categoryRoot, ...(work.categoryLeaf ? [work.categoryLeaf] : [])] : null,
+    categoryName: work.categoryLeaf ? `${work.categoryRoot} / ${work.categoryLeaf}` : work.categoryRoot,
     tags: tagRows.map((t) => t.name),
     cfi: state?.cfi ?? null,
     chapter: state?.chapter ?? null,
@@ -1406,10 +1393,10 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     lastReadAt: bookStates.lastReadAt,
   }).from(bookStates)
     .where(and(eq(bookStates.userId, userId), eq(bookStates.bookVersionId, bookId))).get()
-  const tagRows = db.select({ id: libraryTags.id, name: libraryTags.name })
-    .from(libraryBookTags)
-    .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
-    .where(eq(libraryBookTags.libraryBookId, lb.id))
+  const tagRows = db.select({ name: libraryBookTagValues.name })
+    .from(libraryBookTagValues)
+    .where(eq(libraryBookTagValues.libraryBookId, lb.id))
+    .orderBy(libraryBookTagValues.sortOrder, libraryBookTagValues.name)
     .all()
   const shelfRow = lb.shelfId
     ? db.select({ name: shelves.name }).from(shelves).where(eq(shelves.id, lb.shelfId)).get()
@@ -1464,11 +1451,8 @@ export async function resolvePrivateBook(userId: string | null, bookId: string, 
     deletedAt: lb.deletedAt ?? null,
     shelfId: lb.shelfId,
     shelfName: shelfRow?.name ?? null,
-    categoryId: lb.categoryId,
-    categoryName: lb.categoryId
-      ? db.select({ name: libraryCategories.name }).from(libraryCategories).where(eq(libraryCategories.id, lb.categoryId)).get()?.name ?? null
-      : null,
-    tagIds: tagRows.map((t) => t.id),
+    categoryPath: lb.categoryRoot ? [lb.categoryRoot, ...(lb.categoryLeaf ? [lb.categoryLeaf] : [])] : null,
+    categoryName: lb.categoryLeaf ? `${lb.categoryRoot} / ${lb.categoryLeaf}` : lb.categoryRoot,
     tags: tagRows.map((t) => t.name),
     cfi: state?.cfi ?? null,
     chapter: state?.chapter ?? null,
@@ -1512,12 +1496,11 @@ export function getBookMembership(userId: string, bookId: string, shelfId: strin
       .get()?.name ?? null
     : null
   const tagRows = library
-    ? db.select({ name: libraryTags.name })
-      .from(libraryBookTags)
-      .innerJoin(libraryBookVersions, eq(libraryBookTags.libraryBookId, libraryBookVersions.libraryBookId))
-      .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
+    ? db.select({ name: libraryBookTagValues.name })
+      .from(libraryBookTagValues)
+      .innerJoin(libraryBookVersions, eq(libraryBookTagValues.libraryBookId, libraryBookVersions.libraryBookId))
       .where(and(eq(libraryBookVersions.bookVersionId, bookId), eq(libraryBookVersions.libraryId, library.id)))
-      .orderBy(asc(libraryTags.sortOrder), asc(libraryTags.name))
+      .orderBy(asc(libraryBookTagValues.sortOrder), asc(libraryBookTagValues.name))
       .all()
     : []
   return { shelfName, tags: tagRows.map((tag) => tag.name) }
@@ -2958,7 +2941,7 @@ export async function updateBook(userId: string, bookId: string, data: { readSta
 
 /** The card columns a dialog save can write, in the order they are restored. */
 const SAVE_CARD_COLUMNS = [
-  'title', 'author', 'authors', 'hidden', 'descriptionOverride', 'coverKey', 'categoryId', 'shelfId',
+  'title', 'author', 'authors', 'hidden', 'descriptionOverride', 'coverKey', 'categoryRoot', 'categoryLeaf', 'shelfId',
 ] as const
 
 type SaveCardColumn = typeof SAVE_CARD_COLUMNS[number]
@@ -2971,7 +2954,8 @@ function readSaveCardState(reader: Pick<ReturnType<typeof getDb>, 'select'>, lib
     hidden: libraryBooks.hidden,
     descriptionOverride: libraryBooks.descriptionOverride,
     coverKey: libraryBooks.coverKey,
-    categoryId: libraryBooks.categoryId,
+    categoryRoot: libraryBooks.categoryRoot,
+    categoryLeaf: libraryBooks.categoryLeaf,
     shelfId: libraryBooks.shelfId,
   }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
 }
@@ -3020,21 +3004,10 @@ export async function savePrivateBook(
       .where(and(eq(shelves.id, organization.shelfId), eq(shelves.libraryId, libraryId))).get()
     if (!shelf) throw new AppError('SHELF_NOT_FOUND')
   }
-  if (organization?.categoryId) {
-    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, organization.categoryId), eq(libraryCategories.libraryId, libraryId))).get()
-    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
-  }
-  const templatePath = organization?.categoryTemplateKey
-    ? categoryTemplatePath(organization.categoryTemplateKey)
-    : undefined
-  if (organization?.categoryTemplateKey && !templatePath) {
-    throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
-  }
-  // A scraped category name the library does not have yet rides along with the
-  // save, exactly like tagNames, so an abandoned dialog leaves no empty row.
-  const categoryPathToCreate = templatePath
-    ?? (organization?.categoryName ? [organization.categoryName] : undefined)
+  // A category is a value: it needs no existence check, only normalization.
+  const organizationCategoryPath = organization?.categoryPath === undefined
+    ? undefined
+    : normalizeCategoryPath(organization.categoryPath)
   if (input.cover === 'replace' && !file) throw new AppError('VALIDATION_ERROR', 'Cover file is required')
   const storage = getStorage()
   let stagedCoverKey: string | undefined
@@ -3094,15 +3067,8 @@ export async function savePrivateBook(
 
   const beforePin = db.select({ pinnedAt: libraryBookVersions.pinnedAt }).from(libraryBookVersions)
     .where(eq(libraryBookVersions.id, libraryBookVersionId)).get()?.pinnedAt ?? null
-  const previousTags = db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
-    .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
-  const categoriesBefore = categoryPathToCreate
-    ? new Set(db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(eq(libraryCategories.libraryId, libraryId)).all().map((row) => row.id))
-    : new Set<string>()
+  const previousTags = readBookTagValues(db, libraryBookId)
   const now = Date.now()
-  let createdTagIds: string[] = []
-  let nextTagIds = previousTags
 
   try {
     db.transaction((tx) => {
@@ -3116,8 +3082,6 @@ export async function savePrivateBook(
       const descriptionOverride = card.descriptionOverride === undefined
         ? undefined
         : card.descriptionOverride?.trim() ? card.descriptionOverride : null
-      let categoryId = organization?.categoryId
-      if (categoryPathToCreate) categoryId = resolveOrCreateCategoryPath(tx, libraryId, userId, categoryPathToCreate)
       tx.update(libraryBooks).set({
         ...(card.title ? { title: card.title } : {}),
         ...(normalized ? { author: normalized.author, authors: normalized.authors } : {}),
@@ -3126,7 +3090,9 @@ export async function savePrivateBook(
         ...(stagedCoverKey !== undefined ? { coverKey: stagedCoverKey } : {}),
         ...(input.cover === 'remove' ? { coverKey: null } : {}),
         ...(organization?.shelfId !== undefined ? { shelfId: organization.shelfId } : {}),
-        ...(categoryId !== undefined ? { categoryId } : {}),
+        ...(organizationCategoryPath !== undefined
+          ? { categoryRoot: organizationCategoryPath?.[0] ?? null, categoryLeaf: organizationCategoryPath?.[1] ?? null }
+          : {}),
         updatedAt: now,
       }).where(eq(libraryBooks.id, libraryBookId)).run()
 
@@ -3137,28 +3103,11 @@ export async function savePrivateBook(
       if (nextMeta && latestRevision) {
         tx.update(contentRevisions).set({ meta: nextMeta }).where(eq(contentRevisions.id, latestRevision.id)).run()
       }
-      if (organization && (organization.tagIds !== undefined || organization.tagNames !== undefined)) {
-        const resolved = resolveTagSet(tx, libraryId, userId, {
-          tagIds: organization.tagIds,
-          tagNames: organization.tagNames,
-        })
-        createdTagIds = resolved.createdIds
-        nextTagIds = resolved.tagIds
-        tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
-        if (nextTagIds.length > 0) {
-          tx.insert(libraryBookTags).values(nextTagIds.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
-        }
-        for (const tagId of new Set([...previousTags, ...nextTagIds])) {
-          tx.update(libraryTags).set({ updatedAt: now }).where(eq(libraryTags.id, tagId)).run()
-        }
+      if (organization?.tags !== undefined) {
+        setBookTagValues(tx, libraryBookId, normalizeTagNames(organization.tags))
       }
       if (organization?.shelfId !== undefined && before.shelfId) {
         tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, before.shelfId)).run()
-      }
-      if (categoryId !== undefined) {
-        for (const id of new Set([before.categoryId, categoryId])) {
-          if (id) tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, id)).run()
-        }
       }
       if (stagedCoverKey) {
         tx.insert(blobs).values({ key: stagedCoverKey, size: stagedCoverSize, kind: 'cover', createdAt: now }).onConflictDoNothing().run()
@@ -3176,21 +3125,14 @@ export async function savePrivateBook(
     ? db.select({ meta: contentRevisions.meta }).from(contentRevisions)
       .where(eq(contentRevisions.id, latestRevision.id)).get()?.meta as Record<string, unknown> | undefined
     : undefined
-  const afterTags = db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
-    .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
+  const afterTags = readBookTagValues(db, libraryBookId)
   const changedColumns = SAVE_CARD_COLUMNS.filter((column) => !sameSnapshotValue(before[column], after?.[column]))
   const pinChanged = beforePin !== afterPin
   const metaChanged = beforeMeta !== undefined && afterMeta !== undefined && !sameSnapshotValue(beforeMeta, afterMeta)
   const tagsChanged = previousTags.length !== afterTags.length
-    || previousTags.some((tagId) => !afterTags.includes(tagId))
-  const createdCategoryIds = categoryPathToCreate
-    ? db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(eq(libraryCategories.libraryId, libraryId)).all()
-      .map((row) => row.id).filter((id) => !categoriesBefore.has(id))
-    : []
+    || previousTags.some((name) => !afterTags.includes(name))
 
   if (undo && (changedColumns.length > 0 || pinChanged || metaChanged || tagsChanged)) {
-    const createdTagsForUndo = [...createdTagIds]
     undo.token = issueUndoReceipt(userId, () => db.transaction((tx) => {
       const ownerLibrary = tx.select({ id: libraries.id }).from(libraries)
         .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()
@@ -3216,9 +3158,8 @@ export async function savePrivateBook(
         }
       }
       if (tagsChanged) {
-        const currentTags = tx.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
-          .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
-        const sameSet = currentTags.length === afterTags.length && currentTags.every((tagId) => afterTags.includes(tagId))
+        const currentTags = readBookTagValues(tx, libraryBookId)
+        const sameSet = currentTags.length === afterTags.length && currentTags.every((name) => afterTags.includes(name))
         if (!sameSet) throw new AppError('UNDO_CONFLICT', 'The book tags changed after this save')
       }
       tx.update(libraryBooks).set({
@@ -3232,17 +3173,7 @@ export async function savePrivateBook(
       if (metaChanged && latestRevision && beforeMeta) {
         tx.update(contentRevisions).set({ meta: beforeMeta }).where(eq(contentRevisions.id, latestRevision.id)).run()
       }
-      if (tagsChanged) {
-        tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
-        if (previousTags.length > 0) {
-          tx.insert(libraryBookTags).values(previousTags.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
-        }
-        for (const tagId of new Set([...previousTags, ...afterTags])) {
-          tx.update(libraryTags).set({ updatedAt: Date.now() }).where(eq(libraryTags.id, tagId)).run()
-        }
-      }
-      deleteUnusedCreatedTags(tx, createdTagsForUndo)
-      pruneEmptyCategories(tx, libraryId, userId, createdCategoryIds)
+      if (tagsChanged) setBookTagValues(tx, libraryBookId, previousTags)
     }))
   }
 
@@ -4272,7 +4203,6 @@ export async function deleteBook(userId: string, bookId: string, opts?: { delete
       )).all()
       deletedContentBlobKeys.push(...deleteOwnedReviewsInTx(tx, userId, reviewsToDelete, now))
     }
-    tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBookVersions).where(eq(libraryBookVersions.libraryBookId, libraryBookId)).run()
     tx.delete(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).run()
     if (deleteUserData) {
@@ -4387,90 +4317,73 @@ export function resolveLibraryBook(userId: string, bookId: string): { libraryId:
 }
 
 export async function setBookMembership(userId: string, bookId: string, membership: BookMembershipReq, undo?: { token?: string }) {
-  if (membership.categoryId !== undefined && membership.categoryTemplateKey !== undefined) {
-    throw new AppError('VALIDATION_ERROR', 'Choose a category or a recommendation')
-  }
   const db = getDb()
   const { libraryId, libraryBookId } = resolveLibraryBook(userId, bookId)
-  const before = db.select({ libraryId: libraryBooks.libraryId, userId: libraryBooks.userId, shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId })
-    .from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
-  const categoryIdsBefore = membership.categoryTemplateKey
-    ? new Set(db.select({ id: libraryCategories.id }).from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all().map((row) => row.id))
-    : new Set<string>()
+  const categoryPath = membership.categoryPath === undefined ? undefined : normalizeCategoryPath(membership.categoryPath)
+  const before = db.select({
+    libraryId: libraryBooks.libraryId,
+    userId: libraryBooks.userId,
+    shelfId: libraryBooks.shelfId,
+    categoryRoot: libraryBooks.categoryRoot,
+    categoryLeaf: libraryBooks.categoryLeaf,
+  }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
   const now = Date.now()
   if (membership.shelfId) {
     const shelf = db.select({ id: shelves.id }).from(shelves)
       .where(and(eq(shelves.id, membership.shelfId), eq(shelves.libraryId, libraryId))).get()
     if (!shelf) throw new AppError('SHELF_NOT_FOUND')
   }
-  if (membership.categoryId) {
-    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, membership.categoryId), eq(libraryCategories.libraryId, libraryId))).get()
-    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
-  }
-  const templatePath = membership.categoryTemplateKey ? categoryTemplatePath(membership.categoryTemplateKey) : undefined
-  if (membership.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
   db.transaction((tx) => {
-    const existing = tx.select({ shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId })
-      .from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+    const existing = tx.select({ shelfId: libraryBooks.shelfId }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
     if (!existing) throw new AppError('BOOK_NOT_FOUND')
     const set: Partial<typeof libraryBooks.$inferInsert> = { updatedAt: now }
     if (membership.shelfId !== undefined) set.shelfId = membership.shelfId
-    let categoryId = membership.categoryId
-    if (templatePath) categoryId = resolveOrCreateCategoryPath(tx, libraryId, userId, templatePath)
-    if (categoryId !== undefined) set.categoryId = categoryId
+    if (categoryPath !== undefined) {
+      set.categoryRoot = categoryPath?.[0] ?? null
+      set.categoryLeaf = categoryPath?.[1] ?? null
+    }
     tx.update(libraryBooks).set(set).where(eq(libraryBooks.id, libraryBookId)).run()
     if (membership.shelfId !== undefined) {
       for (const touched of new Set([existing.shelfId, membership.shelfId])) {
         if (touched) tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, touched)).run()
       }
     }
-    if (categoryId !== undefined) {
-      for (const touched of new Set([existing.categoryId, categoryId])) {
-        if (touched) tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, touched)).run()
-      }
-    }
   })
   if (undo && before?.userId === userId
     && db.select({ id: libraries.id }).from(libraries)
       .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()) {
-    const after = db.select({ shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId }).from(libraryBooks)
-      .where(eq(libraryBooks.id, libraryBookId)).get()
+    const after = db.select({
+      shelfId: libraryBooks.shelfId,
+      categoryRoot: libraryBooks.categoryRoot,
+      categoryLeaf: libraryBooks.categoryLeaf,
+    }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
     const changedShelf = membership.shelfId !== undefined && before.shelfId !== after?.shelfId
-    const changedCategory = (membership.categoryId !== undefined || membership.categoryTemplateKey !== undefined) && before.categoryId !== after?.categoryId
-    const newCategoryIds = membership.categoryTemplateKey
-      ? db.select({ id: libraryCategories.id }).from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all()
-        .map((row) => row.id).filter((id) => !categoryIdsBefore.has(id))
-      : []
+    const changedCategory = categoryPath !== undefined
+      && (before.categoryRoot !== after?.categoryRoot || before.categoryLeaf !== after?.categoryLeaf)
     if (changedShelf || changedCategory) undo.token = issueUndoReceipt(userId, () => db.transaction((tx) => {
       const ownerLibrary = tx.select({ id: libraries.id }).from(libraries)
         .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()
-      const current = tx.select({ libraryId: libraryBooks.libraryId, userId: libraryBooks.userId, shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId })
-        .from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+      const current = tx.select({
+        libraryId: libraryBooks.libraryId,
+        userId: libraryBooks.userId,
+        shelfId: libraryBooks.shelfId,
+        categoryRoot: libraryBooks.categoryRoot,
+        categoryLeaf: libraryBooks.categoryLeaf,
+      }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
       if (!ownerLibrary || !current || current.libraryId !== libraryId || current.userId !== userId
         || (changedShelf && current.shelfId !== after?.shelfId)
-        || (changedCategory && current.categoryId !== after?.categoryId)) throw new AppError('UNDO_CONFLICT', 'The book classification changed')
+        || (changedCategory && (current.categoryRoot !== after?.categoryRoot || current.categoryLeaf !== after?.categoryLeaf))) {
+        throw new AppError('UNDO_CONFLICT', 'The book classification changed')
+      }
       if (changedShelf && before.shelfId && !tx.select({ id: shelves.id }).from(shelves)
         .where(and(eq(shelves.id, before.shelfId), eq(shelves.libraryId, libraryId))).get()) {
         throw new AppError('UNDO_CONFLICT', 'The original shelf no longer exists')
       }
-      if (changedCategory && before.categoryId && !tx.select({ id: libraryCategories.id }).from(libraryCategories)
-        .where(and(eq(libraryCategories.id, before.categoryId), eq(libraryCategories.libraryId, libraryId))).get()) {
-        throw new AppError('UNDO_CONFLICT', 'The original category no longer exists')
-      }
       tx.update(libraryBooks).set({
         ...(changedShelf ? { shelfId: before.shelfId } : {}),
-        ...(changedCategory ? { categoryId: before.categoryId } : {}),
+        ...(changedCategory ? { categoryRoot: before.categoryRoot, categoryLeaf: before.categoryLeaf } : {}),
         updatedAt: Date.now(),
       }).where(eq(libraryBooks.id, libraryBookId)).run()
-      for (const categoryId of [...newCategoryIds].reverse()) {
-        const category = tx.select({ parentId: libraryCategories.parentId }).from(libraryCategories)
-          .where(and(eq(libraryCategories.id, categoryId), eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.userId, userId))).get()
-        if (!category) continue
-        const hasBooks = tx.select({ id: libraryBooks.id }).from(libraryBooks).where(eq(libraryBooks.categoryId, categoryId)).get()
-        const hasChildren = tx.select({ id: libraryCategories.id }).from(libraryCategories).where(eq(libraryCategories.parentId, categoryId)).get()
-        if (!hasBooks && !hasChildren) tx.delete(libraryCategories).where(eq(libraryCategories.id, categoryId)).run()
-      }
     }))
   }
 }
@@ -4485,51 +4398,25 @@ export async function getBookShelf(userId: string, bookId: string) {
   return db.select({ shelfId: libraryBooks.shelfId }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()?.shelfId ?? null
 }
 
-export async function setBookTags(userId: string, bookId: string, tagIds: string[], undo?: { token?: string }) {
+export async function setBookTags(userId: string, bookId: string, tags: string[], undo?: { token?: string }) {
   const db = getDb()
   const { libraryId, libraryBookId } = resolveLibraryBook(userId, bookId)
-  const uniqueTagIds = [...new Set(tagIds)]
-  if (uniqueTagIds.length > 0) {
-    const existing = db
-      .select({ count: sql<number>`count(*)` })
-      .from(libraryTags)
-      .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, uniqueTagIds)))
-      .get()
-    if ((existing?.count ?? 0) !== uniqueTagIds.length) {
-      throw new AppError('TAG_NOT_FOUND')
-    }
-  }
-  const previous = db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).all()
-    .map((row) => row.tagId)
+  const nextTags = normalizeTagNames(tags)
+  const previous = readBookTagValues(db, libraryBookId)
   const now = Date.now()
   db.transaction((tx) => {
-    tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
-    if (uniqueTagIds.length > 0) tx.insert(libraryBookTags)
-      .values(uniqueTagIds.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
-    for (const touched of new Set([...previous, ...uniqueTagIds])) {
-      tx.update(libraryTags).set({ updatedAt: now }).where(eq(libraryTags.id, touched)).run()
-    }
+    setBookTagValues(tx, libraryBookId, nextTags)
+    tx.update(libraryBooks).set({ updatedAt: now }).where(eq(libraryBooks.id, libraryBookId)).run()
   })
   if (undo && db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()) {
-    const added = uniqueTagIds.filter((id) => !previous.includes(id))
-    const removed = previous.filter((id) => !uniqueTagIds.includes(id))
-    if (added.length || removed.length) undo.token = issueUndoReceipt(userId, () => db.transaction((tx) => {
-      const ownerLibrary = tx.select({ id: libraries.id }).from(libraries)
-        .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()
-      const work = tx.select({ libraryId: libraryBooks.libraryId, userId: libraryBooks.userId }).from(libraryBooks)
-        .where(eq(libraryBooks.id, libraryBookId)).get()
-      if (!ownerLibrary || !work || work.libraryId !== libraryId || work.userId !== userId) throw new AppError('UNDO_CONFLICT', 'The book is no longer in your private library')
-      const current = new Set(tx.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
-        .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId))
-      const conflict = added.some((id) => !current.has(id)) || removed.some((id) => current.has(id))
-      if (conflict) throw new AppError('UNDO_CONFLICT', 'The book tags changed')
-      const existingTags = tx.select({ id: libraryTags.id }).from(libraryTags)
-        .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, [...added, ...removed]))).all()
-      if (existingTags.length !== added.length + removed.length) throw new AppError('UNDO_CONFLICT', 'An original tag no longer exists')
-      if (added.length) tx.delete(libraryBookTags).where(and(eq(libraryBookTags.libraryBookId, libraryBookId), inArray(libraryBookTags.tagId, added))).run()
-      if (removed.length) tx.insert(libraryBookTags).values(removed.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
-      for (const tagId of [...added, ...removed]) tx.update(libraryTags).set({ updatedAt: Date.now() }).where(eq(libraryTags.id, tagId)).run()
+    const after = readBookTagValues(db, libraryBookId)
+    const changed = previous.length !== after.length || previous.some((name) => !after.includes(name))
+    if (changed) undo.token = issueUndoReceipt(userId, () => db.transaction((tx) => {
+      const current = readBookTagValues(tx, libraryBookId)
+      const sameSet = current.length === after.length && current.every((name) => after.includes(name))
+      if (!sameSet) throw new AppError('UNDO_CONFLICT', 'The book tags changed')
+      setBookTagValues(tx, libraryBookId, previous)
     }))
   }
 }
@@ -4539,122 +4426,81 @@ export function setBookOrganization(userId: string, bookId: string, input: BookM
   const { libraryId, libraryBookId } = resolveLibraryBook(userId, bookId)
   const library = db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()
-  const before = db.select({ shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId, userId: libraryBooks.userId })
-    .from(libraryBooks).where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
+  const before = db.select({
+    shelfId: libraryBooks.shelfId,
+    categoryRoot: libraryBooks.categoryRoot,
+    categoryLeaf: libraryBooks.categoryLeaf,
+    userId: libraryBooks.userId,
+  }).from(libraryBooks).where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId))).get()
   if (!library || !before || before.userId !== userId) throw new AppError('BOOK_NOT_FOUND')
-
-  const previousTags = db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
-    .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId)
-  const nextTags = input.tagIds === undefined ? previousTags : [...new Set(input.tagIds)]
-  if (nextTags.length) {
-    const existing = db.select({ count: sql<number>`count(*)` }).from(libraryTags)
-      .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, nextTags))).get()
-    if ((existing?.count ?? 0) !== nextTags.length) throw new AppError('TAG_NOT_FOUND')
-  }
   if (input.shelfId) {
     const shelf = db.select({ id: shelves.id }).from(shelves)
       .where(and(eq(shelves.id, input.shelfId), eq(shelves.libraryId, libraryId))).get()
     if (!shelf) throw new AppError('SHELF_NOT_FOUND')
   }
-  if (input.categoryId) {
-    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, input.categoryId), eq(libraryCategories.libraryId, libraryId))).get()
-    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
-  }
-  const templatePath = input.categoryTemplateKey ? categoryTemplatePath(input.categoryTemplateKey) : undefined
-  if (input.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
-  const categoriesBefore = new Set(db.select({ id: libraryCategories.id }).from(libraryCategories)
-    .where(eq(libraryCategories.libraryId, libraryId)).all().map((row) => row.id))
+  const categoryPath = input.categoryPath === undefined ? undefined : normalizeCategoryPath(input.categoryPath)
+  const previousTags = readBookTagValues(db, libraryBookId)
+  const nextTags = input.tags === undefined ? previousTags : normalizeTagNames(input.tags)
   const now = Date.now()
-  let categoryId = input.categoryId
   db.transaction((tx) => {
-    const current = tx.select({ shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId }).from(libraryBooks)
+    const current = tx.select({ shelfId: libraryBooks.shelfId }).from(libraryBooks)
       .where(and(eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId), eq(libraryBooks.userId, userId))).get()
     if (!current) throw new AppError('BOOK_NOT_FOUND')
-    if (templatePath) categoryId = resolveOrCreateCategoryPath(tx, libraryId, userId, templatePath)
     tx.update(libraryBooks).set({
       ...(input.shelfId !== undefined ? { shelfId: input.shelfId } : {}),
-      ...(categoryId !== undefined ? { categoryId } : {}),
+      ...(categoryPath !== undefined
+        ? { categoryRoot: categoryPath?.[0] ?? null, categoryLeaf: categoryPath?.[1] ?? null }
+        : {}),
       updatedAt: now,
     }).where(eq(libraryBooks.id, libraryBookId)).run()
-    if (input.tagIds !== undefined) {
-      tx.delete(libraryBookTags).where(eq(libraryBookTags.libraryBookId, libraryBookId)).run()
-      if (nextTags.length) tx.insert(libraryBookTags).values(nextTags.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
-    }
+    if (input.tags !== undefined) setBookTagValues(tx, libraryBookId, nextTags)
     if (input.shelfId !== undefined) {
       for (const id of new Set([current.shelfId, input.shelfId])) {
         if (id) tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, id)).run()
       }
     }
-    if (input.categoryId !== undefined || templatePath) {
-      for (const id of new Set([current.categoryId, categoryId])) {
-        if (id) tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, id)).run()
-      }
-    }
-    if (input.tagIds !== undefined) {
-      for (const id of new Set([...previousTags, ...nextTags])) {
-        tx.update(libraryTags).set({ updatedAt: now }).where(eq(libraryTags.id, id)).run()
-      }
-    }
   })
-  const after = db.select({ shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId }).from(libraryBooks)
-    .where(eq(libraryBooks.id, libraryBookId)).get()
-  const addedTags = nextTags.filter((id) => !previousTags.includes(id))
-  const removedTags = previousTags.filter((id) => !nextTags.includes(id))
+  const after = db.select({
+    shelfId: libraryBooks.shelfId,
+    categoryRoot: libraryBooks.categoryRoot,
+    categoryLeaf: libraryBooks.categoryLeaf,
+  }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+  const addedTags = nextTags.filter((name) => !previousTags.includes(name))
+  const removedTags = previousTags.filter((name) => !nextTags.includes(name))
   const shelfChanged = input.shelfId !== undefined && before.shelfId !== after?.shelfId
-  const categoryChanged = (input.categoryId !== undefined || input.categoryTemplateKey !== undefined) && before.categoryId !== after?.categoryId
-  const newCategoryIds = templatePath
-    ? db.select({ id: libraryCategories.id }).from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all()
-      .map((row) => row.id).filter((id) => !categoriesBefore.has(id))
-    : []
+  const categoryChanged = categoryPath !== undefined
+    && (before.categoryRoot !== after?.categoryRoot || before.categoryLeaf !== after?.categoryLeaf)
   if (undo && (shelfChanged || categoryChanged || addedTags.length || removedTags.length)) {
     undo.token = issueUndoReceipt(userId, () => db.transaction((tx) => {
       const ownerLibrary = tx.select({ id: libraries.id }).from(libraries)
         .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()
-      const current = tx.select({ libraryId: libraryBooks.libraryId, userId: libraryBooks.userId, shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId })
-        .from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
-      const currentTags = new Set(tx.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
-        .where(eq(libraryBookTags.libraryBookId, libraryBookId)).all().map((row) => row.tagId))
+      const current = tx.select({
+        libraryId: libraryBooks.libraryId,
+        userId: libraryBooks.userId,
+        shelfId: libraryBooks.shelfId,
+        categoryRoot: libraryBooks.categoryRoot,
+        categoryLeaf: libraryBooks.categoryLeaf,
+      }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
+      const currentTags = new Set(readBookTagValues(tx, libraryBookId))
       if (!ownerLibrary || !current || current.libraryId !== libraryId || current.userId !== userId
         || (shelfChanged && current.shelfId !== after?.shelfId)
-        || (categoryChanged && current.categoryId !== after?.categoryId)
-        || addedTags.some((id) => !currentTags.has(id)) || removedTags.some((id) => currentTags.has(id))) {
+        || (categoryChanged && (current.categoryRoot !== after?.categoryRoot || current.categoryLeaf !== after?.categoryLeaf))
+        || addedTags.some((name) => !currentTags.has(name)) || removedTags.some((name) => currentTags.has(name))) {
         throw new AppError('UNDO_CONFLICT', 'The book organization changed')
-      }
-      const originalTaxonomy = [...addedTags, ...removedTags]
-      if (originalTaxonomy.length && tx.select({ id: libraryTags.id }).from(libraryTags)
-        .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, originalTaxonomy))).all().length !== originalTaxonomy.length) {
-        throw new AppError('UNDO_CONFLICT', 'An original tag no longer exists')
       }
       tx.update(libraryBooks).set({
         ...(shelfChanged ? { shelfId: before.shelfId } : {}),
-        ...(categoryChanged ? { categoryId: before.categoryId } : {}),
+        ...(categoryChanged ? { categoryRoot: before.categoryRoot, categoryLeaf: before.categoryLeaf } : {}),
         updatedAt: Date.now(),
       }).where(eq(libraryBooks.id, libraryBookId)).run()
-      if (addedTags.length) tx.delete(libraryBookTags).where(and(eq(libraryBookTags.libraryBookId, libraryBookId), inArray(libraryBookTags.tagId, addedTags))).run()
-      if (removedTags.length) tx.insert(libraryBookTags).values(removedTags.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
-      for (const id of originalTaxonomy) tx.update(libraryTags).set({ updatedAt: Date.now() }).where(eq(libraryTags.id, id)).run()
-      for (const id of [...newCategoryIds].reverse()) {
-        const category = tx.select({ parentId: libraryCategories.parentId }).from(libraryCategories)
-          .where(and(eq(libraryCategories.id, id), eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.userId, userId))).get()
-        if (!category) continue
-        const hasBooks = tx.select({ id: libraryBooks.id }).from(libraryBooks).where(eq(libraryBooks.categoryId, id)).get()
-        const hasChildren = tx.select({ id: libraryCategories.id }).from(libraryCategories).where(eq(libraryCategories.parentId, id)).get()
-        if (!hasBooks && !hasChildren) tx.delete(libraryCategories).where(eq(libraryCategories.id, id)).run()
-      }
+      if (addedTags.length || removedTags.length) setBookTagValues(tx, libraryBookId, previousTags)
     }))
   }
 }
 
 export async function getBookTags(userId: string, bookId: string) {
-  const db = getDb()
   const { libraryBookId } = resolveLibraryBook(userId, bookId)
-  const rows = db
-    .select({ tagId: libraryBookTags.tagId })
-    .from(libraryBookTags)
-    .where(eq(libraryBookTags.libraryBookId, libraryBookId))
-    .all()
-  return rows.map((r) => r.tagId)
+  return readBookTagValues(getDb(), libraryBookId)
 }
 
 export function getPrivateBatchSelection(userId: string, ids: string[]): BatchSelectionItem[] {
@@ -4667,7 +4513,8 @@ export function getPrivateBatchSelection(userId: string, ids: string[]): BatchSe
     libraryBookId: libraryBooks.id,
     title: libraryBooks.title,
     format: bookVersions.format,
-    categoryId: libraryBooks.categoryId,
+    categoryRoot: libraryBooks.categoryRoot,
+    categoryLeaf: libraryBooks.categoryLeaf,
     shelfId: libraryBooks.shelfId,
     hidden: libraryBooks.hidden,
     pinnedAt: libraryBookVersions.pinnedAt,
@@ -4677,22 +4524,24 @@ export function getPrivateBatchSelection(userId: string, ids: string[]): BatchSe
     .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
     .where(and(eq(libraryBooks.libraryId, libraryId), inArray(libraryBookVersions.bookVersionId, uniqueIds))).all()
   if (rows.length !== uniqueIds.length) throw new AppError('BOOK_NOT_FOUND')
-  const tags = db.select().from(libraryBookTags)
-    .where(inArray(libraryBookTags.libraryBookId, rows.map((row) => row.libraryBookId))).all()
-  const tagIdsByWork = new Map<string, string[]>()
+  const tags = db.select({ libraryBookId: libraryBookTagValues.libraryBookId, name: libraryBookTagValues.name })
+    .from(libraryBookTagValues)
+    .where(inArray(libraryBookTagValues.libraryBookId, rows.map((row) => row.libraryBookId)))
+    .orderBy(libraryBookTagValues.sortOrder, libraryBookTagValues.name).all()
+  const tagsByWork = new Map<string, string[]>()
   for (const tag of tags) {
-    const tagIds = tagIdsByWork.get(tag.libraryBookId) ?? []
-    tagIds.push(tag.tagId)
-    tagIdsByWork.set(tag.libraryBookId, tagIds)
+    const names = tagsByWork.get(tag.libraryBookId) ?? []
+    names.push(tag.name)
+    tagsByWork.set(tag.libraryBookId, names)
   }
   const byId = new Map(rows.map((row) => [row.id, {
     id: row.id,
     bookVersionId: row.bookVersionId,
     title: row.title,
     format: row.format,
-    categoryId: row.categoryId,
+    categoryPath: row.categoryRoot ? [row.categoryRoot, ...(row.categoryLeaf ? [row.categoryLeaf] : [])] : null,
     shelfId: row.shelfId,
-    tagIds: tagIdsByWork.get(row.libraryBookId) ?? [],
+    tags: tagsByWork.get(row.libraryBookId) ?? [],
     hidden: row.hidden,
     pinnedAt: row.pinnedAt,
     versionCount: 1,
@@ -4753,9 +4602,6 @@ export function movePrivateBatchToShelf(userId: string, input: PrivateBatchShelf
 }
 
 export function organizePrivateBatch(userId: string, input: BatchOrganizeReq, undo?: { token?: string }) {
-  if (input.categoryId !== undefined && input.categoryTemplateKey !== undefined) {
-    throw new AppError('VALIDATION_ERROR', 'Choose a category or a recommendation')
-  }
   const db = getDb()
   const libraryId = ensurePrivateLibrary(db, userId)
   const ids = [...new Set(input.ids)]
@@ -4765,123 +4611,105 @@ export function organizePrivateBatch(userId: string, input: BatchOrganizeReq, un
   if (rows.length !== ids.length) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   if (input.shelfId !== undefined && input.shelfId !== null && !db.select({ id: shelves.id }).from(shelves)
     .where(and(eq(shelves.id, input.shelfId), eq(shelves.libraryId, libraryId))).get()) throw new AppError('SHELF_NOT_FOUND')
-  if (input.categoryId !== undefined && input.categoryId !== null && !db.select({ id: libraryCategories.id }).from(libraryCategories)
-    .where(and(eq(libraryCategories.id, input.categoryId), eq(libraryCategories.libraryId, libraryId))).get()) throw new AppError('CATEGORY_NOT_FOUND')
-  const templatePath = input.categoryTemplateKey ? categoryTemplatePath(input.categoryTemplateKey) : undefined
-  if (input.categoryTemplateKey && !templatePath) throw new AppError('VALIDATION_ERROR', 'Unknown category recommendation')
-  const categoryIdsBefore = templatePath
-    ? new Set(db.select({ id: libraryCategories.id }).from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all().map((row) => row.id))
-    : new Set<string>()
-  const addTagIds = [...new Set(input.addTagIds)]
-  const removeTagIds = [...new Set(input.removeTagIds)]
-  if (addTagIds.some((id) => removeTagIds.includes(id))) throw new AppError('VALIDATION_ERROR', 'Conflicting tag changes')
-  const touchedTagIds = [...addTagIds, ...removeTagIds]
-  if (touchedTagIds.length > 0) {
-    const found = db.select({ id: libraryTags.id }).from(libraryTags)
-      .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, touchedTagIds))).all()
-    if (found.length !== touchedTagIds.length) throw new AppError('TAG_NOT_FOUND')
-  }
+  const categoryPath = input.categoryPath === undefined ? undefined : normalizeCategoryPath(input.categoryPath)
+  const addTags = normalizeTagNames(input.addTags)
+  const removeTags = normalizeTagNames(input.removeTags)
+  if (addTags.some((name) => removeTags.includes(name))) throw new AppError('VALIDATION_ERROR', 'Conflicting tag changes')
   const workIds = rows.map((row) => row.libraryBookId)
-  const beforeRows = db.select({ id: libraryBooks.id, shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId })
-    .from(libraryBooks).where(inArray(libraryBooks.id, workIds)).all()
-  const beforeTags = touchedTagIds.length
-    ? db.select({ libraryBookId: libraryBookTags.libraryBookId, tagId: libraryBookTags.tagId }).from(libraryBookTags)
-      .where(and(inArray(libraryBookTags.libraryBookId, workIds), inArray(libraryBookTags.tagId, touchedTagIds))).all()
+  const beforeRows = db.select({
+    id: libraryBooks.id,
+    shelfId: libraryBooks.shelfId,
+    categoryRoot: libraryBooks.categoryRoot,
+    categoryLeaf: libraryBooks.categoryLeaf,
+  }).from(libraryBooks).where(inArray(libraryBooks.id, workIds)).all()
+  const beforeTags = addTags.length || removeTags.length
+    ? db.select({ libraryBookId: libraryBookTagValues.libraryBookId, name: libraryBookTagValues.name }).from(libraryBookTagValues)
+      .where(and(
+        inArray(libraryBookTagValues.libraryBookId, workIds),
+        inArray(libraryBookTagValues.name, [...new Set([...addTags, ...removeTags])]),
+      )).all()
     : []
   const now = Date.now()
-  let targetCategoryId: string | null | undefined = input.categoryId
   db.transaction((tx) => {
     const touchedShelfIds = new Set<string>()
-    const touchedCategoryIds = new Set<string>()
     if (input.shelfId !== undefined) {
       for (const row of tx.select({ shelfId: libraryBooks.shelfId }).from(libraryBooks).where(inArray(libraryBooks.id, workIds)).all()) {
         if (row.shelfId) touchedShelfIds.add(row.shelfId)
       }
       if (input.shelfId) touchedShelfIds.add(input.shelfId)
-      tx.update(libraryBooks).set({ shelfId: input.shelfId, updatedAt: now }).where(inArray(libraryBooks.id, workIds)).run()
     }
-    if (input.categoryId !== undefined || templatePath) {
-      for (const row of tx.select({ categoryId: libraryBooks.categoryId }).from(libraryBooks).where(inArray(libraryBooks.id, workIds)).all()) {
-        if (row.categoryId) touchedCategoryIds.add(row.categoryId)
-      }
-      targetCategoryId = templatePath ? resolveOrCreateCategoryPath(tx, libraryId, userId, templatePath) : input.categoryId
-      tx.update(libraryBooks).set({ categoryId: targetCategoryId, updatedAt: now }).where(inArray(libraryBooks.id, workIds)).run()
-      if (targetCategoryId) touchedCategoryIds.add(targetCategoryId)
+    tx.update(libraryBooks).set({
+      ...(input.shelfId !== undefined ? { shelfId: input.shelfId } : {}),
+      ...(categoryPath !== undefined
+        ? { categoryRoot: categoryPath?.[0] ?? null, categoryLeaf: categoryPath?.[1] ?? null }
+        : {}),
+      updatedAt: now,
+    }).where(inArray(libraryBooks.id, workIds)).run()
+    for (const name of removeTags) tx.delete(libraryBookTagValues)
+      .where(and(inArray(libraryBookTagValues.libraryBookId, workIds), eq(libraryBookTagValues.name, name))).run()
+    for (const name of addTags) {
+      tx.insert(libraryBookTagValues)
+        .values(workIds.map((libraryBookId) => ({ id: createId('btv'), libraryBookId, name })))
+        .onConflictDoNothing().run()
     }
-    for (const tagId of removeTagIds) tx.delete(libraryBookTags)
-      .where(and(inArray(libraryBookTags.libraryBookId, workIds), eq(libraryBookTags.tagId, tagId))).run()
-    for (const tagId of addTagIds) tx.insert(libraryBookTags)
-      .values(workIds.map((libraryBookId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
-    for (const tagId of touchedTagIds) tx.update(libraryTags).set({ updatedAt: now }).where(eq(libraryTags.id, tagId)).run()
     for (const shelfId of touchedShelfIds) tx.update(shelves).set({ updatedAt: now }).where(eq(shelves.id, shelfId)).run()
-    for (const categoryId of touchedCategoryIds) tx.update(libraryCategories).set({ updatedAt: now }).where(eq(libraryCategories.id, categoryId)).run()
   })
   if (undo && db.select({ id: libraries.id }).from(libraries)
     .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()) {
-    const afterRows = db.select({ id: libraryBooks.id, shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId })
-      .from(libraryBooks).where(inArray(libraryBooks.id, workIds)).all()
+    const afterRows = db.select({
+      id: libraryBooks.id,
+      shelfId: libraryBooks.shelfId,
+      categoryRoot: libraryBooks.categoryRoot,
+      categoryLeaf: libraryBooks.categoryLeaf,
+    }).from(libraryBooks).where(inArray(libraryBooks.id, workIds)).all()
     const afterById = new Map(afterRows.map((row) => [row.id, row]))
     const changed = beforeRows.flatMap((before) => {
       const after = afterById.get(before.id)!
       const shelfChanged = input.shelfId !== undefined && before.shelfId !== after.shelfId
-      const categoryChanged = (input.categoryId !== undefined || templatePath !== undefined) && before.categoryId !== after.categoryId
+      const categoryChanged = categoryPath !== undefined
+        && (before.categoryRoot !== after.categoryRoot || before.categoryLeaf !== after.categoryLeaf)
       return shelfChanged || categoryChanged ? [{ before, after, shelfChanged, categoryChanged }] : []
     })
-    const beforeTagSet = new Set(beforeTags.map((row) => `${row.libraryBookId}:${row.tagId}`))
+    const beforeTagSet = new Set(beforeTags.map((row) => `${row.libraryBookId}:${row.name}`))
     const tagDeltas = workIds.flatMap((libraryBookId) => [
-      ...addTagIds.filter((tagId) => !beforeTagSet.has(`${libraryBookId}:${tagId}`)).map((tagId) => ({ libraryBookId, tagId, existed: false })),
-      ...removeTagIds.filter((tagId) => beforeTagSet.has(`${libraryBookId}:${tagId}`)).map((tagId) => ({ libraryBookId, tagId, existed: true })),
+      ...addTags.filter((name) => !beforeTagSet.has(`${libraryBookId}:${name}`)).map((name) => ({ libraryBookId, name, existed: false })),
+      ...removeTags.filter((name) => beforeTagSet.has(`${libraryBookId}:${name}`)).map((name) => ({ libraryBookId, name, existed: true })),
     ])
-    const newCategoryIds = templatePath
-      ? db.select({ id: libraryCategories.id }).from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all()
-        .map((row) => row.id).filter((id) => !categoryIdsBefore.has(id))
-      : []
     if (changed.length || tagDeltas.length) undo.token = issueUndoReceipt(userId, () => db.transaction((tx) => {
       const ownerLibrary = tx.select({ id: libraries.id }).from(libraries)
         .where(and(eq(libraries.id, libraryId), eq(libraries.type, 'private'), eq(libraries.userId, userId))).get()
       if (!ownerLibrary) throw new AppError('UNDO_CONFLICT', 'Your private library is no longer available')
       for (const item of changed) {
-        const current = tx.select({ libraryId: libraryBooks.libraryId, userId: libraryBooks.userId, shelfId: libraryBooks.shelfId, categoryId: libraryBooks.categoryId })
-          .from(libraryBooks).where(eq(libraryBooks.id, item.before.id)).get()
+        const current = tx.select({
+          libraryId: libraryBooks.libraryId,
+          userId: libraryBooks.userId,
+          shelfId: libraryBooks.shelfId,
+          categoryRoot: libraryBooks.categoryRoot,
+          categoryLeaf: libraryBooks.categoryLeaf,
+        }).from(libraryBooks).where(eq(libraryBooks.id, item.before.id)).get()
         if (!current || current.libraryId !== libraryId || current.userId !== userId
           || (item.shelfChanged && current.shelfId !== item.after.shelfId)
-          || (item.categoryChanged && current.categoryId !== item.after.categoryId)) throw new AppError('UNDO_CONFLICT', 'Book classification changed')
+          || (item.categoryChanged && (current.categoryRoot !== item.after.categoryRoot || current.categoryLeaf !== item.after.categoryLeaf))) {
+          throw new AppError('UNDO_CONFLICT', 'Book classification changed')
+        }
         if (item.shelfChanged && item.before.shelfId && !tx.select({ id: shelves.id }).from(shelves)
           .where(and(eq(shelves.id, item.before.shelfId), eq(shelves.libraryId, libraryId))).get()) {
           throw new AppError('UNDO_CONFLICT', 'An original shelf no longer exists')
         }
-        if (item.categoryChanged && item.before.categoryId && !tx.select({ id: libraryCategories.id }).from(libraryCategories)
-          .where(and(eq(libraryCategories.id, item.before.categoryId), eq(libraryCategories.libraryId, libraryId))).get()) {
-          throw new AppError('UNDO_CONFLICT', 'An original category no longer exists')
-        }
       }
       for (const delta of tagDeltas) {
-        const present = Boolean(tx.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
-          .where(and(eq(libraryBookTags.libraryBookId, delta.libraryBookId), eq(libraryBookTags.tagId, delta.tagId))).get())
+        const present = Boolean(tx.select({ name: libraryBookTagValues.name }).from(libraryBookTagValues)
+          .where(and(eq(libraryBookTagValues.libraryBookId, delta.libraryBookId), eq(libraryBookTagValues.name, delta.name))).get())
         if (present !== !delta.existed) throw new AppError('UNDO_CONFLICT', 'Book tags changed')
-      }
-      if (tagDeltas.length) {
-        const tagIds = [...new Set(tagDeltas.map((delta) => delta.tagId))]
-        const existingTags = tx.select({ id: libraryTags.id }).from(libraryTags)
-          .where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, tagIds))).all()
-        if (existingTags.length !== tagIds.length) throw new AppError('UNDO_CONFLICT', 'An original tag no longer exists')
       }
       for (const item of changed) tx.update(libraryBooks).set({
         ...(item.shelfChanged ? { shelfId: item.before.shelfId } : {}),
-        ...(item.categoryChanged ? { categoryId: item.before.categoryId } : {}),
+        ...(item.categoryChanged ? { categoryRoot: item.before.categoryRoot, categoryLeaf: item.before.categoryLeaf } : {}),
         updatedAt: Date.now(),
       }).where(eq(libraryBooks.id, item.before.id)).run()
-      for (const categoryId of [...newCategoryIds].reverse()) {
-        const category = tx.select({ id: libraryCategories.id }).from(libraryCategories)
-          .where(and(eq(libraryCategories.id, categoryId), eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.userId, userId))).get()
-        if (!category) continue
-        const hasBooks = tx.select({ id: libraryBooks.id }).from(libraryBooks).where(eq(libraryBooks.categoryId, categoryId)).get()
-        const hasChildren = tx.select({ id: libraryCategories.id }).from(libraryCategories).where(eq(libraryCategories.parentId, categoryId)).get()
-        if (!hasBooks && !hasChildren) tx.delete(libraryCategories).where(eq(libraryCategories.id, categoryId)).run()
-      }
       for (const delta of tagDeltas) {
-        if (delta.existed) tx.insert(libraryBookTags).values({ libraryBookId: delta.libraryBookId, tagId: delta.tagId }).onConflictDoNothing().run()
-        else tx.delete(libraryBookTags).where(and(eq(libraryBookTags.libraryBookId, delta.libraryBookId), eq(libraryBookTags.tagId, delta.tagId))).run()
+        if (delta.existed) tx.insert(libraryBookTagValues).values({ id: createId('btv'), libraryBookId: delta.libraryBookId, name: delta.name }).onConflictDoNothing().run()
+        else tx.delete(libraryBookTagValues).where(and(eq(libraryBookTagValues.libraryBookId, delta.libraryBookId), eq(libraryBookTagValues.name, delta.name))).run()
       }
     }))
   }

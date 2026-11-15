@@ -179,17 +179,16 @@ describe('vault archive and reading projections', () => {
     expect(result.daily).toEqual([{ date: '2026-11-07', durationSeconds: 70 }])
     expect(result.hourly.every((hour) => hour.durationSeconds === 0 && hour.days === 0)).toBe(true)
     expect(result.byBook.every((book) => book.days === 0 && book.progress === null)).toBe(true)
-    expect(result.byCategory).toEqual([{ categoryId: null, name: null, parentId: null, parentName: null, bookCount: 2, durationSeconds: 70 }])
+    expect(result.byCategory).toEqual([{ categoryPath: null, name: null, parentName: null, bookCount: 2, durationSeconds: 70 }])
   })
 
   it('uses source-owned taxonomy and treats tag time as non-exclusive', async () => {
-    const item = (id: string, kind: 'tag' | 'category', parentId: string | null = null) => ({ id, kind, name: id, parentId, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 })
-    await repository.saveOrganization('vault', { version: 0, items: [item('tag-one', 'tag'), item('tag-two', 'tag'), item('parent', 'category'), item('child', 'category', 'parent')] }, 0)
-    await repository.updateMetadata(ref('First'), { catalog: { tagIds: ['tag-one', 'tag-two'], categoryId: 'child' } }, 0)
-    await repository.updateMetadata(ref('Second'), { catalog: { tagIds: ['tag-one'] } }, 0)
+    await repository.saveOrganization('vault', { version: 0, shelves: [], valueState: [] }, 0)
+    await repository.updateMetadata(ref('First'), { catalog: { tags: ['tag-one', 'tag-two'], categoryPath: ['parent', 'child'] } }, 0)
+    await repository.updateMetadata(ref('Second'), { catalog: { tags: ['tag-one'] } }, 0)
     const result = projectLocalVaultReading(await repository.readVaultReadingSnapshot('vault'))
-    expect(result.byTag).toEqual([{ tagId: 'tag-one', name: 'tag-one', bookCount: 2, durationSeconds: 70 }, { tagId: 'tag-two', name: 'tag-two', bookCount: 1, durationSeconds: 40 }])
-    expect(result.byCategory).toContainEqual({ categoryId: 'child', name: 'child', parentId: 'parent', parentName: 'parent', bookCount: 1, durationSeconds: 40 })
+    expect(result.byTag).toEqual([{ name: 'tag-one', bookCount: 2, durationSeconds: 70 }, { name: 'tag-two', bookCount: 1, durationSeconds: 40 }])
+    expect(result.byCategory).toContainEqual({ categoryPath: ['parent', 'child'], name: 'child', parentName: 'parent', bookCount: 1, durationSeconds: 40 })
   })
 
   it('unions hourly calendar days across books and keeps their recorded timezone and date', async () => {

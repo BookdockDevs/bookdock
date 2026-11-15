@@ -20,8 +20,8 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import type { ToastMessage } from '@/stores/toast.store'
 
-import { invalidateDeviceMembershipQueries, useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useTags, useCreateTag, useLibraryCategories, useVersionTocState, useLibraries } from '../hooks'
-import { matchCategoryByName } from '../taxonomy'
+import { invalidateDeviceMembershipQueries, useCatalogBookDetail, useBook, useBookMembership, useBookMetadataSource, useDeviceTaxonomy, useLibraryCategories, useTags, useVersionTocState, useLibraries } from '../hooks'
+import { useVaultCapable } from '@/features/reading-data/vault-availability'
 import { warmEditorEntry } from '@/features/content-editor/lib/editor-entry-prefetch'
 
 import AppendContentModal from './AppendContentModal'
@@ -35,8 +35,8 @@ import MetadataLookupDropdown from './book-detail/MetadataLookupDropdown'
 import type { DraftTextField } from './book-detail/metadata-source'
 import { applySourceAllToDraft, applySourceFieldToDraft, hasRestorableField, PRIVATE_ALL_TEXT_FIELDS, PRIVATE_B_TEXT_FIELDS } from './book-detail/metadata-source'
 import type { MoreActionsMenuItem } from './book-detail/MoreActionsMenu'
-import { mergePendingTagNames } from './book-detail/pending-tags'
 import { draftFrom, draftToBookmetaPreserving, isMachineIdentifier, parseAuthorList, type MetaDraft } from './book-detail/types'
+import { categoryTemplatePath, matchCategoryTemplateKey } from '@bookdock/shared'
 import TocRulePicker from './TocRulePicker'
 import VersionSelect from './VersionSelect'
 import WorkDetailBody from './WorkDetailBody'
@@ -81,14 +81,29 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const displayBook: ClientLibraryBookView = detail ?? book!
   const bookmeta = detail?.meta?.bookmeta
 
-  const { tags: memTags } = useBookMembership(book?.id ?? null, { tags: !detail?.tagIds, ref: book?.ref })
-  // privateLibraryId only matters for server books; a device-book dialog
-  // must not probe the account's library list.
-  const { data: librariesData } = useLibraries({ enabled: !isLocalBook && Boolean(user) })
-  const privateLibraryId = isLocalBook ? null : user?.privateLibraryId ?? librariesData?.data.find((library) => library.type === 'private')?.id ?? null
+  const { tags: memTags } = useBookMembership(book?.id ?? null, { tags: !detail?.tags, ref: book?.ref })
+  const { data: librariesData } = useLibraries({ enabled: Boolean(user) && !user?.privateLibraryId })
+  const privateLibraryId = user?.privateLibraryId ?? librariesData?.data.find((library) => library.type === 'private')?.id ?? null
   const { data: tagsData } = useTags({ fallbackAnonymous: isLocalBook })
-  const createTag = useCreateTag()
-  const { data: categoriesData } = useLibraryCategories(privateLibraryId)
+  const vaultCapable = useVaultCapable()
+  const deviceTaxonomy = useDeviceTaxonomy({ enabled: vaultCapable || isLocalBook })
+  const privateCategories = useLibraryCategories(privateLibraryId)
+  const categories = useMemo(() => {
+    const merged = new Map((privateCategories.data?.data ?? []).map((category) => [JSON.stringify(category.path), category]))
+    for (const category of deviceTaxonomy.data?.categories ?? []) {
+      const key = JSON.stringify(category.path)
+      if (!merged.has(key)) merged.set(key, category)
+    }
+    return [...merged.values()]
+  }, [privateCategories.data, deviceTaxonomy.data])
+  const tags = useMemo(() => {
+    const merged = new Map((tagsData?.data ?? []).map((tag) => [tag.name, tag]))
+    for (const tag of deviceTaxonomy.data?.tags ?? []) {
+      const key = tag.name
+      if (!merged.has(key)) merged.set(key, tag)
+    }
+    return [...merged.values()]
+  }, [tagsData, deviceTaxonomy.data])
 
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -101,14 +116,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
   const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null)
   const [coverRemovalPending, setCoverRemovalPending] = useState(false)
   const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null)
-  const [categorySel, setCategorySel] = useState<{ categoryId?: string | null; categoryTemplateKey?: string }>({ categoryId: null })
+  const [categoryPath, setCategoryPath] = useState<string[] | null>(null)
   const [tagSel, setTagSel] = useState<Set<string>>(new Set())
-  // Scraped tag names that are not in the library yet. They stay here until the
-  // dialog is saved, so closing or removing them leaves no orphan tags behind.
-  const [pendingTagNames, setPendingTagNames] = useState<string[]>([])
-  // A scraped category name that matches no library category follows the same
-  // rule as tags: it is created by the save, never by applying a lookup.
-  const [pendingCategoryName, setPendingCategoryName] = useState<string | null>(null)
 
   const [tocRuleOpen, setTocRuleOpen] = useState(false)
   const [appendContentOpen, setAppendContentOpen] = useState(false)
@@ -249,8 +258,6 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setMetadataLookup({ open: false })
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
-    setPendingTagNames([])
-    setPendingCategoryName(null)
   }, [])
 
   const closeDialog = useCallback(() => {
@@ -280,8 +287,6 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     setDraft(null)
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
-    setPendingTagNames([])
-    setPendingCategoryName(null)
     setTocRuleOpen(false)
     setAppendContentOpen(false)
     setReviewSubView('detail')
@@ -310,18 +315,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
     })
     setPendingCoverFile(null)
     setCoverRemovalPending(false)
-    setCategorySel({ categoryId: displayBook.categoryId ?? null })
-    setPendingTagNames([])
-    setPendingCategoryName(null)
-    setTagSel(
-      new Set(
-        detail?.tagIds ??
-          memTags.data?.data ??
-          (tagsData?.data ?? [])
-            .filter((t) => (book.tags ?? []).includes(t.name))
-            .map((t) => t.id),
-      ),
-    )
+    setCategoryPath(displayBook.categoryPath ?? null)
+    setTagSel(new Set(detail?.tags ?? memTags.data?.data ?? book.tags ?? []))
     setDraftEpoch((n) => n + 1)
     void queryClient.removeQueries({ queryKey: ['books', book.id, 'metadata-source'] })
     setEditing(true)
@@ -351,9 +346,8 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
           title, authors,
           catalog: {
             metadata: draftToBookmetaPreserving(bookmeta, draft), coverPaletteId: draft.coverPaletteId,
-            ...(categorySel.categoryTemplateKey ? {} : { categoryId: categorySel.categoryId ?? null }), tagIds: [...tagSel],
+            categoryPath, tags: [...tagSel],
           },
-          ...(categorySel.categoryTemplateKey ? { categoryTemplateKey: categorySel.categoryTemplateKey } : {}),
         }, editVersion, coverRemovalPending ? null : pendingCoverFile ?? undefined)
         await queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(book.ref!.scope)] })
         invalidateDeviceMembershipQueries(queryClient)
@@ -377,17 +371,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
             ? { descriptionOverride: draft.description.trim() ? draft.description : null }
             : { bookmeta: draftToBookmetaPreserving(bookmeta, draft), coverPaletteId: draft.coverPaletteId }),
         },
-        organization: {
-          ...(categorySel.categoryTemplateKey
-            ? { categoryTemplateKey: categorySel.categoryTemplateKey }
-            : pendingCategoryName
-              ? { categoryName: pendingCategoryName }
-              : { categoryId: categorySel.categoryId ?? null }),
-          tagIds: [...tagSel],
-          // Names the library has never seen are created by the save itself, so
-          // backing out of the dialog leaves nothing behind.
-          ...(pendingTagNames.length > 0 ? { tagNames: pendingTagNames } : {}),
-        },
+        organization: { categoryPath, tags: [...tagSel] },
         ...(coverOp ? { cover: coverOp } : {}),
       }, coverOp === 'replace' && pendingCoverFile ? { cover: pendingCoverFile } : {})
 
@@ -397,8 +381,6 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
       queryClient.invalidateQueries({ queryKey: ['tags'] })
       queryClient.invalidateQueries({ queryKey: ['libraries', privateLibraryId, 'categories'] })
       queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
-      setPendingTagNames([])
-      setPendingCategoryName(null)
       if (saved.undo) notify.success({ key: 'toast.bookUpdated' }, { undo: saved.undo })
       else notify.success({ key: 'toast.bookUpdated' })
       discardEdit()
@@ -575,19 +557,14 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
 
   if (!book) return null
 
-  const tagIds = detail?.tagIds ? new Set(detail.tagIds) : (memTags.data?.data ? new Set(memTags.data.data) : null)
+  const tagNames = detail?.tags ? new Set(detail.tags) : (memTags.data?.data ? new Set(memTags.data.data) : null)
   // 7.x: a collected B keeps its own metadata editable, but its content belongs
   // to the library — appending, re-chaptering and resetting derived metadata
   // would rewrite the shared revision, so the server refuses them too. `source`
   // is the right test for that: it is set for a B and for a library read, and
   // absent for A/C.
   const isLibraryOwned = Boolean(displayBook.source)
-  const memberTags = tagIds
-    ? (tagsData?.data ?? []).filter((t) => tagIds.has(t.id))
-    : (book.tags ?? []).map((name) => {
-        const found = (tagsData?.data ?? []).find((t) => t.name === name)
-        return { id: found ? found.id : name, name }
-      })
+  const memberTags = [...(tagNames ?? new Set(book.tags ?? []))]
   const rawId = bookmeta?.isbn || bookmeta?.identifier || ''
   const identifier = rawId && (bookmeta?.isbn || !isMachineIdentifier(rawId)) ? rawId : ''
 
@@ -726,32 +703,11 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
                     if (classification) {
                       if (classification.category?.trim()) {
                         const rawCat = classification.category.trim()
-                        // Same rule as tags: only an exact name reuses a row,
-                        // anything else is created by the save.
-                        const existing = matchCategoryByName(categoriesData?.data ?? [], rawCat)
-                        setCategorySel({ categoryId: existing?.id ?? null })
-                        setPendingCategoryName(existing ? null : rawCat)
+                        const template = matchCategoryTemplateKey(rawCat)
+                        setCategoryPath(template ? categoryTemplatePath(template) ?? [rawCat] : [rawCat])
                       }
                       if (classification.tags?.length) {
-                        const currentTags = tagsData?.data ?? []
-                        const toAddIds: string[] = []
-                        const toAddNames: string[] = []
-                        for (const tagName of classification.tags) {
-                          const trimmed = tagName.trim()
-                          if (!trimmed) continue
-                          const found = currentTags.find((t) => t.name.toLowerCase() === trimmed.toLowerCase())
-                          if (found) toAddIds.push(found.id)
-                          else toAddNames.push(trimmed)
-                        }
-                        if (toAddIds.length > 0) {
-                          setTagSel((prev) => new Set([...prev, ...toAddIds]))
-                        }
-                        if (toAddNames.length > 0) {
-                          // Creating the tag here would leave an orphan row as soon
-                          // as the user backs out of the dialog, so the name waits
-                          // for handleSave to turn it into a real tag.
-                          setPendingTagNames((prev) => mergePendingTagNames(prev, toAddNames))
-                        }
+                        setTagSel((prev) => new Set([...prev, ...classification.tags!.map((name) => name.trim()).filter(Boolean)]))
                       }
                     }
                     setMetadataLookup({ open: false })
@@ -761,21 +717,12 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
               <BookClassificationEditor
                 className="mt-4 border-t border-stone-100 pt-3.5 dark:border-stone-800"
                 libraryId={privateLibraryId}
-                categoryId={categorySel.categoryId ?? null}
-                categoryTemplateKey={categorySel.categoryTemplateKey}
-                tagIds={tagSel}
-                onCategoryChange={(value) => {
-                  setCategorySel(value)
-                  setPendingCategoryName(null)
-                }}
-                onTagChange={setTagSel}
-                tags={tagsData?.data ?? []}
-                pendingTagNames={pendingTagNames}
-                onRemovePendingTag={(name) => setPendingTagNames((prev) => prev.filter((tag) => tag !== name))}
-                pendingCategoryName={pendingCategoryName}
-                onRemovePendingCategory={() => setPendingCategoryName(null)}
-                onCreateTag={async (name) => (await createTag.mutateAsync(name)).data.id}
-                creatingTag={createTag.isPending}
+                categories={categories}
+                categoryPath={categoryPath}
+                tags={tagSel}
+                onCategoryChange={setCategoryPath}
+                onTagsChange={setTagSel}
+                tagValues={tags}
               />
             </div>
           ) : (
@@ -788,6 +735,7 @@ export default function BookDetailDialog({ book, work: workContext = null, readO
               readOnly={readOnly || displayBook.collected === false}
               detail={detail}
               categoryLibraryId={privateLibraryId}
+              categoryChoices={categories}
               memberTags={memberTags}
               isLoading={detailLoading || !detail}
               moreActions={privateMenuItems}

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { categoryPathSchema, classificationKindSchema, tagNameListSchema } from './classification'
 import { COVER_PALETTE_IDS } from './constants'
 import { REVIEW_BODY_MAX_LENGTH, REVIEW_TITLE_MAX_LENGTH } from './review'
 import { bookMetadataSchema, replacementCreateSchema, settingsUpdateSchema, tocRulePatternsSchema } from './schema'
@@ -83,32 +84,63 @@ export const clientReadingStateSchema = z.object({
 })
 export type ClientReadingState = z.infer<typeof clientReadingStateSchema>
 
+/**
+ * Organization a device book carries. Category and tag are values (see
+ * classification.ts), so only the shelf is an id here; a patch that carries
+ * `categoryPath`/`tags` replaces those values wholesale.
+ */
 export const clientCatalogAttributesSchema = z.object({
   metadata: bookMetadataSchema.optional(),
   shelfId: identity.nullable().optional(),
-  categoryId: identity.nullable().optional(),
-  tagIds: z.array(identity).optional(),
+  categoryPath: categoryPathSchema.nullable().optional(),
+  tags: tagNameListSchema.optional(),
   pinnedAt: timestamp.nullable().optional(),
   hidden: z.boolean().optional(),
   coverPaletteId: z.enum(COVER_PALETTE_IDS).nullable().optional(),
 })
 export type ClientCatalogAttributes = z.infer<typeof clientCatalogAttributesSchema>
 
+/** A shelf keeps an identity: users name it, order it, and move books onto it. */
+export const clientShelfItemSchema = z.object({
+  id: identity,
+  name: z.string().trim().min(1).max(100),
+  pinned: z.boolean(),
+  hidden: z.boolean(),
+  sortOrder: z.number().int().nonnegative(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+})
+export type ClientShelfItem = z.infer<typeof clientShelfItemSchema>
+
+/**
+ * What a device remembers about one category or tag *value*: whether it is
+ * hidden, pinned, and where it sits in the manual order. The value itself is
+ * never stored here — it lives on the books, which is why clearing a value
+ * leaves its preferences behind for the day it returns.
+ */
+export const clientValueStateSchema = z.object({
+  kind: classificationKindSchema,
+  /** Canonical key: `JSON.stringify(path)` for a category, the name for a tag. */
+  value: identity,
+  pinned: z.boolean(),
+  hidden: z.boolean(),
+  sortOrder: z.number().int().nonnegative(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+})
+export type ClientValueState = z.infer<typeof clientValueStateSchema>
+
 export const clientOrganizationSchema = z.object({
   version: z.number().int().nonnegative(),
-  items: z.array(z.object({
-    id: identity,
-    kind: z.enum(['shelf', 'category', 'tag']),
-    name: z.string().trim().min(1).max(100),
-    parentId: identity.nullable(),
-    pinned: z.boolean(),
-    hidden: z.boolean(),
-    sortOrder: z.number().int().nonnegative(),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  })),
+  shelves: z.array(clientShelfItemSchema),
+  valueState: z.array(clientValueStateSchema),
 })
 export type ClientOrganization = z.infer<typeof clientOrganizationSchema>
+
+/** Empty organization for a vault nobody has organized yet. */
+export function emptyClientOrganization(): ClientOrganization {
+  return { version: 0, shelves: [], valueState: [] }
+}
 
 export const clientCatalogPreferencesSchema = settingsUpdateSchema.shape.library.unwrap().extend({ showHidden: z.boolean().optional() })
 export type ClientCatalogPreferences = z.infer<typeof clientCatalogPreferencesSchema>

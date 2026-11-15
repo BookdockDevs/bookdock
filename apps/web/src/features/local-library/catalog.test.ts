@@ -2,7 +2,7 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ClientBook, ClientOrganization } from '@bookdock/shared'
-import { CATEGORY_TEMPLATES, parseLibrarySearch } from '@bookdock/shared'
+import { classificationValueKey, parseLibrarySearch } from '@bookdock/shared'
 
 import type { CatalogQuery } from '../reading-data/catalog'
 import { catalogQueryKey } from '../reading-data/catalog'
@@ -13,11 +13,14 @@ const scope = { kind: 'local' as const, vaultId: 'device' }
 const query: CatalogQuery = { page: 1, pageSize: 24, search: '', sortBy: 'title', sortOrder: 'asc', shelfId: null, tagId: null, format: null, readStatus: null }
 const book: ClientBook = { ref: { scope, bookId: 'same-id' }, title: 'Lighthouse', authors: ['Author'], format: 'epub', content: null, availability: 'available', size: 3, createdAt: 1, updatedAt: 1, version: 0 }
 book.content = { book: book.ref, contentId: 'content' }
-const organization: ClientOrganization = { version: 0, items: [
-  { id: 'shelf', kind: 'shelf', name: 'Shelf', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
-  { id: 'tag', kind: 'tag', name: 'Favorites', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
-  { id: 'parent', kind: 'category', name: 'Fiction', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
-  { id: 'child', kind: 'category', name: 'Adventure', parentId: 'parent', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
+const categoryRoot = classificationValueKey('category', ['Fiction'])
+const categoryChild = classificationValueKey('category', ['Fiction', 'Adventure'])
+const organization: ClientOrganization = { version: 0, shelves: [
+  { id: 'shelf', name: 'Shelf', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
+], valueState: [
+  { value: 'Favorites', kind: 'tag', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
+  { value: categoryRoot, kind: 'category', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
+  { value: categoryChild, kind: 'category', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
 ] }
 let repository: LocalLibraryRepository
 beforeEach(() => { vi.stubGlobal('indexedDB', new IDBFactory()); vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('Blob', NativeBlob); repository = new LocalLibraryRepository('catalog') })
@@ -61,25 +64,21 @@ describe('scoped catalog operations', () => {
     expect((await repository.getBook(secondRef)).catalog?.pinnedAt).toBeTypeOf('number')
   })
 
-  it('rolls back category-template creation together with invalid metadata and cover changes', async () => {
+  it('rolls back invalid metadata and cover changes', async () => {
     await repository.addBook(book, new Blob(['abc']), new Blob(['old']))
-    const categoryTemplateKey = CATEGORY_TEMPLATES[0].key
-    await expect(repository.updateMetadata(book.ref, { title: 'Rejected', categoryTemplateKey, catalog: { tagIds: ['foreign'] } }, 0, new Blob(['replacement']))).rejects.toMatchObject({ category: 'invalid-input' })
-    expect((await repository.getOrganization(scope.vaultId)).items).toEqual([])
+    await expect(repository.updateMetadata(book.ref, { title: 'Rejected', catalog: { categoryPath: ['Fiction', 'Adventure', 'Extra'] } }, 0, new Blob(['replacement']))).rejects.toMatchObject({ category: 'invalid-input' })
+    expect((await repository.getOrganization(scope.vaultId)).valueState).toEqual([])
     expect((await repository.getBook(book.ref))).toMatchObject({ title: 'Lighthouse', version: 0 })
     expect((await repository.getCover(book.ref))?.size).toBe(3)
-    const updated = await repository.updateMetadata(book.ref, { categoryTemplateKey }, 0)
-    const organization = await repository.getOrganization(scope.vaultId)
-    expect(organization.items.some((item) => item.id === updated.catalog?.categoryId && item.kind === 'category')).toBe(true)
-    await repository.updateMetadata(book.ref, { categoryTemplateKey }, 1)
-    expect(await repository.getOrganization(scope.vaultId)).toEqual(organization)
+    await repository.updateMetadata(book.ref, { catalog: { categoryPath: ['Fiction', 'Adventure'], tags: ['Favorite'] } }, 0)
+    expect((await repository.getBook(book.ref)).catalog).toMatchObject({ categoryPath: ['Fiction', 'Adventure'], tags: ['Favorite'] })
   })
 
   it('retains v2 records across catalog edits, cover promotion and reopening', async () => {
     await repository.addBook(book, new Blob(['abc']), new Blob(['old']))
     await repository.saveOrganization(scope.vaultId, organization, 0)
     const operations = localCatalogOperations(scope, repository)
-    const next = await operations.update(book.ref, { title: 'Updated', catalog: { metadata: { publisher: 'Publisher' }, shelfId: 'shelf', categoryId: 'child', tagIds: ['tag'] } }, 0, new Blob(['new-cover']))
+    const next = await operations.update(book.ref, { title: 'Updated', catalog: { metadata: { publisher: 'Publisher' }, shelfId: 'shelf', categoryPath: ['Fiction', 'Adventure'], tags: ['Favorites'] } }, 0, new Blob(['new-cover']))
     expect(next.version).toBe(1)
     await repository.close()
     expect((await operations.detail(book.ref)).metadata?.publisher).toBe('Publisher')
@@ -93,7 +92,7 @@ describe('scoped catalog operations', () => {
     await repository.addBook(book, new Blob(['abc']), new Blob(['old']))
     const operations = localCatalogOperations(scope, repository)
     await expect(operations.detail({ ...book.ref, scope: { kind: 'local', vaultId: 'other' } })).rejects.toThrow('different data source')
-    await expect(operations.update(book.ref, { title: 'Rejected', catalog: { tagIds: ['foreign-tag'] } }, 0, null)).rejects.toMatchObject({ category: 'invalid-input' })
+    await expect(operations.update(book.ref, { title: 'Rejected', catalog: { categoryPath: ['a', 'b', 'c'] } }, 0, null)).rejects.toMatchObject({ category: 'invalid-input' })
     expect((await repository.getBook(book.ref)).title).toBe('Lighthouse')
     expect((await repository.getCover(book.ref))?.size).toBe(3)
   })
@@ -101,31 +100,58 @@ describe('scoped catalog operations', () => {
   it('supports compound search, descendant categories, hidden taxonomy and stable pagination', async () => {
     await repository.addBook(book, new Blob(['abc']))
     await repository.saveOrganization(scope.vaultId, organization, 0)
-    await repository.updateMetadata(book.ref, { catalog: { categoryId: 'child', tagIds: ['tag'] } }, 0)
+    await repository.updateMetadata(book.ref, { catalog: { categoryPath: ['Fiction', 'Adventure'], tags: ['Favorites'] } }, 0)
     const second = { ...book, ref: { scope, bookId: 'second' }, title: 'Another', content: null, size: null }
     await repository.addBook({ ...second, content: { book: second.ref, contentId: 'second-content' } }, new Blob(['xyz']))
+    await repository.updateMetadata(second.ref, { catalog: { categoryPath: ['Science'], tags: ['none'] } }, 0)
     const operations = localCatalogOperations(scope, repository)
-    expect((await operations.list({ ...query, categoryId: 'parent' })).entries.map((row) => row.book.ref.bookId)).toEqual(['same-id'])
+    expect((await operations.list({ ...query, category: ['Fiction'] })).entries.map((row) => row.book.ref.bookId)).toEqual(['same-id'])
     expect((await operations.list({ ...query, expression: JSON.stringify(parseLibrarySearch('tag:Favorites & !author:Other')) })).total).toBe(1)
+    expect((await operations.list({ ...query, expression: JSON.stringify({ kind: 'field', field: 'category', value: categoryRoot, id: categoryRoot, start: 0, end: 1 }) })).entries.map((row) => row.book.ref.bookId)).toEqual(['same-id'])
+    expect((await operations.list({ ...query, expression: JSON.stringify({ kind: 'field', field: 'tag', value: 'none', id: 'none', start: 0, end: 1 }) })).entries.map((row) => row.book.ref.bookId)).toEqual(['second'])
     const page = await operations.list({ ...query, pageSize: 1 })
     expect(page.total).toBe(2)
     expect(page.totalSize).toBeNull()
     expect(page.entries[0].book.title).toBe('Another')
-    await repository.saveOrganization(scope.vaultId, { ...organization, items: organization.items.map((item) => ({ ...item, hidden: item.id === 'parent' })) }, 1)
+    const currentOrganization = await repository.getOrganization(scope.vaultId)
+    await repository.saveOrganization(scope.vaultId, { ...currentOrganization, valueState: currentOrganization.valueState.map((item) => ({ ...item, hidden: item.value === categoryRoot })) }, currentOrganization.version)
     expect((await operations.list(query)).total).toBe(1)
     expect((await operations.list({ ...query, showHidden: true })).total).toBe(2)
+  })
+
+  it('renames a category branch and its sidebar preferences in one vault operation', async () => {
+    await repository.addBook(book, new Blob(['abc']))
+    const withPreferences = { ...organization, valueState: organization.valueState.map((state) => ({ ...state, pinned: true })) }
+    await repository.saveOrganization(scope.vaultId, withPreferences, 0)
+    await repository.updateMetadata(book.ref, { catalog: { categoryPath: ['Fiction', 'Adventure'] } }, 0)
+    await localCatalogOperations(scope, repository).rewriteValue('category', categoryRoot, JSON.stringify(['Novel']))
+
+    expect((await repository.getBook(book.ref)).catalog?.categoryPath).toEqual(['Novel', 'Adventure'])
+    expect((await repository.getOrganization(scope.vaultId)).valueState).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'category', value: '["Novel"]', pinned: true }),
+      expect.objectContaining({ kind: 'category', value: '["Novel","Adventure"]', pinned: true }),
+    ]))
+  })
+
+  it('moves a category leaf to a different parent', async () => {
+    await repository.addBook(book, new Blob(['abc']))
+    await repository.updateMetadata(book.ref, { catalog: { categoryPath: ['Fiction', 'Adventure'] } }, 0)
+    await localCatalogOperations(scope, repository).rewriteValue('category', categoryChild, JSON.stringify(['Science', 'Adventure']))
+    expect((await repository.getBook(book.ref)).catalog?.categoryPath).toEqual(['Science', 'Adventure'])
   })
 
   it('clears removed memberships atomically and rejects cycles and stale organization', async () => {
     await repository.addBook(book, new Blob(['abc']))
     await repository.saveOrganization(scope.vaultId, organization, 0)
-    await repository.updateMetadata(book.ref, { catalog: { shelfId: 'shelf', tagIds: ['tag'] } }, 0)
-    await repository.saveOrganization(scope.vaultId, { version: 1, items: [] }, 1)
-    expect((await repository.getBook(book.ref)).catalog).toMatchObject({ shelfId: null, tagIds: [] })
+    await repository.updateMetadata(book.ref, { catalog: { shelfId: 'shelf', tags: ['Favorites'] } }, 0)
+    const beforeClear = await repository.getOrganization(scope.vaultId)
+    await repository.saveOrganization(scope.vaultId, { version: beforeClear.version, shelves: [], valueState: [] }, beforeClear.version)
+    expect((await repository.getBook(book.ref)).catalog).toMatchObject({ shelfId: null, tags: ['Favorites'] })
     await expect(repository.updateMetadata(book.ref, { title: 'stale' }, 1)).rejects.toMatchObject({ category: 'conflict' })
-    await expect(repository.saveOrganization(scope.vaultId, organization, 1)).rejects.toMatchObject({ category: 'conflict' })
-    await expect(repository.saveOrganization(scope.vaultId, { ...organization, items: organization.items.map((item) => ({ ...item, parentId: item.id === 'parent' ? 'child' : item.parentId })) }, 2)).rejects.toMatchObject({ category: 'invalid-input' })
-    expect((await repository.getOrganization(scope.vaultId)).items).toEqual([])
+    const afterClear = await repository.getOrganization(scope.vaultId)
+    await expect(repository.saveOrganization(scope.vaultId, organization, afterClear.version - 1)).rejects.toMatchObject({ category: 'conflict' })
+    await expect(repository.saveOrganization(scope.vaultId, { ...organization, valueState: [{ ...organization.valueState[0]!, value: '' }] }, afterClear.version)).rejects.toThrow()
+    expect((await repository.getOrganization(scope.vaultId)).valueState).toEqual([])
   })
 
   it('keeps missing state unknown and scopes same raw IDs by vault, account and guest', async () => {

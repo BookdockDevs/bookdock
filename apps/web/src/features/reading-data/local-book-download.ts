@@ -15,10 +15,8 @@ export async function prepareLocalBookFile(ref: ClientBookRef, format: 'epub' | 
   signal.throwIfAborted()
   const book = await repository.getBook(ref)
   const file = await repository.getFile(ref)
-  if (book.format === 'txt' && format === 'epub' && isDeviceBook(ref) && book.catalog?.tagIds?.length) {
-    const organization = await repository.getOrganization(ref.scope.vaultId)
-    const tags = organization.items.filter((item) => item.kind === 'tag' && book.catalog?.tagIds?.includes(item.id)).map((item) => item.name)
-    book.catalog.metadata = { ...book.catalog.metadata, subjects: [...new Set([...(book.catalog.metadata?.subjects ?? []), ...tags])] }
+  if (book.format === 'txt' && format === 'epub' && isDeviceBook(ref) && book.catalog?.tags?.length) {
+    book.catalog.metadata = { ...book.catalog.metadata, subjects: [...new Set([...(book.catalog.metadata?.subjects ?? []), ...book.catalog.tags])] }
   }
   signal.throwIfAborted()
   if (book.format === 'txt' && !edited && format === 'txt') return repository.getNormalizedText(ref)

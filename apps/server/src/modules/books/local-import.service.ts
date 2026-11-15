@@ -7,6 +7,8 @@ import {
   CONTENT_IMAGE_MAX_BYTES,
   mergeTimeFragments,
   normalizeAuthors,
+  normalizeCategoryPath,
+  normalizeTagNames,
   type LocalBookDuplicateCheckReq,
   type LocalBookDuplicateCheckRes,
   type LocalBookImportPayload,
@@ -26,10 +28,8 @@ import {
   highlights,
   ideas,
   libraryBooks,
-  libraryBookTags,
+  libraryBookTagValues,
   libraryBookVersions,
-  libraryCategories,
-  libraryTags,
   readingArchives,
   readingRounds,
   readingSessions,
@@ -224,13 +224,10 @@ export async function importLocalBookFromClient(
       const shelfId = payload.book.catalog?.shelfId
         ? tx.select({ id: shelves.id }).from(shelves).where(and(eq(shelves.id, payload.book.catalog.shelfId), eq(shelves.libraryId, libraryId))).get()?.id ?? null
         : null
-      const categoryId = payload.book.catalog?.categoryId
-        ? tx.select({ id: libraryCategories.id }).from(libraryCategories).where(and(eq(libraryCategories.id, payload.book.catalog.categoryId), eq(libraryCategories.libraryId, libraryId))).get()?.id ?? null
-        : null
-      const candidateTagIds = [...new Set(payload.book.catalog?.tagIds ?? [])]
-      const tagIds = candidateTagIds.length
-        ? tx.select({ id: libraryTags.id }).from(libraryTags).where(and(eq(libraryTags.libraryId, libraryId), inArray(libraryTags.id, candidateTagIds))).all().map((row) => row.id)
-        : []
+      // The device already stores categories and tags as values, so the import
+      // carries them straight through; nothing has to be created first.
+      const categoryPath = normalizeCategoryPath(payload.book.catalog?.categoryPath ?? null)
+      const tags = normalizeTagNames(payload.book.catalog?.tags ?? [])
 
       tx.insert(bookVersions).values({
         id: versionId,
@@ -266,7 +263,8 @@ export async function importLocalBookFromClient(
         libraryId,
         userId,
         shelfId,
-        categoryId,
+        categoryRoot: categoryPath?.[0] ?? null,
+        categoryLeaf: categoryPath?.[1] ?? null,
         title: payload.book.title,
         author: authors.author,
         authors: authors.authors,
@@ -291,8 +289,10 @@ export async function importLocalBookFromClient(
         updatedAt: payload.book.updatedAt,
       }).run()
 
-      if (tagIds.length > 0) {
-        tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId, tagId }))).onConflictDoNothing().run()
+      if (tags.length > 0) {
+        tx.insert(libraryBookTagValues)
+          .values(tags.map((name, index) => ({ id: createId('btv'), libraryBookId, name, sortOrder: index })))
+          .onConflictDoNothing().run()
       }
 
       const localState = payload.state

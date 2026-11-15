@@ -138,6 +138,17 @@ function makeLegacyIdentity() {
     DROP INDEX library_books_shelf_idx;
     ALTER TABLE library_books DROP COLUMN shelf_id;
     ALTER TABLE library_books DROP COLUMN description_override;
+    DROP TABLE IF EXISTS library_book_tag_values;
+    DROP TABLE IF EXISTS library_metadata_value_state;
+    DROP TABLE IF EXISTS library_book_tags;
+    DROP TABLE IF EXISTS library_tags;
+    DROP TABLE IF EXISTS library_categories;
+    ALTER TABLE library_books DROP COLUMN category_root;
+    ALTER TABLE library_books DROP COLUMN category_leaf;
+    ALTER TABLE library_books ADD COLUMN category_id text;
+    CREATE TABLE library_categories (id text PRIMARY KEY NOT NULL, library_id text NOT NULL, user_id text NOT NULL, name text NOT NULL, parent_id text, sort_order integer NOT NULL DEFAULT 0, pinned integer NOT NULL DEFAULT 0, hidden integer NOT NULL DEFAULT 0, created_at integer NOT NULL, updated_at integer NOT NULL);
+    CREATE TABLE library_tags (id text PRIMARY KEY NOT NULL, library_id text NOT NULL, user_id text NOT NULL, name text NOT NULL, sort_order integer NOT NULL DEFAULT 0, pinned integer NOT NULL DEFAULT 0, hidden integer NOT NULL DEFAULT 0, created_at integer NOT NULL, updated_at integer NOT NULL);
+    CREATE TABLE library_book_tags (library_book_id text NOT NULL, tag_id text NOT NULL, PRIMARY KEY (library_book_id, tag_id));
     DELETE FROM library_migration_log WHERE batch = 'category-shelf-separation-v1';
     DELETE FROM __drizzle_migrations WHERE created_at >= ${cutoff};`)
   db.$client.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'")

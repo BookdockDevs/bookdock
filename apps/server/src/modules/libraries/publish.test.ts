@@ -206,26 +206,27 @@ describe('publish private book snapshot', () => {
       .rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
   })
 
-  it('validates target categories and tags and returns duplicate publishes', async () => {
+  it('stores the target category path and tag values and returns duplicate publishes', async () => {
     const source = await privateBook(ownerId)
-    const categoryId = createId('category')
-    const tagId = createId('tag')
-    db.insert(schema.libraryCategories).values({
-      id: categoryId, libraryId: sharedLibraryId, userId: ownerId, name: '分类', parentId: null,
-      sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
-    db.insert(schema.libraryTags).values({
-      id: tagId, libraryId: sharedLibraryId, userId: ownerId, name: '标签',
-      sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
-
-    await expect(publishPrivateBook(ownerId, sharedLibraryId, { bookId: source.book.id, categoryId: createId('category') }))
-      .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-    const first = await publishPrivateBook(ownerId, sharedLibraryId, { bookId: source.book.id, categoryId, tagIds: [tagId] })
-    const second = await publishPrivateBook(ownerId, sharedLibraryId, { bookId: source.book.id, categoryId, tagIds: [tagId] })
+    // Values need no existence check: a name the target library never listed is
+    // still a legitimate value to publish under.
+    const categoryPath = ['分类', '子类']
+    const first = await publishPrivateBook(ownerId, sharedLibraryId, {
+      bookId: source.book.id, categoryPath, tags: ['标签'],
+    })
+    const second = await publishPrivateBook(ownerId, sharedLibraryId, {
+      bookId: source.book.id, categoryPath, tags: ['标签'],
+    })
     expect(second).toEqual({ ...first, duplicated: true })
     expect(db.select().from(schema.libraryBookVersions)
       .where(eq(schema.libraryBookVersions.libraryId, sharedLibraryId)).all()).toHaveLength(1)
+
+    const work = db.select().from(schema.libraryBooks)
+      .where(eq(schema.libraryBooks.id, first.libraryBookId)).get()!
+    expect(work).toMatchObject({ categoryRoot: '分类', categoryLeaf: '子类' })
+    expect(db.select().from(schema.libraryBookTagValues)
+      .where(eq(schema.libraryBookTagValues.libraryBookId, first.libraryBookId)).all().map((row) => row.name))
+      .toEqual(['标签'])
   })
 
   it('keeps the published snapshot after the private source changes or is deleted', async () => {

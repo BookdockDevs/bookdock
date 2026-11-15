@@ -1339,42 +1339,13 @@ export interface ShelfReorderReq {
   shelfIds: string[]
 }
 
-export interface TagListItem {
-  id: string
-  userId: string
-  name: string
-  sortOrder: number
-  createdAt: number
-  /** Membership-change timestamp, maintained by DB triggers (see N-06). */
-  updatedAt: number
-  /** Pin-to-top flag; pinned items lead every sort mode. */
-  pinned: boolean
-  /** Persistent hide: hides every work carrying this tag. */
-  hidden: boolean
-  bookCount: number
-}
-
-export interface TagCreateReq {
-  name: string
-}
-
-export interface TagUpdateReq {
-  name?: string
-  pinned?: boolean
-  hidden?: boolean
-}
-
-/** Full ordered tag id list; the server rewrites each tag's sortOrder to its index. */
-export interface TagReorderReq {
-  tagIds: string[]
-}
-
 export interface BookMembershipReq {
   /** Single-shelf membership: string = move into shelf, null = remove from shelf, absent = unchanged */
   shelfId?: string | null
-  categoryId?: string | null
-  categoryTemplateKey?: string
-  tagIds?: string[]
+  /** Category value: null clears it, absent leaves it unchanged. */
+  categoryPath?: string[] | null
+  /** Replaces the book's whole tag set. */
+  tags?: string[]
 }
 
 export interface BookListItem {
@@ -1396,7 +1367,9 @@ export interface BookListItem {
   deletedAt?: number | null
   /** Single-shelf membership; null = unshelved. Drives drag-to-shelf no-op checks. */
   shelfId: string | null
-  categoryId?: string | null
+  /** Category value as its name path (one or two names); null = uncategorized. */
+  categoryPath?: string[] | null
+  /** Display label for `categoryPath` (`root / leaf`); never an identity. */
   categoryName?: string | null
   /** Private-library entry kind; A is personal, B is shared, C is local. */
   kind?: LibraryVersionKind
@@ -1538,7 +1511,6 @@ export interface BookDetailRes extends BookListItem {
   /** True when `descriptionOverride` is in effect (non-empty). */
   descriptionOverridden?: boolean
   readerSettings: ReaderBookSettings
-  tagIds?: string[]
   cfi?: string | null
   chapter?: string | null
   readFraction?: number
@@ -1818,7 +1790,7 @@ export interface ReadingRecordBookDetailRes {
 }
 
 export interface ReadingRecordTagItem {
-  tagId: string
+  /** A tag value is identified by its name; there is no separate id. */
   name: string
   durationSeconds: number
   /** Distinct book count having this tag in the range */
@@ -1826,9 +1798,9 @@ export interface ReadingRecordTagItem {
 }
 
 export interface ReadingRecordCategoryItem {
-  categoryId: string | null
+  /** Category value as its name path; null = uncategorized. */
+  categoryPath: string[] | null
   name: string | null
-  parentId: string | null
   parentName: string | null
   durationSeconds: number
   bookCount: number

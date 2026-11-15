@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { categoryPathSchema, tagNameListSchema } from './classification'
 import { ANNOTATION_MAX_TEXT_LENGTH, COVER_PALETTE_IDS } from './constants'
 import { readingCoverageSchema, readingTimeFragmentSchema } from './reading-ledger'
 import { REVIEW_BODY_MAX_LENGTH, REVIEW_TITLE_MAX_LENGTH } from './review'
@@ -106,8 +107,8 @@ export const localBookImportPayloadSchema = z.object({
     catalog: z.object({
       metadata: bookMetadataSchema.optional(),
       shelfId: idSchema.nullable().optional(),
-      categoryId: idSchema.nullable().optional(),
-      tagIds: z.array(idSchema).optional(),
+      categoryPath: categoryPathSchema.nullable().optional(),
+      tags: tagNameListSchema.optional(),
       pinnedAt: timestampSchema.nullable().optional(),
       hidden: z.boolean().optional(),
       coverPaletteId: z.enum(COVER_PALETTE_IDS).nullable().optional(),

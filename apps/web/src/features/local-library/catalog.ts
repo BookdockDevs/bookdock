@@ -1,5 +1,5 @@
-import type { ArchiveBooksQuery, ReadingRange, EditorEpubSaveReq, EditorTxtSaveReq, ClientReadingLedgerClear, BatchOrganizeReq, ClientBatchSelectionItem, ClientBook, ClientBookRef, ClientDataScope, ClientOrganization, ClientReadingState, LibrarySearchExpression } from '@bookdock/shared'
-import { PAGINATION, readLibrarySearchExpression } from '@bookdock/shared'
+import type { ArchiveBooksQuery, ReadingRange, EditorEpubSaveReq, EditorTxtSaveReq, ClientReadingLedgerClear, BatchOrganizeReq, ClientBatchSelectionItem, ClientBook, ClientBookRef, ClientDataScope, ClientOrganization, ClientReadingState, ClientShelfItem, LibrarySearchExpression } from '@bookdock/shared'
+import { PAGINATION, classificationValueKey, parseCategoryValueKey, readLibrarySearchExpression } from '@bookdock/shared'
 
 import type { CatalogPage, CatalogQuery } from '../reading-data/catalog'
 import { localCatalogEntry } from '../reading-data/catalog'
@@ -90,7 +90,7 @@ export function localCatalogOperations(scope: Extract<ClientDataScope, { kind: '
       if (selected.size !== ids.length || !ids.length || ids.length > 2000) throw new LocalLibraryError('invalid-input', 'Invalid book selection')
       return snapshot.books.filter(({ book }) => selected.has(book.ref.bookId)).map(({ book }) => ({
         id: book.ref.bookId, ref: book.ref, clientVersion: book.version, title: book.title, format: book.format,
-        categoryId: book.catalog?.categoryId ?? null, shelfId: book.catalog?.shelfId ?? null, tagIds: book.catalog?.tagIds ?? [],
+        categoryPath: book.catalog?.categoryPath ?? null, shelfId: book.catalog?.shelfId ?? null, tags: book.catalog?.tags ?? [],
         hidden: book.catalog?.hidden ?? false, pinnedAt: book.catalog?.pinnedAt ?? null,
       }))
     },
@@ -98,15 +98,15 @@ export function localCatalogOperations(scope: Extract<ClientDataScope, { kind: '
       const changes = items.map((item) => {
         if (!item.ref || item.ref.bookId !== item.id || item.clientVersion === undefined) throw new LocalLibraryError('invalid-input', 'A source-owned selection version is required')
         assertSourceBook(scope, item.ref)
-        const tags = new Set(item.tagIds)
-        for (const id of patch.removeTagIds ?? []) tags.delete(id)
-        for (const id of patch.addTagIds ?? []) tags.add(id)
+        const tags = new Set(item.tags ?? [])
+        for (const name of patch.removeTags ?? []) tags.delete(name)
+        for (const name of patch.addTags ?? []) tags.add(name)
+        const categoryPath = patch.categoryPath
         return { ref: item.ref, expectedVersion: item.clientVersion, patch: {
-          ...(patch.categoryTemplateKey ? { categoryTemplateKey: patch.categoryTemplateKey } : {}),
           catalog: {
             ...(patch.shelfId === undefined ? {} : { shelfId: patch.shelfId }),
-            ...(patch.categoryId === undefined ? {} : { categoryId: patch.categoryId }),
-            ...(patch.addTagIds === undefined && patch.removeTagIds === undefined ? {} : { tagIds: [...tags] }),
+            ...(categoryPath === undefined ? {} : { categoryPath }),
+            ...(patch.addTags === undefined && patch.removeTags === undefined ? {} : { tags: [...tags] }),
             ...(patch.pinned === undefined ? {} : { pinnedAt: patch.pinned ? Date.now() : null }),
             ...(patch.hidden === undefined ? {} : { hidden: patch.hidden }),
           },
@@ -121,15 +121,18 @@ export function localCatalogOperations(scope: Extract<ClientDataScope, { kind: '
       const { books, organization } = await repository.readCatalog(scope.vaultId)
       signal?.throwIfAborted()
       const expression = query.expression ? readLibrarySearchExpression(query.expression) : null
-      const descendants = new Set(query.categoryId ? [query.categoryId] : [])
-      for (let previous = -1; previous !== descendants.size;) {
-        previous = descendants.size
-        for (const item of organization.items) if (item.kind === 'category' && item.parentId && descendants.has(item.parentId)) descendants.add(item.id)
+      // A category filter is a name path, and naming a root selects its branch.
+      const target = query.category ?? null
+      const matchesCategory = (path: string[] | null, selected: string[] | 'none' | null = target): boolean => {
+        if (!selected) return true
+        if (selected === 'none') return path === null
+        return path !== null && selected.every((name, index) => path[index] === name)
       }
-      const matchesOrganization = (book: ClientBook, kind: 'shelf' | 'category' | 'tag', id: string): boolean => {
-        if (kind === 'tag') return id === 'none' ? !book.catalog?.tagIds?.length : Boolean(book.catalog?.tagIds?.includes(id))
-        const ownId = kind === 'shelf' ? book.catalog?.shelfId : book.catalog?.categoryId
-        return id === 'none' ? !ownId : ownId === id
+      const valueState = (kind: 'category' | 'tag', value: string) => organization.valueState.find((state) => state.kind === kind && state.value === value)
+      const categoryHidden = (path: string[] | null): boolean => {
+        if (!path) return false
+        if (valueState('category', classificationValueKey('category', path))?.hidden) return true
+        return path.length > 1 && Boolean(valueState('category', classificationValueKey('category', [path[0]!]))?.hidden)
       }
       const matchesExpression = (book: ClientBook, state: ClientReadingState | null, node: LibrarySearchExpression): boolean => {
         if (node.kind === 'and') return matchesExpression(book, state, node.left) && matchesExpression(book, state, node.right)
@@ -140,23 +143,27 @@ export function localCatalogOperations(scope: Extract<ClientDataScope, { kind: '
         if (node.field === 'format') return book.format === node.value
         if (node.field === 'status') return (state?.readStatus ?? 'reading') === node.value
         if (node.field === 'author') return book.authors.includes(node.value)
-        const id = node.id ?? organization.items.find((item) => item.kind === node.field && item.name === node.value)?.id
-        return id !== undefined && matchesOrganization(book, node.field, id)
+        if (node.field === 'shelf') return node.value === 'none' ? !book.catalog?.shelfId : book.catalog?.shelfId === (node.id ?? node.value)
+        if (node.field === 'tag') {
+          const name = node.id ?? node.value
+          return Boolean(book.catalog?.tags?.includes(name))
+        }
+        const path = parseCategoryValueKey(node.id ?? node.value)
+        return path === null ? !book.catalog?.categoryPath : matchesCategory(book.catalog?.categoryPath ?? null, path)
       }
-      const hiddenIds = new Set(organization.items.filter((item) => item.hidden).map((item) => item.id))
-      for (let previous = -1; previous !== hiddenIds.size;) {
-        previous = hiddenIds.size
-        for (const item of organization.items) if (item.parentId && hiddenIds.has(item.parentId)) hiddenIds.add(item.id)
-      }
-      const filtered = books.filter(({ book, state }) => {
+      const filtered: typeof books = books.filter(({ book, state }) => {
         if ((book.deletedAt != null) !== Boolean(query.trash) || !query.trash && book.catalogRemoved) return false
         const catalog = book.catalog
-        if (!query.showHidden && (catalog?.hidden || (catalog?.shelfId && hiddenIds.has(catalog.shelfId)) || (catalog?.categoryId && hiddenIds.has(catalog.categoryId)) || catalog?.tagIds?.some((id) => hiddenIds.has(id)))) return false
+        const hiddenTag = (catalog?.tags ?? []).some((name) => valueState('tag', name)?.hidden)
+        if (!query.showHidden && (catalog?.hidden
+          || (catalog?.shelfId && organization.shelves.find((shelf) => shelf.id === catalog.shelfId)?.hidden)
+          || categoryHidden(catalog?.categoryPath ?? null)
+          || hiddenTag)) return false
         if (expression && !matchesExpression(book, state, expression)) return false
         if (!expression && query.search && !`${book.title} ${book.authors.join(' ')}`.toLocaleLowerCase().includes(query.search.toLocaleLowerCase())) return false
-        if (query.shelfId && !matchesOrganization(book, 'shelf', query.shelfId)) return false
-        if (query.categoryId && !(query.categoryId === 'none' ? !catalog?.categoryId : catalog?.categoryId && descendants.has(catalog.categoryId))) return false
-        if (query.tagId && !matchesOrganization(book, 'tag', query.tagId)) return false
+        if (query.shelfId && !(query.shelfId === 'none' ? !catalog?.shelfId : catalog?.shelfId === query.shelfId)) return false
+        if (target && !matchesCategory(catalog?.categoryPath ?? null)) return false
+        if (query.tag && !catalog?.tags?.includes(query.tag)) return false
         if (query.author && !book.authors.includes(query.author)) return false
         if (query.series && catalog?.metadata?.series !== query.series) return false
         if (query.format && book.format !== query.format) return false
@@ -204,47 +211,108 @@ export function localCatalogOperations(scope: Extract<ClientDataScope, { kind: '
     },
     getOrganization: () => repository.getOrganization(scope.vaultId),
     saveOrganization: (value: ClientOrganization, expectedVersion: number) => repository.saveOrganization(scope.vaultId, value, expectedVersion),
-    async createOrganization(kind: ClientOrganization['items'][number]['kind'], name: string, parentId: string | null = null) {
+    async createShelf(name: string) {
       const current = await repository.getOrganization(scope.vaultId)
       const now = Date.now()
-      const item = { id: localRecordId(), kind, name, parentId, pinned: false, hidden: false, sortOrder: Math.max(-1, ...current.items.filter((entry) => entry.kind === kind).map((entry) => entry.sortOrder)) + 1, createdAt: now, updatedAt: now }
-      await repository.saveOrganization(scope.vaultId, { ...current, items: [...current.items, item] }, current.version)
-      return item
+      const shelf = { id: localRecordId(), name, pinned: false, hidden: false, sortOrder: Math.max(-1, ...current.shelves.map((entry) => entry.sortOrder)) + 1, createdAt: now, updatedAt: now }
+      await repository.saveOrganization(scope.vaultId, { ...current, shelves: [...current.shelves, shelf] }, current.version)
+      return shelf
     },
-    async updateOrganization(kind: ClientOrganization['items'][number]['kind'], id: string, patch: Partial<Pick<ClientOrganization['items'][number], 'name' | 'parentId' | 'pinned' | 'hidden'>>) {
+    async updateShelf(id: string, patch: Partial<Pick<ClientShelfItem, 'name' | 'pinned' | 'hidden'>>) {
       const current = await repository.getOrganization(scope.vaultId)
-      const item = current.items.find((entry) => entry.kind === kind && entry.id === id)
-      if (!item) throw new LocalLibraryError('conflict', 'Organization no longer exists')
-      const next = { ...item, ...patch, updatedAt: Date.now() }
-      await repository.saveOrganization(scope.vaultId, { ...current, items: current.items.map((entry) => entry.id === id ? next : entry) }, current.version)
+      const shelf = current.shelves.find((entry) => entry.id === id)
+      if (!shelf) throw new LocalLibraryError('conflict', 'Shelf no longer exists')
+      const next = { ...shelf, ...patch, updatedAt: Date.now() }
+      await repository.saveOrganization(scope.vaultId, { ...current, shelves: current.shelves.map((entry) => entry.id === id ? next : entry) }, current.version)
       return next
     },
-    async deleteOrganization(kind: ClientOrganization['items'][number]['kind'], id: string) {
+    async deleteShelf(id: string) {
       const current = await repository.getOrganization(scope.vaultId)
-      if (!current.items.some((entry) => entry.id === id && entry.kind === kind)) throw new LocalLibraryError('conflict', 'Organization no longer exists')
-      const removed = new Set([id])
-      if (kind === 'category') for (let previous = -1; previous !== removed.size;) {
-        previous = removed.size
-        for (const entry of current.items) if (entry.kind === 'category' && entry.parentId && removed.has(entry.parentId)) removed.add(entry.id)
-      }
-      await repository.saveOrganization(scope.vaultId, { ...current, items: current.items.filter((entry) => !removed.has(entry.id)) }, current.version)
+      if (!current.shelves.some((entry) => entry.id === id)) throw new LocalLibraryError('conflict', 'Shelf no longer exists')
+      await repository.saveOrganization(scope.vaultId, { ...current, shelves: current.shelves.filter((entry) => entry.id !== id) }, current.version)
     },
-    /**
-     * Remember the tree the user is looking at, so a device book can be filed
-     * under nodes that only the server can enumerate.
-     */
-    async mirrorOrganization(items: readonly ClientOrganization['items'][number][]) {
-      await repository.mirrorOrganization(scope.vaultId, items)
-    },
-    async reorderOrganization(kind: ClientOrganization['items'][number]['kind'], orderedIds: string[]) {
+    async reorderShelves(orderedIds: string[]) {
       const current = await repository.getOrganization(scope.vaultId)
       const requested = new Set(orderedIds)
-      if (requested.size !== orderedIds.length || orderedIds.some((id) => !current.items.some((entry) => entry.kind === kind && entry.id === id))) throw new LocalLibraryError('invalid-input', 'Invalid organization order')
-      const entries = current.items.filter((entry) => entry.kind === kind).sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id))
+      if (requested.size !== orderedIds.length || orderedIds.some((id) => !current.shelves.some((entry) => entry.id === id))) throw new LocalLibraryError('invalid-input', 'Invalid shelf order')
+      const entries = [...current.shelves].sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id))
       let index = 0
       const order = entries.map((entry) => requested.has(entry.id) ? orderedIds[index++]! : entry.id)
       const ranks = new Map(order.map((id, rank) => [id, rank]))
-      await repository.saveOrganization(scope.vaultId, { ...current, items: current.items.map((entry) => entry.kind === kind ? { ...entry, sortOrder: ranks.get(entry.id)!, updatedAt: Date.now() } : entry) }, current.version)
+      await repository.saveOrganization(scope.vaultId, { ...current, shelves: current.shelves.map((entry) => ({ ...entry, sortOrder: ranks.get(entry.id)!, updatedAt: Date.now() })) }, current.version)
+    },
+    /** Hide, pin or re-order one category/tag value the way the sidebar sees it. */
+    setValueState: (kind: 'category' | 'tag', value: string, patch: { pinned?: boolean; hidden?: boolean; sortOrder?: number }) => repository.setValueState(scope.vaultId, kind, value, patch),
+    /** Persist a manual order for the values the sidebar lists. */
+    async reorderValues(kind: 'category' | 'tag', values: string[]) {
+      const current = await repository.getOrganization(scope.vaultId)
+      const now = Date.now()
+      const ranks = new Map(values.map((value, index) => [value, index]))
+      const known = new Set(current.valueState.filter((state) => state.kind === kind).map((state) => state.value))
+      const valueState = [
+        ...current.valueState.map((state) => state.kind === kind && ranks.has(state.value) ? { ...state, sortOrder: ranks.get(state.value)! } : state),
+        ...values.filter((value) => !known.has(value)).map((value) => ({ kind, value, pinned: false, hidden: false, sortOrder: ranks.get(value)!, createdAt: now, updatedAt: now })),
+      ]
+      await repository.saveOrganization(scope.vaultId, { ...current, valueState }, current.version)
+    },
+    /**
+     * Rewrite one value on every book that carries it: `to` is the new canonical
+     * key, or null to clear it. Renaming a category root moves its whole branch,
+     * and the sidebar's preferences follow the value.
+     */
+    async rewriteValue(kind: 'category' | 'tag', from: string, to: string | null, statePatch: { pinned?: boolean; hidden?: boolean } = {}) {
+      const snapshot = await repository.readCatalog(scope.vaultId)
+      if (kind === 'category' && to !== null) {
+        const fromPath = parseCategoryValueKey(from)
+        const toPath = parseCategoryValueKey(to)
+        if (!fromPath || !toPath) throw new LocalLibraryError('invalid-input', 'Invalid category path')
+        const paths = [
+          ...snapshot.books.flatMap(({ book }) => book.catalog?.categoryPath ? [book.catalog.categoryPath] : []),
+          ...snapshot.organization.valueState
+            .filter((state) => state.kind === 'category')
+            .flatMap((state) => {
+              const path = parseCategoryValueKey(state.value)
+              return path ? [path] : []
+            }),
+        ]
+        if (paths.some((path) => fromPath.every((name, index) => path[index] === name)
+          && [...toPath, ...path.slice(fromPath.length)].length > 2)) {
+          throw new LocalLibraryError('invalid-input', 'Category paths cannot exceed two levels')
+        }
+      }
+      const changes: Array<{ ref: ClientBookRef; expectedVersion: number; patch: { catalog: { tags?: string[]; categoryPath?: string[] | null } } }> = []
+      for (const { book } of snapshot.books) {
+        if (book.ref.scope.kind !== 'local' || book.version === undefined) continue
+        const catalog = book.catalog
+        if (!catalog) continue
+        if (kind === 'tag') {
+          if (!catalog.tags?.includes(from)) continue
+          const tags = to === null ? catalog.tags.filter((name) => name !== from) : [...new Set(catalog.tags.map((name) => name === from ? to : name))]
+          changes.push({ ref: book.ref, expectedVersion: book.version, patch: { catalog: { tags } } })
+          continue
+        }
+        const path = catalog.categoryPath
+        if (!path) continue
+        const key = classificationValueKey('category', path)
+        const rootKey = classificationValueKey('category', [path[0]!])
+        if (key !== from && rootKey !== from) continue
+        const targetPath = to === null ? null : JSON.parse(to) as string[]
+        // A root rename moves the whole branch: the leaf keeps its own name.
+        const next = targetPath === null ? null : key === from ? targetPath : [targetPath[0]!, ...path.slice(1)]
+        changes.push({ ref: book.ref, expectedVersion: book.version, patch: { catalog: { categoryPath: next } } })
+      }
+      await repository.rewriteClassificationValue(scope.vaultId, kind, from, to, changes, statePatch)
+    },
+    /**
+     * Remember the shelves the user is looking at, so a device book can sit on
+     * one that only the server can enumerate.
+     */
+    async mirrorShelves(shelves: readonly ClientShelfItem[]) {
+      await repository.mirrorShelves(scope.vaultId, shelves)
+    },
+    /** Follow the account's shelves; categories and tags are values, so they need no mirror. */
+    async syncAccountShelves(shelves: ReadonlyArray<{ id: string; name: string; sortOrder: number }>) {
+      await repository.syncAccountShelves(scope.vaultId, [...shelves])
     },
   }
 }

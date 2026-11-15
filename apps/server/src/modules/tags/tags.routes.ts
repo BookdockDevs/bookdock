@@ -1,105 +1,66 @@
-import { z } from 'zod'
 import { Hono } from 'hono'
-import {
-  tagCreateSchema,
-  tagReorderSchema,
-  tagUpdateSchema,
-  type TagListItem,
-} from '@bookdock/shared'
 
-import {
-  listTags,
-  createTag,
-  updateTag,
-  reorderTags,
-  deleteTag,
-  addBooksToTag,
-  removeBooksFromTag,
-} from './tags.service'
+import { tagValueClearSchema, tagValueOrderSchema, tagValuePatchSchema } from '@bookdock/shared'
 
-const bookIdsSchema = z.object({ bookIds: z.array(z.string().min(1)) })
+import { getDb } from '../../db/client'
+import { ensurePrivateLibrary } from '../libraries/library-access'
+import { clearTagValue, listTagValues, reorderTagValues, updateTagValue } from '../classification/classification.service'
 
+/**
+ * The signed-in owner's private-library tag values.
+ *
+ * Tags have no entity to create or delete: these endpoints read the values the
+ * owner's books carry and write their hidden/pinned/order preferences. The
+ * generic `/libraries/:id/tags` routes serve the same values for any library
+ * the caller may manage; this module only saves the client from resolving its
+ * private library id first.
+ */
 const tagsRoutes = new Hono()
+
+function privateLibraryId(userId: string): string {
+  return ensurePrivateLibrary(getDb(), userId)
+}
 
 tagsRoutes.get('/', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
   // Guests never reveal the vault, even with the query flag.
   const showHidden = c.get('guest') !== true && c.req.query('showHidden') === '1'
-  const items = await listTags(user.id, showHidden)
-  return c.json({ data: items } satisfies { data: TagListItem[] })
+  const items = await listTagValues(user.id, privateLibraryId(user.id), { showHidden })
+  return c.json({ data: items })
 })
 
-tagsRoutes.post('/', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const body = await c.req.json()
-  const parsed = tagCreateSchema.safeParse(body)
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
-  }
-  const tag = await createTag(user.id, parsed.data.name)
-  return c.json({ data: tag }, 201)
-})
-
-// Registered before '/:id' so 'order' never matches as a tag id.
 tagsRoutes.put('/order', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const body = await c.req.json()
-  const parsed = tagReorderSchema.safeParse(body)
+  const parsed = tagValueOrderSchema.safeParse(await c.req.json())
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  await reorderTags(user.id, parsed.data.tagIds)
+  await reorderTagValues(user.id, privateLibraryId(user.id), parsed.data.names)
   return c.json({ data: null })
 })
 
-tagsRoutes.put('/:id', async (c) => {
+tagsRoutes.patch('/', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const tagId = c.req.param('id')
-  const body = await c.req.json()
-  const parsed = tagUpdateSchema.safeParse(body)
-  if (!parsed.success || (parsed.data.name === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name, pinned or hidden is required' : parsed.error.flatten() } }, 400)
+  const parsed = tagValuePatchSchema.safeParse(await c.req.json())
+  if (!parsed.success || (parsed.data.renamedTo === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'renamedTo, pinned or hidden is required' : parsed.error.flatten() } }, 400)
   }
-  const tag = await updateTag(user.id, tagId, parsed.data)
-  return c.json({ data: tag })
+  const items = await updateTagValue(user.id, privateLibraryId(user.id), parsed.data)
+  return c.json({ data: items })
 })
 
-tagsRoutes.delete('/:id', async (c) => {
+tagsRoutes.post('/clear', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const tagId = c.req.param('id')
-  await deleteTag(user.id, tagId)
-  return c.json({ data: null })
-})
-
-tagsRoutes.post('/:id/books', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const tagId = c.req.param('id')
-  const body = await c.req.json()
-  const parsed = bookIdsSchema.safeParse(body)
+  const parsed = tagValueClearSchema.safeParse(await c.req.json())
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  await addBooksToTag(user.id, tagId, parsed.data.bookIds)
-  return c.json({ data: null })
-})
-
-tagsRoutes.delete('/:id/books', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const tagId = c.req.param('id')
-  const body = await c.req.json()
-  const parsed = bookIdsSchema.safeParse(body)
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
-  }
-  await removeBooksFromTag(user.id, tagId, parsed.data.bookIds)
-  return c.json({ data: null })
+  const items = await clearTagValue(user.id, privateLibraryId(user.id), parsed.data.name)
+  return c.json({ data: items })
 })
 
 export default tagsRoutes

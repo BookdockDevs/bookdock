@@ -24,7 +24,6 @@ import { addToPrivateLibrary } from './collect.service'
 import { deleteCatalogBook, deleteCatalogVersion, permanentDeleteCatalogBook } from './catalog.service'
 import { deleteLibrary } from './libraries.service'
 import { forkLocalBook } from './fork.service'
-import { createLibraryTag } from '../tags/tags.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -172,8 +171,7 @@ describe('fork B into local C', () => {
 
   it('keeps card metadata and moves the reading data to the new version', async () => {
     const city = await seedCityBook()
-    const tag = await createLibraryTag(memberId, memberPrivateId(), '想读')
-    const collected = await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!, { tagIds: [tag.id] })
+    const collected = await addToPrivateLibrary(memberId, libraryId, city.versionLinkId!, { tags: ['想读'] })
     db.update(schema.bookStates).set({ percent: 50, readStatus: 'reading' })
       .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, city.bookVersionId))).run()
     db.insert(schema.highlights).values({
@@ -188,8 +186,8 @@ describe('fork B into local C', () => {
     expect(result.libraryBookId).toBe(collected.libraryBookId)
     const card = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, result.libraryBookId)).get()!
     expect(card.title).toBe('三体')
-    expect(db.select().from(schema.libraryBookTags)
-      .where(eq(schema.libraryBookTags.libraryBookId, result.libraryBookId)).all()).toHaveLength(1)
+    expect(db.select().from(schema.libraryBookTagValues)
+      .where(eq(schema.libraryBookTagValues.libraryBookId, result.libraryBookId)).all()).toHaveLength(1)
     // Reading data followed the card.
     expect(db.select().from(schema.bookStates)
       .where(and(eq(schema.bookStates.userId, memberId), eq(schema.bookStates.bookVersionId, result.bookVersionId))).get())

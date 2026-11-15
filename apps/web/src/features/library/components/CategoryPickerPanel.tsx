@@ -1,21 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
-import { CATEGORY_TEMPLATES, type ClientCategoryView } from '@bookdock/shared'
+import { CATEGORY_TEMPLATES, categoryTemplatePath, type ClientCategoryView } from '@bookdock/shared'
 
 import { useTranslation } from '@/hooks/useTranslation'
 
-import { useCreateLibraryCategory } from '../hooks'
 import TaxonomyIcon from './TaxonomyIcon'
 
-export type CategorySelection =
-  | { categoryId: string | null; categoryTemplateKey?: undefined }
-  | { categoryId?: undefined; categoryTemplateKey: string }
+export interface CategorySelection { categoryPath: string[] | null }
 
 interface CategoryPickerPanelProps {
-  libraryId: string | null
   categories: ClientCategoryView[]
-  categoryId: string | null | undefined
-  categoryTemplateKey?: string
+  categoryPath: string[] | null | undefined
   allowTemplates?: boolean
   onChange: (value: CategorySelection) => void
   /** A choice was made (or creation finished): the shell should close. */
@@ -29,16 +24,15 @@ interface CategoryPickerPanelProps {
  * drift into picking categories in different ways.
  */
 export default function CategoryPickerPanel({
-  libraryId,
   categories,
-  categoryId,
-  categoryTemplateKey,
+  categoryPath,
   allowTemplates = true,
   onChange,
   onDismiss,
 }: CategoryPickerPanelProps) {
   const _ = useTranslation()
-  const createCategory = useCreateLibraryCategory()
+  const categoryId = categories.find((item) => JSON.stringify(item.path) === JSON.stringify(categoryPath))?.id ?? null
+  const categoryTemplateKey = CATEGORY_TEMPLATES.flatMap((root) => [root, ...(root.children ?? [])]).find((item) => JSON.stringify(categoryTemplatePath(item.key)) === JSON.stringify(categoryPath))?.key
   const inputRef = useRef<HTMLInputElement>(null)
   const inputId = useId()
   const parentSelectId = useId()
@@ -68,23 +62,11 @@ export default function CategoryPickerPanel({
     onDismiss()
   }
 
-  async function handleCreateCategory() {
+  function handleCreateCategory() {
     const name = newName.trim()
-    if (!name || createCategory.isPending) return
-    try {
-      const res = await createCategory.mutateAsync({
-        libraryId: libraryId!,
-        name,
-        parentId: newParentId || undefined,
-      })
-      onChange({ categoryId: res.data.id })
-      setIsCreating(false)
-      setNewName('')
-      setNewParentId('')
-      onDismiss()
-    } catch {
-      // toast error handled by mutation
-    }
+    if (!name) return
+    const parent = rootCategories.find((item) => item.id === newParentId)
+    choose({ categoryPath: parent ? [...parent.path, name] : [name] })
   }
 
   function startCreateChild(parentId: string) {
@@ -152,11 +134,11 @@ export default function CategoryPickerPanel({
               />
               <button
                 type="button"
-                disabled={!newName.trim() || createCategory.isPending}
+                disabled={!newName.trim()}
                 onClick={() => void handleCreateCategory()}
                 className="flex h-7 items-center justify-center rounded-md bg-stone-900 px-2.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40 dark:bg-stone-100 dark:text-stone-900"
               >
-                {createCategory.isPending ? '...' : _('library.create')}
+                {_('library.create')}
               </button>
             </div>
           </div>
@@ -179,17 +161,17 @@ export default function CategoryPickerPanel({
         <button
           type="button"
           role="radio"
-          aria-checked={categoryId === null && !categoryTemplateKey}
+          aria-checked={!categoryPath?.length}
           aria-label={_('library.uncategorized')}
-          onClick={() => choose({ categoryId: null })}
+          onClick={() => choose({ categoryPath: null })}
           className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
-            categoryId === null && !categoryTemplateKey
+            !categoryPath?.length
               ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
               : 'text-stone-600 hover:bg-stone-50 dark:text-stone-400 dark:hover:bg-stone-800/50'
           }`}
         >
           <span>{_('library.uncategorized')}</span>
-          {categoryId === null && !categoryTemplateKey && (
+          {!categoryPath?.length && (
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-stone-900 dark:text-stone-100">
               <polyline points="20 6 9 17 4 12" />
             </svg>
@@ -199,7 +181,7 @@ export default function CategoryPickerPanel({
         {/* Existing Categories Tree (Roots + Subcategories) */}
         {rootCategories.map((root) => {
           const children = childCategoriesMap.get(root.id) ?? []
-          const isRootSelected = categoryId === root.id && !categoryTemplateKey
+          const isRootSelected = categoryId === root.id
 
           return (
             <div key={root.id} className="space-y-0.5">
@@ -216,7 +198,7 @@ export default function CategoryPickerPanel({
                   role="radio"
                   aria-checked={isRootSelected}
                   aria-label={root.name}
-                  onClick={() => choose({ categoryId: root.id })}
+                  onClick={() => choose({ categoryPath: root.path })}
                   className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
                 >
                   <TaxonomyIcon kind="category" size={13} className="shrink-0 text-stone-400" />
@@ -250,7 +232,7 @@ export default function CategoryPickerPanel({
 
               {/* Children Rows */}
               {children.map((child) => {
-                const isChildSelected = categoryId === child.id && !categoryTemplateKey
+                const isChildSelected = categoryId === child.id
                 return (
                   <button
                     key={child.id}
@@ -258,7 +240,7 @@ export default function CategoryPickerPanel({
                     role="radio"
                     aria-checked={isChildSelected}
                     aria-label={child.name}
-                    onClick={() => choose({ categoryId: child.id })}
+                    onClick={() => choose({ categoryPath: child.path })}
                     className={`flex w-full items-center justify-between rounded-lg py-1.5 pl-6 pr-2.5 text-xs transition-colors ${
                       isChildSelected
                         ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
@@ -299,7 +281,7 @@ export default function CategoryPickerPanel({
                     role="radio"
                     aria-checked={categoryTemplateKey === root.key}
                     aria-label={rootName}
-                    onClick={() => choose({ categoryTemplateKey: root.key })}
+                    onClick={() => choose({ categoryPath: categoryTemplatePath(root.key)! })}
                     className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-xs transition-colors ${
                       categoryTemplateKey === root.key
                         ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'
@@ -325,7 +307,7 @@ export default function CategoryPickerPanel({
                         role="radio"
                         aria-checked={isChildTemplateSelected}
                         aria-label={fullChildLabel}
-                        onClick={() => choose({ categoryTemplateKey: child.key })}
+                        onClick={() => choose({ categoryPath: categoryTemplatePath(child.key)! })}
                         className={`flex w-full items-center justify-between rounded-md py-1 pl-5 pr-2 text-xs transition-colors ${
                           isChildTemplateSelected
                             ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'

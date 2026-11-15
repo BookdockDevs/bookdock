@@ -1,5 +1,5 @@
-import { acceptsReadingTimerClaim, categoryTemplatePath, clientBookRefSchema, settingsUpdateSchema, clientReplacementSchema, replacementCreateSchema, replacementUpdateSchema, clientNoteImageSchema, CONTENT_DRAFT_TTL_MS, IDEA_IMAGE_MAX_COUNT, clientBookKey, clientBookSchema, clientPublicationReplacementSchema, clientCatalogAttributesSchema, clientCatalogPreferencesSchema, clientManualTimerSnapshotSchema, clientNoteSchema, clientOrganizationSchema, clientReadingCaptureGroupSchema, clientReadingCaptureSchema, clientReadingEntrySchema, clientReadingCoverageIntervalsSchema, clientReadingGroupEntrySchema, clientReadingSessionSchema, clientReadingSessionCommandSchema, clientReadingLedgerClearSchema, clientReadingSessionUpdateSchema, clientReadingRoundsSchema, clientReadingStateSchema, clientReadingTimerDraftSchema, clientReviewSchema, localDraftEnvelopeSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, mergeTimeFragments, readingTimerClaimSchema, sameClientBook, subtractTimeFragments, viewSettingsSchema } from '@bookdock/shared'
-import type { AiMessageRes, AiThreadDetailRes, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, ArchiveDeleteRes, TrashSettings, ClientReplacement, TextReplacementRes, ReplacementCreateReq, ReplacementUpdateReq, ClientNoteImage, ClientBook, ClientTxtPublication, LocalEditorDraftEnvelope, ClientPublicationReplacement, EditorTxtSaveRes, ClientReadingLedgerClear, ClientVaultReadingSnapshot, ClientBookNotesSnapshot, ClientBookRef, ClientCatalogAttributes, ClientCatalogPreferences, ClientManualTimerSnapshot, ClientNote, ClientOrganization, ClientReadingCapture, ClientReadingCaptureGroup, ClientReadingEntry, ClientReadingBookSnapshot, ClientReadingGroupEntry, ClientReadingLedger, ClientReadingSession, ClientReadingSessionCommand, ClientReadingSessionUpdate, ClientReadingRounds, ClientReadingRoundAction, ClientReadingState, ClientReadingTimerDraft, ClientReview, ClientReviewInput, ReadingTimerClaimInput, ReadingTimerLease, ReadStatus } from '@bookdock/shared'
+import { acceptsReadingTimerClaim, classificationValueKey, clientBookRefSchema, settingsUpdateSchema, clientReplacementSchema, replacementCreateSchema, replacementUpdateSchema, clientNoteImageSchema, CONTENT_DRAFT_TTL_MS, IDEA_IMAGE_MAX_COUNT, clientBookKey, clientBookSchema, clientPublicationReplacementSchema, clientCatalogAttributesSchema, clientCatalogPreferencesSchema, clientManualTimerSnapshotSchema, clientNoteSchema, clientOrganizationSchema, emptyClientOrganization, clientReadingCaptureGroupSchema, clientReadingCaptureSchema, clientReadingEntrySchema, clientReadingCoverageIntervalsSchema, clientReadingGroupEntrySchema, clientReadingSessionSchema, clientReadingSessionCommandSchema, clientReadingLedgerClearSchema, clientReadingSessionUpdateSchema, clientReadingRoundsSchema, clientReadingStateSchema, clientReadingTimerDraftSchema, clientReviewSchema, localDraftEnvelopeSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, mergeTimeFragments, readingTimerClaimSchema, sameClientBook, subtractTimeFragments, viewSettingsSchema } from '@bookdock/shared'
+import type { AiMessageRes, AiThreadDetailRes, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, ArchiveDeleteRes, TrashSettings, ClientReplacement, TextReplacementRes, ReplacementCreateReq, ReplacementUpdateReq, ClientNoteImage, ClientBook, ClientTxtPublication, LocalEditorDraftEnvelope, ClientPublicationReplacement, EditorTxtSaveRes, ClientReadingLedgerClear, ClientVaultReadingSnapshot, ClientBookNotesSnapshot, ClientBookRef, ClassificationKind, ClientCatalogAttributes, ClientCatalogPreferences, ClientShelfItem, ClientManualTimerSnapshot, ClientNote, ClientOrganization, ClientReadingCapture, ClientReadingCaptureGroup, ClientReadingEntry, ClientReadingBookSnapshot, ClientReadingGroupEntry, ClientReadingLedger, ClientReadingSession, ClientReadingSessionCommand, ClientReadingSessionUpdate, ClientReadingRounds, ClientReadingRoundAction, ClientReadingState, ClientReadingTimerDraft, ClientReview, ClientReviewInput, ReadingTimerClaimInput, ReadingTimerLease, ReadStatus } from '@bookdock/shared'
 
 import { createCoverThumbnail } from './cover-thumbnail'
 import { preparePublicationRelocationInWorker } from './epub-editor-worker'
@@ -95,6 +95,184 @@ function request<T>(value: IDBRequest<T>): Promise<T> {
   })
 }
 
+/**
+ * Convert a version-4 vault organization into the value model, in place.
+ *
+ * Version 4 stored categories and tags as rows with ids, and books pointed at
+ * those ids. Both are gone: a category is the name path its books carry and a
+ * tag is its own name, so the old rows are read once here to translate the ids
+ * into values, and what survives is the sidebar state (hidden, pinned, manual
+ * order) keyed by the value. The upgrade transaction is the only place this can
+ * happen — a later read would parse the old document against the new schema and
+ * fail.
+ */
+function upgradeOrganizationToValues(tx: IDBTransaction): void {
+  const settings = tx.objectStore('settings')
+  const books = tx.objectStore('books')
+  const fail = () => { try { tx.abort() } catch { /* The upgrade transaction may already be aborting. */ } }
+  const keysRequest = settings.getAllKeys()
+  keysRequest.onerror = fail
+  keysRequest.onsuccess = () => {
+    const organizationKeys = keysRequest.result.filter((storeKey): storeKey is string => {
+      if (typeof storeKey !== 'string') return false
+      try {
+        const parsed: unknown = JSON.parse(storeKey)
+        return Array.isArray(parsed) && parsed[0] === 'organization' && typeof parsed[1] === 'string'
+      } catch { return false }
+    })
+    const organizations = new Map<string, Map<string, LegacyOrganizationItem>>()
+    let pending = organizationKeys.length
+    const startBooks = () => {
+      const cursorRequest = books.openCursor()
+      cursorRequest.onerror = fail
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result
+        if (!cursor) return
+        const raw = cursor.value as { ref?: ClientBookRef; catalog?: Record<string, unknown> } & Record<string, unknown>
+        const catalog = raw.catalog
+        if (catalog && ('categoryId' in catalog || 'tagIds' in catalog)) {
+          const vaultId = raw.ref?.scope.kind === 'local' ? raw.ref.scope.vaultId : null
+          const items = vaultId ? organizations.get(vaultId) : undefined
+          const categoryId = catalog.categoryId
+          const tagIds = catalog.tagIds
+          const categoryPath = categoryId === null || categoryId === undefined
+            ? null
+            : legacyCategoryPath(items, categoryId, fail)
+          const tags = tagIds === undefined
+            ? undefined
+            : legacyTagNames(items, tagIds, fail)
+          if ((categoryId !== null && categoryId !== undefined && !categoryPath) || (tagIds !== undefined && !tags)) return
+          const { categoryId: _categoryId, tagIds: _tagIds, ...rest } = catalog
+          cursor.update({ ...raw, catalog: { ...rest, ...(categoryId === undefined ? {} : { categoryPath }), ...(tagIds === undefined ? {} : { tags }) } })
+        }
+        cursor.continue()
+      }
+    }
+    if (!pending) { startBooks(); return }
+    for (const storeKey of organizationKeys) {
+      const parsed = JSON.parse(storeKey) as ['organization', string]
+      const read = settings.get(storeKey)
+      read.onerror = fail
+      read.onsuccess = () => {
+        try {
+          const value = read.result as { version?: number; items?: unknown[] } | undefined
+          if (!value || !Array.isArray(value.items)) throw new LocalLibraryError('storage-unavailable', 'A stored local organization is missing its legacy values')
+          const legacy = value.items as LegacyOrganizationItem[]
+          const converted = convertStoredOrganization(value as { version: number; items: LegacyOrganizationItem[] })
+          const byId = new Map<string, LegacyOrganizationItem>()
+          for (const item of legacy) {
+            if (!item || typeof item.id !== 'string' || byId.has(item.id)) throw new LocalLibraryError('storage-unavailable', 'A stored local organization has conflicting legacy values')
+            byId.set(item.id, item)
+          }
+          organizations.set(parsed[1], byId)
+          settings.put(converted, storeKey)
+        } catch { fail(); return }
+        pending -= 1
+        if (!pending) startBooks()
+      }
+    }
+  }
+}
+
+function legacyCategoryPath(items: Map<string, LegacyOrganizationItem> | undefined, id: unknown, fail: () => void): string[] | null {
+  if (typeof id !== 'string' || !items) { fail(); return null }
+  const path: string[] = []
+  const seen = new Set<string>()
+  let current = items.get(id)
+  while (current) {
+    if (current.kind !== 'category' || seen.has(current.id) || path.length >= 2) { fail(); return null }
+    seen.add(current.id)
+    path.unshift(current.name)
+    if (!current.parentId) return path
+    const parent = items.get(current.parentId)
+    if (!parent || parent.kind !== 'category') { fail(); return null }
+    current = parent
+  }
+  fail()
+  return null
+}
+
+function legacyTagNames(items: Map<string, LegacyOrganizationItem> | undefined, ids: unknown, fail: () => void): string[] | null {
+  if (!Array.isArray(ids) || (ids.length > 0 && !items)) { fail(); return null }
+  if (!items) return []
+  const names: string[] = []
+  for (const id of ids) {
+    if (typeof id !== 'string') { fail(); return null }
+    const item = items.get(id)
+    if (!item || item.kind !== 'tag') { fail(); return null }
+    if (!names.includes(item.name)) names.push(item.name)
+  }
+  return names
+}
+
+interface LegacyOrganizationItem {
+  id: string
+  kind: 'shelf' | 'category' | 'tag'
+  name: string
+  parentId: string | null
+  pinned: boolean
+  hidden: boolean
+  sortOrder: number
+  createdAt: number
+  updatedAt: number
+}
+
+function convertStoredOrganization(value: { version: number; items: LegacyOrganizationItem[] }): ClientOrganization {
+  if (!Number.isSafeInteger(value.version) || value.version < 0 || !Array.isArray(value.items)) throw new LocalLibraryError('storage-unavailable', 'A stored local organization is invalid')
+  const ids = new Set<string>()
+  for (const item of value.items) {
+    if (!item || typeof item.id !== 'string' || ids.has(item.id)) throw new LocalLibraryError('storage-unavailable', 'A stored local organization has conflicting legacy values')
+    ids.add(item.id)
+  }
+  const byId = new Map(value.items.map((item) => [item.id, item] as const))
+  const categoryPath = (id: string): string[] => {
+    const path: string[] = []
+    const seen = new Set<string>()
+    let current = byId.get(id)
+    while (current) {
+      if (current.kind !== 'category' || seen.has(current.id) || path.length >= 2) throw new LocalLibraryError('storage-unavailable', 'A stored local category has an invalid parent path')
+      seen.add(current.id)
+      path.unshift(current.name)
+      if (!current.parentId) return path
+      const parent = byId.get(current.parentId)
+      if (!parent || parent.kind !== 'category') throw new LocalLibraryError('storage-unavailable', 'A stored local category references a missing parent')
+      current = parent
+    }
+    throw new LocalLibraryError('storage-unavailable', 'A stored local category is missing')
+  }
+  const shelves: ClientShelfItem[] = []
+  const valueState: ClientOrganization['valueState'] = []
+  const canonicalValues = new Map<string, ClientOrganization['valueState'][number]>()
+  const addValue = (key: string, state: ClientOrganization['valueState'][number]) => {
+    const existing = canonicalValues.get(key)
+    if (existing) {
+      existing.pinned ||= state.pinned
+      existing.hidden ||= state.hidden
+      existing.sortOrder = Math.min(existing.sortOrder, state.sortOrder)
+      existing.createdAt = Math.min(existing.createdAt, state.createdAt)
+      existing.updatedAt = Math.max(existing.updatedAt, state.updatedAt)
+    } else {
+      canonicalValues.set(key, state)
+      valueState.push(state)
+    }
+  }
+  for (const item of value.items) {
+    if (item.kind === 'shelf') {
+      shelves.push({ id: item.id, name: item.name, pinned: item.pinned, hidden: item.hidden, sortOrder: item.sortOrder, createdAt: item.createdAt, updatedAt: item.updatedAt })
+      continue
+    }
+    if (item.kind === 'tag') {
+      const key = JSON.stringify(['tag', item.name])
+      addValue(key, { kind: 'tag', value: item.name, pinned: item.pinned, hidden: item.hidden, sortOrder: item.sortOrder, createdAt: item.createdAt, updatedAt: item.updatedAt })
+      continue
+    }
+    const path = categoryPath(item.id)
+    const key = JSON.stringify(['category', path])
+    addValue(key, { kind: 'category', value: JSON.stringify(path), pinned: item.pinned, hidden: item.hidden, sortOrder: item.sortOrder, createdAt: item.createdAt, updatedAt: item.updatedAt })
+  }
+  return clientOrganizationSchema.parse({ version: value.version, shelves, valueState })
+}
+
 export class LocalLibraryRepository {
   private opening?: Promise<IDBDatabase>
   private changes?: BroadcastChannel
@@ -114,9 +292,13 @@ export class LocalLibraryRepository {
   private database(): Promise<IDBDatabase> {
     this.opening ??= new Promise((resolve, reject) => {
       let blocked = false
-      const open = indexedDB.open(this.databaseName, 4)
-      open.onupgradeneeded = () => {
+      const open = indexedDB.open(this.databaseName, 5)
+      open.onupgradeneeded = (event) => {
         for (const store of STORES) if (!open.result.objectStoreNames.contains(store)) open.result.createObjectStore(store)
+        // Version 5 turns the stored taxonomy from rows into values: a book's
+        // catalog carries its category path and tag names, and the vault keeps
+        // only the sidebar's preferences about those values.
+        if ((event as IDBVersionChangeEvent).oldVersion < 5) upgradeOrganizationToValues(open.transaction!)
         const notes = open.transaction!.objectStore('notes')
         if (!notes.indexNames.contains('book')) notes.createIndex('book', ['book.scope.vaultId', 'book.bookId'])
         if (!notes.indexNames.contains('book-kind')) notes.createIndex('book-kind', ['book.scope.vaultId', 'book.bookId', 'kind'])
@@ -215,8 +397,9 @@ export class LocalLibraryRepository {
         if (textPublication && (await request(tx.objectStore('files').get(`publication-digest:${key(book.ref)}`))) !== publicationDigest) throw new LocalLibraryError('conflict', 'TXT publication identity was already used')
         return existing
       }
+      let organization: ClientOrganization | null = null
       if (book.catalog) {
-        const organization = clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(this.organizationKey(book.ref.scope.kind === 'local' ? book.ref.scope.vaultId : ''))) ?? { version: 0, items: [] })
+        organization = clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(this.organizationKey(book.ref.scope.kind === 'local' ? book.ref.scope.vaultId : ''))) ?? emptyClientOrganization())
         this.validateMembership(book.catalog, organization)
       }
       await request(tx.objectStore('files').put(blob, key(book.ref)))
@@ -228,6 +411,26 @@ export class LocalLibraryRepository {
       }
       if (cover) await request(tx.objectStore('files').put(cover, `cover:${key(book.ref)}`))
       await request(tx.objectStore('books').add(book, key(book.ref)))
+      if (book.catalog && organization) {
+        const now = Date.now()
+        const additions = [
+          ...(book.catalog.categoryPath ? [
+            { kind: 'category' as const, value: classificationValueKey('category', book.catalog.categoryPath) },
+            ...(book.catalog.categoryPath.length > 1 ? [{ kind: 'category' as const, value: classificationValueKey('category', [book.catalog.categoryPath[0]!]) }] : []),
+          ] : []),
+          ...(book.catalog.tags ?? []).map((value) => ({ kind: 'tag' as const, value })),
+        ]
+        const valueState = [...organization.valueState]
+        for (const addition of additions) {
+          const existingState = valueState.find((state) => state.kind === addition.kind && state.value === addition.value)
+          if (existingState) existingState.updatedAt = now
+          else {
+            const sameKind = valueState.filter((state) => state.kind === addition.kind)
+            valueState.push({ ...addition, pinned: false, hidden: false, sortOrder: sameKind.reduce((max, state) => Math.max(max, state.sortOrder), -1) + 1, createdAt: now, updatedAt: now })
+          }
+        }
+        if (additions.length) await request(tx.objectStore('settings').put(clientOrganizationSchema.parse({ ...organization, version: organization.version + 1, valueState }), this.organizationKey(book.ref.scope.kind === 'local' ? book.ref.scope.vaultId : '')))
+      }
       return book
     }, signal)
   }
@@ -261,7 +464,7 @@ export class LocalLibraryRepository {
         if ((settings.maxTrashBytes ?? 0) > 0 && total > settings.maxTrashBytes!) needsTrashPurge = true
         else if (settings.autoCleanDays > 0 && trashed.some((book) => book.deletedAt! < now - settings.autoCleanDays * 86_400_000)) needsTrashPurge = true
       }
-      const organization = clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(this.organizationKey(vaultId))) ?? { version: 0, items: [] })
+      const organization = clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(this.organizationKey(vaultId))) ?? emptyClientOrganization())
       return { books, organization, needsTrashPurge }
     })
   }
@@ -818,44 +1021,62 @@ export class LocalLibraryRepository {
     })
   }
 
-  async updateMetadata(ref: ClientBookRef, patch: Partial<Pick<ClientBook, 'title' | 'authors'>> & { catalog?: Partial<ClientCatalogAttributes>; categoryTemplateKey?: string }, expectedVersion: number, cover?: Blob | null): Promise<ClientBook> {
+  async updateMetadata(ref: ClientBookRef, patch: Partial<Pick<ClientBook, 'title' | 'authors'>> & { catalog?: Partial<ClientCatalogAttributes> }, expectedVersion: number, cover?: Blob | null): Promise<ClientBook> {
     this.assertLocal(ref)
     return this.transaction(['books', 'files', 'settings'], 'readwrite', (tx) => this.updateMetadataInTx(tx, ref, patch, expectedVersion, cover))
   }
 
-  private async updateMetadataInTx(tx: IDBTransaction, ref: ClientBookRef, patch: Parameters<LocalLibraryRepository['updateMetadata']>[1], expectedVersion: number, cover?: Blob | null): Promise<ClientBook> {
-    const catalog = patch.catalog === undefined ? undefined : clientCatalogAttributesSchema.strict().parse(patch.catalog)
-    const template = patch.categoryTemplateKey === undefined ? undefined : categoryTemplatePath(patch.categoryTemplateKey)
-    if (patch.categoryTemplateKey !== undefined && !template) throw new LocalLibraryError('invalid-input', 'Unknown category template')
+  private async updateMetadataInTx(tx: IDBTransaction, ref: ClientBookRef, patch: Parameters<LocalLibraryRepository['updateMetadata']>[1], expectedVersion: number, cover?: Blob | null, trackClassification = true): Promise<ClientBook> {
+    const parsedCatalog = patch.catalog === undefined ? undefined : clientCatalogAttributesSchema.strict().safeParse(patch.catalog)
+    if (parsedCatalog && !parsedCatalog.success) throw new LocalLibraryError('invalid-input', 'Invalid book classification or catalog metadata', parsedCatalog.error.issues)
+    const catalog = parsedCatalog?.data
     const current = await this.requireBook(tx, ref)
     if (current.version !== expectedVersion) throw new LocalLibraryError('conflict', 'Book was changed in another tab')
-    let attributes = catalog
-    if (catalog || template) {
+    const attributes = catalog
+    if (attributes && attributes.shelfId) {
       const organizationKey = this.organizationKey(ref.scope.kind === 'local' ? ref.scope.vaultId : '')
-      const organization = clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(organizationKey)) ?? { version: 0, items: [] })
-      if (template) {
-        let parentId: string | null = null
-        let created = false
-        for (const name of template) {
-          let item = organization.items.find((entry) => entry.kind === 'category' && entry.parentId === parentId && entry.name === name)
-          if (!item) {
-            const now = Date.now()
-            item = { id: localRecordId(), kind: 'category', name, parentId, pinned: false, hidden: false, sortOrder: Math.max(-1, ...organization.items.filter((entry) => entry.kind === 'category').map((entry) => entry.sortOrder)) + 1, createdAt: now, updatedAt: now }
-            organization.items.push(item)
-            created = true
-          }
-          parentId = item.id
-        }
-        attributes = { ...catalog, categoryId: parentId }
-        if (created) await request(tx.objectStore('settings').put({ ...organization, version: organization.version + 1 }, organizationKey))
-      }
-      this.validateMembership(attributes ?? {}, organization)
+      const organization = clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(organizationKey)) ?? emptyClientOrganization())
+      this.validateMembership(attributes, organization)
     }
     const next = clientBookSchema.parse({ ...current,
       ...(patch.title === undefined ? {} : { title: patch.title }),
       ...(patch.authors === undefined ? {} : { authors: patch.authors }),
       ...(attributes === undefined ? {} : { catalog: { ...current.catalog, ...attributes } }),
       updatedAt: Date.now(), version: current.version + 1 })
+    if (trackClassification && ref.scope.kind === 'local') {
+      const changedValues: Array<{ kind: ClassificationKind; value: string }> = []
+      const currentPath = current.catalog?.categoryPath ?? null
+      const nextPath = next.catalog?.categoryPath ?? null
+      if (JSON.stringify(currentPath) !== JSON.stringify(nextPath)) {
+        for (const path of [currentPath, nextPath]) {
+          if (!path) continue
+          changedValues.push({ kind: 'category', value: classificationValueKey('category', path) })
+          if (path.length > 1) changedValues.push({ kind: 'category', value: classificationValueKey('category', [path[0]!]) })
+        }
+      }
+      const currentTags = new Set(current.catalog?.tags ?? [])
+      const nextTags = new Set(next.catalog?.tags ?? [])
+      for (const name of currentTags) if (!nextTags.has(name)) changedValues.push({ kind: 'tag', value: name })
+      for (const name of nextTags) if (!currentTags.has(name)) changedValues.push({ kind: 'tag', value: name })
+      if (changedValues.length > 0) {
+        const settings = tx.objectStore('settings')
+        const organizationKey = this.organizationKey(ref.scope.vaultId)
+        const organization = clientOrganizationSchema.parse(await request(settings.get(organizationKey)) ?? emptyClientOrganization())
+        const valueState = [...organization.valueState]
+        const now = Date.now()
+        const uniqueChanges = new Map(changedValues.map((changed) => [`${changed.kind}\u0000${changed.value}`, changed]))
+        for (const changed of uniqueChanges.values()) {
+          const existing = valueState.find((state) => state.kind === changed.kind && state.value === changed.value)
+          if (existing) {
+            existing.updatedAt = now
+            continue
+          }
+          const sameKind = valueState.filter((state) => state.kind === changed.kind)
+          valueState.push({ ...changed, pinned: false, hidden: false, sortOrder: sameKind.reduce((max, state) => Math.max(max, state.sortOrder), -1) + 1, createdAt: now, updatedAt: now })
+        }
+        await request(settings.put(clientOrganizationSchema.parse({ ...organization, version: organization.version + 1, valueState }), organizationKey))
+      }
+    }
     if (cover === null) await request(tx.objectStore('files').delete(`cover:${key(ref)}`))
     else if (cover !== undefined) await request(tx.objectStore('files').put(cover, `cover:${key(ref)}`))
     await request(tx.objectStore('books').put(next, key(ref)))
@@ -870,6 +1091,87 @@ export class LocalLibraryRepository {
     }
     await this.transaction(['books', 'files', 'settings'], 'readwrite', async (tx) => {
       for (const change of changes) await this.updateMetadataInTx(tx, change.ref, change.patch, change.expectedVersion)
+    })
+  }
+
+  async rewriteClassificationValue(vaultId: string, kind: ClassificationKind, from: string, to: string | null, changes: Array<{ ref: ClientBookRef; patch: Parameters<LocalLibraryRepository['updateMetadata']>[1]; expectedVersion: number }>, statePatch: { pinned?: boolean; hidden?: boolean } = {}): Promise<void> {
+    this.organizationKey(vaultId)
+    if (changes.length > 2000 || new Set(changes.map((change) => key(change.ref))).size !== changes.length) throw new LocalLibraryError('invalid-input', 'Invalid book selection')
+    for (const change of changes) {
+      this.assertLocal(change.ref)
+      if (change.ref.scope.kind !== 'local' || change.ref.scope.vaultId !== vaultId) throw new LocalLibraryError('invalid-input', 'Selection spans multiple vaults')
+    }
+    await this.transaction(['books', 'files', 'settings'], 'readwrite', async (tx) => {
+      const organizationStore = tx.objectStore('settings')
+      const organizationKey = this.organizationKey(vaultId)
+      const organization = clientOrganizationSchema.parse(await request(organizationStore.get(organizationKey)) ?? emptyClientOrganization())
+      const source = organization.valueState.filter((state) => state.kind === kind && (kind === 'category' && from.startsWith('["')
+        ? state.value === from || (JSON.parse(from).length === 1 && JSON.parse(state.value)[0] === JSON.parse(from)[0])
+        : state.value === from))
+      if (to !== null) {
+        const destinations = new Set<string>()
+        for (const state of source) {
+          let nextValue = to
+          if (kind === 'category') {
+            const fromPath = JSON.parse(from) as string[]
+            const statePath = JSON.parse(state.value) as string[]
+            const toPath = JSON.parse(to) as string[]
+            nextValue = JSON.stringify(fromPath.length === 1 && statePath.length > 1 ? [...toPath, ...statePath.slice(1)] : toPath)
+          }
+          if (destinations.has(nextValue) || organization.valueState.some((candidate) => candidate !== state && candidate.kind === kind && candidate.value === nextValue)) {
+            throw new LocalLibraryError('conflict', 'The destination already has saved sidebar preferences')
+          }
+          destinations.add(nextValue)
+        }
+      }
+      for (const change of changes) await this.updateMetadataInTx(tx, change.ref, change.patch, change.expectedVersion, undefined, false)
+      if (source.length || changes.length || Object.keys(statePatch).length) {
+        const fromPath = kind === 'category' ? JSON.parse(from) as string[] : null
+        const toPath = kind === 'category' && to !== null ? JSON.parse(to) as string[] : null
+        const now = Date.now()
+        const valueState = organization.valueState.map((state) => {
+          if (!source.includes(state)) return state
+          const value = to === null ? state.value : kind === 'category'
+            ? JSON.stringify(fromPath!.length === 1 && JSON.parse(state.value).length > 1 ? [...toPath!, ...JSON.parse(state.value).slice(1)] : toPath)
+            : to
+          return { ...state, value, ...statePatch, updatedAt: now }
+        })
+        if (!source.length) valueState.push({ kind, value: to ?? from, pinned: statePatch.pinned ?? false, hidden: statePatch.hidden ?? false, sortOrder: organization.valueState.filter((state) => state.kind === kind).reduce((max, state) => Math.max(max, state.sortOrder), -1) + 1, createdAt: now, updatedAt: now })
+        if (to !== null) {
+          for (const change of changes) {
+            const values = kind === 'category'
+              ? (change.patch.catalog?.categoryPath ? [classificationValueKey('category', change.patch.catalog.categoryPath)] : [])
+              : [to]
+            for (const value of values) {
+              if (valueState.some((state) => state.kind === kind && state.value === value)) continue
+              const sameKind = valueState.filter((state) => state.kind === kind)
+              valueState.push({ kind, value, pinned: false, hidden: false, sortOrder: sameKind.reduce((max, state) => Math.max(max, state.sortOrder), -1) + 1, createdAt: now, updatedAt: now })
+            }
+          }
+        }
+        if (kind === 'category') {
+          const parentValues = new Set<string>()
+          for (const state of source) {
+            const statePath = JSON.parse(state.value) as string[]
+            if (statePath.length < 2) continue
+            const oldParent = classificationValueKey('category', [statePath[0]!])
+            if (!source.some((candidate) => candidate.kind === 'category' && candidate.value === oldParent)) parentValues.add(oldParent)
+            if (toPath) {
+              const nextPath = fromPath!.length === 1 ? [...toPath, ...statePath.slice(1)] : toPath
+              if (nextPath.length > 1) parentValues.add(classificationValueKey('category', [nextPath[0]!]))
+            }
+          }
+          for (const value of parentValues) {
+            const parent = valueState.find((state) => state.kind === 'category' && state.value === value)
+            if (parent) parent.updatedAt = now
+            else {
+              const sameKind = valueState.filter((state) => state.kind === 'category')
+              valueState.push({ kind: 'category', value, pinned: false, hidden: false, sortOrder: sameKind.reduce((max, state) => Math.max(max, state.sortOrder), -1) + 1, createdAt: now, updatedAt: now })
+            }
+          }
+        }
+        await request(organizationStore.put(clientOrganizationSchema.parse({ ...organization, version: organization.version + 1, valueState }), organizationKey))
+      }
     })
   }
 
@@ -904,77 +1206,65 @@ export class LocalLibraryRepository {
     })
   }
 
+  /**
+   * A shelf is an entity, so a device book may only name one this vault knows.
+   * Categories and tags are values: whatever the book carries is valid, which is
+   * why there is nothing left to check for them.
+   */
   private validateMembership(catalog: Partial<ClientCatalogAttributes>, organization: ClientOrganization): void {
-    for (const [kind, ids] of [
-      ['shelf', catalog.shelfId ? [catalog.shelfId] : []],
-      ['category', catalog.categoryId ? [catalog.categoryId] : []],
-      ['tag', catalog.tagIds ?? []],
-    ] as const) {
-      if (ids.some((id) => !organization.items.some((item) => item.id === id && item.kind === kind))) throw new LocalLibraryError('invalid-input', 'Organization does not belong to this vault')
+    if (catalog.shelfId && !organization.shelves.some((shelf) => shelf.id === catalog.shelfId)) {
+      throw new LocalLibraryError('invalid-input', 'Shelf does not belong to this vault')
     }
   }
 
   async getOrganization(vaultId: string): Promise<ClientOrganization> {
-    return this.transaction(['settings'], 'readonly', async (tx) => clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(this.organizationKey(vaultId))) ?? { version: 0, items: [] }))
+    return this.transaction(['settings'], 'readonly', async (tx) => clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(this.organizationKey(vaultId))) ?? emptyClientOrganization()))
   }
 
   /**
-   * Cache the tree the user is looking at. A device book may sit on a shelf
+   * Cache the shelves the user is looking at. A device book may sit on a shelf
    * that only the server knows, so the shelf ids a device book can carry are
    * exactly the ones written here; membership validation then stays strict and
-   * the vault still refuses ids nobody owns. Nodes created on this device are
-   * never removed by a mirror.
+   * the vault still refuses ids nobody owns. Shelves are merged, never removed,
+   * because one created on this device is not the account's to delete.
    */
-  async mirrorOrganization(vaultId: string, items: readonly ClientOrganization['items'][number][]): Promise<void> {
+  async mirrorShelves(vaultId: string, items: readonly ClientShelfItem[]): Promise<void> {
     await this.withOrganizationLock(vaultId, () => this.transaction(['settings'], 'readwrite', async (tx) => {
       const store = tx.objectStore('settings')
-      const current = clientOrganizationSchema.parse(await request(store.get(this.organizationKey(vaultId))) ?? { version: 0, items: [] })
-      const byId = new Map(current.items.map((item) => [item.id, item]))
+      const current = clientOrganizationSchema.parse(await request(store.get(this.organizationKey(vaultId))) ?? emptyClientOrganization())
+      const byId = new Map(current.shelves.map((shelf) => [shelf.id, shelf]))
       let changed = false
       for (const item of items) {
-        if (byId.get(item.id)?.kind === item.kind && JSON.stringify(byId.get(item.id)) === JSON.stringify(item)) continue
+        if (JSON.stringify(byId.get(item.id)) === JSON.stringify(item)) continue
         byId.set(item.id, item)
         changed = true
       }
       if (!changed) return
-      await request(store.put(clientOrganizationSchema.parse({ version: current.version + 1, items: [...byId.values()] }), this.organizationKey(vaultId)))
+      await request(store.put(clientOrganizationSchema.parse({ ...current, version: current.version + 1, shelves: [...byId.values()] }), this.organizationKey(vaultId)))
     }))
   }
 
   private validateOrganizationStructure(parsed: ClientOrganization): Set<string> {
-    const ids = new Set(parsed.items.map((item) => item.id))
-    if (ids.size !== parsed.items.length) throw new LocalLibraryError('invalid-input', 'Organization identities must be unique')
-    for (const item of parsed.items) {
-      const seen = new Set([item.id])
-      let parentId = item.parentId
-      if (item.kind !== 'category' && parentId !== null) throw new LocalLibraryError('invalid-input', 'Only categories may have parents')
-      while (parentId !== null) {
-        const parent = parsed.items.find((candidate) => candidate.id === parentId && candidate.kind === 'category')
-        if (!parent || seen.has(parentId)) throw new LocalLibraryError('invalid-input', 'Category ancestry is invalid')
-        seen.add(parentId)
-        parentId = parent.parentId
-      }
-    }
+    const ids = new Set(parsed.shelves.map((shelf) => shelf.id))
+    if (ids.size !== parsed.shelves.length) throw new LocalLibraryError('invalid-input', 'Shelf identities must be unique')
+    const keys = new Set(parsed.valueState.map((state) => `${state.kind}\u0000${state.value}`))
+    if (keys.size !== parsed.valueState.length) throw new LocalLibraryError('invalid-input', 'Value state must be unique per value')
     return ids
   }
 
   private async saveOrganizationInTx(tx: IDBTransaction, vaultId: string, parsed: ClientOrganization, ids: Set<string>, expectedVersion: number): Promise<ClientOrganization> {
     const store = tx.objectStore('settings')
-    const current = clientOrganizationSchema.parse(await request(store.get(this.organizationKey(vaultId))) ?? { version: 0, items: [] })
+    const current = clientOrganizationSchema.parse(await request(store.get(this.organizationKey(vaultId))) ?? emptyClientOrganization())
     if (current.version !== expectedVersion) throw new LocalLibraryError('conflict', 'Organization was changed in another tab')
     const next = { ...parsed, version: expectedVersion + 1 }
+    // Dropping a shelf unshelves the books that named it; a value needs no such
+    // cleanup, because the books are where it lives.
     const books = await request<ClientBook[]>(tx.objectStore('books').getAll())
     for (const raw of books) {
       if (raw.ref.scope.kind !== 'local' || raw.ref.scope.vaultId !== vaultId) continue
       const book = clientBookSchema.parse(raw)
-      if (!book.catalog) continue
-      const catalog = { ...book.catalog,
-        ...(book.catalog.shelfId && !ids.has(book.catalog.shelfId) ? { shelfId: null } : {}),
-        ...(book.catalog.categoryId && !ids.has(book.catalog.categoryId) ? { categoryId: null } : {}),
-        ...(book.catalog.tagIds ? { tagIds: book.catalog.tagIds.filter((id) => ids.has(id)) } : {}),
-      }
-      this.validateMembership(catalog, next)
-      if (JSON.stringify(catalog) === JSON.stringify(book.catalog)) continue
+      if (!book.catalog?.shelfId || ids.has(book.catalog.shelfId)) continue
+      const catalog = { ...book.catalog, shelfId: null }
       await request(tx.objectStore('books').put({ ...book, catalog, version: book.version + 1, updatedAt: Date.now() }, key(book.ref)))
     }
     await request(store.put(next, this.organizationKey(vaultId)))
@@ -988,47 +1278,45 @@ export class LocalLibraryRepository {
   }
 
   private taxonomyMirrorKey(vaultId: string): string {
-    return JSON.stringify(['account-taxonomy-mirror', vaultId])
+    return JSON.stringify(['account-shelf-mirror', vaultId])
   }
 
   /**
-   * Mirrors the signed-in account's taxonomy into the vault organization so
-   * device books can join account groups: mirror entries carry the server
-   * ids, names follow the account, and local pin/hide preferences survive.
-   * Mirrors that the account removed are dropped (membership cleanup rides
-   * on saveOrganizationInTx) inside one serialized transaction.
+   * Mirror the signed-in account's shelves into the vault so a device book can
+   * sit on a shelf only the server knows. Categories and tags need no mirror —
+   * they are values on the books, so a device book joins an account category by
+   * carrying the same name path.
    */
-  async syncAccountTaxonomy(vaultId: string, accountItems: Array<{ id: string; kind: 'shelf' | 'tag'; name: string; sortOrder: number }>): Promise<void> {
+  async syncAccountShelves(vaultId: string, accountShelves: Array<{ id: string; name: string; sortOrder: number }>): Promise<void> {
     await this.withOrganizationLock(vaultId, async () => {
       const { org, mirrored } = await this.transaction(['settings'], 'readonly', async (tx) => {
         const store = tx.objectStore('settings')
-        const org = clientOrganizationSchema.parse(await request(store.get(this.organizationKey(vaultId))) ?? { version: 0, items: [] })
+        const org = clientOrganizationSchema.parse(await request(store.get(this.organizationKey(vaultId))) ?? emptyClientOrganization())
         const mirrored = (await request<unknown>(store.get(this.taxonomyMirrorKey(vaultId)))) as string[] | undefined ?? []
         return { org, mirrored }
       })
       const now = Date.now()
-      const accountIds = new Set(accountItems.map((item) => item.id))
+      const accountIds = new Set(accountShelves.map((shelf) => shelf.id))
       const nextMirror = [...accountIds]
       const mirroredChanged = mirrored.length !== nextMirror.length || mirrored.some((id, index) => id !== nextMirror[index])
       let orgChanged = false
-      const items = org.items.map((item) => ({ ...item }))
-      for (const [index, account] of accountItems.entries()) {
-        const existing = items.find((item) => item.id === account.id)
+      const shelves = org.shelves.map((shelf) => ({ ...shelf }))
+      for (const [index, account] of accountShelves.entries()) {
+        const existing = shelves.find((shelf) => shelf.id === account.id)
         if (existing) {
-          if (existing.kind !== account.kind || existing.name !== account.name) {
-            existing.kind = account.kind
+          if (existing.name !== account.name) {
             existing.name = account.name
             existing.updatedAt = now
             orgChanged = true
           }
         } else {
-          items.push({ id: account.id, kind: account.kind, name: account.name, parentId: null, pinned: false, hidden: false, sortOrder: index, createdAt: now, updatedAt: now })
+          shelves.push({ id: account.id, name: account.name, pinned: false, hidden: false, sortOrder: index, createdAt: now, updatedAt: now })
           orgChanged = true
         }
       }
       const removedMirrors = new Set(mirrored.filter((id) => !accountIds.has(id)))
-      const nextItems = items.filter((item) => !removedMirrors.has(item.id) || item.kind === 'category')
-      if (nextItems.length !== items.length) orgChanged = true
+      const nextShelves = shelves.filter((shelf) => !removedMirrors.has(shelf.id))
+      if (nextShelves.length !== shelves.length) orgChanged = true
       if (!orgChanged && !mirroredChanged) return
       if (!orgChanged) {
         await this.transaction(['settings'], 'readwrite', async (tx) => {
@@ -1036,13 +1324,56 @@ export class LocalLibraryRepository {
         }, undefined, false)
         return
       }
-      const parsed = clientOrganizationSchema.parse({ version: org.version, items: nextItems })
+      const parsed = clientOrganizationSchema.parse({ ...org, shelves: nextShelves })
       const ids = this.validateOrganizationStructure(parsed)
       await this.transaction(['settings', 'books'], 'readwrite', async (tx) => {
         await this.saveOrganizationInTx(tx, vaultId, parsed, ids, org.version)
         await request(tx.objectStore('settings').put(nextMirror, this.taxonomyMirrorKey(vaultId)))
       })
     })
+  }
+
+  /**
+   * Remember the sidebar's preference about one value. The value itself is not
+   * touched: hiding a category does not move a book, and clearing a value leaves
+   * its row behind for the day it comes back.
+   */
+  async setValueState(vaultId: string, kind: ClassificationKind, value: string, patch: { pinned?: boolean; hidden?: boolean; sortOrder?: number }): Promise<void> {
+    await this.withOrganizationLock(vaultId, () => this.transaction(['settings'], 'readwrite', async (tx) => {
+      const store = tx.objectStore('settings')
+      const current = clientOrganizationSchema.parse(await request(store.get(this.organizationKey(vaultId))) ?? emptyClientOrganization())
+      const now = Date.now()
+      const existing = current.valueState.find((state) => state.kind === kind && state.value === value)
+      const valueState = existing
+        ? current.valueState.map((state) => state === existing ? { ...state, ...patch, ...((patch.pinned !== undefined || patch.hidden !== undefined) ? { updatedAt: now } : {}) } : state)
+        : [...current.valueState, {
+            kind, value,
+            pinned: patch.pinned ?? false,
+            hidden: patch.hidden ?? false,
+            sortOrder: patch.sortOrder ?? current.valueState.filter((state) => state.kind === kind).reduce((max, state) => Math.max(max, state.sortOrder), -1) + 1,
+            createdAt: now, updatedAt: now,
+          }]
+      await request(store.put(clientOrganizationSchema.parse({ ...current, version: current.version + 1, valueState }), this.organizationKey(vaultId)))
+    }))
+  }
+
+  /**
+   * Carry a value's preferences to its new spelling. Used after the books have
+   * been rewritten, so the sidebar keeps its pin, its hide and its position.
+   */
+  async moveValueState(vaultId: string, kind: ClassificationKind, from: string, to: string): Promise<void> {
+    if (from === to) return
+    await this.withOrganizationLock(vaultId, () => this.transaction(['settings'], 'readwrite', async (tx) => {
+      const store = tx.objectStore('settings')
+      const current = clientOrganizationSchema.parse(await request(store.get(this.organizationKey(vaultId))) ?? emptyClientOrganization())
+      const source = current.valueState.find((state) => state.kind === kind && state.value === from)
+      if (!source) return
+      const target = current.valueState.find((state) => state.kind === kind && state.value === to)
+      const valueState = current.valueState
+        .filter((state) => state !== target)
+        .map((state) => state === source ? { ...state, value: to, updatedAt: Date.now() } : state)
+      await request(store.put(clientOrganizationSchema.parse({ ...current, version: current.version + 1, valueState }), this.organizationKey(vaultId)))
+    }))
   }
 
   async readEditorDraft(ref: ClientBookRef, format: 'txt' | 'epub'): Promise<unknown> {
@@ -1552,7 +1883,7 @@ export class LocalLibraryRepository {
           reviews.push(parsed)
         }
       }
-      const organization = clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(this.organizationKey(vaultId))) ?? { version: 0, items: [] })
+      const organization = clientOrganizationSchema.parse(await request(tx.objectStore('settings').get(this.organizationKey(vaultId))) ?? emptyClientOrganization())
       return { books, notes, organization, reviews }
     })
   }

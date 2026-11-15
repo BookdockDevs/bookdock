@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 
 import type { CatalogBook, Library, Review } from '@bookdock/shared'
+import { classificationValueKey } from '@bookdock/shared'
 
 import { ApiError } from '@/api/client'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -285,9 +286,9 @@ export default function WorkDetailBody({
 
   // Filing a work is its own small write: the edit dialog batches it with the
   // rest of the record, but a right-click on the chip carries nothing else.
-  async function changeCategory(categoryId: string | null) {
+  async function changeCategory(categoryPath: string[] | null) {
     try {
-      await updateWork.mutateAsync({ libraryId: library.id, libraryBookId: work.id, patch: { categoryId } })
+      await updateWork.mutateAsync({ libraryId: library.id, libraryBookId: work.id, patch: { categoryPath } })
       notify.success({ key: 'toast.bookUpdated' })
     } catch (err) {
       notify.error(getUserErrorNotification(err, 'library.catalogWorkSaveFailed'))
@@ -469,13 +470,13 @@ export default function WorkDetailBody({
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <CategoryChip
               libraryId={library.id}
-              categoryId={work.categoryId ?? null}
+              categoryPath={work.categoryPath}
               editable={canManage}
-              onFilter={() => goToFilter({ category: work.categoryId ?? 'none', categoryScope: work.categoryId ? 'subtree' : 'direct' })}
-              onChange={(value) => void changeCategory(value.categoryId ?? null)}
+              onFilter={() => goToFilter({ category: work.categoryPath ? classificationValueKey('category', work.categoryPath) : 'none', categoryScope: work.categoryPath?.length === 1 ? 'subtree' : 'direct' })}
+              onChange={(value) => void changeCategory(value.categoryPath)}
             />
             {work.tags.map((tag) => (
-              <FilterChip key={tag.id} prefix="#" label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
+              <FilterChip key={tag} prefix="#" label={tag} onClick={() => goToFilter({ tag })} />
             ))}
           </div>
         )}

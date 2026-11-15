@@ -85,14 +85,21 @@ export function projectLocalVaultReading(snapshot: ClientVaultReadingSnapshot, i
   }))
   const byTag: ReadingRecordTagItem[] = []
   const byCategory: ReadingRecordCategoryItem[] = []
-  for (const item of snapshot.organization.items) {
-    const matches = books.filter((book) => book.scoped.stats.totalSeconds > 0 && (item.kind === 'tag' ? book.snapshot.book.catalog?.tagIds?.includes(item.id) : item.kind === 'category' && book.snapshot.book.catalog?.categoryId === item.id))
-    if (!matches.length) continue
-    const durationSeconds = matches.reduce((sum, book) => sum + book.scoped.stats.totalSeconds, 0)
-    if (item.kind === 'tag') byTag.push({ tagId: item.id, name: item.name, durationSeconds, bookCount: matches.length })
-    if (item.kind === 'category') byCategory.push({ categoryId: item.id, name: item.name, parentId: item.parentId, parentName: snapshot.organization.items.find((parent) => parent.kind === 'category' && parent.id === item.parentId)?.name ?? null, durationSeconds, bookCount: matches.length })
+  const tagNames = new Set(books.flatMap((book) => book.snapshot.book.catalog?.tags ?? []))
+  for (const name of tagNames) {
+    const matches = books.filter((book) => book.scoped.stats.totalSeconds > 0 && book.snapshot.book.catalog?.tags?.includes(name))
+    if (matches.length) byTag.push({ name, durationSeconds: matches.reduce((sum, book) => sum + book.scoped.stats.totalSeconds, 0), bookCount: matches.length })
   }
-  const uncategorized = books.filter((book) => book.scoped.stats.totalSeconds > 0 && !book.snapshot.book.catalog?.categoryId)
-  if (uncategorized.length) byCategory.push({ categoryId: null, name: null, parentId: null, parentName: null, durationSeconds: uncategorized.reduce((sum, book) => sum + book.scoped.stats.totalSeconds, 0), bookCount: uncategorized.length })
+  const categoryPaths = new Map<string, string[]>()
+  for (const book of books) {
+    const path = book.snapshot.book.catalog?.categoryPath
+    if (path) categoryPaths.set(JSON.stringify(path), path)
+  }
+  for (const path of categoryPaths.values()) {
+    const matches = books.filter((book) => book.scoped.stats.totalSeconds > 0 && JSON.stringify(book.snapshot.book.catalog?.categoryPath ?? null) === JSON.stringify(path))
+    if (matches.length) byCategory.push({ categoryPath: path, name: path[path.length - 1] ?? null, parentName: path.length === 2 ? path[0]! : null, durationSeconds: matches.reduce((sum, book) => sum + book.scoped.stats.totalSeconds, 0), bookCount: matches.length })
+  }
+  const uncategorized = books.filter((book) => book.scoped.stats.totalSeconds > 0 && !book.snapshot.book.catalog?.categoryPath)
+  if (uncategorized.length) byCategory.push({ categoryPath: null, name: null, parentName: null, durationSeconds: uncategorized.reduce((sum, book) => sum + book.scoped.stats.totalSeconds, 0), bookCount: uncategorized.length })
   return { summary, daily: [...daily].sort(([a], [b]) => a.localeCompare(b)).map(([date, durationSeconds]): ReadingRecordDailyItem => ({ date, durationSeconds })), hourly, byBook, byTag, byCategory }
 }

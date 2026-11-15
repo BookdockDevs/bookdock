@@ -1,11 +1,12 @@
 import { useRef } from 'react'
 
+import type { ClientCategoryView } from '@bookdock/shared'
+
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { useLibraryCategories } from '../../hooks'
-import { categoryPath } from '../../taxonomy'
 import CategoryPickerPanel, { type CategorySelection } from '../CategoryPickerPanel'
 import TaxonomyIcon from '../TaxonomyIcon'
 import { FilterChip } from './ui'
@@ -13,7 +14,8 @@ import { FilterChip } from './ui'
 interface CategoryChipProps {
   /** The taxonomy this book belongs to: a shared library, or the private one. */
   libraryId: string | null
-  categoryId: string | null
+  categories?: ClientCategoryView[]
+  categoryPath: string[] | null
   /** What the row already carried, for a category the taxonomy no longer has. */
   fallbackLabel?: string
   /** Only a caller that may write the book offers the quick edit. */
@@ -28,21 +30,20 @@ interface CategoryChipProps {
  * the same panel the edit dialog's select opens, so a quick edit and the full
  * form cannot disagree about what a category pick looks like.
  */
-export default function CategoryChip({ libraryId, categoryId, fallbackLabel, editable, onFilter, onChange }: CategoryChipProps) {
+export default function CategoryChip({ libraryId, categories: choices, categoryPath, fallbackLabel, editable, onFilter, onChange }: CategoryChipProps) {
   const _ = useTranslation()
-  const { data, isPending, isError } = useLibraryCategories(libraryId)
-  const categories = data?.data ?? []
+  const { data, isPending, isError } = useLibraryCategories(libraryId, { enabled: !choices })
+  const categories = choices ?? data?.data ?? []
   // A taxonomy that failed to load must not be presented as a stale name: the
   // known values are unusable, so the chip says so instead of guessing.
-  const path = categoryId && !isError ? categoryPath(categories, categoryId) : []
-  const loading = isPending && !data
-  const unresolved = loading || isError
+  const loading = !choices && Boolean(libraryId) && isPending && !data
+  const unresolved = !choices && (loading || isError)
 
-  const label = path.length > 0
-    ? path.map((category) => category.name).join(' / ')
-    : categoryId
+  const label = categoryPath?.length
+    ? categoryPath.join(' / ')
+    : categoryPath
       ? (isError ? _('library.categoryUnavailable') : loading ? _('library.categories') : fallbackLabel ?? _('library.categoryUnavailable'))
-      : (loading ? _('library.categories') : _('library.uncategorized'))
+      : _('library.uncategorized')
 
   const anchorRef = useRef<HTMLButtonElement>(null)
   const menu = useMenuAnchor()
@@ -74,9 +75,8 @@ export default function CategoryChip({ libraryId, categoryId, fallbackLabel, edi
           className="max-h-72 overflow-y-auto custom-scrollbar"
         >
           <CategoryPickerPanel
-            libraryId={libraryId}
             categories={categories}
-            categoryId={categoryId}
+            categoryPath={categoryPath}
             // A shared library owns its taxonomy, and a quick edit must not
             // mint a category from a recommendation: only real ones are offered.
             allowTemplates={false}

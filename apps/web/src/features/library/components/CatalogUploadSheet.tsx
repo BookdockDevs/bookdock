@@ -3,7 +3,6 @@ import { useMemo } from 'react'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import { useLibraryCategories, type UploadTarget } from '../hooks'
-import { categoryPath } from '../taxonomy'
 import UploadSheet from './UploadSheet'
 
 interface CatalogUploadSheetProps {
@@ -47,8 +46,9 @@ export default function CatalogUploadSheet({
   const _ = useTranslation()
   const categoriesQuery = useLibraryCategories(libraryId, { enabled: Boolean(open && categoryId && !libraryBookId) })
   const categories = categoriesQuery.data?.data ?? []
-  const categoryName = !libraryBookId && categoryId
-    ? categoryPath(categories, categoryId).map((node) => node.name).join(' / ')
+  const selectedCategory = categories.find((item) => item.id === categoryId)
+  const categoryName = !libraryBookId && selectedCategory
+    ? selectedCategory.path.join(' / ')
     : undefined
 
   // Memoized because the upload queue keys its scheduler and its settlement
@@ -60,7 +60,7 @@ export default function CatalogUploadSheet({
       ...(item.operationId ? { operationId: item.operationId } : {}),
       ...(libraryBookId
         ? { libraryBookId }
-        : (categoryId ? { categoryId } : {})),
+        : (selectedCategory ? { categoryPath: JSON.stringify(selectedCategory.path) } : {})),
       ...(item.versionName?.trim() ? { name: item.versionName.trim() } : {}),
     }),
     // Bound-work uploads answer the new link id so the caller can select the
@@ -78,7 +78,7 @@ export default function CatalogUploadSheet({
       ['batch-selection'],
     ],
     activityLibraryId: libraryId,
-  }), [libraryId, categoryId, libraryBookId])
+  }), [libraryId, libraryBookId, selectedCategory])
 
   if (!open) return null
 

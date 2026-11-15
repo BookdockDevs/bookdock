@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 
-import type { PublishPrivateBookReq, PublishPrivateBookRes } from '@bookdock/shared'
+import { normalizeCategoryPath, normalizeTagNames, type PublishPrivateBookReq, type PublishPrivateBookRes } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import {
@@ -8,10 +8,8 @@ import {
   bookVersions,
   contentRevisions,
   libraryBooks,
-  libraryBookTags,
+  libraryBookTagValues,
   libraryBookVersions,
-  libraryCategories,
-  libraryTags,
   libraries,
 } from '../../db/schema'
 import { recordActivityEvent } from '../../lib/activity-events'
@@ -69,17 +67,10 @@ export async function publishPrivateBook(
     throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   }
 
-  if (opts.categoryId) {
-    const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, opts.categoryId), eq(libraryCategories.libraryId, targetLibraryId))).get()
-    if (!category) throw new AppError('CATEGORY_NOT_FOUND', 'Category not found')
-  }
-  const tagIds = [...new Set(opts.tagIds ?? [])]
-  if (tagIds.length > 0) {
-    const found = db.select({ id: libraryTags.id }).from(libraryTags)
-      .where(and(eq(libraryTags.libraryId, targetLibraryId), inArray(libraryTags.id, tagIds))).all()
-    if (found.length !== tagIds.length) throw new AppError('TAG_NOT_FOUND', 'Tag not found')
-  }
+  // Values need no existence check: a name the target library no longer lists is
+  // still a legitimate value to publish under.
+  const categoryPath = normalizeCategoryPath(opts.categoryPath ?? null)
+  const tags = normalizeTagNames(opts.tags ?? [])
 
   const sourceTitle = sourceLink.title ?? sourceWork.title
   const sourceAuthor = sourceLink.author ?? sourceWork.author
@@ -116,11 +107,17 @@ export async function publishPrivateBook(
       return latest?.blobKey === sourceRevision.blobKey
     })
     if (duplicate) {
-      if (tagIds.length > 0) {
-        tx.insert(libraryBookTags)
-          .values(tagIds.map((tagId) => ({ libraryBookId: duplicate.libraryBookId, tagId })))
-          .onConflictDoNothing()
-          .run()
+      if (tags.length > 0) {
+        const existing = new Set(tx.select({ name: libraryBookTagValues.name }).from(libraryBookTagValues)
+          .where(eq(libraryBookTagValues.libraryBookId, duplicate.libraryBookId)).all().map((row) => row.name))
+        const missing = tags.filter((name) => !existing.has(name))
+        if (missing.length > 0) {
+          tx.insert(libraryBookTagValues)
+            .values(missing.map((name, index) => ({
+              id: createId('btv'), libraryBookId: duplicate.libraryBookId, name, sortOrder: existing.size + index,
+            })))
+            .run()
+        }
       }
       result = {
         libraryBookId: duplicate.libraryBookId,
@@ -155,7 +152,8 @@ export async function publishPrivateBook(
       // This column is still the shared-catalog write actor in the current
       // transition model; ACL decisions use the library and membership rows.
       userId: actorId,
-      categoryId: opts.categoryId ?? null,
+      categoryRoot: categoryPath?.[0] ?? null,
+      categoryLeaf: categoryPath?.[1] ?? null,
       title: sourceTitle,
       author: sourceAuthor,
       authors: sourceAuthors,
@@ -193,8 +191,10 @@ export async function publishPrivateBook(
       targetKind: 'work', targetId: newLibraryBookId, workId: newLibraryBookId,
       versionId: newBookVersionId, occurredAt: now,
     })
-    if (tagIds.length > 0) {
-      tx.insert(libraryBookTags).values(tagIds.map((tagId) => ({ libraryBookId: newLibraryBookId, tagId }))).run()
+    if (tags.length > 0) {
+      tx.insert(libraryBookTagValues)
+        .values(tags.map((name, index) => ({ id: createId('btv'), libraryBookId: newLibraryBookId, name, sortOrder: index })))
+        .run()
     }
     result = {
       libraryBookId: newLibraryBookId,

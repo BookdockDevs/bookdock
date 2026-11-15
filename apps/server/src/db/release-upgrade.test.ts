@@ -54,6 +54,13 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
       VALUES ('library', 'u', 'shared', 'Shared library', 'public', 1, 1);
     INSERT INTO library_books (id, library_id, user_id, title, created_at, updated_at)
       VALUES ('work', 'library', 'u', 'Book', 1, 1);
+    INSERT INTO library_categories (id, library_id, user_id, name, parent_id, sort_order, pinned, hidden, created_at, updated_at)
+      VALUES ('root', 'library', 'u', 'Fiction', NULL, 2, 0, 1, 1, 1),
+        ('leaf', 'library', 'u', 'Mystery', 'root', 3, 1, 0, 1, 1);
+    UPDATE library_books SET category_id = 'leaf' WHERE id = 'work';
+    INSERT INTO library_tags (id, library_id, user_id, name, sort_order, pinned, hidden, created_at, updated_at)
+      VALUES ('favorite', 'library', 'u', 'Favorite', 4, 1, 0, 1, 1);
+    INSERT INTO library_book_tags (library_book_id, tag_id) VALUES ('work', 'favorite');
     INSERT INTO library_book_versions (id, library_id, library_book_id, book_version_id, kind,
       pinned_revision_id, created_at, updated_at)
       VALUES ('link', 'library', 'work', 'b', 'personal', 'r', 1, 1);
@@ -88,9 +95,13 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
     const { title: _title, author: _author, authors: _authors, description: _description, ...retained } = row
     return retained
   }
+  // `category_id` retires in favour of the value columns, so the fixture's
+  // column is excluded from both sides of the no-loss comparison.
   const before = retainedTables.map((table) => (table === 'library_book_versions'
     ? (sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all() as Array<Record<string, unknown>>).map(stripVersionInheritance)
-    : sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all()))
+    : table === 'library_books'
+      ? (sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all() as Array<Record<string, unknown>>).map(({ category_id: _categoryId, ...row }) => row)
+      : sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all()))
   const oldLedger = sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at').all()
   expect(oldLedger).toHaveLength(41)
   expect(sqlite.prepare('SELECT count(*) AS n FROM ai_chunks_fts').get()).toEqual({ n: 1 })
@@ -115,6 +126,14 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
   expect(upgradedLedger).toHaveLength(journal.entries.length)
   expect(upgradedLedger.slice(0, oldLedger.length)).toEqual(oldLedger)
   expect(sqlite.pragma('foreign_key_check')).toEqual([])
+  expect(sqlite.prepare('SELECT category_root, category_leaf FROM library_books WHERE id = ?').get('work')).toEqual({ category_root: 'Fiction', category_leaf: 'Mystery' })
+  expect(sqlite.prepare('SELECT name FROM library_book_tag_values WHERE library_book_id = ?').all('work')).toEqual([{ name: 'Favorite' }])
+  expect(sqlite.prepare("SELECT kind, value, sort_order, pinned, hidden FROM library_metadata_value_state ORDER BY kind, sort_order").all()).toEqual([
+    { kind: 'category', value: '["Fiction"]', sort_order: 2, pinned: 0, hidden: 1 },
+    { kind: 'category', value: '["Fiction","Mystery"]', sort_order: 3, pinned: 1, hidden: 0 },
+    { kind: 'tag', value: 'Favorite', sort_order: 4, pinned: 1, hidden: 0 },
+  ])
+  expect(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('library_categories', 'library_tags', 'library_book_tags')").all()).toEqual([])
   expect(sqlite.pragma('integrity_check')).toEqual([{ integrity_check: 'ok' }])
   expect(await fs.readFile(file, 'utf8')).toBe('book')
   expect(await fs.readFile(progressFile, 'utf8')).toBe(progress)
@@ -123,7 +142,10 @@ it('upgrades the populated 0.4.4 schema without losing books, personal data or A
   expect(sqlite.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at').all()).toEqual(upgradedLedger)
   const after = retainedTables.map((table) => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all())
   const libraryBooksIndex = retainedTables.indexOf('library_books')
-  after[libraryBooksIndex] = (after[libraryBooksIndex] as Array<Record<string, unknown>>).map(({ shelf_id: _shelfId, description_override: _descriptionOverride, ...row }) => row)
+  after[libraryBooksIndex] = (after[libraryBooksIndex] as Array<Record<string, unknown>>).map(({
+    shelf_id: _shelfId, description_override: _descriptionOverride,
+    category_root: _categoryRoot, category_leaf: _categoryLeaf, ...row
+  }) => row)
   // The work-projection startup migration intentionally copies the work's
   // publication fields onto NULL version overrides; assert the backfill and
   // exclude the fields from the byte-for-byte no-loss comparison.

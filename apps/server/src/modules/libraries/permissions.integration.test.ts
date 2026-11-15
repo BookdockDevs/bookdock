@@ -100,14 +100,6 @@ describe('library permission boundaries', () => {
     return id
   }
 
-  function seedTag(libraryId: string, name: string) {
-    const id = createId('ltag')
-    db.insert(schema.libraryTags).values({
-      id, libraryId, userId: ownerId, name, sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
-    return id
-  }
-
   function txtFile(name: string, body: string) {
     return new File([body], name, { type: 'text/plain' })
   }
@@ -212,18 +204,21 @@ describe('library permission boundaries', () => {
     seedInstance(true)
     await updateLibrary(ownerId, libraryId, { allowMemberUpload: true })
     const original = await uploadCatalogBook(libraryId, ownerId, txtFile('original.txt', 'Same content'))
-    const tagId = seedTag(libraryId, 'Managed tag')
-    await expect(updateCatalogBook(memberId, libraryId, original.libraryBookId, { tagIds: [tagId] })).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    const memberDuplicate = await uploadCatalogBook(libraryId, memberId, txtFile('duplicate.txt', 'Same content'), { tagIds: [tagId] })
+    await expect(updateCatalogBook(memberId, libraryId, original.libraryBookId, { tags: ['Managed tag'] })).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    const memberDuplicate = await uploadCatalogBook(libraryId, memberId, txtFile('duplicate.txt', 'Same content'), { tags: ['Managed tag'] })
     expect(memberDuplicate.duplicated).toBe(true)
-    expect(db.select().from(schema.libraryBookTags).all()).toHaveLength(0)
-    await uploadCatalogBook(libraryId, memberId, txtFile('new-version.txt', 'Different version'), { libraryBookId: original.libraryBookId, tagIds: [tagId] })
-    expect(db.select().from(schema.libraryBookTags).all()).toHaveLength(0)
-    const ownWork = await uploadCatalogBook(libraryId, memberId, txtFile('new-work.txt', 'New work'), { tagIds: [tagId] })
-    expect(db.select().from(schema.libraryBookTags).all()).toEqual([expect.objectContaining({ libraryBookId: ownWork.libraryBookId, tagId })])
-    const adminDuplicate = await uploadCatalogBook(libraryId, adminId, txtFile('duplicate.txt', 'Same content'), { tagIds: [tagId] })
+    expect(db.select().from(schema.libraryBookTagValues).all()).toHaveLength(0)
+    await uploadCatalogBook(libraryId, memberId, txtFile('new-version.txt', 'Different version'), { libraryBookId: original.libraryBookId, tags: ['Managed tag'] })
+    expect(db.select().from(schema.libraryBookTagValues).all()).toHaveLength(0)
+    const ownWork = await uploadCatalogBook(libraryId, memberId, txtFile('new-work.txt', 'New work'), { tags: ['Managed tag'] })
+    expect(db.select().from(schema.libraryBookTagValues).all()).toEqual([
+      expect.objectContaining({ libraryBookId: ownWork.libraryBookId, name: 'Managed tag' }),
+    ])
+    const adminDuplicate = await uploadCatalogBook(libraryId, adminId, txtFile('duplicate.txt', 'Same content'), { tags: ['Managed tag'] })
     expect(adminDuplicate.duplicated).toBe(true)
-    expect(db.select().from(schema.libraryBookTags).all()).toEqual(expect.arrayContaining([expect.objectContaining({ libraryBookId: original.libraryBookId, tagId })]))
+    expect(db.select().from(schema.libraryBookTagValues).all()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ libraryBookId: original.libraryBookId, name: 'Managed tag' }),
+    ]))
   })
 
   it('blocks every collected-link revision writer without changing the shared source', async () => {

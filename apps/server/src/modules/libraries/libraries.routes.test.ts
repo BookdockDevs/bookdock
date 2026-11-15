@@ -65,26 +65,45 @@ describe('libraries routes', () => {
   })
 
   it('validates category scopes and saves rename and reparent atomically', async () => {
+    vi.spyOn(storage, 'getStorage').mockReturnValue({
+      put: vi.fn(async () => {}), get: vi.fn(), delete: vi.fn(async () => {}),
+      exists: vi.fn(async () => true), size: vi.fn(async () => 0),
+    } as unknown as ReturnType<typeof storage.getStorage>)
+    registerParser(new TxtParser())
     const app = createApp({ id: ownerId })
-    const create = async (name: string, parentId?: string) => {
-      const response = await app.request(`/api/v1/libraries/${libraryId}/categories`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, parentId }),
-      })
-      expect(response.status).toBe(201)
-      return (await response.json()).data
-    }
-    const root = await create('Root')
-    const child = await create('Child', root.id)
-    const response = await app.request(`/api/v1/libraries/${libraryId}/categories/${root.id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Changed', parentId: child.id }),
+    const upload = (name: string, body: string, categoryPath: string[]) =>
+      uploadCatalogBook(libraryId, ownerId, new File([body], name, { type: 'text/plain' }), { categoryPath })
+    await upload('a.txt', 'Root content', ['Root'])
+    await upload('b.txt', 'Child content', ['Root', 'Child'])
+
+    const listed = await (await app.request(`/api/v1/libraries/${libraryId}/categories`)).json() as { data: Array<{ id: string; path: string[]; name: string; parentId: string | null; subtreeBookCount: number }> }
+    expect(listed.data.find((row) => row.id === JSON.stringify(['Root'])))
+      .toMatchObject({ name: 'Root', parentId: null, subtreeBookCount: 2 })
+
+    // A patch must name at least one field to change.
+    const emptyPatch = await app.request(`/api/v1/libraries/${libraryId}/categories`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: ['Root'] }),
     })
-    expect(response.status).toBe(400)
-    const categories = await (await app.request(`/api/v1/libraries/${libraryId}/categories`)).json()
-    expect(categories.data.find((row: { id: string }) => row.id === root.id)).toMatchObject({ name: 'Root', parentId: null, subtreeBookCount: 0 })
+    expect(emptyPatch.status).toBe(400)
+    // Paths deeper than two levels are invalid.
+    const tooDeep = await app.request(`/api/v1/libraries/${libraryId}/categories`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: ['Root', 'Child', 'Grandchild'], name: 'Nope' }),
+    })
+    expect(tooDeep.status).toBe(400)
+
+    // Rename and reparent in one request: the leaf becomes a root.
+    const moved = await app.request(`/api/v1/libraries/${libraryId}/categories`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: ['Root', 'Child'], name: 'Renamed', parentPath: null }),
+    })
+    expect(moved.status).toBe(200)
+    const after = await (await app.request(`/api/v1/libraries/${libraryId}/categories`)).json() as { data: Array<{ path: string[] }> }
+    expect(after.data.map((row) => row.path).sort()).toEqual([['Renamed'], ['Root']])
+
     expect((await app.request(`/api/v1/libraries/${libraryId}/books?categoryScope=invalid`)).status).toBe(400)
-    expect((await app.request(`/api/v1/libraries/${libraryId}/books?categoryId=${root.id}&categoryScope=subtree`)).status).toBe(200)
-    const denied = await createApp({ id: memberId }).request(`/api/v1/libraries/${libraryId}/categories/${child.id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parentId: null }),
+    expect((await app.request(`/api/v1/libraries/${libraryId}/books?category=${encodeURIComponent(JSON.stringify(['Renamed']))}&categoryScope=subtree`)).status).toBe(200)
+    const denied = await createApp({ id: memberId }).request(`/api/v1/libraries/${libraryId}/categories`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: ['Root'], name: 'Nope' }),
     })
     expect(denied.status).toBe(403)
   })
@@ -163,10 +182,9 @@ describe('libraries routes', () => {
       expect(missingFile.status).toBe(400)
     })
 
-    it('filters private books by independent shelfId and categoryId query parameters', async () => {
+    it('filters private books by independent shelfId and category query parameters', async () => {
       const privateLibraryId = createId('lib')
       const shelfId = createId('shelf')
-      const categoryId = createId('cat')
       const now = Date.now()
       db.insert(schema.libraries).values({
         id: privateLibraryId, userId: ownerId, type: 'private', name: 'Private',
@@ -176,19 +194,17 @@ describe('libraries routes', () => {
         id: shelfId, libraryId: privateLibraryId, userId: ownerId, name: 'Reading',
         sortOrder: 0, pinned: false, hidden: false, createdAt: now, updatedAt: now,
       }).run()
-      db.insert(schema.libraryCategories).values({
-        id: categoryId, libraryId: privateLibraryId, userId: ownerId, name: 'Mystery',
-        parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: now, updatedAt: now,
-      }).run()
       await uploadCatalogBook(privateLibraryId, ownerId, new File(['private content'], 'private.txt', { type: 'text/plain' }), {
-        shelfId, categoryId, title: 'Private Book',
+        shelfId, categoryPath: ['Mystery'], title: 'Private Book',
       })
 
+      const categoryKey = encodeURIComponent(JSON.stringify(['Mystery']))
+      const shelfKeyAsCategory = encodeURIComponent(JSON.stringify([shelfId]))
       const app = createApp({ id: ownerId })
       const byShelf = await app.request(`/api/v1/libraries/${privateLibraryId}/books?shelfId=${shelfId}`)
-      const byCategory = await app.request(`/api/v1/libraries/${privateLibraryId}/books?categoryId=${categoryId}`)
-      const categoryUsedAsShelf = await app.request(`/api/v1/libraries/${privateLibraryId}/books?shelfId=${categoryId}`)
-      const shelfUsedAsCategory = await app.request(`/api/v1/libraries/${privateLibraryId}/books?categoryId=${shelfId}`)
+      const byCategory = await app.request(`/api/v1/libraries/${privateLibraryId}/books?category=${categoryKey}`)
+      const categoryUsedAsShelf = await app.request(`/api/v1/libraries/${privateLibraryId}/books?shelfId=${categoryKey}`)
+      const shelfUsedAsCategory = await app.request(`/api/v1/libraries/${privateLibraryId}/books?category=${shelfKeyAsCategory}`)
 
       expect((await byShelf.json()).data.items).toHaveLength(1)
       expect((await byCategory.json()).data.items).toHaveLength(1)

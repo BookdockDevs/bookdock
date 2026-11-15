@@ -12,11 +12,9 @@ import { invalidateActivityQueries } from '@/features/activity/hooks'
 import { formatAuthorList } from '@/lib/utils'
 
 import { versionOrdinal } from '../book-row'
-import { matchCategoryByName } from '../taxonomy'
+import { categoryTemplatePath, matchCategoryTemplateKey } from '@bookdock/shared'
 import {
   useCatalogVersionMetadataSource,
-  useCreateLibraryTag,
-  useLibraryCategories,
   useLibraryTags,
 } from '../hooks'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
@@ -27,7 +25,6 @@ import { isMachineIdentifier, parseAuthorList, type MetaFormValues } from './boo
 import MetadataLookupDialog from './book-detail/MetadataLookupDialog'
 import MetadataLookupDropdown from './book-detail/MetadataLookupDropdown'
 import { hasRestorableField, sourceTextForField, type DraftTextField } from './book-detail/metadata-source'
-import { mergePendingTagNames } from './book-detail/pending-tags'
 import VersionSelect from './VersionSelect'
 
 interface WorkEditDialogProps {
@@ -129,8 +126,6 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
   const queryClient = useQueryClient()
 
   const { data: tagsData } = useLibraryTags(libraryId)
-  const createTag = useCreateLibraryTag()
-  const { data: categoriesData } = useLibraryCategories(libraryId)
 
   const [initialDrafts] = useState<Record<string, VersionDraft>>(() => buildInitialDrafts(work.versions))
   const [drafts, setDrafts] = useState<Record<string, VersionDraft>>(() => ({ ...initialDrafts }))
@@ -141,15 +136,8 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
 
   // Classification is work-level: one set of categories and tags per work,
   // shared by every version of it.
-  const [categoryId, setCategoryId] = useState<string | null>(work.categoryId)
-  const [categoryTemplateKey, setCategoryTemplateKey] = useState<string | undefined>(undefined)
-  const [tagIds, setTagIds] = useState<Set<string>>(() => new Set(work.tags.map((t) => t.id)))
-  // Scraped tag names that are not in this library yet: created on save only, so
-  // closing the dialog or dropping them leaves no orphan tags behind.
-  const [pendingTagNames, setPendingTagNames] = useState<string[]>([])
-  // A scraped category name that matches nothing here is created on save, the
-  // same way pending tags are.
-  const [pendingCategoryName, setPendingCategoryName] = useState<string | null>(null)
+  const [categoryPath, setCategoryPath] = useState<string[] | null>(work.categoryPath)
+  const [tagNames, setTagNames] = useState<Set<string>>(() => new Set(work.tags))
   const [defaultVersionLinkId, setDefaultVersionLinkId] = useState<string | null>(
     work.defaultVersionLinkId || work.versions[0]?.id || null,
   )
@@ -214,7 +202,7 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
   }
 
   const [savingSave, setSaving] = useState(false)
-  const saving = savingSave || createTag.isPending
+  const saving = savingSave
 
   const invalidVersion = work.versions.find((v) => drafts[v.id] && !drafts[v.id].title.trim())
 
@@ -261,19 +249,11 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
       return
     }
 
-    const bookPatch: CatalogBookUpdateReq & { tagNames?: string[] } = {}
-    if (categoryTemplateKey) bookPatch.categoryTemplateKey = categoryTemplateKey
-    else if (pendingCategoryName) bookPatch.categoryName = pendingCategoryName
-    else if (categoryId !== work.categoryId) bookPatch.categoryId = categoryId
-    // Scraped tags only became names: they ride along with the save and the
-    // server creates the missing ones, so an abandoned dialog leaves no rows.
-    const initialTagIds = work.tags.map((t) => t.id)
-    const nextTagIds = [...tagIds]
-    const tagsChanged = nextTagIds.length !== initialTagIds.length || nextTagIds.some((id) => !initialTagIds.includes(id))
-    if (tagsChanged || pendingTagNames.length > 0) {
-      bookPatch.tagIds = nextTagIds
-      if (pendingTagNames.length > 0) bookPatch.tagNames = pendingTagNames
-    }
+    const bookPatch: CatalogBookUpdateReq = {}
+    if (JSON.stringify(categoryPath) !== JSON.stringify(work.categoryPath)) bookPatch.categoryPath = categoryPath
+    const initialTags = work.tags
+    const nextTags = [...tagNames]
+    if (nextTags.length !== initialTags.length || nextTags.some((name) => !initialTags.includes(name))) bookPatch.tags = nextTags
     if (work.versions.length > 1 && defaultVersionLinkId !== work.defaultVersionLinkId) {
       bookPatch.defaultVersionLinkId = defaultVersionLinkId
     }
@@ -465,22 +445,11 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
 
           <BookClassificationEditor
             libraryId={libraryId}
-            categoryId={categoryId}
-            categoryTemplateKey={categoryTemplateKey}
-            tagIds={tagIds}
-            onCategoryChange={(value) => {
-              setCategoryId(value.categoryId ?? null)
-              setCategoryTemplateKey(value.categoryTemplateKey)
-              setPendingCategoryName(null)
-            }}
-            onTagChange={setTagIds}
-            tags={tagsData?.data ?? []}
-            pendingTagNames={pendingTagNames}
-            onRemovePendingTag={(name) => setPendingTagNames((prev) => prev.filter((tag) => tag !== name))}
-            pendingCategoryName={pendingCategoryName}
-            onRemovePendingCategory={() => setPendingCategoryName(null)}
-            onCreateTag={async (name) => (await createTag.mutateAsync({ libraryId, name })).data.id}
-            creatingTag={createTag.isPending}
+            categoryPath={categoryPath}
+            tags={tagNames}
+            onCategoryChange={setCategoryPath}
+            onTagsChange={setTagNames}
+            tagValues={tagsData?.data ?? []}
           />
         </div>
       </Modal>
@@ -527,31 +496,11 @@ export default function WorkEditDialog({ work, libraryId, version, onClose }: Wo
             if (classification) {
               if (classification.category?.trim()) {
                 const rawCat = classification.category.trim()
-                // Exact name or nothing: an unknown one is created by the save.
-                const existing = matchCategoryByName(categoriesData?.data ?? [], rawCat)
-                setCategoryId(existing?.id ?? null)
-                setCategoryTemplateKey(undefined)
-                setPendingCategoryName(existing ? null : rawCat)
+                const template = matchCategoryTemplateKey(rawCat)
+                setCategoryPath(template ? categoryTemplatePath(template) ?? [rawCat] : [rawCat])
               }
               if (classification.tags?.length) {
-                const currentTags = tagsData?.data ?? []
-                const toAddIds: string[] = []
-                const toAddNames: string[] = []
-                for (const tagName of classification.tags) {
-                  const trimmed = tagName.trim()
-                  if (!trimmed) continue
-                  const found = currentTags.find((t) => t.name.toLowerCase() === trimmed.toLowerCase())
-                  if (found) toAddIds.push(found.id)
-                  else toAddNames.push(trimmed)
-                }
-                if (toAddIds.length > 0) {
-                  setTagIds((prev) => new Set([...prev, ...toAddIds]))
-                }
-                if (toAddNames.length > 0) {
-                  // Deferred to save: creating them here would persist tags even
-                  // when the dialog is cancelled right after scraping.
-                  setPendingTagNames((prev) => mergePendingTagNames(prev, toAddNames))
-                }
+                setTagNames((prev) => new Set([...prev, ...classification.tags!.map((name) => name.trim()).filter(Boolean)]))
               }
             }
             setMetadataLookup({ open: false })

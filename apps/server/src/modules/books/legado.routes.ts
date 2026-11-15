@@ -586,7 +586,7 @@ async function legadoSearchItems(
   c: Context,
   userId: string,
   libraryIds: string[],
-  params: { page: number; sortBy?: string; sortOrder?: string; shelfId?: string; categoryId?: string; tagId?: string; search?: string },
+  params: { page: number; sortBy?: string; sortOrder?: string; shelfId?: string; category?: string[] | 'none'; tag?: string; search?: string },
 ) {
   const items: LegadoBookSearchItem[] = []
   let page = params.page
@@ -676,8 +676,8 @@ async function exploreBooks(c: Context, scope: LegadoExploreScope, id?: string, 
       sortBy,
       sortOrder,
       shelfId: filter.shelfId,
-      categoryId: filter.categoryId,
-      tagId: filter.tagId,
+      category: filter.category,
+      tag: filter.tag,
     }),
   })
 }

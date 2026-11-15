@@ -310,6 +310,21 @@ describe('archive service', () => {
     expect(searchRes.entries).toHaveLength(0)
     expect(searchRes.hasMore).toBe(false)
   })
+
+  it('filters archive tags through only the requesting user private library', async () => {
+    const owner = db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
+      .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, bookOne)).get()!
+    db.insert(schema.libraryBookTagValues).values({ id: createId('tagv'), libraryBookId: owner.libraryBookId, name: 'Shared name', sortOrder: 0 }).run()
+
+    const otherBook = createId('book')
+    const other = seedVersion(db, otherId, otherBook, 'Other private book')
+    db.insert(schema.libraryBookTagValues).values({ id: createId('tagv'), libraryBookId: other.libraryBookId, name: 'Shared name', sortOrder: 0 }).run()
+    seedHighlight(db, ownerId, bookOne, 100)
+    seedHighlight(db, ownerId, otherBook, 200)
+
+    const result = await listBooks(ownerId, { tag: 'Shared name', sort: 'recent', page: 1, pageSize: 20 })
+    expect(result.entries.map((entry) => entry.bookVersionId)).toEqual([bookOne])
+  })
   it('scopes counts, participating books and note sorting without using edits or foreign/deleted facts', async () => {
     const from = Date.parse('2026-10-17T16:00:00Z')
     const until = Date.parse('2026-10-18T16:00:00Z')

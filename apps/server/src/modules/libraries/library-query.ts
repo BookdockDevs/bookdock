@@ -1,8 +1,8 @@
 import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm'
 
-import { bookVersions, contentRevisions, libraryBookTags, libraryBooks, libraryBookVersions, libraryCategories, libraryTags, shelves, libraries } from '../../db/schema'
+import { bookVersions, contentRevisions, libraryBookTagValues, libraryBooks, libraryBookVersions, libraryMetadataValueState, shelves, libraries } from '../../db/schema'
 import { getDb } from '../../db/client'
-import type { CategoryScope, HiddenReason, HiddenVia } from '@bookdock/shared'
+import { parseCategoryValueKey, type CategoryScope, type HiddenReason, type HiddenVia } from '@bookdock/shared'
 
 export function pendingBookDataDeletionVersionIds(db: ReturnType<typeof getDb>, userId: string): string[] {
   return db.select({ id: libraryBookVersions.bookVersionId }).from(libraryBookVersions)
@@ -35,12 +35,13 @@ export interface LibraryListQuery {
   search?: string
   sortBy?: string
   sortOrder?: string
-  /** Category, or the 'none' sentinel for uncategorized. */
-  categoryId?: string
+  /** Category path, or the 'none' sentinel for uncategorized. */
+  category?: string[] | 'none'
   /** Private shelf, or the 'none' sentinel for works outside every shelf. */
   shelfId?: string
   categoryScope?: CategoryScope
-  tagId?: string
+  /** Tag value (the name itself; tags have no other identity). */
+  tag?: string
   format?: 'epub' | 'txt'
   author?: string
   series?: string
@@ -75,23 +76,22 @@ export function likePattern(term: string): string {
   return `%${term.replace(/[!%_]/g, (match) => '!' + match)}%`
 }
 
-/** 'none' filters uncategorized works; otherwise the category must match. */
-export function categoryFilter(categoryId: string | undefined, scope: CategoryScope = 'direct', libraryId?: string): SQL | undefined {
-  if (categoryId === 'none') return isNull(libraryBooks.categoryId)
-  if (!categoryId) return undefined
-  if (scope === 'subtree' && libraryId) {
-    // UNION terminates even for a historical cycle; every step stays in-library.
-    return sql`${libraryBooks.categoryId} IN (
-      WITH RECURSIVE category_tree(id) AS (
-        SELECT id FROM library_categories WHERE id = ${categoryId} AND library_id = ${libraryId}
-        UNION
-        SELECT child.id FROM library_categories child
-        INNER JOIN category_tree parent ON child.parent_id = parent.id
-        WHERE child.library_id = ${libraryId}
-      ) SELECT id FROM category_tree
-    )`
+/**
+ * 'none' filters uncategorized works; a path matches the books carrying it.
+ *
+ * A path node stands for itself, and a subtree query for a root covers every
+ * branch under it — the two-level limit means the root column alone answers
+ * that, so no recursive walk is needed.
+ */
+export function categoryFilter(category: string[] | 'none' | undefined, scope: CategoryScope = 'direct'): SQL | undefined {
+  if (category === undefined) return undefined
+  if (category === 'none') return isNull(libraryBooks.categoryRoot)
+  const root = category[0]!
+  const leaf = category[1]
+  if (leaf === undefined) {
+    return scope === 'subtree' ? eq(libraryBooks.categoryRoot, root) : and(eq(libraryBooks.categoryRoot, root), isNull(libraryBooks.categoryLeaf)) as SQL
   }
-  return eq(libraryBooks.categoryId, categoryId)
+  return and(eq(libraryBooks.categoryRoot, root), eq(libraryBooks.categoryLeaf, leaf)) as SQL
 }
 
 export function publishedWorkExists(): SQL {
@@ -103,36 +103,31 @@ export function publishedWorkExists(): SQL {
   )`
 }
 
-/** Works carrying the tag, scoped to the library so ids cannot cross over. */
-export function tagFilter(tagId: string, libraryId: string): SQL | undefined {
-  if (!tagId) return undefined
-  return sql`${libraryBooks.id} IN (
-    SELECT ${libraryBookTags.libraryBookId} FROM ${libraryBookTags}
-    INNER JOIN library_tags AS filter_tag ON filter_tag.id = ${libraryBookTags.tagId}
-    WHERE ${libraryBookTags.tagId} = ${tagId} AND filter_tag.library_id = ${libraryId}
+/** Works carrying the tag value. Tag names are library-scoped by the book join. */
+export function tagFilter(tag: string | undefined): SQL | undefined {
+  if (!tag) return undefined
+  return sql`EXISTS (
+    SELECT 1 FROM ${libraryBookTagValues} AS filter_book_tag
+    INNER JOIN ${libraryBooks} AS filter_tag_book ON filter_tag_book.id = filter_book_tag.library_book_id
+    WHERE filter_book_tag.library_book_id = ${libraryBooks.id}
+      AND filter_book_tag.name = ${tag}
+      AND filter_tag_book.library_id = ${libraryBooks.libraryId}
   )`
 }
 
 /**
- * Persistent-hide taxonomy snapshot for one library (see Hidden boundary in
- * architecture.md). Category hiding propagates down: a hidden category hides
- * its whole subtree, so the closure contains every hidden node plus all of
- * its descendants. Tag hiding is flat: any hidden tag hides every work that
- * carries it. Libraries are small; the walk runs in memory per request.
+ * Persistent-hide snapshot for one library (see the Hidden boundary in
+ * architecture.md). Category hiding is value-based: hiding a root covers its
+ * whole branch, hiding a leaf covers exactly that path. Tag hiding is flat and
+ * hides every work carrying the name. Libraries are small; the snapshot is
+ * loaded once per request.
  */
 export interface LibraryHiddenTaxonomy {
   hiddenShelfIds: string[]
   hiddenShelfNames: Map<string, string>
-  hiddenCategoryIds: string[]
-  /** Only rows flagged hidden themselves, without inherited descendants. */
-  directHiddenCategoryIds: string[]
-  hiddenTagIds: string[]
-  /** Every category's display name, for naming the hiding ancestor. */
-  categoryNames: Map<string, string>
-  /** Every category's parent, for walking a work's ancestry upward. */
-  categoryParents: Map<string, string | null>
-  /** Hidden tags' display names, for naming the hiding tags. */
-  hiddenTagNames: Map<string, string>
+  /** Hidden category paths. Length 1 hides the branch, length 2 the exact node. */
+  hiddenCategoryPaths: string[][]
+  hiddenTagNames: string[]
 }
 
 export function loadLibraryHiddenTaxonomy(
@@ -141,45 +136,24 @@ export function loadLibraryHiddenTaxonomy(
 ): LibraryHiddenTaxonomy {
   const hiddenShelves = db.select({ id: shelves.id, name: shelves.name }).from(shelves)
     .where(and(eq(shelves.libraryId, libraryId), eq(shelves.hidden, true))).all()
-  const categories = db.select({
-    id: libraryCategories.id,
-    parentId: libraryCategories.parentId,
-    hidden: libraryCategories.hidden,
-    name: libraryCategories.name,
-  }).from(libraryCategories).where(eq(libraryCategories.libraryId, libraryId)).all()
-  const childrenByParent = new Map<string, string[]>()
-  const categoryNames = new Map<string, string>()
-  const categoryParents = new Map<string, string | null>()
-  for (const category of categories) {
-    categoryNames.set(category.id, category.name)
-    categoryParents.set(category.id, category.parentId)
-    if (!category.parentId) continue
-    const siblings = childrenByParent.get(category.parentId) ?? []
-    siblings.push(category.id)
-    childrenByParent.set(category.parentId, siblings)
-  }
-  const closure = new Set<string>()
-  const queue = categories.filter((category) => category.hidden).map((category) => category.id)
-  for (const id of queue) closure.add(id)
-  while (queue.length > 0) {
-    const current = queue.pop() as string
-    for (const child of childrenByParent.get(current) ?? []) {
-      if (closure.has(child)) continue
-      closure.add(child)
-      queue.push(child)
+  const hiddenRows = db.select({ kind: libraryMetadataValueState.kind, value: libraryMetadataValueState.value })
+    .from(libraryMetadataValueState)
+    .where(and(eq(libraryMetadataValueState.libraryId, libraryId), eq(libraryMetadataValueState.hidden, true))).all()
+  const hiddenCategoryPaths: string[][] = []
+  const hiddenTagNames: string[] = []
+  for (const row of hiddenRows) {
+    if (row.kind === 'tag') {
+      hiddenTagNames.push(row.value)
+      continue
     }
+    const path = parseCategoryValueKey(row.value)
+    if (path) hiddenCategoryPaths.push(path)
   }
-  const tags = db.select({ id: libraryTags.id, name: libraryTags.name }).from(libraryTags)
-    .where(and(eq(libraryTags.libraryId, libraryId), eq(libraryTags.hidden, true))).all()
   return {
     hiddenShelfIds: hiddenShelves.map((shelf) => shelf.id),
     hiddenShelfNames: new Map(hiddenShelves.map((shelf) => [shelf.id, shelf.name])),
-    hiddenCategoryIds: [...closure],
-    directHiddenCategoryIds: categories.filter((category) => category.hidden).map((category) => category.id),
-    hiddenTagIds: tags.map((tag) => tag.id),
-    categoryNames,
-    categoryParents,
-    hiddenTagNames: new Map(tags.map((tag) => [tag.id, tag.name])),
+    hiddenCategoryPaths,
+    hiddenTagNames,
   }
 }
 
@@ -192,33 +166,30 @@ export interface WorkHiddenDetail {
 /**
  * Pure classification over a preloaded taxonomy: no queries, so list paths
  * call it per row after one taxonomy load. Priority is direct over category
- * over tag, so a work hidden two ways still names one cause. The category
- * name is the nearest hidden ancestor, which is where the owner must unhide.
+ * over tag, so a work hidden two ways still names one cause. The named
+ * category is the nearest hidden ancestor, which is where the owner must
+ * unhide.
  */
 export function classifyWorkHidden(
-  work: { hidden: boolean; shelfId?: string | null; categoryId: string | null },
+  work: { hidden: boolean; shelfId?: string | null; categoryRoot: string | null; categoryLeaf: string | null },
   taxonomy: LibraryHiddenTaxonomy,
-  workTagIds: string[] = [],
+  workTagNames: readonly string[] = [],
 ): WorkHiddenDetail {
   if (work.hidden) return { reason: 'direct' }
   if (work.shelfId && taxonomy.hiddenShelfNames.has(work.shelfId)) {
     return { reason: 'shelf', via: { shelfName: taxonomy.hiddenShelfNames.get(work.shelfId) } }
   }
-  // Walk the ancestry for the nearest directly-hidden category: descendants
-  // inherit the hide but only the flagged ancestor names the cause.
-  const seen = new Set<string>()
-  let current: string | null | undefined = work.categoryId
-  while (current && !seen.has(current)) {
-    seen.add(current)
-    if (taxonomy.directHiddenCategoryIds.includes(current)) {
-      return { reason: 'category', via: { categoryName: taxonomy.categoryNames.get(current) } }
+  const path = work.categoryRoot ? [work.categoryRoot, ...(work.categoryLeaf ? [work.categoryLeaf] : [])] : null
+  if (path && path.length > 0) {
+    // Nearest first: a hidden leaf names itself, otherwise its root does.
+    for (let depth = path.length; depth >= 1; depth -= 1) {
+      const candidate = path.slice(0, depth)
+      const hit = taxonomy.hiddenCategoryPaths.find((hidden) => hidden.length === candidate.length
+        && hidden.every((name, index) => name === candidate[index]))
+      if (hit) return { reason: 'category', via: { categoryName: candidate[candidate.length - 1] } }
     }
-    current = taxonomy.categoryParents.get(current) ?? null
   }
-  const hitNames = workTagIds.flatMap((id) => {
-    const name = taxonomy.hiddenTagNames.get(id)
-    return name === undefined ? [] : [name]
-  })
+  const hitNames = workTagNames.filter((name) => taxonomy.hiddenTagNames.includes(name))
   if (hitNames.length > 0) return { reason: 'tag', via: { tagNames: hitNames } }
   return { reason: null }
 }
@@ -231,22 +202,23 @@ export function classifyWorkHidden(
 export function getWorkHiddenDetail(
   db: ReturnType<typeof getDb>,
   libraryId: string,
-  work: { id: string; shelfId?: string | null; categoryId: string | null; hidden: boolean },
+  work: { id: string; shelfId?: string | null; categoryRoot: string | null; categoryLeaf: string | null; hidden: boolean },
 ): WorkHiddenDetail {
   if (work.hidden) return { reason: 'direct' }
   const taxonomy = loadLibraryHiddenTaxonomy(db, libraryId)
-  const tagIds = taxonomy.hiddenTagIds.length === 0 ? [] : db.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
+  const tagNames = taxonomy.hiddenTagNames.length === 0 ? [] : db.select({ name: libraryBookTagValues.name })
+    .from(libraryBookTagValues)
     .where(and(
-      eq(libraryBookTags.libraryBookId, work.id),
-      inArray(libraryBookTags.tagId, taxonomy.hiddenTagIds),
-    )).all().map((row) => row.tagId)
-  return classifyWorkHidden(work, taxonomy, tagIds)
+      eq(libraryBookTagValues.libraryBookId, work.id),
+      inArray(libraryBookTagValues.name, taxonomy.hiddenTagNames),
+    )).all().map((row) => row.name)
+  return classifyWorkHidden(work, taxonomy, tagNames)
 }
 
 /**
  * Read-time visibility exclusion for works (see Hidden boundary). A work is
  * listed only when it is not hidden itself, sits outside every hidden
- * category subtree (null = uncategorized, always outside), and carries no
+ * category branch (null = uncategorized, always outside), and carries no
  * hidden tag. Callers that may see hidden rows (shared-library managers,
  * private owners with showHidden) skip this condition entirely.
  *
@@ -258,12 +230,22 @@ export function workDirectHiddenExclusion(): SQL {
   return eq(libraryBooks.hidden, false)
 }
 
-export function hiddenCategoryExclusion(hiddenCategoryIds: string[]): SQL | undefined {
-  if (hiddenCategoryIds.length === 0) return undefined
-  return or(
-    isNull(libraryBooks.categoryId),
-    notInArray(libraryBooks.categoryId, hiddenCategoryIds),
-  ) as SQL
+export function hiddenCategoryExclusion(hiddenCategoryPaths: string[][]): SQL | undefined {
+  if (hiddenCategoryPaths.length === 0) return undefined
+  const roots = hiddenCategoryPaths.filter((path) => path.length === 1).map((path) => path[0]!)
+  const leaves = hiddenCategoryPaths.filter((path) => path.length === 2)
+  const conditions: SQL[] = []
+  if (roots.length > 0) conditions.push(or(isNull(libraryBooks.categoryRoot), notInArray(libraryBooks.categoryRoot, roots)) as SQL)
+  for (const [root, leaf] of leaves) {
+    conditions.push(sql`(
+      ${libraryBooks.categoryRoot} IS NULL
+      OR ${libraryBooks.categoryRoot} <> ${root}
+      OR ${libraryBooks.categoryLeaf} IS NULL
+      OR ${libraryBooks.categoryLeaf} <> ${leaf}
+    )`)
+  }
+  if (conditions.length === 0) return undefined
+  return conditions.length === 1 ? conditions[0] : and(...conditions) as SQL
 }
 
 export function hiddenShelfExclusion(hiddenShelfIds: string[]): SQL | undefined {
@@ -271,23 +253,22 @@ export function hiddenShelfExclusion(hiddenShelfIds: string[]): SQL | undefined 
   return or(isNull(libraryBooks.shelfId), notInArray(libraryBooks.shelfId, hiddenShelfIds)) as SQL
 }
 
-export function hiddenTagExclusion(hiddenTagIds: string[]): SQL | undefined {
-  if (hiddenTagIds.length === 0) return undefined
+export function hiddenTagExclusion(hiddenTagNames: string[]): SQL | undefined {
+  if (hiddenTagNames.length === 0) return undefined
   return sql`NOT EXISTS (
-    SELECT 1 FROM ${libraryBookTags} AS hidden_book_tag
-    INNER JOIN ${libraryTags} AS hidden_tag ON hidden_tag.id = hidden_book_tag.tag_id
+    SELECT 1 FROM ${libraryBookTagValues} AS hidden_book_tag
     WHERE hidden_book_tag.library_book_id = ${libraryBooks.id}
-      AND hidden_tag.id IN ${hiddenTagIds}
+      AND hidden_book_tag.name IN ${hiddenTagNames}
   )`
 }
 
 export function workHiddenExclusion(taxonomy: LibraryHiddenTaxonomy): SQL {
   const conditions: SQL[] = [workDirectHiddenExclusion()]
-  const category = hiddenCategoryExclusion(taxonomy.hiddenCategoryIds)
+  const category = hiddenCategoryExclusion(taxonomy.hiddenCategoryPaths)
   if (category) conditions.push(category)
   const shelf = hiddenShelfExclusion(taxonomy.hiddenShelfIds)
   if (shelf) conditions.push(shelf)
-  const tag = hiddenTagExclusion(taxonomy.hiddenTagIds)
+  const tag = hiddenTagExclusion(taxonomy.hiddenTagNames)
   if (tag) conditions.push(tag)
   return and(...conditions) as SQL
 }
@@ -300,7 +281,7 @@ export function workHiddenExclusion(taxonomy: LibraryHiddenTaxonomy): SQL {
 export function isWorkEffectivelyHidden(
   db: ReturnType<typeof getDb>,
   libraryId: string,
-  work: { id: string; shelfId?: string | null; categoryId: string | null; hidden: boolean },
+  work: { id: string; shelfId?: string | null; categoryRoot: string | null; categoryLeaf: string | null; hidden: boolean },
 ): boolean {
   return getWorkHiddenDetail(db, libraryId, work).reason !== null
 }
@@ -345,18 +326,14 @@ export function taxonomyNameMatch(pattern: string, libraryId: string): SQL {
       AND q_shelf.library_id = ${libraryId}
       AND q_shelf.name LIKE ${pattern} ESCAPE '!'
   )`
-  const categoryMatch = sql`EXISTS (
-    SELECT 1 FROM ${libraryCategories} AS q_category
-    WHERE q_category.id = ${libraryBooks.categoryId}
-      AND q_category.library_id = ${libraryId}
-      AND q_category.name LIKE ${pattern} ESCAPE '!'
+  const categoryMatch = sql`(
+    ${libraryBooks.categoryRoot} LIKE ${pattern} ESCAPE '!'
+    OR ${libraryBooks.categoryLeaf} LIKE ${pattern} ESCAPE '!'
   )`
   const tagMatch = sql`EXISTS (
-    SELECT 1 FROM ${libraryBookTags} AS q_book_tag
-    INNER JOIN library_tags AS q_tag ON q_tag.id = q_book_tag.tag_id
+    SELECT 1 FROM ${libraryBookTagValues} AS q_book_tag
     WHERE q_book_tag.library_book_id = ${libraryBooks.id}
-      AND q_tag.library_id = ${libraryId}
-      AND q_tag.name LIKE ${pattern} ESCAPE '!'
+      AND q_book_tag.name LIKE ${pattern} ESCAPE '!'
   )`
   return sql`(${shelfMatch} OR ${categoryMatch} OR ${tagMatch})`
 }
@@ -435,7 +412,7 @@ export function sharedListConditions(query: LibraryListQuery, libraryId: string,
   const conditions: SQL[] = []
   const libraryType = getDb().select({ type: libraries.type }).from(libraries).where(eq(libraries.id, libraryId)).get()?.type
   const categoryScope = libraryType === 'private' ? 'subtree' : query.categoryScope ?? 'direct'
-  const category = categoryFilter(query.categoryId, categoryScope, libraryId)
+  const category = categoryFilter(query.category, categoryScope)
   if (category) conditions.push(category)
   if (query.shelfId !== undefined) {
     conditions.push(sql`EXISTS (SELECT 1 FROM ${libraries} WHERE ${libraries.id} = ${libraryId} AND ${libraries.type} = 'private')`)
@@ -443,7 +420,7 @@ export function sharedListConditions(query: LibraryListQuery, libraryId: string,
       ? isNull(libraryBooks.shelfId)
       : eq(libraryBooks.shelfId, query.shelfId))
   }
-  const tag = query.tagId ? tagFilter(query.tagId, libraryId) : undefined
+  const tag = query.tag ? tagFilter(query.tag) : undefined
   if (tag) conditions.push(tag)
   const author = authorFilter(query.author ?? '', libraryId, opts)
   if (author) conditions.push(author)

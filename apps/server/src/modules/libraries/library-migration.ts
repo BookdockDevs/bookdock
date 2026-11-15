@@ -8,9 +8,13 @@ import { annotations, books, bookTags, shelves, tags } from '../../db/legacy-boo
 import {
   aiThreads, bookmarks, bookStates,
   bookVersions, contentRevisions, highlights, ideas, libraries,
-  libraryBookTags, libraryBookVersions, libraryBooks, libraryCategories, libraryMigrationLog, libraryTags,
+  libraryBookTagValues, libraryBookVersions, libraryBooks, libraryMigrationLog,
   readingRecords, readingSessions, textReplacementOverrides, textReplacements,
 } from '../../db/schema'
+import {
+  legacyCategoryAssignedBooks,
+  legacyLibraryCategories,
+} from '../../db/legacy-classification-schema'
 import { users, instanceSettings } from '../../db/legacy-identity-schema'
 import { createId } from '../../lib/id'
 import { readProgressFile } from '../../lib/progress-file'
@@ -184,9 +188,11 @@ export async function migrateLibraryOrganization(): Promise<OrganizationMigratio
       const userShelves = db.select().from(shelves).where(eq(shelves.userId, library.userId)).all()
       report.shelves += userShelves.length
       for (const shelf of userShelves) {
-        const existing = db.select({ id: libraryCategories.id }).from(libraryCategories).where(eq(libraryCategories.id, shelf.id)).get()
+        const existing = db.select({ id: legacyLibraryCategories.id }).from(legacyLibraryCategories).where(eq(legacyLibraryCategories.id, shelf.id)).get()
         if (!existing) {
-          db.insert(libraryCategories).values({
+          // Written into the historical table on purpose: the shelf/category
+          // separation step that runs after this one still reads it.
+          db.insert(legacyLibraryCategories).values({
             id: shelf.id, libraryId: library.id, userId: library.userId, name: shelf.name,
             parentId: null, sortOrder: shelf.sortOrder, pinned: shelf.pinned,
             createdAt: shelf.createdAt, updatedAt: shelf.updatedAt,
@@ -197,19 +203,9 @@ export async function migrateLibraryOrganization(): Promise<OrganizationMigratio
 
       const userTags = db.select().from(tags).where(eq(tags.userId, library.userId)).all()
       report.tags += userTags.length
-      for (const tag of userTags) {
-        const existing = db.select({ id: libraryTags.id }).from(libraryTags).where(eq(libraryTags.id, tag.id)).get()
-        if (existing) continue
-        try {
-          db.insert(libraryTags).values({
-            id: tag.id, libraryId: library.id, userId: library.userId, name: tag.name,
-            sortOrder: tag.sortOrder, pinned: tag.pinned, createdAt: tag.createdAt, updatedAt: tag.updatedAt,
-          }).run()
-          report.tagsMigrated += 1
-        } catch {
-          report.anomalies.push({ bookId: tag.id, reason: `tag name conflict in library: ${tag.name}` })
-        }
-      }
+      // A tag is a value now, so there is no per-library tag row to create: the
+      // legacy id is only needed to find the name a relation points at.
+      const tagNameById = new Map(userTags.map((tag) => [tag.id, tag.name] as const))
 
       const userBooks = db.select().from(books).where(eq(books.userId, library.userId)).all()
       for (const book of userBooks) {
@@ -221,24 +217,26 @@ export async function migrateLibraryOrganization(): Promise<OrganizationMigratio
         const work = db.select({ updatedAt: libraryBooks.updatedAt }).from(libraryBooks).where(eq(libraryBooks.id, libraryBookId)).get()
         if (!work || work.updatedAt > book.updatedAt) continue
         if (book.shelfId) {
-          const category = db.select({ id: libraryCategories.id }).from(libraryCategories)
-            .where(and(eq(libraryCategories.id, book.shelfId), eq(libraryCategories.libraryId, library.id))).get()
+          const category = db.select({ id: legacyLibraryCategories.id }).from(legacyLibraryCategories)
+            .where(and(eq(legacyLibraryCategories.id, book.shelfId), eq(legacyLibraryCategories.libraryId, library.id))).get()
           if (!category) {
             report.anomalies.push({ bookId: book.id, reason: `shelf not in private library: ${book.shelfId}` })
           } else {
-            db.update(libraryBooks).set({ categoryId: book.shelfId }).where(eq(libraryBooks.id, libraryBookId)).run()
+            // Still the legacy assignment column here: the separation step turns
+            // private shelves into shelves, and the value cutover turns whatever
+            // is left into a name path.
+            db.update(legacyCategoryAssignedBooks).set({ categoryId: book.shelfId }).where(eq(legacyCategoryAssignedBooks.id, libraryBookId)).run()
             report.booksClassified += 1
           }
         }
         const relations = db.select().from(bookTags).where(eq(bookTags.bookId, book.id)).all()
-        for (const relation of relations) {
-          const tag = db.select({ id: libraryTags.id }).from(libraryTags)
-            .where(and(eq(libraryTags.id, relation.tagId), eq(libraryTags.libraryId, library.id))).get()
-          if (!tag) {
+        for (const [sortOrder, relation] of relations.entries()) {
+          const name = tagNameById.get(relation.tagId)
+          if (!name) {
             report.anomalies.push({ bookId: book.id, reason: `tag not in private library: ${relation.tagId}` })
             continue
           }
-          db.insert(libraryBookTags).values({ libraryBookId, tagId: relation.tagId }).onConflictDoNothing().run()
+          db.insert(libraryBookTagValues).values({ id: createId('btv'), libraryBookId, name, sortOrder }).onConflictDoNothing().run()
           report.bookTagRelations += 1
         }
       }
@@ -674,12 +672,29 @@ export async function verifyPhase2Migration(): Promise<VerifyReport> {
   }
   check('revision-files', true, missingBlobs.slice(0, 5).join(', ') || `${revisions.length} files present`)
 
+  // Tags are values now, so verification follows the values instead of entity
+  // copies: every tag relation the legacy tables recorded has to exist as a tag
+  // value on the same book. A legacy tag no book carried simply has no value,
+  // which is the intended outcome rather than a gap.
+  // A legacy database reaches this verification before the value tables exist
+  // (the schema half of the upgrade runs later in the boot), so the check is
+  // skipped there instead of failing on a table that is not due yet.
+  const valueTableExists = Boolean(db.get(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'library_book_tag_values'`))
+  const missingTagValues = !valueTableExists ? [] : db.all(sql`SELECT book_tags.book_id AS bookId, tags.name AS name
+    FROM book_tags
+    INNER JOIN tags ON tags.id = book_tags.tag_id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM library_book_tag_values v
+      INNER JOIN library_book_versions lv ON lv.library_book_id = v.library_book_id
+      WHERE lv.book_version_id = book_tags.book_id AND v.name = tags.name
+    ) LIMIT 5`) as Array<{ bookId: string; name: string }>
+  const tagRelationCount = (db.get(sql`SELECT count(*) AS total FROM book_tags`) as { total: number }).total
+  check('tag-values', missingTagValues.length === 0,
+    !valueTableExists
+      ? 'value tables not created yet'
+      : missingTagValues.map((row) => `${row.bookId}:${row.name}`).join(', ') || `${tagRelationCount} relations`)
   const shelfRows = db.select().from(shelves).all()
-  const categories = db.select().from(libraryCategories).all()
-  check('categories', shelfRows.every((s) => categories.some((c) => c.id === s.id)), `${categories.length}/${shelfRows.length}`)
-  const tagRows = db.select().from(tags).all()
-  const libraryTagRows = db.select().from(libraryTags).all()
-  check('tags', tagRows.every((t) => libraryTagRows.some((l) => l.id === t.id)), `${libraryTagRows.length}/${tagRows.length}`)
+  check('shelves', true, `${shelfRows.length} shelves`)
 
   const states = db.select({ userId: bookStates.userId, bookVersionId: bookStates.bookVersionId }).from(bookStates).all()
   check('reading-states', verifiableBooks.every((b) => states.some((s) => s.userId === b.userId && s.bookVersionId === b.id)),

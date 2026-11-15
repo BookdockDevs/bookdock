@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url'
 
 import * as schema from '../../db/legacy-test-schema'
 import * as legacyBookSchema from '../../db/legacy-book-schema'
+import {
+  legacyCategoryAssignedBooks,
+  legacyLibraryCategories,
+} from '../../db/legacy-classification-schema'
 import * as client from '../../db/client'
 import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
@@ -224,20 +228,23 @@ describe('library follow-up migrations', () => {
     await migratePrivateLibraries()
     const first = await migrateLibraryOrganization()
     expect(first).toMatchObject({
-      shelves: 2, categoriesMigrated: 2, tags: 2, tagsMigrated: 2,
+      shelves: 2, categoriesMigrated: 2, tags: 2, tagsMigrated: 0,
       booksClassified: 1, bookTagRelations: 2,
     })
     expect(first.anomalies).toEqual([{ bookId: 'b-missing', reason: 'book has no migrated library entry' }])
 
-    const categories = db.select().from(schema.libraryCategories).all()
+    // The shelf/category separation step runs after this one and still reads the
+    // historical table, so the entity rows exist here on purpose.
+    const categories = db.select().from(legacyLibraryCategories).all()
     expect(categories.map((c) => c.id).sort()).toEqual(['s1', 's2'])
     const book = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.title, 'Epub')).get()
-    expect(book?.categoryId).toBe('s1')
-    expect(db.select().from(schema.libraryBookTags).all()).toHaveLength(2)
+    expect(db.select().from(legacyCategoryAssignedBooks).where(eq(legacyCategoryAssignedBooks.id, book!.id)).get()?.categoryId)
+      .toBe('s1')
+    // Tags are values now: the relation lands on the book as a tag name.
+    expect(db.select().from(schema.libraryBookTagValues).all()).toHaveLength(2)
 
     const second = await migrateLibraryOrganization()
-    expect(second).toMatchObject({ categoriesMigrated: 0, tagsMigrated: 0, booksClassified: 1, bookTagRelations: 2 })
-  })
+    expect(second).toMatchObject({ categoriesMigrated: 0, tagsMigrated: 0, booksClassified: 1, bookTagRelations: 2 })  })
 
   it('migrates reading states preferring progress files with row fallback', async () => {
     await migratePrivateLibraries()
@@ -365,7 +372,7 @@ describe('library identity migration', () => {
     expect(report.pass).toBe(true)
     expect(report.checks.map((c) => c.name)).toEqual(expect.arrayContaining([
       'private-library-per-user', 'guest-has-no-library', 'username-normalized',
-      'book-versions', 'initial-revisions', 'revision-files', 'categories', 'tags',
+      'book-versions', 'initial-revisions', 'revision-files', 'shelves', 'tag-values',
       'reading-states', 'annotations', 'version-references', 'instance',
     ]))
   })

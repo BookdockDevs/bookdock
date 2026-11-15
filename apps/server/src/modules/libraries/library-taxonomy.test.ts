@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
+import { classificationValueKey } from '@bookdock/shared'
 import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migration-stage'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,20 +11,15 @@ import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
 import {
-  createLibraryCategory,
-  deleteLibraryCategory,
-  listLibraryCategories,
-  reorderLibraryCategories,
-  setLibraryCategoryParent,
-  updateLibraryCategory,
-} from '../shelves/shelves.service'
-import {
-  createLibraryTag,
-  deleteLibraryTag,
-  listLibraryTags,
-  reorderLibraryTags,
-  updateLibraryTag,
-} from '../tags/tags.service'
+  clearCategoryValue,
+  clearTagValue,
+  listCategoryValues,
+  listTagValues,
+  reorderCategoryValues,
+  reorderTagValues,
+  updateCategoryValue,
+  updateTagValue,
+} from '../classification/classification.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -38,9 +34,10 @@ function createTestDb() {
 
 /**
  * The library taxonomy (11.5) is the one surface where a wrong write is
- * silently destructive: categories are a parent-linked tree, books fall back to
- * uncategorized on delete, and a tag set is replaced wholesale. Phase 4C built
- * the endpoints; these tests are what decide whether the rules actually hold.
+ * silently destructive: categories and tags are values on books now, so a
+ * rewrite reaches every book carrying the value, and clearing a category drops
+ * that branch from all of them. Phase 4C built the endpoints; these tests are
+ * what decide whether the rules actually hold.
  */
 describe('library taxonomy (11.5)', () => {
   let db: ReturnType<typeof createTestDb>
@@ -67,30 +64,29 @@ describe('library taxonomy (11.5)', () => {
     return id
   }
 
-  function seedCategory(libraryId: string, name: string, parentId: string | null = null) {
-    const id = createId('cat')
-    db.insert(schema.libraryCategories).values({
-      id, libraryId, userId: ownerId, name, parentId, sortOrder: 0, pinned: false,
-      createdAt: 1, updatedAt: 1,
-    }).run()
-    return id
-  }
-
-  function seedTag(libraryId: string, name: string) {
-    const id = createId('ltag')
-    db.insert(schema.libraryTags).values({
-      id, libraryId, userId: ownerId, name, sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
-    return id
-  }
-
   function seedWork(libraryId: string, overrides: Partial<typeof schema.libraryBooks.$inferInsert> = {}) {
     const id = createId('lb')
     db.insert(schema.libraryBooks).values({
       id, libraryId, userId: ownerId, title: 'Work', author: '', description: '',
-      coverKey: null, categoryId: null, createdAt: 1, updatedAt: 1, ...overrides,
+      coverKey: null, categoryRoot: null, categoryLeaf: null, createdAt: 1, updatedAt: 1, ...overrides,
     }).run()
     return id
+  }
+
+  function seedBookTag(libraryBookId: string, name: string, sortOrder = 0) {
+    db.insert(schema.libraryBookTagValues).values({
+      id: createId('btv'), libraryBookId, name, sortOrder,
+    }).run()
+  }
+
+  /** A published version, so a shared-library member's counts can see the work. */
+  function publishWork(workId: string) {
+    const versionId = createId('bv')
+    db.insert(schema.bookVersions).values({ id: versionId, format: 'txt', size: 10, createdAt: 1, updatedAt: 1 }).run()
+    db.insert(schema.libraryBookVersions).values({
+      id: createId('lbv'), libraryId: cityId, libraryBookId: workId, bookVersionId: versionId,
+      kind: 'shared', status: 'published', createdAt: 1, updatedAt: 1,
+    }).run()
   }
 
   beforeEach(() => {
@@ -107,161 +103,172 @@ describe('library taxonomy (11.5)', () => {
   })
 
   describe('categories', () => {
-    it('refuses a duplicate name inside the same library but allows it across libraries', async () => {
-      await createLibraryCategory(ownerId, cityId, { name: 'Sci-Fi' })
-      await expect(createLibraryCategory(ownerId, cityId, { name: 'Sci-Fi' }))
-        .rejects.toMatchObject({ code: 'CATEGORY_NAME_TAKEN' })
-      // Another library is a different taxonomy, so the same name is fine.
-      const other = await createLibraryCategory(ownerId, otherCityId, { name: 'Sci-Fi' })
-      expect(other.name).toBe('Sci-Fi')
+    it('refuses a rename onto a path already in use but keeps libraries independent', async () => {
+      seedWork(cityId, { categoryRoot: 'A' })
+      seedWork(cityId, { categoryRoot: 'B' })
+      // The same path in another library is a different value.
+      seedWork(otherCityId, { categoryRoot: 'B' })
+
+      await expect(updateCategoryValue(ownerId, cityId, { path: ['A'], name: 'B' }))
+        .rejects.toMatchObject({ code: 'CLASSIFICATION_CONFLICT' })
+
+      // Renaming the other library's B does not touch this library's B.
+      const other = await updateCategoryValue(ownerId, otherCityId, { path: ['B'], name: 'C' })
+      expect(other.map((node) => node.path)).toEqual([['C']])
+      expect((await listCategoryValues(ownerId, cityId)).map((node) => node.path).sort())
+        .toEqual([['A'], ['B']])
     })
 
-    it('rejects a rename onto an existing name but allows renaming to itself', async () => {
-      const a = await createLibraryCategory(ownerId, cityId, { name: 'A' })
-      await createLibraryCategory(ownerId, cityId, { name: 'B' })
-      await expect(updateLibraryCategory(ownerId, cityId, a.id, { name: 'B' }))
-        .rejects.toMatchObject({ code: 'CATEGORY_NAME_TAKEN' })
-      // Idempotent rename: the same name is not a conflict with itself.
-      await expect(updateLibraryCategory(ownerId, cityId, a.id, { name: 'A' })).resolves.toMatchObject({ name: 'A' })
+    it('allows renaming a path to itself', async () => {
+      seedWork(cityId, { categoryRoot: 'A' })
+      const listed = await updateCategoryValue(ownerId, cityId, { path: ['A'], name: 'A' })
+      expect(listed.find((node) => node.path[0] === 'A')?.name).toBe('A')
     })
 
     it('never lets one library reach another library category', async () => {
-      const foreign = seedCategory(otherCityId, 'Foreign')
-      const own = await createLibraryCategory(ownerId, cityId, { name: 'Own' })
+      const foreign = seedWork(otherCityId, { categoryRoot: 'Foreign' })
 
-      await expect(createLibraryCategory(ownerId, cityId, { name: 'Kid', parentId: foreign }))
-        .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-      await expect(setLibraryCategoryParent(ownerId, cityId, own.id, foreign))
-        .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-      await expect(updateLibraryCategory(ownerId, cityId, foreign, { name: 'Stolen' }))
-        .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-      await expect(deleteLibraryCategory(ownerId, cityId, foreign))
-        .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-      // And the foreign row is untouched.
-      expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, foreign)).get()?.name)
+      await expect(updateCategoryValue(ownerId, cityId, { path: ['Foreign'], name: 'Stolen' }))
+        .rejects.toMatchObject({ code: 'CLASSIFICATION_NOT_FOUND' })
+      await expect(clearCategoryValue(ownerId, cityId, ['Foreign']))
+        .resolves.toEqual([])
+
+      // And the foreign book is untouched.
+      expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, foreign)).get()?.categoryRoot)
         .toBe('Foreign')
     })
 
-    it('refuses cycles: self-parenting and moving a category under its own descendant', async () => {
-      const root = await createLibraryCategory(ownerId, cityId, { name: 'Root' })
-      const child = await createLibraryCategory(ownerId, cityId, { name: 'Child', parentId: root.id })
-      await expect(createLibraryCategory(ownerId, cityId, { name: 'Grandchild', parentId: child.id }))
-        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    it('refuses paths deeper than two levels and moves a leaf to a root', async () => {
+      seedWork(cityId, { categoryRoot: 'Parent' })
+      seedWork(cityId, { categoryRoot: 'Parent', categoryLeaf: 'Child' })
 
-      await expect(setLibraryCategoryParent(ownerId, cityId, root.id, root.id))
-        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-      // The reverse edge would close the root/child cycle.
-      await expect(setLibraryCategoryParent(ownerId, cityId, root.id, child.id))
-        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-      // The valid direction still works.
-      const promoted = await setLibraryCategoryParent(ownerId, cityId, child.id, null)
-      expect(promoted.parentId).toBeNull()
+      await expect(updateCategoryValue(ownerId, cityId, { path: ['Parent', 'Child', 'Grandchild'] }))
+        .rejects.toThrow('at most 2 levels')
+
+      // Promoting a leaf to a root rewrites the value on its books.
+      await updateCategoryValue(ownerId, cityId, { path: ['Parent', 'Child'], parentPath: null })
+      const listed = await listCategoryValues(ownerId, cityId)
+      expect(listed.map((node) => node.path)).toContainEqual(['Child'])
+      expect(db.select().from(schema.libraryBooks).all().filter((book) => book.categoryRoot === 'Child')).toHaveLength(1)
     })
 
-    it('deleting a category uncategorizes its books and promotes its children to roots', async () => {
-      const parent = seedCategory(cityId, 'Parent')
-      const child = seedCategory(cityId, 'Child', parent)
-      const tagged = seedWork(cityId, { categoryId: parent })
-      const inChild = seedWork(cityId, { categoryId: child })
+    it('clearing a category uncategorizes its whole branch and keeps preference rows', async () => {
+      seedWork(cityId, { categoryRoot: 'Parent' })
+      seedWork(cityId, { categoryRoot: 'Parent', categoryLeaf: 'Child' })
+      await updateCategoryValue(ownerId, cityId, { path: ['Parent', 'Child'], pinned: true })
 
-      await deleteLibraryCategory(ownerId, cityId, parent)
+      const cleared = await clearCategoryValue(ownerId, cityId, ['Parent'])
+      expect(cleared).toEqual([])
+      expect(db.select().from(schema.libraryBooks).all().every((book) => book.categoryRoot === null)).toBe(true)
 
-      // Books fall back to uncategorized rather than pointing at a dead row.
-      expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, tagged)).get()?.categoryId).toBeNull()
-      expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, inChild)).get()?.categoryId).toBe(child)
-      // The child survives as a root instead of dangling.
-      expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, child)).get()?.parentId)
-        .toBeNull()
+      // The pin survives: a value that comes back keeps its place.
+      const returning = seedWork(cityId, { categoryRoot: 'Parent', categoryLeaf: 'Child' })
+      expect(returning).toBeTruthy()
+      const relisted = await listCategoryValues(ownerId, cityId)
+      expect(relisted.find((node) => node.path.join('/') === 'Parent/Child')?.pinned).toBe(true)
     })
 
-    it('reorder demands the exact full set, so a partial list cannot silently drop rows', async () => {
-      const a = await createLibraryCategory(ownerId, cityId, { name: 'A' })
-      const b = await createLibraryCategory(ownerId, cityId, { name: 'B' })
 
-      await expect(reorderLibraryCategories(ownerId, cityId, [a.id]))
-        .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-      await expect(reorderLibraryCategories(ownerId, cityId, [a.id, a.id]))
-        .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-      await expect(reorderLibraryCategories(ownerId, cityId, [a.id, createId('cat')]))
-        .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-      // A foreign category id is not orderable either.
-      await expect(reorderLibraryCategories(ownerId, cityId, [a.id, b.id, seedCategory(otherCityId, 'X')]))
-        .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
+    it('reorder refuses duplicate and unknown keys and never moves another library value', async () => {
+      seedWork(cityId, { categoryRoot: 'A' })
+      seedWork(cityId, { categoryRoot: 'B' })
+      seedWork(otherCityId, { categoryRoot: 'X' })
+      const a = classificationValueKey('category', ['A'])
 
-      await reorderLibraryCategories(ownerId, cityId, [b.id, a.id])
-      const order = new Map(listLibraryCategoriesRes().map((c: { id: string; sortOrder: number }) => [c.id, c.sortOrder]))
-      expect(order.get(b.id)).toBeLessThan(order.get(a.id)!)
+      await expect(reorderCategoryValues(ownerId, cityId, [a, a]))
+        .rejects.toMatchObject({ code: 'CLASSIFICATION_NOT_FOUND' })
+      await expect(reorderCategoryValues(ownerId, cityId, [a, classificationValueKey('category', createId('cat'))]))
+        .rejects.toMatchObject({ code: 'CLASSIFICATION_NOT_FOUND' })
+      await expect(reorderCategoryValues(ownerId, cityId, [a, classificationValueKey('category', ['X'])]))
+        .rejects.toMatchObject({ code: 'CLASSIFICATION_NOT_FOUND' })
+
+      // A partial list only orders what it names; it cannot drop book values.
+      await reorderCategoryValues(ownerId, cityId, [classificationValueKey('category', ['B']), a])
+      const order = new Map((await listCategoryValues(ownerId, cityId)).map((node) => [node.id, node.sortOrder]))
+      expect(order.get(classificationValueKey('category', ['B']))!).toBeLessThan(order.get(a)!)
     })
 
     it('only owners and admins curate; members and outsiders get nothing', async () => {
-      await expect(createLibraryCategory(memberId, cityId, { name: 'X' }))
+      seedWork(cityId, { categoryRoot: 'X' })
+      await expect(updateCategoryValue(memberId, cityId, { path: ['X'], name: 'Y' }))
         .rejects.toMatchObject({ code: 'FORBIDDEN' })
-      await expect(createLibraryCategory(outsiderId, cityId, { name: 'X' }))
+      await expect(updateCategoryValue(outsiderId, cityId, { path: ['X'], name: 'Y' }))
         .rejects.toMatchObject({ code: 'FORBIDDEN' })
-      const id = await createLibraryCategory(ownerId, cityId, { name: 'X' })
-      await expect(deleteLibraryCategory(memberId, cityId, id)).rejects.toMatchObject({ code: 'FORBIDDEN' })
-      await expect(reorderLibraryCategories(memberId, cityId, [id])).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      await expect(clearCategoryValue(memberId, cityId, ['X'])).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      await expect(reorderCategoryValues(memberId, cityId, [classificationValueKey('category', ['X'])]))
+        .rejects.toMatchObject({ code: 'FORBIDDEN' })
       // Promotion to admin grants curation.
       db.update(schema.libraryMemberships).set({ role: 'admin' })
         .where(eq(schema.libraryMemberships.userId, memberId)).run()
-      await expect(createLibraryCategory(memberId, cityId, { name: 'Y' })).resolves.toMatchObject({ name: 'Y' })
+      await expect(updateCategoryValue(memberId, cityId, { path: ['X'], name: 'Y' }))
+        .resolves.toContainEqual(expect.objectContaining({ path: ['Y'] }))
     })
+
   })
 
   describe('tags', () => {
-    it('refuses a duplicate name inside the same library but allows it across libraries', async () => {
-      await createLibraryTag(ownerId, cityId, 'Classic')
-      await expect(createLibraryTag(ownerId, cityId, 'Classic'))
-        .rejects.toMatchObject({ code: 'TAG_NAME_TAKEN' })
-      await expect(createLibraryTag(ownerId, otherCityId, 'Classic')).resolves.toMatchObject({ name: 'Classic' })
+    it('treats a tag name as one value per library and keeps libraries independent', async () => {
+      const mine = seedWork(cityId)
+      const theirs = seedWork(otherCityId)
+      seedBookTag(mine, 'Classic')
+      seedBookTag(theirs, 'Classic')
+
+      const renamed = await updateTagValue(ownerId, cityId, { name: 'Classic', renamedTo: 'Classics' })
+      expect(renamed.map((tag) => tag.name)).toEqual(['Classics'])
+      // The other library's value is not this library's tag.
+      expect((await listTagValues(ownerId, otherCityId)).map((tag) => tag.name)).toEqual(['Classic'])
     })
 
     it('never lets one library reach another library tag', async () => {
-      const foreign = seedTag(otherCityId, 'Foreign')
-      const own = await createLibraryTag(ownerId, cityId, 'Own')
+      const foreign = seedWork(otherCityId)
+      seedBookTag(foreign, 'Foreign')
 
-      await expect(updateLibraryTag(ownerId, cityId, foreign, { name: 'Stolen' }))
-        .rejects.toMatchObject({ code: 'TAG_NOT_FOUND' })
-      await expect(deleteLibraryTag(ownerId, cityId, foreign))
-        .rejects.toMatchObject({ code: 'TAG_NOT_FOUND' })
-      await expect(reorderLibraryTags(ownerId, cityId, [own.id, foreign]))
-        .rejects.toMatchObject({ code: 'TAG_NOT_FOUND' })
-      expect(db.select().from(schema.libraryTags).where(eq(schema.libraryTags.id, foreign)).get()?.name).toBe('Foreign')
+      // A rename in this library finds nothing here and leaves the foreign value alone.
+      await updateTagValue(ownerId, cityId, { name: 'Foreign', renamedTo: 'Stolen' })
+      expect((await listTagValues(ownerId, otherCityId)).map((tag) => tag.name)).toEqual(['Foreign'])
+      await expect(reorderTagValues(ownerId, cityId, ['Foreign']))
+        .rejects.toMatchObject({ code: 'CLASSIFICATION_NOT_FOUND' })
     })
 
-    it('deleting a tag drops its book links instead of leaving orphans', async () => {
-      const tag = await createLibraryTag(ownerId, cityId, 'Doomed')
-      const keep = await createLibraryTag(ownerId, cityId, 'Kept')
+    it('clearing a tag drops its book links instead of leaving orphans', async () => {
       const work = seedWork(cityId)
-      for (const tagId of [tag.id, keep.id]) {
-        db.insert(schema.libraryBookTags).values({ libraryBookId: work, tagId }).run()
-      }
+      seedBookTag(work, 'Doomed')
+      seedBookTag(work, 'Kept', 1)
 
-      await deleteLibraryTag(ownerId, cityId, tag.id)
+      await clearTagValue(ownerId, cityId, 'Doomed')
 
-      const left = db.select().from(schema.libraryBookTags).all()
+      const left = db.select().from(schema.libraryBookTagValues).all()
       expect(left).toHaveLength(1)
-      expect(left[0]!.tagId).toBe(keep.id)
+      expect(left[0]!.name).toBe('Kept')
     })
 
     it('reorder demands the exact full set', async () => {
-      const a = await createLibraryTag(ownerId, cityId, 'A')
-      const b = await createLibraryTag(ownerId, cityId, 'B')
-      await expect(reorderLibraryTags(ownerId, cityId, [a.id])).rejects.toMatchObject({ code: 'TAG_NOT_FOUND' })
-      await reorderLibraryTags(ownerId, cityId, [b.id, a.id])
-      const listed = await listLibraryTags(ownerId, cityId)
-      expect(listed.map((t) => t.name)).toEqual(['B', 'A'])
+      const work = seedWork(cityId)
+      seedBookTag(work, 'A')
+      seedBookTag(work, 'B', 1)
+      await expect(reorderTagValues(ownerId, cityId, ['A', 'A']))
+        .rejects.toMatchObject({ code: 'CLASSIFICATION_NOT_FOUND' })
+      await expect(reorderTagValues(ownerId, cityId, ['A', 'Missing']))
+        .rejects.toMatchObject({ code: 'CLASSIFICATION_NOT_FOUND' })
+      await reorderTagValues(ownerId, cityId, ['B', 'A'])
+      expect((await listTagValues(ownerId, cityId)).map((tag) => tag.name)).toEqual(['B', 'A'])
     })
 
     it('only owners and admins curate', async () => {
-      await expect(createLibraryTag(memberId, cityId, 'X')).rejects.toMatchObject({ code: 'FORBIDDEN' })
-      await expect(createLibraryTag(outsiderId, cityId, 'X')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      const work = seedWork(cityId)
+      seedBookTag(work, 'X')
+      await expect(updateTagValue(memberId, cityId, { name: 'X', renamedTo: 'Y' }))
+        .rejects.toMatchObject({ code: 'FORBIDDEN' })
+      await expect(updateTagValue(outsiderId, cityId, { name: 'X', renamedTo: 'Y' }))
+        .rejects.toMatchObject({ code: 'FORBIDDEN' })
     })
 
     it('lets any member browse the taxonomy but not a stranger', async () => {
-      await createLibraryTag(ownerId, cityId, 'Visible')
-      await expect(listLibraryTags(memberId, cityId)).resolves.toHaveLength(1)
-      await expect(listLibraryTags(outsiderId, cityId)).rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
+      const visible = seedWork(cityId)
+      publishWork(visible)
+      seedBookTag(visible, 'Visible')
+      await expect(listTagValues(memberId, cityId)).resolves.toHaveLength(1)
+      await expect(listTagValues(outsiderId, cityId)).rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
     })
   })
 
@@ -274,104 +281,75 @@ describe('library taxonomy (11.5)', () => {
    */
   describe('taxonomy counts', () => {
     it('counts the works filed under a category, ignoring trashed ones', async () => {
-      const fiction = await createLibraryCategory(ownerId, cityId, { name: 'Fiction' })
-      const poetry = await createLibraryCategory(ownerId, cityId, { name: 'Poetry' })
-      seedWork(cityId, { title: 'A', categoryId: fiction.id })
-      seedWork(cityId, { title: 'B', categoryId: fiction.id })
-      seedWork(cityId, { title: 'C', categoryId: fiction.id, deletedAt: 2 })
-      seedWork(cityId, { title: 'D', categoryId: poetry.id })
+      seedWork(cityId, { title: 'A', categoryRoot: 'Fiction' })
+      seedWork(cityId, { title: 'B', categoryRoot: 'Fiction' })
+      seedWork(cityId, { title: 'C', categoryRoot: 'Fiction', deletedAt: 2 })
+      seedWork(cityId, { title: 'D', categoryRoot: 'Poetry' })
 
-      const listed = await listLibraryCategories(ownerId, cityId)
-      expect(listed.find((c) => c.id === fiction.id)?.bookCount).toBe(2)
-      expect(listed.find((c) => c.id === poetry.id)?.bookCount).toBe(1)
+      const listed = await listCategoryValues(ownerId, cityId)
+      expect(listed.find((node) => node.path.length === 1 && node.name === 'Fiction')?.bookCount).toBe(2)
+      expect(listed.find((node) => node.path.length === 1 && node.name === 'Poetry')?.bookCount).toBe(1)
     })
 
     it('counts the works carrying a tag, ignoring trashed ones', async () => {
-      const classic = await createLibraryTag(ownerId, cityId, 'Classic')
-      const modern = await createLibraryTag(ownerId, cityId, 'Modern')
       const a = seedWork(cityId, { title: 'A' })
       const b = seedWork(cityId, { title: 'B' })
       const trashed = seedWork(cityId, { title: 'C', deletedAt: 2 })
-      db.insert(schema.libraryBookTags).values([
-        { libraryBookId: a, tagId: classic.id },
-        { libraryBookId: b, tagId: classic.id },
-        { libraryBookId: trashed, tagId: classic.id },
-        { libraryBookId: a, tagId: modern.id },
-      ]).run()
+      seedBookTag(a, 'Classic')
+      seedBookTag(b, 'Classic')
+      seedBookTag(trashed, 'Classic')
+      seedBookTag(a, 'Modern')
 
-      const listed = await listLibraryTags(ownerId, cityId)
-      expect(listed.find((t) => t.id === classic.id)?.bookCount).toBe(2)
-      expect(listed.find((t) => t.id === modern.id)?.bookCount).toBe(1)
+      const listed = await listTagValues(ownerId, cityId)
+      expect(listed.find((tag) => tag.name === 'Classic')?.bookCount).toBe(2)
+      expect(listed.find((tag) => tag.name === 'Modern')?.bookCount).toBe(1)
     })
 
     it('drops a sibling count when a work is hidden through any dimension', async () => {
-      const adult = await createLibraryTag(ownerId, cityId, 'Adult')
-      const name = await createLibraryTag(ownerId, cityId, 'Author')
-      const secret = await createLibraryCategory(ownerId, cityId, { name: 'Secret' })
       const kept = seedWork(cityId, { title: 'Kept' })
       const hidden = seedWork(cityId, { title: 'Hidden' })
-      for (const workId of [kept, hidden]) {
-        const versionId = createId('bv')
-        db.insert(schema.bookVersions).values({ id: versionId, format: 'txt', size: 10, createdAt: 1, updatedAt: 1 }).run()
-        db.insert(schema.libraryBookVersions).values({ id: createId('lbv'), libraryId: cityId, libraryBookId: workId, bookVersionId: versionId, kind: 'shared', status: 'published', createdAt: 1, updatedAt: 1 }).run()
-      }
-      db.insert(schema.libraryBookTags).values([
-        { libraryBookId: kept, tagId: name.id },
-        { libraryBookId: hidden, tagId: name.id },
-        { libraryBookId: hidden, tagId: adult.id },
-      ]).run()
+      publishWork(kept)
+      publishWork(hidden)
+      seedBookTag(kept, 'Author')
+      seedBookTag(hidden, 'Author')
+      seedBookTag(hidden, 'Adult')
+      seedWork(cityId, { title: 'Secret work', categoryRoot: 'Secret' })
 
       // A manager sees hidden rows, so nothing is excluded for them.
-      const asOwner = await listLibraryTags(ownerId, cityId)
-      expect(asOwner.find((t) => t.id === name.id)?.bookCount).toBe(2)
+      const asOwner = await listTagValues(ownerId, cityId)
+      expect(asOwner.find((tag) => tag.name === 'Author')?.bookCount).toBe(2)
 
       // Hiding one tag closes every work carrying it, and the sibling tag's
       // capsule has to follow the list it counts, not just its own dimension.
-      await updateLibraryTag(ownerId, cityId, adult.id, { hidden: true })
-      const asMember = await listLibraryTags(memberId, cityId)
-      expect(asMember.find((t) => t.id === name.id)?.bookCount).toBe(1)
+      await updateTagValue(ownerId, cityId, { name: 'Adult', hidden: true })
+      const asMember = await listTagValues(memberId, cityId)
+      expect(asMember.find((tag) => tag.name === 'Author')?.bookCount).toBe(1)
       // The hidden tag itself drops out of the member's sidebar entirely.
-      expect(asMember.find((t) => t.id === adult.id)).toBeUndefined()
+      expect(asMember.find((tag) => tag.name === 'Adult')).toBeUndefined()
 
       // A work hidden through a hidden category is excluded from a tag count too.
-      db.update(schema.libraryBooks).set({ categoryId: secret.id }).where(eq(schema.libraryBooks.id, kept)).run()
-      await updateLibraryCategory(ownerId, cityId, secret.id, { hidden: true })
-      expect((await listLibraryTags(memberId, cityId)).find((t) => t.id === name.id)?.bookCount).toBe(0)
+      db.update(schema.libraryBooks).set({ categoryRoot: 'Secret' }).where(eq(schema.libraryBooks.id, kept)).run()
+      await updateCategoryValue(ownerId, cityId, { path: ['Secret'], hidden: true })
+      // Nothing visible carries the tag any more, so the value has no count row.
+      expect((await listTagValues(memberId, cityId)).find((tag) => tag.name === 'Author')).toBeUndefined()
     })
 
     it('scopes each category to its own library, and leaves uncategorized work uncounted', async () => {
-      const mine = await createLibraryCategory(ownerId, cityId, { name: 'Mine' })
-      const theirs = await createLibraryCategory(ownerId, otherCityId, { name: 'Theirs' })
       seedWork(cityId, { title: 'Loose' })
-      seedWork(otherCityId, { title: 'X', categoryId: theirs.id })
-      seedWork(otherCityId, { title: 'Y', categoryId: theirs.id })
+      seedWork(otherCityId, { title: 'X', categoryRoot: 'Theirs' })
+      seedWork(otherCityId, { title: 'Y', categoryRoot: 'Theirs' })
 
-      // The same shape listShelves already relies on: a category id belongs to
-      // exactly one library, so counting by categoryId is counting by library.
-      const listed = await listLibraryCategories(ownerId, cityId)
-      expect(listed).toHaveLength(1)
-      expect(listed[0]?.bookCount).toBe(0)
-      expect((await listLibraryCategories(ownerId, otherCityId))[0]?.bookCount).toBe(2)
-      expect(mine.id).not.toBe(theirs.id)
+      // Uncounted because no book in this library carries a category value.
+      await expect(listCategoryValues(ownerId, cityId)).resolves.toEqual([])
+      const other = await listCategoryValues(ownerId, otherCityId)
+      expect(other).toHaveLength(1)
+      expect(other[0]?.bookCount).toBe(2)
     })
 
     it('reports the same count from a rename as from a listing', async () => {
-      const fiction = await createLibraryCategory(ownerId, cityId, { name: 'Fiction' })
-      seedWork(cityId, { categoryId: fiction.id })
-      const renamed = await updateLibraryCategory(ownerId, cityId, fiction.id, { name: 'Novels' })
-      expect(renamed.bookCount).toBe(1)
+      seedWork(cityId, { categoryRoot: 'Fiction' })
+      const renamed = await updateCategoryValue(ownerId, cityId, { path: ['Fiction'], name: 'Novels' })
+      expect(renamed.find((node) => node.path[0] === 'Novels')?.bookCount).toBe(1)
     })
   })
-
-  // Sync helper: the service is async but the taxonomy read is pure, and the
-  // reorder assertion only needs the resulting order.
-  function listLibraryCategoriesRes() {
-    return db.select().from(schema.libraryCategories)
-      .where(eq(schema.libraryCategories.libraryId, cityId))
-      .orderBy(schema.libraryCategories.sortOrder).all()
-  }
 })
-
-// Keep the async listing referenced so the import stays honest if the helper
-// above is ever inlined.
-void listLibraryCategories

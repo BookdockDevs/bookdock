@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { parseCategoryQuery } from '@bookdock/shared'
 
 import {
   useStorageConnectionImport,
@@ -311,12 +312,13 @@ export default function WebDavImportBrowser({
       patchQueueItem(nextPath, { status: 'downloading', progress: undefined }, run.id)
 
       try {
+        const categoryFilter = categoryId ? parseCategoryQuery(categoryId) : undefined
         const res = await importMutation.mutateAsync({
           body: {
             files: [nextPath],
             shelfId,
-            categoryId,
-            tagIds: includeCurrentTag && tagId ? [tagId] : undefined,
+            ...(categoryFilter === undefined ? {} : { categoryPath: categoryFilter === 'none' ? null : categoryFilter }),
+            tags: includeCurrentTag && tagId ? [tagId] : undefined,
             libraryId: targetLibraryId,
           },
           signal: run.controller.signal,

@@ -4,28 +4,28 @@ import { CATEGORY_TEMPLATES, categoryTemplatePath, type ClientCategoryView } fro
 
 import { useTranslation } from '@/hooks/useTranslation'
 
-import { categoryPath } from '../taxonomy'
 import { inputClass } from './book-detail/ui'
 import TaxonomyChoiceRow from './TaxonomyChoiceRow'
 import TaxonomyIcon from './TaxonomyIcon'
 
 interface CategoryAssignmentSelectorProps {
   categories: ClientCategoryView[]
-  categoryId: string | null | undefined
-  categoryTemplateKey: string | undefined
+  categoryPath: string[] | null | undefined
   allowTemplates: boolean
   allowKeep?: boolean
   onKeep?: () => void
-  onChange: (value: { categoryId: string | null; categoryTemplateKey?: undefined } | { categoryId?: undefined; categoryTemplateKey: string }) => void
+  onChange: (value: { categoryPath: string[] | null }) => void
 }
 
-export default function CategoryAssignmentSelector({ categories, categoryId, categoryTemplateKey, allowTemplates, allowKeep = false, onKeep, onChange }: CategoryAssignmentSelectorProps) {
+export default function CategoryAssignmentSelector({ categories, categoryPath, allowTemplates, allowKeep = false, onKeep, onChange }: CategoryAssignmentSelectorProps) {
   const _ = useTranslation()
+  const categoryId = categoryPath === undefined ? undefined : categoryPath === null ? null : categories.find((item) => JSON.stringify(item.path) === JSON.stringify(categoryPath))?.id
+  const categoryTemplateKey = CATEGORY_TEMPLATES.flatMap((root) => [root, ...(root.children ?? [])]).find((item) => JSON.stringify(categoryTemplatePath(item.key)) === JSON.stringify(categoryPath))?.key
   const radioName = `category-${useId()}`
   const [query, setQuery] = useState('')
   const [expandedRoots, setExpandedRoots] = useState<Set<string>>(() => new Set())
-  const paths = useMemo(() => new Map(categories.map((category) => [category.id, categoryPath(categories, category.id).map((node) => node.name).join(' / ')])), [categories])
-  const existingPathKeys = useMemo(() => new Set(categories.map((category) => categoryPath(categories, category.id).map((node) => node.name).join('\u0000'))), [categories])
+  const paths = useMemo(() => new Map(categories.map((category) => [category.id, category.path.join(' / ')])), [categories])
+  const existingPathKeys = useMemo(() => new Set(categories.map((category) => category.path.join('\u0000'))), [categories])
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const selectedTemplateRoot = CATEGORY_TEMPLATES.find((root) => root.key === categoryTemplateKey || root.children?.some((child) => child.key === categoryTemplateKey))
   const selectedTemplateLabel = selectedTemplateRoot
@@ -59,16 +59,16 @@ export default function CategoryAssignmentSelector({ categories, categoryId, cat
       {allowKeep && (
         <TaxonomyChoiceRow
           label={_('library.keepCategory')}
-          checked={categoryId === undefined && !categoryTemplateKey}
+          checked={categoryPath === undefined}
           name={radioName}
           onChange={() => onKeep?.()}
         />
       )}
       <TaxonomyChoiceRow
         label={_('library.uncategorized')}
-        checked={categoryId === null && !categoryTemplateKey}
+        checked={categoryPath === null}
         name={radioName}
-        onChange={() => onChange({ categoryId: null })}
+        onChange={() => onChange({ categoryPath: null })}
       />
       {categories.length > 0 && (
         <section>
@@ -78,9 +78,9 @@ export default function CategoryAssignmentSelector({ categories, categoryId, cat
               <TaxonomyChoiceRow
                 key={category.id}
                 label={paths.get(category.id) ?? category.name}
-                checked={categoryId === category.id && !categoryTemplateKey}
+                checked={categoryId === category.id}
                 name={radioName}
-                onChange={() => onChange({ categoryId: category.id })}
+                onChange={() => onChange({ categoryPath: category.path })}
               />
             ))}
           </div>
@@ -117,7 +117,7 @@ export default function CategoryAssignmentSelector({ categories, categoryId, cat
                           label={rootName}
                           checked={categoryTemplateKey === root.key}
                           name={radioName}
-                          onChange={() => onChange({ categoryTemplateKey: root.key })}
+                          onChange={() => onChange({ categoryPath: categoryTemplatePath(root.key)! })}
                         />
                       )}
                       {hasChildren && (
@@ -143,7 +143,7 @@ export default function CategoryAssignmentSelector({ categories, categoryId, cat
                             ariaLabel={`${rootName} / ${_(`library.categoryTemplate.${child.key}`)}`}
                             checked={categoryTemplateKey === child.key}
                             name={radioName}
-                            onChange={() => onChange({ categoryTemplateKey: child.key })}
+                            onChange={() => onChange({ categoryPath: categoryTemplatePath(child.key)! })}
                           />
                         ))}
                       </div>

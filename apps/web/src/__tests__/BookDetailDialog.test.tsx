@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { act, render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
-import type { BookListItem, CatalogBook, Category, Library } from '@bookdock/shared'
+import type { BookListItem, CatalogBook, Category, ClientCategoryView, ClientTaxonomyView, Library } from '@bookdock/shared'
 
 import i18n from '../i18n/i18n'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
@@ -45,7 +45,13 @@ const removeVersionCoverMutate = vi.fn()
 const updateCatalogBookMutate = vi.fn()
 const deleteCatalogVersionMutate = vi.fn()
 const vaultUpdateMock = vi.fn()
+const localDraftUpdateMock = vi.fn()
 const navigateMock = vi.fn()
+
+vi.mock('../features/local-library/catalog', async (original) => ({
+  ...await original<typeof import('../features/local-library/catalog')>(),
+  deviceCatalogOperations: () => ({ update: localDraftUpdateMock }),
+}))
 
 vi.mock('@/api/client', async (original) => ({
   ...await original<typeof import('@/api/client')>(),
@@ -84,6 +90,9 @@ let sharedCategories: Category[] = []
 let categoriesPending = false
 let categoriesError = false
 let queriedWork: CatalogBook | undefined
+let deviceCategories: ClientCategoryView[] = []
+let deviceTags: ClientTaxonomyView[] = []
+let reactiveTaxonomy = false
 
 vi.mock('../features/library/hooks', () => ({
   useCatalogBookDetail: () => ({ data: queriedWork ? { data: queriedWork } : undefined, isError: false }),
@@ -94,6 +103,7 @@ vi.mock('../features/library/hooks', () => ({
   }),
   useShelves: () => ({ data: { data: [{ id: 'shelf-1', name: 'Favorites', bookCount: 2 }] } }),
   useTags: () => ({ data: { data: [{ id: 'tag-1', name: '小说', bookCount: 1 }] } }),
+  useDeviceTaxonomy: () => ({ data: { categories: deviceCategories, tags: deviceTags }, isLoading: false, isError: false }),
   useCreateShelf: () => ({ mutateAsync: createShelfMutate, isPending: false }),
   useCreateTag: () => ({ mutateAsync: createTagMutate, isPending: false }),
   useUpdateBook: () => ({ mutate: updateBookMutate, mutateAsync: updateBookMutateAsync, isPending: quickEditPending }),
@@ -110,7 +120,10 @@ vi.mock('../features/library/hooks', () => ({
   useUpdateCatalogVersion: () => ({ mutate: updateCatalogVersionMutate, mutateAsync: updateCatalogVersionMutate, isPending: quickEditPending }),
   useUpdateCatalogBook: () => ({ mutate: updateCatalogBookMutate, mutateAsync: updateCatalogBookMutate, isPending: false }),
   useLibraries: () => ({ data: { data: [{ id: 'private', type: 'private' }] } }),
-  useLibraryCategories: () => ({ data: categoriesPending ? undefined : { data: sharedCategories }, isPending: categoriesPending, isError: categoriesError }),
+  useLibraryCategories: (libraryId: string | null) => {
+    const query = useQuery({ queryKey: ['libraries', libraryId, 'categories', false], queryFn: async () => ({ data: [...sharedCategories] }), enabled: reactiveTaxonomy })
+    return reactiveTaxonomy ? query : { data: categoriesPending ? undefined : { data: sharedCategories }, isPending: categoriesPending, isError: categoriesError }
+  },
   useLibraryTags: () => ({ data: { data: [] } }),
   useCreateLibraryCategory: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateLibraryTag: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -192,6 +205,9 @@ beforeEach(async () => {
   quickEditPending = false
   membershipUnavailable = false
   sharedCategories = []
+  deviceCategories = []
+  deviceTags = []
+  reactiveTaxonomy = false
   categoriesPending = false
   categoriesError = false
   queriedWork = undefined
@@ -199,6 +215,86 @@ beforeEach(async () => {
   pendingReview = null
   downloadRules = []
   await i18n.changeLanguage('zh-CN')
+})
+
+describe('unified classification choices', () => {
+  it('refreshes the category picker and another catalog observer after quick creation', async () => {
+    reactiveTaxonomy = true
+    const category = { id: '["玄幻"]', libraryId: 'private', name: '玄幻', parentId: null, path: ['玄幻'], sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1, subtreeBookCount: 1 }
+    apiPut.mockImplementationOnce(async () => { sharedCategories = [category]; return {} })
+    function SidebarCategories() {
+      const query = useQuery({ queryKey: ['libraries', 'private', 'categories', false], queryFn: async () => ({ data: [...sharedCategories] }) })
+      return <div aria-label="sidebar categories">{query.data?.data.map((item) => item.name).join(', ')}</div>
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } })
+    const invalidations = vi.spyOn(queryClient, 'invalidateQueries')
+    render(<QueryClientProvider client={queryClient}><SidebarCategories /><BookDetailDialog book={{ ...book, categoryPath: null }} onClose={vi.fn()} onDelete={vi.fn()} /></QueryClientProvider>)
+    await waitFor(() => expect(queryClient.getQueryData(['libraries', 'private', 'categories', false])).toEqual({ data: [] }))
+    fireEvent.contextMenu(screen.getByRole('button', { name: '未分类' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建分类' }))
+    fireEvent.change(screen.getByPlaceholderText('分类名称'), { target: { value: '玄幻' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryPath: ['玄幻'] }))
+    await waitFor(() => expect(invalidations).toHaveBeenCalledWith({ queryKey: ['libraries', 'private', 'categories'] }))
+    await waitFor(() => expect(queryClient.getQueryData(['libraries', 'private', 'categories', false])).toEqual({ data: [category] }))
+    await waitFor(() => expect(screen.getByLabelText('sidebar categories')).toHaveTextContent('玄幻'))
+    fireEvent.contextMenu(screen.getByRole('button', { name: '未分类' }))
+    expect(await screen.findByRole('radio', { name: '玄幻' })).toBeInTheDocument()
+  })
+
+  it('offers server and device values on a device book and writes quick edits to the device', async () => {
+    const serverCategory = { id: '["Server"]', libraryId: 'private', name: 'Server', parentId: null, path: ['Server'], sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1, subtreeBookCount: 1 }
+    const deviceCategory = { ...serverCategory, id: '["Device"]', name: 'Device', path: ['Device'] }
+    sharedCategories = [serverCategory]
+    deviceCategories = [deviceCategory]
+    deviceTags = [{ id: 'LocalTag', name: 'LocalTag', bookCount: 1, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1 }]
+    vaultUpdateMock.mockResolvedValue({})
+    localDraftUpdateMock.mockResolvedValue({})
+    const deviceBook = { ...book, categoryPath: null, tags: [], clientVersion: 3, ref: { scope: { kind: 'local' as const, vaultId: 'device' }, bookId: 'dev-1' } }
+    render(<BookDetailDialog book={deviceBook} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    fireEvent.contextMenu(screen.getByRole('button', { name: '未分类' }))
+    expect(screen.getByRole('radio', { name: 'Server' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Device' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Server' }))
+    await waitFor(() => expect(vaultUpdateMock).toHaveBeenCalledWith(deviceBook.ref, { catalog: { categoryPath: ['Server'] } }, 3))
+    expect(apiPut).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '分类' }))
+    expect(screen.getByRole('radio', { name: 'Server' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Device' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Server' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    expect(screen.getByRole('checkbox', { name: '小说' })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'LocalTag' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: '小说' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(localDraftUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: deviceBook.ref.scope }),
+      expect.objectContaining({ catalog: expect.objectContaining({ categoryPath: ['Server'], tags: ['小说'] }) }),
+      3,
+      undefined,
+    ))
+    expect(apiSave).not.toHaveBeenCalled()
+  })
+
+  it('lets a server book select a device category without writing the device book store', async () => {
+    deviceCategories = [{ id: '["Device"]', libraryId: 'private', name: 'Device', parentId: null, path: ['Device'], sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1, subtreeBookCount: 1 }]
+    render(<BookDetailDialog book={{ ...book, categoryPath: null }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    fireEvent.contextMenu(screen.getByRole('button', { name: '未分类' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Device' }))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryPath: ['Device'] }))
+    expect(vaultUpdateMock).not.toHaveBeenCalled()
+  })
+
+  it('allows a device book to use local choices while the server taxonomy is unavailable', () => {
+    categoriesError = true
+    deviceCategories = [{ id: '["Device"]', libraryId: 'private', name: 'Device', parentId: null, path: ['Device'], sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1, subtreeBookCount: 1 }]
+    const deviceBook = { ...book, categoryPath: null, clientVersion: 3, ref: { scope: { kind: 'local' as const, vaultId: 'device' }, bookId: 'dev-1' } }
+    render(<BookDetailDialog book={deviceBook} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
+    fireEvent.contextMenu(screen.getByRole('button', { name: '未分类' }))
+    expect(screen.getByRole('radio', { name: 'Device' })).toBeInTheDocument()
+  })
 })
 
 describe('BookDetailDialog classification editor', () => {

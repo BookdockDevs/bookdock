@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as Re
 import { useNavigate } from '@tanstack/react-router'
 
 import { useAuthStore } from '@/stores/auth.store'
+import { parseCategoryQuery } from '@bookdock/shared'
 import { useStorageConnections } from '@/api/hooks/useStorageConnections'
 import Modal from '@/components/ui/Modal'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -149,10 +150,11 @@ export default function UploadSheet({
     ? _('library.uploadCategoryContext', { name: shelfName ?? '' })
     : _('library.uploadShelfContext', { name: shelfName ?? '' })
   const tagName = tagId ? tagsData?.data.find((tag) => tag.id === tagId)?.name : undefined
+  const categoryFilter = categoryId ? parseCategoryQuery(categoryId) : undefined
   const assignment: UploadAssignment = {
     shelfId,
-    categoryId,
-    tagIds: includeCurrentTag && tagId ? [tagId] : [],
+    ...(categoryFilter === undefined ? {} : { categoryPath: categoryFilter === 'none' ? null : categoryFilter }),
+    tags: includeCurrentTag && tagName ? [tagName] : [],
   }
 
   // clearQueue keeps in-flight items, so closing mid-upload stays resumable

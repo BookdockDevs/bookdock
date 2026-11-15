@@ -5,21 +5,17 @@ import { useTranslation } from '@/hooks/useTranslation'
 import type { MenuAnchor } from '@/lib/menu-anchor'
 
 interface TagSelectPopoverProps {
-  tags: { id: string; name: string }[]
-  selectedTagIds: Set<string>
+  tags: { name: string }[]
+  selectedTags: Set<string>
   onToggleTag: (tagId: string) => void
   onAddTag: (tagId: string) => void
-  onCreateTag: (name: string) => Promise<string>
-  creating?: boolean
 }
 
 export default function TagSelectPopover({
   tags,
-  selectedTagIds,
+  selectedTags,
   onToggleTag,
   onAddTag,
-  onCreateTag,
-  creating,
 }: TagSelectPopoverProps) {
   const _ = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -68,16 +64,11 @@ export default function TagSelectPopover({
     }
   }, [open])
 
-  async function handleCreateTag() {
+  function handleCreateTag() {
     const name = query.trim()
-    if (!name || creating) return
-    try {
-      const id = await onCreateTag(name)
-      onAddTag(id)
-      setQuery('')
-    } catch {
-      // toast error handled by the caller's mutation
-    }
+    if (!name) return
+    onAddTag(name)
+    setQuery('')
   }
 
   return (
@@ -97,7 +88,7 @@ export default function TagSelectPopover({
         }`}
       >
         <span className="text-stone-400 dark:text-stone-500">+</span>
-        <span>{selectedTagIds.size > 0 ? _('library.tags') : _('library.newTag')}</span>
+        <span>{selectedTags.size > 0 ? _('library.tags') : _('library.newTag')}</span>
         <svg
           className={`h-3 w-3 shrink-0 text-stone-400 transition-transform duration-200 ${
             open ? 'rotate-180' : 'rotate-0'
@@ -170,7 +161,6 @@ export default function TagSelectPopover({
           {!exactMatch && query.trim() && (
             <button
               type="button"
-              disabled={creating}
               onClick={() => void handleCreateTag()}
               className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
             >
@@ -178,7 +168,7 @@ export default function TagSelectPopover({
                 <path d="M12 5v14M5 12h14" />
               </svg>
               <span className="truncate">
-                {creating ? '...' : `${_('library.create')} “${query.trim()}”`}
+                {`${_('library.create')} “${query.trim()}”`}
               </span>
             </button>
           )}
@@ -186,14 +176,14 @@ export default function TagSelectPopover({
           {/* Tag items (checkable rows; stays open on click) */}
           <div className="space-y-0.5">
             {filteredTags.map((tag) => {
-              const isChecked = selectedTagIds.has(tag.id)
+              const isChecked = selectedTags.has(tag.name)
               return (
                 <button
-                  key={tag.id}
+                  key={tag.name}
                   type="button"
                   role="checkbox"
                   aria-checked={isChecked}
-                  onClick={() => onToggleTag(tag.id)}
+                  onClick={() => onToggleTag(tag.name)}
                   className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
                     isChecked
                       ? 'bg-stone-100 font-medium text-stone-900 dark:bg-stone-800 dark:text-stone-100'

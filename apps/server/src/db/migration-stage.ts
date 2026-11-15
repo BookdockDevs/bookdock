@@ -24,6 +24,7 @@ export const MEMBER_RESOURCE_UPLOAD_TAG = '0064_member_resource_upload_switch'
 export const FONT_LOCAL_NAMES_TAG = '0065_font_local_names'
 export const READING_RESOURCES_AI_FOUNDATION_TAG = '0066_reading_resources_ai_foundation'
 export const BOOK_DESCRIPTION_OVERRIDE_TAG = '0067_book_description_override'
+export const BOOK_CLASSIFICATION_VALUES_TAG = '0068_book_classification_values'
 
 /** Guarded revert of 0061_instance_invites and 0062_ai_chat_jobs for legacy-fixture
  * tests that reset the migration watermark and re-run the chain from an earlier
@@ -51,6 +52,16 @@ export function revertInstanceAndAiJobsSchema(
   // 0067 adds a card-local column on a table every legacy fixture keeps; its
   // ledger row replays too, so the column has to go with the watermark reset.
   if (table('library_books') && columns('library_books').has('description_override')) sqlite.exec('ALTER TABLE library_books DROP COLUMN description_override')
+  // 0068 replaces the category column and the taxonomy tables with values. The
+  // fixture was built by the current chain, so a replay starts from the *new*
+  // shape: revert the additions and put the retired column back, or the replay
+  // fails on a duplicate column and the fixture keeps a shape no release had.
+  for (const column of ['category_root', 'category_leaf']) {
+    if (table('library_books') && columns('library_books').has(column)) sqlite.exec(`ALTER TABLE library_books DROP COLUMN ${column}`)
+  }
+  if (table('library_books') && !columns('library_books').has('category_id')) sqlite.exec('ALTER TABLE library_books ADD COLUMN category_id text')
+  if (table('library_book_tag_values')) sqlite.exec('DROP TABLE library_book_tag_values')
+  if (table('library_metadata_value_state')) sqlite.exec('DROP TABLE library_metadata_value_state')
 }
 
 /** Guarded revert of 0065/0066 reading-resource and AI structure for fixtures
@@ -273,7 +284,7 @@ export function migrateBeforeBookRetirementIncluding(
   // Older partial fixtures lack book_reviews, so stage only the archive/annotation portion there.
   // MEMBER_RESOURCE_UPLOAD_TAG keeps the drizzle `instance` shape and its
   // settings queries consistent across service-test fixtures.
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG, FONT_LOCAL_NAMES_TAG, READING_RESOURCES_AI_FOUNDATION_TAG, BOOK_DESCRIPTION_OVERRIDE_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG, FONT_LOCAL_NAMES_TAG, READING_RESOURCES_AI_FOUNDATION_TAG, BOOK_DESCRIPTION_OVERRIDE_TAG, BOOK_CLASSIFICATION_VALUES_TAG])
   migrateWithTagFilter(
     db,
     options,

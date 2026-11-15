@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { z } from 'zod'
 
-import type { ExternalLibrariesRes, ExternalUploadRes } from '@bookdock/shared'
+import { categoryPathSchema, type ExternalLibrariesRes, type ExternalUploadRes } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
@@ -104,16 +104,26 @@ extRoutes.post('/books', async (c) => {
     throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
   }
   const libraryId = typeof body['libraryId'] === 'string' && body['libraryId'] ? body['libraryId'] : undefined
-  const categoryId = typeof body['categoryId'] === 'string' && body['categoryId'] ? body['categoryId'] : undefined
+  // A category is a value, so a client sends the names rather than an id. Form
+  // bodies are flat, so the path arrives as a JSON array string.
+  const rawCategoryPath = typeof body['categoryPath'] === 'string' && body['categoryPath'] ? body['categoryPath'] : undefined
+  let categoryPath: string[] | undefined
+  if (rawCategoryPath) {
+    try {
+      categoryPath = categoryPathSchema.parse(JSON.parse(rawCategoryPath))
+    } catch {
+      throw new AppError('VALIDATION_ERROR', 'categoryPath must be a JSON array of one or two names')
+    }
+  }
   const shelfId = typeof body['shelfId'] === 'string' && body['shelfId'] ? body['shelfId'] : undefined
-  if (categoryId && !libraryId) throw new AppError('VALIDATION_ERROR', 'Category placement requires a libraryId')
+  if (categoryPath && !libraryId) throw new AppError('VALIDATION_ERROR', 'Category placement requires a libraryId')
   const normalizeTitle = isTitleNormalizeEnabled(user.id)
   // Two upload paths because the domain has two: uploadBook always writes to the
   // caller's private library, while uploadCatalogBook targets a named one and
   // enforces requireLibraryManager itself. Both report duplication, which is
   // what lets a client re-run the same folder safely.
   const result = libraryId
-    ? await uploadCatalogBook(libraryId, user.id, file, { normalizeTitle, categoryId, shelfId })
+    ? await uploadCatalogBook(libraryId, user.id, file, { normalizeTitle, categoryPath, shelfId })
     : await uploadBook(user.id, file, { shelfId }, { normalizeTitle }).then((r) => ({
       bookVersionId: r.book.id,
       duplicated: r.duplicated,

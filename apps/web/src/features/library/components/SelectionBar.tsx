@@ -618,10 +618,9 @@ function BatchClassifyDialog({ ids, items, libraryId, taxonomyLibraryId, onClose
   const { data: libraryCategories } = useLibraryCategories(taxonomyLibraryId ?? libraryId ?? null)
   const { data: libraryTags } = useLibraryTags(libraryId ?? null)
   const [activeTab, setActiveTab] = useState<'shelves' | 'categories' | 'tags'>(libraryId ? 'categories' : 'shelves')
-  // undefined = untouched (no shelf PUT), null = move out of shelf (uncategorized)
+  // undefined = untouched, null = move out of category.
   const [selectedShelf, setSelectedShelf] = useState<string | null | undefined>(undefined)
-  const [selectedCategory, setSelectedCategory] = useState<string | null | undefined>(undefined)
-  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string | undefined>(undefined)
+  const [selectedCategory, setSelectedCategory] = useState<string[] | null | undefined>(undefined)
   const [tagChanges, setTagChanges] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
   const shelfRadioName = `batch-shelf-${useId()}`
@@ -630,7 +629,7 @@ function BatchClassifyDialog({ ids, items, libraryId, taxonomyLibraryId, onClose
   const categories = categoryChoices(libraryCategories?.data ?? [])
   const tags = libraryId ? (libraryTags?.data ?? []) : (tagsData?.data ?? [])
   const initialShelf = items.every((item) => item.shelfId === items[0]?.shelfId) ? items[0]?.shelfId ?? null : undefined
-  const initialCategory = items.every((item) => item.categoryId === items[0]?.categoryId) ? items[0]?.categoryId ?? null : undefined
+  const initialCategory = items.every((item) => JSON.stringify(item.categoryPath) === JSON.stringify(items[0]?.categoryPath)) ? items[0]?.categoryPath ?? null : undefined
 
   function handleClose() {
     if (!saving) onClose()
@@ -643,9 +642,9 @@ function BatchClassifyDialog({ ids, items, libraryId, taxonomyLibraryId, onClose
       const patch = {
         ids,
         ...(selectedShelf !== undefined ? { shelfId: selectedShelf } : {}),
-        ...(selectedTemplateKey ? { categoryTemplateKey: selectedTemplateKey } : selectedCategory !== undefined ? { categoryId: selectedCategory } : {}),
-        addTagIds: Object.keys(tagChanges).filter((id) => tagChanges[id]),
-        removeTagIds: Object.keys(tagChanges).filter((id) => !tagChanges[id]),
+        ...(selectedCategory !== undefined ? { categoryPath: selectedCategory } : {}),
+        addTags: Object.keys(tagChanges).filter((name) => tagChanges[name]),
+        removeTags: Object.keys(tagChanges).filter((name) => !tagChanges[name]),
       }
       const { device: localItems, server: serverSelection } = partitionByStore(items, (item) => item.ref)
       const serverItemIds = serverSelection.map((item) => item.id)
@@ -685,13 +684,13 @@ function BatchClassifyDialog({ ids, items, libraryId, taxonomyLibraryId, onClose
     }
   }
 
-  const showSave = selectedShelf !== undefined || selectedCategory !== undefined || selectedTemplateKey !== undefined || Object.keys(tagChanges).length > 0
+  const showSave = selectedShelf !== undefined || selectedCategory !== undefined || Object.keys(tagChanges).length > 0
   const currentShelfName = initialShelf === null
     ? _('library.notOnShelf')
     : shelves.find((shelf) => shelf.id === initialShelf)?.name
   const currentCategoryName = initialCategory === null
     ? _('library.uncategorized')
-    : categories.find((category) => category.id === initialCategory)?.name
+    : categories.find((category) => JSON.stringify(category.path) === JSON.stringify(initialCategory))?.name
 
   return (
     <Modal
@@ -727,15 +726,11 @@ function BatchClassifyDialog({ ids, items, libraryId, taxonomyLibraryId, onClose
               {currentCategoryName !== undefined && <p className="px-2 text-xs text-stone-400">{_('library.batchCurrentCategory', { name: currentCategoryName })}</p>}
               <CategoryAssignmentSelector
                 categories={libraryCategories?.data ?? []}
-                categoryId={selectedCategory}
-                categoryTemplateKey={selectedTemplateKey}
+                categoryPath={selectedCategory}
                 allowTemplates={!libraryId}
                 allowKeep
-                onKeep={() => { setSelectedCategory(undefined); setSelectedTemplateKey(undefined) }}
-                onChange={(value) => {
-                  setSelectedCategory(value.categoryId)
-                  setSelectedTemplateKey(value.categoryTemplateKey)
-                }}
+                onKeep={() => setSelectedCategory(undefined)}
+                onChange={(value) => setSelectedCategory(value.categoryPath)}
               />
             </div>
           ) : tags.length === 0 ? (
@@ -744,17 +739,17 @@ function BatchClassifyDialog({ ids, items, libraryId, taxonomyLibraryId, onClose
             <div className="flex flex-col gap-0.5">
               <p className="mb-1 px-2 text-xs text-stone-400">{_('library.batchTagsHint')}</p>
               {tags.map((tag) => {
-                const count = items.filter((item) => item.tagIds.includes(tag.id)).length
-                const state = tagChanges[tag.id] === undefined ? (count === 0 ? false : count === ids.length ? true : 'mixed') : tagChanges[tag.id]
+                const count = items.filter((item) => item.tags.includes(tag.name)).length
+                const state = tagChanges[tag.name] === undefined ? (count === 0 ? false : count === ids.length ? true : 'mixed') : tagChanges[tag.name]
                 const targetCount = state === true ? ids.length : state === false ? 0 : count
                 return <TaxonomyChoiceRow
-                  key={tag.id}
+                  key={tag.name}
                   label={tag.name}
                   ariaLabel={tag.name}
                   type="checkbox"
                   checked={state}
                   count={`${targetCount}/${ids.length}`}
-                  onChange={() => setTagChanges((previous) => ({ ...previous, [tag.id]: state !== true }))}
+                  onChange={() => setTagChanges((previous) => ({ ...previous, [tag.name]: state !== true }))}
                 />
               })}
             </div>

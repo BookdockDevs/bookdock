@@ -2,7 +2,13 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 
 import { getDb } from '../../db/client'
-import { libraryBookTags, libraryBookVersions, libraryBooks, libraryCategories, libraryMigrationLog, libraryTags, libraries, shelves } from '../../db/schema'
+import {
+  legacyCategoryAssignedBooks,
+  legacyLibraryBookTags,
+  legacyLibraryCategories,
+  legacyLibraryTags,
+} from '../../db/legacy-classification-schema'
+import { libraryBookTagValues, libraryBookVersions, libraryBooks, libraryMigrationLog, libraries, shelves } from '../../db/schema'
 import { createId } from '../../lib/id'
 
 export const CATEGORY_SHELF_MIGRATION_BATCH = 'category-shelf-separation-v1'
@@ -28,40 +34,33 @@ interface SourceBook {
   bookVersionId: string
 }
 
-function categoryPath(db: Tx, categoryId: string, sourceLibraryId: string): Array<{ id: string; name: string; sortOrder: number }> | undefined {
-  const path: Array<{ id: string; name: string; sortOrder: number }> = []
+/** Name path of a legacy category, or undefined when the row is not that library's. */
+function categoryPath(db: Tx, categoryId: string, sourceLibraryId: string): string[] | undefined {
+  const path: string[] = []
   let currentId: string | null = categoryId
   const seen = new Set<string>()
   while (currentId) {
     if (seen.has(currentId) || path.length === 2) return undefined
     seen.add(currentId)
-    const row = db.select({ id: libraryCategories.id, name: libraryCategories.name, sortOrder: libraryCategories.sortOrder, parentId: libraryCategories.parentId, libraryId: libraryCategories.libraryId })
-      .from(libraryCategories).where(eq(libraryCategories.id, currentId)).get()
+    const row = db.select({ id: legacyLibraryCategories.id, name: legacyLibraryCategories.name, parentId: legacyLibraryCategories.parentId, libraryId: legacyLibraryCategories.libraryId })
+      .from(legacyLibraryCategories).where(eq(legacyLibraryCategories.id, currentId)).get()
     if (!row || row.libraryId !== sourceLibraryId) return undefined
-    path.unshift({ id: row.id, name: row.name, sortOrder: row.sortOrder })
+    path.unshift(row.name)
     currentId = row.parentId
   }
   return path
 }
 
-function ensurePrivateCategory(db: Tx, libraryId: string, userId: string, path: Array<{ id: string; name: string; sortOrder: number }>, now: number): string {
-  let parentId: string | null = null
-  let categoryId = ''
-  for (const node of path) {
-    const existing = db.select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.name, node.name), parentId === null ? isNull(libraryCategories.parentId) : eq(libraryCategories.parentId, parentId))).get()
-    if (existing) {
-      categoryId = existing.id
-    } else {
-      categoryId = createId('cat')
-      db.insert(libraryCategories).values({ id: categoryId, libraryId, userId, name: node.name, parentId, sortOrder: node.sortOrder, pinned: false, hidden: false, createdAt: now, updatedAt: now }).run()
-    }
-    parentId = categoryId
-  }
-  return categoryId
-}
-
-/** Synchronous, atomic structure and metadata cutover. */
+/**
+ * Historical cutover: private libraries used to keep their bookshelves in the
+ * category table, so the first step is separating the two — those rows become
+ * shelves and their book assignments become shelf membership.
+ *
+ * The second half used to materialise the *source* library's categories and tags
+ * in the private library. Categories and tags are values now, so it writes the
+ * source's name path and tag names onto the collected card instead; the copy is
+ * complete without inventing any row.
+ */
 export function migrateCategoryShelfSeparation(db: Db = getDb(), options: MigrationOptions = {}) {
   return db.transaction((tx) => {
     const completed = tx.select({ id: libraryMigrationLog.id }).from(libraryMigrationLog)
@@ -76,7 +75,7 @@ export function migrateCategoryShelfSeparation(db: Db = getDb(), options: Migrat
       .where(sql`${libraryBooks.shelfId} IS NOT NULL`).get()
     if (existingShelves || existingShelfAssignment) throw new Error('category/shelf separation has partial data without its completion marker')
     const oldShelves = privateLibraryIds.length
-      ? tx.select().from(libraryCategories).where(inArray(libraryCategories.libraryId, privateLibraryIds)).all()
+      ? tx.select().from(legacyLibraryCategories).where(inArray(legacyLibraryCategories.libraryId, privateLibraryIds)).all()
       : []
     const shelfIds = oldShelves.map((row) => row.id)
     if (oldShelves.some((row) => privateUserByLibrary.get(row.libraryId) !== row.userId)) {
@@ -84,13 +83,13 @@ export function migrateCategoryShelfSeparation(db: Db = getDb(), options: Migrat
     }
     if (shelfIds.length) {
       const references = tx.select({
-        libraryId: libraryBooks.libraryId,
-        userId: libraryBooks.userId,
-        categoryLibraryId: libraryCategories.libraryId,
-        categoryUserId: libraryCategories.userId,
-        shelfId: libraryBooks.shelfId,
-      }).from(libraryBooks).innerJoin(libraryCategories, eq(libraryCategories.id, libraryBooks.categoryId))
-        .where(inArray(libraryBooks.categoryId, shelfIds)).all()
+        libraryId: legacyCategoryAssignedBooks.libraryId,
+        userId: legacyCategoryAssignedBooks.userId,
+        categoryLibraryId: legacyLibraryCategories.libraryId,
+        categoryUserId: legacyLibraryCategories.userId,
+        shelfId: legacyCategoryAssignedBooks.shelfId,
+      }).from(legacyCategoryAssignedBooks).innerJoin(legacyLibraryCategories, eq(legacyLibraryCategories.id, legacyCategoryAssignedBooks.categoryId))
+        .where(inArray(legacyCategoryAssignedBooks.categoryId, shelfIds)).all()
       if (references.some((row) => row.libraryId !== row.categoryLibraryId || row.userId !== row.categoryUserId || row.shelfId !== null)) {
         throw new Error('category/shelf separation found conflicting library-book assignments')
       }
@@ -101,12 +100,14 @@ export function migrateCategoryShelfSeparation(db: Db = getDb(), options: Migrat
     options.afterStage?.('shelves-copied')
 
     if (shelfIds.length) {
-      for (const shelfId of shelfIds) tx.update(libraryBooks).set({ shelfId: sql`${libraryBooks.categoryId}` })
-        .where(and(inArray(libraryBooks.libraryId, privateLibraryIds), eq(libraryBooks.categoryId, shelfId), isNull(libraryBooks.shelfId))).run()
+      for (const shelfId of shelfIds) {
+        tx.update(legacyCategoryAssignedBooks).set({ shelfId: sql`${legacyCategoryAssignedBooks.categoryId}` })
+          .where(and(inArray(legacyCategoryAssignedBooks.libraryId, privateLibraryIds), eq(legacyCategoryAssignedBooks.categoryId, shelfId), isNull(legacyCategoryAssignedBooks.shelfId))).run()
+      }
     }
     options.afterStage?.('book-shelves-moved')
 
-    if (shelfIds.length) tx.delete(libraryCategories).where(inArray(libraryCategories.id, shelfIds)).run()
+    if (shelfIds.length) tx.delete(legacyLibraryCategories).where(inArray(legacyLibraryCategories.id, shelfIds)).run()
     options.afterStage?.('old-categories-deleted')
 
     const anomalies: string[] = []
@@ -115,7 +116,7 @@ export function migrateCategoryShelfSeparation(db: Db = getDb(), options: Migrat
     const now = Date.now()
     for (const library of privateLibraries) {
       const sourceVersion = alias(libraryBookVersions, 'source_library_book_versions')
-      const sourceBook = alias(libraryBooks, 'source_library_books')
+      const sourceBook = alias(legacyCategoryAssignedBooks, 'source_library_books')
       const targets = tx.select({
         id: libraryBooks.id,
         libraryId: libraryBooks.libraryId,
@@ -150,28 +151,21 @@ export function migrateCategoryShelfSeparation(db: Db = getDb(), options: Migrat
           if (!path) {
             anomalies.push(`${target.id}: missing, mismatched or invalid source category path`)
           } else {
-            const categoryId = ensurePrivateCategory(tx, library.id, library.userId, path, now)
-            tx.update(libraryBooks).set({ categoryId }).where(and(eq(libraryBooks.id, target.id), isNull(libraryBooks.categoryId))).run()
+            tx.update(libraryBooks)
+              .set({ categoryRoot: path[0] ?? null, categoryLeaf: path[1] ?? null })
+              .where(and(eq(libraryBooks.id, target.id), isNull(libraryBooks.categoryRoot))).run()
             categories += 1
           }
         }
-        const sourceTags = tx.select({ name: libraryTags.name }).from(libraryBookTags)
-          .innerJoin(libraryTags, and(eq(libraryTags.id, libraryBookTags.tagId), eq(libraryTags.libraryId, target.sourceLibraryId)))
-          .where(eq(libraryBookTags.libraryBookId, target.sourceBookId)).all()
-        for (const sourceTag of sourceTags) {
-          let privateTag = tx.select({ id: libraryTags.id }).from(libraryTags)
-            .where(and(eq(libraryTags.libraryId, library.id), eq(libraryTags.name, sourceTag.name))).get()
-          if (!privateTag) {
-            const id = createId('tag')
-            tx.insert(libraryTags).values({ id, libraryId: library.id, userId: library.userId, name: sourceTag.name, sortOrder: 0, pinned: false, hidden: false, createdAt: now, updatedAt: now }).run()
-            privateTag = { id }
-          }
-          const relation = tx.select({ tagId: libraryBookTags.tagId }).from(libraryBookTags)
-            .where(and(eq(libraryBookTags.libraryBookId, target.id), eq(libraryBookTags.tagId, privateTag.id))).get()
-          if (!relation) {
-            tx.insert(libraryBookTags).values({ libraryBookId: target.id, tagId: privateTag.id }).run()
-            tags += 1
-          }
+        const sourceTags = tx.select({ name: legacyLibraryTags.name }).from(legacyLibraryBookTags)
+          .innerJoin(legacyLibraryTags, and(eq(legacyLibraryTags.id, legacyLibraryBookTags.tagId), eq(legacyLibraryTags.libraryId, target.sourceLibraryId)))
+          .where(eq(legacyLibraryBookTags.libraryBookId, target.sourceBookId)).all()
+        for (const [sortOrder, sourceTag] of sourceTags.entries()) {
+          const existing = tx.select({ id: libraryBookTagValues.id }).from(libraryBookTagValues)
+            .where(and(eq(libraryBookTagValues.libraryBookId, target.id), eq(libraryBookTagValues.name, sourceTag.name))).get()
+          if (existing) continue
+          tx.insert(libraryBookTagValues).values({ id: createId('btv'), libraryBookId: target.id, name: sourceTag.name, sortOrder }).run()
+          tags += 1
         }
       }
     }

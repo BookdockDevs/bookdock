@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, editorEpubSaveSchema, editorTxtSaveSchema, LOCAL_IMPORT_MAX_IMAGES, LOCAL_IMPORT_MAX_PAYLOAD_BYTES, localBookDuplicateCheckSchema, localBookImportPayloadSchema, privateBatchShelfSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, bookSaveSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema } from '@bookdock/shared'
+import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, editorEpubSaveSchema, editorTxtSaveSchema, LOCAL_IMPORT_MAX_IMAGES, LOCAL_IMPORT_MAX_PAYLOAD_BYTES, localBookDuplicateCheckSchema, localBookImportPayloadSchema, privateBatchShelfSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, bookSaveSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema, parseCategoryQuery } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -45,6 +45,7 @@ import {
 import { updateReaderBookSettings } from './reader-settings.service'
 import { undoReceiptPayload as undoReceipt } from '../../lib/undo'
 import { readJsonOrMultipartPayload } from '../../lib/multipart-payload'
+import { parseFormJson } from '../../lib/form-json'
 import { forkLocalBook } from '../libraries/fork.service'
 import { getPrivateBookMetadataSource } from '../libraries/metadata-source.service'
 import { getTrashSettings, isTitleNormalizeEnabled, isTrashEnabled } from '../settings/settings.service'
@@ -175,8 +176,8 @@ booksRoutes.get('/', async (c) => {
   const sortBy = query['sortBy']
   const sortOrder = query['sortOrder']
   const shelfId = query['shelfId']
-  const categoryId = query['categoryId']
-  const tagId = query['tagId']
+  const category = parseCategoryQuery(query['category'])
+  const tag = query['tag']
   const author = query['author']
   const series = query['series']
   const formatParsed = bookFormatSchema.safeParse(query['format'])
@@ -190,7 +191,7 @@ booksRoutes.get('/', async (c) => {
     await purgeExpiredTrash(user.id, trashSettings.autoCleanDays)
     await purgeTrashToCapacity(user.id, trashSettings.maxTrashBytes ?? 0)
   }
-  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tagId, format, readStatus, trash, author, series, requestShowHidden(c), query['expression'], categoryId)
+  const result = await listBooks(user.id, parsed.data.page, parsed.data.pageSize, search, sortBy, sortOrder, shelfId, tag, format, readStatus, trash, author, series, requestShowHidden(c), query['expression'], category)
   return c.json(result)
 })
 
@@ -205,19 +206,11 @@ booksRoutes.post('/', async (c) => {
   if (file.size > effectiveUploadMaxBytes()) {
     throw new AppError('UPLOAD_TOO_LARGE', 'File too large')
   }
-  const rawTagIds = body['tagIds']
-  let tagIds: unknown
-  if (rawTagIds !== undefined) {
-    if (typeof rawTagIds !== 'string') {
-      throw new AppError('VALIDATION_ERROR', 'Invalid tagIds')
-    }
-    try {
-      tagIds = JSON.parse(rawTagIds)
-    } catch {
-      throw new AppError('VALIDATION_ERROR', 'Invalid tagIds')
-    }
-  }
-  const membership = bookMembershipSchema.safeParse({ shelfId: body['shelfId'], categoryId: body['categoryId'], categoryTemplateKey: body['categoryTemplateKey'], tagIds })
+  const membership = bookMembershipSchema.safeParse({
+    shelfId: body['shelfId'],
+    categoryPath: parseFormJson(body['categoryPath'], 'categoryPath'),
+    tags: parseFormJson(body['tags'], 'tags'),
+  })
   if (!membership.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid membership', membership.error.flatten())
   }
@@ -685,7 +678,7 @@ booksRoutes.put('/:id/tags', async (c) => {
     throw new AppError('VALIDATION_ERROR', 'Invalid input', parsed.error.flatten())
   }
   const undo: { token?: string } = {}
-  await setBookTags(user.id, bookId, parsed.data.tagIds ?? [], undo)
+  await setBookTags(user.id, bookId, parsed.data.tags ?? [], undo)
   return c.json({ data: null, ...(undo.token ? { undo: undoReceipt(undo.token) } : {}) })
 })
 

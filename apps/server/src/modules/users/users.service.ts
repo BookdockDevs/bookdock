@@ -20,9 +20,7 @@ import {
   libraries,
   libraryBooks,
   libraryBookVersions,
-  libraryCategories,
   shelves,
-  libraryTags,
   instance,
   readingRecords,
   settings,
@@ -239,26 +237,21 @@ export async function deleteUser(actorId: string, targetId: string, password?: s
     for (const library of privateLibraries) {
       tx.delete(libraryBooks).where(eq(libraryBooks.libraryId, library.id)).run()
       tx.delete(shelves).where(eq(shelves.libraryId, library.id)).run()
-      tx.delete(libraryCategories).where(eq(libraryCategories.libraryId, library.id)).run()
-      tx.delete(libraryTags).where(eq(libraryTags.libraryId, library.id)).run()
       tx.delete(libraries).where(eq(libraries.id, library.id)).run()
     }
-    // Creator rows inside libraries the account does not own (shared works,
-    // categories, tags uploaded/created as a manager) belong to the library,
-    // so authorship falls back to the library owner instead of blocking the
-    // whole deletion on a restricting FK. A full createdByUserId split is
-    // deferred (review §4.2); this keeps the delete working without inventing
-    // new relations.
+    // Creator rows inside libraries the account does not own (shared works
+    // uploaded as a manager) belong to the library, so authorship falls back to
+    // the library owner instead of blocking the whole deletion on a restricting
+    // FK. A full createdByUserId split is deferred (review §4.2); this keeps the
+    // delete working without inventing new relations. Categories and tags have
+    // no rows of their own to reassign: a value belongs to whichever books
+    // carry it.
     const sharedLibraries = tx.select({ id: libraries.id, userId: libraries.userId }).from(libraries)
       .where(eq(libraries.type, 'shared')).all()
     for (const library of sharedLibraries) {
       if (library.userId === targetId) continue
       tx.update(libraryBooks).set({ userId: library.userId })
         .where(and(eq(libraryBooks.libraryId, library.id), eq(libraryBooks.userId, targetId))).run()
-      tx.update(libraryCategories).set({ userId: library.userId })
-        .where(and(eq(libraryCategories.libraryId, library.id), eq(libraryCategories.userId, targetId))).run()
-      tx.update(libraryTags).set({ userId: library.userId })
-        .where(and(eq(libraryTags.libraryId, library.id), eq(libraryTags.userId, targetId))).run()
     }
     tx.delete(settings).where(eq(settings.userId, targetId)).run()
     tx.delete(fonts).where(eq(fonts.userId, targetId)).run()

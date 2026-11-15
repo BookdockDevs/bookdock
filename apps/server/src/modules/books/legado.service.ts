@@ -1,16 +1,17 @@
 import { DOMParser, Element as XmlElement } from '@xmldom/xmldom'
 import { and, asc, eq, inArray, or, sql } from 'drizzle-orm'
 
-import { applyTitleReplacements, type LegadoExploreConfigRes, type LegadoExploreLibrary, type TextRun } from '@bookdock/shared'
+import { applyTitleReplacements, parseCategoryValueKey, type LegadoExploreConfigRes, type LegadoExploreLibrary, type TextRun } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { contentRevisions, libraryCategories, libraryMemberships, libraryTags, libraries, shelves } from '../../db/schema'
+import { contentRevisions, libraryMemberships, libraries, shelves } from '../../db/schema'
 import { isEpubMediaPath, resolveEpubResourcePath, type EpubChapterMedia } from '../../formats/epub'
 import { AppError } from '../../middleware/error'
 import { getUserTimezone } from '../auth/auth.service'
 import { formatTimestamp } from '../../lib/format-timestamp'
 import { ensurePrivateLibrary, isLibraryManager } from '../libraries/library-access'
 import { listLibraryVersionEntries } from '../libraries/catalog.service'
+import { listCategoryValues, listTagValues } from '../classification/classification.service'
 import { getSettings } from '../settings/settings.service'
 
 import {
@@ -32,15 +33,17 @@ export const LEGADO_NONE_CATEGORY = 'none'
 export type LegadoExploreScope = 'all' | 'shelf' | 'category' | 'tag'
 
 /**
- * A shelf/tag filter is always scoped to one library: taxonomy ids are
- * library-local and the uncategorized sentinel repeats per library, so an id
- * on its own would let one library's row answer for another's.
+ * A shelf/tag filter is always scoped to one library: a shelf id is
+ * library-local, and a category or tag value only means anything inside the
+ * library whose list produced it, so neither travels alone.
  */
 export interface LegadoExploreFilter {
   libraryId: string
-  categoryId?: string
+  /** Category value by name path, or the uncategorized sentinel. */
+  category?: string[] | 'none'
   shelfId?: string
-  tagId?: string
+  /** A tag value is its name. */
+  tag?: string
 }
 
 /**
@@ -77,24 +80,6 @@ function memberLibraryIds(userId: string): string[] {
     .where(eq(libraryMemberships.userId, userId)).all().map((row) => row.libraryId)
 }
 
-/** Nesting depth for the discovery indents; cycles cannot occur (see the
- *  category-parent service, which refuses them) but a malformed row must not
- *  hang the config request either. */
-function categoryDepths(rows: { id: string; parentId: string | null }[]): Map<string, number> {
-  const byId = new Map(rows.map((row) => [row.id, row]))
-  const depths = new Map<string, number>()
-  for (const row of rows) {
-    let depth = 0
-    let cursor = row.parentId
-    while (cursor && depth < 8) {
-      depth += 1
-      cursor = byId.get(cursor)?.parentId ?? null
-    }
-    depths.set(row.id, depth)
-  }
-  return depths
-}
-
 /**
  * Discovery rows for every browsable library.
  *
@@ -112,9 +97,9 @@ export async function getLegadoExploreConfig(userId: string): Promise<LegadoExpl
   for (const library of listBrowsableLibraries(userId)) {
     const showHidden = await isLibraryManager(userId, library.id)
     const [categories, privateShelves, tags, works] = await Promise.all([
-      enabledModules.includes('categories') ? listLegadoCategories(library.id, showHidden) : Promise.resolve([]),
+      enabledModules.includes('categories') ? listLegadoCategories(userId, library.id, showHidden) : Promise.resolve([]),
       library.private && enabledModules.includes('shelves') ? listLegadoShelves(library.id, showHidden) : Promise.resolve([]),
-      enabledModules.includes('tags') ? listLegadoTags(library.id, showHidden) : Promise.resolve([]),
+      enabledModules.includes('tags') ? listLegadoTags(userId, library.id, showHidden) : Promise.resolve([]),
       listLibraryVersionEntries(userId, library.id, { page: 1, pageSize: 1 }),
     ])
     if (works.total === 0) continue
@@ -123,18 +108,15 @@ export async function getLegadoExploreConfig(userId: string): Promise<LegadoExpl
   return { libraries: rows }
 }
 
-function listLegadoCategories(libraryId: string, includeHidden: boolean) {
-  const db = getDb()
-  const rows = db.select({ id: libraryCategories.id, name: libraryCategories.name, parentId: libraryCategories.parentId, sortOrder: libraryCategories.sortOrder, createdAt: libraryCategories.createdAt })
-    .from(libraryCategories)
-    .where(includeHidden
-      ? eq(libraryCategories.libraryId, libraryId)
-      : and(eq(libraryCategories.libraryId, libraryId), eq(libraryCategories.hidden, false)))
-    .orderBy(asc(libraryCategories.sortOrder), asc(libraryCategories.createdAt))
-    .all()
-  const depths = categoryDepths(rows)
-  const categories = rows.map((row) => ({ id: row.id, name: row.name, depth: depths.get(row.id) ?? 0 }))
-  return categories.length > 0 ? [{ id: LEGADO_NONE_CATEGORY, name: '未分类', depth: 0 }, ...categories] : []
+/**
+ * Discovery rows for the categories this library's works carry. Depth comes
+ * from the value's own path, so the indent follows the two-level limit without
+ * any parent lookup.
+ */
+async function listLegadoCategories(actorId: string, libraryId: string, includeHidden: boolean) {
+  const categories = await listCategoryValues(actorId, libraryId, { showHidden: includeHidden })
+  const mapped = categories.map((node) => ({ id: node.id, name: node.name, depth: node.path.length - 1 }))
+  return mapped.length > 0 ? [{ id: LEGADO_NONE_CATEGORY, name: '未分类', depth: 0 }, ...mapped] : []
 }
 
 function listLegadoShelves(libraryId: string, includeHidden: boolean) {
@@ -149,15 +131,9 @@ function listLegadoShelves(libraryId: string, includeHidden: boolean) {
   return mapped.length > 0 ? [{ id: LEGADO_NONE_CATEGORY, name: '未入架', depth: 0 }, ...mapped] : []
 }
 
-function listLegadoTags(libraryId: string, includeHidden: boolean) {
-  return getDb().select({ id: libraryTags.id, name: libraryTags.name })
-    .from(libraryTags)
-    .where(includeHidden
-      ? eq(libraryTags.libraryId, libraryId)
-      : and(eq(libraryTags.libraryId, libraryId), eq(libraryTags.hidden, false)))
-    .orderBy(asc(libraryTags.sortOrder), asc(libraryTags.name))
-    .all()
-    .map((row) => ({ id: row.id, name: row.name, depth: 0 }))
+async function listLegadoTags(actorId: string, libraryId: string, includeHidden: boolean) {
+  const tags = await listTagValues(actorId, libraryId, { showHidden: includeHidden })
+  return tags.map((tag) => ({ id: tag.name, name: tag.name, depth: 0 }))
 }
 
 /** Reject a taxonomy id that does not belong to the library it was asked for. */
@@ -172,16 +148,14 @@ export function getLegadoExploreFilter(userId: string, libraryId: string, scope:
     return { libraryId, shelfId: id }
   }
   if (scope === 'category') {
-    if (id === LEGADO_NONE_CATEGORY) return { libraryId, categoryId: LEGADO_NONE_CATEGORY }
-    const category = getDb().select({ id: libraryCategories.id }).from(libraryCategories)
-      .where(and(eq(libraryCategories.id, id), eq(libraryCategories.libraryId, libraryId))).get()
-    if (!category) throw new AppError('CATEGORY_NOT_FOUND')
-    return { libraryId, categoryId: id }
+    if (id === LEGADO_NONE_CATEGORY) return { libraryId, category: 'none' }
+    // A category is a value, not a row in this library: the only thing that can
+    // be wrong with it is its shape.
+    const path = parseCategoryValueKey(id)
+    if (!path) throw new AppError('CATEGORY_NOT_FOUND')
+    return { libraryId, category: path }
   }
-  const tag = getDb().select({ id: libraryTags.id }).from(libraryTags)
-    .where(and(eq(libraryTags.id, id), eq(libraryTags.libraryId, libraryId))).get()
-  if (!tag) throw new AppError('TAG_NOT_FOUND')
-  return { libraryId, tagId: id }
+  return { libraryId, tag: id }
 }
 
 /** The reader's own library, created on demand like every other private path. */

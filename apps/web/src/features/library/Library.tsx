@@ -48,7 +48,6 @@ import { warmReaderEntry, useWarmReaderEntry } from '@/features/reading-data/rea
 import { catalogSelectionId, catalogSelectionKey } from '@/features/reading-data/catalog-selection'
 import { useVaultCapable } from '@/features/reading-data/vault-availability'
 import { localLibraryRepository } from '@/features/local-library/repository'
-import { LOCAL_VAULT_ID } from '@/features/local-library/id'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useInstanceInfo } from '@/features/auth/hooks'
@@ -86,7 +85,7 @@ import { catalogWorkRow, privateBookRow, rowCover, type BookRow } from './book-r
 import { libraryUrlCorrection, pageRangeCorrection, vanishedFilterCorrection } from './library-filters'
 import { BOOK_SORT_DEFAULT_DIR, sortSidebarItems } from './sort-modes'
 import { categoryPath, sortCategories } from './taxonomy'
-import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, loadUnifiedSearchPage, catalogQueryParts, useUnifiedBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useMoveBooksToCategory, useReorderShelves, useReorderTags, useReorderLibraryCategories, useReorderLibraryTags, useTrashEnabled, useTrashCapBytes, useLibraryPrefsState, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useCatalogBookDetail, useLibraryCategories, useLibraryTags, useLibraryRelation } from './hooks'
+import { useLibrarySearchAuthors, booksQueryParts, loadSearchPage, loadUnifiedSearchPage, catalogQueryParts, useUnifiedBooks, prefetchBooks, prefetchLibraryCatalog, useDeleteBook, useForkBook, useRestoreBook, usePermanentDeleteBook, useEmptyTrash, useRestoreLibraryBook, usePermanentDeleteLibraryBook, useEmptyLibraryTrash, useShelves, useTags, useMoveBooksToShelf, useMoveBooksToCategory, useReorderShelves, useReorderLibraryCategories, useReorderLibraryTags, useTrashEnabled, useTrashCapBytes, useLibraryPrefsState, useHiddenLibraries, useUpdateLibraryPrefs, useLibraries, useLibraryCatalog, useCatalogBookDetail, useLibraryCategories, useLibraryTags, useLibraryRelation, useDeviceTaxonomy } from './hooks'
 
 
 function estimateDynColumns(): number {  if (typeof window === 'undefined') return 4
@@ -418,7 +417,6 @@ export default function Library() {
   const moveBooksToShelf = useMoveBooksToShelf()
   const moveBooksToCategory = useMoveBooksToCategory()
   const reorderShelves = useReorderShelves()
-  const reorderTags = useReorderTags()
   const reorderLibraryCategories = useReorderLibraryCategories()
   const reorderLibraryTags = useReorderLibraryTags()
   // Drag-to-manual: a row drop materializes the visual order into sortOrder
@@ -473,15 +471,16 @@ export default function Library() {
       // The same drop in either library: onto a category row, or onto the
       // uncategorized entry to take the row out of its category. Tag rows are
       // not drop targets in either library.
-      const targetCategoryId = resolveDropShelfId(String(over.id))
+      const targetCategoryKey = resolveDropShelfId(String(over.id))
       const targetType = (over.data.current as { type?: unknown } | undefined)?.type
+      const targetPath = targetCategoryKey ? categories.find((category) => category.id === targetCategoryKey)?.path ?? null : null
       if (activeLibrary) {
         const moved = payload.bookIds.filter((key) => {
           const work = catalogWorks.find((w) => catalogSelectionKey(w) === key)
-          return work ? work.categoryId !== targetCategoryId : false
+          return work ? JSON.stringify(work.categoryPath) !== JSON.stringify(targetPath) : false
         }).map((key) => catalogSelectionId(key))
         if (moved.length === 0) return
-        moveBooksToCategory.mutate({ libraryId: activeLibrary.id, books: moved.map((id) => ({ id })), categoryId: targetCategoryId })
+        moveBooksToCategory.mutate({ libraryId: activeLibrary.id, books: moved.map((id) => ({ id })), categoryPath: targetPath })
         if (selectionActive && payload.bookIds.some((id) => selection.has(id))) {
           completeBatchAction()
         }
@@ -489,14 +488,14 @@ export default function Library() {
       }
       // Mixed shelf: the dragged keys may span both stores, so the move hook
       // partitions them and each authority files its own half.
-      const movedBooks = (field: 'categoryId' | 'shelfId') => payload.bookIds.flatMap((key) => {
+      const movedBooks = (field: 'categoryPath' | 'shelfId') => payload.bookIds.flatMap((key) => {
         const book = allBooks.find((item) => catalogSelectionKey(item) === key)
-        return book && !isRowReadOnly(book) && book[field] !== targetCategoryId ? [{ id: book.id, ref: book.ref }] : []
+        return book && !isRowReadOnly(book) && (field === 'categoryPath' ? JSON.stringify(book.categoryPath) !== JSON.stringify(targetPath) : book.shelfId !== targetCategoryKey) ? [{ id: book.id, ref: book.ref }] : []
       })
       if (targetType === 'category') {
-        const moved = movedBooks('categoryId')
+        const moved = movedBooks('categoryPath')
         if (moved.length === 0) return
-        moveBooksToCategory.mutate({ books: moved, categoryId: targetCategoryId })
+        moveBooksToCategory.mutate({ books: moved, categoryPath: targetPath })
         if (selectionActive && payload.bookIds.some((id) => selection.has(id))) {
           completeBatchAction()
         }
@@ -505,7 +504,7 @@ export default function Library() {
       // No-op when every dragged book already sits in the target shelf.
       const moved = movedBooks('shelfId')
       if (moved.length === 0) return
-      moveBooksToShelf.mutate({ books: moved, shelfId: targetCategoryId })
+      moveBooksToShelf.mutate({ books: moved, shelfId: targetCategoryKey })
       if (selectionActive && payload.bookIds.some((id) => selection.has(id))) {
         completeBatchAction()
       }
@@ -532,7 +531,7 @@ export default function Library() {
       return
     }
     if (dragType === 'tag') {
-      const ordered = tags.map((tag) => tag.id)
+      const ordered = tags.map((tag) => tag.name)
       const oldIndex = ordered.indexOf(String(active.id))
       const newIndex = ordered.indexOf(String(over.id))
       if (oldIndex < 0 || newIndex < 0) return
@@ -546,14 +545,16 @@ export default function Library() {
       }, 160)
       // The same drag reorders whichever taxonomy is on screen; only the
       // endpoint differs, because the rows live in different scopes.
-      if (activeLibrary) reorderLibraryTags.mutate({ libraryId: activeLibrary.id, tagIds: next })
-      else reorderTags.mutate(next)
+      const source = activeLibrary ? 'server' : search.source ?? null
+      const localNames = source === null ? next.filter((name) => deviceTaxonomy.data?.tags.some((tag) => tag.name === name)) : undefined
+      const serverNames = source === null ? next.filter((name) => tagsData?.data.some((tag) => tag.name === name)) : undefined
+      reorderLibraryTags.mutate({ libraryId: activeLibrary?.id ?? null, names: next, source, localNames, serverNames })
       updateLibraryPrefs.mutate({ tagSort: { mode: 'manual' } })
       return
     }
     const isCategoryDrag = dragType === 'category'
     if (dragType !== 'shelf' && !isCategoryDrag) return
-    const categoryRows = isCategoryDrag ? libraryCategoriesQuery.data?.data ?? [] : []
+    const categoryRows = isCategoryDrag ? categories : []
     const draggedCategory = isCategoryDrag ? categoryRows.find((category) => category.id === active.id) : undefined
     const targetCategory = isCategoryDrag ? categoryRows.find((category) => category.id === over.id) : undefined
     if (isCategoryDrag && (!draggedCategory || !targetCategory || draggedCategory.parentId !== targetCategory.parentId)) return
@@ -573,7 +574,10 @@ export default function Library() {
       setSettleShelfId(null)
     }, 160)
     if (isCategoryDrag) {
-      reorderLibraryCategories.mutate({ libraryId: taxonomyLibraryId!, categoryIds: next })
+      const source = activeLibrary ? 'server' : search.source ?? null
+      const localKeys = source === null ? next.filter((key) => deviceTaxonomy.data?.categories.some((category) => category.id === key)) : undefined
+      const serverKeys = source === null ? next.filter((key) => libraryCategoriesQuery.data?.data.some((category) => category.id === key)) : undefined
+      reorderLibraryCategories.mutate({ libraryId: taxonomyLibraryId, keys: next, source, localKeys, serverKeys })
       updateLibraryPrefs.mutate({ categorySort: { mode: 'manual' } })
     } else {
       reorderShelves.mutate(next)
@@ -762,29 +766,16 @@ export default function Library() {
   const searchAuthors = useLibrarySearchAuthors(activeLibrary?.id ?? null, trash, revealHidden, { enabled: !libraryContextUnresolved && !isLibraryActivity })
   const shelvesQuery = useShelves({ enabled: !requestedLibraryId, fallbackAnonymous: !requestedLibraryId && vaultCapable })
   const tagsQuery = useTags({ enabled: !requestedLibraryId, fallbackAnonymous: !requestedLibraryId && vaultCapable })
-  // Logged-in unified shelf: mirror the account taxonomy into the vault so
-  // device books can join account groups. Anonymous users keep vault-local
-  // organization only.
-  const accountTaxonomy = useMemo(() => {
-    if (!user || !unifiedShelf) return null
-    const shelves = shelvesQuery.data?.data
-    const tags = tagsQuery.data?.data
-    if (!shelves || !tags) return null
-    return [
-      ...shelves.map((shelf) => ({ id: shelf.id, kind: 'shelf' as const, name: shelf.name, sortOrder: shelf.sortOrder })),
-      ...tags.map((tag) => ({ id: tag.id, kind: 'tag' as const, name: tag.name, sortOrder: tag.sortOrder })),
-    ]
-  }, [user, unifiedShelf, shelvesQuery.data, tagsQuery.data])
-  useEffect(() => {
-    if (!accountTaxonomy) return
-    void localLibraryRepository.syncAccountTaxonomy(LOCAL_VAULT_ID, accountTaxonomy).catch(() => undefined)
-  }, [accountTaxonomy])
+  const deviceTaxonomy = useDeviceTaxonomy({ enabled: !requestedLibraryId })
   const taxonomyLibraryId = activeLibrary?.id ?? privateLibraryId
   const libraryCategoriesQuery = useLibraryCategories(taxonomyLibraryId)
   const libraryTagsQuery = useLibraryTags(activeLibrary?.id ?? null)
-  const visibleTaxonomyError = activeLibrary
-    ? libraryCategoriesQuery.isError || libraryTagsQuery.isError
-    : !requestedLibraryId && (shelvesQuery.isError || tagsQuery.isError || libraryCategoriesQuery.isError)
+  const localSourceSelected = !activeLibrary && search.source === 'local'
+  const visibleTaxonomyError = localSourceSelected
+    ? deviceTaxonomy.isError
+    : activeLibrary
+      ? libraryCategoriesQuery.isError || libraryTagsQuery.isError
+      : !requestedLibraryId && (shelvesQuery.isError || tagsQuery.isError || libraryCategoriesQuery.isError)
   const shelvesData = shelvesQuery.data
   const tagsData = tagsQuery.data
   const taxonomyRevoked = isAccessRevocationError(shelvesQuery.error) || isAccessRevocationError(tagsQuery.error)
@@ -802,13 +793,34 @@ export default function Library() {
   // Must mirror LibrarySidebar's memo: handleDragEnd materializes this exact
   // visual order when a category/tag row is dropped, in either library.
   const categorySort = libraryPrefs?.categorySort ?? libraryPrefs?.shelfSort
-  const categories = useMemo(() => sortCategories(applyShelfOrder(libraryCategoriesQuery.data?.data ?? [], shelfOrderOverride), categorySort), [libraryCategoriesQuery.data, shelfOrderOverride, categorySort])
+  const categories = useMemo(() => {
+    const server = libraryCategoriesQuery.data?.data ?? []
+    const device = deviceTaxonomy.data?.categories ?? []
+    const source = activeLibrary ? 'server' : search.source ?? null
+    if (source === 'server') return sortCategories(applyShelfOrder(server, shelfOrderOverride), categorySort)
+    if (source === 'local') return sortCategories(device, categorySort)
+    const merged = new Map(server.map((item) => [item.id, item]))
+    for (const item of device) {
+      const existing = merged.get(item.id)
+      merged.set(item.id, existing ? { ...existing, bookCount: existing.bookCount + item.bookCount, subtreeBookCount: existing.subtreeBookCount + item.subtreeBookCount } : item)
+    }
+    return sortCategories(applyShelfOrder([...merged.values()], shelfOrderOverride), categorySort)
+  }, [libraryCategoriesQuery.data, deviceTaxonomy.data, shelfOrderOverride, categorySort, activeLibrary, search.source])
   const privateShelves = useMemo(() => sortSidebarItems(applyShelfOrder(shelvesData?.data ?? [], shelfOrderOverride), libraryPrefs?.shelfSort), [shelvesData, shelfOrderOverride, libraryPrefs?.shelfSort])
   const shelves = activeLibrary ? categories : privateShelves
-  const tags = useMemo(
-    () => sortSidebarItems(applyTagOrder(activeLibrary ? (libraryTagsQuery.data?.data ?? []) : (tagsData?.data ?? []), tagOrderOverride), libraryPrefs?.tagSort),
-    [activeLibrary, libraryTagsQuery.data, tagsData, tagOrderOverride, libraryPrefs?.tagSort],
-  )
+  const tags = useMemo(() => {
+    const server = activeLibrary ? libraryTagsQuery.data?.data ?? [] : tagsData?.data ?? []
+    const device = deviceTaxonomy.data?.tags ?? []
+    const source = activeLibrary ? 'server' : search.source ?? null
+    if (source === 'server') return sortSidebarItems(applyTagOrder(server, tagOrderOverride), libraryPrefs?.tagSort)
+    if (source === 'local') return sortSidebarItems(device, libraryPrefs?.tagSort)
+    const merged = new Map(server.map((item) => [item.id, item]))
+    for (const item of device) {
+      const existing = merged.get(item.id)
+      merged.set(item.id, existing ? { ...existing, bookCount: existing.bookCount + item.bookCount } : item)
+    }
+    return sortSidebarItems(applyTagOrder([...merged.values()], tagOrderOverride), libraryPrefs?.tagSort)
+  }, [activeLibrary, libraryTagsQuery.data, tagsData, deviceTaxonomy.data, tagOrderOverride, libraryPrefs?.tagSort, search.source])
   useEffect(() => {
     setShelfOrderOverride(null)
   }, [activeLibrary, shelvesData, libraryCategoriesQuery.data])
@@ -827,8 +839,8 @@ export default function Library() {
         : cachedTaxonomyNames.categories.find((s) => s.id === shelfId)?.name)
     : undefined
   const activeCategoryName = categoryId && categoryId !== 'none'
-    ? (libraryCategoriesQuery.data?.data.some((category) => category.id === categoryId)
-      ? categoryPath(libraryCategoriesQuery.data.data, categoryId).map((category) => category.name).join(' / ')
+    ? (categories.some((category) => category.id === categoryId)
+      ? categoryPath(categories, categoryId).map((category) => category.name).join(' / ')
       : cachedTaxonomyNames.categories.find((category) => category.id === categoryId)?.name)
     : undefined
   const activeTagName = tagId
@@ -959,7 +971,7 @@ export default function Library() {
   )
 
   async function submitSearch(source: string, signal: AbortSignal) {
-    const patch = submittedSearchPatch(source, { shared: !!activeLibrary, tags, categories: libraryCategoriesQuery.data?.data ?? [], shelves: shelvesData?.data ?? [] })
+    const patch = submittedSearchPatch(source, { shared: !!activeLibrary, tags, categories, shelves: shelvesData?.data ?? [] })
     const expression = patch.expression
     // Validate against the real list before publishing URL state. Failures leave
     // the previous cache, paging, selection and draft intact.
@@ -1114,8 +1126,13 @@ export default function Library() {
   // the reader can no longer see or click. That leaves the list at zero with no
   // way out. Wait for the taxonomy to actually load first: an in-flight query
   // reports an empty list and would clear a valid filter.
-  const taxonomyLoading = libraryCategoriesQuery.isLoading || (activeLibrary ? libraryTagsQuery.isLoading : shelvesQuery.isLoading || tagsQuery.isLoading)
-  const taxonomyFailed = libraryCategoriesQuery.isError || (activeLibrary ? libraryTagsQuery.isError : shelvesQuery.isError || tagsQuery.isError)
+  const taxonomySourceIsLocal = !activeLibrary && search.source === 'local'
+  const taxonomyLoading = taxonomySourceIsLocal
+    ? deviceTaxonomy.isLoading
+    : libraryCategoriesQuery.isLoading || (activeLibrary ? libraryTagsQuery.isLoading : shelvesQuery.isLoading || tagsQuery.isLoading)
+  const taxonomyFailed = taxonomySourceIsLocal
+    ? deviceTaxonomy.isError
+    : libraryCategoriesQuery.isError || (activeLibrary ? libraryTagsQuery.isError : shelvesQuery.isError || tagsQuery.isError)
   useEffect(() => {
     if (libraryContextUnresolved || taxonomyLoading || taxonomyFailed) return
     const patch = vanishedFilterCorrection({
@@ -1268,6 +1285,7 @@ export default function Library() {
             privateLibraryId={privateLibraryId ?? null}
             sessionKey={`${user?.id ?? 'guest'}:${activeLibrary?.id ?? 'private'}`}
             panel={search.directory}
+            source={activeLibrary ? 'server' : search.source ?? null}
             canManage={(!isGuest || (!activeLibrary && vaultCapable)) && (!activeLibrary || isLibraryManager)}
             navSearch={navSearch}
             onOpenNavigation={() => setMobileNavOpen(true)}
@@ -1303,7 +1321,7 @@ export default function Library() {
           navSearch={navSearch}
           view={view}
           query={expressionDisplay(search.expression, query)}
-          searchNames={{ shared: !!activeLibrary, tags, categories: libraryCategoriesQuery.data?.data ?? [], shelves: shelvesData?.data ?? [], authors: searchAuthors.data?.data }}
+          searchNames={{ shared: !!activeLibrary, tags, categories, shelves: shelvesData?.data ?? [], authors: searchAuthors.data?.data }}
           searchContext={JSON.stringify(search)}
           searchError={activeLibrary ? catalogQuery.error : booksError}
           onSearchSubmit={submitSearch}

@@ -16,10 +16,10 @@ import {
   pushVersionSchema,
   reTocSchema,
   tocPreviewSchema,
-  categoryCreateSchema,
   categoryScopeSchema,
-  categoryReorderSchema,
-  categoryUpdateSchema,
+  categoryValuePatchSchema,
+  categoryValueOrderSchema,
+  categoryValueClearSchema,
   libraryCreateSchema,
   libraryJoinSchema,
   libraryInviteTokenSchema,
@@ -28,9 +28,10 @@ import {
   membershipRoleSchema,
   ownershipTransferSchema,
   publishPrivateBookSchema,
-  tagCreateSchema,
-  tagReorderSchema,
-  tagUpdateSchema,
+  tagValuePatchSchema,
+  tagValueOrderSchema,
+  tagValueClearSchema,
+  parseCategoryQuery,
 } from '@bookdock/shared'
 
 import {
@@ -77,6 +78,7 @@ import { addToPrivateLibrary } from './collect.service'
 import { publishPrivateBook } from './publish.service'
 import { appendCityVersionContent, getVersionTocState, previewCityAppend, previewCityToc, pushPrivateToVersion, reTocCityVersion, uploadCatalogBook } from '../books/books.service'
 import { listSearchAuthors } from './search-expression'
+import { parseFormJson } from '../../lib/form-json'
 import { AppError } from '../../middleware/error'
 import { undoReceiptPayload } from '../../lib/undo'
 import { readJsonOrMultipartPayload } from '../../lib/multipart-payload'
@@ -86,19 +88,15 @@ import { getEditorAccess, getEditorEpubContent, saveManagedEditorEpubContent, sa
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
 import {
-  createLibraryCategory,
-  deleteLibraryCategory,
-  listLibraryCategories,
-  reorderLibraryCategories,
-  updateLibraryCategory,
-} from '../shelves/shelves.service'
-import {
-  createLibraryTag,
-  deleteLibraryTag,
-  listLibraryTags,
-  reorderLibraryTags,
-  updateLibraryTag,
-} from '../tags/tags.service'
+  clearCategoryValue,
+  clearTagValue,
+  listCategoryValues,
+  listTagValues,
+  reorderCategoryValues,
+  reorderTagValues,
+  updateCategoryValue,
+  updateTagValue,
+} from '../classification/classification.service'
 
 const librariesRoutes = new Hono()
 
@@ -279,10 +277,10 @@ librariesRoutes.get('/:id/books', async (c) => {
     search: c.req.query('q') ?? undefined,
     sortBy: c.req.query('sortBy') ?? undefined,
     sortOrder: c.req.query('sortOrder') ?? undefined,
-    categoryId: c.req.query('categoryId') ?? (library.type === 'shared' ? c.req.query('shelfId') : undefined),
+    category: parseCategoryQuery(c.req.query('category')),
     shelfId: library.type === 'private' ? c.req.query('shelfId') ?? undefined : undefined,
     categoryScope: scope.data,
-    tagId: c.req.query('tagId') ?? undefined,
+    tag: c.req.query('tag') ?? undefined,
     format: format === 'epub' || format === 'txt' ? format : undefined,
     author: c.req.query('author') ?? undefined,
     series: c.req.query('series') ?? undefined,
@@ -338,22 +336,14 @@ librariesRoutes.post('/:id/books', async (c) => {
   if (file.size > effectiveUploadMaxBytes()) {
     return c.json({ error: { code: 'UPLOAD_TOO_LARGE', message: 'File too large' } }, 413)
   }
-  let rawTagIds: unknown
-  if (body['tagIds'] !== undefined) {
-    try {
-      rawTagIds = JSON.parse(String(body['tagIds']))
-    } catch {
-      return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid tagIds' } }, 400)
-    }
-  }
   const parsed = catalogUploadSchema.safeParse({
     libraryBookId: body['libraryBookId'],
-    categoryId: body['categoryId'],
+    categoryPath: parseFormJson(body['categoryPath'], 'categoryPath'),
     shelfId: body['shelfId'],
     name: body['name'],
     title: body['title'],
     author: body['author'],
-    tagIds: rawTagIds,
+    tags: parseFormJson(body['tags'], 'tags'),
     operationId: body['operationId'],
   })
   if (!parsed.success) {
@@ -685,95 +675,85 @@ librariesRoutes.post('/:id/versions/:versionLinkId/collect', async (c) => {
 librariesRoutes.get('/:id/categories', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const items = await listLibraryCategories(user.id, c.req.param('id'))
+  const showHidden = c.get('guest') !== true && c.req.query('showHidden') === '1'
+  const items = await listCategoryValues(user.id, c.req.param('id'), { showHidden })
   return c.json({ data: items })
 })
 
-librariesRoutes.post('/:id/categories', async (c) => {
+librariesRoutes.patch('/:id/categories', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = categoryCreateSchema.safeParse(await c.req.json())
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  const parsed = categoryValuePatchSchema.safeParse(await c.req.json())
+  if (!parsed.success || (parsed.data.name === undefined && parsed.data.parentPath === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name, parentPath, pinned or hidden is required' : parsed.error.flatten() } }, 400)
   }
-  const category = await createLibraryCategory(user.id, c.req.param('id'), parsed.data)
-  return c.json({ data: category }, 201)
-})
-
-librariesRoutes.patch('/:id/categories/:categoryId', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = categoryUpdateSchema.safeParse(await c.req.json())
-  if (!parsed.success || (parsed.data.name === undefined && parsed.data.parentId === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name, parentId, pinned or hidden is required' : parsed.error.flatten() } }, 400)
-  }
-  const updated = await updateLibraryCategory(user.id, c.req.param('id'), c.req.param('categoryId'), parsed.data)
-  return c.json({ data: updated })
+  const items = await updateCategoryValue(user.id, c.req.param('id'), parsed.data)
+  return c.json({ data: items })
 })
 
 librariesRoutes.put('/:id/categories/order', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = categoryReorderSchema.safeParse(await c.req.json())
+  const parsed = categoryValueOrderSchema.safeParse(await c.req.json())
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  await reorderLibraryCategories(user.id, c.req.param('id'), parsed.data.categoryIds)
+  await reorderCategoryValues(user.id, c.req.param('id'), parsed.data.keys)
   return c.json({ data: null })
 })
 
-librariesRoutes.delete('/:id/categories/:categoryId', async (c) => {
+// Clearing is a bulk book-metadata write, not an entity deletion: it keeps the
+// value's hidden/pinned/order preferences and empties the branch.
+librariesRoutes.post('/:id/categories/clear', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const result = await deleteLibraryCategory(user.id, c.req.param('id'), c.req.param('categoryId'))
-  return c.json({ data: result })
+  const parsed = categoryValueClearSchema.safeParse(await c.req.json())
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const items = await clearCategoryValue(user.id, c.req.param('id'), parsed.data.path)
+  return c.json({ data: items })
 })
 
 librariesRoutes.get('/:id/tags', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const items = await listLibraryTags(user.id, c.req.param('id'))
+  const showHidden = c.get('guest') !== true && c.req.query('showHidden') === '1'
+  const items = await listTagValues(user.id, c.req.param('id'), { showHidden })
   return c.json({ data: items })
 })
 
-librariesRoutes.post('/:id/tags', async (c) => {
+librariesRoutes.patch('/:id/tags', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = tagCreateSchema.safeParse(await c.req.json())
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  const parsed = tagValuePatchSchema.safeParse(await c.req.json())
+  if (!parsed.success || (parsed.data.renamedTo === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'renamedTo, pinned or hidden is required' : parsed.error.flatten() } }, 400)
   }
-  const tag = await createLibraryTag(user.id, c.req.param('id'), parsed.data.name)
-  return c.json({ data: tag }, 201)
-})
-
-librariesRoutes.patch('/:id/tags/:tagId', async (c) => {
-  const user = c.get('user')
-  if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = tagUpdateSchema.safeParse(await c.req.json())
-  if (!parsed.success || (parsed.data.name === undefined && parsed.data.pinned === undefined && parsed.data.hidden === undefined)) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.success ? 'name, pinned or hidden is required' : parsed.error.flatten() } }, 400)
-  }
-  const tag = await updateLibraryTag(user.id, c.req.param('id'), c.req.param('tagId'), parsed.data)
-  return c.json({ data: tag })
+  const items = await updateTagValue(user.id, c.req.param('id'), parsed.data)
+  return c.json({ data: items })
 })
 
 librariesRoutes.put('/:id/tags/order', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = tagReorderSchema.safeParse(await c.req.json())
+  const parsed = tagValueOrderSchema.safeParse(await c.req.json())
   if (!parsed.success) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
   }
-  await reorderLibraryTags(user.id, c.req.param('id'), parsed.data.tagIds)
+  await reorderTagValues(user.id, c.req.param('id'), parsed.data.names)
   return c.json({ data: null })
 })
 
-librariesRoutes.delete('/:id/tags/:tagId', async (c) => {
+librariesRoutes.post('/:id/tags/clear', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const result = await deleteLibraryTag(user.id, c.req.param('id'), c.req.param('tagId'))
-  return c.json({ data: result })
+  const parsed = tagValueClearSchema.safeParse(await c.req.json())
+  if (!parsed.success) {
+    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid input', details: parsed.error.flatten() } }, 400)
+  }
+  const items = await clearTagValue(user.id, c.req.param('id'), parsed.data.name)
+  return c.json({ data: items })
 })
 
 export default librariesRoutes

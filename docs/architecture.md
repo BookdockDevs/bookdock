@@ -548,33 +548,73 @@ for review comments, replies and likes are covered by the persistent
 interaction notifications section below. No feed, social graph,
 version-quality score or review-history versions are added.
 
-### Category and shelf separation
+### Book classification and shelves
 
-Categories and tags are library-local catalog metadata. Categories support at most
-two levels in both private and shared libraries. Shelves are flat, owner-managed
-private-library storage in a separate `shelves` table; `library_books.shelf_id`
-and `category_id` are independent nullable assignments. Shelf ownership is scoped
-to both its private library and user. Shared works never receive a shelf.
+Categories and tags are values on a library book entry, not independently
+created catalog entities. A category is a nullable path of one or two names;
+tags are a deduplicated list of names. Private entries and shared works own their
+values, so collection copies a snapshot into the private entry and source changes
+do not propagate. Shared work classification remains work-level and does not
+change with the selected/default version. EPUB subject extraction is excluded.
 
-The private sidebar has Shelves, Categories and Tags. Switching dimensions clears
-the previous navigation assignment and page, retaining independent filters. Old
-private `shelf` URLs retain shelf meaning; shared `shelf` URLs retain their legacy
-category meaning. Unshelved means null shelf; Uncategorized means null category.
-Private category navigation includes descendants. Details edit categories/tags;
-shelf organization stays on the library home page.
+Shelves remain flat, owner-managed private-library entities. `shelf_id` is an
+independent nullable assignment and a shelf may exist while empty. Shared works
+never receive shelves. The private sidebar still offers Shelves, Categories and
+Tags; category navigation aggregates full paths from books, and navigating a
+root includes its descendants. Old private `shelf` URLs retain shelf meaning;
+shared `shelf` URLs retain their legacy category meaning. Unshelved means null
+shelf; Uncategorized means a null category path.
 
-Recommended categories are a shared static vocabulary with stable English keys,
-not seeded rows. A recommendation is only a draft until saving. Saving resolves
-the selected path and assignment atomically; it creates only missing path nodes.
-Collection maps source category paths and tag names into the private library,
-retains existing tags and local hidden/pinned flags, and starts unshelved. This is
-a snapshot; source changes do not propagate. EPUB subject extraction is excluded.
+Category/tag candidates and counts are projections of books the viewer may
+currently list. Their hidden, pinned and manual-order preferences are separate
+library-scoped state keyed by kind and canonical value; they can outlive a value
+temporarily absent from active books. Hidden and trashed books retain their
+metadata and count as uses for lifecycle and bulk operations. Category hiding on
+a root covers its full path branch; tag hiding matches the exact tag value.
+Value creation time records when its first book membership was added, and value
+update time advances when membership changes or the value is explicitly renamed,
+pinned or hidden. Editing a book's title or description and manually reordering
+the sidebar do not change these timestamps. The 0068 migration preserves legacy
+category/tag entity timestamps.
+Renaming and clearing a value are bulk book-metadata operations. Clearing a root
+clears its entire branch. These operations include hidden and trashed entries.
+Shared catalog-wide operations require a library manager. In the unified
+bookshelf, operations follow the active source filter and report partial
+completion when device and server writes cannot share one transaction.
+The 0068 server upgrade runs after category/shelf separation: it converts the
+legacy category foreign key to root/leaf names, copies tag relations and
+library-scoped preferences, then drops the legacy tables in the same transaction
+that records completion. Ambiguous preference collisions and cross-library
+references fail the upgrade without leaving a half-converted schema. Device
+vault schema v5 performs the equivalent conversion from v4 organization rows
+inside the IndexedDB version-change transaction, including existing book
+metadata; malformed or unresolvable references abort the upgrade. Editors and
+batch operations now send paths and tag names directly, while shelves retain
+their entity IDs. Local rename, clear and preference changes share one vault
+transaction.
 
-Upgrade runs after legacy shelf retirement: preserve private category IDs and all
-shelf properties in the new shelf table, move memberships, then map collected
-metadata. Data movement and the fixed `category-shelf-separation-v1` completion
-marker commit in one synchronous transaction. A completed batch skips entirely;
-conflicts or partial unmarked movement fail rather than guessing ownership.
+Recommended categories remain a shared static vocabulary with stable English
+keys, but selection resolves directly to a path in the edit draft. Saving or
+undoing a book changes its values only; it never creates or prunes taxonomy
+entities. Existing collection, publication, import, navigation, search, hidden
+visibility, sorting, and reading statistics preserve their behavior using the
+book values and separate preference state.
+
+On the unified private bookshelf, book detail and edit controls offer the union
+of the viewer's device and private-server category paths and tag names, regardless
+of the selected book's source. Choosing a value writes only to the book's own
+store. A missing or unavailable server does not prevent device books from using
+the device choices; shared-library controls remain scoped to that library.
+
+The taxonomy cutover runs after historical shelf/category migrations. It copies
+the category paths and tag names from legacy rows, migrates hidden/pinned/order
+preferences (including empty values), verifies every active and trashed book,
+then removes the old taxonomy entities and foreign-key associations in one
+synchronous transaction. A completion marker makes the conversion idempotent;
+unresolvable references or conflicting values abort startup instead of silently
+discarding metadata. The device vault performs the equivalent conversion in its
+IndexedDB upgrade transaction, retaining shelf entities and removing mirrored
+server taxonomy identities.
 
 Reading taxonomy statistics first choose one legal current holding per version:
 the user's active private card wins, including empty metadata; otherwise choose

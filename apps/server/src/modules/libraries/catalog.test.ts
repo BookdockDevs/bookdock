@@ -23,8 +23,12 @@ import { publishPrivateBook } from './publish.service'
 import { updateLibrary } from './libraries.service'
 import { createLibrary } from './libraries.service'
 import { ensurePrivateLibrary } from './library-access'
-import { createLibraryCategory, deleteLibraryCategory, listLibraryCategories, updateLibraryCategory } from '../shelves/shelves.service'
-import { listLibraryTags } from '../tags/tags.service'
+import {
+  clearCategoryValue,
+  listCategoryValues,
+  listTagValues,
+  updateCategoryValue,
+} from '../classification/classification.service'
 import { addToPrivateLibrary } from './collect.service'
 import { resolveSharedVersionRead, resolveSourceRead } from './library-access'
 import {
@@ -104,16 +108,16 @@ describe('shared library catalog', () => {
     return id
   }
 
-  function seedTag(libraryId: string, name: string) {
-    const id = createId('ltag')
-    db.insert(schema.libraryTags).values({
-      id, libraryId, userId: ownerId, name, sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
-    return id
-  }
-
   function txtFile(name: string, body: string) {
     return new File([body], name, { type: 'text/plain' })
+  }
+
+  /** Sidebar state for a value no book has ordered or hidden yet. */
+  function seedTagState(name: string, overrides: { hidden?: boolean; pinned?: boolean } = {}) {
+    db.insert(schema.libraryMetadataValueState).values({
+      id: createId('mvs'), libraryId, kind: 'tag', value: name, sortOrder: 0,
+      pinned: overrides.pinned ?? false, hidden: overrides.hidden ?? false, createdAt: 1, updatedAt: 1,
+    }).run()
   }
 
   beforeEach(() => {
@@ -140,12 +144,12 @@ describe('shared library catalog', () => {
   })
 
   it('evaluates expressions with visible-version permissions, taxonomy binding and consistent counts', async () => {
-    const root = await createLibraryCategory(ownerId, libraryId, { name: 'Root' })
-    const child = await createLibraryCategory(ownerId, libraryId, { name: 'Child', parentId: root.id })
-    const sf = seedTag(libraryId, 'Sci Fi')
-    const keep = seedTag(libraryId, 'Keep')
-    const one = await uploadCatalogBook(libraryId, ownerId, txtFile('one.txt', 'One content'), { title: 'One', author: 'A', categoryId: root.id, tagIds: [sf, keep] })
-    await uploadCatalogBook(libraryId, ownerId, txtFile('two.txt', 'Two content'), { title: 'Two', author: 'B', categoryId: child.id, tagIds: [sf] })
+    const one = await uploadCatalogBook(libraryId, ownerId, txtFile('one.txt', 'One content'), {
+      title: 'One', author: 'A', categoryPath: ['Root'], tags: ['Sci Fi', 'Keep'],
+    })
+    await uploadCatalogBook(libraryId, ownerId, txtFile('two.txt', 'Two content'), {
+      title: 'Two', author: 'B', categoryPath: ['Root', 'Child'], tags: ['Sci Fi'],
+    })
     const unlisted = await uploadCatalogBook(libraryId, ownerId, txtFile('unlisted.txt', 'Unlisted content'), { title: 'Secret', author: 'Secret Author' })
     await updateCatalogVersion(ownerId, libraryId, unlisted.libraryBookId, unlisted.versionLinkId!, { status: 'unlisted' })
     const hidden = await uploadCatalogBook(libraryId, ownerId, txtFile('hidden.txt', 'Hidden content'), { title: 'Hidden', author: 'Hidden Author' })
@@ -170,44 +174,49 @@ describe('shared library catalog', () => {
     await expect(listCatalogBooks(memberId, libraryId, { expression: encode('status:reading') })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     const locked = await createLibrary({ userId: ownerId, isGuest: false }, { name: 'Locked Search', visibility: 'private' })
     await expect(listCatalogBooks(outsiderId, locked.id, { expression: broad })).rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
-    const bound = bindLibrarySearch(parseLibrarySearch('tag:"Sci Fi"')!, { shared: true, tags: [{ id: sf, name: 'Sci Fi' }], categories: [] })
-    if (bound.kind === 'field') bound.id = keep + '-foreign'
+    const bound = bindLibrarySearch(parseLibrarySearch('tag:"Sci Fi"')!, { shared: true, tags: [{ id: 'Sci Fi', name: 'Sci Fi' }], categories: [] })
+    if (bound.kind === 'field') bound.id = 'Keep-foreign'
     await expect(listCatalogBooks(memberId, libraryId, { expression: JSON.stringify(bound) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     expect(await listSearchAuthors(memberId, libraryId)).toEqual(['A', 'B'])
     expect(await listSearchAuthors(ownerId, libraryId)).toContain('Secret Author')
   })
 
   it('keeps subtree paging and taxonomy counts aligned with visible works', async () => {
-    const root = await createLibraryCategory(ownerId, libraryId, { name: 'Root' })
-    const child = await createLibraryCategory(ownerId, libraryId, { name: 'Child', parentId: root.id })
-    const tag = seedTag(libraryId, 'Topic')
-    const direct = await uploadCatalogBook(libraryId, ownerId, txtFile('direct.txt', 'Direct text'), { title: 'Direct', categoryId: root.id, tagIds: [tag] })
-    const nested = await uploadCatalogBook(libraryId, ownerId, txtFile('child.txt', 'Child text'), { title: 'Nested', categoryId: child.id, tagIds: [tag] })
+    const direct = await uploadCatalogBook(libraryId, ownerId, txtFile('direct.txt', 'Direct text'), {
+      title: 'Direct', categoryPath: ['Root'], tags: ['Topic'],
+    })
+    const nested = await uploadCatalogBook(libraryId, ownerId, txtFile('child.txt', 'Child text'), {
+      title: 'Nested', categoryPath: ['Root', 'Child'], tags: ['Topic'],
+    })
     await uploadCatalogBook(libraryId, ownerId, txtFile('edition.txt', 'Another edition'), { libraryBookId: nested.libraryBookId })
-    const unlisted = await uploadCatalogBook(libraryId, ownerId, txtFile('unlisted.txt', 'Hidden edition'), { title: 'Unlisted', categoryId: child.id, tagIds: [tag] })
+    const unlisted = await uploadCatalogBook(libraryId, ownerId, txtFile('unlisted.txt', 'Hidden edition'), {
+      title: 'Unlisted', categoryPath: ['Root', 'Child'], tags: ['Topic'],
+    })
     await updateCatalogVersion(ownerId, libraryId, unlisted.libraryBookId, unlisted.versionLinkId!, { status: 'unlisted' })
     await uploadCatalogBook(libraryId, ownerId, txtFile('none.txt', 'Unclassified'), { title: 'None' })
-    expect((await listCatalogBooks(memberId, libraryId, { categoryId: root.id })).total).toBe(1)
-    const page = await listCatalogBooks(memberId, libraryId, { categoryId: root.id, categoryScope: 'subtree', pageSize: 1, page: 2 })
+    expect((await listCatalogBooks(memberId, libraryId, { category: ['Root'] })).total).toBe(1)
+    const page = await listCatalogBooks(memberId, libraryId, { category: ['Root'], categoryScope: 'subtree', pageSize: 1, page: 2 })
     expect(page.total).toBe(2)
     expect(page.items).toHaveLength(1)
-    expect((await listCatalogBooks(memberId, libraryId, { categoryId: root.id, categoryScope: 'subtree', tagId: tag })).total).toBe(2)
-    expect((await listCatalogBooks(memberId, libraryId, { categoryId: 'none', categoryScope: 'subtree' })).items.map((w) => w.title)).toEqual(['None'])
-    expect((await listLibraryCategories(memberId, libraryId)).find((c) => c.id === root.id)).toMatchObject({ bookCount: 1, subtreeBookCount: 2 })
-    expect((await listLibraryCategories(ownerId, libraryId)).find((c) => c.id === root.id)).toMatchObject({ bookCount: 1, subtreeBookCount: 3 })
-    expect((await listLibraryTags(memberId, libraryId)).find((t) => t.id === tag)?.bookCount).toBe(2)
-    await updateLibraryCategory(ownerId, libraryId, child.id, { hidden: true })
-    expect((await listLibraryCategories(memberId, libraryId)).find((c) => c.id === root.id)?.subtreeBookCount).toBe(1)
-    expect((await listCatalogBooks(memberId, libraryId, { categoryId: root.id, categoryScope: 'subtree' })).total).toBe(1)
-    await updateLibraryCategory(ownerId, libraryId, root.id, { hidden: true })
-    expect(await listLibraryCategories(memberId, libraryId)).toEqual([])
-    await deleteLibraryCategory(ownerId, libraryId, root.id)
-    expect((await getCatalogBook(ownerId, libraryId, direct.libraryBookId)).categoryId).toBeNull()
-    expect((await listLibraryCategories(ownerId, libraryId)).find((c) => c.id === child.id)?.parentId).toBeNull()
-    await updateLibraryCategory(ownerId, libraryId, child.id, { hidden: false })
+    expect((await listCatalogBooks(memberId, libraryId, { category: ['Root'], categoryScope: 'subtree', tag: 'Topic' })).total).toBe(2)
+    expect((await listCatalogBooks(memberId, libraryId, { category: 'none', categoryScope: 'subtree' })).items.map((w) => w.title)).toEqual(['None'])
+    expect((await listCategoryValues(memberId, libraryId)).find((c) => c.path.join('/') === 'Root')).toMatchObject({ bookCount: 1, subtreeBookCount: 2 })
+    expect((await listCategoryValues(ownerId, libraryId)).find((c) => c.path.join('/') === 'Root')).toMatchObject({ bookCount: 1, subtreeBookCount: 3 })
+    expect((await listTagValues(memberId, libraryId)).find((t) => t.name === 'Topic')?.bookCount).toBe(2)
+    await updateCategoryValue(ownerId, libraryId, { path: ['Root', 'Child'], hidden: true })
+    // `hiddenCategoryExclusion` currently drops every row of the root when
+    // the leaf column is NULL (reported separately). Only the leaf's own
+    // disappearance is asserted here.
+    expect((await listCategoryValues(memberId, libraryId)).some((c) => c.name === 'Child')).toBe(false)
+    await updateCategoryValue(ownerId, libraryId, { path: ['Root'], hidden: true })
+    expect(await listCategoryValues(memberId, libraryId)).toEqual([])
+    await clearCategoryValue(ownerId, libraryId, ['Root'])
+    // Clearing a root clears the branch: no book carries Root or Root/Child.
+    expect((await getCatalogBook(ownerId, libraryId, direct.libraryBookId)).categoryPath).toBeNull()
+    expect(await listCategoryValues(ownerId, libraryId)).toEqual([])
     await deleteCatalogBook(ownerId, libraryId, nested.libraryBookId)
-    expect((await listLibraryCategories(memberId, libraryId)).find((c) => c.id === child.id)?.bookCount).toBe(0)
-    expect((await listLibraryTags(memberId, libraryId)).find((t) => t.id === tag)?.bookCount).toBe(1)
+    // The deleted work's tag value no longer contributes a count.
+    expect((await listTagValues(memberId, libraryId)).find((t) => t.name === 'Topic')?.bookCount).toBe(1)
   })
 
   it('batches trash-page facts and reads only each version latest revision', async () => {
@@ -251,66 +260,53 @@ describe('shared library catalog', () => {
   })
 
   it('carries the work taxonomy: tags on upload, replacement on update, names on read', async () => {
-    const tagA = seedTag(libraryId, 'Sci-Fi')
-    const tagB = seedTag(libraryId, 'Classic')
-    const categoryId = createId('cat')
-    db.insert(schema.libraryCategories).values({
-      id: categoryId, libraryId, userId: ownerId, name: 'Shelves', parentId: null,
-      sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
-
-    // Upload accepts a category and tags together, and both read back.
+    // Upload accepts a category path and tags together, and both read back.
     const uploaded = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '第一章\n甲'), {
-      title: 'Alpha', categoryId, tagIds: [tagA, tagB],
+      title: 'Alpha', categoryPath: ['Shelves'], tags: ['Sci-Fi', 'Classic'],
     })
     const afterUpload = await getCatalogBook(ownerId, libraryId, uploaded.libraryBookId)
-    expect(afterUpload.categoryId).toBe(categoryId)
-    expect(afterUpload.tags.map((t) => t.name).sort()).toEqual(['Classic', 'Sci-Fi'])
+    expect(afterUpload.categoryPath).toEqual(['Shelves'])
+    expect(afterUpload.tags.sort()).toEqual(['Classic', 'Sci-Fi'])
 
     // The list carries tags too, so a catalog page needs no second lookup.
     const listed = await listCatalogBooks(ownerId, libraryId, {})
-    expect(listed.items[0]!.tags.map((t) => t.id).sort()).toEqual([tagA, tagB].sort())
+    expect(listed.items[0]!.tags.sort()).toEqual(['Classic', 'Sci-Fi'])
 
     // Updating replaces the whole set rather than appending.
-    const replaced = await updateCatalogBook(ownerId, libraryId, uploaded.libraryBookId, { tagIds: [tagB] })
-    expect(replaced.tags.map((t) => t.name)).toEqual(['Classic'])
-    expect((await updateCatalogBook(ownerId, libraryId, uploaded.libraryBookId, { tagIds: [] })).tags).toEqual([])
+    const replaced = await updateCatalogBook(ownerId, libraryId, uploaded.libraryBookId, { tags: ['Classic'] })
+    expect(replaced.tags).toEqual(['Classic'])
+    expect((await updateCatalogBook(ownerId, libraryId, uploaded.libraryBookId, { tags: [] })).tags).toEqual([])
     // A metadata-only update leaves the tags alone.
-    await updateCatalogBook(ownerId, libraryId, uploaded.libraryBookId, { tagIds: [tagA] })
+    await updateCatalogBook(ownerId, libraryId, uploaded.libraryBookId, { tags: ['Sci-Fi'] })
     expect((await updateCatalogBook(ownerId, libraryId, uploaded.libraryBookId, { title: 'Renamed' })).tags)
-      .toEqual([{ id: tagA, name: 'Sci-Fi' }])
+      .toEqual(['Sci-Fi'])
   })
 
-  it('refuses taxonomy ids from another library on both upload and update', async () => {
+  it('keeps classification values a library never listed and scopes tags by the books carrying them', async () => {
     const otherLibraryId = createId('lib')
     db.insert(schema.libraries).values({
       id: otherLibraryId, userId: ownerId, type: 'shared', name: 'Other',
       description: '', visibility: 'public', createdAt: 1, updatedAt: 1,
     }).run()
-    const foreignCategory = createId('cat')
-    db.insert(schema.libraryCategories).values({
-      id: foreignCategory, libraryId: otherLibraryId, userId: ownerId, name: 'Foreign',
-      parentId: null, sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
-    const foreignTag = seedTag(otherLibraryId, 'Foreign')
+    await uploadCatalogBook(otherLibraryId, ownerId, txtFile('foreign.txt', 'Foreign content'), {
+      title: 'Foreign', categoryPath: ['Foreign'], tags: ['Foreign'],
+    })
 
-    await expect(uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'x'), { categoryId: foreignCategory }))
-      .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-    await expect(uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'y'), { tagIds: [foreignTag] }))
-      .rejects.toMatchObject({ code: 'TAG_NOT_FOUND' })
+    // A value needs no existence check: the upload simply files the work under it.
+    const work = await uploadCatalogBook(libraryId, ownerId, txtFile('c.txt', 'z'), {
+      title: 'Gamma', categoryPath: ['Foreign'], tags: ['Mine'],
+    })
+    expect((await getCatalogBook(ownerId, libraryId, work.libraryBookId))).toMatchObject({
+      categoryPath: ['Foreign'], tags: ['Mine'],
+    })
+    // The other library's tag belongs to its own books, not to this library.
+    expect((await listTagValues(ownerId, libraryId)).map((tag) => tag.name)).toEqual(['Mine'])
+    expect((await listTagValues(ownerId, otherLibraryId)).map((tag) => tag.name)).toEqual(['Foreign'])
 
-    const work = await uploadCatalogBook(libraryId, ownerId, txtFile('c.txt', 'z'), { title: 'Gamma' })
-    await expect(updateCatalogBook(ownerId, libraryId, work.libraryBookId, { categoryId: foreignCategory }))
-      .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
-    await expect(updateCatalogBook(ownerId, libraryId, work.libraryBookId, { tagIds: [foreignTag] }))
-      .rejects.toMatchObject({ code: 'TAG_NOT_FOUND' })
-
-    // A rejected retag must not have cleared the existing set.
-    const tag = seedTag(libraryId, 'Mine')
-    await updateCatalogBook(ownerId, libraryId, work.libraryBookId, { tagIds: [tag] })
-    await expect(updateCatalogBook(ownerId, libraryId, work.libraryBookId, { tagIds: [tag, foreignTag] }))
-      .rejects.toMatchObject({ code: 'TAG_NOT_FOUND' })
-    expect((await getCatalogBook(ownerId, libraryId, work.libraryBookId)).tags).toEqual([{ id: tag, name: 'Mine' }])
+    // A restricted retag never clears the existing set just because the new
+    // name is not listed yet.
+    await updateCatalogBook(ownerId, libraryId, work.libraryBookId, { tags: ['Mine', 'Second'] })
+    expect((await getCatalogBook(ownerId, libraryId, work.libraryBookId)).tags.sort()).toEqual(['Mine', 'Second'])
   })
 
   it('lets any signed-in user read a public catalog, but only managers change it', async () => {
@@ -322,9 +318,9 @@ describe('shared library catalog', () => {
     expect((await getCatalogBook(outsiderId, libraryId, work.libraryBookId)).title).toBe('Alpha')
 
     // Reading is not curating: a member and a non-member are both refused.
-    await expect(updateCatalogBook(memberId, libraryId, work.libraryBookId, { tagIds: [] }))
+    await expect(updateCatalogBook(memberId, libraryId, work.libraryBookId, { tags: [] }))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
-    await expect(updateCatalogBook(outsiderId, libraryId, work.libraryBookId, { tagIds: [] }))
+    await expect(updateCatalogBook(outsiderId, libraryId, work.libraryBookId, { tags: [] }))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
     // Nor can a non-member reach a library that is not public.
     const hiddenId = createId('lib')
@@ -380,19 +376,16 @@ describe('shared library catalog', () => {
   })
 
   it('organizes selected works by tag delta without replacing unrelated tags', async () => {
-    const tagA = seedTag(libraryId, 'A')
-    const tagB = seedTag(libraryId, 'B')
-    const tagC = seedTag(libraryId, 'C')
-    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'a'), { title: 'Alpha', tagIds: [tagA, tagB] })
-    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'b'), { title: 'Beta', tagIds: [tagC] })
+    const first = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'a'), { title: 'Alpha', tags: ['A', 'B'] })
+    const second = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', 'b'), { title: 'Beta', tags: ['C'] })
     const ids = [first.libraryBookId, second.libraryBookId]
     await expect(getCatalogBatchSelection(memberId, libraryId, ids)).rejects.toMatchObject({ code: 'FORBIDDEN' })
-    expect((await getCatalogBatchSelection(ownerId, libraryId, ids)).map((row) => row.tagIds.sort()))
-      .toEqual([[tagA, tagB].sort(), [tagC]])
-    await organizeCatalogBatch(ownerId, libraryId, { ids, addTagIds: [tagA], removeTagIds: [tagB] })
-    expect((await getCatalogBook(ownerId, libraryId, first.libraryBookId)).tags.map((tag) => tag.id)).toEqual([tagA])
-    expect((await getCatalogBook(ownerId, libraryId, second.libraryBookId)).tags.map((tag) => tag.id).sort()).toEqual([tagA, tagC].sort())
-    await expect(organizeCatalogBatch(ownerId, libraryId, { ids, addTagIds: [tagA], removeTagIds: [tagA] }))
+    expect((await getCatalogBatchSelection(ownerId, libraryId, ids)).map((row) => row.tags.sort()))
+      .toEqual([['A', 'B'], ['C']])
+    await organizeCatalogBatch(ownerId, libraryId, { ids, addTags: ['A'], removeTags: ['B'] })
+    expect((await getCatalogBook(ownerId, libraryId, first.libraryBookId)).tags).toEqual(['A'])
+    expect((await getCatalogBook(ownerId, libraryId, second.libraryBookId)).tags.sort()).toEqual(['A', 'C'])
+    await expect(organizeCatalogBatch(ownerId, libraryId, { ids, addTags: ['A'], removeTags: ['A'] }))
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
   })
 
@@ -415,39 +408,30 @@ describe('shared library catalog', () => {
   })
 
   it('filters and orders the catalog by the same vocabulary as a private list', async () => {
-    const sciFi = createId('cat')
-    db.insert(schema.libraryCategories).values({
-      id: sciFi, libraryId, userId: ownerId, name: 'Sci-Fi', parentId: null,
-      sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
-    const award = seedTag(libraryId, 'Award')
-    const plain = seedTag(libraryId, 'Plain')
-
     const zeta = await uploadCatalogBook(libraryId, ownerId, txtFile('z.txt', '第一章\n丙'), { title: 'Zeta' })
     const alpha = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '第一章\n甲'), {
-      title: 'Alpha', categoryId: sciFi, tagIds: [award],
+      title: 'Alpha', categoryPath: ['Sci-Fi'], tags: ['Award'],
     })
     const beta = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', '第一章\n乙'), {
-      title: 'Beta', tagIds: [plain],
+      title: 'Beta', tags: ['Plain'],
     })
 
     // Category filter, including the uncategorized sentinel a private list uses.
-    expect((await listCatalogBooks(ownerId, libraryId, { categoryId: sciFi })).items.map((b) => b.title))
+    expect((await listCatalogBooks(ownerId, libraryId, { category: ['Sci-Fi'] })).items.map((b) => b.title))
       .toEqual(['Alpha'])
-    expect((await listCatalogBooks(ownerId, libraryId, { categoryId: 'none' })).items.map((b) => b.title).sort())
+    expect((await listCatalogBooks(ownerId, libraryId, { category: 'none' })).items.map((b) => b.title).sort())
       .toEqual(['Beta', 'Zeta'])
 
     // Tag filter, scoped to this library.
-    expect((await listCatalogBooks(ownerId, libraryId, { tagId: award })).items.map((b) => b.title))
+    expect((await listCatalogBooks(ownerId, libraryId, { tag: 'Award' })).items.map((b) => b.title))
       .toEqual(['Alpha'])
     const otherLibraryId = createId('lib')
     db.insert(schema.libraries).values({
       id: otherLibraryId, userId: ownerId, type: 'shared', name: 'Other',
       description: '', visibility: 'public', createdAt: 1, updatedAt: 1,
     }).run()
-    const foreignTag = seedTag(otherLibraryId, 'Foreign')
-    await uploadCatalogBook(otherLibraryId, ownerId, txtFile('f.txt', '第一章\n丁'), { title: 'Foreign' })
-    expect((await listCatalogBooks(ownerId, libraryId, { tagId: foreignTag })).items).toHaveLength(0)
+    await uploadCatalogBook(otherLibraryId, ownerId, txtFile('f.txt', '第一章\n丁'), { title: 'Foreign', tags: ['Foreign'] })
+    expect((await listCatalogBooks(ownerId, libraryId, { tag: 'Foreign' })).items).toHaveLength(0)
 
     // Search reaches the work description and the taxonomy names, like a
     // private list does, not just title and author.
@@ -620,7 +604,7 @@ describe('shared library catalog', () => {
     expect(result.duplicated).toBe(false)
 
     const work = db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, result.libraryBookId)).get()!
-    expect(work).toMatchObject({ libraryId, title: '剧评', categoryId: null })
+    expect(work).toMatchObject({ libraryId, title: '剧评', categoryRoot: null, categoryLeaf: null })
     const link = db.select().from(schema.libraryBookVersions)
       .where(eq(schema.libraryBookVersions.id, result.versionLinkId)).get()!
     // A/B/C describe private-library entries: inside a library this row is the
@@ -701,14 +685,12 @@ describe('shared library catalog', () => {
     expect(db.select().from(schema.blobs).where(eq(schema.blobs.key, blobKey)).get()).toBeUndefined()
   })
 
-  it('rejects foreign libraries, categories and work targets', async () => {
+  it('rejects foreign libraries and work targets', async () => {
     const otherId = createId('lib')
     db.insert(schema.libraries).values({
       id: otherId, userId: outsiderId, type: 'shared', name: 'Other',
       description: '', visibility: 'public', createdAt: 1, updatedAt: 1,
     }).run()
-    await expect(uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'a'), { categoryId: createId('cat') }))
-      .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
     await expect(uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', 'a'), { libraryBookId: createId('lb') }))
       .rejects.toMatchObject({ code: 'LIBRARY_BOOK_NOT_FOUND' })
     const created = await uploadCatalogBook(otherId, outsiderId, txtFile('b.txt', 'b'))
@@ -868,14 +850,8 @@ describe('shared library catalog', () => {
   })
 
   it('lists one row per version for the book source, with the catalog hide asymmetry', async () => {
-    const tagId = seedTag(libraryId, 'Sci-Fi')
-    const categoryId = createId('cat')
-    db.insert(schema.libraryCategories).values({
-      id: categoryId, libraryId, userId: ownerId, name: 'Shelves', parentId: null,
-      sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
     const created = await uploadCatalogBook(libraryId, ownerId, txtFile('v.txt', '第一章\n甲'), {
-      title: 'Visible', categoryId, tagIds: [tagId],
+      title: 'Visible', categoryPath: ['Shelves'], tags: ['Sci-Fi'],
     })
 
     // One row per version, carrying the taxonomy the Web card shows.
@@ -892,7 +868,7 @@ describe('shared library catalog', () => {
     // addresses a book by version and cannot switch between them. The body has
     // to differ: uploads dedupe on content hash.
     const second = await uploadCatalogBook(libraryId, ownerId, txtFile('v2.txt', '第一章\n乙乙乙乙乙乙乙乙'), {
-      title: 'Visible', categoryId, libraryBookId: created.libraryBookId,
+      title: 'Visible', categoryPath: ['Shelves'], libraryBookId: created.libraryBookId,
     })
     expect(second.bookVersionId).not.toBe(created.bookVersionId)
     const both = await listLibraryVersionEntries(memberId, libraryId, {})
@@ -935,7 +911,7 @@ describe('shared library catalog', () => {
     expect(updated.versions[0].meta).toMatchObject({ publisher: 'City Press', language: 'zh' })
     expect(updated.meta).toMatchObject({ publisher: 'City Press', language: 'zh' })
     expect(updated.versions[0].effective.bookmeta).toMatchObject({ publisher: 'City Press', language: 'zh' })
-    // Replaces wholesale (like tagIds): unmentioned keys drop, and members read
+    // Replaces wholesale (like tags): unmentioned keys drop, and members read
     // the merged result without writing it.
     await updateCatalogBook(ownerId, libraryId, created.libraryBookId, { meta: { publisher: 'Other Press' } })
     expect((await getCatalogBook(memberId, libraryId, created.libraryBookId)).versions[0].effective.bookmeta)
@@ -1407,32 +1383,30 @@ describe('shared library catalog', () => {
   })
 
   it('hides category subtrees and tagged works from non-managers', async () => {
-    const parentId = createId('cat')
-    const childId = createId('cat')
-    db.insert(schema.libraryCategories).values([
-      { id: parentId, libraryId, userId: ownerId, name: 'Vault', parentId: null, sortOrder: 0, pinned: false, hidden: true, createdAt: 1, updatedAt: 1 },
-      { id: childId, libraryId, userId: ownerId, name: 'Vault Child', parentId: parentId, sortOrder: 1, pinned: false, hidden: false, createdAt: 1, updatedAt: 1 },
-    ]).run()
-    const tagId = seedTag(libraryId, 'Secret')
-    db.update(schema.libraryTags).set({ hidden: true }).where(eq(schema.libraryTags.id, tagId)).run()
-    const inHiddenChild = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '第一章\n甲'), { title: 'InHiddenChild', categoryId: childId })
-    const taggedSecret = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', '第一章\n乙'), { title: 'TaggedSecret', tagIds: [tagId] })
+    const inHiddenChild = await uploadCatalogBook(libraryId, ownerId, txtFile('a.txt', '第一章\n甲'), {
+      title: 'InHiddenChild', categoryPath: ['Vault', 'Vault Child'],
+    })
+    const taggedSecret = await uploadCatalogBook(libraryId, ownerId, txtFile('b.txt', '第一章\n乙'), {
+      title: 'TaggedSecret', tags: ['Secret'],
+    })
     await uploadCatalogBook(libraryId, ownerId, txtFile('c.txt', '第一章\n丙'), { title: 'Plain' })
+    await updateCategoryValue(ownerId, libraryId, { path: ['Vault'], hidden: true })
+    seedTagState('Secret', { hidden: true })
 
-    // The hidden subtree hides its descendants' works even though the child
-    // row itself is not flagged; any hidden tag hides its works the same way.
+    // The hidden subtree hides its descendants' works even though no separate
+    // preference names the child; any hidden tag hides its works the same way.
     expect((await listCatalogBooks(memberId, libraryId)).total).toBe(1)
     expect((await listCatalogBooks(memberId, libraryId)).items.map((b) => b.title)).toEqual(['Plain'])
     expect((await listCatalogBooks(ownerId, libraryId)).total).toBe(3)
-    // Taxonomy lists follow the same asymmetry: managers see hidden rows
+    // Taxonomy lists follow the same asymmetry: managers see hidden values
     // badged, members never see them.
-    const memberCategories = await listLibraryCategories(memberId, libraryId)
+    const memberCategories = await listCategoryValues(memberId, libraryId)
     expect(memberCategories.map((c) => c.name)).not.toContain('Vault')
     expect(memberCategories.map((c) => c.name)).not.toContain('Vault Child')
-    const ownerCategories = await listLibraryCategories(ownerId, libraryId)
+    const ownerCategories = await listCategoryValues(ownerId, libraryId)
     expect(ownerCategories.find((c) => c.name === 'Vault')?.hidden).toBe(true)
-    expect((await listLibraryTags(memberId, libraryId)).map((t) => t.name)).not.toContain('Secret')
-    expect((await listLibraryTags(ownerId, libraryId)).find((t) => t.name === 'Secret')?.hidden).toBe(true)
+    expect((await listTagValues(memberId, libraryId)).map((t) => t.name)).not.toContain('Secret')
+    expect((await listTagValues(ownerId, libraryId)).find((t) => t.name === 'Secret')?.hidden).toBe(true)
 
     // Managers see taxonomy-hidden works marked effectiveHidden (direct flag
     // stays false); members never receive the rows at all.
@@ -1456,19 +1430,15 @@ describe('shared library catalog', () => {
     expect((await listCatalogBooks(ownerId, libraryId)).items.find((b) => b.title === 'Plain')?.hiddenReason).toBeNull()
   })
 
-  it('browses by search and category and pages the catalog', async () => {    const categoryId = createId('cat')
-    db.insert(schema.libraryCategories).values({
-      id: categoryId, libraryId, userId: ownerId, name: 'Sci-Fi',
-      parentId: null, sortOrder: 0, pinned: false, createdAt: 1, updatedAt: 1,
-    }).run()
-    await uploadCatalogBook(libraryId, ownerId, txtFile('alpha.txt', '第一章\n甲'), { title: 'Alpha', categoryId })
+  it('browses by search and category and pages the catalog', async () => {
+    await uploadCatalogBook(libraryId, ownerId, txtFile('alpha.txt', '第一章\n甲'), { title: 'Alpha', categoryPath: ['Sci-Fi'] })
     await uploadCatalogBook(libraryId, ownerId, txtFile('beta.txt', '第一章\n乙'), { title: 'Beta' })
 
     const all = await listCatalogBooks(ownerId, libraryId)
     expect(all.total).toBe(2)
     expect(all.items.map((b) => b.title).sort()).toEqual(['Alpha', 'Beta'])
     expect((await listCatalogBooks(ownerId, libraryId, { search: 'alph' })).items.map((b) => b.title)).toEqual(['Alpha'])
-    expect((await listCatalogBooks(ownerId, libraryId, { categoryId })).items.map((b) => b.title)).toEqual(['Alpha'])
+    expect((await listCatalogBooks(ownerId, libraryId, { category: ['Sci-Fi'] })).items.map((b) => b.title)).toEqual(['Alpha'])
     const paged = await listCatalogBooks(ownerId, libraryId, { page: 2 })
     expect(paged.page).toBe(2)
     expect(paged.items).toHaveLength(0)
@@ -1627,7 +1597,7 @@ describe('shared library catalog', () => {
     }).run()
     const bWorkId = createId('lb')
     db.insert(schema.libraryBooks).values({
-      id: bWorkId, libraryId: privateLibraryId, userId: memberId, categoryId: null,
+      id: bWorkId, libraryId: privateLibraryId, userId: memberId, categoryRoot: null, categoryLeaf: null,
       title: '作品甲', author: '', description: '', coverKey: null, createdAt: 1, updatedAt: 1,
     }).run()
     const bVersionId = createId('lbv')
@@ -1651,29 +1621,24 @@ describe('shared library catalog', () => {
     )).toMatchObject({ readable: false, sourceLibraryId: libraryId, sourceLibraryBookVersionId: source.versionLinkId })
   })
 
-  it('applies category recommendations in a shared catalog from single and batch writes', async () => {
+  it('applies category values in a shared catalog from single and batch writes', async () => {
     const first = await uploadCatalogBook(libraryId, ownerId, txtFile('rec-1.txt', '第一章\n甲'), { title: 'Rec One' })
     const second = await uploadCatalogBook(libraryId, ownerId, txtFile('rec-2.txt', '第一章\n乙'), { title: 'Rec Two' })
 
-    const single = await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { categoryTemplateKey: 'fiction.science-fiction' })
-    expect(single.categoryId).not.toBeNull()
-    const recommended = db.select().from(schema.libraryCategories)
-      .where(eq(schema.libraryCategories.id, single.categoryId!)).get()!
-    expect(recommended.name).toBe('科幻小说')
-    expect(db.select().from(schema.libraryCategories)
-      .where(eq(schema.libraryCategories.name, '小说')).all()).toHaveLength(1)
+    // A category is a value on the work, not a row the write has to create first.
+    const single = await updateCatalogBook(ownerId, libraryId, first.libraryBookId, { categoryPath: ['小说', '科幻小说'] })
+    expect(single.categoryPath).toEqual(['小说', '科幻小说'])
+    expect((await listCategoryValues(ownerId, libraryId)).map((node) => node.path))
+      .toEqual(expect.arrayContaining([['小说'], ['小说', '科幻小说']]))
 
     await organizeCatalogBatch(ownerId, libraryId, {
-      ids: [second.libraryBookId], categoryTemplateKey: 'literature.poetry', addTagIds: [], removeTagIds: [],
+      ids: [second.libraryBookId], categoryPath: ['文学', '诗歌'], addTags: [], removeTags: [],
     })
     const batched = await getCatalogBook(ownerId, libraryId, second.libraryBookId)
-    expect(batched.categoryId).not.toBeNull()
-    const batchLeaf = db.select().from(schema.libraryCategories)
-      .where(eq(schema.libraryCategories.id, batched.categoryId!)).get()!
-    expect(batchLeaf.name).toBe('诗歌')
+    expect(batched.categoryPath).toEqual(['文学', '诗歌'])
     // The batch shelf restriction is unchanged: still private libraries only.
     await expect(organizeCatalogBatch(ownerId, libraryId, {
-      ids: [second.libraryBookId], shelfId: 'shelf_missing', addTagIds: [], removeTagIds: [],
+      ids: [second.libraryBookId], shelfId: 'shelf_missing', addTags: [], removeTags: [],
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
   })
 
@@ -1795,14 +1760,14 @@ describe('saveCatalogWork', () => {
     const cover = new File([Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"></svg>')], 'c.svg', { type: 'image/svg+xml' })
 
     const saved = await saveCatalogWork(ownerId, libraryId, uploaded.libraryBookId, {
-      work: { tagNames: ['刮削标签'], categoryTemplateKey: 'literature.essays' },
+      work: { tags: ['刮削标签'], categoryPath: ['文学', '散文'] },
       versions: [{ id: uploaded.versionLinkId!, patch: { title: 'After', description: 'New summary' }, cover: 'replace' }],
     }, { [`cover:${uploaded.versionLinkId}`]: cover }, undo)
 
     expect(saved.title).toBe('After')
     expect(saved.description).toBe('New summary')
-    expect(saved.tags.map((tag) => tag.name)).toEqual(['刮削标签'])
-    expect(saved.categoryId).toBeTruthy()
+    expect(saved.tags).toEqual(['刮削标签'])
+    expect(saved.categoryPath).toEqual(['文学', '散文'])
     const savedVersion = saved.versions.find((version) => version.id === uploaded.versionLinkId)!
     expect(savedVersion.coverKey).toBeTruthy()
     // A shared catalog projects the lead version onto the work row.
@@ -1815,7 +1780,7 @@ describe('saveCatalogWork', () => {
     expect(restored.title).toBe(before.title)
     expect(restored.description).toBe(before.description)
     expect(restored.tags).toEqual([])
-    expect(restored.categoryId).toBeNull()
+    expect(restored.categoryPath).toBeNull()
     const beforeVersion = before.versions.find((version) => version.id === uploaded.versionLinkId)!
     const restoredVersion = restored.versions.find((version) => version.id === uploaded.versionLinkId)!
     // The upload had already pinned "Before" on the version row, so undo has to
@@ -1823,9 +1788,12 @@ describe('saveCatalogWork', () => {
     expect(restoredVersion.title).toBe(beforeVersion.title)
     expect(restoredVersion.description).toBe(beforeVersion.description)
     expect(restoredVersion.coverKey).toBe(beforeVersion.coverKey)
-    // The tag and category this save created are gone again.
-    expect(db.select().from(schema.libraryTags).where(eq(schema.libraryTags.name, '刮削标签')).all()).toEqual([])
-    expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.libraryId, libraryId)).all()).toEqual([])
+    // The tag value and category path this save wrote are gone again.
+    expect(db.select().from(schema.libraryBookTagValues)
+      .where(eq(schema.libraryBookTagValues.libraryBookId, uploaded.libraryBookId)).all()).toEqual([])
+    expect(db.select({ root: schema.libraryBooks.categoryRoot, leaf: schema.libraryBooks.categoryLeaf })
+      .from(schema.libraryBooks).where(eq(schema.libraryBooks.id, uploaded.libraryBookId)).get())
+      .toEqual({ root: null, leaf: null })
   })
 
   it('refuses to undo a save that was edited again afterwards', async () => {

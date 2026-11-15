@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { categoryPathSchema, tagNameListSchema } from './classification'
+
 import { isOrderedReadingRange, readingRangeShape } from './reading-range'
 
 import { ACCESS_TOKEN_DURATIONS, ACCESS_TOKEN_NAME_MAX_LENGTH, ACCESS_TOKEN_PERMISSIONS } from './access-tokens'
@@ -865,45 +867,13 @@ export const shelfUpdateSchema = z.object({
   hidden: z.boolean().optional(),
 })
 export const shelfReorderSchema = z.object({ shelfIds: z.array(z.string().min(1)) })
-export const tagCreateSchema = z.object({ name: z.string().trim().min(1).max(100) })
-export const tagUpdateSchema = z.object({
-  name: z.string().trim().min(1).max(100).optional(),
-  pinned: z.boolean().optional(),
-  hidden: z.boolean().optional(),
-})
-export const tagReorderSchema = z.object({ tagIds: z.array(z.string().min(1)) })
-export const categoryCreateSchema = z.object({
-  name: z.string().trim().min(1).max(100),
-  parentId: z.string().min(1).optional(),
-})
-export const categoryUpdateSchema = z.object({
-  name: z.string().trim().min(1).max(100).optional(),
-  parentId: z.string().min(1).nullable().optional(),
-  pinned: z.boolean().optional(),
-  hidden: z.boolean().optional(),
-})
-export const categoryReorderSchema = z.object({ categoryIds: z.array(z.string().min(1)) })
 export const bookMembershipSchema = z.object({
   shelfId: z.string().min(1).nullable().optional(),
-  categoryId: z.string().min(1).nullable().optional(),
-  categoryTemplateKey: z.string().min(1).max(128).optional(),
-  tagIds: z.array(z.string().min(1)).optional(),
-  /**
-   * Tag names to resolve inside the same write. The editor cannot create tags
-   * ahead of a save any more (an abandoned dialog must leave no rows behind),
-   * so the names ride along and the server creates only the missing ones.
-   */
-  tagNames: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
-  /**
-   * Category name to resolve inside the same write, mirroring `tagNames`: a
-   * scraped category the library does not have yet is created on save instead
-   * of sending the client through a second request.
-   */
-  categoryName: z.string().trim().min(1).max(100).optional(),
-}).refine(
-  (value) => value.categoryId === undefined || (value.categoryTemplateKey === undefined && value.categoryName === undefined),
-  { message: 'Choose an existing category, a recommendation or a new name', path: ['categoryTemplateKey'] },
-)
+  /** Null clears the category; absent leaves it unchanged. */
+  categoryPath: categoryPathSchema.nullable().optional(),
+  /** Replaces the book's whole tag set with these values. */
+  tags: tagNameListSchema.optional(),
+})
 
 export const bookUploadOptionsSchema = z.object({
   allowCorresponding: z.enum(['true', 'false']).optional().transform((value) => value === 'true'),

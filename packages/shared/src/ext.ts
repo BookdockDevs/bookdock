@@ -28,11 +28,17 @@ import type { BookMetadata } from './contract'
  */
 
 /**
- * A library category, or a flat private shelf when returned in `shelves`.
- * The arrays use independent IDs and assignment columns.
+ * A library category value, or a flat private shelf when returned in `shelves`.
+ *
+ * A category is a value, so `id` is its canonical key (`JSON.stringify(path)`)
+ * and `path` carries the names themselves — a client that files an upload by
+ * name never has to decode the key. A shelf is still an entity, so its `id` is
+ * a real row id and `path` is null. The two arrays stay independent.
  */
 export interface ExternalCategory {
   id: string
+  /** Category names from the root down; `null` for a shelf. */
+  path: string[] | null
   name: string
   /** `null` for a root category or any shelf. */
   parentId: string | null
@@ -52,6 +58,7 @@ export interface ExternalCategory {
 }
 
 export interface ExternalTag {
+  /** A tag value is its name, so `id` repeats `name` for clients that key by id. */
   id: string
   name: string
   bookCount: number

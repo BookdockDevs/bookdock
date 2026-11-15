@@ -72,7 +72,7 @@ export default function TagDistribution({ date, period, range, selectedTag, onSe
   }, [menuOpen])
 
   const taxonomyItems: TaxonomyItem[] = items.map((item) => ({
-    id: item.tagId,
+    id: item.name,
     name: item.name,
     count: item.bookCount ?? 1,
     durationSeconds: item.durationSeconds,

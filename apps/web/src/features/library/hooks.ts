@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryObse
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import {
+  classificationValueKey,
   extractVersionNameFromFileName,
   type AppendContentPreviewRes,
   type BookDetailRes,
@@ -38,7 +39,6 @@ import {
   type ReadStatus,
   type SettingsRes,
   type ShelfListItem,
-  type TagListItem,
   type TocRulePattern,
   type UndoReceipt,
 } from '@bookdock/shared'
@@ -73,7 +73,7 @@ import { fetchSettings, readStoredSettings, writeStoredSettings } from '@/lib/se
 import { saveLibrariesSnapshot, saveLibraryCategoriesSnapshot, saveLibraryTagsSnapshot, saveShelvesSnapshot, saveTagsSnapshot } from '@/lib/library-name-cache'
 
 export { buildBooksPath, booksQueryParts, type UseBooksParams } from './catalog-query'
-import { booksQueryParts, buildBooksPath, type UseBooksParams } from './catalog-query'
+import { booksQueryParts, buildBooksPath, categoryFilterValue, toCatalogQuery, type UseBooksParams } from './catalog-query'
 
 const DEVICE_VAULT_PAGE_SIZE = PAGINATION.MAX_PAGE_SIZE
 const DEVICE_VAULT_PAGE_CAP = 20
@@ -126,7 +126,7 @@ async function fetchVaultRows(params: UseBooksParams, signal?: AbortSignal): Pro
   let total = 0
   let totalSize: number | null = 0
   for (let p = 1; p <= DEVICE_VAULT_PAGE_CAP; p++) {
-    const page = await vault.list({ ...params, page: p, pageSize: DEVICE_VAULT_PAGE_SIZE }, signal)
+    const page = await vault.list({ ...toCatalogQuery(params), page: p, pageSize: DEVICE_VAULT_PAGE_SIZE }, signal)
     if (!page.organization) throw new Error("Local catalog organization is unavailable")
     rows.push(...page.entries.map((entry) => localCatalogBookView(entry.book, entry.state, page.organization!)))
     total = page.total
@@ -234,7 +234,7 @@ export function useBooks(params: UseBooksParams, options?: { enabled?: boolean }
     queryKey: local ? catalogQueryKey(vaultScope, 'list', params) : queryKey,
     queryFn: async ({ signal }) => {
       if (local) {
-        const page = await vault.list(params, signal)
+        const page = await vault.list(toCatalogQuery(params), signal)
         if (!page.organization) throw new Error("Local catalog organization is unavailable")
         const data = page.entries.map((entry) => localCatalogBookView(entry.book, entry.state, page.organization!))
         await seedLocalCoverQueries(queryClient, data, (refs) => vault.getCovers(refs))
@@ -301,8 +301,9 @@ export interface UploadItem {
   /** Upload progress 0-100; stays 100 while the server parses the book */
   progress: number
   shelfId?: string
-  categoryId?: string
-  tagIds?: string[]
+  /** Category value as its name path; null = uncategorized. */
+  categoryPath?: string[] | null
+  tags?: string[]
   /** The unified shelf queues both destinations in one batch; the row decides. */
   destination?: 'local' | 'server'
   bookRef?: ClientBookRef
@@ -318,8 +319,8 @@ export interface UploadItem {
 
 export interface UploadAssignment {
   shelfId?: string
-  categoryId?: string
-  tagIds?: string[]
+  categoryPath?: string[] | null
+  tags?: string[]
 }
 
 /**
@@ -378,7 +379,7 @@ export function invalidateDeviceMembershipQueries(queryClient: QueryClient) {
       if (root === 'shelves' || root === 'tags') return sub === 'device'
       if (root === 'client-catalog') {
         const parts = query.queryKey
-        return parts[parts.length - 1] === 'membership-counts'
+        return parts[parts.length - 1] === 'membership-counts' || parts[parts.length - 2] === 'membership-counts'
       }
       return false
     },
@@ -391,17 +392,29 @@ export function invalidateDeviceMembershipQueries(queryClient: QueryClient) {
  * never from a device-owned tree, because a device book files itself into
  * whichever tree the reader is looking at.
  */
-export function useDeviceMembershipCounts(options: { enabled?: boolean } = {}) {
+function useDeviceMembershipSnapshot(options: { enabled?: boolean } = {}) {
   const vault = useVaultOperations()
   const scope = useVaultScope()
-  const { data } = useQuery({
+  const { revealHidden } = useCatalogRevealHidden()
+  return useQuery({
     networkMode: 'always',
-    queryKey: catalogQueryKey(scope, 'membership-counts'),
-    queryFn: async () => deviceMembershipCounts(await vault.readCatalog()),
+    queryKey: catalogQueryKey(scope, 'membership-counts', revealHidden),
+    queryFn: async () => {
+      const snapshot = await vault.readCatalog()
+      return { ...deviceMembershipCounts(snapshot), taxonomy: localTaxonomyViews(snapshot, revealHidden) }
+    },
     enabled: options.enabled ?? true,
     staleTime: Infinity,
   })
-  return data
+}
+
+export function useDeviceMembershipCounts(options: { enabled?: boolean } = {}) {
+  return useDeviceMembershipSnapshot(options).data
+}
+
+export function useDeviceTaxonomy(options: { enabled?: boolean } = {}) {
+  const query = useDeviceMembershipSnapshot(options)
+  return { data: query.data?.taxonomy, isLoading: query.isLoading, isError: query.isError, refetch: query.refetch }
 }
 
 
@@ -424,8 +437,8 @@ const PRIVATE_UPLOAD_TARGET: UploadTarget = {
   fields: (item) => ({
     ...(item.allowCorresponding ? { allowCorresponding: 'true' } : {}),
     ...(item.shelfId ? { shelfId: item.shelfId } : {}),
-    ...(item.categoryId ? { categoryId: item.categoryId } : {}),
-    ...(item.tagIds?.length ? { tagIds: JSON.stringify(item.tagIds) } : {}),
+    ...(item.categoryPath?.length ? { categoryPath: JSON.stringify(item.categoryPath) } : {}),
+    ...(item.tags?.length ? { tags: JSON.stringify(item.tags) } : {}),
   }),
   invalidateKeys: [...BOOK_MEMBERSHIP_KEYS, ['libraries']],
   reportsAppliedShelf: true,
@@ -565,10 +578,9 @@ export function useLibraryCategories(libraryId: string | null, options?: { enabl
   const local = useDataAuthority()
   const { revealHidden: showHidden } = useCatalogRevealHidden()
   const user = useAuthStore((state) => state.user)
-  const vault = useVaultOperations()
   return useQuery<{ data: ClientCategoryView[] }>({
     networkMode: local ? 'always' : 'online',
-    queryKey: local ? catalogQueryKey(local.scope, 'categories', showHidden) : ['libraries', libraryId, 'categories'],
+    queryKey: local ? catalogQueryKey(local.scope, 'categories', showHidden) : ['libraries', libraryId, 'categories', showHidden],
     queryFn: async ({ signal }) => {
       if (local) {
         const snapshot = await local.operations.readCatalog()
@@ -577,11 +589,12 @@ export function useLibraryCategories(libraryId: string | null, options?: { enabl
       }
       const userId = user?.id
       const sessionRevision = getAuthSessionRevision()
-      const result = await apiGet<{ data: Category[] }>(`/libraries/${libraryId}/categories`, signal)
+      const result = await apiGet<{ data: Category[] }>(`/libraries/${libraryId}/categories${showHidden ? '?showHidden=1' : ''}`, signal)
       if (!signal.aborted && userId && libraryId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) {
         saveLibraryCategoriesSnapshot(userId, libraryId, result.data)
       }
-      void vault.mirrorOrganization(result.data.map((item) => ({ id: item.id, kind: 'category' as const, name: item.name, parentId: item.parentId, pinned: item.pinned, hidden: item.hidden, sortOrder: item.sortOrder, createdAt: item.createdAt, updatedAt: item.updatedAt }))).catch(() => {})
+      // Categories are values on the books, so a device book joins an account
+      // category by carrying the same name path; nothing needs mirroring here.
       return result
     },
     enabled: (options?.enabled ?? true) && Boolean(local || libraryId),
@@ -695,159 +708,357 @@ export function useRemoveLibraryMember() {
 }
 
 /**
- * Library taxonomy (11.5). Mutating a category or tag also changes what a
- * catalog card shows, so the catalog query is invalidated with the taxonomy.
+ * One value maintenance write on the device vault: a rename rewrites the value
+ * on every book that carries it (a category root moves its whole branch) and a
+ * null name clears it. Pinning and hiding only touch the preference row.
  */
-function useTaxonomyMutation<TVars extends { libraryId: string | null }, TData = unknown>(
-  build: (vars: TVars) => { url: string; method: 'post' | 'patch' | 'delete'; body?: unknown; successKey?: string },
-  localMutation?: (source: LocalCatalogSource, vars: TVars) => Promise<{ data: TData }>,
-) {
-  const queryClient = useQueryClient()
+async function rewriteLocalValue(
+  source: LocalCatalogSource,
+  kind: 'category' | 'tag',
+  value: string | readonly string[],
+  patch: { name?: string | null; renamedTo?: string; parentPath?: string[] | null; pinned?: boolean; hidden?: boolean },
+): Promise<{ data: null }> {
+  const from = classificationValueKey(kind, value)
+  const next = patch.name !== undefined ? patch.name : patch.renamedTo
+  const state = { ...(patch.pinned === undefined ? {} : { pinned: patch.pinned }), ...(patch.hidden === undefined ? {} : { hidden: patch.hidden }) }
+  if (next !== undefined) {
+    const to = next === null
+      ? null
+      : kind === 'tag' ? next : classificationValueKey('category', [...(patch.parentPath !== undefined ? patch.parentPath ?? [] : typeof value !== 'string' ? value.slice(0, -1) : []), next])
+    await source.operations.rewriteValue(kind, from, to, state)
+    return { data: null }
+  }
+  if (Object.keys(state).length) await source.operations.setValueState(kind, from, state)
+  return { data: null }
+}
+
+/** A taxonomy write changes what a catalog row shows, so both caches refresh. */
+function invalidateSharedTaxonomy(queryClient: QueryClient, libraryId: string | null) {
+  void queryClient.invalidateQueries({ queryKey: libraryId ? ['libraries', libraryId, 'categories'] : ['tags'] })
+  if (libraryId) void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'tags'] })
+  void queryClient.invalidateQueries({ queryKey: ['libraries', libraryId, 'catalog'] })
+  void queryClient.invalidateQueries({ queryKey: ['books'] })
+  void queryClient.invalidateQueries({ queryKey: ['book'] })
+  void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
+  void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
+}
+
+/** Private-library tag endpoints live at /tags; a shared library nests under it. */
+function acctPath(libraryId: string | null, suffix: string): string {
+  return libraryId ? `/libraries/${libraryId}/${suffix}` : `/${suffix}`
+}
+
+
+export interface CategoryValuePatch {
+  libraryId: string | null
+  /** The category value's path; its identity is the path itself. */
+  path: string[]
+  source?: 'local' | 'server' | null
+  suppressPartialNotification?: boolean
+  patch: { name?: string; parentPath?: string[] | null; pinned?: boolean; hidden?: boolean }
+}
+
+type ClassificationMutationResult = { data: unknown; partial?: boolean }
+
+/**
+ * Renaming, hiding or pinning one category value. There is no entity behind it:
+ * a rename rewrites the path on every book carrying the branch, and the
+ * sidebar's preference row follows the value.
+ */
+export function useUpdateLibraryCategory() {
   const local = useDataAuthority()
-  return useMutation({
-    networkMode: local ? 'always' : 'online',
-    mutationFn: (vars: TVars) => {
-      if (local) {
-        if (!localMutation) throw new Error('This operation requires a remote library')
-        return localMutation(local, vars)
+  const vault = useVaultOperations()
+  const user = useAuthStore((state) => state.user)
+  const queryClient = useQueryClient()
+  return useMutation<ClassificationMutationResult, Error, CategoryValuePatch>({
+    networkMode: 'always',
+    mutationFn: async (vars: CategoryValuePatch) => {
+      const updateLocal = vars.source !== 'server' && (vars.source === 'local' || Boolean(user) || Boolean(local))
+      const updateServer = vars.source !== 'local' && Boolean(user) && !local
+      let localSucceeded = false
+      if (updateLocal) {
+        await rewriteLocalValue(local ?? { scope: DEVICE_VAULT_SCOPE, operations: vault }, 'category', vars.path, vars.patch)
+        localSucceeded = true
       }
-      if (!vars.libraryId) throw new Error('A remote library identity is required')
-      const { url, method, body } = build(vars)
-      if (method === 'delete') return apiDelete<{ data: TData }>(url)
-      if (method === 'patch') return apiPatch<{ data: TData }>(url, body)
-      return apiPost<{ data: TData }>(url, body)
+      if (updateServer) {
+        try {
+          return await apiPatch<{ data: ClientCategoryView[] }>(`/libraries/${vars.libraryId}/categories`, { path: vars.path, ...vars.patch })
+        } catch (error) {
+          if (localSucceeded) return { data: null, partial: true }
+          throw error
+        }
+      }
+      return { data: null }
     },
-    onSuccess: (_res, vars) => {
-      const key = build(vars).successKey
-      if (key) notify.success({ key })
-      if (local) {
-        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
+    onSuccess: (res, vars) => {
+      const renamed = vars.patch.name !== undefined
+      if (vars.source !== 'server' && (user || local)) {
+        void queryClient.invalidateQueries({ queryKey: ['client-catalog'] })
         invalidateDeviceMembershipQueries(queryClient)
-        return
       }
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
-      void queryClient.invalidateQueries({ queryKey: ['books'] })
-      void queryClient.invalidateQueries({ queryKey: ['book'] })
-      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
-      void queryClient.invalidateQueries({ queryKey: READING_RECORDS_KEY })
+      if (vars.source !== 'local' && user && !local) invalidateSharedTaxonomy(queryClient, vars.libraryId)
+      if (res.partial) {
+        if (!vars.suppressPartialNotification) notify.warning({ key: 'library.taxonomySourcePartial' })
+      } else if (renamed) notify.success({ key: 'toast.categoryUpdated' })
     },
     onError: (error) => notify.error(getUserErrorNotification(error)),
   })
 }
 
-export function useCreateLibraryCategory() {
-  return useTaxonomyMutation<{ libraryId: string | null; name: string; parentId?: string }, ClientCategoryView>(({ libraryId, name, parentId }) => ({
-    url: `/libraries/${libraryId}/categories`, method: 'post', body: { name, parentId }, successKey: 'toast.categoryCreated',
-  }), async (source, { name, parentId }) => ({ data: { ...await source.operations.createOrganization('category', name, parentId ?? null), bookCount: 0, subtreeBookCount: 0 } }))
+export interface CategoryValueClear {
+  libraryId: string | null
+  path: string[]
+  source?: 'local' | 'server' | null
+  suppressPartialNotification?: boolean
 }
 
-export function useUpdateLibraryCategory() {
-  return useTaxonomyMutation<{ libraryId: string | null; categoryId: string; patch: { name?: string; parentId?: string | null; pinned?: boolean; hidden?: boolean } }, ClientCategoryView>(
-    ({ libraryId, categoryId, patch }) => ({
-      url: `/libraries/${libraryId}/categories/${categoryId}`, method: 'patch', body: patch,
-      successKey: patch.name !== undefined || patch.parentId !== undefined ? 'toast.categoryUpdated' : undefined,
-    }),
-    async (source, { categoryId, patch }) => {
-      await source.operations.updateOrganization('category', categoryId, patch)
-      const data = localTaxonomyViews(await source.operations.readCatalog(), true).categories.find((item) => item.id === categoryId)
-      if (!data) throw new Error('Category no longer exists')
-      return { data }
+/**
+ * Clearing a category is a bulk book-metadata write: every book in the branch
+ * loses the value and the sidebar keeps the value's own preferences for the day
+ * it comes back. Deleting a root therefore empties the whole branch.
+ */
+export function useClearLibraryCategory() {
+  const local = useDataAuthority()
+  const vault = useVaultOperations()
+  const user = useAuthStore((state) => state.user)
+  const queryClient = useQueryClient()
+  return useMutation<ClassificationMutationResult, Error, CategoryValueClear>({
+    networkMode: 'always',
+    mutationFn: async (vars: CategoryValueClear) => {
+      const clearLocal = vars.source !== 'server' && (vars.source === 'local' || Boolean(user) || Boolean(local))
+      const clearServer = vars.source !== 'local' && Boolean(user) && !local
+      let localSucceeded = false
+      if (clearLocal) {
+        await rewriteLocalValue(local ?? { scope: DEVICE_VAULT_SCOPE, operations: vault }, 'category', vars.path, { name: null })
+        localSucceeded = true
+      }
+      if (clearServer) {
+        try {
+          return await apiPost<{ data: ClientCategoryView[] }>(`/libraries/${vars.libraryId}/categories/clear`, { path: vars.path })
+        } catch (error) {
+          if (localSucceeded) return { data: null, partial: true }
+          throw error
+        }
+      }
+      return { data: null }
     },
-  )
+    onSuccess: (res, vars) => {
+      if (vars.source !== 'server' && (user || local)) {
+        void queryClient.invalidateQueries({ queryKey: ['client-catalog'] })
+        invalidateDeviceMembershipQueries(queryClient)
+      }
+      if (vars.source !== 'local' && user && !local) invalidateSharedTaxonomy(queryClient, vars.libraryId)
+      if (res.partial) {
+        if (!vars.suppressPartialNotification) notify.warning({ key: 'library.taxonomySourcePartial' })
+      } else notify.success({ key: 'toast.categoryCleared' })
+    },
+    onError: (error) => notify.error(getUserErrorNotification(error)),
+  })
 }
 
-export function useDeleteLibraryCategory() {
-  return useTaxonomyMutation<{ libraryId: string | null; categoryId: string }>(({ libraryId, categoryId }) => ({
-    url: `/libraries/${libraryId}/categories/${categoryId}`, method: 'delete', successKey: 'toast.categoryDeleted',
-  }), async (source, { categoryId }) => { await source.operations.deleteOrganization('category', categoryId); return { data: null } })
-}
-
-export function useCreateLibraryTag() {
-  return useTaxonomyMutation<{ libraryId: string; name: string }, LibraryTag>(({ libraryId, name }) => ({
-    url: `/libraries/${libraryId}/tags`, method: 'post', body: { name }, successKey: 'toast.tagCreated',
-  }))
+export interface TagValuePatch {
+  /** Null = the signed-in owner's private library; a shared library otherwise. */
+  libraryId: string | null
+  /** A tag is identified by its name. */
+  name: string
+  source?: 'local' | 'server' | null
+  suppressPartialNotification?: boolean
+  patch: { renamedTo?: string; pinned?: boolean; hidden?: boolean }
 }
 
 export function useUpdateLibraryTag() {
-  return useTaxonomyMutation<{ libraryId: string; tagId: string; patch: { name?: string; pinned?: boolean; hidden?: boolean } }>(
-    ({ libraryId, tagId, patch }) => ({
-      url: `/libraries/${libraryId}/tags/${tagId}`, method: 'patch', body: patch,
-      successKey: patch.name !== undefined ? 'toast.tagRenamed' : undefined,
-    }),
-  )
+  const local = useDataAuthority()
+  const vault = useVaultOperations()
+  const user = useAuthStore((state) => state.user)
+  const queryClient = useQueryClient()
+  return useMutation<ClassificationMutationResult, Error, TagValuePatch>({
+    networkMode: 'always',
+    mutationFn: async (vars: TagValuePatch) => {
+      const updateLocal = vars.source !== 'server' && (vars.source === 'local' || Boolean(user) || Boolean(local))
+      const updateServer = vars.source !== 'local' && Boolean(user) && !local
+      let localSucceeded = false
+      if (updateLocal) {
+        await rewriteLocalValue(local ?? { scope: DEVICE_VAULT_SCOPE, operations: vault }, 'tag', vars.name, { ...vars.patch, name: vars.patch.renamedTo })
+        localSucceeded = true
+      }
+      if (updateServer) {
+        try {
+          return await apiPatch<{ data: LibraryTag[] }>(acctPath(vars.libraryId, 'tags'), { name: vars.name, ...vars.patch })
+        } catch (error) {
+          if (localSucceeded) return { data: null, partial: true }
+          throw error
+        }
+      }
+      return { data: null }
+    },
+    onSuccess: (res, vars) => {
+      if (vars.source !== 'server' && (user || local)) {
+        void queryClient.invalidateQueries({ queryKey: ['client-catalog'] })
+        invalidateDeviceMembershipQueries(queryClient)
+      }
+      if (vars.source !== 'local' && user && !local) invalidateSharedTaxonomy(queryClient, vars.libraryId)
+      if (res.partial) {
+        if (!vars.suppressPartialNotification) notify.warning({ key: 'library.taxonomySourcePartial' })
+      } else if (vars.patch.renamedTo !== undefined) notify.success({ key: 'toast.tagRenamed' })
+    },
+    onError: (error) => notify.error(getUserErrorNotification(error)),
+  })
 }
 
-export function useDeleteLibraryTag() {
-  return useTaxonomyMutation<{ libraryId: string; tagId: string }>(({ libraryId, tagId }) => ({
-    url: `/libraries/${libraryId}/tags/${tagId}`, method: 'delete', successKey: 'toast.tagDeleted',
-  }))
+export interface TagValueClear {
+  libraryId: string | null
+  name: string
+  source?: 'local' | 'server' | null
+  suppressPartialNotification?: boolean
+}
+
+export function useClearLibraryTag() {
+  const local = useDataAuthority()
+  const vault = useVaultOperations()
+  const user = useAuthStore((state) => state.user)
+  const queryClient = useQueryClient()
+  return useMutation<ClassificationMutationResult, Error, TagValueClear>({
+    networkMode: 'always',
+    mutationFn: async (vars: TagValueClear) => {
+      const clearLocal = vars.source !== 'server' && (vars.source === 'local' || Boolean(user) || Boolean(local))
+      const clearServer = vars.source !== 'local' && Boolean(user) && !local
+      let localSucceeded = false
+      if (clearLocal) {
+        await rewriteLocalValue(local ?? { scope: DEVICE_VAULT_SCOPE, operations: vault }, 'tag', vars.name, { name: null })
+        localSucceeded = true
+      }
+      if (clearServer) {
+        try {
+          return await apiPost<{ data: LibraryTag[] }>(`${acctPath(vars.libraryId, 'tags')}/clear`, { name: vars.name })
+        } catch (error) {
+          if (localSucceeded) return { data: null, partial: true }
+          throw error
+        }
+      }
+      return { data: null }
+    },
+    onSuccess: (res, vars) => {
+      if (vars.source !== 'server' && (user || local)) {
+        void queryClient.invalidateQueries({ queryKey: ['client-catalog'] })
+        invalidateDeviceMembershipQueries(queryClient)
+      }
+      if (vars.source !== 'local' && user && !local) invalidateSharedTaxonomy(queryClient, vars.libraryId)
+      if (res.partial) {
+        if (!vars.suppressPartialNotification) notify.warning({ key: 'library.taxonomySourcePartial' })
+      } else notify.success({ key: 'toast.tagCleared' })
+    },
+    onError: (error) => notify.error(getUserErrorNotification(error)),
+  })
 }
 
 /**
  * Reorder is the same gesture as a private shelf's: the sidebar writes the full
- * id list and the server rewrites every sortOrder by index, so a drag can never
- * leave two rows claiming the same slot. Rejects optimistically and restores the
- * previous list so a manager who cannot reorder (a member) is not left looking
- * at a local order the server never accepted.
+ * value list and the server rewrites every sortOrder by index. Keys are the
+ * canonical value keys, so a value that no longer exists costs nothing.
  */
 export function useReorderLibraryCategories() {
   const local = useDataAuthority()
+  const vault = useVaultOperations()
+  const user = useAuthStore((state) => state.user)
   const queryClient = useQueryClient()
+  const localOperations = local ?? { scope: DEVICE_VAULT_SCOPE, operations: vault }
   return useMutation({
-    networkMode: local ? 'always' : 'online',
-    mutationFn: async ({ libraryId, categoryIds }: { libraryId: string | null; categoryIds: string[] }) => {
-      if (local) { await local.operations.reorderOrganization('category', categoryIds); return { data: null } }
-      if (!libraryId) throw new Error('A remote library identity is required')
-      return apiPut<{ data: null }>(`/libraries/${libraryId}/categories/order`, { categoryIds })
-    },
-    onMutate: ({ libraryId, categoryIds }) => {
-      if (local) return undefined
-      const key = ['libraries', libraryId, 'categories']
-      const prev = queryClient.getQueryData<{ data: Category[] }>(key)
-      if (prev) {
-        const byId = new Map(prev.data.map((category) => [category.id, category]))
-        queryClient.setQueryData(key, {
-          data: categoryIds.map((id) => byId.get(id)).filter((c): c is Category => Boolean(c)),
-        })
+    networkMode: 'always',
+    mutationFn: async ({ libraryId, keys, source, localKeys, serverKeys }: { libraryId: string | null; keys: string[]; source?: 'local' | 'server' | null; localKeys?: string[]; serverKeys?: string[] }) => {
+      if (source === 'local') {
+        await localOperations.operations.reorderValues('category', keys)
+        return { data: null }
       }
-      return { key, prev }
-    },
-    onError: (error, _vars, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(ctx.key, ctx.prev)
-      notify.error(getUserErrorNotification(error, 'toast.reorderShelvesFailed'))
+      const reorderServer = async (orderedKeys: string[]) => {
+        if (!libraryId) throw new Error('A remote library identity is required')
+        return apiPut<{ data: null }>(`/libraries/${libraryId}/categories/order`, { keys: orderedKeys })
+      }
+      if (source === null && (localKeys !== undefined || serverKeys !== undefined)) {
+        let localSucceeded = false
+        if (localKeys !== undefined) {
+          await localOperations.operations.reorderValues('category', localKeys)
+          localSucceeded = true
+        }
+        if (serverKeys !== undefined && user) {
+          try {
+            return await reorderServer(serverKeys)
+          } catch (error) {
+            if (localSucceeded) return { data: null, partial: true }
+            throw error
+          }
+        }
+        return { data: null }
+      }
+      if (!source && local) {
+        await localOperations.operations.reorderValues('category', keys)
+        return { data: null }
+      }
+      return reorderServer(keys)
     },
     onSettled: (_data, _error, vars) => {
-      if (local) { void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] }); invalidateDeviceMembershipQueries(queryClient); return }
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
+      const localRequested = vars.source === 'local' || (vars.source === null && vars.localKeys !== undefined) || (vars.source === undefined && Boolean(local))
+      const serverRequested = vars.source === 'server' || (vars.source === null && vars.serverKeys !== undefined) || (vars.source === undefined && !local)
+      if (localRequested) {
+        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(localOperations.scope)] })
+        invalidateDeviceMembershipQueries(queryClient)
+      }
+      if (serverRequested) void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
     },
+    onSuccess: (result) => { if (result.partial) notify.warning({ key: 'library.taxonomySourcePartial' }) },
+    onError: (error) => notify.error(getUserErrorNotification(error)),
   })
 }
 
 export function useReorderLibraryTags() {
+  const local = useDataAuthority()
+  const vault = useVaultOperations()
+  const user = useAuthStore((state) => state.user)
   const queryClient = useQueryClient()
+  const localOperations = local ?? { scope: DEVICE_VAULT_SCOPE, operations: vault }
   return useMutation({
-    mutationFn: ({ libraryId, tagIds }: { libraryId: string; tagIds: string[] }) =>
-      apiPut<{ data: null }>(`/libraries/${libraryId}/tags/order`, { tagIds }),
-    onMutate: ({ libraryId, tagIds }) => {
-      const key = ['libraries', libraryId, 'tags']
-      const prev = queryClient.getQueryData<{ data: LibraryTag[] }>(key)
-      if (prev) {
-        const byId = new Map(prev.data.map((tag) => [tag.id, tag]))
-        queryClient.setQueryData(key, {
-          data: tagIds.map((id) => byId.get(id)).filter((t): t is LibraryTag => Boolean(t)),
-        })
+    networkMode: 'always',
+    mutationFn: async ({ libraryId, names, source, localNames, serverNames }: { libraryId: string | null; names: string[]; source?: 'local' | 'server' | null; localNames?: string[]; serverNames?: string[] }) => {
+      if (source === 'local') {
+        await localOperations.operations.reorderValues('tag', names)
+        return { data: null }
       }
-      return { key, prev }
-    },
-    onError: (error, _vars, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(ctx.key, ctx.prev)
-      notify.error(getUserErrorNotification(error, 'toast.reorderTagsFailed'))
+      const reorderServer = (orderedNames: string[]) => apiPut<{ data: null }>(acctPath(libraryId, 'tags/order'), { names: orderedNames })
+      if (source === null && (localNames !== undefined || serverNames !== undefined)) {
+        let localSucceeded = false
+        if (localNames !== undefined) {
+          await localOperations.operations.reorderValues('tag', localNames)
+          localSucceeded = true
+        }
+        if (serverNames !== undefined && user) {
+          try {
+            return await reorderServer(serverNames)
+          } catch (error) {
+            if (localSucceeded) return { data: null, partial: true }
+            throw error
+          }
+        }
+        return { data: null }
+      }
+      if (!source && local) {
+        await localOperations.operations.reorderValues('tag', names)
+        return { data: null }
+      }
+      return reorderServer(names)
     },
     onSettled: (_data, _error, vars) => {
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+      const localRequested = vars.source === 'local' || (vars.source === null && vars.localNames !== undefined) || (vars.source === undefined && Boolean(local))
+      const serverRequested = vars.source === 'server' || (vars.source === null && vars.serverNames !== undefined && Boolean(user)) || (vars.source === undefined && !local)
+      if (localRequested) {
+        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(localOperations.scope)] })
+        invalidateDeviceMembershipQueries(queryClient)
+      }
+      if (serverRequested) {
+        if (vars.libraryId) void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'tags'] })
+        else void queryClient.invalidateQueries({ queryKey: ['tags'] })
+      }
     },
+    onSuccess: (result) => { if (result.partial) notify.warning({ key: 'library.taxonomySourcePartial' }) },
+    onError: (error) => notify.error(getUserErrorNotification(error)),
   })
 }
 
@@ -867,8 +1078,10 @@ export interface CatalogListParams {
   q?: string
   sortBy?: string
   sortOrder?: string
+  /** Canonical category value key, or 'none' for the uncategorized shelf. */
   categoryId?: string
   categoryScope?: CategoryScope
+  /** A tag is identified by its name. */
   tagId?: string
   format?: string
   author?: string
@@ -904,9 +1117,11 @@ export function catalogQueryParts(libraryId: string, params: CatalogListParams) 
   if (key.q) search.set('q', key.q)
   if (key.sortBy) search.set('sortBy', key.sortBy)
   if (key.sortOrder) search.set('sortOrder', key.sortOrder)
-  if (key.categoryId) search.set('categoryId', key.categoryId)
+  // The wire carries the value, never an opaque row id.
+  const category = categoryFilterValue(key.categoryId)
+  if (category) search.set('category', category === 'none' ? 'none' : JSON.stringify(category))
   if (key.categoryScope !== 'direct') search.set('categoryScope', key.categoryScope)
-  if (key.tagId) search.set('tagId', key.tagId)
+  if (key.tagId) search.set('tag', key.tagId)
   if (key.format) search.set('format', key.format)
   if (key.author) search.set('author', key.author)
   if (key.series) search.set('series', key.series)
@@ -940,24 +1155,6 @@ export function prefetchLibraryCatalog(queryClient: QueryClient, libraryId: stri
  * the shared library's counterpart of moving a private book to a shelf, and it
  * is what a card dropped on a category row and a batch classify both call.
  */
-export function useSetWorkCategory() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ libraryId, libraryBookId, categoryId }: { libraryId: string; libraryBookId: string; categoryId: string | null }) =>
-      apiPatch(`/libraries/${libraryId}/books/${libraryBookId}`, { categoryId }),
-    onSuccess: (_res, vars) => {
-      void queryClient.invalidateQueries({ queryKey: ['books'] })
-      void queryClient.invalidateQueries({ queryKey: ['book'] })
-      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'catalog'] })
-      void queryClient.invalidateQueries({ queryKey: ['libraries', vars.libraryId, 'categories'] })
-    },
-    onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'toast.moveBooksFailed'))
-    },
-  })
-}
-
 /**
  * Edit a work's own metadata (5.3): title, author, description, category and
  * the whole tag set. Version overrides are a separate PATCH on the version.
@@ -1166,10 +1363,10 @@ export function useRemoveCatalogVersionCover() {
 export function useCollectBook() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ libraryId, versionLinkId, categoryId }: { libraryId: string; versionLinkId: string; categoryId?: string }) =>
+    mutationFn: ({ libraryId, versionLinkId, categoryPath, tags }: { libraryId: string; versionLinkId: string; categoryPath?: string[] | null; tags?: string[] }) =>
       apiPost<{ data: CollectBookRes }>(
         `/libraries/${libraryId}/versions/${versionLinkId}/collect`,
-        categoryId ? { categoryId } : {},
+        { ...(categoryPath === undefined ? {} : { categoryPath }), ...(tags === undefined ? {} : { tags }) },
       ),
     onSuccess: (_res, vars) => {
       // The collected card shows up in the private library, and the catalog
@@ -1252,14 +1449,14 @@ export function usePushVersion() {
 export function usePublishPrivateBook() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ libraryId, bookId, categoryId, tagIds }: {
+    mutationFn: ({ libraryId, bookId, categoryPath, tags }: {
       libraryId: string
       bookId: string
-      categoryId?: string
-      tagIds?: string[]
+      categoryPath?: string[] | null
+      tags?: string[]
     }) => apiPost<{ data: PublishPrivateBookRes }>(
       `/libraries/${libraryId}/books/from-private`,
-      { bookId, ...(categoryId ? { categoryId } : {}), ...(tagIds && tagIds.length > 0 ? { tagIds } : {}) },
+      { bookId, ...(categoryPath === undefined ? {} : { categoryPath }), ...(tags ? { tags } : {}) },
     ),
     onSuccess: (_res, vars) => {
       void queryClient.invalidateQueries({ queryKey: ['books'] })
@@ -1637,7 +1834,7 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
             const normalizeTitle = signedIn
               ? (queryClient.getQueryData<{ data: SettingsRes }>(['settings'])?.data ?? readStoredSettings())?.library?.normalizeTitle !== false
               : useUiStore.getState().deviceNormalizeTitle
-            const book = existing ? await vault.acknowledgeIngestion(existing.book.ref, item.file) : await vault.addFile(item.file, { ...identity, normalizeTitle, signal: controller.signal, catalog: { shelfId: item.shelfId ?? null, categoryId: item.categoryId ?? null, tagIds: item.tagIds ?? [] } })
+            const book = existing ? await vault.acknowledgeIngestion(existing.book.ref, item.file) : await vault.addFile(item.file, { ...identity, normalizeTitle, signal: controller.signal, catalog: { shelfId: item.shelfId ?? null, categoryPath: item.categoryPath ?? null, tags: item.tags ?? [] } })
             patchItem(item.id, { status: 'success', progress: 100, bookRef: book.ref })
           } catch {
             patchItem(item.id, { status: 'error', messageKey: controller.signal.aborted ? 'library.uploadCancelled' : 'library.uploadFailed' })
@@ -1830,8 +2027,8 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
           status,
           progress: 0,
           shelfId: opts?.shelfId,
-          categoryId: opts?.categoryId,
-          tagIds: opts?.tagIds,
+          categoryPath: opts?.categoryPath,
+          tags: opts?.tags,
           destination: opts?.destination ?? (local ? 'local' : 'server'),
           ...(opts?.versionNameMode ? { versionName: extractVersionNameFromFileName(file.name) } : {}),
         })),
@@ -1855,8 +2052,8 @@ export function useUploadBooks(target: UploadTarget = PRIVATE_UPLOAD_TARGET) {
         ...(destination ? { destination } : {}),
         ...(assignment ? {
           shelfId: assignment.shelfId,
-          categoryId: assignment.categoryId,
-          tagIds: assignment.tagIds,
+          categoryPath: assignment.categoryPath,
+          tags: assignment.tags,
         } : {}),
       }
     }))
@@ -2107,7 +2304,7 @@ export function useShelves(options?: { enabled?: boolean; fallbackAnonymous?: bo
       const result = await apiGet<{ data: ShelfListItem[] }>(withReveal('/shelves'), signal)
       if (!signal.aborted && userId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) saveShelvesSnapshot(userId, result.data)
       // The shelf tree the user sees is the tree a device book may point at.
-      void vault.mirrorOrganization(result.data.map((item) => ({ id: item.id, kind: 'shelf' as const, name: item.name, parentId: null, pinned: item.pinned, hidden: item.hidden, sortOrder: item.sortOrder, createdAt: item.createdAt, updatedAt: item.updatedAt }))).catch(() => {})
+      void vault.syncAccountShelves(result.data.map((item) => ({ id: item.id, name: item.name, sortOrder: item.sortOrder }))).catch(() => {})
       return result
     },
   })
@@ -2131,9 +2328,8 @@ export function useTags(options?: { enabled?: boolean; fallbackAnonymous?: boole
       }
       const userId = user?.id
       const sessionRevision = getAuthSessionRevision()
-      const result = await apiGet<{ data: TagListItem[] }>(withReveal('/tags'), signal)
+      const result = await apiGet<{ data: LibraryTag[] }>(withReveal('/tags'), signal)
       if (!signal.aborted && userId && useAuthStore.getState().user?.id === userId && getAuthSessionRevision() === sessionRevision) saveTagsSnapshot(userId, result.data)
-      void vault.mirrorOrganization(result.data.map((item) => ({ id: item.id, kind: 'tag' as const, name: item.name, parentId: null, pinned: item.pinned, hidden: item.hidden, sortOrder: item.sortOrder, createdAt: item.createdAt, updatedAt: item.updatedAt }))).catch(() => {})
       return result
     },
   })
@@ -2145,7 +2341,7 @@ export function useCreateShelf() {
 
   return useMutation({
     networkMode: local ? 'always' : 'online',
-    mutationFn: async (name: string) => local ? { data: { ...await local.operations.createOrganization('shelf', name), bookCount: 0 } } : apiPost<{ data: ShelfListItem }>('/shelves', { name }),
+    mutationFn: async (name: string) => local ? { data: { ...await local.operations.createShelf(name), bookCount: 0 } } : apiPost<{ data: ShelfListItem }>('/shelves', { name }),
     onSuccess: () => {
       if (local) {
         void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
@@ -2168,7 +2364,7 @@ export function useRenameShelf() {
 
   return useMutation({
     networkMode: local ? 'always' : 'online',
-    mutationFn: async ({ id, name }: { id: string; name: string }) => local ? { data: await local.operations.updateOrganization('shelf', id, { name }) } : apiPut<{ data: ShelfListItem }>(`/shelves/${id}`, { name }),
+    mutationFn: async ({ id, name }: { id: string; name: string }) => local ? { data: await local.operations.updateShelf(id, { name }) } : apiPut<{ data: ShelfListItem }>(`/shelves/${id}`, { name }),
     onSuccess: () => {
       if (local) {
         void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
@@ -2195,7 +2391,7 @@ export function useToggleShelfPin() {
 
   return useMutation({
     networkMode: local ? 'always' : 'online',
-    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => local ? local.operations.updateOrganization('shelf', id, { pinned }) : apiPut(`/shelves/${id}`, { pinned }),
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => local ? local.operations.updateShelf(id, { pinned }) : apiPut(`/shelves/${id}`, { pinned }),
     onSuccess: () => {
       if (local) {
         void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
@@ -2217,7 +2413,7 @@ export function useToggleShelfHidden() {
 
   return useMutation({
     networkMode: local ? 'always' : 'online',
-    mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) => local ? local.operations.updateOrganization('shelf', id, { hidden }) : apiPut(`/shelves/${id}`, { hidden }),
+    mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) => local ? local.operations.updateShelf(id, { hidden }) : apiPut(`/shelves/${id}`, { hidden }),
     onSuccess: () => {
       if (local) {
         void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
@@ -2243,7 +2439,7 @@ export function useDeleteShelf() {
   return useMutation({
     networkMode: local ? 'always' : 'online',
     mutationFn: async (id: string) => {
-      if (local) { await local.operations.deleteOrganization('shelf', id); return { data: null } }
+      if (local) { await local.operations.deleteShelf(id); return { data: null } }
       return apiDelete<{ data: null }>(`/shelves/${id}`)
     },
     onSuccess: () => {
@@ -2273,7 +2469,7 @@ export function useReorderShelves() {
   return useMutation({
     networkMode: local ? 'always' : 'online',
     mutationFn: async (shelfIds: string[]) => {
-      if (local) { await local.operations.reorderOrganization('shelf', shelfIds); return { data: null } }
+      if (local) { await local.operations.reorderShelves(shelfIds); return { data: null } }
       const all = await apiGet<{ data: ShelfListItem[] }>('/shelves?showHidden=1')
       const visible = new Set(shelfIds)
       let position = 0
@@ -2309,52 +2505,6 @@ export function useReorderShelves() {
         return
       }
       void queryClient.invalidateQueries({ queryKey: ['shelves'] })
-    },
-  })
-}
-
-export function useReorderTags() {
-  const local = useDataAuthority()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    networkMode: local ? 'always' : 'online',
-    mutationFn: async (tagIds: string[]) => {
-      if (local) { await local.operations.reorderOrganization('tag', tagIds); return { data: null } }
-      const all = await apiGet<{ data: TagListItem[] }>('/tags?showHidden=1')
-      const visible = new Set(tagIds)
-      let position = 0
-      const complete = all.data.map((row) => visible.has(row.id) ? tagIds[position++]! : row.id)
-      return apiPut<{ data: null }>('/tags/order', { tagIds: complete })
-    },
-    onMutate: (tagIds) => {
-      if (local) return undefined
-      // Same prefix-wide patch as the shelf reorder: one root key, several
-      // account/device/visibility variants below it.
-      const previous = queryClient.getQueriesData<{ data: TagListItem[] }>({ queryKey: ['tags'] })
-      for (const [key, prev] of previous) {
-        if (!prev) continue
-        const byId = new Map(prev.data.map((tag) => [tag.id, tag]))
-        const visible = new Set(tagIds)
-        let position = 0
-        const next = prev.data
-          .map((row) => (visible.has(row.id) ? byId.get(tagIds[position++]!) : row))
-          .filter((tag): tag is TagListItem => Boolean(tag))
-        queryClient.setQueryData(key, { data: next })
-      }
-      return { previous }
-    },
-    onError: (error, _tagIds, ctx) => {
-      for (const [key, prev] of ctx?.previous ?? []) queryClient.setQueryData(key, prev)
-      notify.error(getUserErrorNotification(error, 'toast.reorderTagsFailed'))
-    },
-    onSettled: () => {
-      if (local) {
-        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
-        invalidateDeviceMembershipQueries(queryClient)
-        return
-      }
-      void queryClient.invalidateQueries({ queryKey: ['tags'] })
     },
   })
 }
@@ -2609,151 +2759,25 @@ export function useCatalogVersionMetadataSource(
   })
 }
 
-export function useCreateTag() {
-  const local = useDataAuthority()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    networkMode: local ? 'always' : 'online',
-    mutationFn: async (name: string) => local ? { data: { ...await local.operations.createOrganization('tag', name), bookCount: 0 } } : apiPost<{ data: TagListItem }>('/tags', { name }),
-    onSuccess: () => {
-      if (local) {
-        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
-        invalidateDeviceMembershipQueries(queryClient)
-        notify.success({ key: 'toast.tagCreated' })
-        return
-      }
-      queryClient.invalidateQueries({ queryKey: ['tags'] })
-      notify.success({ key: 'toast.tagCreated' })
-    },
-    onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'toast.createTagFailed'))
-    },
-  })
-}
-
-export function useRenameTag() {
-  const local = useDataAuthority()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    networkMode: local ? 'always' : 'online',
-    mutationFn: async ({ id, name }: { id: string; name: string }) => local ? { data: await local.operations.updateOrganization('tag', id, { name }) } : apiPut<{ data: TagListItem }>(`/tags/${id}`, { name }),
-    onSuccess: () => {
-      if (local) {
-        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
-        invalidateDeviceMembershipQueries(queryClient)
-        notify.success({ key: 'toast.tagRenamed' })
-        return
-      }
-      void queryClient.invalidateQueries({ queryKey: ['books'] })
-      void queryClient.invalidateQueries({ queryKey: ['book'] })
-      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
-      queryClient.invalidateQueries({ queryKey: ['tags'] })
-      notify.success({ key: 'toast.tagRenamed' })
-    },
-    onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'toast.renameTagFailed'))
-    },
-  })
-}
-
-export function useToggleTagPin() {
-  const local = useDataAuthority()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    networkMode: local ? 'always' : 'online',
-    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => local ? local.operations.updateOrganization('tag', id, { pinned }) : apiPut(`/tags/${id}`, { pinned }),
-    onSuccess: () => {
-      if (local) {
-        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
-        invalidateDeviceMembershipQueries(queryClient)
-
-        return
-      }
-      queryClient.invalidateQueries({ queryKey: ['tags'] })
-    },
-    onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'toast.pinTagFailed'))
-    },
-  })
-}
-
-export function useToggleTagHidden() {
-  const local = useDataAuthority()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    networkMode: local ? 'always' : 'online',
-    mutationFn: ({ id, hidden }: { id: string; hidden: boolean }) => local ? local.operations.updateOrganization('tag', id, { hidden }) : apiPut(`/tags/${id}`, { hidden }),
-    onSuccess: () => {
-      if (local) {
-        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
-        invalidateDeviceMembershipQueries(queryClient)
-
-        return
-      }
-      void queryClient.invalidateQueries({ queryKey: ['books'] })
-      void queryClient.invalidateQueries({ queryKey: ['book'] })
-      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
-      queryClient.invalidateQueries({ queryKey: ['tags'] })
-      queryClient.invalidateQueries({ queryKey: ['books'] })
-    },
-    onError: (error) => notify.error(getUserErrorNotification(error, 'library.taxonomyVisibilityFailed')),
-  })
-}
-
-export function useDeleteTag() {
-  const local = useDataAuthority()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    networkMode: local ? 'always' : 'online',
-    mutationFn: async (id: string) => {
-      if (local) { await local.operations.deleteOrganization('tag', id); return { data: null } }
-      return apiDelete<{ data: null }>(`/tags/${id}`)
-    },
-    onSuccess: () => {
-      if (local) {
-        void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(local.scope)] })
-        invalidateDeviceMembershipQueries(queryClient)
-        notify.success({ key: 'toast.tagDeleted' })
-        return
-      }
-      void queryClient.invalidateQueries({ queryKey: ['books'] })
-      void queryClient.invalidateQueries({ queryKey: ['book'] })
-      void queryClient.invalidateQueries({ queryKey: ['batch-selection'] })
-      queryClient.invalidateQueries({ queryKey: ['tags'] })
-      queryClient.invalidateQueries({ queryKey: ['books'] })
-      notify.success({ key: 'toast.tagDeleted' })
-    },
-    onError: (error) => {
-      notify.error(getUserErrorNotification(error, 'toast.deleteTagFailed'))
-    },
-  })
-}
-
 export function useUpdateBookMembership() {
   const queryClient = useQueryClient()
   const vault = useVaultOperations()
 
   return useMutation({
     networkMode: 'always',
-    mutationFn: async ({ bookId, ref, shelfId, categoryId, categoryTemplateKey, tagIds }: { bookId: string; ref?: ClientBookRef; shelfId?: string | null; categoryId?: string | null; categoryTemplateKey?: string; tagIds?: string[] }) => {
+    mutationFn: async ({ bookId, ref, shelfId, categoryPath, tags }: { bookId: string; ref?: ClientBookRef; shelfId?: string | null; categoryPath?: string[] | null; tags?: string[] }) => {
       if (isDeviceBook(ref)) {
         const entry = await vault.detail(ref)
         if (entry.book.version === null) throw new Error('Local book version is unavailable')
-        await vault.update(ref, { ...(categoryTemplateKey ? { categoryTemplateKey } : {}), catalog: {
-          ...(shelfId === undefined ? {} : { shelfId }), ...(categoryId === undefined ? {} : { categoryId }), ...(tagIds === undefined ? {} : { tagIds }),
+        await vault.update(ref, { catalog: {
+          ...(shelfId === undefined ? {} : { shelfId }), ...(categoryPath === undefined ? {} : { categoryPath }), ...(tags === undefined ? {} : { tags }),
         } }, entry.book.version)
         return { data: null, undo: undefined }
       }
       return apiPut<{ data: null; undo?: UndoReceipt }>(`/books/${bookId}/organization`, {
         ...(shelfId !== undefined ? { shelfId } : {}),
-        ...(categoryId !== undefined ? { categoryId } : {}),
-        ...(categoryTemplateKey !== undefined ? { categoryTemplateKey } : {}),
-        ...(tagIds !== undefined ? { tagIds } : {}),
+        ...(categoryPath !== undefined ? { categoryPath } : {}),
+        ...(tags !== undefined ? { tags } : {}),
       })
     },
     onSuccess: async (result, { bookId, ref }) => {
@@ -2803,7 +2827,7 @@ export function useBookMembership(bookId: string | null, options: { shelves?: bo
       networkMode: isLocalBook ? 'always' : 'online',
       queryKey: isLocalBook ? catalogQueryKey(bookRef.scope, 'book-tags', bookRef.bookId) : ['books', bookId, 'tags'],
       queryFn: async ({ signal }) => isLocalBook
-        ? { data: (await vault.detail(bookRef, signal)).book.catalog?.tagIds ?? [] }
+        ? { data: (await vault.detail(bookRef, signal)).book.catalog?.tags ?? [] }
         : guardedRemoteCatalogRead<{ data: string[] }>(`/books/${bookId}/tags`, signal),
       enabled: Boolean(bookId && checkTags),
     }),
@@ -2893,7 +2917,7 @@ export function useMoveBooksToCategory() {
 
   return useMutation({
     networkMode: 'always',
-    mutationFn: async ({ libraryId, books, categoryId }: { libraryId?: string | null; books: MoveTarget[]; categoryId: string | null }): Promise<MoveOutcome> => {
+    mutationFn: async ({ libraryId, books, categoryPath }: { libraryId?: string | null; books: MoveTarget[]; categoryPath: string[] | null }): Promise<MoveOutcome> => {
       const { device, server } = partitionByStore(books, (book) => book.ref)
       let succeeded = 0
       let failed = 0
@@ -2902,13 +2926,13 @@ export function useMoveBooksToCategory() {
       if (device.length) {
         const items = await vault.selection(device.map((book) => book.id))
         if (items.length !== device.length) throw new Error('The selected local books changed')
-        await vault.updateSelection(items, { categoryId })
+        await vault.updateSelection(items, { categoryPath })
         succeeded += items.length
       }
       if (server.length) {
         const result = await apiPatch<{ data?: { count: number; failed?: number; failedIds?: string[] }; undo?: UndoReceipt }>(
           libraryId ? `/libraries/${libraryId}/books/batch/organize` : '/books/batch/organize',
-          { ids: server.map((book) => book.id), categoryId },
+          { ids: server.map((book) => book.id), categoryPath },
         )
         succeeded += result.data?.count ?? server.length
         failed += result.data?.failed ?? 0

@@ -72,7 +72,7 @@ export function projectLocalArchiveEntries(snapshot: ClientVaultReadingSnapshot,
     if (query.search && !entry.title?.toLowerCase().includes(query.search.toLowerCase())) return false
     if (query.tag) {
       const book = snapshot.books.find((book) => book.book.ref.bookId === entry.id)?.book
-      if (!snapshot.organization.items.some((tag) => tag.kind === 'tag' && tag.name === query.tag && book?.catalog?.tagIds?.includes(tag.id))) return false
+      if (!book?.catalog?.tags?.includes(query.tag)) return false
     }
     return true
   })

@@ -1,3 +1,4 @@
+import { classificationValueKey } from '@bookdock/shared'
 import { useEffect, useRef, useState } from 'react'
 
 import { localDateString, useReadingByCategory } from '@/api/hooks/reading-records'
@@ -78,7 +79,7 @@ export default function CategoryDistribution({
   }, [menuOpen])
 
   const taxonomyItems: TaxonomyItem[] = items.map((item) => ({
-    id: item.categoryId ?? 'uncategorized',
+    id: item.categoryPath ? classificationValueKey('category', item.categoryPath) : 'uncategorized',
     name: item.name ?? '未分类',
     count: item.bookCount ?? 1,
     durationSeconds: item.durationSeconds,

@@ -175,8 +175,9 @@ export async function importWebDavBooks(userId: string, req: WebDavImportReq): P
 
       if (req.libraryId) {
         const catalogRes = await uploadCatalogBook(req.libraryId, userId, file, {
-          ...(privateTarget ? { shelfId: req.shelfId, categoryId: req.categoryId } : { categoryId: req.categoryId ?? req.shelfId }),
-          tagIds: req.tagIds,
+          ...(privateTarget ? { shelfId: req.shelfId } : {}),
+          categoryPath: req.categoryPath ?? null,
+          tags: req.tags,
           normalizeTitle,
         })
         results.push({
@@ -189,7 +190,7 @@ export async function importWebDavBooks(userId: string, req: WebDavImportReq): P
         const uploadRes = await uploadBook(
           userId,
           file,
-          { shelfId: req.shelfId, categoryId: req.categoryId, tagIds: req.tagIds },
+          { shelfId: req.shelfId, categoryPath: req.categoryPath ?? null, tags: req.tags },
           { normalizeTitle, allowCorresponding: true },
         )
         results.push({

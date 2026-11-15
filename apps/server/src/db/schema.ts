@@ -532,10 +532,9 @@ export const readingBookStats = sqliteTable('reading_book_stats', {
   userBookIdx: index('reading_book_stats_user_book_idx').on(table.userId, table.bookVersionId, table.factVersion),
 }))
 
-// Library foundation (Phase 1): structure only, no data migration yet.
-// `user_id` on libraries/library_books/library_categories/library_tags is
-// the owner/tenant key (exposed on the wire as ownerUserId), so the
-// per-user scoping rule needs no second column. Source ids on
+// `user_id` on libraries/library_books is the owner/tenant key (exposed on the
+// wire as ownerUserId), so the per-user scoping rule needs no second column.
+// Category paths and tag names belong to each library book directly. Source ids on
 // library_book_versions and ideas.sharedLibraryId are plain text on purpose:
 // provenance must survive the deletion of whatever they point at, which no
 // FK cascade/SET NULL/restrict can express.
@@ -598,7 +597,8 @@ export const libraryBooks = sqliteTable('library_books', {
   id: text('id').primaryKey(),
   libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
   userId: text('user_id').notNull().references(() => users.id),
-  categoryId: text('category_id').references(() => libraryCategories.id, { onDelete: 'set null' }),
+  categoryRoot: text('category_root'),
+  categoryLeaf: text('category_leaf'),
   shelfId: text('shelf_id').references(() => shelves.id, { onDelete: 'set null' }),
   title: text('title').notNull(),
   author: text('author').notNull().default(''),
@@ -633,7 +633,6 @@ export const libraryBooks = sqliteTable('library_books', {
   meta: text('meta', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
 }, (table) => ({
   libraryIdx: index('library_books_library_idx').on(table.libraryId, table.updatedAt),
-  categoryIdx: index('library_books_category_idx').on(table.categoryId),
   shelfIdx: index('library_books_shelf_idx').on(table.shelfId),
 }))
 
@@ -826,48 +825,32 @@ export const blobs = sqliteTable('blobs', {
   createdAt: integer('created_at').notNull(),
 })
 
-export const libraryCategories = sqliteTable('library_categories', {
+// A tag value belongs to a book row. The row has no separately managed tag
+// identity; its id only serves as an internal relation key.
+export const libraryBookTagValues = sqliteTable('library_book_tag_values', {
   id: text('id').primaryKey(),
-  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
-  userId: text('user_id').notNull().references(() => users.id),
-  name: text('name').notNull(),
-  parentId: text('parent_id').references((): AnySQLiteColumn => libraryCategories.id, { onDelete: 'set null' }),
-  sortOrder: integer('sort_order').notNull().default(0),
-  // Sidebar pin-to-top flag, orthogonal to every sort mode (mirrors shelves.pinned).
-  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
-  // Persistent taxonomy hide (see Hidden boundary): hides the subtree and
-  // every work filed under it; evaluated at read time.
-  hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
-}, (table) => ({
-  libraryIdx: index('library_categories_library_idx').on(table.libraryId, table.sortOrder),
-  parentIdx: index('library_categories_parent_idx').on(table.parentId),
-}))
-
-export const libraryTags = sqliteTable('library_tags', {
-  id: text('id').primaryKey(),
-  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
-  userId: text('user_id').notNull().references(() => users.id),
-  name: text('name').notNull(),
-  sortOrder: integer('sort_order').notNull().default(0),
-  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
-  // Persistent taxonomy hide (see Hidden boundary): hides every work carrying
-  // the tag; evaluated at read time.
-  hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
-}, (table) => ({
-  libraryNameUnique: uniqueIndex('library_tags_library_name_unique').on(table.libraryId, table.name),
-  libraryIdx: index('library_tags_library_idx').on(table.libraryId, table.sortOrder),
-}))
-
-export const libraryBookTags = sqliteTable('library_book_tags', {
   libraryBookId: text('library_book_id').notNull().references(() => libraryBooks.id, { onDelete: 'cascade' }),
-  tagId: text('tag_id').notNull().references(() => libraryTags.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
 }, (table) => ({
-  pk: primaryKey({ columns: [table.libraryBookId, table.tagId] }),
-  tagIdx: index('library_book_tags_tag_idx').on(table.tagId),
+  bookNameUnique: uniqueIndex('library_book_tag_values_book_name_unique').on(table.libraryBookId, table.name),
+  nameIdx: index('library_book_tag_values_name_idx').on(table.name, table.libraryBookId),
+}))
+
+// Sidebar rules may outlive a value's last book, while the value itself may not.
+export const libraryMetadataValueState = sqliteTable('library_metadata_value_state', {
+  id: text('id').primaryKey(),
+  libraryId: text('library_id').notNull().references(() => libraries.id, { onDelete: 'cascade' }),
+  kind: text('kind', { enum: ['category', 'tag'] }).notNull(),
+  value: text('value').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  libraryValueUnique: uniqueIndex('library_metadata_value_state_unique').on(table.libraryId, table.kind, table.value),
+  librarySortIdx: index('library_metadata_value_state_sort_idx').on(table.libraryId, table.kind, table.sortOrder),
 }))
 
 // Single-row deployment record. Replaces instance_settings once migrated;

@@ -1,11 +1,13 @@
 import { eq } from 'drizzle-orm'
 
 import type {
+  Category,
   ExternalBook,
   ExternalBookDetail,
   ExternalBookListRes,
   ExternalCategory,
   ExternalLibrary,
+  ShelfListItem,
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
@@ -19,8 +21,8 @@ import {
 import type { LibraryListQuery } from '../libraries/library-query'
 import { isLibraryManager } from '../libraries/library-access'
 import { listLibraries } from '../libraries/libraries.service'
-import { listLibraryCategories, listShelves } from '../shelves/shelves.service'
-import { listLibraryTags } from '../tags/tags.service'
+import { listShelves } from '../shelves/shelves.service'
+import { listCategoryValues, listTagValues } from '../classification/classification.service'
 import { listBrowsableLibraries } from '../books/legado.service'
 import { getActiveBook, getBookCoverContent, trashBook } from '../books/books.service'
 import { isTrashEnabled } from '../settings/settings.service'
@@ -95,36 +97,32 @@ export async function listExternalLibraries(userId: string): Promise<ExternalLib
     // making the client find out by collecting a 403 on its first write.
     const canWrite = await isLibraryManager(userId, library.id)
     const [categories, libraryShelves, tags] = await Promise.all([
-      listLibraryCategories(userId, library.id),
+      listCategoryValues(userId, library.id, { showHidden: true }),
       library.private ? listShelves(userId, true) : Promise.resolve([]),
-      listLibraryTags(userId, library.id),
+      listTagValues(userId, library.id, { showHidden: true }),
     ])
 
-    const projectTaxonomy = (rows: Array<{
-      id: string
-      name: string
-      parentId?: string | null
-      bookCount: number
-      hidden: boolean
-    }>): ExternalCategory[] => {
-      const byId = new Map(rows.map((row) => [row.id, row]))
-      return rows.map((row) => {
-        let depth = 0
-        let cursor = row.parentId
-        while (cursor && depth < 8) {
-          depth += 1
-          cursor = byId.get(cursor)?.parentId ?? null
-        }
-        return {
-          id: row.id,
-          name: row.name,
-          parentId: row.parentId ?? null,
-          depth,
-          bookCount: row.bookCount,
-          hidden: Boolean(row.hidden),
-        }
-      })
-    }
+    // Categories carry their own path, so the indent and the parent key are
+    // read off the value instead of walking a tree of rows.
+    const projectCategories = (rows: Category[]): ExternalCategory[] => rows.map((node) => ({
+      id: node.id,
+      path: node.path,
+      name: node.name,
+      parentId: node.parentId,
+      depth: node.path.length - 1,
+      bookCount: node.bookCount,
+      hidden: node.hidden,
+    }))
+    // A shelf is still an entity: flat, with a row id and no path.
+    const projectShelves = (rows: ShelfListItem[]): ExternalCategory[] => rows.map((row) => ({
+      id: row.id,
+      path: null,
+      name: row.name,
+      parentId: null,
+      depth: 0,
+      bookCount: row.bookCount,
+      hidden: Boolean(row.hidden),
+    }))
 
     const row = counts.get(library.id)
     return {
@@ -137,13 +135,13 @@ export async function listExternalLibraries(userId: string): Promise<ExternalLib
       canWrite,
       memberCount: row?.memberCount ?? 1,
       workCount: row?.workCount ?? 0,
-      categories: projectTaxonomy(categories),
-      shelves: projectTaxonomy(libraryShelves),
+      categories: projectCategories(categories),
+      shelves: projectShelves(libraryShelves),
       tags: tags.map((tag) => ({
-        id: tag.id,
+        id: tag.name,
         name: tag.name,
         bookCount: tag.bookCount,
-        hidden: Boolean(tag.hidden),
+        hidden: tag.hidden,
       })),
     }
   }))

@@ -1,32 +1,46 @@
 import type { ClientBook, ClientCatalogEntry, ClientCategoryView, ClientLibraryBookView, ClientLibraryDetailView, ClientOrganization, ClientReadingState, ClientTaxonomyView, ViewSettings } from '@bookdock/shared'
-import { clientPresetBindingSchema } from '@bookdock/shared'
+import { classificationValueKey, clientPresetBindingSchema } from '@bookdock/shared'
+
+/** The stored preference row for one value, if the sidebar has ever touched it. */
+function valueState(organization: ClientOrganization, kind: 'category' | 'tag', value: string) {
+  return organization.valueState.find((state) => state.kind === kind && state.value === value)
+}
+
+/**
+ * The path a book's category names, or null. A two-level path hides through
+ * either end: hiding the root hides its whole branch, which is why a leaf is
+ * checked against its own key and its root's.
+ */
+function categoryHidden(organization: ClientOrganization, path: string[] | null): boolean {
+  if (!path) return false
+  if (valueState(organization, 'category', classificationValueKey('category', path))?.hidden) return true
+  return path.length > 1 && Boolean(valueState(organization, 'category', classificationValueKey('category', [path[0]!]))?.hidden)
+}
 
 export function localCatalogBookView(book: ClientCatalogEntry['book'], state: ClientReadingState | null, organization: ClientOrganization): ClientLibraryBookView {
   const catalog = book.catalog
-  const shelf = organization.items.find((item) => item.kind === 'shelf' && item.id === catalog?.shelfId)
-  const category = organization.items.find((item) => item.kind === 'category' && item.id === catalog?.categoryId)
-  const tags = organization.items.filter((item) => item.kind === 'tag' && catalog?.tagIds?.includes(item.id))
-  let hiddenCategory = category?.hidden ? category : undefined
-  let ancestor = category
-  const seen = new Set<string>()
-  while (ancestor?.parentId && !seen.has(ancestor.id)) {
-    seen.add(ancestor.id)
-    ancestor = organization.items.find((item) => item.id === ancestor!.parentId && item.kind === 'category')
-    if (ancestor?.hidden) hiddenCategory = ancestor
-  }
-  const hiddenTag = tags.find((item) => item.hidden)
-  const hiddenReason = catalog?.hidden ? 'direct' : shelf?.hidden ? 'shelf' : hiddenCategory ? 'category' : hiddenTag ? 'tag' : null
+  const shelf = organization.shelves.find((entry) => entry.id === catalog?.shelfId)
+  const path = catalog?.categoryPath ?? null
+  const tagNames = catalog?.tags ?? []
+  const hiddenTags = tagNames.filter((name) => valueState(organization, 'tag', name)?.hidden)
+  const hiddenCategory = categoryHidden(organization, path)
+  const hiddenReason = catalog?.hidden ? 'direct' : shelf?.hidden ? 'shelf' : hiddenCategory ? 'category' : hiddenTags.length > 0 ? 'tag' : null
   return {
     ref: book.ref, id: book.ref.bookId, title: book.title, author: book.authors[0] ?? '', authors: book.authors,
     format: book.format, coverKey: null, size: book.size,
     readStatus: state?.readStatus ?? 'reading', progress: state?.fraction === null || !state ? null : state.fraction * 100,
     pinnedAt: catalog?.pinnedAt, lastReadAt: state?.lastReadAt ?? null,
     deletedAt: book.deletedAt ?? null, createdAt: book.createdAt, updatedAt: book.updatedAt, clientVersion: book.version ?? undefined,
-    shelfId: catalog?.shelfId ?? null, shelfName: shelf?.name, categoryId: catalog?.categoryId ?? null, categoryName: category?.name,
-    tags: tags.map((item) => item.name), coverPaletteId: catalog?.coverPaletteId,
+    shelfId: catalog?.shelfId ?? null, shelfName: shelf?.name,
+    categoryPath: path, categoryName: path ? path.join(' / ') : null,
+    tags: tagNames, coverPaletteId: catalog?.coverPaletteId,
     coverPaletteKey: JSON.stringify([book.ref.scope, book.ref.bookId]),
     hidden: catalog?.hidden ?? false, effectiveHidden: hiddenReason !== null, hiddenReason,
-    hiddenVia: { ...(shelf?.hidden ? { shelfName: shelf.name } : {}), ...(hiddenCategory ? { categoryName: hiddenCategory.name } : {}), ...(hiddenTag ? { tagNames: tags.filter((tag) => tag.hidden).map((tag) => tag.name) } : {}) },
+    hiddenVia: {
+      ...(shelf?.hidden ? { shelfName: shelf.name } : {}),
+      ...(hiddenCategory && path ? { categoryName: path.join(' / ') } : {}),
+      ...(hiddenTags.length > 0 ? { tagNames: hiddenTags } : {}),
+    },
     sourceUnavailable: book.availability !== 'available',
   }
 }
@@ -36,32 +50,91 @@ export function localCatalogDetailView(book: ClientCatalogEntry['book'], state: 
     ...localCatalogBookView(book, state, organization),
     revisionId: book.content?.contentId,
     meta: { ...(book.catalog?.metadata ? { bookmeta: book.catalog.metadata } : {}), ...(book.textSource?.ruleSelection ? { customTocPatterns: book.textSource.ruleSelection.patterns ?? undefined, tocRuleId: book.textSource.ruleSelection.patterns ? 'custom' : undefined, tocRuleLabel: book.textSource.ruleSelection.label ?? undefined, tocRuleAuto: book.textSource.ruleSelection.auto } : {}), ...(book.textSource ? { wordCount: book.textSource.chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0) } : {}) },
-    tagIds: book.catalog?.tagIds ?? [],
+    tags: book.catalog?.tags ?? [],
     readerSettings: { viewSettings: settings.viewSettings as ViewSettings | undefined },
     clientPresetBinding: clientPresetBindingSchema.nullable().parse(settings.presetBinding ?? null),
   }
 }
 
+/**
+ * Sidebar taxonomy for the device half, aggregated from what the books carry.
+ *
+ * Nothing here is a stored row. A category exists because some book names its
+ * path, a tag because some book carries the name, and a shelf because the vault
+ * still has the shelf row. What the vault does store is the sidebar's opinion of
+ * each value — hidden, pinned, manual order — which is why an unused value
+ * leaves the tree while its preferences stay behind.
+ */
 export function localTaxonomyViews(snapshot: { books: Array<{ book: ClientBook; state: ClientReadingState | null }>; organization: ClientOrganization }, showHidden: boolean): { shelves: ClientTaxonomyView[]; tags: ClientTaxonomyView[]; categories: ClientCategoryView[] } {
   const { organization } = snapshot
-  const booksById = new Map(snapshot.books.map(({ book }) => [book.ref.bookId, book]))
-  const rows = snapshot.books.filter(({ book }) => book.deletedAt == null && !book.catalogRemoved).map(({ book, state }) => localCatalogBookView(book, state, organization)).filter((row) => showHidden || !row.effectiveHidden)
-  const hiddenIds = new Set(organization.items.filter((item) => item.hidden).map((item) => item.id))
-  for (let previous = -1; previous !== hiddenIds.size;) {
-    previous = hiddenIds.size
-    for (const item of organization.items) if (item.parentId && hiddenIds.has(item.parentId)) hiddenIds.add(item.id)
-  }
-  const visible = organization.items.filter((item) => showHidden || !hiddenIds.has(item.id)).sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id))
-  const shelves = visible.filter((item) => item.kind === 'shelf').map((item) => ({ ...item, bookCount: rows.filter((row) => row.shelfId === item.id).length }))
-  const tags = visible.filter((item) => item.kind === 'tag').map((item) => ({ ...item, bookCount: rows.filter((row) => booksById.get(row.id)?.catalog?.tagIds?.includes(item.id)).length }))
-  const categories = visible.filter((item) => item.kind === 'category').map((item) => {
-    const children = new Set([item.id])
-    for (let previous = -1; previous !== children.size;) {
-      previous = children.size
-      for (const child of organization.items) if (child.kind === 'category' && child.parentId && children.has(child.parentId)) children.add(child.id)
+  const rows = snapshot.books
+    .filter(({ book }) => book.deletedAt == null && !book.catalogRemoved)
+    .map(({ book, state }) => localCatalogBookView(book, state, organization))
+    .filter((row) => showHidden || !row.effectiveHidden)
+  const shelves = organization.shelves
+    .filter((shelf) => showHidden || !shelf.hidden)
+    .map((shelf) => ({ ...shelf, bookCount: rows.filter((row) => row.shelfId === shelf.id).length }))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+
+  const tagCounts = new Map<string, number>()
+  for (const row of rows) for (const name of row.tags ?? []) tagCounts.set(name, (tagCounts.get(name) ?? 0) + 1)
+  const tags = [...tagCounts].flatMap(([name, bookCount]) => {
+    const state = valueState(organization, 'tag', name)
+    if (!showHidden && state?.hidden) return []
+    return [{
+      id: name, name, bookCount,
+      sortOrder: state?.sortOrder ?? Number.MAX_SAFE_INTEGER,
+      pinned: state?.pinned ?? false,
+      hidden: state?.hidden ?? false,
+      createdAt: state?.createdAt ?? 0,
+      updatedAt: state?.updatedAt ?? 0,
+    }]
+  }).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+
+  const direct = new Map<string, number>()
+  const children = new Map<string, Map<string, number>>()
+  for (const row of rows) {
+    const path = row.categoryPath
+    if (!path || path.length === 0) continue
+    if (path.length === 1) {
+      direct.set(path[0]!, (direct.get(path[0]!) ?? 0) + 1)
+      if (!children.has(path[0]!)) children.set(path[0]!, new Map())
+      continue
     }
-    return { ...item, bookCount: rows.filter((row) => row.categoryId === item.id).length, subtreeBookCount: rows.filter((row) => row.categoryId && children.has(row.categoryId)).length }
-  })
+    const bucket = children.get(path[0]!) ?? new Map<string, number>()
+    bucket.set(path[1]!, (bucket.get(path[1]!) ?? 0) + 1)
+    children.set(path[0]!, bucket)
+  }
+  const categories: ClientCategoryView[] = []
+  const node = (path: string[], bookCount: number, subtreeBookCount: number): ClientCategoryView => {
+    const id = classificationValueKey('category', path)
+    const state = valueState(organization, 'category', id)
+    return {
+      id, path, name: path[path.length - 1]!,
+      parentId: path.length === 1 ? null : classificationValueKey('category', path.slice(0, -1)),
+      sortOrder: state?.sortOrder ?? Number.MAX_SAFE_INTEGER,
+      pinned: state?.pinned ?? false,
+      hidden: state?.hidden ?? false,
+      createdAt: state?.createdAt ?? 0,
+      updatedAt: state?.updatedAt ?? 0,
+      bookCount, subtreeBookCount,
+    }
+  }
+  for (const [root, leafCounts] of children) {
+    const rootState = valueState(organization, 'category', classificationValueKey('category', [root]))
+    if (!showHidden && rootState?.hidden) continue
+    const rootDirect = direct.get(root) ?? 0
+    let subtree = rootDirect
+    const leafNodes: ClientCategoryView[] = []
+    for (const [leaf, count] of leafCounts) {
+      const path = [root, leaf]
+      if (!showHidden && valueState(organization, 'category', classificationValueKey('category', path))?.hidden) continue
+      subtree += count
+      leafNodes.push(node(path, count, count))
+    }
+    categories.push(node([root], rootDirect, subtree), ...leafNodes)
+  }
+  categories.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
   return { shelves, tags, categories }
 }
 
@@ -81,12 +154,11 @@ export interface DeviceMembershipCounts {
 /**
  * Membership counts for the device half, read straight from the books.
  *
- * A device book's shelf/category/tag id points at whichever tree is in play —
- * the server's when there is a session — so the vault cannot enumerate that
- * tree. It can only say how many of its own books carry each id, which is what
- * the sidebar needs to keep its numbers honest. Hidden books are counted: the
- * number answers "how many books are filed here", and hiding is a filter the
- * reader turns on separately.
+ * Categories are counted by their canonical value key and tags by their name,
+ * which is exactly how the sidebar addresses them, so the numbers line up with
+ * the server's aggregates without either side enumerating the other's tree.
+ * Hidden books are counted: the number answers "how many books are filed here",
+ * and hiding is a filter the reader turns on separately.
  */
 export function deviceMembershipCounts(snapshot: { books: Array<{ book: ClientBook }> }): DeviceMembershipCounts {
   const shelves = new Map<string, number>()
@@ -106,11 +178,15 @@ export function deviceMembershipCounts(snapshot: { books: Array<{ book: ClientBo
       continue
     }
     active++
+    const path = book.catalog?.categoryPath ?? null
     if (!book.catalog?.shelfId) unshelved++
-    if (!book.catalog?.categoryId) uncategorized++
+    if (!path) uncategorized++
     bump(shelves, book.catalog?.shelfId)
-    bump(categories, book.catalog?.categoryId)
-    for (const id of book.catalog?.tagIds ?? []) bump(tags, id)
+    if (path) {
+      bump(categories, classificationValueKey('category', path))
+      if (path.length > 1) bump(categories, classificationValueKey('category', [path[0]!]))
+    }
+    for (const name of book.catalog?.tags ?? []) bump(tags, name)
   }
   return { shelves, categories, tags, active, trash, unshelved, uncategorized }
 }

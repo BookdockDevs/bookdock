@@ -1,7 +1,8 @@
-import type { Category, LibraryListItem, LibraryTag, ShelfListItem, TagListItem } from '@bookdock/shared'
+import type { Category, LibraryListItem, LibraryTag, ShelfListItem } from '@bookdock/shared'
 
 const STORAGE_PREFIX = 'bd-library-names:v1:'
-const CACHE_VERSION = 1
+/** Version 2 stores value-keyed category/tag names; version 1 held entity ids. */
+const CACHE_VERSION = 2
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const MAX_LIBRARIES = 20
 const MAX_TAXONOMY_ITEMS = 500
@@ -122,7 +123,7 @@ export function saveShelvesSnapshot(userId: string, shelves: ShelfListItem[]): v
   }))
 }
 
-export function saveTagsSnapshot(userId: string, tags: TagListItem[]): void {
+export function saveTagsSnapshot(userId: string, tags: LibraryTag[]): void {
   writeSnapshot(userId, (snapshot) => ({
     ...snapshot,
     tags: { ...snapshot.tags, private: { savedAt: Date.now(), items: tags.map(({ id, name }) => ({ id, name })).slice(0, MAX_TAXONOMY_ITEMS) } },

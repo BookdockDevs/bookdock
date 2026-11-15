@@ -329,6 +329,8 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
   repairReadingLedgerSchema(db)
   const { migrateCategoryShelfSeparation } = await import('../modules/libraries/category-shelf-migration')
   migrateCategoryShelfSeparation(db)
+  const { migrateBookClassificationValues } = await import('../modules/libraries/book-classification-migration')
+  migrateBookClassificationValues(db)
   // Runs on every database shape (not just legacy ones): shared works written
   // before the work row became a pure projection keep their metadata only on
   // the work row, and the read path no longer falls back onto it.

@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
-import type { ClientLibraryDetailView, ClientLibraryBookView, ReadStatus, Review, UndoReceipt } from '@bookdock/shared'
+import type { ClientCategoryView, ClientLibraryDetailView, ClientLibraryBookView, ReadStatus, Review, UndoReceipt } from '@bookdock/shared'
+import { classificationValueKey } from '@bookdock/shared'
 
 import { catalogBookTarget, catalogHomeTarget } from '@/features/reading-data/catalog-navigation'
 import { isDeviceBook } from '@/features/reading-data/book-source'
@@ -46,7 +47,8 @@ interface BookDetailViewProps {
   detail?: ClientLibraryDetailView
   /** The taxonomy this book is filed under; null reads the device catalog's. */
   categoryLibraryId?: string | null
-  memberTags: Array<{ id: string; name: string }>
+  categoryChoices?: ClientCategoryView[]
+  memberTags: string[]
   isLoading?: boolean
   reviewContext?: import('@bookdock/shared').ReviewBookContext | null
   /** Device books persist their review to the vault. */
@@ -67,6 +69,7 @@ export default function BookDetailView({
   readOnly = false,
   detail,
   categoryLibraryId = null,
+  categoryChoices,
   memberTags,
   isLoading,
   reviewContext: reviewContextProp,
@@ -220,20 +223,21 @@ export default function BookDetailView({
 
   // Filing a book is its own small write: the edit form batches it with the
   // rest of the record, but a right-click on the chip carries nothing else.
-  async function changeCategory(categoryId: string | null) {
+  async function changeCategory(categoryPath: string[] | null) {
     try {
       let undo: UndoReceipt | undefined
       if (isLocalBook) {
         if (displayBook.clientVersion === undefined) throw new Error('The displayed local book version is required')
         const targetRef = book.ref!
-        await vault.update(targetRef, { catalog: { categoryId } }, displayBook.clientVersion)
+        await vault.update(targetRef, { catalog: { categoryPath } }, displayBook.clientVersion)
         void queryClient.invalidateQueries({ queryKey: ['client-catalog', ...clientScopeKey(targetRef.scope)] })
         if (!local) invalidateDeviceMembershipQueries(queryClient)
       } else {
-        const result = await apiPut<{ undo?: UndoReceipt }>(`/books/${book.id}/organization`, { categoryId })
+        const result = await apiPut<{ undo?: UndoReceipt }>(`/books/${book.id}/organization`, { categoryPath })
         undo = result.undo
         void queryClient.invalidateQueries({ queryKey: ['books'] })
         void queryClient.invalidateQueries({ queryKey: ['book', book.id] })
+        if (categoryLibraryId) void queryClient.invalidateQueries({ queryKey: ['libraries', categoryLibraryId, 'categories'] })
       }
       notify.success({ key: 'toast.bookUpdated' }, { undo })
     } catch (err) {
@@ -373,18 +377,18 @@ export default function BookDetailView({
                 </span>
               </span>
             )}
-            {displayBook.categoryId !== undefined && (
+            {displayBook.categoryPath !== undefined && (
               <CategoryChip
                 libraryId={categoryLibraryId}
-                categoryId={displayBook.categoryId}
-                fallbackLabel={displayBook.categoryName ?? undefined}
+                categories={categoryChoices}
+                categoryPath={displayBook.categoryPath}
                 editable={!readOnly}
-                onFilter={() => goToFilter({ category: displayBook.categoryId ?? 'none' })}
-                onChange={(value) => void changeCategory(value.categoryId ?? null)}
+                onFilter={() => goToFilter({ category: displayBook.categoryPath ? classificationValueKey('category', displayBook.categoryPath) : 'none' })}
+                onChange={(value) => void changeCategory(value.categoryPath)}
               />
             )}
             {memberTags.map((tag) => (
-              <FilterChip key={tag.id} prefix="#" label={tag.name} onClick={() => goToFilter({ tag: tag.id })} />
+              <FilterChip key={tag} prefix="#" label={tag} onClick={() => goToFilter({ tag })} />
             ))}
           </div>
         )}

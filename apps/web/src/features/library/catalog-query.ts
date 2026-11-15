@@ -1,4 +1,5 @@
-import type { BookFormat, ReadStatus } from '@bookdock/shared'
+import { parseCategoryValueKey } from '@bookdock/shared'
+import type { BookFormat, ClientCatalogQuery, ReadStatus } from '@bookdock/shared'
 
 export interface UseBooksParams {
   page: number
@@ -8,7 +9,9 @@ export interface UseBooksParams {
   sortBy: string
   sortOrder: string
   shelfId: string | null
+  /** Canonical category value key, or 'none' for the uncategorized shelf. */
   categoryId?: string | null
+  /** A tag is identified by its name. */
   tagId: string | null
   author?: string | null
   series?: string | null
@@ -18,6 +21,38 @@ export interface UseBooksParams {
   trash: boolean
   /** Private-vault reveal; omitted = hidden rows excluded. */
   showHidden?: boolean
+}
+
+/**
+ * A category filter on the wire is the value path itself (or the 'none'
+ * sentinel). A key that no longer parses is a stale link to a value nothing
+ * carries any more, so the filter is dropped instead of matching nothing.
+ */
+export function categoryFilterValue(categoryId: string | null | undefined): string[] | 'none' | null {
+  if (!categoryId) return null
+  if (categoryId === 'none') return 'none'
+  return parseCategoryValueKey(categoryId)
+}
+
+/** The same filter expressed for the local catalog reader. */
+export function toCatalogQuery(params: UseBooksParams): ClientCatalogQuery {
+  return {
+    trash: params.trash,
+    page: params.page,
+    pageSize: params.pageSize,
+    search: params.search,
+    expression: params.expression,
+    sortBy: params.sortBy,
+    sortOrder: params.sortOrder,
+    shelfId: params.shelfId,
+    category: categoryFilterValue(params.categoryId),
+    tag: params.tagId,
+    author: params.author,
+    series: params.series,
+    format: params.format,
+    readStatus: params.readStatus,
+    showHidden: params.showHidden,
+  }
 }
 
 export function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shelfId, categoryId, tagId, author, series, format, readStatus, trash, showHidden, expression }: UseBooksParams): string {
@@ -30,8 +65,9 @@ export function buildBooksPath({ page, pageSize, search, sortBy, sortOrder, shel
   if (expression) params.set('expression', expression)
   if (search) params.set('search', search)
   if (shelfId) params.set('shelfId', shelfId)
-  if (categoryId) params.set('categoryId', categoryId)
-  if (tagId) params.set('tagId', tagId)
+  const category = categoryFilterValue(categoryId)
+  if (category) params.set('category', category === 'none' ? 'none' : JSON.stringify(category))
+  if (tagId) params.set('tag', tagId)
   if (author) params.set('author', author)
   if (series) params.set('series', series)
   if (format) params.set('format', format)
@@ -49,4 +85,3 @@ export function booksQueryParts(params: UseBooksParams) {
   const key = { ...params, categoryId: params.categoryId ?? null, author: params.author ?? null, series: params.series ?? null, source: params.source ?? null, showHidden: params.showHidden ?? false }
   return { queryKey: ['books', key] as const, path: buildBooksPath(key) }
 }
-

@@ -1,3 +1,4 @@
+import { classificationValueKey } from '@bookdock/shared'
 import type {
   ClientReadingBookView,
   ReadingRecordCategoryItem,
@@ -108,10 +109,10 @@ export function mergeByBook(remote: ClientReadingBookView[], device: ClientReadi
 
 export function mergeByTag(remote: ReadingRecordTagItem[], device: ReadingRecordTagItem[]): ReadingRecordTagItem[] {
   const byId = new Map<string, ReadingRecordTagItem>()
-  for (const item of remote) byId.set(item.tagId, item)
+  for (const item of remote) byId.set(item.name, item)
   for (const item of device) {
-    const current = byId.get(item.tagId)
-    byId.set(item.tagId, current
+    const current = byId.get(item.name)
+    byId.set(item.name, current
       ? { ...current, durationSeconds: current.durationSeconds + item.durationSeconds, bookCount: Math.max(current.bookCount ?? 0, item.bookCount ?? 0) }
       : item)
   }
@@ -119,7 +120,8 @@ export function mergeByTag(remote: ReadingRecordTagItem[], device: ReadingRecord
 }
 
 export function mergeByCategory(remote: ReadingRecordCategoryItem[], device: ReadingRecordCategoryItem[]): ReadingRecordCategoryItem[] {
-  const key = (item: ReadingRecordCategoryItem) => item.categoryId ?? ''
+  const key = (item: ReadingRecordCategoryItem) =>
+    item.categoryPath ? classificationValueKey('category', item.categoryPath) : ''
   const byId = new Map<string, ReadingRecordCategoryItem>()
   for (const item of remote) byId.set(key(item), item)
   for (const item of device) {

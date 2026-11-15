@@ -35,9 +35,8 @@ import {
   ideas,
   libraries,
   libraryBooks,
-  libraryBookTags,
+  libraryBookTagValues,
   libraryBookVersions,
-  libraryTags,
   readingArchives,
   readingImportBindings,
   readingRecords,
@@ -504,9 +503,11 @@ export async function listBooks(userId: string, query: ArchiveBooksQuery) {
     const tagged = db
       .select({ bookVersionId: libraryBookVersions.bookVersionId })
       .from(libraryBookVersions)
-      .innerJoin(libraryBookTags, eq(libraryBookTags.libraryBookId, libraryBookVersions.libraryBookId))
-      .innerJoin(libraryTags, eq(libraryBookTags.tagId, libraryTags.id))
-      .where(or(eq(libraryTags.name, query.tag), eq(libraryTags.id, query.tag)))
+      .innerJoin(libraryBookTagValues, eq(libraryBookTagValues.libraryBookId, libraryBookVersions.libraryBookId))
+      .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookVersions.libraryBookId))
+      .innerJoin(libraries, eq(libraries.id, libraryBooks.libraryId))
+      // Archive filters use the requesting user's private taxonomy only.
+      .where(and(eq(libraryBookTagValues.name, query.tag), eq(libraries.userId, userId), eq(libraries.type, 'private')))
       .all()
     tagAllowedVersionIds = new Set(tagged.map((r) => r.bookVersionId))
   }

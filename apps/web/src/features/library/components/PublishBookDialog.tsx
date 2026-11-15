@@ -14,7 +14,7 @@ import { useAuthStore } from '@/stores/auth.store'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
-import { useCreateLibraryTag, useLibraryTags, usePublishPrivateBook, useBook, usePushVersion } from '../hooks'
+import { useLibraryTags, usePublishPrivateBook, useBook, usePushVersion } from '../hooks'
 import BookClassificationEditor from './book-detail/BookClassificationEditor'
 
 interface CustomSelectOption {
@@ -196,8 +196,8 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
   const firstTargetId = targets[0]?.id ?? ''
   const targetPreferenceKey = userId ? `bd-publish-target-library:${userId}` : null
   const [selectedLibraryId, setSelectedLibraryId] = useState('')
-  const [categoryId, setCategoryId] = useState('')
-  const [tagIds, setTagIds] = useState<Set<string>>(() => new Set())
+  const [categoryPath, setCategoryPath] = useState<string[] | null>(null)
+  const [tagNames, setTagNames] = useState<Set<string>>(() => new Set())
   const [result, setResult] = useState<PublishPrivateBookRes | null>(null)
   const [errorKey, setErrorKey] = useState<string | null>(null)
   // Push is the one destructive-ish action in this dialog — it replaces what
@@ -223,21 +223,20 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
 
   useEffect(() => {
     setResult(null)
-    setCategoryId('')
-    setTagIds(new Set())
+    setCategoryPath(null)
+    setTagNames(new Set())
     setErrorKey(null)
   }, [book?.id])
 
   useEffect(() => {
-    setCategoryId('')
-    setTagIds(new Set())
+    setCategoryPath(null)
+    setTagNames(new Set())
     setErrorKey(null)
   }, [selectedLibraryId])
 
   const { data: tagsData } = useLibraryTags(selectedLibraryId || null, {
     enabled: Boolean(book && selectedLibraryId && !result),
   })
-  const createTag = useCreateLibraryTag()
 
   const libraryOptions: CustomSelectOption[] = useMemo(
     () => targets.map((lib) => ({
@@ -259,11 +258,6 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
   const selectedLibrary = targets.find((library) => library.id === selectedLibraryId)
   const tags = tagsData?.data ?? []
 
-  async function createTagForTarget(name: string): Promise<string> {
-    const response = await createTag.mutateAsync({ libraryId: selectedLibraryId, name })
-    return response.data.id
-  }
-
   function submit() {
     if (!selectedLibraryId) return
     setErrorKey(null)
@@ -271,8 +265,8 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
       {
         libraryId: selectedLibraryId,
         bookId: currentBook.id,
-        categoryId: categoryId || undefined,
-        tagIds: [...tagIds],
+        categoryPath,
+        tags: [...tagNames],
       },
       {
         onSuccess: (response) => {
@@ -430,13 +424,11 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
               takes an existing category id, and a template would mint one. */}
           <BookClassificationEditor
             libraryId={selectedLibraryId || null}
-            categoryId={categoryId || null}
-            tagIds={tagIds}
-            onCategoryChange={(value) => setCategoryId(value.categoryId ?? '')}
-            onTagChange={setTagIds}
-            tags={tags}
-            onCreateTag={createTagForTarget}
-            creatingTag={createTag.isPending}
+            categoryPath={categoryPath}
+            tags={tagNames}
+            onCategoryChange={setCategoryPath}
+            onTagsChange={setTagNames}
+            tagValues={tags}
             allowTemplates={false}
           />
 

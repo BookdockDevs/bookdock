@@ -16,7 +16,7 @@ import type {
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { bookStates, contentRevisions, libraries, libraryBooks, libraryBookTags, libraryBookVersions, libraryCategories, libraryTags, readingArchives, readingBookStats, readingContributions, readingHourlyStats, readingRecords, readingRounds, readingSessions } from '../../db/schema'
+import { bookStates, contentRevisions, libraries, libraryBooks, libraryBookTagValues, libraryBookVersions, readingArchives, readingBookStats, readingContributions, readingHourlyStats, readingRecords, readingRounds, readingSessions } from '../../db/schema'
 import { readProgressFile } from '../../lib/progress-file'
 import { getBook } from '../books/books.service'
 import { excludedReadingBookVersionIds } from './reading-visibility'
@@ -535,13 +535,11 @@ export async function getByTag(userId: string, range: ReadingRange, showHidden =
   }))]
   if (!workIds.length) return []
   const links = db.selectDistinct({
-    libraryBookId: libraryBookTags.libraryBookId,
-    tagId: libraryBookTags.tagId,
-    name: libraryTags.name,
-  }).from(libraryBookTags)
-    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookTags.libraryBookId))
-    .innerJoin(libraryTags, and(eq(libraryTags.id, libraryBookTags.tagId), eq(libraryTags.libraryId, libraryBooks.libraryId)))
-    .where(inArray(libraryBookTags.libraryBookId, workIds)).all()
+    libraryBookId: libraryBookTagValues.libraryBookId,
+    name: libraryBookTagValues.name,
+  }).from(libraryBookTagValues)
+    .innerJoin(libraryBooks, eq(libraryBooks.id, libraryBookTagValues.libraryBookId))
+    .where(inArray(libraryBookTagValues.libraryBookId, workIds)).all()
   const tagsByWork = new Map<string, typeof links>()
   for (const link of links) {
     const tags = tagsByWork.get(link.libraryBookId) ?? []
@@ -554,39 +552,37 @@ export async function getByTag(userId: string, range: ReadingRange, showHidden =
     if (!holding) continue
     const seen = new Set<string>()
     for (const tag of tagsByWork.get(holding.libraryBookId) ?? []) {
-      if (seen.has(tag.tagId)) continue
-      seen.add(tag.tagId)
-      const group = groups.get(tag.tagId) ?? { tagId: tag.tagId, name: tag.name, durationSeconds: 0, bookCount: 0 }
+      // A tag value is its name, so the name is also the grouping key.
+      if (seen.has(tag.name)) continue
+      seen.add(tag.name)
+      const group = groups.get(tag.name) ?? { name: tag.name, durationSeconds: 0, bookCount: 0 }
       group.durationSeconds += fact.durationSeconds
       group.bookCount = (group.bookCount ?? 0) + 1
-      groups.set(tag.tagId, group)
+      groups.set(tag.name, group)
     }
   }
-  return [...groups.values()].sort((a, b) => (b.bookCount ?? 0) - (a.bookCount ?? 0) || b.durationSeconds - a.durationSeconds || a.tagId.localeCompare(b.tagId))
+  return [...groups.values()].sort((a, b) => (b.bookCount ?? 0) - (a.bookCount ?? 0) || b.durationSeconds - a.durationSeconds || a.name.localeCompare(b.name))
 }
 
 export async function getByCategory(userId: string, range: ReadingRange, showHidden = false): Promise<ReadingRecordCategoryItem[]> {
-  const { db, facts, holdings } = readingTaxonomyFacts(userId, range, showHidden)
-  const libraryIds = [...new Set([...holdings.values()].map((h) => h.libraryId))]
-  const categories = libraryIds.length > 0
-    ? db.select().from(libraryCategories).where(inArray(libraryCategories.libraryId, libraryIds)).all()
-    : []
-  const categoryMap = new Map(categories.map((category) => [category.id, category]))
-  const groups = new Map<string | null, ReadingRecordCategoryItem>()
+  const { facts, holdings } = readingTaxonomyFacts(userId, range, showHidden)
+  const groups = new Map<string, ReadingRecordCategoryItem>()
   for (const fact of facts) {
     const holding = holdings.get(fact.bookVersionId)
-    const assigned = holding?.categoryId ? categoryMap.get(holding.categoryId) : undefined
-    const category = assigned?.libraryId === holding?.libraryId ? assigned : undefined
-    const parent = category?.parentId ? categoryMap.get(category.parentId) : undefined
-    const categoryId = category?.id ?? null
-    const group = groups.get(categoryId) ?? {
-      categoryId, name: category?.name ?? null, parentId: parent?.libraryId === category?.libraryId ? parent?.id ?? null : null,
-      parentName: parent?.libraryId === category?.libraryId ? parent?.name ?? null : null,
-      durationSeconds: 0, bookCount: 0,
+    // The path travels with the book, so statistics need no category lookup:
+    // one-level and two-level values group by their own names.
+    const path = holding?.categoryRoot ? [holding.categoryRoot, ...(holding.categoryLeaf ? [holding.categoryLeaf] : [])] : null
+    const key = path ? JSON.stringify(path) : ''
+    const group = groups.get(key) ?? {
+      categoryPath: path,
+      name: path ? path[path.length - 1]! : null,
+      parentName: path && path.length > 1 ? path[0]! : null,
+      durationSeconds: 0,
+      bookCount: 0,
     }
     group.durationSeconds += fact.durationSeconds
     group.bookCount += 1
-    groups.set(categoryId, group)
+    groups.set(key, group)
   }
-  return [...groups.values()].sort((a, b) => b.durationSeconds - a.durationSeconds || (a.categoryId ?? '').localeCompare(b.categoryId ?? ''))
+  return [...groups.values()].sort((a, b) => b.durationSeconds - a.durationSeconds || (a.name ?? '').localeCompare(b.name ?? ''))
 }

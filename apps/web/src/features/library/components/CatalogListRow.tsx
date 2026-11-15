@@ -14,7 +14,7 @@ import { useWarmReaderEntry } from '@/features/reading-data/reader-entry-prefetc
 import { catalogWorkRow, rowCover } from '../book-row'
 import type { BookDragPayload } from '../dnd'
 import { getHiddenCause } from '../hidden-status'
-import { useLibraryCategories, useUpdateCatalogBook } from '../hooks'
+import { useUpdateCatalogBook } from '../hooks'
 
 import BookCover from './BookCover'
 import HiddenIndicator from './HiddenIndicator'
@@ -57,12 +57,7 @@ export default function CatalogListRow({
   const isPinned = Boolean(work.pinnedAt)
   // The badge tooltip names the hiding layer when taxonomy hides the work.
   const hiddenCause = getHiddenCause(work, 'category')
-  // A work's category is the shelf column of this row; the name resolves
-  // through the same cached taxonomy query the sidebar reads.
-  const { data: categoriesData } = useLibraryCategories(work.libraryId)
-  const categoryName = work.categoryId
-    ? (categoriesData?.data ?? []).find((c) => c.id === work.categoryId)?.name
-    : undefined
+  const categoryName = work.categoryPath?.at(-1)
   const bookIds = selectionActive && selected ? Array.from(selection) : [catalogSelectionKey(work)]
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `book:${catalogSelectionKey(work)}`,
@@ -128,7 +123,7 @@ export default function CatalogListRow({
             progress: null,
             lastReadAt: null,
             categoryName: categoryName ?? null,
-            tags: work.tags.map((t) => t.name),
+            tags: work.tags,
             size: first?.size ?? null,
             createdAt: work.createdAt,
           }}

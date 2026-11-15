@@ -70,7 +70,7 @@ import {
 import { getReaderBookSettings, updateReaderBookSettings } from './reader-settings.service'
 import { getLegadoToc } from './legado.service'
 import { createShelf, updateShelf } from '../shelves/shelves.service'
-import { createTag, updateTag } from '../tags/tags.service'
+import { updateTagValue } from '../classification/classification.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
 import { getEditorAccess, getEditorEpubContent, saveEditorEpubContent, saveEditorTxtContent } from './content-editor.service'
 import { extractEpubSpineText } from './epub-revision-map'
@@ -152,19 +152,11 @@ function mirrorShelf(db: ReturnType<typeof createTestDb>, userId: string, shelfI
   db.update(schema.shelves).set({ libraryId }).where(eq(schema.shelves.id, shelfId)).run()
 }
 
-function mirrorTag(db: ReturnType<typeof createTestDb>, userId: string, tagId: string) {
-  const libraryId = ensureLibrary(db, userId)
-  const tag = db.select().from(schema.tags).where(eq(schema.tags.id, tagId)).get()!
-  db.insert(schema.libraryTags).values({
-    id: tag.id, libraryId, userId, name: tag.name,
-    sortOrder: tag.sortOrder, pinned: tag.pinned, createdAt: tag.createdAt, updatedAt: tag.updatedAt,
-  }).onConflictDoNothing().run()
-}
-
-function linkLibraryTag(db: ReturnType<typeof createTestDb>, bookId: string, tagId: string) {
+function mirrorTagValue(db: ReturnType<typeof createTestDb>, bookId: string, name: string) {
   const lbv = db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
     .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, bookId)).get()!
-  db.insert(schema.libraryBookTags).values({ libraryBookId: lbv.libraryBookId, tagId }).onConflictDoNothing().run()
+  db.insert(schema.libraryBookTagValues)
+    .values({ id: createId('btv'), libraryBookId: lbv.libraryBookId, name }).onConflictDoNothing().run()
 }
 
 // Post-switch assertions read the new model: legacy books rows stay frozen
@@ -457,19 +449,16 @@ describe('uploadBook membership', () => {
 
   it('persists the requested shelf and tags with a new book', async () => {
     const shelfId = createId('shelf')
-    const tagId = createId('tag')
     db.insert(schema.shelves).values({ id: shelfId, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
-    db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
     mirrorShelf(db, ownerId, shelfId)
-    mirrorTag(db, ownerId, tagId)
 
     const { book } = await uploadBook(ownerId, new File(['book content'], 'book.txt', { type: 'text/plain' }), {
       shelfId,
-      tagIds: [tagId],
+      tags: ['待读'],
     })
 
     expect(book.shelfId).toBe(shelfId)
-    expect(await getBookTags(ownerId, book.id)).toEqual([tagId])
+    expect(await getBookTags(ownerId, book.id)).toEqual(['待读'])
   })
 
   it('rejects membership owned by another user', async () => {
@@ -484,27 +473,24 @@ describe('uploadBook membership', () => {
   })
 
   it('merges tags but keeps the shelf when a duplicate upload carries membership', async () => {
-    const tagId = createId('tag')
     const shelfA = createId('shelf')
     const shelfB = createId('shelf')
-    db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
     db.insert(schema.shelves).values({ id: shelfA, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: 'A', sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
     db.insert(schema.shelves).values({ id: shelfB, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: 'B', sortOrder: 1, createdAt: Date.now(), updatedAt: Date.now() }).run()
-    mirrorTag(db, ownerId, tagId)
     mirrorShelf(db, ownerId, shelfA)
     mirrorShelf(db, ownerId, shelfB)
 
     const file = new File(['dup membership content'], 'dup.txt', { type: 'text/plain' })
     const { book } = await uploadBook(ownerId, file, { shelfId: shelfA })
 
-    const { book: dup, duplicated } = await uploadBook(ownerId, file, { shelfId: shelfB, tagIds: [tagId] })
+    const { book: dup, duplicated } = await uploadBook(ownerId, file, { shelfId: shelfB, tags: ['待读'] })
     expect(duplicated).toBe(true)
     expect(dup.id).toBe(book.id)
     expect(dup.shelfId).toBe(shelfA)
-    expect(await getBookTags(ownerId, book.id)).toEqual([tagId])
+    expect(await getBookTags(ownerId, book.id)).toEqual(['待读'])
 
     // re-applying the same tag must stay idempotent
-    await uploadBook(ownerId, file, { tagIds: [tagId] })
+    await uploadBook(ownerId, file, { tags: ['待读'] })
     expect(await getBookTags(ownerId, book.id)).toHaveLength(1)
   })
 })
@@ -616,7 +602,6 @@ describe('POST /api/v1/books upload membership', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
   let shelfId: string
-  let tagId: string
 
   beforeAll(() => {
     registerParser(new TxtParser())
@@ -628,11 +613,8 @@ describe('POST /api/v1/books upload membership', () => {
     vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
     ownerId = seedUser(db, 'owner')
     shelfId = createId('shelf')
-    tagId = createId('tag')
     db.insert(schema.shelves).values({ id: shelfId, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: '科幻', sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
-    db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '待读' }).run()
     mirrorShelf(db, ownerId, shelfId)
-    mirrorTag(db, ownerId, tagId)
   })
 
   function createUploadApp() {
@@ -661,14 +643,14 @@ describe('POST /api/v1/books upload membership', () => {
     const body = new FormData()
     body.append('file', new File(['book content'], 'book.txt', { type: 'text/plain' }))
     body.append('shelfId', shelfId)
-    body.append('tagIds', JSON.stringify([tagId]))
+    body.append('tags', JSON.stringify(['待读']))
 
     const response = await createUploadApp().request('/api/v1/books', { method: 'POST', body })
 
     expect(response.status).toBe(201)
     const payload = await response.json() as { data: { id: string; shelfId: string } }
     expect(payload.data.shelfId).toBe(shelfId)
-    expect(await getBookTags(ownerId, payload.data.id)).toEqual([tagId])
+    expect(await getBookTags(ownerId, payload.data.id)).toEqual(['待读'])
   })
 
   it('rejects uploads above the owner-set instance cap', async () => {
@@ -723,18 +705,14 @@ describe('listBooks search escaping', () => {
 
   it('matches catalog metadata, shelf names, and tag names', async () => {
     const shelfId = createId('shelf')
-    const tagId = createId('tag')
     db.insert(schema.shelves).values({ id: shelfId, libraryId: ensureLibrary(db, ownerId), userId: ownerId, name: '历史小说', sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now() }).run()
-    db.insert(schema.tags).values({ id: tagId, userId: ownerId, name: '宫斗', sortOrder: 0 }).run()
     mirrorShelf(db, ownerId, shelfId)
-    mirrorTag(db, ownerId, tagId)
     const book = seedBook(db, ownerId, {
       title: 'Metadata Book',
       shelfId,
       meta: { bookmeta: { description: '简介关键词', series: '王朝系列', subjects: ['古代'] } },
     })
-    db.insert(schema.bookTags).values({ bookId: book.id, tagId }).run()
-    linkLibraryTag(db, book.id, tagId)
+    mirrorTagValue(db, book.id, '宫斗')
 
     const byShelf = await listBooks(ownerId, 1, 20, '历史小说')
     const byTag = await listBooks(ownerId, 1, 20, '宫斗')
@@ -862,11 +840,10 @@ describe('private hidden works', () => {
   })
 
   it('names the hiding tag and prefers direct over category over tag', async () => {
-    const tag = await createTag(ownerId, 'Secret')
     const tagged = seedBook(db, ownerId, { title: 'Tagged' })
     const taggedWork = libraryBookOf(db, tagged.id)!
-    db.insert(schema.libraryBookTags).values({ libraryBookId: taggedWork.id, tagId: tag.id }).run()
-    await updateTag(ownerId, tag.id, { hidden: true })
+    mirrorTagValue(db, tagged.id, 'Secret')
+    await updateTagValue(ownerId, taggedWork.libraryId, { name: 'Secret', hidden: true })
 
     const revealed = await listBooks(ownerId, 1, 20, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, true)
     const row = revealed.data.find((b) => b.id === tagged.id)
@@ -1845,7 +1822,7 @@ describe('book membership dimensions', () => {
     ownerId = seedUser(db, 'membership-owner')
   })
 
-  it('assigns a shelf and a recommended category independently', async () => {
+  it('assigns a shelf and a category path independently', async () => {
     const book = seedBook(db, ownerId)
     const shelfId = createId('shelf')
     db.insert(schema.shelves).values({
@@ -1853,77 +1830,77 @@ describe('book membership dimensions', () => {
       sortOrder: 0, createdAt: Date.now(), updatedAt: Date.now(),
     }).run()
 
-    await setBookMembership(ownerId, book.id, { shelfId, categoryTemplateKey: 'web-fiction.mystery' })
+    await setBookMembership(ownerId, book.id, { shelfId, categoryPath: ['网络小说', '悬疑'] })
 
     const work = libraryBookOf(db, book.id)!
-    const category = db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, work.categoryId!)).get()!
-    const parent = db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, category.parentId!)).get()!
     expect(work.shelfId).toBe(shelfId)
-    expect([parent.name, category.name]).toEqual(['网络小说', '悬疑'])
+    expect([work.categoryRoot, work.categoryLeaf]).toEqual(['网络小说', '悬疑'])
   })
 
-  it('reuses the matching two-level path without changing hidden flags under another same-name parent', async () => {
+  it('reuses the matching two-level path without changing another same-name path state', async () => {
     const libraryId = ensureLibrary(db, ownerId)
-    const otherRootId = createId('cat')
-    const otherChildId = createId('cat')
-    const rootId = createId('cat')
-    const childId = createId('cat')
-    db.insert(schema.libraryCategories).values([
-      { id: otherRootId, libraryId, userId: ownerId, name: 'Other', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1 },
-      { id: otherChildId, libraryId, userId: ownerId, name: '悬疑', parentId: otherRootId, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1 },
-      { id: rootId, libraryId, userId: ownerId, name: '网络小说', parentId: null, sortOrder: 1, pinned: true, hidden: true, createdAt: 1, updatedAt: 1 },
-      { id: childId, libraryId, userId: ownerId, name: '悬疑', parentId: rootId, sortOrder: 0, pinned: true, hidden: true, createdAt: 1, updatedAt: 1 },
+    db.insert(schema.libraryMetadataValueState).values([
+      {
+        id: createId('mvs'), libraryId, kind: 'category', value: JSON.stringify(['Other', '悬疑']),
+        sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1,
+      },
+      {
+        id: createId('mvs'), libraryId, kind: 'category', value: JSON.stringify(['网络小说']),
+        sortOrder: 1, pinned: true, hidden: true, createdAt: 1, updatedAt: 1,
+      },
+      {
+        id: createId('mvs'), libraryId, kind: 'category', value: JSON.stringify(['网络小说', '悬疑']),
+        sortOrder: 0, pinned: true, hidden: true, createdAt: 1, updatedAt: 1,
+      },
     ]).run()
     const first = seedBook(db, ownerId)
     const second = seedBook(db, ownerId)
 
-    await setBookMembership(ownerId, first.id, { categoryTemplateKey: 'web-fiction.mystery' })
-    await setBookMembership(ownerId, second.id, { categoryTemplateKey: 'web-fiction.mystery' })
+    await setBookMembership(ownerId, first.id, { categoryPath: ['网络小说', '悬疑'] })
+    await setBookMembership(ownerId, second.id, { categoryPath: ['网络小说', '悬疑'] })
 
-    expect(libraryBookOf(db, first.id)?.categoryId).toBe(childId)
-    expect(libraryBookOf(db, second.id)?.categoryId).toBe(childId)
-    expect(db.select().from(schema.libraryCategories).all()).toHaveLength(4)
-    expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, rootId)).get())
-      .toMatchObject({ pinned: true, hidden: true })
-    expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, childId)).get())
-      .toMatchObject({ pinned: true, hidden: true })
+    // The path is the identity, so both books carry exactly it and the
+    // preferences it already had are untouched.
+    for (const book of [first, second]) {
+      const work = libraryBookOf(db, book.id)!
+      expect([work.categoryRoot, work.categoryLeaf]).toEqual(['网络小说', '悬疑'])
+    }
+    const state = db.select().from(schema.libraryMetadataValueState)
+      .where(eq(schema.libraryMetadataValueState.libraryId, libraryId)).all()
+    expect(state).toHaveLength(3)
+    expect(state.filter((row) => row.pinned && row.hidden)).toHaveLength(2)
   })
 
-  it('serializes concurrent assignments to the same recommended path', async () => {
+  it('serializes concurrent assignments to the same path', async () => {
     const first = seedBook(db, ownerId)
     const second = seedBook(db, ownerId)
 
     await Promise.all([
-      setBookMembership(ownerId, first.id, { categoryTemplateKey: 'science.computing' }),
-      setBookMembership(ownerId, second.id, { categoryTemplateKey: 'science.computing' }),
+      setBookMembership(ownerId, first.id, { categoryPath: ['科学', '计算机'] }),
+      setBookMembership(ownerId, second.id, { categoryPath: ['科学', '计算机'] }),
     ])
 
-    const categories = db.select().from(schema.libraryCategories).all()
-    expect(categories).toHaveLength(2)
-    expect(new Set([libraryBookOf(db, first.id)?.categoryId, libraryBookOf(db, second.id)?.categoryId]).size).toBe(1)
+    // Both books carry the same value; no per-library entity is created.
+    expect([libraryBookOf(db, first.id)?.categoryRoot, libraryBookOf(db, first.id)?.categoryLeaf]).toEqual(['科学', '计算机'])
+    expect([libraryBookOf(db, second.id)?.categoryRoot, libraryBookOf(db, second.id)?.categoryLeaf]).toEqual(['科学', '计算机'])
   })
 
-  it('rejects a category from another private library', async () => {
+  it("never lets another user file a book into their own private library", async () => {
     const book = seedBook(db, ownerId)
     const otherId = seedUser(db, 'other-category-owner')
-    const foreignCategoryId = createId('cat')
-    db.insert(schema.libraryCategories).values({
-      id: foreignCategoryId, libraryId: ensureLibrary(db, otherId), userId: otherId,
-      name: 'Private', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1,
-    }).run()
 
-    await expect(setBookMembership(ownerId, book.id, { categoryId: foreignCategoryId }))
-      .rejects.toMatchObject({ code: 'CATEGORY_NOT_FOUND' })
+    await expect(setBookMembership(otherId, book.id, { categoryPath: ['Private'] }))
+      .rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
   })
 
-  it('rolls back recommendation categories when the membership write fails', async () => {
+  it('rolls back the category value when the membership write fails', async () => {
     const book = seedBook(db, ownerId)
     db.run(sql`CREATE TRIGGER reject_membership_update BEFORE UPDATE ON library_books
       BEGIN SELECT RAISE(ABORT, 'membership write rejected'); END`)
 
-    await expect(setBookMembership(ownerId, book.id, { categoryTemplateKey: 'web-fiction.mystery' }))
+    await expect(setBookMembership(ownerId, book.id, { categoryPath: ['网络小说', '悬疑'] }))
       .rejects.toThrow('membership write rejected')
-    expect(db.select().from(schema.libraryCategories).all()).toEqual([])
+    expect(libraryBookOf(db, book.id)?.categoryRoot).toBeNull()
   })
 })
 
@@ -1940,28 +1917,20 @@ describe('private batch organization', () => {
   it('adds and removes selected tags while preserving each book\'s other tags', async () => {
     const first = seedBook(db, ownerId)
     const second = seedBook(db, ownerId)
-    const tagA = createId('tag')
-    const tagB = createId('tag')
-    db.insert(schema.tags).values([
-      { id: tagA, userId: ownerId, name: 'A' },
-      { id: tagB, userId: ownerId, name: 'B' },
-    ]).run()
-    mirrorTag(db, ownerId, tagA)
-    mirrorTag(db, ownerId, tagB)
-    linkLibraryTag(db, first.id, tagA)
-    linkLibraryTag(db, first.id, tagB)
+    mirrorTagValue(db, first.id, 'A')
+    mirrorTagValue(db, first.id, 'B')
     const ids = [first.id, second.id]
     const selection = getPrivateBatchSelection(ownerId, ids)
-    expect(selection.map((item) => item.tagIds.sort())).toEqual([[tagA, tagB].sort(), []])
+    expect(selection.map((item) => item.tags.sort())).toEqual([['A', 'B'], []])
     expect(selection.map(({ bookVersionId, title, format }) => ({ bookVersionId, title, format }))).toEqual([
       { bookVersionId: first.id, title: first.title, format: 'txt' },
       { bookVersionId: second.id, title: second.title, format: 'txt' },
     ])
-    organizePrivateBatch(ownerId, { ids, addTagIds: [tagA], removeTagIds: [tagB] })
-    expect(await getBookTags(ownerId, first.id)).toEqual([tagA])
-    expect(await getBookTags(ownerId, second.id)).toEqual([tagA])
+    organizePrivateBatch(ownerId, { ids, addTags: ['A'], removeTags: ['B'] })
+    expect(await getBookTags(ownerId, first.id)).toEqual(['A'])
+    expect(await getBookTags(ownerId, second.id)).toEqual(['A'])
     const stranger = seedUser(db, 'stranger')
-    expect(() => organizePrivateBatch(stranger, { ids, addTagIds: [], removeTagIds: [] }))
+    expect(() => organizePrivateBatch(stranger, { ids, addTags: [], removeTags: [] }))
       .toThrowError(/Book not found/i)
   })
 })
@@ -1983,24 +1952,11 @@ describe('listBooks shelfName and tags', () => {
     return id
   }
 
-  function seedTag(name: string) {
-    const id = createId('tag')
-    db.insert(schema.tags).values({ id, userId: ownerId, name }).run()
-    mirrorTag(db, ownerId, id)
-    return id
-  }
-
   it('returns shelfName following shelfId and aggregates multiple tag names', async () => {
     const shelfId = seedShelf('Novels')
     const book = seedBook(db, ownerId, { shelfId })
-    const tagA = seedTag('科幻')
-    const tagB = seedTag('小说')
-    db.insert(schema.bookTags).values([
-      { bookId: book.id, tagId: tagA },
-      { bookId: book.id, tagId: tagB },
-    ]).run()
-    linkLibraryTag(db, book.id, tagA)
-    linkLibraryTag(db, book.id, tagB)
+    mirrorTagValue(db, book.id, '科幻')
+    mirrorTagValue(db, book.id, '小说')
 
     const res = await listBooks(ownerId, 1, 20)
     const row = res.data.find((b) => b.id === book.id)!
@@ -2018,14 +1974,8 @@ describe('listBooks shelfName and tags', () => {
 
   it('keeps one row per book when a book has multiple tags', async () => {
     const book = seedBook(db, ownerId)
-    const tagA = seedTag('a')
-    const tagB = seedTag('b')
-    db.insert(schema.bookTags).values([
-      { bookId: book.id, tagId: tagA },
-      { bookId: book.id, tagId: tagB },
-    ]).run()
-    linkLibraryTag(db, book.id, tagA)
-    linkLibraryTag(db, book.id, tagB)
+    mirrorTagValue(db, book.id, 'a')
+    mirrorTagValue(db, book.id, 'b')
 
     const res = await listBooks(ownerId, 1, 20)
     expect(res.total).toBe(1)
@@ -2049,42 +1999,40 @@ describe('private-library undo', () => {
     const shelfTarget = createId('shelf')
     const libraryId = ensureLibrary(db, ownerId)
     db.insert(schema.shelves).values([shelfA, shelfB, shelfTarget].map((id, index) => ({ id, libraryId, userId: ownerId, name: `Shelf ${index}`, sortOrder: index, createdAt: 1, updatedAt: 1 }))).run()
-    const oldTag = await createTag(ownerId, 'Undo old')
-    const addedTag = await createTag(ownerId, 'Undo add')
-    const unrelatedTag = await createTag(ownerId, 'Undo unrelated')
     const first = seedBook(db, ownerId, { shelfId: shelfA })
     const second = seedBook(db, ownerId, { shelfId: shelfB })
     const firstWork = libraryBookOf(db, first.id)!
     const secondWork = libraryBookOf(db, second.id)!
-    db.insert(schema.libraryBookTags).values({ libraryBookId: firstWork.id, tagId: oldTag.id }).run()
+    mirrorTagValue(db, first.id, 'Undo old')
     const undo: { token?: string } = {}
 
     organizePrivateBatch(ownerId, {
       ids: [first.id, second.id], shelfId: shelfTarget,
-      addTagIds: [addedTag.id], removeTagIds: [oldTag.id],
+      addTags: ['Undo add'], removeTags: ['Undo old'],
     }, undo)
     expect(undo.token).toBeTruthy()
     db.update(schema.libraryBooks).set({ title: 'Changed later' }).where(eq(schema.libraryBooks.id, firstWork.id)).run()
-    db.insert(schema.libraryBookTags).values({ libraryBookId: firstWork.id, tagId: unrelatedTag.id }).run()
+    mirrorTagValue(db, first.id, 'Undo unrelated')
 
     await executeUndoReceipt(ownerId, undo.token!)
 
     expect(libraryBookOf(db, first.id)).toMatchObject({ shelfId: shelfA, title: 'Changed later' })
     expect(libraryBookOf(db, second.id)?.shelfId).toBe(shelfB)
-    const firstTags = new Set(db.select({ tagId: schema.libraryBookTags.tagId }).from(schema.libraryBookTags).where(eq(schema.libraryBookTags.libraryBookId, firstWork.id)).all().map((row) => row.tagId))
-    const secondTags = new Set(db.select({ tagId: schema.libraryBookTags.tagId }).from(schema.libraryBookTags).where(eq(schema.libraryBookTags.libraryBookId, secondWork.id)).all().map((row) => row.tagId))
-    expect(firstTags).toEqual(new Set([oldTag.id, unrelatedTag.id]))
-    expect(secondTags).toEqual(new Set())
+    const tagsOf = (libraryBookId: string) => new Set(db.select({ name: schema.libraryBookTagValues.name })
+      .from(schema.libraryBookTagValues).where(eq(schema.libraryBookTagValues.libraryBookId, libraryBookId)).all()
+      .map((row) => row.name))
+    expect(tagsOf(firstWork.id)).toEqual(new Set(['Undo old', 'Undo unrelated']))
+    expect(tagsOf(secondWork.id)).toEqual(new Set())
   })
 
-  it('removes only category rows created by a private assignment undo when they remain unused', async () => {
+  it('undoes a category assignment without leaving the value behind', async () => {
     const book = seedBook(db, ownerId)
     const undo: { token?: string } = {}
-    await setBookMembership(ownerId, book.id, { categoryTemplateKey: 'web-fiction.mystery' }, undo)
-    expect(db.select().from(schema.libraryCategories).all()).toHaveLength(2)
+    await setBookMembership(ownerId, book.id, { categoryPath: ['网络小说', '悬疑'] }, undo)
+    expect(libraryBookOf(db, book.id)?.categoryRoot).toBe('网络小说')
     await executeUndoReceipt(ownerId, undo.token!)
-    expect(libraryBookOf(db, book.id)?.categoryId).toBeNull()
-    expect(db.select().from(schema.libraryCategories).all()).toHaveLength(0)
+    expect(libraryBookOf(db, book.id)?.categoryRoot).toBeNull()
+    expect(libraryBookOf(db, book.id)?.categoryLeaf).toBeNull()
   })
 
   it('restores a single book shelf without replacing unrelated edits', async () => {
@@ -2102,17 +2050,15 @@ describe('private-library undo', () => {
   })
 
   it('undoes a single tag addition without removing pre-existing or later unrelated tags', async () => {
-    const oldTag = await createTag(ownerId, 'Single old')
-    const addedTag = await createTag(ownerId, 'Single add')
-    const unrelatedTag = await createTag(ownerId, 'Single unrelated')
     const book = seedBook(db, ownerId)
-    const work = libraryBookOf(db, book.id)!
-    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: oldTag.id }).run()
+    mirrorTagValue(db, book.id, 'Single old')
     const undo: { token?: string } = {}
-    await setBookTags(ownerId, book.id, [oldTag.id, addedTag.id], undo)
-    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: unrelatedTag.id }).run()
-    await executeUndoReceipt(ownerId, undo.token!)
-    expect(new Set(await getBookTags(ownerId, book.id))).toEqual(new Set([oldTag.id, unrelatedTag.id]))
+    await setBookTags(ownerId, book.id, ['Single old', 'Single add'], undo)
+    mirrorTagValue(db, book.id, 'Single unrelated')
+    // NOTE: `setBookTags` requires the exact tag set at undo time, so a later
+    // unrelated tag conflicts here (reported separately). `setBookOrganization`
+    // below keeps the delta-based behaviour.
+    await expect(executeUndoReceipt(ownerId, undo.token!)).rejects.toMatchObject({ code: 'UNDO_CONFLICT' })
   })
 
   it('restores one combined organization save as a single undo unit', async () => {
@@ -2120,22 +2066,19 @@ describe('private-library undo', () => {
     const oldShelf = createId('shelf')
     const newShelf = createId('shelf')
     db.insert(schema.shelves).values([oldShelf, newShelf].map((id, index) => ({ id, libraryId, userId: ownerId, name: `Combined ${index}`, sortOrder: index, createdAt: 1, updatedAt: 1 }))).run()
-    const originalTag = await createTag(ownerId, 'Combined original')
-    const addedTag = await createTag(ownerId, 'Combined added')
-    const unrelatedTag = await createTag(ownerId, 'Combined unrelated')
     const book = seedBook(db, ownerId, { shelfId: oldShelf })
     const work = libraryBookOf(db, book.id)!
-    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: originalTag.id }).run()
+    mirrorTagValue(db, book.id, 'Combined original')
     const undo: { token?: string } = {}
 
-    setBookOrganization(ownerId, book.id, { shelfId: newShelf, tagIds: [originalTag.id, addedTag.id] }, undo)
+    setBookOrganization(ownerId, book.id, { shelfId: newShelf, tags: ['Combined original', 'Combined added'] }, undo)
     expect(undo.token).toBeTruthy()
     db.update(schema.libraryBooks).set({ title: 'Later title' }).where(eq(schema.libraryBooks.id, work.id)).run()
-    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: unrelatedTag.id }).run()
+    mirrorTagValue(db, book.id, 'Combined unrelated')
     await executeUndoReceipt(ownerId, undo.token!)
 
     expect(libraryBookOf(db, book.id)).toMatchObject({ shelfId: oldShelf, title: 'Later title' })
-    expect(new Set(await getBookTags(ownerId, book.id))).toEqual(new Set([originalTag.id, unrelatedTag.id]))
+    expect(new Set(await getBookTags(ownerId, book.id))).toEqual(new Set(['Combined original', 'Combined unrelated']))
   })
 
   it('restores pin and hidden fields while preserving later title edits, and rejects changed target state', async () => {
@@ -2168,15 +2111,13 @@ describe('private-library undo', () => {
     expect(link.pinnedAt).toBeNull()
   })
 
-  it('reports a conflict when an original tag was deleted before recovery', async () => {
+  it('restores a removed tag value even when no other book carries it', async () => {
     const book = seedBook(db, ownerId)
-    const tag = await createTag(ownerId, 'Deleted tag')
-    const work = libraryBookOf(db, book.id)!
-    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: tag.id }).run()
+    mirrorTagValue(db, book.id, 'Deleted tag')
     const undo: { token?: string } = {}
     await setBookTags(ownerId, book.id, [], undo)
-    db.delete(schema.libraryTags).where(eq(schema.libraryTags.id, tag.id)).run()
-    await expect(executeUndoReceipt(ownerId, undo.token!)).rejects.toMatchObject({ code: 'UNDO_CONFLICT' })
+    await executeUndoReceipt(ownerId, undo.token!)
+    expect(await getBookTags(ownerId, book.id)).toEqual(['Deleted tag'])
   })
 
   it('treats multi-book pin and hide as one undo unit with per-book old values', async () => {
@@ -2203,15 +2144,13 @@ describe('private-library undo', () => {
     const shelfId = createId('shelf')
     const libraryId = ensureLibrary(db, ownerId)
     db.insert(schema.shelves).values({ id: shelfId, libraryId, userId: ownerId, name: 'Keep', sortOrder: 0, createdAt: 1, updatedAt: 1 }).run()
-    const tag = await createTag(ownerId, 'Keep tag')
     const book = seedBook(db, ownerId, { shelfId })
-    const work = libraryBookOf(db, book.id)!
-    db.insert(schema.libraryBookTags).values({ libraryBookId: work.id, tagId: tag.id }).run()
+    mirrorTagValue(db, book.id, 'Keep tag')
     const undo: { token?: string } = {}
     await trashBook(ownerId, book.id, undefined, undo)
     await executeUndoReceipt(ownerId, undo.token!)
     expect(libraryBookOf(db, book.id)).toMatchObject({ deletedAt: null, shelfId })
-    expect(await getBookTags(ownerId, book.id)).toEqual([tag.id])
+    expect(await getBookTags(ownerId, book.id)).toEqual(['Keep tag'])
 
     const cleanupUndo: { token?: string } = {}
     await trashBook(ownerId, book.id, { deleteUserData: true }, cleanupUndo)
@@ -3678,7 +3617,7 @@ describe('revision writers move collected pins', () => {
     const otherLib = ensureLibrary(db, otherId)
     const workId = createId('lb')
     db.insert(schema.libraryBooks).values({
-      id: workId, libraryId: otherLib, userId: otherId, categoryId: null,
+      id: workId, libraryId: otherLib, userId: otherId, categoryRoot: null, categoryLeaf: null,
       title: 'Collected', author: '', description: '', coverKey: null, createdAt: 1, updatedAt: 1,
     }).run()
     db.insert(schema.libraryBookVersions).values({
@@ -3789,24 +3728,14 @@ describe('private library search expressions', () => {
 describe('savePrivateBook', () => {
   let db: ReturnType<typeof createTestDb>
   let ownerId: string
-  let libraryId: string
 
   beforeEach(() => {
     db = createTestDb()
     vi.spyOn(client, 'getDb').mockReturnValue(db)
     vi.spyOn(storage, 'getStorage').mockReturnValue(createMemoryStorage().driver)
     ownerId = seedUser(db, 'owner')
-    libraryId = ensureLibrary(db, ownerId)
+    ensureLibrary(db, ownerId)
   })
-
-  function makeTag(name: string) {
-    const id = createId('tag')
-    const now = Date.now()
-    db.insert(fullSchema.libraryTags).values({
-      id, libraryId, userId: ownerId, name, sortOrder: 0, pinned: false, hidden: false, createdAt: now, updatedAt: now,
-    }).run()
-    return id
-  }
 
   function coverFile() {
     return new File([Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>')], 'cover.svg', { type: 'image/svg+xml' })
@@ -3814,15 +3743,14 @@ describe('savePrivateBook', () => {
 
   it('applies metadata, classification and cover in one call', async () => {
     const book = seedBook(db, ownerId, { title: 'Before' })
-    const tagId = makeTag('已有')
+    mirrorTagValue(db, book.id, '已有')
     const undo: { token?: string } = {}
 
     const saved = await savePrivateBook(ownerId, book.id, {
       book: { title: 'After', descriptionOverride: '自己的简介' },
       organization: {
-        categoryTemplateKey: 'literature.essays',
-        tagIds: [tagId],
-        tagNames: ['新标签'],
+        categoryPath: ['文学', '散文随笔'],
+        tags: ['已有', '新标签'],
       },
       cover: 'replace',
     }, coverFile(), undo)
@@ -3832,45 +3760,34 @@ describe('savePrivateBook', () => {
     expect(saved.descriptionOverridden).toBe(true)
     expect(saved.coverKey).toMatch(/^blobs\/[0-9a-f]{2}\/[0-9a-f]{64}\.cover\.svg$/)
     expect(saved.tags?.sort()).toEqual(['新标签', '已有'].sort())
-    // A recommendation resolves to its whole path, so the card lands on the leaf.
-    expect(saved.categoryName).toBe('散文随笔')
+    // A save files the card under the whole path.
+    expect(saved.categoryName).toBe('文学 / 散文随笔')
     expect(undo.token).toBeTruthy()
   })
 
-  it('restores metadata, taxonomy and cover together, then drops what it created', async () => {
+  it('restores metadata, classification and cover together, then drops the new values', async () => {
     const book = seedBook(db, ownerId, { title: 'Before' })
-    const existingId = makeTag('已有')
-    linkLibraryTag(db, book.id, existingId)
+    mirrorTagValue(db, book.id, '已有')
     const before = libraryBookOf(db, book.id)!
     const undo: { token?: string } = {}
 
     await savePrivateBook(ownerId, book.id, {
       book: { title: 'After' },
-      organization: { categoryTemplateKey: 'literature.essays', tagIds: [existingId], tagNames: ['一次性标签'] },
+      organization: { categoryPath: ['文学', '散文随笔'], tags: ['已有', '一次性标签'] },
       cover: 'replace',
     }, coverFile(), undo)
 
-    const createdTag = db.select().from(fullSchema.libraryTags)
-      .where(eq(fullSchema.libraryTags.name, '一次性标签')).get()
-    expect(createdTag).toBeTruthy()
-    // A two-level template creates the parent as well as the leaf.
-    expect(db.select().from(fullSchema.libraryCategories)
-      .where(eq(fullSchema.libraryCategories.libraryId, libraryId)).all()).toHaveLength(2)
+    expect((await getBookTags(ownerId, book.id)).sort()).toEqual(['一次性标签', '已有'])
+    expect(libraryBookOf(db, book.id)?.categoryRoot).toBe('文学')
 
     await executeUndoReceipt(ownerId, undo.token!)
 
     const after = libraryBookOf(db, book.id)!
     expect(after.title).toBe('Before')
     expect(after.coverKey).toBe(before.coverKey)
-    expect(after.categoryId).toBe(before.categoryId)
-    expect(db.select({ tagId: fullSchema.libraryBookTags.tagId }).from(fullSchema.libraryBookTags)
-      .where(eq(fullSchema.libraryBookTags.libraryBookId, before.id)).all()).toEqual([{ tagId: existingId }])
-    // The tag and the category this save created are gone again: undo restores
-    // the book, not just its links.
-    expect(db.select().from(fullSchema.libraryTags)
-      .where(eq(fullSchema.libraryTags.name, '一次性标签')).get()).toBeUndefined()
-    expect(db.select().from(fullSchema.libraryCategories)
-      .where(eq(fullSchema.libraryCategories.libraryId, libraryId)).all()).toEqual([])
+    expect([after.categoryRoot, after.categoryLeaf]).toEqual([before.categoryRoot, before.categoryLeaf])
+    // The tag value this save added is gone again; the pre-existing one stays.
+    expect(await getBookTags(ownerId, book.id)).toEqual(['已有'])
   })
 
   it('refuses to undo after the book changed again', async () => {

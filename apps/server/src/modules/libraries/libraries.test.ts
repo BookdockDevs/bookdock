@@ -12,7 +12,7 @@ import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import { createId } from '../../lib/id'
 import { resetInstanceCache } from '../auth/auth.service'
-import { listLibraryCategories } from '../shelves/shelves.service'
+import { listCategoryValues } from '../classification/classification.service'
 import { resolveSharedVersionRead } from './library-access'
 import {
   addMember,
@@ -659,7 +659,7 @@ describe('libraries service', () => {
     await joinLibrary(bobId, seedLibrary(aliceId, { visibility: 'public' }))
     await expect(getLibrary({ userId: bobId, isGuest: false }, alicePrivateId))
       .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
-    await expect(listLibraryCategories(bobId, alicePrivateId))
+    await expect(listCategoryValues(bobId, alicePrivateId))
       .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })
     await expect(resolveSharedVersionRead(alicePrivateId, 'v1', bobId))
       .rejects.toMatchObject({ code: 'LIBRARY_NOT_FOUND' })

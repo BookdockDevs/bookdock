@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { categoryPathSchema, tagNameListSchema } from './classification'
 import type { BookFormat, ReadStatus } from './constants'
 import type { BookMetadata } from './contract'
 
@@ -180,7 +181,7 @@ export interface LibraryBook {
   id: string
   libraryId: string
   /** Null = uncategorized; a real state, not a special category. */
-  categoryId: string | null
+  categoryPath: string[] | null
   shelfId?: string | null
   title: string
   /** Derived first-author mirror of `authors`; sort/filter/search use this. */
@@ -302,11 +303,6 @@ export interface CatalogVersion {
   updatedAt: number
 }
 
-export interface CatalogBookTag {
-  id: string
-  name: string
-}
-
 /**
  * Why a work is effectively hidden. `direct` is the work's own flag;
  * `category`/`tag` come from hidden taxonomy. Priority is direct over
@@ -325,7 +321,7 @@ export interface HiddenVia {
 export interface CatalogBook {
   id: string
   libraryId: string
-  categoryId: string | null
+  categoryPath: string[] | null
   title: string
   author: string
   /** Full author list, max 10. */
@@ -366,10 +362,10 @@ export interface CatalogBook {
    */
   defaultVersionLinkId: string | null
   /**
-   * The work's own tags in the library's taxonomy. Carries the name, not just
-   * the id, so a catalog card can render them without a second lookup.
+   * The work's own tag values. A shared catalog tags the work, not a version,
+   * so these live next to the category path and never vary by version.
    */
-  tags: CatalogBookTag[]
+  tags: string[]
   versions: CatalogVersion[]
   createdAt: number
   updatedAt: number
@@ -387,9 +383,9 @@ export interface BatchSelectionItem {
   bookVersionId: string
   title: string
   format: BookFormat
-  categoryId: string | null
+  categoryPath: string[] | null
   shelfId?: string | null
-  tagIds: string[]
+  tags: string[]
   hidden: boolean
   pinnedAt: number | null
   /** Private-library entries have one version; shared works may have several. */
@@ -403,13 +399,11 @@ export const batchSelectionSchema = z.object({
 })
 
 export const batchOrganizeSchema = batchSelectionSchema.extend({
-  categoryId: z.string().min(1).max(128).nullable().optional(),
+  /** Null clears the category; absent leaves it alone. */
+  categoryPath: categoryPathSchema.nullable().optional(),
   shelfId: z.string().min(1).max(128).nullable().optional(),
-  categoryTemplateKey: z.string().min(1).max(128).optional(),
-  addTagIds: z.array(z.string().min(1).max(128)).default([]),
-  removeTagIds: z.array(z.string().min(1).max(128)).default([]),
-}).refine((value) => value.categoryId === undefined || value.categoryTemplateKey === undefined, {
-  message: 'Choose an existing category or a recommendation', path: ['categoryTemplateKey'],
+  addTags: tagNameListSchema.default([]),
+  removeTags: tagNameListSchema.default([]),
 })
 
 export const privateBatchUpdateSchema = batchSelectionSchema.extend({
@@ -487,11 +481,11 @@ export const catalogUploadSchema = z.object({
   operationId: z.string().trim().min(1).max(128).optional(),
   /** Existing work to attach this version to (5.2); omit to create one. */
   libraryBookId: z.string().min(1).max(128).optional(),
-  /** Library category (the catalog's own taxonomy). */
-  categoryId: z.string().min(1).max(128).optional(),
+  /** Library category path (the catalog's own classification value). */
+  categoryPath: categoryPathSchema.nullable().optional(),
   /** Private storage only; shared libraries reject shelf placement. */
   shelfId: z.string().min(1).max(128).optional(),
-  tagIds: z.array(z.string().min(1).max(128)).optional(),
+  tags: tagNameListSchema.optional(),
   /** Version label inside the library, e.g. the edition name. */
   name: z.string().trim().max(120).optional(),
   /** Work defaults; omitted fields fall back to the parsed file metadata. */
@@ -507,12 +501,10 @@ export const catalogBookUpdateSchema = z.object({
   author: z.string().trim().max(300).optional(),
   authors: authorListSchema.optional(),
   description: z.string().max(4000).optional(),
-  categoryId: z.string().min(1).max(128).nullable().optional(),
-  categoryTemplateKey: z.string().min(1).max(128).optional(),
-  /** Category name resolved (or created) inside the same save, like `tagNames`. */
-  categoryName: z.string().trim().min(1).max(100).optional(),
-  /** Replaces the work's whole tag set; every id must belong to this library. */
-  tagIds: z.array(z.string().min(1).max(128)).optional(),
+  /** Null clears the category path; absent leaves it unchanged. */
+  categoryPath: categoryPathSchema.nullable().optional(),
+  /** Replaces the work's whole tag set with these values. */
+  tags: tagNameListSchema.optional(),
   /** Work-level hide; manager-only like every other catalog write. */
   hidden: z.boolean().optional(),
   pinned: z.boolean().optional(),
@@ -558,9 +550,9 @@ export type CatalogVersionUpdateReq = z.infer<typeof catalogVersionUpdateSchema>
  * the undo log could describe none of them (parallel receipts also cancelled
  * each other out, since only a user's newest receipt survives).
  *
- * `tagNames` rides along for the same reason as the private editor: the dialog
- * only knows the names scraped from a source, and creating them ahead of a save
- * leaves orphan rows behind whenever the user backs out.
+ * A save carries the whole work patch, including the classification values the
+ * dialog's own form holds. Nothing is created ahead of the save: a category or
+ * tag the library has never seen is simply a value the book now carries.
  */
 export const catalogVersionSaveSchema = z.object({
   id: z.string().min(1).max(128),
@@ -570,9 +562,7 @@ export const catalogVersionSaveSchema = z.object({
 })
 
 export const catalogWorkSaveSchema = z.object({
-  work: catalogBookUpdateSchema.extend({
-    tagNames: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
-  }).optional(),
+  work: catalogBookUpdateSchema.optional(),
   versions: z.array(catalogVersionSaveSchema).max(100).optional(),
 })
 
@@ -617,10 +607,18 @@ export interface BlobRef {
 
 // ------------------------------------------------------- Category / Tag
 
+/**
+ * One category value as the sidebar sees it, aggregated from book paths.
+ *
+ * `id` is the canonical key of the full path, not a row: a category has no row
+ * of its own any more. `parentId` is the parent path's key, so tree walks that
+ * used to follow entity ids keep working unchanged.
+ */
 export interface Category {
   id: string
-  libraryId: string
-  userId: string
+  /** The path this node stands for, e.g. ['小说'] or ['小说', '轻小说']. */
+  path: string[]
+  /** The node's own name (the last path segment). */
   name: string
   parentId: string | null
   sortOrder: number
@@ -629,7 +627,7 @@ export interface Category {
   hidden: boolean
   createdAt: number
   updatedAt: number
-  /** Works filed under this category, trashed works excluded. */
+  /** Works filed exactly here, trashed works excluded. */
   bookCount: number
   /** Visible works filed here or under descendants, independent of book filters. */
   subtreeBookCount: number
@@ -638,10 +636,9 @@ export interface Category {
 export const categoryScopeSchema = z.enum(['direct', 'subtree'])
 export type CategoryScope = z.infer<typeof categoryScopeSchema>
 
+/** One tag value as the sidebar sees it; `id` and `name` are the same value. */
 export interface LibraryTag {
   id: string
-  libraryId: string
-  userId: string
   name: string
   sortOrder: number
   pinned: boolean
@@ -661,8 +658,8 @@ export interface LibraryTag {
  * the single source. Idempotent per BookVersion (7.5).
  */
 export const collectBookSchema = z.object({
-  categoryId: z.string().min(1).max(128).optional(),
-  tagIds: z.array(z.string().min(1).max(128)).optional(),
+  categoryPath: categoryPathSchema.nullable().optional(),
+  tags: tagNameListSchema.optional(),
 })
 
 export type CollectBookReq = z.infer<typeof collectBookSchema>
@@ -689,8 +686,8 @@ export interface CollectBookRes {
 /** Publish a private A entry into a managed shared library as an independent snapshot. */
 export const publishPrivateBookSchema = z.object({
   bookId: z.string().min(1).max(128),
-  categoryId: z.string().min(1).max(128).optional(),
-  tagIds: z.array(z.string().min(1).max(128)).optional(),
+  categoryPath: categoryPathSchema.nullable().optional(),
+  tags: tagNameListSchema.optional(),
 })
 
 export type PublishPrivateBookReq = z.infer<typeof publishPrivateBookSchema>

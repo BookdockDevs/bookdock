@@ -165,11 +165,11 @@ describe('shared version reads', () => {
   })
 
   it('keeps reading an effectively hidden work available to its managers', async () => {
-    db.insert(schema.libraryCategories).values({
-      id: 'cat1', libraryId, userId: ownerId, name: 'Hidden shelf',
+    db.insert(schema.libraryMetadataValueState).values({
+      id: 'mvs1', libraryId, kind: 'category', value: JSON.stringify(['Hidden shelf']),
       sortOrder: 0, pinned: false, hidden: true, createdAt: 1, updatedAt: 1,
     }).run()
-    db.update(schema.libraryBooks).set({ categoryId: 'cat1' }).where(eq(schema.libraryBooks.id, 'wb')).run()
+    db.update(schema.libraryBooks).set({ categoryRoot: 'Hidden shelf' }).where(eq(schema.libraryBooks.id, 'wb')).run()
     await expect(resolveSharedVersionRead(libraryId, 'v1', memberId))
       .rejects.toMatchObject({ code: 'LIBRARY_VERSION_NOT_FOUND' })
     await expect(resolveSharedVersionRead(libraryId, 'v1', ownerId))

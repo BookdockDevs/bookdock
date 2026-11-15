@@ -59,8 +59,10 @@ export interface ClientCatalogQuery {
   sortBy: string
   sortOrder: string
   shelfId: string | null
-  categoryId?: string | null
-  tagId: string | null
+  /** Category value as its name path; 'none' selects the uncategorized books. */
+  category?: string[] | 'none' | null
+  /** A tag is its name, so the filter is the name itself. */
+  tag: string | null
   author?: string | null
   series?: string | null
   format: BookFormat | null

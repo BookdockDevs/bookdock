@@ -9,7 +9,9 @@ export interface ReadingHolding {
   bookVersionId: string
   libraryBookId: string
   libraryId: string
-  categoryId: string | null
+  /** Category value as its root name; the leaf column joins it. */
+  categoryRoot: string | null
+  categoryLeaf: string | null
   excluded: number
 }
 
@@ -29,7 +31,8 @@ export function readingHoldings(db: ReturnType<typeof getDb>, userId: string, sh
     WITH holding_candidates AS (
       SELECT ${libraryBookVersions.bookVersionId} AS bookVersionId,
         ${libraryBooks.id} AS libraryBookId, ${libraries.id} AS libraryId,
-        ${libraryBooks.categoryId} AS categoryId,
+        ${libraryBooks.categoryRoot} AS categoryRoot,
+        ${libraryBooks.categoryLeaf} AS categoryLeaf,
         CASE WHEN ${libraries.type} = 'private' THEN 0 ELSE 1 END AS priority,
         CASE WHEN ${eligible} THEN 0 ELSE 1 END AS excluded,
         CASE WHEN ${libraries.userId} = ${userId} THEN ${libraries.createdAt}
@@ -50,6 +53,6 @@ export function readingHoldings(db: ReturnType<typeof getDb>, userId: string, sh
         priority, excluded, joinedAt, libraryCreatedAt, libraryId, libraryBookId, linkId) AS position
       FROM holding_candidates
     )
-    SELECT bookVersionId, libraryBookId, libraryId, categoryId, excluded FROM ranked WHERE position = 1
+    SELECT bookVersionId, libraryBookId, libraryId, categoryRoot, categoryLeaf, excluded FROM ranked WHERE position = 1
   `)
 }

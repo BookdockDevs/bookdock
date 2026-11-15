@@ -1,29 +1,24 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 
-import { CATEGORY_TEMPLATES, type ClientCategoryView } from '@bookdock/shared'
+import { type ClientCategoryView } from '@bookdock/shared'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import type { MenuAnchor } from '@/lib/menu-anchor'
 
-import { categoryPath } from '../taxonomy'
 import CategoryPickerPanel, { type CategorySelection } from './CategoryPickerPanel'
 import TaxonomyIcon from './TaxonomyIcon'
 
 interface CategorySelectPopoverProps {
-  libraryId: string | null
   categories: ClientCategoryView[]
-  categoryId: string | null | undefined
-  categoryTemplateKey?: string
+  categoryPath: string[] | null | undefined
   allowTemplates?: boolean
   onChange: (value: CategorySelection) => void
 }
 
 export default function CategorySelectPopover({
-  libraryId,
   categories,
-  categoryId,
-  categoryTemplateKey,
+  categoryPath,
   allowTemplates = true,
   onChange,
 }: CategorySelectPopoverProps) {
@@ -39,27 +34,8 @@ export default function CategorySelectPopover({
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null)
   const open = Boolean(anchor)
 
-  const currentPath = useMemo(() => {
-    if (!categoryId) return []
-    return categoryPath(categories, categoryId)
-  }, [categories, categoryId])
-
-  const selectedTemplateRoot = useMemo(() => {
-    if (!categoryTemplateKey) return undefined
-    return CATEGORY_TEMPLATES.find((root) => root.key === categoryTemplateKey || root.children?.some((child) => child.key === categoryTemplateKey))
-  }, [categoryTemplateKey])
-
-  const currentLabel = useMemo(() => {
-    if (currentPath.length > 0) {
-      return currentPath.map((c) => c.name).join(' / ')
-    }
-    if (selectedTemplateRoot && categoryTemplateKey) {
-      return `${_(`library.categoryTemplate.${selectedTemplateRoot.key}.name`)}${selectedTemplateRoot.key === categoryTemplateKey ? '' : ` / ${_(`library.categoryTemplate.${categoryTemplateKey}`)}`}`
-    }
-    return _('library.uncategorized')
-  }, [currentPath, selectedTemplateRoot, categoryTemplateKey, _])
-
-  const isSelected = Boolean(categoryId || categoryTemplateKey)
+  const currentLabel = categoryPath?.join(' / ') || _('library.uncategorized')
+  const isSelected = Boolean(categoryPath?.length)
 
   function toggle() {
     if (anchor) {
@@ -123,10 +99,8 @@ export default function CategorySelectPopover({
           className="max-h-72 overflow-y-auto custom-scrollbar"
         >
           <CategoryPickerPanel
-            libraryId={libraryId}
             categories={categories}
-            categoryId={categoryId}
-            categoryTemplateKey={categoryTemplateKey}
+            categoryPath={categoryPath}
             allowTemplates={allowTemplates}
             onChange={onChange}
             onDismiss={() => setAnchor(null)}
