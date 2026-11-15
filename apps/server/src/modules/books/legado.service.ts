@@ -11,6 +11,7 @@ import { getUserTimezone } from '../auth/auth.service'
 import { formatTimestamp } from '../../lib/format-timestamp'
 import { ensurePrivateLibrary, isLibraryManager } from '../libraries/library-access'
 import { listLibraryVersionEntries } from '../libraries/catalog.service'
+import { getSettings } from '../settings/settings.service'
 
 import {
   getActiveBook,
@@ -107,12 +108,13 @@ function categoryDepths(rows: { id: string; parentId: string | null }[]): Map<st
  */
 export async function getLegadoExploreConfig(userId: string): Promise<LegadoExploreConfigRes> {
   const rows: LegadoExploreLibrary[] = []
+  const enabledModules = getSettings(userId)?.library?.sidebarModules ?? ['shelves', 'categories', 'tags']
   for (const library of listBrowsableLibraries(userId)) {
     const showHidden = await isLibraryManager(userId, library.id)
     const [categories, privateShelves, tags, works] = await Promise.all([
-      listLegadoCategories(library.id, showHidden),
-      library.private ? listLegadoShelves(library.id, showHidden) : Promise.resolve([]),
-      listLegadoTags(library.id, showHidden),
+      enabledModules.includes('categories') ? listLegadoCategories(library.id, showHidden) : Promise.resolve([]),
+      library.private && enabledModules.includes('shelves') ? listLegadoShelves(library.id, showHidden) : Promise.resolve([]),
+      enabledModules.includes('tags') ? listLegadoTags(library.id, showHidden) : Promise.resolve([]),
       listLibraryVersionEntries(userId, library.id, { page: 1, pageSize: 1 }),
     ])
     if (works.total === 0) continue
@@ -131,11 +133,8 @@ function listLegadoCategories(libraryId: string, includeHidden: boolean) {
     .orderBy(asc(libraryCategories.sortOrder), asc(libraryCategories.createdAt))
     .all()
   const depths = categoryDepths(rows)
-  return [{ id: LEGADO_NONE_CATEGORY, name: '未分类', depth: 0 }, ...rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    depth: depths.get(row.id) ?? 0,
-  }))]
+  const categories = rows.map((row) => ({ id: row.id, name: row.name, depth: depths.get(row.id) ?? 0 }))
+  return categories.length > 0 ? [{ id: LEGADO_NONE_CATEGORY, name: '未分类', depth: 0 }, ...categories] : []
 }
 
 function listLegadoShelves(libraryId: string, includeHidden: boolean) {
@@ -146,7 +145,8 @@ function listLegadoShelves(libraryId: string, includeHidden: boolean) {
       ? eq(shelves.libraryId, libraryId)
       : and(eq(shelves.libraryId, libraryId), eq(shelves.hidden, false)))
     .orderBy(asc(shelves.sortOrder), asc(shelves.createdAt)).all()
-  return [{ id: LEGADO_NONE_CATEGORY, name: '未入架', depth: 0 }, ...rows.map((row) => ({ id: row.id, name: row.name, depth: 0 }))]
+  const mapped = rows.map((row) => ({ id: row.id, name: row.name, depth: 0 }))
+  return mapped.length > 0 ? [{ id: LEGADO_NONE_CATEGORY, name: '未入架', depth: 0 }, ...mapped] : []
 }
 
 function listLegadoTags(libraryId: string, includeHidden: boolean) {

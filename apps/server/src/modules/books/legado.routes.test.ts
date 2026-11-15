@@ -155,10 +155,10 @@ describe('Legado book-source adapter', () => {
       bookSourceGroup: '书坞',
       header: '@js:\nvar cookieHeader = java.getCookie(baseUrl);\nresult = cookieHeader ? JSON.stringify({"Cookie": cookieHeader}) : "{}";',
       loginUrl: 'http://bookdock.test/api/v1/legado/login',
-      lastUpdateTime: 1793731200000,
+      lastUpdateTime: 1794732879000,
       enabledCookieJar: true,
       enabledExplore: true,
-      exploreUrl: '@js:\n/* Bookdock explore 1793731200000 */\nresult = bdExplore(this);',
+      exploreUrl: '@js:\n/* Bookdock explore 1794732879000 */\nresult = bdExplore(this);',
       jsLib: expect.stringContaining('BD_API_ROOT'),
       searchUrl: 'http://bookdock.test/api/v1/legado/search?keyword={{key}}&page={{page}}&scope=joined',
       ruleSearch: {
@@ -313,6 +313,7 @@ describe('Legado book-source adapter', () => {
             id: 'lib-private',
             name: '我的书库',
             type: 'private',
+            shelves: [{ id: 'shelf-1', name: '常读' }],
             categories: [
               { id: 'none', name: '未分类', depth: 0 },
               { id: 'cat-1', name: '网络小说', depth: 0 },
@@ -327,12 +328,11 @@ describe('Legado book-source adapter', () => {
     const rows = JSON.parse(runExplore(sourceContext, javaContext) as string) as Array<{ title: string; url: string; type?: string; style?: { layout_flexBasisPercent?: number } }>
 
     expect(javaContext.ajax).toHaveBeenCalledWith('http://bookdock.test/api/v1/legado/explore/config')
-    expect(rows[0]).toMatchObject({ title: '排序', type: 'select', style: { layout_flexBasisPercent: 0.45 } })
-    expect(rows[1]).toMatchObject({ title: '顺序', type: 'select', style: { layout_flexBasisPercent: 0.45 } })
-    // A single library keeps the familiar flat headings, with no library prefix.
+    expect(rows[0]).toMatchObject({ title: '排序', type: 'select', chars: ['更新时间', '添加时间', '最近阅读', '阅读进度', '书名', '作者', '文件大小'], style: { layout_flexBasisPercent: 0.55 } })
+    expect(rows[1]).toMatchObject({ title: '方向', type: 'select', chars: ['降序', '升序'], style: { layout_flexBasisPercent: 0.35 } })
     expect(rows[2]).toEqual({
-      title: '全部书籍',
-      url: 'http://bookdock.test/api/v1/legado/explore/all?scope=joined&page={{page}}&sort=updated&order=desc',
+      title: '全部 · 我的书库',
+      url: 'http://bookdock.test/api/v1/legado/explore/libraries/lib-private?page={{page}}&sort=updated&order=desc',
       style: { layout_flexGrow: 1, layout_flexBasisPercent: 1 },
     })
     expect(rows).toEqual(expect.arrayContaining([
@@ -347,49 +347,55 @@ describe('Legado book-source adapter', () => {
     ]))
   })
 
-  it('names the library in every section once more than one is browsable', async () => {
+  it('switches the displayed library instead of combining every library section', async () => {
     const response = await createApp(true).request('http://bookdock.test/api/v1/legado/source.json')
     const [source] = await response.json() as [{ jsLib: string }]
     const javaContext = {
       ajax: vi.fn(() => JSON.stringify({
         data: {
           libraries: [
-            { id: 'lib-private', name: '我的书库', type: 'private', categories: [], tags: [{ id: 'tag-1', name: '完结', depth: 0 }] },
+            { id: 'lib-private', name: '', type: 'private', shelves: [{ id: 'shelf-1', name: '常读' }], categories: [], tags: [{ id: 'tag-1', name: '完结', depth: 0 }] },
             { id: 'lib-city', name: '城市书库', type: 'shared', categories: [{ id: 'cat-9', name: '科幻', depth: 0 }], tags: [] },
           ],
         },
       })),
     }
     const runExplore = new Function('source', 'java', `${source.jsLib}; return bdExplore({ source: source, java: java });`)
-    const rows = JSON.parse(runExplore(
-      { getKey: () => 'http://bookdock.test', getVariable: () => '' },
+    let state = ''
+    const sourceContext = { getKey: () => 'http://bookdock.test', getVariable: () => state }
+    let rows = JSON.parse(runExplore(
+      sourceContext,
       javaContext,
     ) as string) as Array<{ title: string; url: string; type?: string }>
 
-    // One full-width row per library instead of a single "全部书籍".
-    expect(rows.filter((row) => row.title.startsWith('全部 · '))).toEqual([
-      expect.objectContaining({ title: '全部 · 我的书库', url: expect.stringContaining('/explore/libraries/lib-private?') }),
-      expect.objectContaining({ title: '全部 · 城市书库', url: expect.stringContaining('/explore/libraries/lib-city?') }),
-    ])
-    expect(rows.some((row) => row.title === '全部书籍')).toBe(false)
+    expect(rows[0]).toMatchObject({ title: '书库', type: 'select', chars: ['个人书库', '城市书库'], default: '个人书库', style: { layout_flexBasisPercent: 1 } })
+    expect(rows[1]).toMatchObject({ title: '排序', chars: expect.arrayContaining(['最近阅读', '阅读进度']) })
+    expect(rows[3]).toMatchObject({ title: '全部 · 个人书库', url: expect.stringContaining('/explore/libraries/lib-private?') })
     expect(rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ title: '—— 我的书库 · 书架 ——' }),
-      expect.objectContaining({ title: '—— 我的书库 · 标签 ——' }),
-      // A shared library's taxonomy is 分类, not 书架.
-      expect.objectContaining({ title: '—— 城市书库 · 分类 ——' }),
-      expect.objectContaining({ title: '—— 城市书库 · 标签 ——' }),
-      // An empty dimension says so instead of rendering nothing, using the same
-      // wording as its heading.
-      expect.objectContaining({ title: '暂无书架' }),
-      expect.objectContaining({ title: '暂无标签' }),
+      expect.objectContaining({ title: '—— 书架 ——' }),
+    ]))
+    expect(rows.some((row) => row.title === '暂无标签')).toBe(false)
+    expect(rows.some((row) => row.title === '科幻')).toBe(false)
+
+    state = JSON.stringify({ bdLibraryId: 'lib-city', bdSortField: 'progress', bdSortOrder: 'asc' })
+    javaContext.ajax.mockReturnValue(JSON.stringify({ data: { libraries: [
+      { id: 'lib-private', name: '', type: 'private', categories: [], shelves: [], tags: [] },
+      { id: 'lib-city', name: '城市书库', type: 'shared', categories: [{ id: 'cat-9', name: '科幻', depth: 0 }], tags: [] },
+    ] } }))
+    rows = JSON.parse(runExplore(sourceContext, javaContext) as string) as Array<{ title: string; url: string; type?: string }>
+    expect(rows[1]).toMatchObject({ title: '排序', default: '更新时间', chars: expect.not.arrayContaining(['最近阅读', '阅读进度']) })
+    expect(rows[3]).toMatchObject({ title: '全部 · 城市书库', url: expect.stringContaining('/explore/libraries/lib-city?page={{page}}&sort=updated&order=asc') })
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: '—— 分类 ——' }),
       expect.objectContaining({ title: '科幻', url: expect.stringContaining('/explore/libraries/lib-city/categories/cat-9?') }),
     ]))
+    expect(rows.some((row) => row.title === '—— 书架 ——')).toBe(false)
   })
 
   it('translates persisted discovery sort values into result URLs', async () => {
     const response = await createApp(true).request('http://bookdock.test/api/v1/legado/source.json')
     const [source] = await response.json() as [{ jsLib: string }]
-    let state = { bdSortField: 'title', bdSortOrder: 'asc' }
+    let state = { bdSort: 'title-asc' }
     const sourceContext = {
       getKey: () => 'http://bookdock.test',
       getVariable: () => JSON.stringify(state),
@@ -401,19 +407,22 @@ describe('Legado book-source adapter', () => {
 
     let rows = JSON.parse(runExplore(sourceContext, javaContext) as string) as Array<{ title: string; url: string }>
     // No library at all is reported, not rendered as an empty book list.
-    expect(rows[2]?.title).toBe('暂无可浏览的书库')
+    expect(rows[0]?.title).toBe('暂无可浏览的书库')
     expect(rows.some((row) => row.title === '全部书籍')).toBe(false)
 
-    state = { bdSortField: 'added', bdSortOrder: 'desc' }
     javaContext.ajax.mockReturnValue(JSON.stringify({
       data: { libraries: [{ id: 'lib-private', name: '我的书库', type: 'private', categories: [], tags: [] }] },
     }))
     rows = JSON.parse(runExplore(sourceContext, javaContext) as string) as Array<{ title: string; url: string }>
-    expect(rows[2]?.url).toContain('/explore/all?scope=joined&page={{page}}&sort=added&order=desc')
+    expect(rows[2]?.url).toContain('/explore/libraries/lib-private?page={{page}}&sort=title&order=asc')
 
-    state = { bdSortField: 'title', bdSortOrder: 'asc' }
+    state = { bdSortField: 'added', bdSortOrder: 'desc' }
     rows = JSON.parse(runExplore(sourceContext, javaContext) as string) as Array<{ title: string; url: string }>
-    expect(rows[2]?.url).toContain('/explore/all?scope=joined&page={{page}}&sort=title&order=asc')
+    expect(rows[2]?.url).toContain('/explore/libraries/lib-private?page={{page}}&sort=added&order=desc')
+
+    state = { bdSortField: 'progress', bdSortOrder: 'asc' }
+    rows = JSON.parse(runExplore(sourceContext, javaContext) as string) as Array<{ title: string; url: string }>
+    expect(rows[2]?.url).toContain('/explore/libraries/lib-private?page={{page}}&sort=progress&order=asc')
   })
 
   it('asks the reader to sign in when the config request is unauthorized', async () => {
@@ -521,6 +530,20 @@ describe('Legado book-source adapter', () => {
     })
   })
 
+  it('maps the expanded discovery sort keys to catalog sort columns', async () => {
+    vi.mocked(getLegadoExploreFilter).mockReturnValue({ libraryId: 'lib-private' })
+    vi.mocked(listLibraryVersionEntries).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 24 })
+
+    for (const sort of ['author', 'size', 'lastReadAt', 'progress'] as const) {
+      const response = await createApp().request(`http://bookdock.test/api/v1/legado/explore/libraries/lib-private?sort=${sort}&order=asc`)
+      expect(response.status).toBe(200)
+      expect(listLibraryVersionEntries).toHaveBeenLastCalledWith('user-1', 'lib-private', expect.objectContaining({
+        sortBy: sort,
+        sortOrder: 'asc',
+      }))
+    }
+  })
+
   it('maps owned books into Legado search results', async () => {
     vi.mocked(listLibraryVersionEntries).mockResolvedValue({
       items: [versionEntry()],
@@ -555,6 +578,25 @@ describe('Legado book-source adapter', () => {
         total: 1,
       },
     })
+  })
+
+  it('uses a short bookmeta description fallback for search and discovery previews', async () => {
+    const longDescription = '书'.repeat(81)
+    vi.mocked(listLibraryVersionEntries).mockResolvedValue({
+      items: [versionEntry({ description: '', bookmeta: { description: longDescription } })],
+      total: 1,
+      page: 1,
+      pageSize: 24,
+    })
+
+    const searchResponse = await createApp().request('http://bookdock.test/api/v1/legado/search?keyword=Book%20One')
+    const searchJson = await searchResponse.json() as { data: { items: { intro: string }[] } }
+    expect(searchJson.data.items[0]?.intro).toBe(`${'书'.repeat(80)}…`)
+
+    vi.mocked(getLegadoExploreFilter).mockReturnValue({ libraryId: 'lib-private' })
+    const exploreResponse = await createApp().request('http://bookdock.test/api/v1/legado/explore/all')
+    const exploreJson = await exploreResponse.json() as { data: { items: { intro: string }[] } }
+    expect(exploreJson.data.items[0]?.intro).toBe(`${'书'.repeat(80)}…`)
   })
 
   it('searches the private library and every joined library by default', async () => {

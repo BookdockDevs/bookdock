@@ -69,7 +69,7 @@ export const legadoSearchSchema = z.object({
 
 export const legadoExploreSchema = z.object({
   page: z.coerce.number().int().min(1).max(1_000).default(PAGINATION.DEFAULT_PAGE),
-  sort: z.enum(['updated', 'added', 'title']).default('updated'),
+  sort: z.enum(['updated', 'added', 'title', 'author', 'size', 'lastReadAt', 'progress']).default('updated'),
   order: z.enum(['asc', 'desc']).optional(),
   scope: z.enum(['joined', 'private']).default('joined'),
 })

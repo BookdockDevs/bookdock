@@ -25,7 +25,7 @@ const legadoRoutes = new Hono()
 // newer rules, and the same number is embedded in `exploreUrl` because Legado
 // caches the generated discovery rows keyed by MD5(bookSourceUrl + exploreUrl).
 // Bumping it is what forces an already-imported source to re-run the script.
-const LEGADO_SOURCE_UPDATED_AT = 1793731200000
+const LEGADO_SOURCE_UPDATED_AT = 1794732879000
 const LEGADO_SESSION_MAX_AGE = 7 * 24 * 60 * 60
 
 function publicOrigin(c: Context): string {
@@ -227,30 +227,64 @@ function bdExploreState(ctx) {
   var state = {};
   try { state = holder ? JSON.parse(holder.getVariable() || "{}") : {}; } catch (error) { state = {}; }
   if (!state || typeof state !== "object") state = {};
-  if (["updated", "added", "title"].indexOf(String(state.bdSortField)) < 0) state.bdSortField = "updated";
-  if (["asc", "desc"].indexOf(String(state.bdSortOrder)) < 0) state.bdSortOrder = state.bdSortField === "title" ? "asc" : "desc";
+  var validSortFields = ["updated", "added", "title", "author", "size", "lastReadAt", "progress"];
+  var legacyParts = String(state.bdSort || "").split("-");
+  if (validSortFields.indexOf(String(state.bdSortField)) < 0) {
+    state.bdSortField = validSortFields.indexOf(legacyParts[0]) >= 0 ? legacyParts[0] : "updated";
+  }
+  if (["asc", "desc"].indexOf(String(state.bdSortOrder)) < 0) {
+    state.bdSortOrder = ["asc", "desc"].indexOf(legacyParts[1]) >= 0 ? legacyParts[1] : "desc";
+  }
+  delete state.bdSort;
   return state;
 }
 
-function bdExploreSortFieldLabel(value) {
-  if (String(value) === "added") return "添加时间";
-  if (String(value) === "title") return "书名";
-  return "更新时间";
+function bdExploreSortLabel(value) {
+  var labels = { updated: "更新时间", added: "添加时间", lastReadAt: "最近阅读", progress: "阅读进度", title: "书名", author: "作者", size: "文件大小" };
+  return labels[String(value)] || labels.updated;
 }
 
-function bdExploreSortFieldValue(label) {
-  var value = String(label);
-  if (value === "added" || value === "添加时间") return "added";
-  if (value === "title" || value === "书名") return "title";
-  return "updated";
+function bdExploreSortValue(label) {
+  var values = ["updated", "added", "lastReadAt", "progress", "title", "author", "size"];
+  var labels = ["更新时间", "添加时间", "最近阅读", "阅读进度", "书名", "作者", "文件大小"];
+  var index = labels.indexOf(String(label));
+  return values[index] || "updated";
 }
 
-function bdExploreSortOrderLabel(value) {
-  return String(value) === "asc" ? "升序" : "降序";
+function bdExploreDirectionValue(label) {
+  return String(label) === "升序" ? "asc" : "desc";
 }
 
-function bdExploreSortOrderValue(value) {
-  return String(value) === "asc" || String(value) === "升序" ? "asc" : "desc";
+function bdExploreSortQuery(field, order) {
+  return { sort: String(field || "updated"), order: String(order || "desc") };
+}
+
+function bdExploreLibraryLabel(library, libraries) {
+  var name = String(library.name || (String(library.type) === "private" ? "个人书库" : "未命名书库"));
+  var duplicates = 0;
+  var sameTypeDuplicates = 0;
+  for (var i = 0; i < libraries.length; i++) {
+    var other = libraries[i] || {};
+    var otherName = String(other.name || (String(other.type) === "private" ? "个人书库" : "未命名书库"));
+    if (otherName === name) {
+      duplicates++;
+      if (String(other.type) === String(library.type)) sameTypeDuplicates++;
+    }
+  }
+  if (duplicates > 1) {
+    name += String(library.type) === "private" ? " · 个人" : " · 共享";
+    if (sameTypeDuplicates > 1) name += " " + String(library.id || "").slice(-4);
+  }
+  return name;
+}
+
+var BD_EXPLORE_LIBRARY_OPTIONS = [];
+
+function bdExploreLibraryId(label) {
+  for (var i = 0; i < BD_EXPLORE_LIBRARY_OPTIONS.length; i++) {
+    if (BD_EXPLORE_LIBRARY_OPTIONS[i].label === String(label)) return BD_EXPLORE_LIBRARY_OPTIONS[i].id;
+  }
+  return "";
 }
 
 function bdExploreHeader(rows, title) {
@@ -278,26 +312,16 @@ function bdExploreSelectAction(key, title, converter) {
   return "var v=infoMap[" + JSON.stringify(title) + "]||(infoMap.get&&infoMap.get(" + JSON.stringify(title) + "));var d={};try{d=JSON.parse(source.getVariable()||'{}')}catch(e){};d." + key + "=" + converter + "(String(v||''));source.setVariable(JSON.stringify(d));try{source.refreshExplore()}catch(e){}try{java.refreshExplore()}catch(e){}";
 }
 
-function bdExploreSelect(rows, state) {
+function bdExploreSelect(rows, title, chars, defaultValue, action, basis) {
   rows.push({
-    title: "排序",
+    title: title,
     url: "",
     type: "select",
-    chars: ["书名", "添加时间", "更新时间"],
-    default: bdExploreSortFieldLabel(state.bdSortField),
-    action: bdExploreSelectAction("bdSortField", "排序", "bdExploreSortFieldValue"),
-    viewName: "'排序'",
-    style: { layout_flexGrow: 1, layout_flexBasisPercent: 0.45 },
-  });
-  rows.push({
-    title: "顺序",
-    url: "",
-    type: "select",
-    chars: ["升序", "降序"],
-    default: bdExploreSortOrderLabel(state.bdSortOrder),
-    action: bdExploreSelectAction("bdSortOrder", "顺序", "bdExploreSortOrderValue"),
-    viewName: "'顺序'",
-    style: { layout_flexGrow: 1, layout_flexBasisPercent: 0.45 },
+    chars: chars,
+    default: defaultValue,
+    action: action,
+    viewName: "'" + title + "'",
+    style: { layout_flexGrow: 1, layout_flexBasisPercent: basis },
   });
 }
 
@@ -328,71 +352,81 @@ function bdExplore(ctx) {
     return JSON.stringify(rows);
   }
 
-  bdExploreSelect(rows, state);
-  var sort = bdExploreSortFieldValue(state.bdSortField);
-  var order = bdExploreSortOrderValue(state.bdSortOrder);
-  var query = "page={{page}}&sort=" + sort + "&order=" + order;
   var libraries = config.libraries || [];
-  // Nothing browsable: say so instead of rendering an all-books link that
-  // would open an empty list.
   if (!libraries.length) {
     bdExploreEmpty(rows, "暂无可浏览的书库");
     return JSON.stringify(rows);
   }
-  var multiple = libraries.length > 1;
+  var libraryOptions = [];
+  for (var optionIndex = 0; optionIndex < libraries.length; optionIndex++) {
+    var optionLibrary = libraries[optionIndex] || {};
+    libraryOptions.push({ id: String(optionLibrary.id || ""), label: bdExploreLibraryLabel(optionLibrary, libraries) });
+  }
+  BD_EXPLORE_LIBRARY_OPTIONS = libraryOptions;
+  var selectedLibraryId = String(state.bdLibraryId || "");
+  var selectedLibrary = null;
+  for (var selectedIndex = 0; selectedIndex < libraries.length; selectedIndex++) {
+    var candidate = libraries[selectedIndex] || {};
+    if (String(candidate.id || "") === selectedLibraryId) selectedLibrary = candidate;
+  }
+  if (!selectedLibrary) {
+    for (var privateIndex = 0; privateIndex < libraries.length; privateIndex++) {
+      if (String((libraries[privateIndex] || {}).type) === "private") {
+        selectedLibrary = libraries[privateIndex];
+        break;
+      }
+    }
+  }
+  if (!selectedLibrary) selectedLibrary = libraries[0];
+  selectedLibrary = selectedLibrary || {};
+  var privateLibrary = String(selectedLibrary.type) === "private";
+  var sortField = state.bdSortField;
+  if (!privateLibrary && (sortField === "lastReadAt" || sortField === "progress")) sortField = "updated";
+  var sort = bdExploreSortQuery(sortField, state.bdSortOrder);
+  var query = "page={{page}}&sort=" + sort.sort + "&order=" + sort.order;
+  var selectedLabel = bdExploreLibraryLabel(selectedLibrary, libraries);
+  if (libraries.length > 1) {
+    var libraryLabels = [];
+    for (var labelIndex = 0; labelIndex < libraryOptions.length; labelIndex++) libraryLabels.push(libraryOptions[labelIndex].label);
+    bdExploreSelect(rows, "书库", libraryLabels, selectedLabel, bdExploreSelectAction("bdLibraryId", "书库", "bdExploreLibraryId"), 1);
+  }
+  var sortValues = ["updated", "added", "title", "author", "size"];
+  if (privateLibrary) sortValues.splice(2, 0, "lastReadAt", "progress");
+  var sortLabels = [];
+  for (var sortIndex = 0; sortIndex < sortValues.length; sortIndex++) sortLabels.push(bdExploreSortLabel(sortValues[sortIndex]));
+  bdExploreSelect(rows, "排序", sortLabels, bdExploreSortLabel(sortField), bdExploreSelectAction("bdSortField", "排序", "bdExploreSortValue"), 0.55);
+  bdExploreSelect(rows, "方向", ["降序", "升序"], state.bdSortOrder === "asc" ? "升序" : "降序", bdExploreSelectAction("bdSortOrder", "方向", "bdExploreDirectionValue"), 0.35);
 
-  // A single library keeps the flat "全部书籍" entry the source always had; with
-  // more than one, each library gets its own full-width row so the reader can
-  // tell the private library from the ones they joined.
-  if (!multiple) {
-    bdExploreEntry(rows, "全部书籍", apiRoot + "/explore/all?scope=joined&" + query, 1);
-  } else {
-    for (var libIndex = 0; libIndex < libraries.length; libIndex++) {
-      var libRow = libraries[libIndex] || {};
-      bdExploreEntry(rows, "全部 · " + String(libRow.name || "书库"), apiRoot + "/explore/libraries/" + encodeURIComponent(String(libRow.id || "")) + "?" + query, 1);
+  var libraryId = encodeURIComponent(String(selectedLibrary.id || ""));
+  var libraryName = bdExploreLibraryLabel(selectedLibrary, libraries);
+  bdExploreEntry(rows, "全部 · " + libraryName, apiRoot + "/explore/libraries/" + libraryId + "?" + query, 1);
+
+  if (String(selectedLibrary.type) === "private") {
+    var shelves = selectedLibrary.shelves || [];
+    if (shelves.length) {
+      bdExploreHeader(rows, "书架");
+      for (var s = 0; s < shelves.length; s++) {
+        var shelf = shelves[s] || {};
+        bdExploreEntry(rows, String(shelf.name || "未命名书架"), apiRoot + "/explore/libraries/" + libraryId + "/shelves/" + encodeURIComponent(String(shelf.id || "")) + "?" + query);
+      }
     }
   }
 
-  for (var index = 0; index < libraries.length; index++) {
-    var library = libraries[index] || {};
-    var libraryId = encodeURIComponent(String(library.id || ""));
-    var libraryName = String(library.name || "书库");
-    // Section headings name the library only when there is more than one, so a
-    // single-library reader sees the familiar 书架 / 标签 headings.
-    var prefix = multiple ? libraryName + " · " : "";
-    if (String(library.type) === "private") {
-      bdExploreHeader(rows, prefix + "书架");
-      var shelves = library.shelves || [];
-      if (!shelves.length) {
-        bdExploreEmpty(rows, "暂无书架");
-      } else {
-        for (var s = 0; s < shelves.length; s++) {
-          var shelf = shelves[s] || {};
-          bdExploreEntry(rows, String(shelf.name || "未命名书架"), apiRoot + "/explore/libraries/" + libraryId + "/shelves/" + encodeURIComponent(String(shelf.id || "")) + "?" + query);
-        }
-      }
+  var categories = selectedLibrary.categories || [];
+  if (categories.length) {
+    bdExploreHeader(rows, "分类");
+    for (var c = 0; c < categories.length; c++) {
+      var category = categories[c] || {};
+      bdExploreEntry(rows, bdExploreIndent(category.depth) + String(category.name || "未命名分类"), apiRoot + "/explore/libraries/" + libraryId + "/categories/" + encodeURIComponent(String(category.id || "")) + "?" + query);
     }
+  }
 
-    bdExploreHeader(rows, prefix + "分类");
-    var categories = library.categories || [];
-    if (!categories.length) {
-      bdExploreEmpty(rows, "暂无分类");
-    } else {
-      for (var c = 0; c < categories.length; c++) {
-        var category = categories[c] || {};
-        bdExploreEntry(rows, bdExploreIndent(category.depth) + String(category.name || "未命名分类"), apiRoot + "/explore/libraries/" + libraryId + "/categories/" + encodeURIComponent(String(category.id || "")) + "?" + query);
-      }
-    }
-
-    bdExploreHeader(rows, prefix + "标签");
-    var tags = library.tags || [];
-    if (!tags.length) {
-      bdExploreEmpty(rows, "暂无标签");
-    } else {
-      for (var t = 0; t < tags.length; t++) {
-        var tag = tags[t] || {};
-        bdExploreEntry(rows, String(tag.name || "未命名标签"), apiRoot + "/explore/libraries/" + libraryId + "/tags/" + encodeURIComponent(String(tag.id || "")) + "?" + query);
-      }
+  var tags = selectedLibrary.tags || [];
+  if (tags.length) {
+    bdExploreHeader(rows, "标签");
+    for (var t = 0; t < tags.length; t++) {
+      var tag = tags[t] || {};
+      bdExploreEntry(rows, String(tag.name || "未命名标签"), apiRoot + "/explore/libraries/" + libraryId + "/tags/" + encodeURIComponent(String(tag.id || "")) + "?" + query);
     }
   }
   return JSON.stringify(rows);
@@ -589,6 +623,17 @@ function legadoKind(entry: Pick<LibraryVersionEntry, 'format' | 'categoryName' |
     .join('\n')
 }
 
+const LEGADO_PREVIEW_INTRO_MAX_CHARS = 80
+
+function legadoPreviewIntro(entry: Pick<LibraryVersionEntry, 'description' | 'bookmeta'>): string {
+  const bookmetaDescription = typeof entry.bookmeta.description === 'string' ? entry.bookmeta.description : ''
+  const intro = entry.description.trim() || bookmetaDescription.trim()
+  const chars = Array.from(intro)
+  return chars.length > LEGADO_PREVIEW_INTRO_MAX_CHARS
+    ? `${chars.slice(0, LEGADO_PREVIEW_INTRO_MAX_CHARS).join('')}…`
+    : intro
+}
+
 function legadoItem(c: Context, entry: LibraryVersionEntry, latestChapterTitle: string | null): LegadoBookSearchItem {
   return {
     id: entry.bookVersionId,
@@ -598,7 +643,7 @@ function legadoItem(c: Context, entry: LibraryVersionEntry, latestChapterTitle: 
     kind: legadoKind(entry),
     wordCount: formatLegadoWordCount(entry.wordCount),
     latestChapterTitle,
-    intro: entry.description,
+    intro: legadoPreviewIntro(entry),
     url: absoluteUrl(c, `/api/v1/legado/books/${entry.bookVersionId}`),
     coverUrl: coverUrl(c, entry.bookVersionId, entry.coverKey),
   }
@@ -612,8 +657,16 @@ async function exploreBooks(c: Context, scope: LegadoExploreScope, id?: string, 
 
   const user = c.get('user')
   if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
-  const sortBy = parsed.data.sort === 'updated' ? 'updatedAt' : parsed.data.sort === 'title' ? 'title' : 'createdAt'
-  const sortOrder = parsed.data.order ?? (parsed.data.sort === 'title' ? 'asc' : 'desc')
+  const sortBy = ({
+    updated: 'updatedAt',
+    added: 'createdAt',
+    title: 'title',
+    author: 'author',
+    size: 'size',
+    lastReadAt: 'lastReadAt',
+    progress: 'progress',
+  } as const)[parsed.data.sort]
+  const sortOrder = parsed.data.order ?? (parsed.data.sort === 'title' || parsed.data.sort === 'author' ? 'asc' : 'desc')
   const requested = libraryId ?? legadoPrivateLibraryId(user.id)
   const filter = getLegadoExploreFilter(user.id, requested, scope, id)
   const libraryIds = libraryId ? [filter.libraryId] : legadoJoinedLibraryIds(user.id)

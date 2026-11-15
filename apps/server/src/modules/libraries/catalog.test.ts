@@ -1044,6 +1044,22 @@ describe('shared library catalog', () => {
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
   })
 
+  it('sorts private book-source entries by the requesting reader state', async () => {
+    const privateLibraryId = ensurePrivateLibrary(db, ownerId)
+    const first = await uploadBook(ownerId, txtFile('first.txt', '第一章\n第一本'))
+    const second = await uploadBook(ownerId, txtFile('second.txt', '第一章\n第二本内容'))
+    db.update(schema.bookStates).set({ percent: 80, lastReadAt: 100, updatedAt: 100 })
+      .where(and(eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, first.book.id))).run()
+    db.update(schema.bookStates).set({ percent: 20, lastReadAt: 200, updatedAt: 200 })
+      .where(and(eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, second.book.id))).run()
+
+    const recentlyRead = await listLibraryVersionEntries(ownerId, privateLibraryId, { sortBy: 'lastReadAt', sortOrder: 'desc' })
+    expect(recentlyRead.items.map((entry) => entry.bookVersionId)).toEqual([second.book.id, first.book.id])
+
+    const mostProgress = await listLibraryVersionEntries(ownerId, privateLibraryId, { sortBy: 'progress', sortOrder: 'desc' })
+    expect(mostProgress.items.map((entry) => entry.bookVersionId)).toEqual([first.book.id, second.book.id])
+  })
+
   it('pushes the linked private draft to its city version', async () => {
     const draft = await uploadBook(ownerId, txtFile('draft.txt', '第一章\n草稿'))
     const pub = await publishPrivateBook(ownerId, libraryId, { bookId: draft.book.id })

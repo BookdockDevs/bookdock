@@ -5,6 +5,7 @@ import { compileSearchExpression } from './search-expression'
 import { getDb } from '../../db/client'
 import {
   blobs,
+  bookStates,
   bookVersions,
   contentRevisions,
   libraryBooks,
@@ -633,8 +634,8 @@ export async function listCatalogBooks(
  *
  * Visibility follows the same asymmetry as the catalog list: managers see
  * every version including hidden ones, everyone else only published versions
- * of works that are not effectively hidden. Reading state is absent by
- * construction — a shared work belongs to nobody.
+ * of works that are not effectively hidden. Reading state is not returned;
+ * private-library ordering may consult only the requesting user's state.
  */
 export interface LibraryVersionEntry {
   bookVersionId: string
@@ -681,6 +682,7 @@ export async function listLibraryVersionEntries(
   const manager = await isLibraryManager(actorId, libraryId)
   // One lookup decides both the cover fallback and the bookmeta layers below.
   const shared = isSharedLibrary(db, libraryId)
+  const includeReadingStateSort = !shared && (params.sortBy === 'progress' || params.sortBy === 'lastReadAt')
   const page = Math.max(1, params.page ?? 1)
   const pageSize = Math.min(100, Math.max(1, params.pageSize ?? CATALOG_PAGE_SIZE))
   // Latest-revision meta, so description/series/cover palette follow the
@@ -722,7 +724,8 @@ export async function listLibraryVersionEntries(
   conditions.push(...sharedListConditions({ page, pageSize, ...params }, libraryId))
 
   const where = and(...conditions)
-  const baseQuery = () => db.select({
+  const baseQuery = () => {
+    const query = db.select({
     bookVersionId: bookVersions.id,
     libraryBookId: libraryBooks.id,
     versionName: libraryBookVersions.name,
@@ -768,7 +771,13 @@ export async function listLibraryVersionEntries(
     ))
     .leftJoin(libraryCategories, eq(libraryBooks.categoryId, libraryCategories.id))
     .leftJoin(shelves, eq(libraryBooks.shelfId, shelves.id))
-    .where(where)
+    return includeReadingStateSort
+      ? query.leftJoin(bookStates, and(
+        eq(bookStates.userId, actorId),
+        eq(bookStates.bookVersionId, bookVersions.id),
+      )).where(where)
+      : query.where(where)
+  }
 
   // Pin-first is universal; a manager's pin on a private card and a shared
   // work's own pin sort at the same unit here because one row is one version.
@@ -778,6 +787,8 @@ export async function listLibraryVersionEntries(
     size: bookVersions.size,
     createdAt: libraryBooks.createdAt,
     updatedAt: libraryBooks.updatedAt,
+    progress: shared ? undefined : sql<number>`coalesce(${bookStates.percent}, 0)`,
+    lastReadAt: shared ? undefined : bookStates.lastReadAt,
   })
   const rows = baseQuery()
     .orderBy(asc(sql`${libraryBookVersions.pinnedAt} IS NULL`), ...orderBy)
