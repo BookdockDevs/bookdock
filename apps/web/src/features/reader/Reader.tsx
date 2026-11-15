@@ -1722,6 +1722,7 @@ export default function Reader() {
   }, [renderer])
 
   const onHistoryBack = useCallback(() => {
+    keepChromePinnedRef.current = true
     const target = jumpHistoryRef.current.back(currentCfiRef.current ?? '')
     if (!target) { syncHistoryCaps(); historyAutoHideRef.current?.reset(); return }
     // internal: history navigation itself must not re-enter the back stack;
@@ -1733,6 +1734,7 @@ export default function Reader() {
   }, [syncHistoryCaps])
 
   const onHistoryForward = useCallback(() => {
+    keepChromePinnedRef.current = true
     const target = jumpHistoryRef.current.forward(currentCfiRef.current ?? '')
     if (!target) { syncHistoryCaps(); historyAutoHideRef.current?.reset(); return }
     closeSegment(segmentTrackerRef.current)

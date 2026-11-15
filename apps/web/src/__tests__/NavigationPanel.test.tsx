@@ -302,6 +302,33 @@ describe('NavigationPanel', () => {
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
   })
 
+  it('commits position for tail chapters when scrolled to the bottom so returning to earlier chapter re-locates', async () => {
+    useReaderState.setState({
+      tocItems: Array.from({ length: 44 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
+      currentChapter: '第1章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 0, currentIndex: 0, sessionId: READER_SESSION_ID } } },
+    })
+    const { container } = render(<NavigationPanel bookId="book-1" open />)
+    const list = container.querySelector('.overflow-y-auto') as HTMLElement
+    vi.spyOn(list, 'scrollHeight', 'get').mockReturnValue(1500)
+    vi.spyOn(list, 'clientHeight', 'get').mockReturnValue(400)
+    list.scrollTop = 1100
+
+    await act(async () => {
+      useReaderState.getState().setCurrentChapter('第40章')
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    })
+
+    vi.mocked(window.HTMLElement.prototype.scrollIntoView).mockClear()
+
+    await act(async () => {
+      useReaderState.getState().setCurrentChapter('第1章')
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    })
+
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+  })
+
   it('snaps to the landing spot instead of halting when a locate is interrupted', async () => {
     useReaderState.setState({
       tocItems: Array.from({ length: 10 }, (_, i) => ({ label: `第${i + 1}章`, href: `chapter:${i}` })),
@@ -378,6 +405,16 @@ describe('NavigationPanel', () => {
       tocItems: [{ label: '第一章 开篇', href: 'chapter:0' }],
     })
 
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query === '(pointer: coarse)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList))
     const onClose = vi.fn()
     render(<NavigationPanel bookId="book-1" open onClose={onClose} />)
     fireEvent.click(screen.getByText('第一章 开篇'))
@@ -390,6 +427,16 @@ describe('NavigationPanel', () => {
       tocItems: [{ label: '第一章 开篇', href: 'chapter:0' }],
     })
 
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query === '(pointer: coarse)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList))
     const onClose = vi.fn()
     render(<NavigationPanel bookId="book-1" open locked onClose={onClose} />)
     fireEvent.click(screen.getByText('第一章 开篇'))
@@ -661,7 +708,17 @@ describe('NavigationPanel', () => {
     })
 
     it('navigates to a result and closes the panel on click', async () => {
-      const onClose = vi.fn()
+      vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query === '(pointer: coarse)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList))
+    const onClose = vi.fn()
       render(<NavigationPanel bookId="book-1" open onClose={onClose} />)
       fireEvent.click(screen.getByTitle('reader.search'))
       fireEvent.change(screen.getByPlaceholderText('reader.searchPlaceholder'), { target: { value: '高中' } })

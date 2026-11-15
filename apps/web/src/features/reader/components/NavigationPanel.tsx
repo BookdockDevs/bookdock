@@ -184,8 +184,30 @@ const VolumeHeaderItem = memo(function VolumeHeaderItem({
 // A located row counts as placed only inside the upper-half comfort zone.
 // Merely visible at the bottom edge still lacks following context, so it
 // gets pulled up to the 1/4 landing spot instead of staying put.
-function isTocRowPlaced(rowTop: number, viewportTop: number, viewportBottom: number, topInset: number): boolean {
-  return rowTop >= viewportTop + topInset && rowTop + 32 <= viewportBottom - (viewportBottom - viewportTop) * 0.5
+// Exception: when the container is scrolled to the bottom (or cannot scroll
+// further), any fully visible row counts as placed so tail chapters commit
+// their position and do not leave lastScrolledIndex stale.
+function isTocRowPlaced(
+  rowTop: number,
+  viewportTop: number,
+  viewportBottom: number,
+  topInset: number,
+  container?: HTMLElement | null,
+): boolean {
+  if (rowTop >= viewportTop + topInset && rowTop + 32 <= viewportBottom - (viewportBottom - viewportTop) * 0.5) {
+    return true
+  }
+  if (
+    container &&
+    container.scrollTop > 0 &&
+    container.scrollHeight > container.clientHeight &&
+    Math.ceil(container.scrollTop + container.clientHeight) >= container.scrollHeight - 4 &&
+    rowTop >= viewportTop + topInset &&
+    rowTop + 32 <= viewportBottom + 4
+  ) {
+    return true
+  }
+  return false
 }
 
 interface NavigationPanelProps {  bookId: string
@@ -577,11 +599,11 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       const bounds = row.getBoundingClientRect()
       const viewport = container.getBoundingClientRect()
       const topInset = tree[currentIndex]?.parent === null ? 0 : 40
-      if (!isTocRowPlaced(bounds.top, viewport.top, viewport.bottom, topInset)) {
+      if (!isTocRowPlaced(bounds.top, viewport.top, viewport.bottom, topInset, container)) {
         container.scrollTop = Math.max(0, container.scrollTop + bounds.top - viewport.top - container.clientHeight * 0.25)
       }
       const finalBounds = row.getBoundingClientRect()
-      if (isTocRowPlaced(finalBounds.top, viewport.top, viewport.bottom, topInset)) {
+      if (isTocRowPlaced(finalBounds.top, viewport.top, viewport.bottom, topInset, container)) {
         lastScrolledIndex.current = currentIndex
         hasPositioned.current = true
       }
@@ -834,7 +856,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     const bounds = (item.closest('li') ?? item).getBoundingClientRect()
     const viewport = container.getBoundingClientRect()
     const topInset = tree[currentIndex]?.parent === null ? 0 : 40
-    if (lastScrolledIndex.current !== null && isTocRowPlaced(bounds.top, viewport.top, viewport.bottom, topInset)) {
+    if (lastScrolledIndex.current !== null && isTocRowPlaced(bounds.top, viewport.top, viewport.bottom, topInset, container)) {
       lastScrolledIndex.current = currentIndex
       hasPositioned.current = true
       rememberSidebarScroll('toc', container.scrollTop, currentIndex)

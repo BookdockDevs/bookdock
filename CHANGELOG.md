@@ -16,6 +16,8 @@ All notable changes to Bookdock are documented here.
 
 ### Fixed
 
+- Fixed directory auto-locate failing to scroll when returning to earlier chapters (such as via the history capsule) after visiting tail chapters. When the table of contents reaches maximum scroll, fully visible chapters now correctly commit their placed position instead of leaving stale scroll tracking that suppressed subsequent relocations.
+- History capsule navigation now maintains pinned chrome across chapter transitions, keeping the footer and companion controls visible while interacting.
 - Fixed TXT-to-EPUB downloads flattening nested chapter navigation. Server and device exports retain the saved hierarchy, embed current book details and cover, and respect the selected text replacement option. A cover that cannot be read or supported now stops the export with an error.
 
 ## [0.8.4] - 2026-11-15
@@ -1301,6 +1303,8 @@ All notable changes to Bookdock are documented here.
 
 #### 修复
 
+- 修复访问全书末尾章节后返回前序章节（如通过历史胶囊跳转）时目录未重新定位的问题。当目录列表已滚动触底时，可视区域内的章节能正常提交定位记录，避免残留旧的章节索引阻断后续切章时的自动滚动。
+- 历史胶囊跳转时保持控制栏常驻，避免切章定位后底栏与操作按钮过早自动收起。
 - 修复 TXT 下载为 EPUB 时目录层级被压平的问题。服务器和本机书籍导出时保留已保存的目录层级，嵌入当前书籍信息和封面，并按所选文本版本应用替换规则；封面无法读取或格式不受支持时会提示并停止导出。
 
 ### [0.8.4] - 2026-11-15
