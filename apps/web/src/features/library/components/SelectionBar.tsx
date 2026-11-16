@@ -539,7 +539,7 @@ export default function SelectionBar({ selectedKeys, onClear, onComplete = onCle
                   ? { left: statusAnchorLeft, transform: 'translateX(-50%)' }
                   : { left: '50%', transform: 'translateX(-50%)' }
               }
-              className="absolute bottom-full mb-2 min-w-40 rounded-xl border border-stone-200/90 bg-white/95 p-1.5 shadow-xl shadow-stone-900/10 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 dark:border-stone-700/90 dark:bg-stone-900/95 dark:shadow-black/40"
+              className="absolute bottom-full mb-2 min-w-40 rounded-xl border border-stone-200/80 bg-white p-1.5 shadow-xl shadow-stone-900/10 animate-in fade-in zoom-in-95 duration-150 dark:border-stone-700 dark:bg-stone-900 dark:shadow-black/40"
             >
               {BATCH_STATUS_ACTIONS.map((action) => {
                 const opt = READ_STATUS_OPTIONS.find((o) => o.value === action.value)

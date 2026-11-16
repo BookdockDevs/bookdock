@@ -1,4 +1,4 @@
-import { memo, useCallback, type MouseEvent } from 'react'
+import { memo, useCallback, useEffect, useState, type MouseEvent } from 'react'
 import { Link, useLocation, useNavigate, useRouter } from '@tanstack/react-router'
 import { useBackNavigation } from '@/hooks/useBackNavigation'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -98,10 +98,19 @@ export const ReaderHeader = memo(function ReaderHeader({ title, loading = false,
   const { state: ttsState } = useTtsSession()
   const { state: autoReadingState } = useAutoReadingSession()
   const ttsActive = ttsState.status === 'starting' || ttsState.status === 'playing' || ttsState.status === 'paused'
+  // The bar mounts hidden and slides down when the pointer reaches the top strip.
+  // Playing that 300ms slide on the very first paint reads as a loading animation,
+  // so the transform transition only arms after the first frame.
+  const [transitionsOn, setTransitionsOn] = useState(false)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setTransitionsOn(true))
+    return () => cancelAnimationFrame(frame)
+  }, [])
   return (
     <header
       className={cn(
-        'absolute left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] transition-transform duration-300 sm:px-3',
+        'absolute left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] sm:px-3',
+        transitionsOn && 'transition-transform duration-300',
         visible || settingsOpen || ttsOpen || autoReadingOpen || pinned ? 'translate-y-0 pointer-events-auto' : '-translate-y-full pointer-events-none',
         className,
       )}
@@ -129,12 +138,19 @@ export const ReaderHeader = memo(function ReaderHeader({ title, loading = false,
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-        {estimatedMinutes !== undefined && (
-          <span className="mr-1 hidden text-xs tabular-nums text-[var(--bd-read-sub)] sm:mr-2 sm:inline">
-            {formatDuration(estimatedMinutes * 60, _)}
-          </span>
-        )}
-        {onToggleTts && (
+        {/* Fixed slot: the duration lands a beat after the title, and a plain
+            conditional span would shove the whole icon row sideways when it does.
+            `w` (not `min-w`) because a `min-w` floor still lets a longer string —
+            "2 小时 30 分钟" on a very long chapter — widen the slot and push the
+            icons again; overflow is clipped instead. */}
+        <span className="mr-1 hidden w-[5.5rem] shrink-0 truncate text-right text-xs tabular-nums text-[var(--bd-read-sub)] sm:mr-2 sm:inline-block">
+          {estimatedMinutes !== undefined ? formatDuration(estimatedMinutes * 60, _) : null}
+        </span>
+        {/* Guests get no TTS and no bookmark. Those two keep their slots as inert
+            placeholders instead of collapsing, so the remaining icons never shift
+            when identity settles. Auto-reading is offered to everyone, so it needs
+            no placeholder. */}
+        {onToggleTts ? (
           <div className="relative">
             <button
               data-tts-toggle
@@ -159,6 +175,8 @@ export const ReaderHeader = memo(function ReaderHeader({ title, loading = false,
               <TtsPanel onStart={onTtsStart} />
             </SettingsPopover>
           </div>
+        ) : (
+          <span aria-hidden="true" className="hidden shrink-0 sm:block sm:h-8 sm:w-8" />
         )}
         {onToggleAutoReading && (
           <div className="relative">
@@ -182,7 +200,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, loading = false,
             </SettingsPopover>
           </div>
         )}
-        {onAddBookmark && (
+        {onAddBookmark ? (
           <button
             onClick={onAddBookmark}
             title={bookmarkActive ? '移除书签' : '添加书签'}
@@ -205,6 +223,8 @@ export const ReaderHeader = memo(function ReaderHeader({ title, loading = false,
               </svg>
             )}
           </button>
+        ) : (
+          <span aria-hidden="true" className="hidden shrink-0 sm:block sm:h-8 sm:w-8" />
         )}
         {onToggleFullscreen && (
           <button

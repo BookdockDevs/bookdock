@@ -644,7 +644,7 @@ describe('NavigationPanel', () => {
     expect(screen.getByRole('button', { name: '第三章 变故' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '第四章 绝境' })).toBeInTheDocument()
 
-    // Volumes 1 and 3 are collapsed by default
+    // Volumes 1 and 3 are collapsed by default on initial open
     expect(screen.queryByRole('button', { name: '第一章 启程' })).toBeNull()
     expect(screen.queryByRole('button', { name: '第二章 行路' })).toBeNull()
     expect(screen.queryByRole('button', { name: '第五章 归来' })).toBeNull()
@@ -964,6 +964,9 @@ describe('NavigationPanel', () => {
     })
 
     it('normalizes multiple consecutive spaces and settles on reader.noMatches when no hits found', async () => {
+      // The shared mock always returns three hits; this case is about the empty
+      // outcome, so the next call has to answer with nothing.
+      search.mockResolvedValueOnce([])
       render(<NavigationPanel bookId="book-1" open />)
       fireEvent.click(screen.getByTitle('reader.search'))
       const input = screen.getByPlaceholderText('reader.searchPlaceholder')

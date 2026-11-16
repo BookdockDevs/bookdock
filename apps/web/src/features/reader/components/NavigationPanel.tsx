@@ -86,6 +86,65 @@ function buildTocTree(items: { label: string; href: string; level: number }[]): 
   return tree
 }
 
+function normalizeSearchQuery(q: string, mode: 'contains' | 'regex'): string {
+  return mode === 'regex' ? q.trim() : q.replace(/\s+/g, ' ').trim()
+}
+
+function computeInitialCollapsed(tree: TocNode[], currentIndex: number): Set<number> {
+  const parents = tree.filter((n) => n.children.length > 0)
+  if (parents.length === 0) return new Set()
+
+  const currentAncestors = new Set<number>()
+  if (currentIndex >= 0 && currentIndex < tree.length) {
+    let node: TocNode | undefined = tree[currentIndex]
+    while (node) {
+      if (node.parent !== null) {
+        currentAncestors.add(node.parent)
+      }
+      node = node.parent !== null ? tree[node.parent] : undefined
+    }
+  }
+
+  // If no chapter is identified as current yet, expand the first volume
+  if (currentAncestors.size === 0 && parents.length > 0) {
+    currentAncestors.add(parents[0].index)
+  }
+
+  const initial = new Set<number>()
+  for (const parent of parents) {
+    if (!currentAncestors.has(parent.index)) {
+      initial.add(parent.index)
+    }
+  }
+  return initial
+}
+
+function getNodeKey(node: TocNode): string {
+  return `${node.label}:::${node.href}`
+}
+
+function serializeCollapsed(collapsed: Set<number>, tree: TocNode[]): string[] {
+  const keys: string[] = []
+  for (const idx of collapsed) {
+    const node = tree[idx]
+    if (node) {
+      keys.push(getNodeKey(node))
+    }
+  }
+  return keys
+}
+
+function deserializeCollapsed(keys: string[], tree: TocNode[]): Set<number> {
+  const keySet = new Set(keys)
+  const indices = new Set<number>()
+  for (const node of tree) {
+    if (keySet.has(getNodeKey(node))) {
+      indices.add(node.index)
+    }
+  }
+  return indices
+}
+
 interface VolumeHeaderItemProps {
   node: TocNode
   isCurrent: boolean
@@ -121,7 +180,7 @@ const VolumeHeaderItem = memo(function VolumeHeaderItem({
   return (
     <div
       className={cn(
-        isStickyVolume && 'sticky top-0 z-10 -ml-2 -mr-3 pl-2 pr-3 py-1 transition-all duration-200',
+        isStickyVolume && 'sticky top-0 z-10 -ml-2 -mr-3 pl-2 pr-3 transition-shadow duration-200',
         isStickyVolume && isStuck && 'shadow-[0_4px_16px_-2px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_16px_-2px_rgba(0,0,0,0.36)]',
       )}
       style={isStickyVolume ? { backgroundColor: 'var(--bd-read-bg)' } : undefined}
@@ -130,10 +189,10 @@ const VolumeHeaderItem = memo(function VolumeHeaderItem({
         ref={handleRef}
         onClick={() => onItemClick(node)}
         className={cn(
-          'group flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-sm transition-colors',
+          'group relative flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-sm transition-colors',
           isCurrent
             ? cn(
-                'relative font-medium text-current ring-inset',
+                'font-medium text-current ring-inset',
                 isFlashing
                   ? 'bg-stone-500/25 ring-2 ring-stone-500/40 shadow-sm transition-all duration-300'
                   : 'bg-stone-500/12 ring-1 ring-stone-500/20 transition-all duration-300',
@@ -167,7 +226,12 @@ const VolumeHeaderItem = memo(function VolumeHeaderItem({
         )}
         <span className="flex-1 truncate">{node.label}</span>
         {isVolume && (
-          <span className="ml-auto shrink-0 pr-1 text-xs text-[var(--bd-read-sub)] opacity-0 transition-opacity duration-150 group-hover:opacity-80 tabular-nums">
+          <span
+            className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center pl-6 pr-1.5 text-xs text-[var(--bd-read-sub)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 tabular-nums"
+            style={{
+              background: 'linear-gradient(to right, transparent 0px, color-mix(in srgb, var(--color-stone-500, #78716c) 10%, var(--bd-read-bg)) 20px, color-mix(in srgb, var(--color-stone-500, #78716c) 10%, var(--bd-read-bg)) 100%)',
+            }}
+          >
             {node.children.length} {t('reader.chapters')}
           </span>
         )}
@@ -269,6 +333,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const savedTocPosition = useRef(tocPositionFresh ? rememberedTocPosition : undefined)
   const locateFrame = useRef<number | null>(null)
   const hasPositioned = useRef(false)
+  const collapsedRef = useRef<Set<number>>(new Set())
+  const treeRef = useRef<TocNode[]>([])
 
   const rememberSidebarScroll = useCallback((tabToRemember: NavTab, top: number, index?: number, persist = true) => {
     savedScrollTop.current[tabToRemember] = top
@@ -284,8 +350,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           const rect = row.getBoundingClientRect()
           return rect.top >= viewportTop + 40 && rect.top < viewportTop + container.clientHeight
         })
+      const collapsedKeys = serializeCollapsed(collapsedRef.current, treeRef.current)
       savedTocPosition.current = {
         ...position,
+        collapsedKeys,
         ...(anchor ? { anchorHref: anchor.dataset.tocHref, anchorOffset: anchor.getBoundingClientRect().top - viewportTop } : {}),
       }
       if (persist) setSidebarScrollPosition(bookId, tabToRemember, savedTocPosition.current)
@@ -441,6 +509,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }, [bookId, chaptersQuery.data, tocBookId, tocItems])
 
   const tree = useMemo(() => buildTocTree(tocChapters), [tocChapters])
+  treeRef.current = tree
   const chapterOrder = useMemo(() => tocChapters.map((c) => ({ label: c.label, href: c.href })), [tocChapters])
   const chapterOrderReady = tocBookId === bookId && chapterOrder.length > 0
   const rootNodes = useMemo(() => tree.filter((n) => n.parent === null), [tree])
@@ -511,7 +580,28 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     },
   }), [currentIndex, open, rememberSidebarScroll, tab])
 
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+  const rememberedCollapsedKeys = rememberedTocPosition?.collapsedKeys
+
+  const [collapsed, setCollapsed] = useState<Set<number>>(() => {
+    if (rememberedCollapsedKeys !== undefined && tree.length > 0) {
+      return deserializeCollapsed(rememberedCollapsedKeys, tree)
+    }
+    return computeInitialCollapsed(tree, currentIndex)
+  })
+  const isInitiallyReady = tree.length > 0 && (rememberedCollapsedKeys !== undefined || currentIndex >= 0 || tocPositionReady)
+  const initializedTreeRef = useRef(isInitiallyReady)
+  useEffect(() => {
+    if (initializedTreeRef.current || tree.length === 0) return
+    if (rememberedCollapsedKeys !== undefined) {
+      initializedTreeRef.current = true
+      setCollapsed(deserializeCollapsed(rememberedCollapsedKeys, tree))
+    } else if (currentIndex >= 0 || tocPositionReady) {
+      initializedTreeRef.current = true
+      setCollapsed(computeInitialCollapsed(tree, currentIndex))
+    }
+  }, [tree, currentIndex, rememberedCollapsedKeys, tocPositionReady])
+  collapsedRef.current = collapsed
+  const scrollAnchorRef = useRef<{ index: number; visualTop: number } | null>(null)
 
   const [query, setQuery] = useState('')
   const [searchExpanded, setSearchExpanded] = useState(false)
@@ -669,10 +759,18 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     return tree.filter((n) => n.displayDepth === 1 && n.children.length > 0).map((n) => n.index)
   }, [tree])
 
-  // Auto-expand path to current chapter when it changes or the panel opens.
+  const prevChapterIndexRef = useRef<number | null>(null)
+
+  // Auto-expand path to current chapter when chapter changes during reading.
   useEffect(() => {
     if (!open || tab !== 'toc' || currentIndex < 0) return
-    if (currentIndex === lastScrolledIndex.current) return
+    if (prevChapterIndexRef.current === null) {
+      prevChapterIndexRef.current = currentIndex
+      return
+    }
+    if (prevChapterIndexRef.current === currentIndex) return
+    prevChapterIndexRef.current = currentIndex
+
     const next = new Set<number>()
     let node: TocNode | undefined = tree[currentIndex]
     while (node) {
@@ -683,12 +781,36 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     }
     setCollapsed((prev) => {
       if (next.size === 0) return prev
+      let hasCollapsedAncestor = false
+      for (const n of next) {
+        if (prev.has(n)) {
+          hasCollapsedAncestor = true
+          break
+        }
+      }
+      if (!hasCollapsedAncestor) return prev
       const merged = new Set(prev)
       for (const n of next) merged.delete(n)
-      if (merged.size === prev.size) return prev
+      collapsedRef.current = merged
+      const container = listRef.current
+      if (container) {
+        rememberSidebarScroll('toc', container.scrollTop, currentIndex)
+      }
       return merged
     })
-  }, [currentIndex, tree, open, tab])
+  }, [currentIndex, tree, open, tab, rememberSidebarScroll])
+
+  const updateCollapsed = useCallback((updater: (prev: Set<number>) => Set<number>) => {
+    setCollapsed((prev) => {
+      const next = updater(prev)
+      collapsedRef.current = next
+      const container = listRef.current
+      if (container) {
+        rememberSidebarScroll('toc', container.scrollTop, currentIndex)
+      }
+      return next
+    })
+  }, [currentIndex, rememberSidebarScroll])
 
   const goTo = useCallback((href: string) => {
     setPendingNavigationHref(href)
@@ -703,35 +825,77 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const handleItemClick = useCallback((node: TocNode) => {
     goTo(node.href)
     if (node.children.length > 0) {
-      setCollapsed((prev) => {
+      updateCollapsed((prev) => {
         if (!prev.has(node.index)) return prev
         const next = new Set(prev)
         next.delete(node.index)
         return next
       })
     }
-  }, [goTo])
+  }, [goTo, updateCollapsed])
 
   const handleExpanderClick = useCallback((e: React.MouseEvent, index: number) => {
     e.stopPropagation()
-    setCollapsed((prev) => {
+    const container = listRef.current
+    const itemEl = itemRefs.current.get(index)
+    if (container && itemEl) {
+      const containerRect = container.getBoundingClientRect()
+      const itemRect = itemEl.getBoundingClientRect()
+      const isDockedAtTop = stuckVolumeIndex === index || itemRect.top <= containerRect.top + 4
+      scrollAnchorRef.current = {
+        index,
+        visualTop: isDockedAtTop ? 0 : Math.max(0, itemRect.top - containerRect.top),
+      }
+    }
+    updateCollapsed((prev) => {
       const next = new Set(prev)
       if (next.has(index)) next.delete(index)
       else next.add(index)
       return next
     })
-  }, [])
+  }, [stuckVolumeIndex, updateCollapsed])
 
   function toggleAllCollapse() {
+    const container = listRef.current
+    if (container && tab === 'toc') {
+      let anchorIndex: number | null = null
+      if (stuckVolumeIndex !== null && itemRefs.current.has(stuckVolumeIndex)) {
+        anchorIndex = stuckVolumeIndex
+      } else if (currentIndex >= 0 && tree[currentIndex]?.parent !== null) {
+        anchorIndex = tree[currentIndex].parent
+      }
+      if (anchorIndex === null) {
+        const cTop = container.getBoundingClientRect().top
+        for (const vIdx of volumeIndices) {
+          const el = itemRefs.current.get(vIdx)
+          if (!el) continue
+          if (el.getBoundingClientRect().bottom > cTop) {
+            anchorIndex = vIdx
+            break
+          }
+        }
+      }
+      if (anchorIndex !== null) {
+        const itemEl = itemRefs.current.get(anchorIndex)
+        if (itemEl) {
+          const containerRect = container.getBoundingClientRect()
+          const itemRect = itemEl.getBoundingClientRect()
+          const isDockedAtTop = stuckVolumeIndex === anchorIndex || itemRect.top <= containerRect.top + 4
+          scrollAnchorRef.current = {
+            index: anchorIndex,
+            visualTop: isDockedAtTop ? 0 : Math.max(0, itemRect.top - containerRect.top),
+          }
+        }
+      }
+    }
     if (allParentCollapsed) {
-      setCollapsed(new Set())
+      updateCollapsed(() => new Set())
       return
     }
     const parentIndices = tree.filter((n) => n.children.length > 0).map((n) => n.index)
-    setCollapsed((prev) => {
+    updateCollapsed((prev) => {
       const next = new Set(prev)
       for (const i of parentIndices) next.add(i)
-      if (next.size === prev.size) return prev
       return next
     })
   }
@@ -771,6 +935,24 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       updateStuckVolume()
     })
   }, [updateStuckVolume])
+
+  useLayoutEffect(() => {
+    const anchor = scrollAnchorRef.current
+    if (!anchor || tab !== 'toc' || !listRef.current) return
+    scrollAnchorRef.current = null
+    const container = listRef.current
+    const itemEl = itemRefs.current.get(anchor.index)
+    if (!itemEl) return
+    const containerRect = container.getBoundingClientRect()
+    const itemRect = itemEl.getBoundingClientRect()
+    const currentVisualTop = itemRect.top - containerRect.top
+    const delta = currentVisualTop - anchor.visualTop
+    if (Math.abs(delta) > 0.5) {
+      container.scrollTop += delta
+      rememberSidebarScroll('toc', container.scrollTop, tab === 'toc' ? currentIndex : undefined, false)
+    }
+    updateStuckVolume()
+  }, [collapsed, currentIndex, rememberSidebarScroll, tab, updateStuckVolume])
 
   // Remember each scrollable side page independently so switching tabs does not
   // move the user to a different position when they return.
@@ -853,7 +1035,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     }
     const item = itemRefs.current.get(currentIndex)
     const container = listRef.current
-    if (!item || !container) return
+    if (!item || !container) {
+      if (tocPositionReady) setTocPlaced(true)
+      return
+    }
     const bounds = (item.closest('li') ?? item).getBoundingClientRect()
     const viewport = container.getBoundingClientRect()
     const topInset = tree[currentIndex]?.parent === null ? 0 : 40
@@ -905,6 +1090,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   const [searchMatchCase, setSearchMatchCase] = useState(false)
   const [searchMode, setSearchMode] = useState<'contains' | 'regex'>('contains')
   const searchGenRef = useRef(0)
+  const normalizedSearchQuery = normalizeSearchQuery(query, searchMode)
+  const currentSearchKey = `${searchScope}:${searchMode}:${searchMatchCase}:${normalizedSearchQuery}`
+  const [executedSearchKey, setExecutedSearchKey] = useState<string | null>(null)
+  const isSearchPending = normalizedSearchQuery.length > 0 && (searching || executedSearchKey !== currentSearchKey)
   // Search-history chips are per-book, deduped, and capped at 10;
   // only completed searches with hits are recorded
   const [searchHistory, setSearchHistory] = useState<string[]>(() => loadSearchHistory(bookId))
@@ -930,15 +1119,102 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     return groups
   }, [searchResults])
 
+  const [collapsedSearchChapters, setCollapsedSearchChapters] = useState<Set<string>>(new Set())
+  const searchItemRefs = useRef<Map<number, HTMLButtonElement>>(new Map())
+  const searchChapterHeaderRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const searchScrollAnchorRef = useRef<{ chapterKey: string; visualTop: number } | null>(null)
+
+  const allSearchChaptersCollapsed = useMemo(() => {
+    const namedGroups = resultGroups.filter((g) => g.chapter)
+    if (namedGroups.length === 0) return false
+    return namedGroups.every((g) => collapsedSearchChapters.has(g.chapter!))
+  }, [resultGroups, collapsedSearchChapters])
+
+  const toggleAllSearchCollapse = useCallback(() => {
+    const container = listRef.current
+    if (container) {
+      const cTop = container.getBoundingClientRect().top
+      let anchorKey: string | null = null
+      for (const group of resultGroups) {
+        if (!group.chapter) continue
+        const el = searchChapterHeaderRefs.current.get(group.chapter)
+        if (!el) continue
+        if (el.getBoundingClientRect().bottom > cTop) {
+          anchorKey = group.chapter
+          break
+        }
+      }
+      if (anchorKey) {
+        const el = searchChapterHeaderRefs.current.get(anchorKey)
+        if (el) {
+          const containerRect = container.getBoundingClientRect()
+          const headerRect = el.getBoundingClientRect()
+          const isDockedAtTop = headerRect.top <= containerRect.top + 4
+          searchScrollAnchorRef.current = {
+            chapterKey: anchorKey,
+            visualTop: isDockedAtTop ? 0 : Math.max(0, headerRect.top - containerRect.top),
+          }
+        }
+      }
+    }
+    if (allSearchChaptersCollapsed) {
+      setCollapsedSearchChapters(new Set())
+    } else {
+      const allKeys = new Set<string>()
+      for (const g of resultGroups) {
+        if (g.chapter) allKeys.add(g.chapter)
+      }
+      setCollapsedSearchChapters(allKeys)
+    }
+  }, [allSearchChaptersCollapsed, resultGroups])
+
+  const toggleSearchChapterCollapse = useCallback((key: string) => {
+    const container = listRef.current
+    const headerEl = searchChapterHeaderRefs.current.get(key)
+    if (container && headerEl) {
+      const containerRect = container.getBoundingClientRect()
+      const headerRect = headerEl.getBoundingClientRect()
+      const isDockedAtTop = headerRect.top <= containerRect.top + 4
+      searchScrollAnchorRef.current = {
+        chapterKey: key,
+        visualTop: isDockedAtTop ? 0 : Math.max(0, headerRect.top - containerRect.top),
+      }
+    }
+    setCollapsedSearchChapters((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    const anchor = searchScrollAnchorRef.current
+    if (!anchor || !listRef.current || !searchExpanded) return
+    searchScrollAnchorRef.current = null
+    const container = listRef.current
+    const headerEl = searchChapterHeaderRefs.current.get(anchor.chapterKey)
+    if (!headerEl) return
+    const containerRect = container.getBoundingClientRect()
+    const headerRect = headerEl.getBoundingClientRect()
+    const currentVisualTop = headerRect.top - containerRect.top
+    const delta = currentVisualTop - anchor.visualTop
+    if (Math.abs(delta) > 0.5) {
+      container.scrollTop += delta
+    }
+  }, [collapsedSearchChapters, searchExpanded])
+
   async function doSearch() {
-    const trimmed = searchMode === 'regex' ? query.trim() : query.replace(/\s+/g, ' ').trim()
+    const trimmed = normalizeSearchQuery(query, searchMode)
     if (!trimmed || !renderer?.search) return
     const gen = ++searchGenRef.current
+    const thisSearchKey = `${searchScope}:${searchMode}:${searchMatchCase}:${trimmed}`
     setSearching(true)
     setSearchProgress(0)
     setSearchStatus({ truncated: false, incomplete: false })
     setSearchResults([])
     setSearchIndex(-1)
+    setCollapsedSearchChapters(new Set())
     try {
       const results = await renderer.search(
         trimmed,
@@ -952,6 +1228,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       )
       if (gen !== searchGenRef.current) return
       setSearchResults(results)
+      setExecutedSearchKey(thisSearchKey)
       if (results.length > 0) {
         setSearchHistory((prev) => {
           const next = pushSearchTerm(prev, query.trim())
@@ -961,6 +1238,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         if (autoJumpOnCompleteRef.current) {
           autoJumpOnCompleteRef.current = false
           setSearchIndex(0)
+          scrollSearchResultIntoView(0)
           void renderer.display(results[0].cfi)
           if (!locked && isTouch) onClose?.()
         }
@@ -979,9 +1257,11 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     setSearchResults([])
     searchGenRef.current++
     setSearching(false)
+    setExecutedSearchKey(null)
     setSearchProgress(null)
     setSearchStatus({ truncated: false, incomplete: false })
     setSearchIndex(-1)
+    setCollapsedSearchChapters(new Set())
     renderer?.clearSearch()
   }
 
@@ -990,12 +1270,45 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     setSearchExpanded(false)
   }
 
+  const scrollSearchResultIntoView = useCallback((index: number, retries = 3) => {
+    requestAnimationFrame(() => {
+      const container = listRef.current
+      if (!container) return
+      const el = searchItemRefs.current.get(index)
+      if (!el) {
+        if (retries > 0) {
+          scrollSearchResultIntoView(index, retries - 1)
+        }
+        return
+      }
+      const cRect = container.getBoundingClientRect()
+      const eRect = el.getBoundingClientRect()
+      const topLimit = cRect.top + 40
+      const bottomLimit = cRect.bottom - 10
+
+      if (eRect.top < topLimit) {
+        container.scrollTop += (eRect.top - topLimit)
+      } else if (eRect.bottom > bottomLimit) {
+        container.scrollTop += (eRect.bottom - bottomLimit)
+      }
+    })
+  }, [])
+
   // Navigate to a result — via list click or the prev/next card — keeping the
   // pointer in sync so "next" always continues from what's on screen
   function goToResult(index: number) {
     const r = searchResults[index]
     if (!r) return
     setSearchIndex(index)
+    if (r.chapter) {
+      setCollapsedSearchChapters((prev) => {
+        if (!prev.has(r.chapter!)) return prev
+        const next = new Set(prev)
+        next.delete(r.chapter!)
+        return next
+      })
+    }
+    scrollSearchResultIntoView(index)
     void renderer?.display(r.cfi)
     if (!locked && isTouch) onClose?.()
   }
@@ -1018,8 +1331,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // results instantly instead of re-searching.
   useEffect(() => {
     if (tabRef.current !== 'toc' || !open) return
-    if (!query.trim()) {
+    if (!normalizeSearchQuery(query, searchMode)) {
       setSearchResults([])
+      setExecutedSearchKey(null)
       return
     }
     const timer = setTimeout(() => {
@@ -1191,6 +1505,31 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           <div className="ml-auto flex items-center gap-1 shrink-0">
             {tab === 'toc' && searchExpanded ? (
               <>
+                {/* Result counts arrive a beat after the bar opens, so this button appears
+                    mid-session. It sits leftmost in the right-aligned group: inserting it
+                    there only claims free space, while inserting it to the right of Aa / .*
+                    would shove those buttons sideways. */}
+                {searchActive && resultGroups.filter((g) => g.chapter).length > 1 && (
+                  <button
+                    type="button"
+                    onClick={toggleAllSearchCollapse}
+                    title={allSearchChaptersCollapsed ? _('reader.expandAll') : _('reader.collapseAll')}
+                    aria-label={allSearchChaptersCollapsed ? _('reader.expandAll') : _('reader.collapseAll')}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current transition-colors active:scale-95"
+                  >
+                    {allSearchChaptersCollapsed ? (
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m7 15 5 5 5-5" />
+                        <path d="m7 9 5-5 5 5" />
+                      </svg>
+                    ) : (
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m7 20 5-5 5 5" />
+                        <path d="m7 4 5 5 5-5" />
+                      </svg>
+                    )}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setSearchMatchCase((v) => !v)}
@@ -1230,32 +1569,14 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                 </button>
               </>
             ) : null}
-            {tab === 'toc' && !searchExpanded && hasMultiLevel && (
-              <button
-                type="button"
-                onClick={toggleAllCollapse}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current transition-colors"
-                aria-label={allParentCollapsed ? _('reader.expandAll') : _('reader.collapseAll')}
-                title={allParentCollapsed ? _('reader.expandAll') : _('reader.collapseAll')}
-              >
-                {allParentCollapsed ? (
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m7 15 5 5 5-5" />
-                    <path d="m7 9 5-5 5 5" />
-                  </svg>
-                ) : (
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m7 20 5-5 5 5" />
-                    <path d="m7 4 5 5 5-5" />
-                  </svg>
-                )}
-              </button>
-            )}
+            {/* Appears only once the reader scrolls away from the current chapter, so it
+                must sit left of the always-present toggle: the group is right-aligned, and a
+                late insertion anywhere further right would shift its neighbours sideways. */}
             {showLocate && (
               <button
                 type="button"
                 onClick={() => {
-                  setCollapsed((prev) => {
+                  updateCollapsed((prev) => {
                     const next = new Set(prev)
                     let parent = tree[currentIndex]?.parent
                     while (parent != null) {
@@ -1275,6 +1596,27 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                   <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
                   <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
                 </svg>
+              </button>
+            )}
+            {tab === 'toc' && !searchExpanded && hasMultiLevel && (
+              <button
+                type="button"
+                onClick={toggleAllCollapse}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--bd-read-sub)] hover:bg-stone-500/10 hover:text-current transition-colors"
+                aria-label={allParentCollapsed ? _('reader.expandAll') : _('reader.collapseAll')}
+                title={allParentCollapsed ? _('reader.expandAll') : _('reader.collapseAll')}
+              >
+                {allParentCollapsed ? (
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m7 15 5 5 5-5" />
+                    <path d="m7 9 5-5 5 5" />
+                  </svg>
+                ) : (
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m7 20 5-5 5 5" />
+                    <path d="m7 4 5 5 5-5" />
+                  </svg>
+                )}
               </button>
             )}
             {tab === 'toc' && !searchExpanded && (
@@ -1462,8 +1804,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             )}
           </div>
 
+          {/* pt is deliberately tighter than pb: the input row already ends with py-2, and
+              the history label sat ~24px away from it, reading as a detached block. */}
           {!query.trim() ? (
-            <div className="flex-1 overflow-y-auto reader-scrollbar p-4 space-y-5">
+            <div className="flex-1 overflow-y-auto reader-scrollbar px-4 pb-4 pt-2.5 space-y-5">
               {searchHistory.length > 0 ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs text-[var(--bd-read-sub)]">
@@ -1506,47 +1850,49 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
               )}
             </div>
           ) : (
-            <div
-              ref={listRef}
-              onScroll={handleScroll}
-              className="flex-1 overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] pl-2 pr-3 py-3 text-sm"
-            >
-              <div className="space-y-3">
-                {searchResults.length > 0 && (
-                  <div className="flex items-center justify-between px-1 text-xs text-[var(--bd-read-sub)]">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span>
-                        {searchResults.length} {_('reader.matches')}
-                      </span>
-                      {searching && searchProgress != null && searchProgress < 1 && (
-                        <span className="flex items-center gap-1 text-[11px] font-mono tabular-nums text-[var(--bd-read-primary)]">
-                          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-                          <span>{Math.round(searchProgress * 100)}%</span>
-                        </span>
-                      )}
-                    </div>
-                    {resultGroups.length > 1 && (
-                      <span className="text-[11px] opacity-70">
-                        {resultGroups.length} {_('reader.chapters')}
+            <>
+              {/* Pinned Search Header Summary Bar (Hairline bottom border, stays pinned while scrolling results) */}
+              {searchResults.length > 0 && (
+                <div className="flex items-center justify-between border-b border-[var(--bd-read-accent)]/20 px-3 py-1.5 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-bg)]">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span>
+                      {searchResults.length} {_('reader.matches')}
+                    </span>
+                    {searching && searchProgress != null && searchProgress < 1 && (
+                      <span className="flex items-center gap-1 text-[11px] font-mono tabular-nums text-[var(--bd-read-primary)]">
+                        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+                        <span>{Math.round(searchProgress * 100)}%</span>
                       </span>
                     )}
                   </div>
-                )}
-                {searchStatus.truncated && (
-                  <p role="status" className="px-1 text-xs text-[var(--bd-read-sub)]">
-                    {_('reader.searchTruncated', { count: searchResults.length })}
-                  </p>
-                )}
-                {searchStatus.incomplete && (
-                  <p role="status" className="px-1 text-xs text-[var(--bd-read-sub)]">
-                    {_(searchStatus.error === 'regex-timeout' ? 'reader.searchRegexTimeout'
-                      : searchStatus.error ? 'reader.searchRegexFailed' : 'reader.searchIncomplete')}
-                  </p>
-                )}
-                {searchResults.length === 0 && !searching && !searchStatus.incomplete && (
+                  {resultGroups.length > 1 && (
+                    <span className="text-[11px] opacity-70">
+                      {resultGroups.length} {_('reader.chapters')}
+                    </span>
+                  )}
+                </div>
+              )}
+              {searchStatus.truncated && (
+                <div role="status" className="border-b border-[var(--bd-read-accent)]/20 px-3 py-1 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-bg)]">
+                  {_('reader.searchTruncated', { count: searchResults.length })}
+                </div>
+              )}
+              {searchStatus.incomplete && (
+                <div role="status" className="border-b border-[var(--bd-read-accent)]/20 px-3 py-1 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-bg)]">
+                  {_(searchStatus.error === 'regex-timeout' ? 'reader.searchRegexTimeout'
+                    : searchStatus.error ? 'reader.searchRegexFailed' : 'reader.searchIncomplete')}
+                </div>
+              )}
+
+              <div
+                ref={listRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto reader-scrollbar [scrollbar-gutter:stable] pl-2 pr-3 pt-0 pb-3 text-sm"
+              >
+                {searchResults.length === 0 && !isSearchPending && !searchStatus.incomplete && (
                   <p className="text-xs text-[var(--bd-read-sub)] px-1 py-8 text-center">{_('reader.noMatches')}</p>
                 )}
-                {searchResults.length === 0 && searching && (
+                {searchResults.length === 0 && isSearchPending && (
                   <div className="flex flex-col items-center justify-center py-10 text-center text-[var(--bd-read-sub)]">
                     <span className="mb-2 inline-block h-2 w-2 animate-ping rounded-full bg-[var(--bd-read-primary)] opacity-75" />
                     <p className="text-xs text-[var(--bd-read-sub)]/80">
@@ -1554,70 +1900,113 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                     </p>
                   </div>
                 )}
-                {resultGroups.map((group, gi) => (
-                  <div key={group.chapter ?? gi} className="space-y-1.5">
-                    {group.chapter && (
-                      <div className="group/ch mb-1 flex items-center justify-between px-1">
-                        <span className="truncate text-xs font-semibold text-current" title={group.chapter}>
-                          {group.chapter}
-                        </span>
-                        <span className="shrink-0 pl-2 text-[11px] font-mono tabular-nums text-[var(--bd-read-sub)]/65 transition-colors group-hover/ch:text-current">
-                          {group.items.length}
-                        </span>
-                      </div>
-                    )}
-                    <ul className="space-y-1.5">
-                      {group.items.map((r) => {
-                        const isActive = searchIndex === r.index
-                        return (
-                          <li key={r.index}>
-                            <button
-                              type="button"
-                              onClick={() => goToResult(r.index)}
-                              className={cn(
-                                'group/item relative flex w-full items-start gap-2 rounded-lg border p-2.5 text-left text-xs leading-relaxed transition-all',
-                                isActive
-                                  ? 'border-[var(--bd-read-primary)]/40 bg-[var(--bd-read-primary)]/10 text-current shadow-xs'
-                                  : 'border-transparent bg-stone-500/5 text-[var(--bd-read-sub)] hover:border-stone-200/60 hover:bg-stone-500/10 hover:text-current dark:hover:border-stone-800/60',
-                              )}
-                            >
-                              <span
+                {resultGroups.map((group, gi) => {
+                  const chapterKey = group.chapter ?? `group-${gi}`
+                  const isCollapsed = group.chapter ? collapsedSearchChapters.has(group.chapter) : false
+                  return (
+                    <div key={chapterKey} className="mt-1.5 first:mt-0 space-y-1.5">
+                      {group.chapter && (
+                        <div
+                          ref={(el) => {
+                            if (el) searchChapterHeaderRefs.current.set(group.chapter!, el)
+                            else searchChapterHeaderRefs.current.delete(group.chapter!)
+                          }}
+                          className="sticky top-0 z-10 -ml-2 -mr-3 pl-2 pr-3 py-0.5 transition-shadow"
+                          style={{ backgroundColor: 'var(--bd-read-bg)' }}
+                        >
+                          {/* Row height carries the hit area: with py-1 the highlight was a
+                              24px band floating inside a ~42px pitch, so collapsed groups read
+                              as thin clickable slivers with wide dead gaps. Keep the pitch but
+                              give the button 32px and take the slack out of the wrapper. */}
+                          <button
+                            type="button"
+                            onClick={() => toggleSearchChapterCollapse(group.chapter!)}
+                            className="group/ch flex min-h-8 w-full items-center justify-between rounded-lg px-1.5 py-1.5 text-left text-xs font-semibold text-current hover:bg-stone-500/10 transition-colors"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <svg
                                 className={cn(
-                                  'mt-0.5 flex h-4 w-4.5 shrink-0 items-center justify-center rounded text-[10px] font-mono font-medium tabular-nums select-none transition-colors',
-                                  isActive
-                                    ? 'bg-[var(--bd-read-primary)]/25 text-current'
-                                    : 'bg-stone-500/10 text-[var(--bd-read-sub)] group-hover/item:bg-stone-500/15 group-hover/item:text-current',
+                                  'h-3.5 w-3.5 shrink-0 text-[var(--bd-read-sub)] transition-transform duration-150',
+                                  isCollapsed ? '-rotate-90' : 'rotate-0',
                                 )}
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
                               >
-                                {r.index + 1}
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                              <span className="truncate" title={group.chapter}>
+                                {group.chapter}
                               </span>
-                              <div className="min-w-0 flex-1 line-clamp-3">
-                                {r.excerpt ? (
-                                  (() => {
-                                    const ex = formatCardExcerpt(r.excerpt)
-                                    return (
-                                      <>
-                                        {ex.pre}
-                                        <mark className="rounded-xs bg-[var(--bd-read-primary)]/25 px-0.5 font-semibold text-current selection:bg-transparent">
-                                          {ex.match}
-                                        </mark>
-                                        {ex.post}
-                                      </>
-                                    )
-                                  })()
-                                ) : (
-                                  r.text
-                                )}
-                              </div>
-                            </button>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  </div>
-                ))}
+                            </div>
+                            <span className="shrink-0 pl-2 text-[11px] font-mono tabular-nums text-[var(--bd-read-sub)]/65 transition-colors group-hover/ch:text-current">
+                              {group.items.length}
+                            </span>
+                          </button>
+                        </div>
+                      )}
+                      {!isCollapsed && (
+                        <ul className="space-y-1.5">
+                          {group.items.map((r) => {
+                            const isActive = searchIndex === r.index
+                            return (
+                              <li key={r.index}>
+                                <button
+                                  ref={(el) => {
+                                    if (el) searchItemRefs.current.set(r.index, el)
+                                    else searchItemRefs.current.delete(r.index)
+                                  }}
+                                  type="button"
+                                  onClick={() => goToResult(r.index)}
+                                  className={cn(
+                                    'group/item relative flex w-full items-start gap-2 rounded-lg border p-2.5 text-left text-xs leading-relaxed transition-all',
+                                    isActive
+                                      ? 'border-[var(--bd-read-primary)]/40 bg-[var(--bd-read-primary)]/10 text-current shadow-xs'
+                                      : 'border-transparent bg-stone-500/5 text-[var(--bd-read-sub)] hover:border-stone-200/60 hover:bg-stone-500/10 hover:text-current dark:hover:border-stone-800/60',
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      'mt-0.5 flex h-4 w-4.5 shrink-0 items-center justify-center rounded text-[10px] font-mono font-medium tabular-nums select-none transition-colors',
+                                      isActive
+                                        ? 'bg-[var(--bd-read-primary)]/25 text-current'
+                                        : 'bg-stone-500/10 text-[var(--bd-read-sub)] group-hover/item:bg-stone-500/15 group-hover/item:text-current',
+                                    )}
+                                  >
+                                    {r.index + 1}
+                                  </span>
+                                  <div className="min-w-0 flex-1 line-clamp-3">
+                                    {r.excerpt ? (
+                                      (() => {
+                                        const ex = formatCardExcerpt(r.excerpt)
+                                        return (
+                                          <>
+                                            {ex.pre}
+                                            <mark className="rounded-xs bg-[var(--bd-read-primary)]/25 px-0.5 font-semibold text-current selection:bg-transparent">
+                                              {ex.match}
+                                            </mark>
+                                            {ex.post}
+                                          </>
+                                        )
+                                      })()
+                                    ) : (
+                                      r.text
+                                    )}
+                                  </div>
+                                </button>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
-            </div>
+            </>
           )}
         </div>
       ) : (
@@ -1646,7 +2035,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                     role="status"
                     aria-busy="true"
                     data-testid="toc-loading-skeleton"
-                    className="pointer-events-none absolute inset-x-0 top-0 space-y-2 px-2 pt-2"
+                    className="pointer-events-none absolute inset-x-0 top-0 space-y-2 px-2 pt-2 overflow-hidden"
                   >
                     {[78, 64, 88, 72, 60, 84, 70, 76].map((width, index) => (
                       <div
@@ -1689,7 +2078,11 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             hideSelectionToolbar={true}
           />
         )}
-        {tab === 'stats' && !statsDisabled && !guestReadOnly && <StatsPanel bookId={bookId} />}
+        {!statsDisabled && !guestReadOnly && (
+          <div className={tab === 'stats' ? 'contents' : 'hidden'}>
+            <StatsPanel bookId={bookId} />
+          </div>
+        )}
         <div className={tab === 'ai' && !guestReadOnly ? 'h-full' : 'hidden'}>
           {!guestReadOnly && (
             <AiPanel

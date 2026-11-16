@@ -4,12 +4,17 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Search results are grouped by chapter with collapsible, sticky chapter headers. A toolbar toggle folds or unfolds every group at once, and moving between matches expands the chapter that holds the match and scrolls it into view.
+- The table of contents remembers which volumes you folded for each book and restores them next time, instead of falling back to the default folding. The first time a book is opened, only the volume holding the current chapter is expanded.
+
 ### Changed
 
 - The desktop reader header now displays a pulsing skeleton placeholder while chapter and book titles load, preventing title text flashing before reading content is ready.
 - The reader progress strip now captures pointer events while visible, preventing clicks on its labels and empty space from passing through to the underlying reading area.
 - Improved the desktop reader's floating sidebar container geometry and layered styling to prevent resize handles, shadows, and tooltips from clipping at the borders.
-- Replaced translucent background blurring on floating flyout menus with solid cards, eliminating visual bleed-through from high-contrast backgrounds.
+- Replaced translucent background blurring on floating flyout menus with solid cards, eliminating visual bleed-through from high-contrast backgrounds. The reading-status picker in the library selection bar uses the same solid treatment.
 - The library category picker now displays a taxonomy icon beside the "Uncategorized" entry for visual consistency.
 - Sidebar note, statistic, and AI thread loading skeletons now constrain overflow to prevent layout shifts inside narrow or resized panels.
 
@@ -17,6 +22,10 @@ All notable changes to Bookdock are documented here.
 
 - Fixed table of contents losing the fully expanded state on page refresh. Saving an empty list of collapsed volumes is now preserved across local storage reloads instead of falling back to default volume folding.
 - Updated the lightweight E-Ink reader bundle with the latest asset caching, image variant handling, and navigation lifecycle fixes.
+- Fixed the reader's tool icons disappearing and reappearing on entry: background `/auth/me` refreshes no longer unmount the routed shell, and the shell no longer paints one frame as an anonymous guest before the signed-in identity settles.
+- Fixed the reader header and floating dock playing a spurious entry animation on first paint, where the header slid down from off-screen and the dock expanded from zero width and height.
+- Fixed the reader header icon row shifting sideways when the reading time arrived, and when guest mode omitted the TTS and bookmark buttons; both now hold fixed slots, and the duration is clipped rather than widening its slot.
+- Fixed the search panel flashing "no matches" between typing and the debounced search actually running.
 
 ## [0.8.5] - 2026-11-16
 
@@ -1337,12 +1346,17 @@ All notable changes to Bookdock are documented here.
 
 ### [Unreleased]
 
+#### 新增
+
+- 搜索结果按章节分组，分组头可折叠并在滚动时吸顶；工具栏支持一键全部折叠或展开，用上一条/下一条在结果间跳转时会自动展开所在章节并滚动到该条。
+- 目录会按书记住你手动折叠的卷，下次打开时恢复，不再回到默认折叠；某本书首次打开时只展开当前阅读章节所在的卷。
+
 #### 优化
 
 - 桌面阅读器顶栏在章节和书名加载期间显示脉冲骨架占位条，避免正文就绪前标题文字闪烁。
 - 阅读器底部进度条在显示时接管指针事件，防止点击标签或空白处穿透触发下层阅读区域。
 - 改进桌面阅读器悬浮侧栏容器几何结构与分层样式，避免调整尺寸手柄、阴影与浮层被边框裁切。
-- 悬浮菜单改用纯色卡片替代半透明背景毛玻璃，消除高对比度背景下的透光干扰。
+- 悬浮菜单改用纯色卡片替代半透明背景毛玻璃，消除高对比度背景下的透光干扰；书库选择栏的阅读状态下拉同样改为纯色。
 - 书库分类选择弹窗在“未分类”选项前补充分类图标，保持视觉规范统一。
 - 侧栏笔记、统计与 AI 对话的加载骨架屏限制溢出，避免窄栏或调整尺寸时出现布局抖动。
 
@@ -1350,6 +1364,10 @@ All notable changes to Bookdock are documented here.
 
 - 修复刷新页面后目录“全部展开”状态丢失的问题。本地存储反序列化时完整保留空的折叠列表，不再错误回退到默认折叠规则。
 - 同步更新轻量级墨水屏阅读器构建产物，包含最新的静态资源缓存、图片变体处理与页面导航生命周期修复。
+- 修复进入阅读器时工具图标先消失再出现的问题：`/auth/me` 的后台刷新不再卸载整个路由外壳，外壳也不会先以访客身份渲染一帧再重建。
+- 修复阅读器顶栏与悬浮侧栏首帧播放多余入场动画的问题（顶栏从屏幕外滑入、侧栏宽度从 0 展开）。
+- 修复阅读时长到达、或访客态缺少 TTS 与书签按钮时顶栏图标组横向位移的问题，两者现在都占固定槽位，超长时长改为截断而不是撑宽槽位。
+- 修复输入搜索词后、防抖搜索尚未开始时先闪一次“未找到匹配”的问题。
 
 ### [0.8.5] - 2026-11-16
 

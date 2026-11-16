@@ -227,4 +227,34 @@ describe('RootComponent guard', () => {
     expect(screen.queryByTestId('outlet')).not.toBeInTheDocument()
   })
 
+  it('keeps the shell mounted while the session refetches in the background', async () => {
+    const me = { id: 'u1', username: 'reader', role: 'owner' }
+    let release: ((value: unknown) => void) | null = null
+    let calls = 0
+    ;(apiGet as ReturnType<typeof vi.fn>).mockImplementation((path: string) => {
+      if (path === '/auth/instance') return Promise.resolve({ data: INITIALIZED })
+      if (path === '/auth/me') {
+        calls += 1
+        if (calls === 1) return Promise.resolve({ data: me })
+        return new Promise((resolve) => { release = resolve })
+      }
+      return Promise.reject(new Error(`unexpected ${path}`))
+    })
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderRoot(client)
+    await waitFor(() => expect(screen.getByTestId('outlet')).toBeInTheDocument())
+    await waitFor(() => expect(useAuthStore.getState().user?.id).toBe('u1'))
+
+    act(() => { void client.invalidateQueries({ queryKey: ME_QUERY_KEY, exact: true }) })
+    await waitFor(() => expect(release).not.toBeNull())
+
+    // A background probe must not swap the shell for the loading screen: doing so
+    // unmounts the reader and makes its tool icons vanish and grow back.
+    expect(screen.getByTestId('outlet')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).toBeNull()
+
+    await act(async () => { release!({ data: me }) })
+  })
+
 })

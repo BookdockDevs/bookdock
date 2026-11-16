@@ -116,23 +116,39 @@ describe('ReaderSidebar on pointer devices', () => {
     coarsePointer = false
   })
 
-  it('keeps the hover summon: collapsed strip reveals the dock on hover', () => {
+  it('keeps the hover summon: collapsed strip reveals the dock on hover', async () => {
     const { container } = renderSidebar(false)
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
     fireEvent.pointerEnter(dockEl(container))
-    expect(dockEl(container)).toHaveClass('opacity-100')
+    // Reveal waits for a short hover dwell so a pointer merely crossing the
+    // corridor does not flash the dock.
+    await waitFor(() => expect(dockEl(container)).toHaveClass('opacity-100'))
     fireEvent.pointerLeave(dockEl(container))
     expect(dockEl(container)).toHaveClass('opacity-0', 'pointer-events-none')
   })
 
-  it('summons the floating dock from coordinates without covering the reading surface', () => {
+  it('bounds the hover dwell: still hidden at 100ms, revealed by 150ms', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = renderSidebar(false)
+      fireEvent.pointerMove(window, { clientX: 60, clientY: 80 })
+      act(() => { vi.advanceTimersByTime(100) })
+      expect(dockEl(container)).toHaveClass('opacity-0')
+      act(() => { vi.advanceTimersByTime(50) })
+      expect(dockEl(container)).toHaveClass('opacity-100')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('summons the floating dock from coordinates without covering the reading surface', async () => {
     const { container } = renderSidebar(false)
     const sidebar = outerEl(container)
 
     expect(sidebar).toHaveClass('pointer-events-none')
     expect(screen.queryByTestId('reader-floating-hover-zone')).toBeNull()
     fireEvent.pointerMove(window, { clientX: 60, clientY: 80 })
-    expect(dockEl(container)).toHaveClass('opacity-100')
+    await waitFor(() => expect(dockEl(container)).toHaveClass('opacity-100'))
 
     fireEvent.pointerMove(window, { clientX: 71, clientY: 80 })
     expect(dockEl(container)).toHaveClass('opacity-0')
@@ -241,7 +257,7 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(useUiStore.getState().sidebarWidth).toBe(288)
   })
 
-  it('summons dock when hovering along the floating dock corridor and ignores header zone', () => {
+  it('summons dock when hovering along the floating dock corridor and ignores header zone', async () => {
     const { container } = renderSidebar(false)
     // Header zone (y < 48): does not summon floating dock to protect header back button
     fireEvent.pointerEnter(dockEl(container), { clientY: 24 })
@@ -249,7 +265,7 @@ describe('ReaderSidebar on pointer devices', () => {
 
     // Floating dock corridor where TOC button lives (y = 80): summons dock
     fireEvent.pointerEnter(dockEl(container), { clientY: 80 })
-    expect(dockEl(container)).toHaveClass('opacity-100')
+    await waitFor(() => expect(dockEl(container)).toHaveClass('opacity-100'))
     expect(dockEl(container)).toHaveClass('w-12')
 
     // Moving down into lower reading zone (y > 380): collapses dock
@@ -258,7 +274,7 @@ describe('ReaderSidebar on pointer devices', () => {
 
     // Re-entering floating dock corridor: summons dock
     fireEvent.pointerMove(dockEl(container), { clientY: 80 })
-    expect(dockEl(container)).toHaveClass('opacity-100')
+    await waitFor(() => expect(dockEl(container)).toHaveClass('opacity-100'))
 
     // Leaves dock: collapses
     fireEvent.pointerLeave(dockEl(container))
@@ -288,7 +304,7 @@ describe('ReaderSidebar on pointer devices', () => {
     fireEvent(window, new CustomEvent('reader-pointermove', {
       detail: { clientX: 20, clientY: 100, buttons: 0, hasSelection: false },
     }))
-    expect(dockEl(container)).toHaveClass('opacity-100')
+    await waitFor(() => expect(dockEl(container)).toHaveClass('opacity-100'))
 
     fireEvent.pointerLeave(dockEl(container))
   })
@@ -431,7 +447,7 @@ describe('ReaderSidebar on pointer devices', () => {
     })
 
     expect(dockEl(container)).toHaveClass('absolute', 'left-3', 'top-16')
-    expect(dockEl(container)).not.toHaveClass('opacity-0')
+    await waitFor(() => expect(dockEl(container)).not.toHaveClass('opacity-0'))
   })
 
   it('seamlessly transitions to floating dock capsule without flashing hidden when collapsing while pointer is in corridor', () => {

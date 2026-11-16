@@ -213,7 +213,11 @@ function RemoteRootComponent() {
       ready = pathname !== '/setup'
         && !(pathname === '/register' && registrationMode === 'closed')
         && !(pathname === '/login' && (meQuery.isPending || meQuery.isFetching || (meQuery.data && meQuery.data.data.guest !== true)))
-    } else if (meQuery.isPending || meQuery.isFetching) {
+    } else if (meQuery.isPending) {
+      // Only the initial probe may withhold the shell. `isFetching` also covers
+      // background refetches (focus, reconnect, identity invalidation) and those
+      // must not tear down the outlet: unmounting and remounting the reader
+      // reads as the tool icons disappearing and growing back.
       ready = false
     } else if (meQuery.data && !meQuery.isError) {
       ready = true
@@ -221,7 +225,15 @@ function RemoteRootComponent() {
       ready = instance.allowGuestAccess
     }
   }
-  if (!ready) {
+  // `setAuth` runs in an effect, so a deep link can paint one frame with
+  // `authUser === null` while /auth/me already names the account. Rendering then
+  // gives the shell key 'anonymous' followed by the user id, which remounts the
+  // whole reader and its dock. Hold the shell until the store catches up.
+  // Paths that never probe the session (/register, /setup) cannot seed the store,
+  // so waiting there would only strand the page on this screen.
+  const queriedMe = meQuery.data?.data
+  const identitySettled = !shouldProbeSession || !queriedMe || queriedMe.guest === true || authUser?.id === queriedMe.id
+  if (!ready || !identitySettled) {
     return <AppLoadingScreen />
   }
 

@@ -192,6 +192,9 @@ export default function Reader() {
   // only; the store's currentChapter stays the committed (relocate) value so
   // annotations saved mid-flight stay consistent.
   const [pendingNavChapter, setPendingNavChapter] = useState<string | null>(null)
+  // Touch devices have no hover: the chrome hot zones stay inert and the
+  // top/bottom controls are driven by the middle-tap chromePinned alone.
+  const isTouch = useIsTouch()
   // Middle click-area tap reveals the top/bottom bars (mobile: no hover);
   // reading-area interactions hide them again, while footer controls keep them open for consecutive navigation
   const [chromePinned, setChromePinned] = useState(false)
@@ -199,7 +202,8 @@ export default function Reader() {
   // Chrome visibility state machine: a 48px hot strip SUMMONs the header/footer, while
   // an already-revealed footer keeps a taller band alive so the pointer can climb to the
   // companion capsules. Leaving either starts a CHROME_LEAVE_GRACE_MS timer; touch uses
-  // chromePinned alone.
+  // chromePinned alone. Both start hidden: entering the reader is meant to be immersive,
+  // and the hot-zone sensor only needs to be right once the pointer actually moves.
   const [headerSummon, setHeaderSummon] = useState(false)
   const [footerSummon, setFooterSummon] = useState(false)
   const [cornerDwell, setCornerDwell] = useState(false)
@@ -263,9 +267,6 @@ export default function Reader() {
     }
   }, [])
 
-  // Touch devices have no hover: the chrome hot zones stay inert and the
-  // top/bottom controls are driven by the middle-tap chromePinned alone.
-  const isTouch = useIsTouch()
   const [isSelectingText, setIsSelectingText] = useState(false)
   useEffect(() => {
     const syncReaderModal = () => {

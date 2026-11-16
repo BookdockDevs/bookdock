@@ -47,6 +47,36 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
   const [locked, setLocked] = useState(toolbarLocked)
   const [hovered, setHovered] = useState(false)
   const [floatingActive, setFloatingActive] = useState(false)
+  // `sidebarOpen` is seeded in a layout effect, so the first commit can carry the
+  // store's stale `false` and then flip to `true`. With transitions armed that
+  // plays a width/height animation out of nothing — the dock appears to open and
+  // collapse on entry. Arm them one frame after mount instead.
+  const [transitionsOn, setTransitionsOn] = useState(false)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setTransitionsOn(true))
+    return () => cancelAnimationFrame(frame)
+  }, [])
+
+  // Hover intent for the floating capsule: the corridor is wide (70px) and sits
+  // where the pointer passes on its way somewhere else, so revealing on the
+  // first pointermove makes the dock fade in and straight back out. Require a
+  // short dwell before it appears; leaving still hides it immediately.
+  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelFloatingReveal = useCallback(() => {
+    if (revealTimerRef.current) {
+      clearTimeout(revealTimerRef.current)
+      revealTimerRef.current = null
+    }
+  }, [])
+  const requestFloatingReveal = useCallback((delay = 140) => {
+    if (revealTimerRef.current || hovered) return
+    revealTimerRef.current = setTimeout(() => {
+      revealTimerRef.current = null
+      setHovered(true)
+      setFloatingActive(true)
+    }, delay)
+  }, [hovered])
+  useEffect(() => cancelFloatingReveal, [cancelFloatingReveal])
 
   // Touch uses a bottom control sheet; desktop dock keeps its hover/lock behavior.
   const mobileControlsVisible = isTouch && (chromePinned || sidebarOpen)
@@ -223,10 +253,9 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
     if (!isWithinFloatingCorridor(e.clientY)) return
     const isLeftEdge = e.clientX == null || e.clientX <= 70
     if (isLeftEdge) {
-      setHovered(true)
-      setFloatingActive(true)
+      requestFloatingReveal()
     }
-  }, [locked, sidebarOpen, isWithinFloatingCorridor])
+  }, [locked, sidebarOpen, isWithinFloatingCorridor, requestFloatingReveal])
 
   const handleHoverPointerMove = useCallback((e: React.PointerEvent) => {
     pointerPosRef.current = { clientX: e.clientX, clientY: e.clientY }
@@ -235,19 +264,18 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
     const isLeftEdge = (e.clientX == null || e.clientX <= 70) && inCorridor
     const isOverDock = inCorridor && Boolean(dockRef.current?.contains(e.target as Node))
     if (!isLeftEdge && !isOverDock) {
+      cancelFloatingReveal()
       if (hovered) setHovered(false)
       return
     }
-    if (!hovered) {
-      setHovered(true)
-      setFloatingActive(true)
-    }
-  }, [locked, sidebarOpen, hovered, isWithinFloatingCorridor])
+    requestFloatingReveal()
+  }, [locked, sidebarOpen, hovered, isWithinFloatingCorridor, requestFloatingReveal, cancelFloatingReveal])
 
   const handleHoverPointerLeave = useCallback(() => {
+    cancelFloatingReveal()
     pointerPosRef.current = null
     setHovered(false)
-  }, [])
+  }, [cancelFloatingReveal])
 
   useEffect(() => {
     if (isTouch) return
@@ -258,10 +286,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
       const overDock = clientY >= 48 && clientY <= 380 && target instanceof Node && Boolean(dockRef.current?.contains(target))
       if (buttons || hasSelection || window.getSelection()?.type === 'Range') return
       if (inZone || overDock) {
-        setHovered(true)
-        setFloatingActive(true)
-      } else if (hovered) {
-        setHovered(false)
+        requestFloatingReveal()
+      } else {
+        cancelFloatingReveal()
+        if (hovered) setHovered(false)
       }
     }
     const onPointerMove = (event: PointerEvent) => updateFloatingHover(event.clientX, event.clientY, event.buttons, false, event.target)
@@ -270,6 +298,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
       if (detail) updateFloatingHover(detail.clientX, detail.clientY, detail.buttons, detail.hasSelection)
     }
     const onWindowLeave = () => {
+      cancelFloatingReveal()
       pointerPosRef.current = null
       setHovered(false)
     }
@@ -283,7 +312,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
       window.removeEventListener('pointerleave', onWindowLeave)
       window.removeEventListener('blur', onWindowLeave)
     }
-  }, [isTouch, locked, sidebarOpen, hovered])
+  }, [isTouch, locked, sidebarOpen, hovered, requestFloatingReveal, cancelFloatingReveal])
 
   // Once mouse leaves the floating dock, allow fade out before dropping floating state
   useEffect(() => {
@@ -341,12 +370,13 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
           className={cn(
             'fixed inset-x-0 bottom-0 z-50 flex flex-col overflow-visible',
             mobileControlsVisible ? 'translate-y-0' : 'pointer-events-none translate-y-full',
-            !resizingDir && 'transition-transform duration-200',
+            !resizingDir && transitionsOn && 'transition-transform duration-200',
           )}
         >
           <div
             className={cn(
-              'order-1 w-full overflow-hidden bg-[var(--bd-read-bg)] transition-[height]',
+              'order-1 w-full overflow-hidden bg-[var(--bd-read-bg)]',
+              transitionsOn && 'transition-[height]',
               sidebarOpen && (activeNavTab === 'ai' ? 'h-[80dvh] max-h-[720px]' : 'h-[65dvh] max-h-[520px]'),
               !sidebarOpen && 'h-0',
             )}
@@ -431,7 +461,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         <div
           className={cn(
             'order-none h-full flex shrink-0 overflow-hidden bg-[var(--bd-read-bg)]',
-            !resizingDir && 'transition-[width] duration-200 will-change-[width]',
+            !resizingDir && transitionsOn && 'transition-[width] duration-200 will-change-[width]',
           )}
           style={{ width: sidebarOpen ? panelWidth : 0 }}
         >
