@@ -47,6 +47,12 @@ describe('reader-state resetForBook', () => {
     })
   })
 
+  it('preserves empty collapsedKeys [] (all expanded) when persisted to and reloaded from localStorage', () => {
+    useReaderState.getState().setSidebarScrollPosition('book-1', 'toc', { top: 0, collapsedKeys: [] })
+    const stored = JSON.parse(localStorage.getItem('bd-reader-sidebar-scroll-v1') ?? '{}')
+    expect(stored['book-1']?.toc?.collapsedKeys).toEqual([])
+  })
+
   it('refreshes a stale session tag even when the saved coordinates are unchanged', () => {
     useReaderState.setState({ sidebarScrollPositions: { 'book-1': { toc: { top: 123, currentIndex: 14 } } } })
     useReaderState.getState().setSidebarScrollPosition('book-1', 'toc', { top: 123, currentIndex: 14 })

@@ -400,6 +400,86 @@ describe('NavigationPanel', () => {
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
   })
 
+  it('anchors the volume header and adjusts scrollTop when collapsing a volume', async () => {
+    useReaderState.setState({
+      tocItems: [
+        { label: '第一卷', href: 'volume-1', level: 1 },
+        { label: '第1章', href: 'ch-1', level: 2 },
+        { label: '第2章', href: 'ch-2', level: 2 },
+        { label: '第二卷', href: 'volume-2', level: 1 },
+        { label: '第3章', href: 'ch-3', level: 2 },
+      ],
+      currentChapter: '第2章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 68, currentIndex: 2, sessionId: READER_SESSION_ID } } },
+    })
+    const { container } = render(<NavigationPanel bookId="book-1" open />)
+    const scrollContainer = container.querySelector('.overflow-y-auto') as HTMLDivElement
+    expect(scrollContainer).toBeTruthy()
+
+    const volume1Button = screen.getByRole('button', { name: /第一卷/ })
+    const expander = volume1Button.querySelector('svg')!
+    expect(expander).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.click(expander)
+    })
+
+    expect(screen.queryByRole('button', { name: /第1章/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /第一卷/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /第二卷/ })).toBeInTheDocument()
+    expect(scrollContainer.scrollTop).toBe(0)
+  })
+
+  it('anchors stuck or top-docked volume at visualTop 0 when collapsed without downward drift', async () => {
+    useReaderState.setState({
+      tocItems: [
+        { label: '第一卷', href: 'volume-1', level: 1 },
+        { label: '第1章', href: 'ch-1', level: 2 },
+        { label: '第2章', href: 'ch-2', level: 2 },
+        { label: '第二卷', href: 'volume-2', level: 1 },
+        { label: '第3章', href: 'ch-3', level: 2 },
+      ],
+      currentChapter: '第2章',
+      sidebarScrollPositions: { 'book-1': { toc: { top: 120, currentIndex: 2, sessionId: READER_SESSION_ID } } },
+    })
+    const { container } = render(<NavigationPanel bookId="book-1" open />)
+    const scrollContainer = container.querySelector('.overflow-y-auto') as HTMLDivElement
+    expect(scrollContainer).toBeTruthy()
+
+    vi.spyOn(scrollContainer, 'getBoundingClientRect').mockReturnValue({
+      top: 100,
+      bottom: 600,
+      left: 0,
+      right: 300,
+      width: 300,
+      height: 500,
+      x: 0,
+      y: 100,
+      toJSON: () => {},
+    })
+
+    const volume1Button = screen.getByRole('button', { name: /第一卷/ })
+    vi.spyOn(volume1Button, 'getBoundingClientRect').mockReturnValue({
+      top: 100,
+      bottom: 132,
+      left: 0,
+      right: 300,
+      width: 300,
+      height: 32,
+      x: 0,
+      y: 100,
+      toJSON: () => {},
+    })
+
+    const expander = volume1Button.querySelector('svg')!
+    await act(async () => {
+      fireEvent.click(expander)
+    })
+
+    expect(screen.queryByRole('button', { name: /第1章/ })).toBeNull()
+    expect(volume1Button.parentElement).not.toHaveClass('py-1')
+  })
+
   it('closes sidebar after navigation when not locked', () => {
     useReaderState.setState({
       tocItems: [{ label: '第一章 开篇', href: 'chapter:0' }],
@@ -535,6 +615,116 @@ describe('NavigationPanel', () => {
     expect(screen.getByRole('button', { name: '第三章 深入' })).toHaveClass('font-medium')
     expect(screen.getByText('第二卷')).toBeInTheDocument()
     expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+  })
+
+  it('only expands the volume containing the current chapter on initial open and keeps other volumes collapsed', () => {
+    useReaderState.setState({
+      tocItems: [
+        { label: '第一卷 鲜衣怒马', href: 'volume-1', level: 1 },
+        { label: '第一章 启程', href: 'ch-1', level: 2 },
+        { label: '第二章 行路', href: 'ch-2', level: 2 },
+        { label: '第二卷 只恨人间', href: 'volume-2', level: 1 },
+        { label: '第三章 变故', href: 'ch-3', level: 2 },
+        { label: '第四章 绝境', href: 'ch-4', level: 2 },
+        { label: '第三卷 苍茫云海', href: 'volume-3', level: 1 },
+        { label: '第五章 归来', href: 'ch-5', level: 2 },
+      ],
+      currentChapter: '第三章 变故',
+      currentChapterHref: 'ch-3',
+    })
+
+    render(<NavigationPanel bookId="book-1" open />)
+
+    // All volume headers are rendered
+    expect(screen.getByRole('button', { name: /第一卷 鲜衣怒马/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /第二卷 只恨人间/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /第三卷 苍茫云海/ })).toBeInTheDocument()
+
+    // Volume 2 (containing current chapter) is expanded
+    expect(screen.getByRole('button', { name: '第三章 变故' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '第四章 绝境' })).toBeInTheDocument()
+
+    // Volumes 1 and 3 are collapsed by default
+    expect(screen.queryByRole('button', { name: '第一章 启程' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '第二章 行路' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '第五章 归来' })).toBeNull()
+  })
+
+  it('restores remembered collapsedKeys preserving user manual collapsed state, and locate button expands current volume', () => {
+    useReaderState.setState({
+      sidebarScrollPositions: {
+        'book-1': {
+          toc: {
+            top: 0,
+            collapsedKeys: ['第一卷 鲜衣怒马:::volume-1', '第二卷 只恨人间:::volume-2', '第三卷 苍茫云海:::volume-3'],
+          },
+        },
+      },
+      tocItems: [
+        { label: '第一卷 鲜衣怒马', href: 'volume-1', level: 1 },
+        { label: '第一章 启程', href: 'ch-1', level: 2 },
+        { label: '第二章 行路', href: 'ch-2', level: 2 },
+        { label: '第二卷 只恨人间', href: 'volume-2', level: 1 },
+        { label: '第三章 变故', href: 'ch-3', level: 2 },
+        { label: '第四章 绝境', href: 'ch-4', level: 2 },
+        { label: '第三卷 苍茫云海', href: 'volume-3', level: 1 },
+        { label: '第五章 归来', href: 'ch-5', level: 2 },
+      ],
+      currentChapter: '第三章 变故',
+      currentChapterHref: 'ch-3',
+    })
+
+    render(<NavigationPanel bookId="book-1" open />)
+
+    // All volume headers are rendered
+    expect(screen.getByRole('button', { name: /第一卷 鲜衣怒马/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /第二卷 只恨人间/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /第三卷 苍茫云海/ })).toBeInTheDocument()
+
+    // All chapters are collapsed per remembered preference
+    expect(screen.queryByRole('button', { name: '第三章 变故' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '第一章 启程' })).toBeNull()
+
+    // Locate chapter button is visible because current chapter is not in view
+    const locateBtn = screen.getByTitle('reader.locateChapter')
+    expect(locateBtn).toBeInTheDocument()
+
+    // Clicking locate button expands Volume 2 (containing current chapter)
+    fireEvent.click(locateBtn)
+    expect(screen.getByRole('button', { name: '第三章 变故' })).toBeInTheDocument()
+    // Other volumes remain collapsed
+    expect(screen.queryByRole('button', { name: '第一章 启程' })).toBeNull()
+  })
+
+  it('restores completely expanded state when user exited with all volumes expanded (collapsedKeys: [])', () => {
+    useReaderState.setState({
+      sidebarScrollPositions: {
+        'book-1': {
+          toc: {
+            top: 0,
+            collapsedKeys: [],
+          },
+        },
+      },
+      tocItems: [
+        { label: '第一卷 鲜衣怒马', href: 'volume-1', level: 1 },
+        { label: '第一章 启程', href: 'ch-1', level: 2 },
+        { label: '第二章 行路', href: 'ch-2', level: 2 },
+        { label: '第二卷 只恨人间', href: 'volume-2', level: 1 },
+        { label: '第三章 变故', href: 'ch-3', level: 2 },
+        { label: '第四章 绝境', href: 'ch-4', level: 2 },
+      ],
+      currentChapter: '第三章 变故',
+      currentChapterHref: 'ch-3',
+    })
+
+    render(<NavigationPanel bookId="book-1" open />)
+
+    // All chapters from all volumes should be visible (completely expanded)
+    expect(screen.getByRole('button', { name: '第一章 启程' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '第二章 行路' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '第三章 变故' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '第四章 绝境' })).toBeInTheDocument()
   })
 
   it('restores TOC scroll position after switching to notes and back', async () => {
@@ -691,6 +881,9 @@ describe('NavigationPanel', () => {
       expect(input).toBeInTheDocument()
       expect(screen.getByTitle('reader.searchScopeBook')).toBeInTheDocument()
       fireEvent.change(input, { target: { value: '高中' } })
+      // While typing and waiting for debounce, must never flash "no matches", shows searching pending state
+      expect(screen.queryByText('reader.noMatches')).toBeNull()
+      expect(screen.getByText(/reader\.searching/)).toBeInTheDocument()
       await act(async () => { await new Promise((r) => setTimeout(r, 500)) })
 
       expect(search).toHaveBeenCalledWith('高中', { scope: 'book', matchCase: false, mode: 'contains' }, expect.any(Function))
@@ -705,6 +898,82 @@ describe('NavigationPanel', () => {
       expect(marks[0]).toHaveClass('bg-[var(--bd-read-primary)]/25', 'rounded-xs')
       // TOC list is replaced by the overlay
       expect(screen.queryByText('第一章 开篇')).toBeNull()
+    })
+
+    it('supports collapsing and expanding search chapter groups, sticky headers, and collapse all', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
+      fireEvent.change(input, { target: { value: '高中' } })
+      // While typing and waiting for debounce, must never flash "no matches", shows searching pending state
+      expect(screen.queryByText('reader.noMatches')).toBeNull()
+      expect(screen.getByText(/reader\.searching/)).toBeInTheDocument()
+      await act(async () => { await new Promise((r) => setTimeout(r, 500)) })
+
+      expect(await screen.findAllByText('高中')).toHaveLength(3)
+
+      // Chapter headers are rendered with sticky positioning
+      const chBtn1 = screen.getByRole('button', { name: /第二章 图穷匕见/ })
+      expect(chBtn1).toBeInTheDocument()
+      const stickyHeader = chBtn1.closest('.sticky')
+      expect(stickyHeader).toHaveClass('sticky', 'top-0', 'z-10')
+
+      // Clicking chapter 2 header collapses its 2 results
+      fireEvent.click(chBtn1)
+      // Only 1 result from chapter 5 remains visible
+      expect(screen.getAllByText('高中')).toHaveLength(1)
+      expect(screen.getByText(/出现在/)).toBeInTheDocument()
+      expect(screen.queryByText(/总武/)).toBeNull()
+
+      // Header collapse all button exists
+      const toggleAllBtn = screen.getByTitle('reader.collapseAll')
+      expect(toggleAllBtn).toBeInTheDocument()
+
+      // Click collapse all collapses all chapters
+      fireEvent.click(toggleAllBtn)
+      expect(screen.queryByText('高中')).toBeNull()
+      expect(screen.getByTitle('reader.expandAll')).toBeInTheDocument()
+
+      // Click expand all restores all matches
+      fireEvent.click(screen.getByTitle('reader.expandAll'))
+      expect(screen.getAllByText('高中')).toHaveLength(3)
+
+      // When chapter 2 is collapsed, jumping to a result in it via capsule auto-expands chapter 2
+      fireEvent.click(chBtn1)
+      expect(screen.getAllByText('高中')).toHaveLength(1)
+
+      // Click next in bottom capsule (jumps to result 0 in chapter 2)
+      const nextBtn = screen.getByTitle('reader.next')
+      fireEvent.click(nextBtn)
+
+      // Chapter 2 automatically expands so result 0 is revealed
+      expect(screen.getAllByText('高中')).toHaveLength(3)
+
+      // Active result is now in Chapter 2. User CAN collapse Chapter 2 even with active result in it
+      fireEvent.click(chBtn1)
+      expect(screen.getAllByText('高中')).toHaveLength(1) // Remains collapsed!
+
+      // User can collapse Chapter 5 without triggering re-expansion of Chapter 2
+      const chBtn2 = screen.getByRole('button', { name: /第五章 死鱼眼/ })
+      fireEvent.click(chBtn2)
+      expect(screen.queryByText('高中')).toBeNull() // Both remain collapsed!
+
+      // Jumping to next result (result 1 in Chapter 2) via capsule auto-expands Chapter 2 only
+      fireEvent.click(nextBtn)
+      expect(screen.getAllByText('高中')).toHaveLength(2) // Chapter 2 expanded, Chapter 5 stays collapsed!
+    })
+
+    it('normalizes multiple consecutive spaces and settles on reader.noMatches when no hits found', async () => {
+      render(<NavigationPanel bookId="book-1" open />)
+      fireEvent.click(screen.getByTitle('reader.search'))
+      const input = screen.getByPlaceholderText('reader.searchPlaceholder')
+      fireEvent.change(input, { target: { value: '不存在的词    带多个空格' } })
+      await act(async () => { await new Promise((r) => setTimeout(r, 500)) })
+
+      expect(search).toHaveBeenCalledWith('不存在的词 带多个空格', expect.any(Object), expect.any(Function))
+      // Does not remain stuck in searching, properly settles and shows noMatches
+      expect(screen.queryByText(/reader\.searching/)).toBeNull()
+      expect(screen.getByText('reader.noMatches')).toBeInTheDocument()
     })
 
     it('navigates to a result and closes the panel on click', async () => {

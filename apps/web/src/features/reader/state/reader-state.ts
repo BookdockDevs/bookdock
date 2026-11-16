@@ -14,6 +14,7 @@ export interface SidebarScrollPosition {
   currentIndex?: number
   anchorHref?: string
   anchorOffset?: number
+  collapsedKeys?: string[]
   /** Page-load token tagging the save. The loader drops it, so a position
    *  restored from a previous load reads as stale: stale positions must not
    *  suppress the TOC locate-on-open. */
@@ -49,11 +50,16 @@ function loadSidebarScrollPositions(): SidebarScrollPositions {
         const currentIndex = (rawPosition as Record<string, unknown>).currentIndex
         const anchorHref = (rawPosition as Record<string, unknown>).anchorHref
         const anchorOffset = (rawPosition as Record<string, unknown>).anchorOffset
+        const rawCollapsedKeys = (rawPosition as Record<string, unknown>).collapsedKeys
+        const collapsedKeys = Array.isArray(rawCollapsedKeys)
+          ? rawCollapsedKeys.filter((k): k is string => typeof k === 'string')
+          : undefined
         tabs[tab] = {
           top,
           ...(typeof currentIndex === 'number' && Number.isInteger(currentIndex) && currentIndex >= 0 ? { currentIndex } : {}),
           ...(typeof anchorHref === 'string' && typeof anchorOffset === 'number' && Number.isFinite(anchorOffset)
             ? { anchorHref, anchorOffset } : {}),
+          ...(collapsedKeys !== undefined ? { collapsedKeys } : {}),
         }
       }
       if (Object.keys(tabs).length > 0) positions[bookId] = tabs
@@ -158,11 +164,16 @@ export const useReaderState = create<ReaderState>((set) => ({
   setCurrentChapterHref: (currentChapterHref) => set({ currentChapterHref }),
   setCurrentChapterIndex: (currentChapterIndex) => set({ currentChapterIndex }),
   setSidebarScrollPosition: (bookId, tab, position) => set((state) => {
-    if (state.sidebarScrollPositions[bookId]?.[tab]?.top === position.top
-      && state.sidebarScrollPositions[bookId]?.[tab]?.currentIndex === position.currentIndex
-      && state.sidebarScrollPositions[bookId]?.[tab]?.anchorHref === position.anchorHref
-      && state.sidebarScrollPositions[bookId]?.[tab]?.anchorOffset === position.anchorOffset
-      && state.sidebarScrollPositions[bookId]?.[tab]?.sessionId === READER_SESSION_ID) return state
+    const existing = state.sidebarScrollPositions[bookId]?.[tab]
+    const sameCollapsed = existing?.collapsedKeys === position.collapsedKeys
+      || (Boolean(existing?.collapsedKeys?.length === position.collapsedKeys?.length)
+        && (existing?.collapsedKeys ?? []).every((k, i) => k === position.collapsedKeys?.[i]))
+    if (existing?.top === position.top
+      && existing?.currentIndex === position.currentIndex
+      && existing?.anchorHref === position.anchorHref
+      && existing?.anchorOffset === position.anchorOffset
+      && sameCollapsed
+      && existing?.sessionId === READER_SESSION_ID) return state
     const tagged = { ...position, sessionId: READER_SESSION_ID }
     const sidebarScrollPositions = {
       ...state.sidebarScrollPositions,

@@ -491,7 +491,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         id="reader-navigation"
         data-testid="reader-sidebar"
         className={cn(
-          'absolute left-3 top-16 z-[45] flex rounded-2xl shadow-2xl ring-1 ring-[var(--bd-read-accent)]/80 backdrop-blur-md overflow-hidden',
+          'absolute left-3 top-16 z-[45] flex rounded-2xl shadow-2xl ring-1 ring-[var(--bd-read-accent)]/80 backdrop-blur-md overflow-visible',
           floatingHeight == null ? 'bottom-16' : '',
         )}
         style={{
@@ -500,51 +500,53 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
           ...(floatingHeight != null ? { height: floatingHeight, maxHeight: 'calc(100vh - 5rem)' } : {}),
         }}
       >
-        {/* Dock Column */}
-        <div
-          ref={dockRef}
-          data-testid="reader-tool-dock"
-          className="order-none flex h-full w-12 shrink-0 flex-col items-center border-r border-[var(--bd-read-accent)]/60 p-1 opacity-100"
-        >
-          <ToolDock
-            activeNavTab={activeNavTab}
-            sidebarOpen={true}
-            locked={false}
-            floating={false}
-            statsDisabled={statsDisabled}
-            guestReadOnly={guestReadOnly}
-            hideLock={false}
-            mobile={false}
-            onNavTab={handleNavTab}
-            onToggleLock={() => setLocked(true)}
-            footer={themeToggleFooter}
-          />
-        </div>
-
-        {/* Panel Column */}
-        <div className="relative flex h-full shrink-0 overflow-hidden" style={{ width: panelWidth }}>
-          <div className="h-full shrink-0" style={{ width: panelWidth }}>
-            <NavigationPanel
-              key={bookId}
-              ref={panelRef}
-              bookId={bookId}
-              tocPositionReady={tocPositionReady}
-              open={true}
+        <div className="flex h-full w-full rounded-2xl overflow-hidden">
+          {/* Dock Column */}
+          <div
+            ref={dockRef}
+            data-testid="reader-tool-dock"
+            className="order-none flex h-full w-12 shrink-0 flex-col items-center border-r border-[var(--bd-read-accent)]/60 p-1 opacity-100"
+          >
+            <ToolDock
+              activeNavTab={activeNavTab}
+              sidebarOpen={true}
               locked={false}
-              sidebarWidth={panelWidth}
+              floating={false}
               statsDisabled={statsDisabled}
               guestReadOnly={guestReadOnly}
-              footerVisible={footerVisible}
-              mobileDockVisible={mobileDockVisible}
-              onFooterSummon={onFooterSummon}
+              hideLock={false}
+              mobile={false}
+              onNavTab={handleNavTab}
+              onToggleLock={() => setLocked(true)}
+              footer={themeToggleFooter}
             />
+          </div>
+
+          {/* Panel Column */}
+          <div className="relative flex h-full shrink-0 overflow-hidden" style={{ width: panelWidth }}>
+            <div className="h-full shrink-0" style={{ width: panelWidth }}>
+              <NavigationPanel
+                key={bookId}
+                ref={panelRef}
+                bookId={bookId}
+                tocPositionReady={tocPositionReady}
+                open={true}
+                locked={false}
+                sidebarWidth={panelWidth}
+                statsDisabled={statsDisabled}
+                guestReadOnly={guestReadOnly}
+                footerVisible={footerVisible}
+                mobileDockVisible={mobileDockVisible}
+                onFooterSummon={onFooterSummon}
+              />
+            </div>
           </div>
         </div>
 
         {/* Right Width Resize Handle */}
         <div
           data-testid="reader-sidebar-resize-handle"
-          className="group absolute right-0 top-0 h-full w-2.5 touch-none reader-resize-cursor z-20"
+          className="group absolute left-full top-2 bottom-4 w-2.5 touch-none reader-resize-cursor z-20"
           onPointerDown={handleResizeStart('width')}
           onPointerMove={handleResizeMove}
           onPointerUp={handleResizeEnd}
@@ -555,7 +557,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         >
           <span
             className={cn(
-              'pointer-events-none absolute right-0.5 top-1/2 h-7 w-0.5 -translate-y-1/2 rounded-full transition-opacity duration-150',
+              'pointer-events-none absolute left-0 top-1/2 h-7 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full transition-opacity duration-150',
               resizingDir === 'width' || resizingDir === 'corner'
                 ? 'bg-[var(--bd-read-primary)]/60 opacity-100'
                 : 'bg-[var(--bd-read-sub)]/40 opacity-0 group-hover:opacity-100',
@@ -566,7 +568,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         {/* Bottom Height Resize Handle */}
         <div
           data-testid="reader-sidebar-resize-handle-bottom"
-          className="group absolute bottom-0 left-0 w-full h-2.5 touch-none cursor-row-resize z-20"
+          className="group absolute top-full left-2 right-4 h-2.5 touch-none cursor-row-resize z-20"
           onPointerDown={handleResizeStart('height')}
           onPointerMove={handleResizeMove}
           onPointerUp={handleResizeEnd}
@@ -577,7 +579,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         >
           <span
             className={cn(
-              'pointer-events-none absolute left-1/2 bottom-0.5 h-0.5 w-7 -translate-x-1/2 rounded-full transition-opacity duration-150',
+              'pointer-events-none absolute left-1/2 top-0 h-0.5 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full transition-opacity duration-150',
               resizingDir === 'height' || resizingDir === 'corner'
                 ? 'bg-[var(--bd-read-primary)]/60 opacity-100'
                 : 'bg-[var(--bd-read-sub)]/40 opacity-0 group-hover:opacity-100',
@@ -588,7 +590,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         {/* Corner 2D Resize Handle */}
         <div
           data-testid="reader-sidebar-resize-handle-corner"
-          className="group absolute right-0 bottom-0 h-4 w-4 touch-none cursor-nwse-resize z-30 flex items-center justify-center"
+          className="group absolute top-full left-full -mt-1 -ml-1 h-3.5 w-3.5 touch-none cursor-nwse-resize z-30 flex items-center justify-center"
           onPointerDown={handleResizeStart('corner')}
           onPointerMove={handleResizeMove}
           onPointerUp={handleResizeEnd}
@@ -599,7 +601,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         >
           <span
             className={cn(
-              'pointer-events-none absolute right-1.5 bottom-1.5 h-2 w-2 rounded-br-[3px] border-r-2 border-b-2 transition-opacity duration-150',
+              'pointer-events-none absolute left-1 top-1 h-2 w-2 rounded-br-[3px] border-r-2 border-b-2 transition-opacity duration-150',
               resizingDir === 'corner'
                 ? 'border-[var(--bd-read-primary)]/70 opacity-100'
                 : 'border-[var(--bd-read-sub)]/40 opacity-0 group-hover:opacity-100',

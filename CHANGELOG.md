@@ -2,6 +2,22 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- The desktop reader header now displays a pulsing skeleton placeholder while chapter and book titles load, preventing title text flashing before reading content is ready.
+- The reader progress strip now captures pointer events while visible, preventing clicks on its labels and empty space from passing through to the underlying reading area.
+- Improved the desktop reader's floating sidebar container geometry and layered styling to prevent resize handles, shadows, and tooltips from clipping at the borders.
+- Replaced translucent background blurring on floating flyout menus with solid cards, eliminating visual bleed-through from high-contrast backgrounds.
+- The library category picker now displays a taxonomy icon beside the "Uncategorized" entry for visual consistency.
+- Sidebar note, statistic, and AI thread loading skeletons now constrain overflow to prevent layout shifts inside narrow or resized panels.
+
+### Fixed
+
+- Fixed table of contents losing the fully expanded state on page refresh. Saving an empty list of collapsed volumes is now preserved across local storage reloads instead of falling back to default volume folding.
+- Updated the lightweight E-Ink reader bundle with the latest asset caching, image variant handling, and navigation lifecycle fixes.
+
 ## [0.8.5] - 2026-11-16
 
 ### Highlights
@@ -1318,6 +1334,22 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [Unreleased]
+
+#### 优化
+
+- 桌面阅读器顶栏在章节和书名加载期间显示脉冲骨架占位条，避免正文就绪前标题文字闪烁。
+- 阅读器底部进度条在显示时接管指针事件，防止点击标签或空白处穿透触发下层阅读区域。
+- 改进桌面阅读器悬浮侧栏容器几何结构与分层样式，避免调整尺寸手柄、阴影与浮层被边框裁切。
+- 悬浮菜单改用纯色卡片替代半透明背景毛玻璃，消除高对比度背景下的透光干扰。
+- 书库分类选择弹窗在“未分类”选项前补充分类图标，保持视觉规范统一。
+- 侧栏笔记、统计与 AI 对话的加载骨架屏限制溢出，避免窄栏或调整尺寸时出现布局抖动。
+
+#### 修复
+
+- 修复刷新页面后目录“全部展开”状态丢失的问题。本地存储反序列化时完整保留空的折叠列表，不再错误回退到默认折叠规则。
+- 同步更新轻量级墨水屏阅读器构建产物，包含最新的静态资源缓存、图片变体处理与页面导航生命周期修复。
 
 ### [0.8.5] - 2026-11-16
 

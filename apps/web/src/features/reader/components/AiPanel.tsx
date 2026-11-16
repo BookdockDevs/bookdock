@@ -2021,7 +2021,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
               </div>
             </div>
           ) : restoringThread ? (
-            <div data-testid="ai-thread-loading" role="status" aria-busy="true" className="h-full space-y-3 px-3 pb-2 pt-4">
+            <div data-testid="ai-thread-loading" role="status" aria-busy="true" className="h-full space-y-3 px-3 pb-2 pt-4 overflow-hidden">
               <div className="flex justify-end">
                 <div className="h-10 w-3/5 animate-pulse rounded-xl bg-[var(--bd-read-accent)]/20 motion-reduce:animate-none" />
               </div>

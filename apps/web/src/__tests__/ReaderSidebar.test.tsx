@@ -198,6 +198,17 @@ describe('ReaderSidebar on pointer devices', () => {
     expect(handle).toHaveClass('absolute', 'left-full')
   })
 
+  it('keeps the resize handle outside the navigation panel scrollbar in floating mode', () => {
+    act(() => {
+      useUiStore.setState({ toolbarLocked: false })
+      useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' })
+    })
+    const { container } = renderSidebar(false)
+    const handle = screen.getByTestId('reader-sidebar-resize-handle')
+    expect(handle).toHaveClass('absolute', 'left-full')
+    expect(outerEl(container)).toHaveClass('overflow-visible')
+  })
+
   it.each(['pointerup', 'pointercancel', 'lostpointercapture'])('ends resizing on %s and ignores later movement', (endEvent) => {
     act(() => {
       useUiStore.setState({ toolbarLocked: true })

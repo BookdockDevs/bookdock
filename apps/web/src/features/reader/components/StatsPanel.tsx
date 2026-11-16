@@ -143,36 +143,36 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
     return (
       <>
         <div role="status" aria-busy="true" data-testid="stats-loading-skeleton" className="space-y-4 px-1 pt-3 pb-6">
-          <div className="rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)] p-3.5">
+          <div className="rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)] p-3.5 overflow-hidden">
             <div className="flex items-center gap-4">
               <div className="flex shrink-0 flex-col items-center gap-2">
                 <div className="h-22 w-22 animate-pulse rounded-full bg-stone-500/10 motion-reduce:animate-none" />
                 <div className="h-4 w-12 animate-pulse rounded-full bg-stone-500/10 motion-reduce:animate-none" />
               </div>
-              <div className="flex flex-1 flex-col gap-3">
+              <div className="flex flex-1 flex-col gap-3 min-w-0">
                 <div className="space-y-1.5">
-                  <div className="h-3 w-14 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
-                  <div className="h-5 w-24 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+                  <div className="h-3 w-14 max-w-full animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                  <div className="h-5 w-24 max-w-full animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
                 </div>
                 <div className="space-y-1.5">
-                  <div className="h-3 w-14 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
-                  <div className="h-5 w-20 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+                  <div className="h-3 w-14 max-w-full animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                  <div className="h-5 w-20 max-w-full animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
                 </div>
               </div>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 border-t border-[var(--bd-read-accent)]/50 pt-2.5">
-              <div className="space-y-1.5">
-                <div className="h-3 w-14 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
-                <div className="h-4 w-12 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+              <div className="space-y-1.5 min-w-0">
+                <div className="h-3 w-14 max-w-full animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                <div className="h-4 w-12 max-w-full animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
               </div>
-              <div className="space-y-1.5">
-                <div className="h-3 w-16 animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
-                <div className="h-4 w-16 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+              <div className="space-y-1.5 min-w-0">
+                <div className="h-3 w-16 max-w-full animate-pulse rounded bg-stone-500/10 motion-reduce:animate-none" />
+                <div className="h-4 w-16 max-w-full animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
               </div>
             </div>
           </div>
           <div className="space-y-2 pt-2">
-            <div className="h-4 w-24 animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
+            <div className="h-4 w-24 max-w-full animate-pulse rounded bg-stone-500/15 motion-reduce:animate-none" />
             <div className="h-14 animate-pulse rounded-xl bg-stone-500/10 motion-reduce:animate-none" />
             <div className="h-14 animate-pulse rounded-xl bg-stone-500/10 motion-reduce:animate-none" />
           </div>
@@ -228,7 +228,7 @@ export default function StatsPanel({ bookId }: StatsPanelProps) {
     <>
     <div className="space-y-4 px-1 pt-3 pb-6">
       {/* 概览卡片：单书详情同款分段覆盖环形图（居中最新进度）+ 4项核心指标（总时长、已读字数、阅读天数、日均时长） */}
-      <section className="rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)] p-3.5 shadow-2xs">
+      <section className="rounded-2xl border border-[var(--bd-read-accent)]/80 bg-[var(--bd-read-bg)] p-3.5 shadow-2xs overflow-hidden">
         {/* 卡片上半部：左侧分段环形进度圈 + 轮次，右侧总时长与字数 */}
         <div className="flex items-center gap-4">
           {/* 左侧分段覆盖环形图（纯净无多余游标） */}

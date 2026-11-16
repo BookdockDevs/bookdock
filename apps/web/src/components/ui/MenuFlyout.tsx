@@ -98,7 +98,7 @@ export default function MenuFlyout({ row, children, panelWidth = 144 }: MenuFlyo
               animation: 'smart-menu-in 100ms ease-out forwards',
               '--slide-y': flipUp ? '4px' : '-4px',
             } as React.CSSProperties}
-            className="max-h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-xl border border-stone-200/80 bg-white/95 p-1 shadow-xl shadow-stone-900/8 backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+            className="max-h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] overflow-y-auto custom-scrollbar [scrollbar-gutter:stable] rounded-xl border border-stone-200/80 bg-white p-1 shadow-xl shadow-stone-900/8 dark:border-stone-700 dark:bg-stone-900"
           >
             {children(() => setOpen(false))}
           </div>

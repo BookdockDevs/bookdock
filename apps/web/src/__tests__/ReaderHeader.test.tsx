@@ -170,5 +170,41 @@ describe('ReaderHeader', () => {
     expect(start).toHaveBeenCalledTimes(1)
     expect(onTtsStart).toHaveBeenCalledTimes(1)
   })
+
+  it('enables pointer events when visible and disables them when hidden', () => {
+    const { container, rerender } = render(<ReaderHeader title="测试书籍" visible />)
+    const header = container.querySelector('header')
+    expect(header).toHaveClass('pointer-events-auto')
+    expect(header).not.toHaveClass('pointer-events-none')
+
+    rerender(<ReaderHeader title="测试书籍" visible={false} />)
+    expect(header).toHaveClass('pointer-events-none')
+    expect(header).not.toHaveClass('pointer-events-auto')
+  })
+
+  it('stops click propagation to prevent triggering page turns', () => {
+    const onParentClick = vi.fn()
+    const { container } = render(
+      <div onClick={onParentClick}>
+        <ReaderHeader title="测试书籍" visible />
+      </div>,
+    )
+    const header = container.querySelector('header')!
+    fireEvent.click(header)
+    expect(onParentClick).not.toHaveBeenCalled()
+  })
+
+  it('renders a shimmer skeleton placeholder when loading or title is unset', () => {
+    const { rerender } = render(<ReaderHeader visible loading />)
+    const skeleton = screen.getByRole('status', { name: 'reader.loading' })
+    expect(skeleton).toHaveClass('animate-pulse')
+
+    rerender(<ReaderHeader visible title="reader.loading" />)
+    expect(screen.getByRole('status', { name: 'reader.loading' })).toBeInTheDocument()
+
+    rerender(<ReaderHeader visible title="第一章 开始" />)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.getByText('第一章 开始')).toBeInTheDocument()
+  })
 })
 vi.mock('@/features/notifications/components/NotificationBell', () => ({ default: () => null }))

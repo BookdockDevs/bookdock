@@ -170,7 +170,10 @@ export default function CategoryPickerPanel({
               : 'text-stone-600 hover:bg-stone-50 dark:text-stone-400 dark:hover:bg-stone-800/50'
           }`}
         >
-          <span>{_('library.uncategorized')}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <TaxonomyIcon kind="category" size={13} className="shrink-0 text-stone-400" />
+            <span className="truncate">{_('library.uncategorized')}</span>
+          </span>
           {!categoryPath?.length && (
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-stone-900 dark:text-stone-100">
               <polyline points="20 6 9 17 4 12" />

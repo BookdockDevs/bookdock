@@ -626,10 +626,10 @@ export const NotesPanel = memo(function NotesPanel({
         <div role="status" aria-busy="true" className="space-y-3 pt-1">
           <span className="sr-only">{_('reader.loading')}</span>
           {[1, 2, 3].map((i) => (
-            <div key={i} className="animate-pulse rounded-xl border border-[var(--bd-read-accent)]/80 bg-stone-500/5 p-3.5 space-y-2.5 motion-reduce:animate-none">
-              <div className="flex items-center justify-between">
-                <div className="h-3 w-16 rounded bg-stone-500/15" />
-                <div className="h-3 w-12 rounded bg-stone-500/10" />
+            <div key={i} className="animate-pulse rounded-xl border border-[var(--bd-read-accent)]/80 bg-stone-500/5 p-3.5 space-y-2.5 motion-reduce:animate-none overflow-hidden">
+              <div className="flex items-center justify-between min-w-0">
+                <div className="h-3 w-16 max-w-full rounded bg-stone-500/15" />
+                <div className="h-3 w-12 max-w-full rounded bg-stone-500/10" />
               </div>
               <div className="h-3.5 w-4/5 rounded bg-stone-500/15" />
               <div className="h-3 w-1/2 rounded bg-stone-500/10" />

@@ -92,4 +92,49 @@ describe('ProgressStrip drag preview', () => {
     fireEvent.pointerUp(slider)
     expect(screen.queryByText('第二章')).not.toBeInTheDocument()
   })
+
+  it('enables pointer events when visible and disables them when hidden', () => {
+    const { view } = renderStrip({ visible: true })
+    expect(view.container.firstElementChild).toHaveClass('pointer-events-auto')
+    expect(view.container.firstElementChild).not.toHaveClass('pointer-events-none')
+
+    view.rerender(
+      <ProgressStrip
+        percent={30}
+        pageInfo={{ page: 1, total: 2 }}
+        visible={false}
+        chapters={chapters}
+        sectionFractions={sectionFractions}
+        onPrevChapter={vi.fn()}
+        onNextChapter={vi.fn()}
+        onPageUp={vi.fn()}
+        onPageDown={vi.fn()}
+        onSeek={vi.fn()}
+      />,
+    )
+    expect(view.container.firstElementChild).toHaveClass('pointer-events-none')
+    expect(view.container.firstElementChild).not.toHaveClass('pointer-events-auto')
+  })
+
+  it('stops click propagation on the footer to prevent triggering page turns', () => {
+    const onParentClick = vi.fn()
+    const view = render(
+      <div onClick={onParentClick}>
+        <ProgressStrip
+          percent={30}
+          pageInfo={{ page: 1, total: 2 }}
+          visible
+          chapters={chapters}
+          sectionFractions={sectionFractions}
+          onPrevChapter={vi.fn()}
+          onNextChapter={vi.fn()}
+          onPageUp={vi.fn()}
+          onPageDown={vi.fn()}
+          onSeek={vi.fn()}
+        />
+      </div>,
+    )
+    fireEvent.click(view.container.querySelector('[aria-label="阅读进度"]')!.closest('[class*="border-t"]')!)
+    expect(onParentClick).not.toHaveBeenCalled()
+  })
 })

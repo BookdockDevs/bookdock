@@ -87,11 +87,12 @@ export const ProgressStrip = memo(function ProgressStrip({
   return (
     <div
       className={cn(
-        'pointer-events-none absolute left-0 right-0 z-40 flex h-[calc(3rem+env(safe-area-inset-bottom))] items-center gap-1.5 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 pb-[env(safe-area-inset-bottom)] text-xs transition-[bottom,translate] duration-300 sm:gap-3 sm:px-4',
+        'absolute left-0 right-0 z-40 flex h-[calc(3rem+env(safe-area-inset-bottom))] items-center gap-1.5 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 pb-[env(safe-area-inset-bottom)] text-xs transition-[bottom,translate] duration-300 sm:gap-3 sm:px-4',
         mobileDockVisible ? 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))]' : 'bottom-[env(safe-area-inset-bottom)]',
-        pinned || visible ? 'translate-y-0' : 'translate-y-full',
+        pinned || visible ? 'translate-y-0 pointer-events-auto' : 'translate-y-full pointer-events-none',
         className,
       )}
+      onClick={(e) => e.stopPropagation()}
     >
       <style>{`
 .bd-progress-slider {
@@ -189,7 +190,7 @@ export const ProgressStrip = memo(function ProgressStrip({
           <path d="M5 12h14m0 0-6-6m6 6-6 6" />
         </svg>
       </button>
-      <div className="pointer-events-none flex flex-1 items-center gap-2 sm:gap-3">
+      <div className="flex flex-1 items-center gap-2 sm:gap-3">
         <span className="min-w-[3.25rem] shrink-0 text-right tabular-nums text-[var(--bd-read-sub)]">{showingChapterText}</span>
         <div className="relative flex-1">
           {dragChapterTitle && dragValue !== null && (

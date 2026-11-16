@@ -40,7 +40,8 @@ function AutoReadingIcon({ status }: { status: 'idle' | 'running' | 'paused' }) 
 }
 
 interface ReaderHeaderProps {
-  title: string
+  title?: string
+  loading?: boolean
   visible: boolean
   /** Middle click-area tap forces the header down (mobile: no hover) */
   pinned?: boolean
@@ -66,7 +67,7 @@ interface ReaderHeaderProps {
   bookmarkActive?: boolean
 }
 
-export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, cleanReadingSupported, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onCloseSettings, onCloseTts, onCloseAutoReading, onTtsStart, onAutoReadingStart, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+export const ReaderHeader = memo(function ReaderHeader({ title, loading = false, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, cleanReadingSupported, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onCloseSettings, onCloseTts, onCloseAutoReading, onTtsStart, onAutoReadingStart, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const _ = useTranslation()
   const navigate = useNavigate()
   const router = useRouter({ warn: false })
@@ -100,10 +101,11 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
   return (
     <header
       className={cn(
-        'pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] transition-transform duration-300 sm:px-3',
-        visible || settingsOpen || ttsOpen || autoReadingOpen || pinned ? 'translate-y-0 pointer-events-auto' : '-translate-y-full',
+        'absolute left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] transition-transform duration-300 sm:px-3',
+        visible || settingsOpen || ttsOpen || autoReadingOpen || pinned ? 'translate-y-0 pointer-events-auto' : '-translate-y-full pointer-events-none',
         className,
       )}
+      onClick={(e) => e.stopPropagation()}
     >
       <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-1.5">
         <Link
@@ -116,7 +118,15 @@ export const ReaderHeader = memo(function ReaderHeader({ title, visible, pinned 
             <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
         </Link>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium md:max-w-md">{title}</span>
+        {loading || !title || title === _('reader.loading') ? (
+          <div
+            role="status"
+            aria-label={_('reader.loading')}
+            className="h-3.5 w-32 sm:w-44 rounded-full bg-[var(--bd-read-sub)]/15 animate-pulse"
+          />
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-sm font-medium md:max-w-md">{title}</span>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         {estimatedMinutes !== undefined && (

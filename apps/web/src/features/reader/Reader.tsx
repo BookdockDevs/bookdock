@@ -2194,7 +2194,8 @@ export default function Reader() {
                 onPointerLeave={isTouch ? undefined : onHeaderLeave}
               >
                 <ReaderHeader
-                  title={pendingNavChapter || currentChapter || book?.title || _('reader.loading')}
+                  title={pendingNavChapter || currentChapter || book?.title || undefined}
+                  loading={!pendingNavChapter && !currentChapter && !book?.title}
                   visible={headerVisible}
                   pinned={chromePinned}
                   settingsOpen={settingsOpen}
@@ -2372,10 +2373,10 @@ export default function Reader() {
             )}
             {/* Bottom controls float over the reader; desktop summoning follows pointer position.
                 Capsules sit above the strip but inside the footer's keep-alive band, so the
-                pointer can climb to them without the chrome collapsing. The strip's own
-                background is pointer-events-none (only its controls take the pointer), so the
-                hover sensor above — not this subtree — owns show/hide: a pointerleave here
-                fires when the pointer merely slides off a control onto the bar itself.
+                pointer can climb to them without the chrome collapsing. When visible, the strip
+                takes pointer events so clicks on its background/labels do not pass through to
+                the reading area underneath. The hover sensor above owns show/hide based on
+                viewport geometry.
                 Touch: summon/dwell stay inert (no sticky hover, no tap
                 interception); the footer follows chromePinned alone. The
                 mobile tool dock occupies the row below this progress strip. */}
