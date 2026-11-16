@@ -11,6 +11,7 @@ import {
   LIST_INFO_ITEMS,
   LIBRARY_PAGE_SIZES,
   type CoverFit,
+  type CoverRatio,
   type ListInfoItem,
 } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
@@ -76,6 +77,11 @@ const STATUS_FILTER_KEYS: Record<ReadStatus, string> = {
   abandoned: 'library.readStatusAbandoned',
 }
 
+const COVER_RATIOS: { value: CoverRatio; labelKey: string }[] = [
+  { value: '2:3', labelKey: 'library.coverRatio23' },
+  { value: '3:4', labelKey: 'library.coverRatio34' },
+]
+
 const COVER_FITS: { value: CoverFit; labelKey: string }[] = [
   { value: 'crop', labelKey: 'library.coverFitCrop' },
   { value: 'full', labelKey: 'library.coverFitFull' },
@@ -121,10 +127,12 @@ export default function ViewMenu({
   const buttonRef = useRef<HTMLButtonElement>(null)
 
   const coverFit = useUiStore((s) => s.coverFit)
+  const coverRatio = useUiStore((s) => s.coverRatio)
   const gridColumns = useUiStore((s) => s.gridColumns)
   const libraryPageSize = useUiStore((s) => s.libraryPageSize)
   const listInfoItems = useUiStore((s) => s.listInfoItems)
   const setCoverFit = useUiStore((s) => s.setCoverFit)
+  const setCoverRatio = useUiStore((s) => s.setCoverRatio)
   const setGridColumns = useUiStore((s) => s.setGridColumns)
   const setLibraryPageSize = useUiStore((s) => s.setLibraryPageSize)
   const setListInfoItems = useUiStore((s) => s.setListInfoItems)
@@ -568,6 +576,34 @@ export default function ViewMenu({
                       </div>
                     </div>
                   )}
+
+                  {/* Cover Ratio */}
+                  <div className="mb-3">
+                    <div className="mb-1.5 px-1 text-[11px] font-medium text-stone-400 dark:text-stone-500">
+                      {_('library.coverRatio')}
+                    </div>
+                    <div className="flex gap-1">
+                      {COVER_RATIOS.map((opt) => {
+                        const active = coverRatio === opt.value
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => setCoverRatio(opt.value)}
+                            className={cn(
+                              'flex h-7 flex-1 items-center justify-center rounded-lg text-xs font-medium transition-all',
+                              active
+                                ? 'bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900'
+                                : 'bg-stone-100/80 text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 dark:bg-stone-800/70 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+                            )}
+                          >
+                            {_(opt.labelKey)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
 
                   {/* Cover Fit */}
                   <div className="mb-3">

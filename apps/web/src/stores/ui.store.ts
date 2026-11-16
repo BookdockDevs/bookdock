@@ -42,6 +42,8 @@ export type UiSection = 'font' | 'layout' | 'display' | 'theme'
 
 /** Cover fill mode inside the grid card: object-cover vs object-contain. */
 export type CoverFit = 'crop' | 'full'
+/** Cover aspect ratio in grid cards. */
+export type CoverRatio = '2:3' | '3:4'
 
 /** Optional info items on the right side of a list-view row */
 export type ListInfoItem = 'progress' | 'size' | 'lastRead' | 'shelf' | 'tags' | 'createdAt'
@@ -225,6 +227,7 @@ interface UiState {
 
   // Library UI prefs
   coverFit: CoverFit
+  coverRatio: CoverRatio
   gridColumns: string
   listInfoItems: ListInfoItem[]
   sortBy: string
@@ -233,6 +236,7 @@ interface UiState {
   libraryPageSize: number
   setLibraryPageSize: (v: number) => void
   setCoverFit: (v: CoverFit) => void
+  setCoverRatio: (v: CoverRatio) => void
   setGridColumns: (v: string) => void
   /** Unified shelf: where the add-book main button sends files. Device preference. */
   defaultAddDestination: 'server' | 'local'
@@ -471,6 +475,12 @@ function getInitialCoverFit(): CoverFit {
   return stored === 'full' ? 'full' : 'crop'
 }
 
+function getInitialCoverRatio(): CoverRatio {
+  if (typeof window === 'undefined') return '2:3'
+  const stored = localStorage.getItem('bd-cover-ratio')
+  return stored === '3:4' ? '3:4' : '2:3'
+}
+
 function getInitialNavTab(): NavTab {
   if (typeof window === 'undefined') return 'toc'
   const stored = localStorage.getItem('bd-reader-nav-tab')
@@ -580,6 +590,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   boundPresetId: null,
 
   coverFit: getInitialCoverFit(),
+  coverRatio: getInitialCoverRatio(),
   gridColumns: getInitial<string>('bd-grid-columns', 'auto'),
   defaultAddDestination: (() => { try { return localStorage.getItem('bd-default-add-destination') === 'local' ? 'local' as const : 'server' as const } catch { return 'server' as const } })(),
   deviceNormalizeTitle: (() => { try { return localStorage.getItem('bd-device-normalize-title') !== 'false' } catch { return true } })(),
@@ -597,6 +608,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setCoverFit: (coverFit) => {
     setStorage('bd-cover-fit', coverFit)
     set({ coverFit })
+  },
+  setCoverRatio: (coverRatio) => {
+    setStorage('bd-cover-ratio', coverRatio)
+    set({ coverRatio })
   },
   setGridColumns: (gridColumns) => {
     setStorage('bd-grid-columns', gridColumns)
@@ -1088,6 +1103,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       fontPreferences: {},
       fontOrder: [],
       coverFit: 'crop',
+      coverRatio: '2:3',
       readingTimerMode: 'auto',
       manualTimerGraceMinutes: 5,
       ttsEngine: 'system',

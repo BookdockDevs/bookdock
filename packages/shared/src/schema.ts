@@ -188,6 +188,7 @@ export const settingsUpdateSchema = z.object({
   selectionToolbarOrder: z.array(z.enum(SELECTION_TOOLBAR_ACTION_KEYS)).optional(),
   selectionToolbarHidden: z.array(z.enum(SELECTION_TOOLBAR_ACTION_KEYS)).optional(),
   coverFit: z.enum(['crop', 'full']).optional(),
+  coverRatio: z.enum(['2:3', '3:4']).optional(),
   readingTimerMode: z.enum(['auto', 'manual', 'both', 'off']).optional(),
   manualTimerGraceMinutes: z.union([z.literal(1), z.literal(5), z.literal(10), z.literal(30)]).optional(),
   ttsEngine: z.enum(['system', 'edge', 'service']).optional(),

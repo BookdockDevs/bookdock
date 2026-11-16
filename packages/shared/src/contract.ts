@@ -581,6 +581,8 @@ export interface SettingsRes {
   selectionToolbarHidden?: SelectionToolbarActionKey[]
   /** Cover fill mode inside a grid card. */
   coverFit?: 'crop' | 'full'
+  /** Cover aspect ratio in grid cards. */
+  coverRatio?: '2:3' | '3:4'
   /** Reading-time accounting: automatic heuristics, manual timer pill, or off (no reading data) */
   readingTimerMode?: 'auto' | 'manual' | 'both' | 'off'
   manualTimerGraceMinutes?: 1 | 5 | 10 | 30

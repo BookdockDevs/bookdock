@@ -2,48 +2,53 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.5] - 2026-11-16
+
+### Highlights
+
+- Manage categories and tags directly on books, with unified choices across device and server books and drag-and-drop organization.
+- Apply richer metadata lookup results and save book details, classification, tags, and covers together with a single undo.
+- Resize the desktop reader's floating sidebar and keep its open or collapsed state across reading sessions.
 
 ### Added
 
-- Refactored the desktop unpinned reader sidebar into an independent floating island card with adjustable width (200–640 px), height (320 px to viewport bound), and corner 2D resizing, with double-click reset and pointer capture cursor locking. The floating sidebar now remembers its open or collapsed state across reading sessions, aligning with the pinned sidebar behavior.
-- Scraped results now carry series, series index, category and tags. Applying a lookup fills the edit draft; classification changes are saved with the book.
-- Collected shared-library books can now keep their own description in the personal library. Editing the summary on a collected card stores a card-local override and leaves the shared version untouched, and a restore action returns the card to the shared summary.
-- The taxonomy management directory (shelves, categories, and tags) now supports drag-and-drop reordering with multi-column responsive grid layouts and floating drag previews. For two-level categories, subcategories can be moved under another root category by dragging directly onto its card (with an active drop indicator slot), or promoted to an independent root category by dropping onto a dedicated promotion card or via the row action menu.
-- Navigating to a filtered library view from the taxonomy directory now automatically switches the sidebar to the corresponding tab (shelves, categories, or tags), expands the parent category when filtering by a subcategory, and smoothly scrolls the active filter entry into view.
+- Metadata lookup results now include series, series index, category, and tags. Applying a result fills the edit draft for review before saving.
+- Collected shared-library books support a personal description override. Editing it on the collected card leaves the shared version unchanged; a restore action returns to the shared description.
+- Shelf, category, and tag management supports drag ordering, responsive multi-column layouts, and floating drag previews. Move subcategories to another parent by dragging onto its card, or promote them to root categories through a drop target or row action.
+- The library display menu offers a cover aspect ratio setting for grid view with 2:3 and 3:4 options, aligning cover containers and loading placeholders while syncing across devices.
 
 ### Changed
 
-- Categories and tags are now stored as book values instead of separate library entries. Category and tag lists are derived from books, so empty categories and tags can no longer be created independently; shelves remain independent and can still be empty.
-- The unified personal bookshelf offers category and tag choices from both device and server books. Assignments are saved with the selected book, and shared libraries continue to use their own classification lists.
-- Renaming or clearing a category or tag updates matching books, including hidden and trashed books. Clearing a category also clears its subcategories. Bulk actions respect the selected source and report partial completion if device and server changes do not both succeed.
-- Improved the reader text replacements dialog with semi-transparent card items, refined pattern and replacement syntax badges, muted zero-match indicators, clustered action buttons, and theme-adaptive hover states that blend into sepia, light, and dark reading palettes without jarring cold-white highlights.
-- Refreshed the default AI provider models for Claude, Gemini, DeepSeek, GLM, Kimi, MiniMax, and MiMo; kept Qwen's rolling alias, corrected MiMo's fallback API URL, and renamed the Moonshot provider to Kimi.
-- Organized Legado discovery around one selected library with a full-width library picker, and added author/file-size sorting for all libraries plus last-read/progress sorting for personal libraries. Search and discovery previews now fall back to book metadata descriptions and are capped at 80 characters.
-- Reworked the metadata lookup dialog into a two-column layout: compact candidate rows with clamped summaries on the left, and a detail preview with the large cover, publisher details, taxonomy badges and the full description on the right.
-- The shared modal footer and both append-content dialog footers no longer register as toast obstacles, so notifications stay in the viewport corner instead of jumping above the open dialog.
-- The book detail dialog and the shared-library work editor now save metadata, classification, tags and the cover in one request instead of a chain of updates, so a failure can no longer leave the metadata applied while the cover or tags stay behind.
-- Compacted book detail, shared work, and metadata lookup tag lists: when a book has more than 5 tags, the first 4 tags stay inline alongside a `+N` overflow chip that opens a popover to browse and filter the full tag list, keeping reading progress and primary action buttons within the cover viewport. The tag editor also constrains its height with clean scrolling so long tag sets never stretch classification forms.
-- Batched reading history loading: opening a book's reading history in the reader drawer now fetches the ledger overview, reading statistics, and recent sessions in a single aggregated request (`GET /api/v1/reading-records/overview/book/:bookId`), reducing network round-trips while guaranteeing cross-dataset snapshot consistency.
-- Deduplicated book detail queries in library membership hooks: `useBookMembership` now delegates to the `useBook` query cache, eliminating duplicate parallel `/api/v1/books/:id` fetches when checking shelves and tags simultaneously.
-- Consolidated user profile updates into `PATCH /api/v1/auth/me` (covering username, bio, and automated timezone reporting) and removed deprecated single-field profile endpoints.
-- Disabling the trash bin in settings no longer purges existing deleted books. Trashed items are retained safely and can be restored or emptied after re-enabling the trash feature, and the confirmation dialog clarifies this retention behavior.
+- Categories and tags are stored directly on books, and their lists are derived from book assignments. Empty categories and tags can no longer be created independently; shelves remain independent and can still be empty.
+- The unified personal library offers category and tag choices from both device and server books, saving assignments with the selected book. Shared libraries retain their own classification lists.
+- Renaming or clearing categories and tags updates matching books, including hidden and trashed books. Clearing a category also clears its subcategories. Bulk actions respect the selected source and report partial completion if device and server changes do not both succeed.
+- Opening a filtered library view from shelf, category, or tag management selects the matching sidebar tab, expands a selected subcategory's parent, and scrolls the active filter into view.
+- The desktop reader's unpinned sidebar is now a floating card with adjustable width (200–640 px) and height (from 320 px to the viewport limit). Resize from its edges or corner, double-click a handle to reset, and restore its open or collapsed state when returning to the reader.
+- Metadata lookup uses compact candidate rows beside a detail preview with a large cover, publication information, classification, tags, and the full description.
+- Book detail and shared-library editors save metadata, classification, tags, and cover in one request, avoiding partially applied edits. Each save produces one undo that restores these fields together and reports its result even after the original notification expires.
+- Long tag lists in book details, shared libraries, and metadata lookup show the first four tags and a `+N` popover when there are more than five. Tag editors scroll within a bounded height to keep forms compact.
+- Reader text replacement rows use theme-adaptive cards, compact syntax badges, quieter zero-match counts, and grouped editing controls across light, dark, and sepia themes.
+- Legado discovery focuses on one selected library with a full-width picker. All libraries support author and file-size sorting; personal libraries also support last-read and reading-progress sorting. Search and discovery previews fall back to book metadata descriptions and show at most 80 characters.
+- Refreshed default AI model presets for Claude, Gemini, DeepSeek, GLM, Kimi, MiniMax, and MiMo. Retained Qwen's rolling alias, corrected MiMo's fallback API URL, and renamed the Moonshot provider to Kimi.
+- Reading history loads its overview, statistics, and recent sessions in one request with a consistent snapshot. Book membership checks reuse the book detail cache to avoid duplicate requests.
+- Consolidated username, bio, and timezone updates into `PATCH /api/v1/auth/me`, replacing the separate profile-field endpoints.
+- Disabling the trash bin preserves existing deleted books for restoration or cleanup after re-enabling it. The confirmation dialog explains this behavior.
 
 ### Fixed
 
-- Fixed directory auto-locate failing to scroll when returning to earlier chapters (such as via the history capsule) after visiting tail chapters. When the table of contents reaches maximum scroll, fully visible chapters now correctly commit their placed position instead of leaving stale scroll tracking that suppressed subsequent relocations.
-- History capsule navigation now maintains pinned chrome across chapter transitions, keeping the footer and companion controls visible while interacting.
-- Fixed TXT-to-EPUB downloads flattening nested chapter navigation. Server and device exports retain the saved hierarchy, embed current book details and cover, and respect the selected text replacement option. A cover that cannot be read or supported now stops the export with an error.
-- Fixed Qidian detail lookups. Its mobile pages now redirect and ship a Vite-based SSR payload, which broke category, tag and multi-paragraph summary extraction.
-- Fixed scraped covers that failed to load. Cover hosts that reject hotlinked requests (such as Douban shards answering 403 or 418) now fall back to the smaller thumbnail and then to a server-side proxy cached for a day, and a cover that still fails is reported on its own instead of discarding the rest of the result.
-- Fixed personal source responses being decoded as UTF-8 regardless of the declared encoding. Bodies now follow the `charset` from the response header or the document head, and unknown labels fall back to UTF-8, so GBK sources return readable text.
-- Fixed protocol-relative and plain-HTTP cover URLs from personal sources being dropped. They are upgraded to HTTPS now, and detail values get the same normalization instead of reaching the browser unnormalized.
-- Fixed undo after an edit that saved the metadata but left a newly applied cover behind, and finished with no feedback. One save now yields one undo that restores metadata, classification, tags and cover together, and its result is always reported even after the original notification expired.
+- Fixed the table of contents failing to locate earlier chapters after navigating back from the end of a book, including through reading history.
+- Fixed reading-history navigation hiding the footer and companion controls too early during chapter transitions.
+- Fixed TXT-to-EPUB downloads flattening nested chapter navigation. Server and device exports preserve saved hierarchy, current metadata and cover, and the selected text replacements. An unreadable or unsupported cover stops export with an error.
+- Fixed Qidian detail lookups failing to extract categories, tags, and multi-paragraph descriptions after changes to its mobile pages and embedded data.
+- Fixed metadata lookup covers failing on hosts that block hotlinking. Loading falls back to a smaller thumbnail, then a server proxy cached for one day; a failed cover is reported separately without discarding the other metadata.
+- Fixed personal metadata sources always being decoded as UTF-8. Responses now use the declared charset from HTTP headers or the document head, with UTF-8 as the fallback for unknown encodings.
+- Fixed protocol-relative and plain-HTTP cover URLs from personal metadata sources being discarded or resolved against the Bookdock host. Cover URLs are normalized to HTTPS in both candidate and detail results.
+- Fixed notifications moving above open dialogs instead of staying in the viewport corner.
 
 ### Upgrade notes
 
-- On upgrade, server and device libraries convert existing category and tag assignments and their visibility, pinning, and order preferences to the new format. The conversion stops on data that cannot be migrated safely rather than discarding it.
-- On upgrade, legacy reading display settings previously stored in book content revisions are automatically migrated to user-scoped reader settings, preserving customized preferences.
+- Server and device libraries automatically convert existing category and tag assignments and their visibility, pinning, and order preferences to the new format. Conversion stops on data that cannot be migrated safely rather than discarding it.
+- Legacy reading display preferences stored in content revisions are automatically migrated to user-scoped reader settings.
 
 ## [0.8.4] - 2026-11-15
 
@@ -1314,48 +1319,53 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [未发布]
+### [0.8.5] - 2026-11-16
+
+#### 亮点
+
+- 分类与标签直接随书籍保存，本机和服务器书籍共用候选列表，并支持拖拽整理。
+- 刮削支持更多书籍信息，元数据、分类、标签和封面一次保存、一次撤销。
+- 桌面阅读器悬浮侧栏支持调整尺寸，并记住展开或折叠状态。
 
 #### 新增
 
-- 桌面端未固定侧栏重构为独立的悬浮岛卡片与紧凑胶囊，支持右边界宽度（200–640 px）、底部高度（320 px 起）及右下角双向拖拽调节尺寸，支持双击手柄重置为默认大小并在拖拽时锁定指针光标；悬浮侧栏现在与固定侧栏统一保持展开/折叠状态记忆，重新进入阅读页时自动恢复。
-- 刮削结果现在会带出系列、系列序号、分类与标签。应用后填充编辑草稿，分类和标签随书籍一起保存。
-- 收藏的共享书库书籍支持在个人书库中自定义简介。在收藏卡片上编辑简介会保存为该卡片私有的覆盖值，不影响共享版本，并可一键恢复为共享简介。
-- 书架、分类与标签管理页面全面支持拖拽排序，适配 PC 宽屏多列网格布局并提供平滑跟随光标的半透明悬浮拖拽卡片（DragOverlay）。对于两级分类结构，支持将子分类直接拖拽到其他一级分类卡片（呈现目标吸附槽提示）以调整所属上级，或拖至专属的移出卡片（亦可通过条目菜单一键操作）升为独立一级根分类。
-- 从分类或标签管理页点击条目跳转筛选时，侧栏会自动同步切换至对应的 Tab 面板（书架、分类或标签），在筛选子分类时自动展开父级节点，并将当前活跃项平滑滚动定位至可视区域。
+- 刮削结果新增系列、系列序号、分类和标签，应用后填入编辑草稿，确认保存后生效。
+- 收藏的共享书库书籍支持自定义个人简介，仅作用于当前收藏卡片，不影响共享版本，并可恢复为共享简介。
+- 书架、分类与标签管理支持拖拽排序、多列自适应布局和悬浮拖拽预览。子分类可直接拖至其他一级分类下，也可通过专用拖放区域或条目菜单升为一级分类。
+- 书库外观显示菜单新增网格封面比例设置，支持 2:3 与 3:4 切换，统一卡片容器与骨架屏占位，并支持跨设备同步。
 
 #### 优化
 
-- 分类和标签改为直接保存在书籍上，列表由书籍归属生成，因此不能再单独创建空分类或空标签；书架仍可独立创建并保持为空。
-- 统一书架中的本机书籍和服务器书籍共用两端的分类、标签候选列表，所选归属只保存到对应书籍所在的位置；共享书库继续使用自己的分类和标签。
-- 重命名或清除分类、标签会更新关联书籍，包括隐藏和回收站中的书籍；清除分类时也会清除其子分类。批量操作遵循当前来源筛选，本机与服务器未全部成功时会提示部分完成。
-- 优化阅读器文本替换弹窗的视觉与交互呈现：列表项改用与阅读器明暗/羊皮纸配色深度融合的半透明微质感卡片，消除悬停时的生硬冷白底色；规则模式与替换词采用轻量语法标签展示，弱化零匹配计数噪音，并将编辑与删除操作收拢分组。
-- 更新 Claude、Gemini、DeepSeek、智谱 GLM、Kimi、MiniMax 和 MiMo 的 AI 供应商默认模型；保留通义千问的系列别名、修正 MiMo 备用 API 地址，并将 Moonshot 供应商名称简化为“Kimi”。
-- 优化 Legado 发现页，按当前书库展示入口，书库选择独占一行，并新增按作者和文件大小排序的支持；个人书库另支持按最近阅读和阅读进度排序。搜索与发现结果缺少简介时会回退到书籍元数据简介，预览最多 80 个字符。
-- 重构刮削信息弹窗：左侧候选列表紧凑排列并对简介单行截断，右侧为包含高清封面、出版信息、分类标签徽标及完整多段简介的预览面板。
-- 共享弹窗的底部操作栏与两个追加内容弹窗的底栏不再标记为浮动通知避让障碍物，通知保持停靠于视口右下角，不再被弹窗顶起。
-- 书籍详情弹窗与共享书库编辑弹窗改为单次请求保存元数据、归类、标签与封面，不再串联多次更新，失败时不会出现元数据已生效而封面或标签未跟上的情况。
-- 优化书籍详情、共享书库与刮削弹窗中的标签呈现：当书籍标签超过 5 个时，行内仅展示前 4 个标签并追加 `+N` 折叠胶囊，点击弹出浮层查看全部标签并支持快速筛选，避免大量标签向下挤压阅读进度与操作按钮；标签编辑区同步加入高度限制与内联滚动，防止长标签列表过度撑大分类表单。
-- 优化单本书籍阅读数据加载：阅读器抽屉中的阅读记录面板改为通过单次聚合请求（`GET /api/v1/reading-records/overview/book/:bookId`）获取账本总览、统计指标与首屏阅读记录，减少网络往返并保证多维统计数据在并发下的快照一致性。
-- 统一图书归属查询缓存：`useBookMembership` 复用 `useBook` 详情查询缓存，消除书架和标签同时展示时并发发起的重复 `/api/v1/books/:id` 请求。
-- 整合个人资料更新接口：统一通过 `PATCH /api/v1/auth/me` 更新用户名、个人简介与时区，清理冗余的独立字段更新端点。
-- 关闭回收站设置时不再清空已删除书籍：现有回收站内容予以安全保留并在重新启用后可继续恢复或清理，确认弹窗同步明确该保留行为。
+- 分类和标签改为直接保存在书籍上，列表由书籍归属生成，不能再单独创建空分类或空标签；书架仍可独立创建并保持为空。
+- 统一个人书库中的本机和服务器书籍共用两端的分类、标签候选列表，所选归属保存到对应书籍所在位置；共享书库继续使用自己的分类和标签。
+- 重命名或清除分类、标签会更新关联书籍，包括隐藏和回收站中的书籍；清除分类时也会清除其子分类。批量操作遵循当前来源筛选，两端未全部成功时提示部分完成。
+- 从书架、分类或标签管理页进入书库筛选时，侧栏自动切换至对应页签、展开所选子分类的父级，并将当前筛选项滚动至可视区域。
+- 桌面阅读器未固定的侧栏改为悬浮卡片，宽度可在 200–640 px 间调节，高度从 320 px 起至视口上限。支持从边缘或右下角拖拽调整、双击手柄重置，并在重新进入阅读器时恢复展开或折叠状态。
+- 刮削弹窗采用双栏布局：左侧紧凑展示候选结果，右侧预览大封面、出版信息、分类、标签与完整简介。
+- 书籍详情和共享书库编辑改为一次请求保存元数据、分类、标签与封面，避免部分修改已生效、其余未保存的情况。一次保存对应一次完整撤销，即使原通知已过期，撤销结果仍会提示。
+- 书籍详情、共享书库与刮削弹窗中的标签超过 5 个时，仅行内显示前 4 个，其余收进 `+N` 浮层。标签编辑区限制高度并支持滚动，避免长列表撑大表单。
+- 阅读器文本替换列表采用适配浅色、深色和羊皮纸主题的卡片样式，精简语法标签、弱化零匹配计数，并统一编辑操作分组。
+- Legado 发现页围绕当前所选书库展示入口，书库选择器独占一行。所有书库支持按作者和文件大小排序，个人书库另支持按最近阅读和阅读进度排序；搜索与发现结果缺少简介时回退到书籍元数据简介，预览最多 80 个字符。
+- 更新 Claude、Gemini、DeepSeek、智谱 GLM、Kimi、MiniMax 和 MiMo 的默认模型，保留通义千问的系列别名，修正 MiMo 备用 API 地址，并将 Moonshot 供应商名称简化为“Kimi”。
+- 阅读记录面板通过一次请求加载总览、统计与最近记录，保持数据快照一致；书籍归属检查复用详情缓存，减少重复请求。
+- 用户名、个人简介和时区统一通过 `PATCH /api/v1/auth/me` 更新，替代原有的独立字段更新接口。
+- 关闭回收站时保留已删除书籍，重新启用后可继续恢复或清理，确认弹窗同步说明该行为。
 
 #### 修复
 
-- 修复访问全书末尾章节后返回前序章节（如通过历史胶囊跳转）时目录未重新定位的问题。当目录列表已滚动触底时，可视区域内的章节能正常提交定位记录，避免残留旧的章节索引阻断后续切章时的自动滚动。
-- 历史胶囊跳转时保持控制栏常驻，避免切章定位后底栏与操作按钮过早自动收起。
-- 修复 TXT 下载为 EPUB 时目录层级被压平的问题。服务器和本机书籍导出时保留已保存的目录层级，嵌入当前书籍信息和封面，并按所选文本版本应用替换规则；封面无法读取或格式不受支持时会提示并停止导出。
-- 修复起点详情解析失败的问题。其移动端页面改为重定向并改用 Vite SSR 数据块渲染，导致分类、标签与多段简介无法提取。
-- 修复刮削封面加载失败的问题。对拒绝外链的图床（如豆瓣不同 CDN 节点返回 HTTP 403 / 418）改为先降级到小尺寸缩略图、再走服务端代理（缓存一天），仍失败时单独提示，不再连带丢弃其余刮削结果。
-- 修复自定义刮削源响应固定按 UTF-8 解析的问题。现按响应头或文档头部的 `charset` 解码，未知编码回退 UTF-8，GBK 页面不再乱码。
-- 修复自定义刮削源的协议相对与 HTTP 封面地址被直接丢弃的问题。现统一升级为 HTTPS，详情返回值同样归一，此前这类地址会在浏览器端解析到本站域名而无法取图。
-- 修复编辑保存后撤销仍残留新封面、且撤销完成没有任何提示的问题。现在一次保存只生成一条撤销记录，元数据、归类、标签与封面一并回滚，撤销结果也一定会提示，即使原通知已经过期。
+- 修复访问全书末尾后返回前序章节时，目录未自动定位的问题，包括通过阅读历史跳转的情况。
+- 修复通过阅读历史切章时，底栏与相关操作控件过早收起的问题。
+- 修复 TXT 下载为 EPUB 时目录层级被压平的问题。服务器和本机导出均保留已保存的目录层级、当前书籍信息与封面，并应用所选文本替换；封面无法读取或格式不受支持时提示并停止导出。
+- 修复起点移动端页面及内嵌数据变化后，详情刮削无法提取分类、标签与多段简介的问题。
+- 修复拒绝外链的图床导致刮削封面加载失败的问题，依次尝试小尺寸缩略图与缓存一天的服务端代理；封面仍失败时单独提示，不丢弃其他信息。
+- 修复自定义刮削源固定按 UTF-8 解码导致乱码的问题，改为读取响应头或文档头部声明的编码，未知编码回退 UTF-8。
+- 修复自定义刮削源的协议相对及 HTTP 封面地址被丢弃或解析到本站域名的问题，候选与详情结果均统一规范为 HTTPS 地址。
+- 修复打开弹窗后通知被顶起的问题，通知保持在视口角落显示。
 
 #### 升级说明
 
-- 升级时会将服务器和本机书库现有的分类、标签归属及其隐藏、置顶和排序偏好转换为新格式。遇到无法安全迁移的数据时会停止转换，不会直接丢弃。
-- 升级时会自动将此前保存在书籍内容修订中的历史阅读设置迁移至用户级阅读设置表，保留个性化阅读偏好。
+- 升级时自动转换服务器和本机书库已有的分类、标签归属及其隐藏、置顶和排序偏好；遇到无法安全迁移的数据时停止转换，不会直接丢弃。
+- 此前保存在内容修订中的历史阅读显示偏好，会自动迁移至用户级阅读设置。
 
 ### [0.8.4] - 2026-11-15
 

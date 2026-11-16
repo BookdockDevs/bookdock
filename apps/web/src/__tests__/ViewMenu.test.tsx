@@ -116,16 +116,21 @@ describe('ViewMenu cover and card field prefs', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '书名' }))
     fireEvent.click(screen.getByRole('button', { name: '完整' }))
+    fireEvent.click(screen.getByRole('button', { name: '3:4' }))
     expect(libraryPrefsMutate).toHaveBeenCalledWith({ gridCardFields: ['author', 'progress'] })
     expect(useUiStore.getState().coverFit).toBe('full')
     expect(localStorage.getItem('bd-cover-fit')).toBe('full')
     expect(screen.getByRole('button', { name: '完整' })).toHaveAttribute('aria-pressed', 'true')
+    expect(useUiStore.getState().coverRatio).toBe('3:4')
+    expect(localStorage.getItem('bd-cover-ratio')).toBe('3:4')
+    expect(screen.getByRole('button', { name: '3:4' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('hides the grid card options in list view', () => {
     renderMenu({ defaultTab: 'viewLayout', view: 'list' })
     expect(screen.queryByRole('button', { name: '书名' })).toBeNull()
     expect(screen.queryByRole('button', { name: '裁剪' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '3:4' })).toBeNull()
   })
 
   it('offers title and author card fields, but not progress, in catalog grid view', () => {

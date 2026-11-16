@@ -65,6 +65,7 @@ export default function BookCoverImage({ book, size = 'md', showFormat = true, c
   const [error, setError] = useState(false)
   const [loaded, setLoaded] = useState(isCached)
   const coverFit = useUiStore((s) => s.coverFit)
+  const coverRatio = useUiStore((s) => s.coverRatio)
   // Hash by stable content identity, not a library work/card id or title:
   // moving a version between libraries and renaming it must not repaint it.
   const palette = getCoverPalette(book.coverPaletteKey ?? book.id, coverPaletteId ?? book.coverPaletteId)
@@ -95,7 +96,9 @@ export default function BookCoverImage({ book, size = 'md', showFormat = true, c
           ? 'flex h-16 w-12 shrink-0 items-center justify-center'
           : isCard
             ? 'flex h-20 w-14 shrink-0 select-none flex-col'
-            : 'flex aspect-[2/3] w-full select-none flex-col',
+            : coverRatio === '3:4'
+              ? 'flex aspect-[3/4] w-full select-none flex-col'
+              : 'flex aspect-[2/3] w-full select-none flex-col',
         palette.className,
         className,
       )}

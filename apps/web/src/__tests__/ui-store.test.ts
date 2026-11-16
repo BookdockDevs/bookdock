@@ -17,15 +17,18 @@ describe('ui.store current preferences', () => {
     expect(JSON.parse(localStorage.getItem('bd-local-reading-config-v1')!).global.fontSize).toBe(27)
   })
 
-  it('uses the default cover fit', async () => {
+  it('uses the default cover fit and ratio', async () => {
     const store = await freshStore()
     expect(store.getState().coverFit).toBe('crop')
+    expect(store.getState().coverRatio).toBe('2:3')
   })
 
-  it('restores a stored cover fit', async () => {
+  it('restores a stored cover fit and ratio', async () => {
     localStorage.setItem('bd-cover-fit', 'full')
+    localStorage.setItem('bd-cover-ratio', '3:4')
     const store = await freshStore()
     expect(store.getState().coverFit).toBe('full')
+    expect(store.getState().coverRatio).toBe('3:4')
   })
 })
 
@@ -33,6 +36,7 @@ describe('ui.store resetUserScopedPrefs', () => {
   it('returns server-owned preferences to their defaults', async () => {
     const store = await freshStore()
     store.getState().setCoverFit('full')
+    store.getState().setCoverRatio('3:4')
     store.getState().setTtsVoiceId('voice-7')
     store.getState().setReadingTimerMode('off')
     store.getState().setFontSize(26)
@@ -41,6 +45,7 @@ describe('ui.store resetUserScopedPrefs', () => {
     store.getState().resetUserScopedPrefs()
 
     expect(store.getState().coverFit).toBe('crop')
+    expect(store.getState().coverRatio).toBe('2:3')
     expect(store.getState().ttsVoiceId).toBe('')
     expect(store.getState().readingTimerMode).toBe('auto')
     expect(store.getState().fontSize).toBe(22)

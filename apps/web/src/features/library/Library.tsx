@@ -21,7 +21,7 @@ import type { ClientLibraryBookView, BookSortPrefField, CatalogBook, Library, Li
 import { useCatalogRevealHidden } from '@/features/reading-data/useCatalogRevealHidden'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
-import { formatAuthorList, formatBytes } from '@/lib/utils'
+import { cn, formatAuthorList, formatBytes } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 
@@ -2148,6 +2148,7 @@ function DraggableWorkCard({
 }
 
 function InitialLoading({ view, columns }: { view: 'grid' | 'list'; columns: number }) {
+  const coverRatio = useUiStore((s) => s.coverRatio)
   if (view === 'list') {
     return (
       <div className="flex flex-col divide-y divide-stone-100 py-2 dark:divide-stone-800">
@@ -2174,7 +2175,7 @@ function InitialLoading({ view, columns }: { view: 'grid' | 'list'; columns: num
     >
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="flex animate-pulse flex-col gap-2 rounded-xl p-1">
-          <div className="aspect-[1/1.4] w-full rounded-lg bg-stone-200/70 dark:bg-stone-800/70" />
+          <div className={cn('w-full rounded-lg bg-stone-200/70 dark:bg-stone-800/70', coverRatio === '3:4' ? 'aspect-[3/4]' : 'aspect-[2/3]')} />
           <div className="h-3.5 w-3/4 rounded bg-stone-200/70 dark:bg-stone-800/70" />
           <div className="h-3 w-1/2 rounded bg-stone-100 dark:bg-stone-800/40" />
         </div>

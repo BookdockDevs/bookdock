@@ -35,6 +35,7 @@ const SETTINGS_KEYS = [
   'selectionToolbarOrder',
   'selectionToolbarHidden',
   'coverFit',
+  'coverRatio',
   'readingTimerMode',
   'manualTimerGraceMinutes',
   'ttsEngine',
@@ -80,7 +81,7 @@ function deviceSettings(fallback: SettingsRes): SettingsRes {
     const raw = localStorage.getItem(DEVICE_SETTINGS_KEY)
     if (raw) stored = settingsUpdateSchema.pick({
       fontPreferences: true, fontOrder: true, selectionToolbarOrder: true, selectionToolbarHidden: true,
-      customThemes: true, coverFit: true, readingTimerMode: true, manualTimerGraceMinutes: true,
+      customThemes: true, coverFit: true, coverRatio: true, readingTimerMode: true, manualTimerGraceMinutes: true,
       ttsEngine: true, ttsServiceId: true, ttsVoiceId: true, ttsRate: true, ttsAutoNext: true, ttsFollow: true, readingConfig: true,
     }).parse(JSON.parse(raw))
     config = localStorage.getItem(DEVICE_READING_CONFIG_KEY)
@@ -88,7 +89,7 @@ function deviceSettings(fallback: SettingsRes): SettingsRes {
   } catch { notify.warning({ key: 'settings.deviceStorageFailed' }) }
   return {
     fontPreferences: {}, fontOrder: [], selectionToolbarOrder: [...DEFAULT_SELECTION_TOOLBAR_ORDER], selectionToolbarHidden: [],
-    customThemes: '[]', coverFit: 'crop', readingTimerMode: 'auto', manualTimerGraceMinutes: 5,
+    customThemes: '[]', coverFit: 'crop', coverRatio: '2:3', readingTimerMode: 'auto', manualTimerGraceMinutes: 5,
     ttsEngine: 'system', ttsServiceId: null, ttsVoiceId: '', ttsRate: 1, ttsAutoNext: true, ttsFollow: true,
     ...fallback, ...stored,
     readingConfig: config && parseReadingConfig(config) ? config : stored.readingConfig && parseReadingConfig(stored.readingConfig) ? stored.readingConfig : fallback.readingConfig,
