@@ -537,14 +537,16 @@ describe('LibrarySidebar', () => {
   it('toggles a tag pin from the context menu', () => {
     const mutate = vi.fn()
     mockHooks({ tags: [{ id: 'tag-1', name: '小说', bookCount: 3 }] })
-    ;(libraryHooks.useToggleTagPin as ReturnType<typeof vi.fn>).mockReturnValue({ mutate, isPending: false })
+    ;(libraryHooks.useUpdateLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate, isPending: false })
 
     render(<LibrarySidebar sessionKey="tag-pin" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
     showTagsPanel()
     fireEvent.click(screen.getAllByLabelText('更多操作')[0])
     fireEvent.click(screen.getByText('置顶'))
 
-    expect(mutate).toHaveBeenCalledWith({ id: 'tag-1', pinned: true })
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ name: '小说', patch: { pinned: true } }),
+    )
   })
 
   it('shows the unpin action for a pinned tag', () => {
@@ -557,29 +559,19 @@ describe('LibrarySidebar', () => {
     expect(screen.getByText('取消置顶')).toBeInTheDocument()
   })
 
-  it('confirms before deleting a tag and calls the delete mutation', () => {
+  it('confirms before clearing a tag and calls the clear mutation', () => {
     const mutateAsync = vi.fn().mockResolvedValue({})
     mockHooks({ tags: [{ id: 'tag-1', name: '小说', bookCount: 3 }] })
-    ;(libraryHooks.useDeleteTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
+    ;(libraryHooks.useClearLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
 
     render(<LibrarySidebar sessionKey="tag-delete" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
     showTagsPanel()
     fireEvent.click(screen.getAllByLabelText('更多操作')[0])
     fireEvent.click(screen.getByText('删除'))
 
-    expect(screen.getByText('删除标签')).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: '删除' }).at(-1)!)
-    expect(mutateAsync).toHaveBeenCalledWith('tag-1')
-  })
-
-  it('opens the new tag dialog from the tags panel button', () => {
-    mockHooks()
-
-    render(<LibrarySidebar sessionKey="tag-new" navSearch={navSearch} shelfId={null} tagId={null} trash={false} />)
-    showTagsPanel()
-    fireEvent.click(screen.getByTitle('新建标签'))
-
-    expect(screen.getByPlaceholderText('标签名称')).toBeInTheDocument()
+    expect(screen.getByText('清除标签')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '清空' }))
+    expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ name: '小说' }))
   })
 
   it('updates scroll shadows based on scroll position', () => {
@@ -705,22 +697,22 @@ describe('LibrarySidebar', () => {
 
     it('lets an owner curate the taxonomy but not a plain member', () => {
       mockHooks()
-      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }], memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'member' })
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4, path: ['Sci-Fi'] } as unknown as ShelfItemData], memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'member' })
 
       const { unmount } = render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
-      expect(screen.queryByTitle('新建分类')).toBeNull()
+      expect(screen.queryByLabelText('更多操作')).toBeNull()
       expect(screen.getByText('Sci-Fi')).toBeInTheDocument()
       unmount()
 
       mockHooks()
-      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }], memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'owner' })
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4, path: ['Sci-Fi'] } as unknown as ShelfItemData], memberCount: 3, workCount: 7, ownerUsername: 'u2', relation: 'owner' })
       render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
-      expect(screen.getByTitle('新建分类')).toBeInTheDocument()
+      expect(screen.getByLabelText('更多操作')).toBeInTheDocument()
     })
 
     it('renames a category through the shared-library endpoint', () => {
       mockHooks()
-      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }] })
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4, path: ['Sci-Fi'] } as unknown as ShelfItemData] })
       const mutate = vi.fn()
       ;(libraryHooks.useUpdateLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutate, isPending: false })
 
@@ -731,54 +723,24 @@ describe('LibrarySidebar', () => {
       fireEvent.click(screen.getAllByRole('button', { name: '保存' })[0])
 
       expect(mutate).toHaveBeenCalledWith(
-        expect.objectContaining({ libraryId: 'lib-1', categoryId: 'cat-1', patch: { name: '科幻', parentId: null } }),
+        expect.objectContaining({ libraryId: 'lib-1', path: ['Sci-Fi'], patch: { name: '科幻', parentPath: null } }),
         expect.anything(),
       )
     })
 
-    it('creates a category through the shared-library endpoint', () => {
-      mockHooks()
-      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }] })
-      const createCategory = vi.fn()
-      ;(libraryHooks.useCreateLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: createCategory, isPending: false })
-
-      render(<LibrarySidebar navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
-      fireEvent.click(screen.getByTitle('新建分类'))
-      // Names are trimmed before they are sent.
-      fireEvent.change(screen.getByPlaceholderText('分类名称'), { target: { value: '  Poetry  ' } })
-      fireEvent.click(screen.getAllByRole('button', { name: '创建' })[0])
-
-      expect(createCategory).toHaveBeenCalledWith({ libraryId: 'lib-1', name: 'Poetry' }, expect.anything())
-    })
-
-    it('creates a tag through the shared-library endpoint', () => {
-      mockHooks()
-      mockLibraryHooks({ tags: [{ id: 'tag-1', name: 'Award', bookCount: 2 }] })
-      const createTag = vi.fn()
-      ;(libraryHooks.useCreateLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: createTag, isPending: false })
-
-      render(<LibrarySidebar sessionKey="shared-new-tag" navSearch={navSearch} shelfId={null} tagId={null} trash={false} activeLibraryId="lib-1" />)
-      showTagsPanel()
-      fireEvent.click(screen.getByTitle('新建标签'))
-      fireEvent.change(screen.getByPlaceholderText('标签名称'), { target: { value: '  Prize  ' } })
-      fireEvent.click(screen.getAllByRole('button', { name: '创建' })[0])
-
-      expect(createTag).toHaveBeenCalledWith({ libraryId: 'lib-1', name: 'Prize' }, expect.anything())
-    })
-
     it('says what happens to the works filed under a deleted category', async () => {
       mockHooks()
-      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4 }] })
+      mockLibraryHooks({ categories: [{ id: 'cat-1', name: 'Sci-Fi', bookCount: 4, path: ['Sci-Fi'] } as unknown as ShelfItemData] })
       const mutateAsync = vi.fn().mockResolvedValue({})
-      ;(libraryHooks.useDeleteLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
+      ;(libraryHooks.useClearLibraryCategory as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync, isPending: false })
 
       render(<LibrarySidebar navSearch={navSearch} shelfId={null} categoryId="cat-1" tagId={null} trash={false} activeLibraryId="lib-1" />)
       fireEvent.click(screen.getAllByLabelText('更多操作')[0])
       fireEvent.click(screen.getByText('删除'))
 
-      expect(screen.getByText(/移至未分类/)).toBeInTheDocument()
-      fireEvent.click(screen.getAllByRole('button', { name: '删除' }).at(-1)!)
-      expect(mutateAsync).toHaveBeenCalledWith({ libraryId: 'lib-1', categoryId: 'cat-1' })
+      expect(screen.getByText('清除分类')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: '清空' }))
+      expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ path: ['Sci-Fi'] }))
       // Deleting the category being viewed is a dead end, so leave the filter.
       await waitFor(() => expect(navSearch).toHaveBeenCalledWith({ category: undefined, categoryScope: undefined, directory: undefined }))
     })
@@ -1222,16 +1184,23 @@ describe('device vault sidebar integration', () => {
       })
       mockLibraryHooks({
         categories: [
-          { id: 'cat-root', name: '文学', bookCount: 1, subtreeBookCount: 2, parentId: null, pinned: false, hidden: false },
-          { id: 'cat-leaf', name: '小说', bookCount: 1, subtreeBookCount: 1, parentId: 'cat-root', pinned: false, hidden: false },
+          { id: 'cat-root', name: '文学', bookCount: 1, subtreeBookCount: 2, parentId: null, path: ['文学'], pinned: false, hidden: false },
+          { id: 'cat-leaf', name: '小说', bookCount: 1, subtreeBookCount: 1, parentId: 'cat-root', path: ['文学', '小说'], pinned: false, hidden: false },
         ] as unknown as ShelfItemData[],
       })
       ;(libraryHooks.useDeviceMembershipCounts as ReturnType<typeof vi.fn>).mockReturnValue({
         shelves: new Map([['shelf-1', 2]]),
-        categories: new Map([['cat-leaf', 1]]),
+        categories: new Map(),
         tags: new Map(),
         unshelved: 0,
         uncategorized: 0,
+        taxonomy: {
+          categories: [
+            { id: 'cat-root', name: '文学', bookCount: 1, subtreeBookCount: 1, parentId: null, path: ['文学'], pinned: false, hidden: false },
+            { id: 'cat-leaf', name: '小说', bookCount: 1, subtreeBookCount: 1, parentId: 'cat-root', path: ['文学', '小说'], pinned: false, hidden: false },
+          ],
+          tags: [],
+        },
       })
 
       render(

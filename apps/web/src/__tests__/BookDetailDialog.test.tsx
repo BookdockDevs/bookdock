@@ -148,7 +148,8 @@ const book: BookListItem = {
   coverKey: null,
   size: 100,
   readStatus: 'reading',
-  categoryId: null,
+  categoryPath: null,
+  tags: [],
   progress: 0,
   createdAt: 1,
   updatedAt: 1,
@@ -321,8 +322,8 @@ describe('BookDetailDialog classification editor', () => {
   })
 
   it('keeps personal status, source, category and tags together without update or collection notices', () => {
-    membershipTags = ['tag-1']
-    bookDetail = { data: { ...book, categoryId: 'category-1', categoryName: 'Fiction', kind: 'shared', ownsSource: true, hasUnreadUpdate: true, source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' } } }
+    membershipTags = ['小说']
+    bookDetail = { data: { ...book, categoryPath: ['Fiction'], tags: ['小说'], kind: 'shared', ownsSource: true, hasUnreadUpdate: true, source: { libraryId: 'lib_city', libraryBookVersionId: 'lbv1', libraryName: 'City' } } }
     renderDialog()
     const row = screen.getByRole('button', { name: '在读' }).parentElement!.parentElement!
     expect(row.textContent).toContain('在读CityFiction#小说')
@@ -330,7 +331,7 @@ describe('BookDetailDialog classification editor', () => {
     // The private detail never offers a collection action any more.
     expect(screen.queryByRole('button', { name: '已在书库中' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Fiction' }))
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { category: 'category-1' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { category: '["Fiction"]' } })
   })
 
   it('saves an existing category from the classification selector', async () => {
@@ -444,9 +445,11 @@ describe('BookDetailDialog recommended categories', () => {
     })
     try {
       renderDialog()
+      fireEvent.click(screen.getByRole('button', { name: '编辑' }))
       fireEvent.click(screen.getByRole('button', { name: '刮削' }))
       fireEvent.click(screen.getByRole('menuitem', { name: /Open Library/ }))
       fireEvent.click(await screen.findByRole('button', { name: /Matched title/ }))
+      fireEvent.click(screen.getByLabelText('替换已有信息'))
       fireEvent.click(screen.getByRole('button', { name: '应用' }))
       fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(lastSave().payload.organization).toMatchObject({ categoryPath: ['武侠'], tags: [] }))
@@ -631,15 +634,15 @@ describe('BookDetailDialog identity chips', () => {
   })
 
   it('renders format in specs and navigates to the category filter from the category chip', () => {
-    bookDetail = { data: { ...book, categoryId: 'category-1', categoryName: 'Fiction' } }
+    bookDetail = { data: { ...book, categoryPath: ['Fiction'] } }
     const onClose = vi.fn()
-    render(<BookDetailDialog book={book} onClose={onClose} onDelete={vi.fn()} />, { wrapper })
+    render(<BookDetailDialog book={{ ...book, categoryPath: ['Fiction'] }} onClose={onClose} onDelete={vi.fn()} />, { wrapper })
 
     expect(screen.getByText('EPUB')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Fiction' }))
 
     expect(onClose).toHaveBeenCalled()
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { category: 'category-1' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { category: '["Fiction"]' } })
   })
 
   it('filters uncategorized books from the uncategorized category chip', () => {
@@ -650,25 +653,25 @@ describe('BookDetailDialog identity chips', () => {
 
   it('files the book from a right-click on its category chip', async () => {
     sharedCategories = [
-      { id: 'category-1', libraryId: 'private', userId: 'test-user', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 },
-      { id: 'category-2', libraryId: 'private', userId: 'test-user', name: 'Nonfiction', parentId: null, sortOrder: 1, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 0 },
+      { id: '["Fiction"]', libraryId: 'private', userId: 'test-user', name: 'Fiction', path: ['Fiction'], parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 },
+      { id: '["Nonfiction"]', libraryId: 'private', userId: 'test-user', name: 'Nonfiction', path: ['Nonfiction'], parentId: null, sortOrder: 1, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 0 },
     ]
-    bookDetail = { data: { ...book, categoryId: 'category-1', categoryName: 'Fiction' } }
+    bookDetail = { data: { ...book, categoryPath: ['Fiction'] } }
     renderDialog()
 
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Fiction' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Nonfiction' }))
 
-    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryId: 'category-2' }))
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/books/book-1/organization', { categoryPath: ['Nonfiction'] }))
     expect(navigateMock).not.toHaveBeenCalled()
   })
 
   it('navigates to the tag filter on tag chip click', () => {
-    membershipTags = ['tag-1']
+    membershipTags = ['小说']
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '小说' }))
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { tag: 'tag-1' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { tag: '小说' } })
   })
 
   it('renders no tag chips when the book has no tags', () => {
@@ -759,7 +762,7 @@ describe('BookDetailDialog read-status chip', () => {
   })
 
   it('keeps category chips as filters and exposes no shelf quick-edit menu', () => {
-    bookDetail = { data: { ...book, categoryId: 'category-1', categoryName: 'Fiction' } }
+    bookDetail = { data: { ...book, categoryPath: ['Fiction'] } }
     renderDialog()
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Fiction' }))
     expect(screen.queryByRole('menu')).toBeNull()
@@ -1556,9 +1559,11 @@ describe('BookDetailDialog shared work mode', () => {
 
   function catalogWork(overrides: Partial<CatalogBook> = {}): CatalogBook {
     return {
-      id: 'lb1', libraryId: 'lib_city', categoryId: null, title: 'City Book', author: 'Someone',
+      id: 'lb1', libraryId: 'lib_city', categoryPath: null, title: 'City Book', author: 'Someone',
+      authors: ['Someone'],
       description: 'A tale', coverKey: null, hidden: false, effectiveHidden: false, hiddenReason: null,
-      tags: [{ id: 't1', name: 'classic' }],
+      meta: {},
+      tags: ['classic'],
       versions: [catalogVersion()], createdAt: 1710000000000, updatedAt: 1710000000000, ...overrides,
     }
   }
@@ -1624,16 +1629,16 @@ describe('BookDetailDialog shared work mode', () => {
 
 
   it('uses refreshed detail when the work has left the current catalog filter', () => {
-    const old = catalogWork({ categoryId: 'old' })
+    const old = catalogWork({ categoryPath: ['old'] })
     queriedWork = {
       ...old,
       title: 'Moved work',
-      categoryId: 'child',
+      categoryPath: ['New root', 'Moved'],
       versions: [catalogVersion({ effective: { ...catalogVersion().effective, title: 'Moved work' } })],
     }
     sharedCategories = [
-      { id: 'root', name: 'New root', parentId: null } as Category,
-      { id: 'child', name: 'Moved', parentId: 'root' } as Category,
+      { id: 'root', name: 'New root', path: ['New root'], parentId: null } as Category,
+      { id: 'child', name: 'Moved', path: ['New root', 'Moved'], parentId: 'root' } as Category,
     ]
     renderWorkDialog(old)
     expect(screen.getByRole('heading', { name: 'Moved work' })).toBeInTheDocument()
@@ -1642,8 +1647,8 @@ describe('BookDetailDialog shared work mode', () => {
   })
 
   it('shows category before shared tags and filters within the current library', () => {
-    sharedCategories = [{ id: 'c1', libraryId: 'lib_city', userId: 'u2', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 }]
-    const { onClose } = renderWorkDialog(catalogWork({ categoryId: 'c1' }))
+    sharedCategories = [{ id: '["Fiction"]', libraryId: 'lib_city', userId: 'u2', name: 'Fiction', path: ['Fiction'], parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 }]
+    const { onClose } = renderWorkDialog(catalogWork({ categoryPath: ['Fiction'] }))
     const category = screen.getByRole('button', { name: 'Fiction' })
     const tag = screen.getByRole('button', { name: 'classic' })
     expect(category.parentElement!.children[0]).toBe(category)
@@ -1651,9 +1656,9 @@ describe('BookDetailDialog shared work mode', () => {
     expect(screen.queryByText('City', { exact: true })).toBeNull()
     fireEvent.click(category)
     expect(onClose).toHaveBeenCalled()
-    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: undefined, tag: undefined, category: 'c1', categoryScope: 'subtree' } })
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/', search: { libraryId: 'lib_city', shelf: undefined, tag: undefined, category: '["Fiction"]', categoryScope: 'subtree' } })
     fireEvent.click(tag)
-    expect(navigateMock).toHaveBeenLastCalledWith({ to: '/', search: { libraryId: 'lib_city', tag: 't1' } })
+    expect(navigateMock).toHaveBeenLastCalledWith({ to: '/', search: { libraryId: 'lib_city', tag: 'classic' } })
     expect(updateCatalogBookMutate).not.toHaveBeenCalled()
   })
 
@@ -1665,23 +1670,23 @@ describe('BookDetailDialog shared work mode', () => {
 
   it('files the work from a right-click on its category chip for a manager', async () => {
     sharedCategories = [
-      { id: 'c1', libraryId: 'lib_city', userId: 'u2', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 },
-      { id: 'c2', libraryId: 'lib_city', userId: 'u2', name: 'Nonfiction', parentId: null, sortOrder: 1, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 0 },
+      { id: '["Fiction"]', libraryId: 'lib_city', userId: 'u2', name: 'Fiction', path: ['Fiction'], parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 },
+      { id: '["Nonfiction"]', libraryId: 'lib_city', userId: 'u2', name: 'Nonfiction', path: ['Nonfiction'], parentId: null, sortOrder: 1, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 0 },
     ]
-    renderWorkDialog(catalogWork({ categoryId: 'c1' }), { canManage: true })
+    renderWorkDialog(catalogWork({ categoryPath: ['Fiction'] }), { canManage: true })
 
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Fiction' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Nonfiction' }))
 
-    await waitFor(() => expect(updateCatalogBookMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', patch: { categoryId: 'c2' } }))
+    await waitFor(() => expect(updateCatalogBookMutate).toHaveBeenCalledWith({ libraryId: 'lib_city', libraryBookId: 'lb1', patch: { categoryPath: ['Nonfiction'] } }))
     expect(navigateMock).not.toHaveBeenCalled()
   })
 
   it('offers no category quick edit to a reader', () => {
     sharedCategories = [
-      { id: 'c1', libraryId: 'lib_city', userId: 'u2', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 },
+      { id: '["Fiction"]', libraryId: 'lib_city', userId: 'u2', name: 'Fiction', path: ['Fiction'], parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1, updatedAt: 1, bookCount: 1 },
     ]
-    renderWorkDialog(catalogWork({ categoryId: 'c1' }))
+    renderWorkDialog(catalogWork({ categoryPath: ['Fiction'] }))
 
     fireEvent.contextMenu(screen.getByRole('button', { name: 'Fiction' }))
 
@@ -1691,8 +1696,8 @@ describe('BookDetailDialog shared work mode', () => {
   it.each(['loading', 'error', 'missing'])('never labels an unresolved category as uncategorized (%s)', (state) => {
     categoriesPending = state === 'loading'
     categoriesError = state === 'error'
-    sharedCategories = state === 'error' ? [{ id: 'c1', name: 'Stale' } as Category] : []
-    renderWorkDialog(catalogWork({ categoryId: 'c1' }))
+    sharedCategories = state === 'error' ? [{ id: '["Stale"]', name: 'Stale', path: ['Stale'] } as Category] : []
+    renderWorkDialog(catalogWork({ categoryPath: [] }))
     expect(screen.queryByRole('button', { name: '未分类' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Stale' })).toBeNull()
     expect(screen.getByText(state === 'loading' ? '分类' : '分类信息暂不可用')).toBeInTheDocument()

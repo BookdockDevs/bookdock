@@ -318,12 +318,12 @@ describe('NotesPanel', () => {
     expect(screen.queryByText('annotation.export')).toBeNull()
   })
 
-  it('navigates on click and closes the panel when not locked', () => {
+  it('navigates on click and keeps the panel open on pointer devices', () => {
     const onClose = vi.fn()
     renderPanel(onClose)
     fireEvent.click(screen.getByText('直线划线甲').closest('.group')!.querySelector('button[aria-label="annotation.jumpToSource"]')!)
     expect(display).toHaveBeenCalledWith('cfi:1')
-    expect(onClose).toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
     // bookmarks navigate by their persisted restore position
     fireEvent.click(screen.getByText('书签丁').closest('.group')!.querySelector('button[aria-label="annotation.jumpToSource"]')!)
     expect(display).toHaveBeenCalledWith('cfi:4')
@@ -348,7 +348,7 @@ describe('NotesPanel', () => {
     display.mockClear()
     fireEvent.click(screen.getByText('想法原文丙').closest('div.ml-7')!.querySelector('button[aria-label="annotation.jumpToSource"]')!)
     expect(display).toHaveBeenCalledWith('cfi:3')
-    expect(onClose).toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('opens idea detail with initialDetailId only when idea has comments and is shared', () => {

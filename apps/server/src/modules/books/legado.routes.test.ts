@@ -497,7 +497,7 @@ describe('Legado book-source adapter', () => {
   })
 
   it('maps a category discovery page scoped to one library', async () => {
-    vi.mocked(getLegadoExploreFilter).mockReturnValue({ libraryId: 'lib-city', categoryId: 'cat-9' })
+    vi.mocked(getLegadoExploreFilter).mockReturnValue({ libraryId: 'lib-city', category: ['科幻'] })
     vi.mocked(listLibraryVersionEntries).mockResolvedValue({
       items: [versionEntry({ categoryName: '科幻', tags: ['高分'] })],
       total: 1,
@@ -515,7 +515,7 @@ describe('Legado book-source adapter', () => {
       page: 2,
       sortBy: 'title',
       sortOrder: 'desc',
-      categoryId: 'cat-9',
+      category: ['科幻'],
     }))
     await expect(response.json()).resolves.toMatchObject({
       data: {

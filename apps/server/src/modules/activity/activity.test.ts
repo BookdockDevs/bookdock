@@ -327,8 +327,11 @@ describe('activity projections', () => {
   })
 
   it('does not expose works hidden by their category and groups system cleanup rows with a null actor', async () => {
-    db.insert(schema.libraryCategories).values({ id: 'hidden-category', libraryId, userId: ids.owner, name: 'Hidden', parentId: null, sortOrder: 0, hidden: true, createdAt: 100, updatedAt: 100 }).run()
-    db.update(schema.libraryBooks).set({ categoryId: 'hidden-category' }).where(eq(schema.libraryBooks.id, workId)).run()
+    db.insert(schema.libraryMetadataValueState).values({
+      id: 'hidden-category', libraryId, kind: 'category', value: JSON.stringify(['Hidden']),
+      sortOrder: 0, pinned: false, hidden: true, createdAt: 100, updatedAt: 100,
+    }).run()
+    db.update(schema.libraryBooks).set({ categoryRoot: 'Hidden' }).where(eq(schema.libraryBooks.id, workId)).run()
     const hiddenPage = await listActivity(ids.member, { scope: 'library', libraryId, type: 'all', limit: 20 })
     expect(hiddenPage.items).toEqual([])
     const managerPage = await listActivity(ids.admin, { scope: 'library', libraryId, type: 'all', limit: 20 })

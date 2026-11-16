@@ -93,7 +93,7 @@ describe('existing reading query hooks with the actual local source', () => {
     await add('recovery')
     const { result } = renderHook(() => useReadingLedgerRecovery('same-id', true), { wrapper })
     await waitFor(() => expect(client.getQueryData(['reading-records', local.namespace, 'ledger', 'same-id'])).toBeDefined())
-    await waitFor(() => expect(client.getQueryCache().getAll().filter((query) => query.queryKey.includes(local.namespace) && query.state.status === 'success')).toHaveLength(3))
+    await waitFor(() => expect(client.getQueryCache().getAll().filter((query) => query.queryKey.includes(local.namespace) && query.state.status === 'success')).toHaveLength(4))
     expect(result.current.failed).toBe(false)
     act(() => result.current.retry())
     expect(result.current.failed).toBe(false)

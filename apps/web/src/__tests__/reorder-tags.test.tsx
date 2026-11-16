@@ -1,13 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-
-import { useAuthStore } from '@/stores/auth.store'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import type { TagListItem } from '@bookdock/shared'
-
+import { useAuthStore } from '@/stores/auth.store'
 import * as apiClient from '@/api/client'
-import { useReorderTags } from '../features/library/hooks'
+import { useReorderLibraryTags } from '../features/library/hooks'
 
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof apiClient>()
@@ -20,45 +17,35 @@ function wrapper(queryClient: QueryClient) {
   }
 }
 
-function tag(id: string, name: string): TagListItem {
-  return { id, userId: 'u1', name, sortOrder: 0, createdAt: 0, updatedAt: 0, pinned: false, bookCount: 0 }
-}
-
-describe('useReorderTags', () => {
+describe('useReorderLibraryTags', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
-  useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
+    useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
 
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
-    queryClient.setQueryData(['tags'], {
-      data: [tag('a', 'A'), tag('b', 'B'), tag('c', 'C')],
-    })
-    vi.mocked(apiClient.apiGet).mockResolvedValue({ data: [tag('a', 'A'), tag('b', 'B'), tag('c', 'C')] })
     vi.mocked(apiClient.apiPut).mockResolvedValue({ data: null } as never)
   })
 
-  it('optimistically reorders the tags cache before the PUT lands', async () => {
-    const { result } = renderHook(() => useReorderTags(), { wrapper: wrapper(queryClient) })
+  it('sends the updated order to the server and invalidates tags query', async () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const { result } = renderHook(() => useReorderLibraryTags(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate(['c', 'a', 'b'])
+    result.current.mutate({ libraryId: null, names: ['c', 'a', 'b'] })
 
-    await waitFor(() => expect(apiClient.apiPut).toHaveBeenCalledWith('/tags/order', { tagIds: ['c', 'a', 'b'] }))
-    const cached = queryClient.getQueryData<{ data: TagListItem[] }>(['tags'])
-    expect(cached?.data.map((item) => item.id)).toEqual(['c', 'a', 'b'])
+    await waitFor(() => expect(apiClient.apiPut).toHaveBeenCalledWith('/tags/order', { names: ['c', 'a', 'b'] }))
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['tags'] }))
   })
 
-  it('rolls the cache back when the PUT fails', async () => {
+  it('notifies on error when the PUT fails', async () => {
     vi.mocked(apiClient.apiPut).mockRejectedValue(new Error('boom'))
 
-    const { result } = renderHook(() => useReorderTags(), { wrapper: wrapper(queryClient) })
+    const { result } = renderHook(() => useReorderLibraryTags(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate(['c', 'a', 'b'])
+    result.current.mutate({ libraryId: null, names: ['c', 'a', 'b'] })
 
     await waitFor(() => expect(result.current.isError).toBe(true))
-    const cached = queryClient.getQueryData<{ data: TagListItem[] }>(['tags'])
-    expect(cached?.data.map((item) => item.id)).toEqual(['a', 'b', 'c'])
   })
 })

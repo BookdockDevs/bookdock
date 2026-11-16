@@ -14,7 +14,7 @@ let bookDetailData: unknown = undefined
 // Rendered behind a real modal, so the confirm dialog portals out of it.
 
 vi.mock('../features/library/hooks', () => ({
-  useLibraryCategories: () => ({ data: { data: [{ id: 'category-1', name: '分类' }] }, isLoading: false }),
+  useLibraryCategories: () => ({ data: { data: [{ id: 'category-1', name: '分类', path: ['分类'] }] }, isLoading: false }),
   useLibraryTags: () => ({ data: { data: [{ id: 'tag-1', name: '标签' }] }, isLoading: false }),
   useCreateLibraryCategory: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateLibraryTag: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -83,7 +83,7 @@ describe('PublishBookDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '发布' }))
 
     await waitFor(() => expect(publishMutate).toHaveBeenCalledWith(
-      { libraryId: 'shared-owner', bookId: 'book-1', categoryId: 'category-1', tagIds: ['tag-1'] },
+      { libraryId: 'shared-owner', bookId: 'book-1', categoryPath: ['分类'], tags: ['标签'] },
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     ))
     expect(screen.getByText('发布成功')).toBeInTheDocument()

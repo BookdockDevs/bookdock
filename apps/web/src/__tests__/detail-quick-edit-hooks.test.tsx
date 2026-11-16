@@ -86,8 +86,8 @@ describe('detail quick-edit mutations', () => {
   it('still supports explicit tag clearing without changing the shelf', async () => {
     const { wrapper } = setup()
     const { result } = renderHook(useUpdateBookMembership, { wrapper })
-    await act(() => result.current.mutateAsync({ bookId: 'b1', tagIds: [] }))
-    expect(apiPut).toHaveBeenCalledExactlyOnceWith('/books/b1/organization', { tagIds: [] })
+    await act(() => result.current.mutateAsync({ bookId: 'b1', tags: [] }))
+    expect(apiPut).toHaveBeenCalledExactlyOnceWith('/books/b1/organization', { tags: [] })
   })
 
   it.each(['status', 'shelf'])('retains confirmed caches when the %s write fails and notifies once', async (field) => {

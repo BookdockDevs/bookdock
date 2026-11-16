@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAuthStore } from '@/stores/auth.store'
 
 import { apiGet, apiPatch, apiPut } from '@/api/client'
-import { useReorderShelves, useReorderTags, useUpdateCatalogBook, useUpdateLibraryCategory } from '@/features/library/hooks'
+import { useReorderShelves, useUpdateCatalogBook, useUpdateLibraryCategory } from '@/features/library/hooks'
 
 vi.mock('@/api/client', async (original) => ({
   ...await original<typeof import('@/api/client')>(), apiGet: vi.fn(), apiPatch: vi.fn(), apiPut: vi.fn(),
@@ -34,23 +34,23 @@ describe('taxonomy write consistency', () => {
     keys.forEach((key) => client.setQueryData(key, { data: {} }))
     const { result } = renderHook(() => ({ category: useUpdateLibraryCategory(), work: useUpdateCatalogBook() }), { wrapper })
     await act(async () => {
-      if (kind === 'category') await result.current.category.mutateAsync({ libraryId: 'lib', categoryId: 'child', patch: { name: 'Renamed', parentId: 'root' } })
-      else await result.current.work.mutateAsync({ libraryId: 'lib', libraryBookId: 'work', patch: { categoryId: 'child' } })
+      if (kind === 'category') await result.current.category.mutateAsync({ libraryId: 'lib', path: ['child'], source: 'server', patch: { name: 'Renamed', parentPath: ['root'] } })
+      else await result.current.work.mutateAsync({ libraryId: 'lib', libraryBookId: 'work', patch: { categoryPath: ['child'] } })
     })
     for (const key of keys) expect(client.getQueryState(key)?.isInvalidated).toBe(true)
-    if (kind === 'work') expect(apiPatch).toHaveBeenCalledWith('/libraries/lib/books/work', { categoryId: 'child' })
+    if (kind === 'work') expect(apiPatch).toHaveBeenCalledWith('/libraries/lib/books/work', { categoryPath: ['child'] })
   })
 
-  it.each(['shelves', 'tags'])('keeps hidden ids in the complete %s order and rolls back on rejection', async (kind) => {
+  it('keeps hidden ids in the complete shelves order and rolls back on rejection', async () => {
     const { client, wrapper } = setup()
     const rows = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }]
-    client.setQueryData([kind], { data: rows })
+    client.setQueryData(['shelves'], { data: rows })
     vi.mocked(apiGet).mockResolvedValue({ data: [rows[0], { id: 'hidden' }, rows[1]] })
     vi.mocked(apiPut).mockRejectedValue(new Error('Rejected'))
-    const { result } = renderHook(() => ({ shelves: useReorderShelves(), tags: useReorderTags() }), { wrapper })
-    await act(async () => { await expect(result.current[kind].mutateAsync(['b', 'a'])).rejects.toThrow('Rejected') })
-    expect(apiGet).toHaveBeenCalledWith(`/${kind}?showHidden=1`)
-    expect(apiPut).toHaveBeenCalledWith(`/${kind}/order`, { [kind === 'shelves' ? 'shelfIds' : 'tagIds']: ['b', 'hidden', 'a'] })
-    expect(client.getQueryData([kind])).toEqual({ data: rows })
+    const { result } = renderHook(() => ({ shelves: useReorderShelves() }), { wrapper })
+    await act(async () => { await expect(result.current.shelves.mutateAsync(['b', 'a'])).rejects.toThrow('Rejected') })
+    expect(apiGet).toHaveBeenCalledWith('/shelves?showHidden=1')
+    expect(apiPut).toHaveBeenCalledWith('/shelves/order', { shelfIds: ['b', 'hidden', 'a'] })
+    expect(client.getQueryData(['shelves'])).toEqual({ data: rows })
   })
 })

@@ -283,12 +283,12 @@ describe('useUploadBooks', () => {
     const { result } = renderHook(() => useUploadBooks(), { wrapper: wrapper(queryClient) })
 
     act(() => {
-      result.current.addFiles([new File(['x'], 'book.epub')], { autoStart: true, shelfId: 'shelf-1', tagIds: ['tag-1'] })
+      result.current.addFiles([new File(['x'], 'book.epub')], { autoStart: true, shelfId: 'shelf-1', tags: ['待读'] })
     })
 
     const sent = FakeXHR.instances[0]!
     expect(sent.url).toMatch(/\/books$/)
-    expect(sent.fields).toEqual({ shelfId: 'shelf-1', tagIds: '["tag-1"]' })
+    expect(sent.fields).toEqual({ shelfId: 'shelf-1', tags: '["待读"]' })
     expect(sent.files.map((f) => f.name)).toEqual(['book.epub'])
   })
 

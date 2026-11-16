@@ -36,7 +36,7 @@ function makeBook(withCatalogTaxonomy = false): ClientBook {
     updatedAt: 2000,
     version: 0,
     catalog: {
-      ...(withCatalogTaxonomy ? { shelfId: 'shelf-1', categoryId: 'cat-1', tagIds: ['tag-1'] } : {}),
+      ...(withCatalogTaxonomy ? { shelfId: 'shelf-1', categoryPath: ['Fiction'], tags: ['Sci-Fi'] } : {}),
       metadata: { publisher: 'Press' },
     },
   }
@@ -102,11 +102,10 @@ describe('uploadLocalBookToServer', () => {
   it('migrates file, cover, metadata, reading state, notes/images, review, and removes local copy', async () => {
     await repository.saveOrganization('v1', {
       version: 0,
-      items: [
-        { id: 'shelf-1', kind: 'shelf', name: 'Favorites', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1000, updatedAt: 1000 },
-        { id: 'cat-1', kind: 'category', name: 'Fiction', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1000, updatedAt: 1000 },
-        { id: 'tag-1', kind: 'tag', name: 'Sci-Fi', parentId: null, sortOrder: 0, pinned: false, hidden: false, createdAt: 1000, updatedAt: 1000 },
+      shelves: [
+        { id: 'shelf-1', name: 'Favorites', sortOrder: 0, pinned: false, hidden: false, createdAt: 1000, updatedAt: 1000 },
       ],
+      valueState: [],
     }, 0)
     const coverBlob = new Blob(['cover-bytes'], { type: 'image/webp' })
     await repository.addBook(makeBook(true), new Blob(['epub-bytes-1']), coverBlob)

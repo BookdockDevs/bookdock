@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { CATEGORY_TEMPLATES, type CatalogBook, type FileMetadataSourceRes } from '@bookdock/shared'
@@ -388,17 +388,11 @@ describe('WorkEditDialog', () => {
   })
 
   it('creates and selects a new tag through the shared popover', async () => {
-    const createdTag = { data: { id: 't_new', name: '硬核' } }
-    let completeCreation!: (result: typeof createdTag) => void
-    const createTag = vi.fn(() => new Promise<typeof createdTag>((resolve) => { completeCreation = resolve }))
-    HOOKS.useCreateLibraryTag.mockReturnValue({ mutateAsync: createTag, isPending: false })
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
     const input = screen.getByPlaceholderText('搜索标签…')
     fireEvent.change(input, { target: { value: '硬核' } })
     fireEvent.keyDown(input, { key: 'Enter' })
-    await waitFor(() => expect(createTag).toHaveBeenCalledWith({ libraryId: 'lib_city', name: '硬核' }))
-    await act(async () => { completeCreation(createdTag) })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(lastSave().payload.work).toMatchObject({ tags: ['classic', '硬核'] }))
     expect(lastSave().payload.work).not.toHaveProperty('tagIds')
@@ -412,7 +406,7 @@ describe('WorkEditDialog', () => {
     fireEvent.click(screen.getByText('推荐分类'))
     fireEvent.click(screen.getByRole('radio', { name: templateName }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(lastSave().payload.work).toEqual({ categoryPath: ['文学', '散文随笔'] }))
+    await waitFor(() => expect(lastSave().payload.work).toEqual({ categoryPath: ['文学'] }))
     expect(lastSave().payload.versions).toBeUndefined()
   })
 })

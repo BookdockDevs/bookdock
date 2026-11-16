@@ -19,8 +19,8 @@ const vaultSelection = vi.fn()
 const vaultTrash = vi.fn()
 const vaultPurge = vi.fn()
 let selectionItems: BatchSelectionItem[] = []
-let tags: { id: string; name: string; bookCount: number; parentId?: string | null }[] = []
-let categories: { id: string; name: string; bookCount: number; parentId?: string | null }[] = []
+let tags: { id: string; name: string; bookCount: number; pinned?: boolean; hidden?: boolean }[] = []
+let categories: { id: string; name: string; bookCount: number; parentId?: string | null; path?: string[]; pinned?: boolean; hidden?: boolean }[] = []
 
 vi.mock('@/api/client', () => ({
   apiPatch: (...args: unknown[]) => apiPatch(...args),
@@ -31,8 +31,8 @@ vi.mock('@/api/client', () => ({
 vi.mock('../features/library/hooks', () => ({
   useShelves: () => ({ data: { data: categories } }),
   useTags: () => ({ data: { data: tags } }),
-  useLibraryCategories: () => ({ data: { data: categories } }),
-  useLibraryTags: () => ({ data: { data: tags } }),
+  useLibraryCategories: () => ({ data: { data: categories.map((c) => ({ ...c, pinned: false, hidden: false, path: c.path ?? (c.parentId ? [categories.find((p) => p.id === c.parentId)?.name ?? '', c.name] : [c.name]) })) } }),
+  useLibraryTags: () => ({ data: { data: tags.map((t) => ({ ...t, pinned: false, hidden: false })) } }),
   // Batch permanent delete routes through the shared projection helper so
   // archive, reading records and interaction queries resync as well. The mock
   // factory replaces that module wholesale, so the export has to be
@@ -58,7 +58,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 function item(id: string, overrides: Partial<BatchSelectionItem> = {}): BatchSelectionItem {
-  return { id, categoryId: null, tagIds: [], hidden: false, pinnedAt: null, versionCount: 1, kind: 'personal', ...overrides }
+  return { id, bookVersionId: 'bv-' + id, title: id, format: 'epub', categoryPath: null, tags: [], hidden: false, pinnedAt: null, versionCount: 1, kind: 'personal', ...overrides }
 }
 
 async function clickReady(name: string) {
@@ -93,7 +93,7 @@ describe('SelectionBar', () => {
 
   it('organizes works through the shared library in one request', async () => {
     selectionItems = [item('w1', { kind: undefined }), item('w2', { kind: undefined })]
-    categories = [{ id: 'c1', name: '科幻', bookCount: 2 }]
+    categories = [{ id: 'c1', name: '科幻', bookCount: 2, path: ['科幻'] }]
     const onComplete = vi.fn()
     render(<SelectionBar selectedKeys={['server:w1', 'server:w2']} libraryId="lib1" onClear={vi.fn()} onComplete={onComplete} />, { wrapper })
 
@@ -105,13 +105,13 @@ describe('SelectionBar', () => {
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled())
     expect(apiPatch).toHaveBeenCalledWith('/libraries/lib1/books/batch/organize', {
-      ids: ['w1', 'w2'], categoryId: 'c1', addTagIds: [], removeTagIds: [],
+      ids: ['w1', 'w2'], categoryPath: ['科幻'], addTags: [], removeTags: [],
     })
   })
 
   it('keeps mixed classification unchanged after selecting and resetting a target', async () => {
-    selectionItems = [item('a', { categoryId: 'c1' }), item('b', { categoryId: 'c2' })]
-    categories = [{ id: 'c1', name: 'Root', bookCount: 1, parentId: null }, { id: 'c2', name: 'Child', bookCount: 1, parentId: 'c1' }]
+    selectionItems = [item('a', { categoryPath: ['Root'] }), item('b', { categoryPath: ['Child'] })]
+    categories = [{ id: 'c1', name: 'Root', bookCount: 1, parentId: null, path: ['Root'] }, { id: 'c2', name: 'Child', bookCount: 1, parentId: 'c1', path: ['Root', 'Child'] }]
     tags = [{ id: 'tag', name: 'Topic', bookCount: 0 }]
     render(<SelectionBar selectedKeys={['server:a', 'server:b']} libraryId="lib1" onClear={vi.fn()} />, { wrapper })
     await clickReady('library.batchOrganize')
@@ -122,12 +122,12 @@ describe('SelectionBar', () => {
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/libraries/lib1/books/batch/organize', {
-      ids: ['a', 'b'], addTagIds: ['tag'], removeTagIds: [],
+      ids: ['a', 'b'], addTags: ['Topic'], removeTags: [],
     }))
   })
 
   it('adds a partially present tag to all selected entries without changing other tags', async () => {
-    selectionItems = [item('a', { shelfId: 's1', categoryId: 'c1', tagIds: ['t1', 'other'] }), item('b', { shelfId: 's2', categoryId: 'c2', tagIds: [] })]
+    selectionItems = [item('a', { shelfId: 's1', categoryPath: ['c1'], tags: ['科幻', 'other'] }), item('b', { shelfId: 's2', categoryPath: ['c2'], tags: [] })]
     tags = [{ id: 't1', name: '科幻', bookCount: 1 }]
     render(<SelectionBar selectedKeys={['server:a', 'server:b']} onClear={vi.fn()} />, { wrapper })
 
@@ -139,13 +139,13 @@ describe('SelectionBar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
 
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
-      ids: ['a', 'b'], addTagIds: ['t1'], removeTagIds: [],
+      ids: ['a', 'b'], addTags: ['科幻'], removeTags: [],
     }))
   })
 
   it('keeps shelf and category selected by default and only unshelves when explicitly chosen', async () => {
-    selectionItems = [item('a', { shelfId: 's1', categoryId: 'c1' })]
-    categories = [{ id: 's1', name: 'Reading', bookCount: 1 }]
+    selectionItems = [item('a', { shelfId: 's1', categoryPath: ['c1'] })]
+    categories = [{ id: 's1', name: 'Reading', bookCount: 1, path: ['Reading'] }]
     render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchOrganize')
@@ -156,13 +156,13 @@ describe('SelectionBar', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'library.notOnShelf' }))
     fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
-      ids: ['a'], shelfId: null, addTagIds: [], removeTagIds: [],
+      ids: ['a'], shelfId: null, addTags: [], removeTags: [],
     }))
   })
 
   it('clears a category only after explicitly choosing uncategorized', async () => {
-    selectionItems = [item('a', { categoryId: 'c1' })]
-    categories = [{ id: 'c1', name: 'Mystery', bookCount: 1 }]
+    selectionItems = [item('a', { categoryPath: ['Mystery'] })]
+    categories = [{ id: 'c1', name: 'Mystery', bookCount: 1, path: ['Mystery'] }]
     render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} />, { wrapper })
 
     await clickReady('library.batchOrganize')
@@ -172,12 +172,12 @@ describe('SelectionBar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
 
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
-      ids: ['a'], categoryId: null, addTagIds: [], removeTagIds: [],
+      ids: ['a'], categoryPath: null, addTags: [], removeTags: [],
     }))
   })
 
   it('allows private recommendations and resets a recommendation to keep before an unrelated tag edit', async () => {
-    selectionItems = [item('a', { categoryId: 'existing' })]
+    selectionItems = [item('a', { categoryPath: ['existing'] })]
     tags = [{ id: 't1', name: 'Topic', bookCount: 0 }]
     render(<SelectionBar selectedKeys={['server:a']} onClear={vi.fn()} />, { wrapper })
 
@@ -192,7 +192,7 @@ describe('SelectionBar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
 
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
-      ids: ['a'], addTagIds: ['t1'], removeTagIds: [],
+      ids: ['a'], addTags: ['Topic'], removeTags: [],
     }))
   })
 
@@ -240,7 +240,7 @@ describe('SelectionBar', () => {
   })
 
   it('removes a tag only when every selected entry has it', async () => {
-    selectionItems = [item('a', { tagIds: ['t1'] }), item('b', { tagIds: ['t1'] })]
+    selectionItems = [item('a', { tags: ['科幻'] }), item('b', { tags: ['科幻'] })]
     tags = [{ id: 't1', name: '科幻', bookCount: 2 }]
     render(<SelectionBar selectedKeys={['server:a', 'server:b']} onClear={vi.fn()} />, { wrapper })
 
@@ -250,7 +250,7 @@ describe('SelectionBar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'library.save' }))
 
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith('/books/batch/organize', {
-      ids: ['a', 'b'], addTagIds: [], removeTagIds: ['t1'],
+      ids: ['a', 'b'], addTags: [], removeTags: ['科幻'],
     }))
   })
 

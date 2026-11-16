@@ -80,7 +80,7 @@ describe('UploadSheet', () => {
     render(<UploadSheet open onClose={vi.fn()} shelfId="current-shelf" initialSource="local" />)
     expect(screen.queryByRole('combobox')).toBeNull()
     fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [new File(['book'], 'book.txt')] } })
-    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { destination: 'local', maxBytes: undefined, shelfId: 'current-shelf', tagIds: [] })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { destination: 'local', maxBytes: undefined, shelfId: 'current-shelf', tags: [] })
   })
 
   it('clicking drop zone triggers hidden file input', () => {
@@ -173,12 +173,12 @@ describe('UploadSheet', () => {
     const file = new File([], 'book.epub')
     fireEvent.drop(dropZone, fileDropData([file]))
     expect(addFiles).toHaveBeenCalledTimes(1)
-    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, destination: 'local', maxBytes: undefined, shelfId: undefined, tagIds: [] })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, destination: 'local', maxBytes: undefined, shelfId: undefined, tags: [] })
 
     addFiles.mockClear()
     const input = document.querySelector('input[type="file"]') as HTMLInputElement
     fireEvent.change(input, { target: { files: [file] } })
-    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { destination: 'local', maxBytes: undefined, shelfId: undefined, tagIds: [] })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { destination: 'local', maxBytes: undefined, shelfId: undefined, tags: [] })
   })
 
   it('enables version extraction on drop only when both versionNameMode and normalizeTitle are active', () => {
@@ -298,7 +298,7 @@ describe('UploadSheet', () => {
     const dropZone = screen.getByText('library.uploadHint').parentElement!.parentElement!
     const file = new File([], 'book.epub')
     fireEvent.drop(dropZone, fileDropData([file]))
-    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, destination: 'local', maxBytes: undefined, shelfId: 'shelf-1', tagIds: ['tag-1'] })
+    expect(addFiles).toHaveBeenCalledWith(expect.anything(), { autoStart: true, destination: 'local', maxBytes: undefined, shelfId: 'shelf-1', tags: ['待读'] })
   })
 
   it('shows a done button once settled, which clears the queue and closes', () => {

@@ -243,12 +243,16 @@ describe('Legado discovery configuration', () => {
     return id
   }
 
-  function seedCategory(libraryId: string, userId: string, name: string, parentId: string | null = null, hidden = false) {
-    const id = createId('cat')
-    db.insert(schema.libraryCategories).values({
-      id, libraryId, userId, name, parentId, sortOrder: 0, pinned: false, hidden, createdAt: 1, updatedAt: 1,
-    }).run()
-    return id
+  function seedCategory(libraryId: string, _userId: string, path: string | string[], hidden = false) {
+    const parts = Array.isArray(path) ? path : [path]
+    const key = JSON.stringify(parts)
+    if (hidden) {
+      db.insert(schema.libraryMetadataValueState).values({
+        id: createId('mvs'), libraryId, kind: 'category', value: key,
+        sortOrder: 0, pinned: false, hidden: true, createdAt: 1, updatedAt: 1,
+      }).run()
+    }
+    return key
   }
 
   function seedShelf(libraryId: string, userId: string, name: string, hidden = false) {
@@ -259,21 +263,28 @@ describe('Legado discovery configuration', () => {
     return id
   }
 
-  function seedTag(libraryId: string, userId: string, name: string, hidden = false) {
-    const id = createId('ltag')
-    db.insert(schema.libraryTags).values({
-      id, libraryId, userId, name, sortOrder: 0, pinned: false, hidden, createdAt: 1, updatedAt: 1,
-    }).run()
-    return id
+  function seedTag(libraryId: string, _userId: string, name: string, hidden = false) {
+    if (hidden) {
+      db.insert(schema.libraryMetadataValueState).values({
+        id: createId('mvs'), libraryId, kind: 'tag', value: name,
+        sortOrder: 0, pinned: false, hidden: true, createdAt: 1, updatedAt: 1,
+      }).run()
+    }
+    return name
   }
 
-  function seedWork(libraryId: string, userId: string, taxonomy: { categoryId?: string | null; shelfId?: string | null; tagIds?: string[] } = {}) {
+  function seedWork(libraryId: string, userId: string, taxonomy: { category?: string[] | null; shelfId?: string | null; tags?: string[] } = {}) {
     const workId = createId('lbook')
     const versionId = createId('book')
+    const [root, leaf] = taxonomy.category ?? []
     db.insert(schema.libraryBooks).values({
-      id: workId, libraryId, userId, title: 'Book One', author: 'A', categoryId: taxonomy.categoryId ?? null, shelfId: taxonomy.shelfId ?? null, createdAt: 1, updatedAt: 1,
+      id: workId, libraryId, userId, title: 'Book One', author: 'A',
+      categoryRoot: root ?? null, categoryLeaf: leaf ?? null,
+      shelfId: taxonomy.shelfId ?? null, createdAt: 1, updatedAt: 1,
     }).run()
-    if (taxonomy.tagIds?.length) db.insert(schema.libraryBookTags).values(taxonomy.tagIds.map((tagId) => ({ libraryBookId: workId, tagId }))).run()
+    if (taxonomy.tags?.length) {
+      db.insert(schema.libraryBookTagValues).values(taxonomy.tags.map((name) => ({ id: createId('lbtv'), libraryBookId: workId, name }))).run()
+    }
     db.insert(schema.bookVersions).values({ id: versionId, format: 'txt', size: 10, createdAt: 1, updatedAt: 1 }).run()
     db.insert(schema.libraryBookVersions).values({
       id: createId('lbv'), libraryId, libraryBookId: workId, bookVersionId: versionId,
@@ -314,11 +325,11 @@ describe('Legado discovery configuration', () => {
   })
 
   it('reads the library taxonomy, not the frozen legacy tables', async () => {
-    const root = seedCategory(privateLibraryId, ownerId, '网络小说')
-    const child = seedCategory(privateLibraryId, ownerId, '都市', root)
+    seedCategory(privateLibraryId, ownerId, ['网络小说'])
+    seedCategory(privateLibraryId, ownerId, ['网络小说', '都市'])
     const tag = seedTag(privateLibraryId, ownerId, '完结')
-    seedWork(privateLibraryId, ownerId, { categoryId: root, tagIds: [tag] })
-    seedWork(privateLibraryId, ownerId, { categoryId: child })
+    seedWork(privateLibraryId, ownerId, { category: ['网络小说'], tags: [tag] })
+    seedWork(privateLibraryId, ownerId, { category: ['网络小说', '都市'] })
     seedWork(privateLibraryId, ownerId)
 
     const config = await getLegadoExploreConfig(ownerId)
@@ -336,31 +347,29 @@ describe('Legado discovery configuration', () => {
   })
 
   it('follows sidebar module visibility preferences', async () => {
-    seedCategory(privateLibraryId, ownerId, '空分类')
+    seedCategory(privateLibraryId, ownerId, ['空分类'])
     seedShelf(privateLibraryId, ownerId, '空书架')
     const usedTag = seedTag(privateLibraryId, ownerId, '有书标签')
-    seedTag(privateLibraryId, ownerId, '空标签')
-    seedWork(privateLibraryId, ownerId, { tagIds: [usedTag] })
+    seedWork(privateLibraryId, ownerId, { tags: [usedTag] })
     updateSettings(ownerId, { library: { sidebarModules: ['tags'] } })
 
     const config = await getLegadoExploreConfig(ownerId)
 
     expect(config.libraries[0]).toMatchObject({ categories: [], shelves: [], tags: [
       { id: usedTag, name: '有书标签' },
-      { name: '空标签' },
     ] })
   })
 
   it('keeps hidden taxonomy for a manager, in the reader\'s own library too', async () => {
     // The source already lists the owner's hidden books, so hiding their shelf
     // rows would only make a visible book unreachable by category.
-    const hiddenCategory = seedCategory(privateLibraryId, ownerId, '小说', null, true)
+    const hiddenCategory = seedCategory(privateLibraryId, ownerId, ['小说'], true)
     const hiddenShelf = seedShelf(privateLibraryId, ownerId, '藏书架', true)
     const hiddenTag = seedTag(privateLibraryId, ownerId, '藏标签', true)
-    const visibleCategory = seedCategory(privateLibraryId, ownerId, '网络小说')
+    seedCategory(privateLibraryId, ownerId, ['网络小说'])
     const visibleTag = seedTag(privateLibraryId, ownerId, '完结')
-    seedWork(privateLibraryId, ownerId, { categoryId: hiddenCategory, shelfId: hiddenShelf, tagIds: [hiddenTag] })
-    seedWork(privateLibraryId, ownerId, { categoryId: visibleCategory, tagIds: [visibleTag] })
+    seedWork(privateLibraryId, ownerId, { category: ['小说'], shelfId: hiddenShelf, tags: [hiddenTag] })
+    seedWork(privateLibraryId, ownerId, { category: ['网络小说'], tags: [visibleTag] })
 
     const config = await getLegadoExploreConfig(ownerId)
     const [library] = config.libraries
@@ -373,18 +382,18 @@ describe('Legado discovery configuration', () => {
     expect(getLegadoExploreFilter(ownerId, privateLibraryId, 'shelf', hiddenShelf))
       .toEqual({ libraryId: privateLibraryId, shelfId: hiddenShelf })
     expect(getLegadoExploreFilter(ownerId, privateLibraryId, 'category', hiddenCategory))
-      .toEqual({ libraryId: privateLibraryId, categoryId: hiddenCategory })
+      .toEqual({ libraryId: privateLibraryId, category: ['小说'] })
     expect(getLegadoExploreFilter(ownerId, privateLibraryId, 'tag', hiddenTag))
-      .toEqual({ libraryId: privateLibraryId, tagId: hiddenTag })
+      .toEqual({ libraryId: privateLibraryId, tag: hiddenTag })
   })
 
   it('hides hidden taxonomy from an ordinary member of a shared library', async () => {
-    const hiddenCategory = seedCategory(sharedLibraryId, ownerId, '藏书架', null, true)
+    const hiddenCategory = seedCategory(sharedLibraryId, ownerId, ['藏书架'], true)
     const hiddenTag = seedTag(sharedLibraryId, ownerId, '藏标签', true)
-    const catVisible = seedCategory(sharedLibraryId, ownerId, '网络小说')
+    const catVisible = seedCategory(sharedLibraryId, ownerId, ['网络小说'])
     const tagVisible = seedTag(sharedLibraryId, ownerId, '完结')
-    seedWork(sharedLibraryId, ownerId, { categoryId: hiddenCategory, tagIds: [hiddenTag] })
-    seedWork(sharedLibraryId, ownerId, { categoryId: catVisible, tagIds: [tagVisible] })
+    seedWork(sharedLibraryId, ownerId, { category: ['藏书架'], tags: [hiddenTag] })
+    seedWork(sharedLibraryId, ownerId, { category: ['网络小说'], tags: [tagVisible] })
 
     // The owner curates it, so the owner sees everything.
     const asOwner = await getLegadoExploreConfig(ownerId)
@@ -416,7 +425,7 @@ describe('Legado discovery configuration', () => {
   })
 
   it('omits a library with no readable work instead of rendering dead buttons', async () => {
-    seedCategory(privateLibraryId, ownerId, '网络小说')
+    seedCategory(privateLibraryId, ownerId, ['网络小说'])
     seedWork(sharedLibraryId, ownerId)
 
     const config = await getLegadoExploreConfig(memberId)
@@ -425,21 +434,22 @@ describe('Legado discovery configuration', () => {
   })
 
   it('rejects a taxonomy id that belongs to another library', () => {
-    const sharedCategory = seedCategory(sharedLibraryId, ownerId, '共享分类')
-    const privateCategory = seedCategory(privateLibraryId, ownerId, '私有分类')
+    const sharedCategory = seedCategory(sharedLibraryId, ownerId, ['共享分类'])
+    const privateCategory = seedCategory(privateLibraryId, ownerId, ['私有分类'])
     const privateShelf = seedShelf(privateLibraryId, ownerId, '私有书架')
     const privateTag = seedTag(privateLibraryId, ownerId, '私有标签')
 
     // Ids are library-local, so one library's row must not answer for another.
     expect(getLegadoExploreFilter(ownerId, privateLibraryId, 'category', privateCategory))
-      .toEqual({ libraryId: privateLibraryId, categoryId: privateCategory })
+      .toEqual({ libraryId: privateLibraryId, category: ['私有分类'] })
     expect(getLegadoExploreFilter(ownerId, privateLibraryId, 'shelf', privateShelf))
       .toEqual({ libraryId: privateLibraryId, shelfId: privateShelf })
-    expect(() => getLegadoExploreFilter(ownerId, privateLibraryId, 'category', createId('cat'))).toThrow()
+    expect(() => getLegadoExploreFilter(ownerId, privateLibraryId, 'category', 'not-a-json-path')).toThrow()
     expect(() => getLegadoExploreFilter(ownerId, privateLibraryId, 'shelf', createId('shelf'))).toThrow()
     expect(getLegadoExploreFilter(ownerId, sharedLibraryId, 'category', sharedCategory))
-      .toEqual({ libraryId: sharedLibraryId, categoryId: sharedCategory })
-    expect(() => getLegadoExploreFilter(ownerId, sharedLibraryId, 'tag', privateTag)).toThrow()
+      .toEqual({ libraryId: sharedLibraryId, category: ['共享分类'] })
+    expect(getLegadoExploreFilter(ownerId, sharedLibraryId, 'tag', privateTag))
+      .toEqual({ libraryId: sharedLibraryId, tag: privateTag })
     // The uncategorized sentinel exists once per library, so it always resolves.
     expect(getLegadoExploreFilter(ownerId, sharedLibraryId, 'shelf', 'none')).toEqual({ libraryId: sharedLibraryId, shelfId: 'none' })
     expect(getLegadoExploreFilter(ownerId, sharedLibraryId, 'all')).toEqual({ libraryId: sharedLibraryId })

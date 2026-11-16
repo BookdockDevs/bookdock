@@ -7,7 +7,7 @@ import type { UseBooksParams } from './catalog-query'
 import { useUnifiedBooks } from './hooks'
 
 const list = vi.fn()
-const vaultPage = { entries: [], organization: { version: 0, items: [] }, total: 0, totalSize: 0 }
+const vaultPage = { entries: [], organization: { version: 0, shelves: [], valueState: [] }, total: 0, totalSize: 0 }
 vi.mock('@/features/local-library/catalog', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/features/local-library/catalog')>()
   return { ...actual, localCatalogOperations: () => ({ list }) }
@@ -77,7 +77,7 @@ describe('unified shelf with no device book', () => {
         },
         state: null,
       }],
-      organization: { version: 1, items: [] },
+      organization: { version: 1, shelves: [], valueState: [] },
       total: 1,
       totalSize: 10,
     })
@@ -100,7 +100,7 @@ describe('unified shelf with no device book', () => {
         },
         state: null,
       }],
-      organization: { version: 1, items: [] },
+      organization: { version: 1, shelves: [], valueState: [] },
       total: 1,
       totalSize: 10,
     })

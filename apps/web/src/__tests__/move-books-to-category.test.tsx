@@ -39,10 +39,10 @@ describe('useMoveBooksToCategory', () => {
   it('sends one batch organize request for private books', async () => {
     const { result } = renderHook(() => useMoveBooksToCategory(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ books: [{ id: 'b1' }, { id: 'b2' }], categoryId: 'cat-1' })
+    result.current.mutate({ books: [{ id: 'b1' }, { id: 'b2' }], categoryPath: ['cat-1'] })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(apiClient.apiPatch).toHaveBeenCalledExactlyOnceWith('/books/batch/organize', { ids: ['b1', 'b2'], categoryId: 'cat-1' })
+    expect(apiClient.apiPatch).toHaveBeenCalledExactlyOnceWith('/books/batch/organize', { ids: ['b1', 'b2'], categoryPath: ['cat-1'] })
     expect(notify.success).toHaveBeenCalledWith(
       { key: 'library.batchClassifySucceeded', params: { count: 2 } },
       { undo: { token: 'undo-1', expiresAt: 99999 } },
@@ -52,17 +52,17 @@ describe('useMoveBooksToCategory', () => {
   it('sends batch organize request to shared library when libraryId is provided', async () => {
     const { result } = renderHook(() => useMoveBooksToCategory(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ libraryId: 'lib-1', books: [{ id: 'b1' }], categoryId: 'cat-2' })
+    result.current.mutate({ libraryId: 'lib-1', books: [{ id: 'b1' }], categoryPath: ['cat-2'] })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(apiClient.apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/batch/organize', { ids: ['b1'], categoryId: 'cat-2' })
+    expect(apiClient.apiPatch).toHaveBeenCalledWith('/libraries/lib-1/books/batch/organize', { ids: ['b1'], categoryPath: ['cat-2'] })
   })
 
   it('invalidates relevant queries on success', async () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const { result } = renderHook(() => useMoveBooksToCategory(), { wrapper: wrapper(queryClient) })
 
-    result.current.mutate({ books: [{ id: 'b1' }], categoryId: null })
+    result.current.mutate({ books: [{ id: 'b1' }], categoryPath: null })
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['books'] })

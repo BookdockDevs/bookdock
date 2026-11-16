@@ -43,7 +43,7 @@ describe.each(['webdav', 'connection'] as const)('%s import taxonomy placement',
 
   afterEach(() => { vi.restoreAllMocks(); sqlite.close() })
 
-  async function importBook(placement: { libraryId?: string; shelfId?: string; categoryId?: string }) {
+  async function importBook(placement: { libraryId?: string; shelfId?: string; categoryPath?: string[] | null; tags?: string[] }) {
     const request = { files: ['/test.txt'], ...placement }
     const result = adapter === 'webdav'
       ? await importWebDavBooks('u1', request)
@@ -52,18 +52,16 @@ describe.each(['webdav', 'connection'] as const)('%s import taxonomy placement',
   }
 
   it('keeps private shelf and category independent with or without an explicit private library', async () => {
-    await importBook({ libraryId: 'private', shelfId: 'shelf', categoryId: 'category' })
-    expect(books.uploadCatalogBook).toHaveBeenCalledWith('private', 'u1', expect.any(File), expect.objectContaining({ shelfId: 'shelf', categoryId: 'category' }))
-    await importBook({ shelfId: 'shelf', categoryId: 'category' })
-    expect(books.uploadBook).toHaveBeenCalledWith('u1', expect.any(File), expect.objectContaining({ shelfId: 'shelf', categoryId: 'category' }), expect.any(Object))
+    await importBook({ libraryId: 'private', shelfId: 'shelf', categoryPath: ['category'] })
+    expect(books.uploadCatalogBook).toHaveBeenCalledWith('private', 'u1', expect.any(File), expect.objectContaining({ shelfId: 'shelf', categoryPath: ['category'] }))
+    await importBook({ shelfId: 'shelf', categoryPath: ['category'] })
+    expect(books.uploadBook).toHaveBeenCalledWith('u1', expect.any(File), expect.objectContaining({ shelfId: 'shelf', categoryPath: ['category'] }), expect.any(Object))
   })
 
-  it('keeps the legacy shared shelf parameter as category placement and accepts the explicit category field', async () => {
-    await importBook({ libraryId: 'shared', shelfId: 'old-category' })
-    expect(books.uploadCatalogBook).toHaveBeenLastCalledWith('shared', 'u1', expect.any(File), expect.objectContaining({ categoryId: 'old-category' }))
-    await importBook({ libraryId: 'shared', shelfId: 'old-category', categoryId: 'category' })
+  it('passes categoryPath and tags to catalog placement on shared library', async () => {
+    await importBook({ libraryId: 'shared', shelfId: 'shelf', categoryPath: ['category'], tags: ['tag1'] })
     const options = vi.mocked(books.uploadCatalogBook).mock.calls.at(-1)![3]
-    expect(options).toMatchObject({ categoryId: 'category' })
+    expect(options).toMatchObject({ categoryPath: ['category'], tags: ['tag1'] })
     expect(options).not.toHaveProperty('shelfId')
   })
 })

@@ -532,19 +532,11 @@ describe('reading-records service', () => {
   })
 
   it('aggregates reading time by tag, excluding untagged books and honoring the range', async () => {
-    const tagA = createId('tag')
-    const tagB = createId('tag')
-    const libraryId = db.select({ id: schema.libraries.id }).from(schema.libraries)
-      .where(and(eq(schema.libraries.userId, ownerId), eq(schema.libraries.type, 'private'))).get()!.id
-    db.insert(schema.libraryTags).values([
-      { id: tagA, libraryId, userId: ownerId, name: 'Fiction', createdAt: 1, updatedAt: 1 },
-      { id: tagB, libraryId, userId: ownerId, name: 'Tech', createdAt: 1, updatedAt: 1 },
-    ]).run()
     const lbvOf = (id: string) => db.select({ libraryBookId: schema.libraryBookVersions.libraryBookId })
       .from(schema.libraryBookVersions).where(eq(schema.libraryBookVersions.bookVersionId, id)).get()!
-    db.insert(schema.libraryBookTags).values([
-      { libraryBookId: lbvOf(bookId).libraryBookId, tagId: tagA },
-      { libraryBookId: lbvOf(book2Id).libraryBookId, tagId: tagB },
+    db.insert(schema.libraryBookTagValues).values([
+      { id: createId('lbtv'), libraryBookId: lbvOf(bookId).libraryBookId, name: 'Fiction' },
+      { id: createId('lbtv'), libraryBookId: lbvOf(book2Id).libraryBookId, name: 'Tech' },
     ]).run()
     const book3Id = createId('book')
     db.insert(schema.books).values({
@@ -560,16 +552,18 @@ describe('reading-records service', () => {
 
     const byTag = await getByTag(ownerId, {})
     expect(byTag).toEqual([
-      { tagId: tagB, name: 'Tech', durationSeconds: 900, bookCount: 1 },
-      { tagId: tagA, name: 'Fiction', durationSeconds: 577, bookCount: 1 },
+      { name: 'Tech', durationSeconds: 900, bookCount: 1 },
+      { name: 'Fiction', durationSeconds: 577, bookCount: 1 },
     ])
 
     const ranged = await getByTag(ownerId, { from: '2026-07-01', to: '2026-07-31' })
     expect(ranged).toEqual([
-      { tagId: tagB, name: 'Tech', durationSeconds: 900, bookCount: 1 },
-      { tagId: tagA, name: 'Fiction', durationSeconds: 500, bookCount: 1 },
+      { name: 'Tech', durationSeconds: 900, bookCount: 1 },
+      { name: 'Fiction', durationSeconds: 500, bookCount: 1 },
     ])
 
+    const otherId = createId('user')
+    db.insert(schema.users).values({ id: otherId, username: `other-${otherId}`, passwordHash: null, role: 'member', createdAt: Date.now() }).run()
     expect(await getByTag(otherId, {})).toEqual([])
   })
 

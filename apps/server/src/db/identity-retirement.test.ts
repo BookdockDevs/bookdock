@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as client from './client'
 import * as schema from './schema'
-import { LEGACY_IDENTITY_RETIREMENT_TAG, migrationTagWhen, revertReadingImportsSchema, revertReadingResourceSchema } from './migration-stage'
+import { LEGACY_IDENTITY_RETIREMENT_TAG, migrationTagWhen, revertInstanceAndAiJobsSchema, revertReadingImportsSchema } from './migration-stage'
 import { authGuard, requireOwner, resetAuthCaches } from '../middleware/auth.guard'
 import { errorHandler } from '../middleware/error'
 import authRoutes from '../modules/auth/auth.routes'
@@ -102,14 +102,10 @@ function makeLegacyIdentity() {
     DROP TABLE IF EXISTS activity_events;
     DROP TABLE IF EXISTS content_revision_maps;
     DROP TABLE IF EXISTS personal_metadata_sources;
-    DROP TABLE IF EXISTS instance_invite_libraries;
-    DROP TABLE IF EXISTS instance_invites;
-    DROP TABLE IF EXISTS ai_chat_jobs;
     `);
     revertReadingImportsSchema(db.$client);
-    revertReadingResourceSchema(db.$client);
+    revertInstanceAndAiJobsSchema(db.$client);
     db.$client.exec(`
-    ALTER TABLE instance DROP COLUMN registration_mode;
     ALTER TABLE book_states DROP COLUMN progress_revision_id;
     ALTER TABLE book_states DROP COLUMN coverage_revision_id;
     ALTER TABLE bookmarks DROP COLUMN relocation;
@@ -124,7 +120,6 @@ function makeLegacyIdentity() {
     ALTER TABLE instance DROP COLUMN storage_backend_status;
     ALTER TABLE instance DROP COLUMN storage_backend_last_tested_at;
     ALTER TABLE instance DROP COLUMN storage_backend_latency_ms;
-    ALTER TABLE instance DROP COLUMN allow_user_resource_upload;
     DROP TRIGGER idea_comments_deleted_author;
     DROP TABLE idea_comment_likes; DROP TABLE idea_likes; DROP TABLE idea_comments;
     ALTER TABLE ideas DROP COLUMN source_library_book_version_id;
@@ -137,15 +132,9 @@ function makeLegacyIdentity() {
     DROP TABLE shelves;
     DROP INDEX library_books_shelf_idx;
     ALTER TABLE library_books DROP COLUMN shelf_id;
-    ALTER TABLE library_books DROP COLUMN description_override;
-    DROP TABLE IF EXISTS library_book_tag_values;
-    DROP TABLE IF EXISTS library_metadata_value_state;
     DROP TABLE IF EXISTS library_book_tags;
     DROP TABLE IF EXISTS library_tags;
     DROP TABLE IF EXISTS library_categories;
-    ALTER TABLE library_books DROP COLUMN category_root;
-    ALTER TABLE library_books DROP COLUMN category_leaf;
-    ALTER TABLE library_books ADD COLUMN category_id text;
     CREATE TABLE library_categories (id text PRIMARY KEY NOT NULL, library_id text NOT NULL, user_id text NOT NULL, name text NOT NULL, parent_id text, sort_order integer NOT NULL DEFAULT 0, pinned integer NOT NULL DEFAULT 0, hidden integer NOT NULL DEFAULT 0, created_at integer NOT NULL, updated_at integer NOT NULL);
     CREATE TABLE library_tags (id text PRIMARY KEY NOT NULL, library_id text NOT NULL, user_id text NOT NULL, name text NOT NULL, sort_order integer NOT NULL DEFAULT 0, pinned integer NOT NULL DEFAULT 0, hidden integer NOT NULL DEFAULT 0, created_at integer NOT NULL, updated_at integer NOT NULL);
     CREATE TABLE library_book_tags (library_book_id text NOT NULL, tag_id text NOT NULL, PRIMARY KEY (library_book_id, tag_id));

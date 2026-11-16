@@ -6,9 +6,12 @@ import { migrateBeforeBookRetirementIncluding as migrate } from '../../db/migrat
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { classificationValueKey } from '@bookdock/shared'
+
 import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
+import { updateCategoryValue } from '../classification/classification.service'
 import {
   deleteExternalBook,
   getExternalBook,
@@ -118,16 +121,10 @@ describe('external API projection', () => {
     // Everything a client needs to place an upload, in the one call it already
     // makes. The counts come from the Web's own list, so they follow the same
     // role-aware rule and cannot drift from the sidebar.
-    const fantasyId = createId('cat')
-    const urbanId = createId('cat')
-    db.insert(schema.libraryCategories).values([
-      { id: fantasyId, libraryId: sharedLibraryId, userId: ownerId, name: 'Fantasy', parentId: null, createdAt: 1, updatedAt: 1 },
-      { id: urbanId, libraryId: sharedLibraryId, userId: ownerId, name: 'Urban', parentId: fantasyId, createdAt: 2, updatedAt: 2 },
-    ]).run()
-    db.insert(schema.libraryTags).values([
-      { id: createId('tag'), libraryId: sharedLibraryId, userId: ownerId, name: 'Finished', createdAt: 1, updatedAt: 1 },
-    ]).run()
-    seedVersion(sharedLibraryId, ownerId, { title: 'One', revisionAt: 1000 })
+    const fantasyId = classificationValueKey('category', ['Fantasy'])
+    const one = seedVersion(sharedLibraryId, ownerId, { title: 'One', revisionAt: 1000 })
+    db.update(schema.libraryBooks).set({ categoryRoot: 'Fantasy', categoryLeaf: 'Urban' }).where(eq(schema.libraryBooks.id, one.workId)).run()
+    db.insert(schema.libraryBookTagValues).values({ id: createId('btv'), libraryBookId: one.workId, name: 'Finished', sortOrder: 0 }).run()
     seedVersion(sharedLibraryId, ownerId, { title: 'Two', revisionAt: 1000 })
 
     const library = (await listExternalLibraries(ownerId)).find((l) => l.id === sharedLibraryId)!
@@ -139,25 +136,21 @@ describe('external API projection', () => {
       ['Fantasy', null, 0],
       ['Urban', fantasyId, 1],
     ])
-    expect(library.tags).toEqual([{ id: expect.any(String), name: 'Finished', bookCount: 0, hidden: false }])
+    expect(library.tags).toEqual([{ id: 'Finished', name: 'Finished', bookCount: 1, hidden: false }])
 
-    // The uncategorized bucket is a display fiction the book source synthesises,
-    // not a category row. Advertising it here would hand a client an id that the
-    // upload path answers with CATEGORY_NOT_FOUND.
+    // The book source synthesises the uncategorized bucket for display.
     expect(library.categories.map((c) => c.id)).not.toContain('none')
   })
 
   it('projects private shelves separately from categories', async () => {
     const shelfId = createId('shelf')
-    const categoryId = createId('cat')
+    const categoryId = classificationValueKey('category', ['Mystery'])
     db.insert(schema.shelves).values({
       id: shelfId, libraryId: privateLibraryId, userId: ownerId, name: 'Reading',
       sortOrder: 0, createdAt: 1, updatedAt: 1,
     }).run()
-    db.insert(schema.libraryCategories).values({
-      id: categoryId, libraryId: privateLibraryId, userId: ownerId, name: 'Mystery',
-      parentId: null, createdAt: 1, updatedAt: 1,
-    }).run()
+    const seeded = seedVersion(privateLibraryId, ownerId, { title: 'Filed', revisionAt: 1000 })
+    db.update(schema.libraryBooks).set({ categoryRoot: 'Mystery' }).where(eq(schema.libraryBooks.id, seeded.workId)).run()
 
     const library = (await listExternalLibraries(ownerId)).find((row) => row.id === privateLibraryId)!
 
@@ -168,30 +161,25 @@ describe('external API projection', () => {
 
   it('returns private shelf and category labels as separate book fields', async () => {
     const shelfId = createId('shelf')
-    const categoryId = createId('cat')
     db.insert(schema.shelves).values({
       id: shelfId, libraryId: privateLibraryId, userId: ownerId, name: 'Reading',
       sortOrder: 0, createdAt: 1, updatedAt: 1,
     }).run()
-    db.insert(schema.libraryCategories).values({
-      id: categoryId, libraryId: privateLibraryId, userId: ownerId, name: 'Mystery',
-      parentId: null, createdAt: 1, updatedAt: 1,
-    }).run()
     const seeded = seedVersion(privateLibraryId, ownerId, { title: 'Filed', revisionAt: 1000 })
-    db.update(schema.libraryBooks).set({ shelfId, categoryId }).where(eq(schema.libraryBooks.id, seeded.workId)).run()
+    db.update(schema.libraryBooks).set({ shelfId, categoryRoot: 'Mystery' }).where(eq(schema.libraryBooks.id, seeded.workId)).run()
 
     const book = (await listExternalBooks(ownerId, { page: 1, pageSize: 10 })).items[0]!
 
     expect(book).toMatchObject({ shelfName: 'Reading', categoryName: 'Mystery' })
   })
 
-  it('shows a hidden shelf to its manager and to nobody else', async () => {
+  it('shows a hidden category to its manager and to nobody else', async () => {
     // Same asymmetry the book rows follow, and for the same reason: a manager is
     // the one who can still file into it, so it is the one who needs to see it.
-    const hiddenId = createId('cat')
-    db.insert(schema.libraryCategories).values(
-      { id: hiddenId, libraryId: sharedLibraryId, userId: ownerId, name: 'Draft', parentId: null, hidden: true, createdAt: 1, updatedAt: 1 },
-    ).run()
+    const hiddenId = classificationValueKey('category', ['Draft'])
+    const seeded = seedVersion(sharedLibraryId, ownerId, { title: 'Draft', revisionAt: 1000 })
+    db.update(schema.libraryBooks).set({ categoryRoot: 'Draft' }).where(eq(schema.libraryBooks.id, seeded.workId)).run()
+    await updateCategoryValue(ownerId, sharedLibraryId, { path: ['Draft'], hidden: true })
 
     const asOwner = (await listExternalLibraries(ownerId)).find((l) => l.id === sharedLibraryId)!
     expect(asOwner.categories).toMatchObject([{ id: hiddenId, name: 'Draft', hidden: true }])

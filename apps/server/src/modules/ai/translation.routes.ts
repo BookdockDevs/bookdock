@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { stream } from 'hono/streaming'
 
-import { translationPreferencesSchema, translationRequestSchema, type TranslationEvent } from '@bookdock/shared'
+import { selectedTextTranslationRequestSchema, translationPreferencesSchema, translationRequestSchema, type TranslationEvent } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { settings } from '../../db/schema'
@@ -39,7 +39,9 @@ translationRoutes.put('/config', async (c) => {
 
 translationRoutes.on('POST', ['/translate', '/selected-text'], async (c) => {
   const body = await c.req.json().catch(() => null)
-  const parsed = translationRequestSchema.safeParse(body)
+  const parsed = c.req.path.endsWith('/selected-text')
+    ? selectedTextTranslationRequestSchema.safeParse(body)
+    : translationRequestSchema.safeParse(body)
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid translation request')
   const user = c.get('user')!
   c.header('Content-Type', 'application/x-ndjson; charset=utf-8')
@@ -57,7 +59,7 @@ translationRoutes.on('POST', ['/translate', '/selected-text'], async (c) => {
     }
     try {
       const onText = (text: string) => send({ type: 'delta', text })
-      if (parsed.data.bookId) await translateAiSelection(user.id, user.role, { ...parsed.data, bookId: parsed.data.bookId }, signal, onText)
+      if ('bookId' in parsed.data && typeof parsed.data.bookId === 'string') await translateAiSelection(user.id, user.role, { ...parsed.data, bookId: parsed.data.bookId }, signal, onText)
       else await translateAiSelectedText(user.id, user.role, parsed.data, signal, onText)
       send({ type: 'done' })
     } catch (error) {

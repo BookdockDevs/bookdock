@@ -102,10 +102,8 @@ describe('local-to-server import', () => {
   it('imports a complete local book with progress, notes, idea images, review, reading ledger, replacements and settings idempotently', async () => {
     const library = db.select().from(schema.libraries).where(eq(schema.libraries.userId, userId)).get()!
     const shelfId = createId('shelf')
-    const tagId = createId('tag')
     const globalRuleId = createId('tr')
     db.insert(schema.shelves).values({ id: shelfId, libraryId: library.id, userId, name: 'Sci-Fi', sortOrder: 0, createdAt: 1, updatedAt: 1 }).run()
-    db.insert(schema.libraryTags).values({ id: tagId, libraryId: library.id, userId, name: 'Favorite', sortOrder: 0, createdAt: 1, updatedAt: 1 }).run()
     db.insert(schema.textReplacements).values({
       id: globalRuleId, userId, matchType: 'pattern', pattern: 'foo', replacement: 'bar',
       isRegex: 0, applyTo: 'content', enabled: 1, sortOrder: 0, createdAt: 1, updatedAt: 1,
@@ -128,8 +126,8 @@ describe('local-to-server import', () => {
         updatedAt: 2000,
         catalog: {
           shelfId,
-          categoryId: 'nonexistent-anon-category',
-          tagIds: [tagId, 'nonexistent-tag'],
+          categoryPath: ['Fiction', 'Science Fiction'],
+          tags: ['Favorite', 'New tag'],
           pinnedAt: 1500,
           hidden: false,
           metadata: { publisher: 'Local Press' },
@@ -194,9 +192,8 @@ describe('local-to-server import', () => {
 
     expect(res.book.title).toBe('Local Custom Title')
     expect(res.book.shelfId).toBe(shelfId)
-    expect(res.book.categoryId).toBeNull()
-    expect(res.book.tagIds).toEqual([tagId])
-    expect(res.book.tags).toEqual(['Favorite'])
+    expect(res.book.categoryPath).toEqual(['Fiction', 'Science Fiction'])
+    expect(res.book.tags).toEqual(['Favorite', 'New tag'])
     expect(res.book.readStatus).toBe('reading')
 
     const state = db.select().from(schema.bookStates).where(eq(schema.bookStates.bookVersionId, res.book.id)).get()!

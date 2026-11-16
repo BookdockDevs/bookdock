@@ -34,7 +34,7 @@ describe('device membership', () => {
   it('files a book under a mirrored tree node and finds it from that shelf', async () => {
     // The shelf lives on the server; mirroring is what lets the device book
     // point at it while membership validation stays strict.
-    await repository.mirrorOrganization('device', [{ id: 'shelf_from_server', kind: 'shelf', name: '服务器上的书架', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }])
+    await repository.mirrorShelves('device', [{ id: 'shelf_from_server', name: '服务器上的书架', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }])
     await repository.addBook({ ...book, catalog: { shelfId: 'shelf_from_server' } }, new Blob(['abc']))
     const page = await localCatalogOperations(scope, repository).list({ ...query, shelfId: 'shelf_from_server' })
     expect(page.entries.map((entry) => entry.book.ref.bookId)).toEqual(['device-book'])
@@ -43,7 +43,7 @@ describe('device membership', () => {
   })
 
   it('rejects an id nobody owns, even with a mirror in place', async () => {
-    await repository.mirrorOrganization('device', [{ id: 'shelf_from_server', kind: 'shelf', name: 'S', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }])
+    await repository.mirrorShelves('device', [{ id: 'shelf_from_server', name: 'S', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }])
     await expect(repository.addBook({ ...book, catalog: { shelfId: 'nobody_owns_this' } }, new Blob(['abc'])))
       .rejects.toMatchObject({ category: 'invalid-input' })
   })
@@ -51,62 +51,61 @@ describe('device membership', () => {
   it('still rejects an id the vault owns when its kind does not match', async () => {
     await repository.saveOrganization('device', {
       version: 0,
-      items: [{ id: 'shelf_local', kind: 'shelf', name: '本地书架', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }],
+      shelves: [{ id: 'shelf_local', name: '本地书架', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }],
+      valueState: [],
     }, 0)
-    await expect(repository.addBook({ ...book, catalog: { categoryId: 'shelf_local' } }, new Blob(['abc'])))
-      .rejects.toThrow(/Organization does not belong to this vault/)
+    await expect(repository.addBook({ ...book, catalog: { shelfId: 'nobody_owns_this' } }, new Blob(['abc'])))
+      .rejects.toThrow(/Shelf does not belong to this vault/)
   })
 
   it('counts membership from the books, whichever tree the ids came from', async () => {
-    await repository.mirrorOrganization('device', [
-      { id: 'shelf_from_server', kind: 'shelf', name: 'S', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
-      { id: 'category_server', kind: 'category', name: 'C', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
-      { id: 'tag_server', kind: 'tag', name: 'T', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
+    await repository.mirrorShelves('device', [
+      { id: 'shelf_from_server', name: 'S', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
     ])
-    await repository.addBook({ ...book, catalog: { shelfId: 'shelf_from_server', categoryId: 'category_server', tagIds: ['tag_server'] } }, new Blob(['abc']))
+    await repository.addBook({ ...book, catalog: { shelfId: 'shelf_from_server', categoryPath: ['C'], tags: ['T'] } }, new Blob(['abc']))
     const counts = deviceMembershipCounts(await repository.readCatalog('device'))
     expect(counts.shelves.get('shelf_from_server')).toBe(1)
-    expect(counts.categories.get('category_server')).toBe(1)
-    expect(counts.tags.get('tag_server')).toBe(1)
+    expect(counts.categories.get(JSON.stringify(['C']))).toBe(1)
+    expect(counts.tags.get('T')).toBe(1)
   })
 
   it('drops the count once the book is trashed', async () => {
-    await repository.mirrorOrganization('device', [{ id: 'shelf_from_server', kind: 'shelf', name: 'S', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }])
+    await repository.mirrorShelves('device', [{ id: 'shelf_from_server', name: 'S', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 }])
     await repository.addBook({ ...book, catalog: { shelfId: 'shelf_from_server' } }, new Blob(['abc']))
     await repository.trashBook(ref)
     const counts = deviceMembershipCounts(await repository.readCatalog('device'))
     expect(counts.shelves.get('shelf_from_server')).toBeUndefined()
   })
 
-  it('serializes concurrent mirrorOrganization and syncAccountTaxonomy without CAS conflict', async () => {
-    await repository.mirrorOrganization('device', [
-      { id: 'shelf_1', kind: 'shelf', name: 'One', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
+  it('serializes concurrent mirrorShelves and syncAccountShelves without CAS conflict', async () => {
+    await repository.mirrorShelves('device', [
+      { id: 'shelf_1', name: 'One', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
     ])
     await expect(
       Promise.all([
-        repository.mirrorOrganization('device', [
-          { id: 'shelf_1', kind: 'shelf', name: 'One', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
-          { id: 'shelf_2', kind: 'shelf', name: 'Two', parentId: null, pinned: false, hidden: false, sortOrder: 1, createdAt: 1, updatedAt: 1 },
+        repository.mirrorShelves('device', [
+          { id: 'shelf_1', name: 'One', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
+          { id: 'shelf_2', name: 'Two', pinned: false, hidden: false, sortOrder: 1, createdAt: 1, updatedAt: 1 },
         ]),
-        repository.syncAccountTaxonomy('device', [
-          { id: 'shelf_1', kind: 'shelf', name: 'One', sortOrder: 0 },
-          { id: 'shelf_2', kind: 'shelf', name: 'Two', sortOrder: 1 },
+        repository.syncAccountShelves('device', [
+          { id: 'shelf_1', name: 'One', sortOrder: 0 },
+          { id: 'shelf_2', name: 'Two', sortOrder: 1 },
         ]),
       ]),
     ).resolves.toBeDefined()
     const snapshot = await repository.readCatalog('device')
-    expect(snapshot.organization.items.map((item) => item.id).sort()).toEqual(['shelf_1', 'shelf_2'])
+    expect(snapshot.organization.shelves.map((item) => item.id).sort()).toEqual(['shelf_1', 'shelf_2'])
   })
 
-  it('skips organization writes when syncAccountTaxonomy sees no changes', async () => {
-    await repository.mirrorOrganization('device', [
-      { id: 'shelf_1', kind: 'shelf', name: 'One', parentId: null, pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
+  it('skips organization writes when syncAccountShelves sees no changes', async () => {
+    await repository.mirrorShelves('device', [
+      { id: 'shelf_1', name: 'One', pinned: false, hidden: false, sortOrder: 0, createdAt: 1, updatedAt: 1 },
     ])
-    await repository.syncAccountTaxonomy('device', [{ id: 'shelf_1', kind: 'shelf', name: 'One', sortOrder: 0 }])
+    await repository.syncAccountShelves('device', [{ id: 'shelf_1', name: 'One', sortOrder: 0 }])
     const before = (await repository.readCatalog('device')).organization.version
     const txSpy = vi.spyOn(IDBDatabase.prototype, 'transaction')
     try {
-      await repository.syncAccountTaxonomy('device', [{ id: 'shelf_1', kind: 'shelf', name: 'One', sortOrder: 0 }])
+      await repository.syncAccountShelves('device', [{ id: 'shelf_1', name: 'One', sortOrder: 0 }])
       expect(txSpy.mock.calls.some(([, mode]) => mode === 'readwrite')).toBe(false)
     } finally {
       txSpy.mockRestore()

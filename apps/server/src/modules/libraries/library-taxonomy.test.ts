@@ -129,7 +129,7 @@ describe('library taxonomy (11.5)', () => {
       const foreign = seedWork(otherCityId, { categoryRoot: 'Foreign' })
 
       await expect(updateCategoryValue(ownerId, cityId, { path: ['Foreign'], name: 'Stolen' }))
-        .rejects.toMatchObject({ code: 'CLASSIFICATION_NOT_FOUND' })
+        .resolves.toEqual([])
       await expect(clearCategoryValue(ownerId, cityId, ['Foreign']))
         .resolves.toEqual([])
 

@@ -9,6 +9,8 @@ import * as schema from './schema'
 import { config } from '../config'
 import { migrateBeforeBookRetirement } from './migration-stage'
 import { repairReadingLedgerSchema } from './reading-ledger-repair'
+import { reconcileContentEditorMigration } from './content-editor-migration'
+import { reconcilePersonalSourceMigration } from './personal-source-migration'
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
@@ -310,8 +312,12 @@ export async function runDatabaseMigrations(db: ReturnType<typeof getDb>, hooks?
     throw new Error('Identity retirement blocked: Guest has legacy TTS configuration')
   }
 
+  reconcileContentEditorMigration(db, migrationsFolder)
+  reconcilePersonalSourceMigration(db, migrationsFolder)
   reconcileConsolidatedMigrationLedger(db, migrationsFolder)
   migrate(db, { migrationsFolder })
+  const { importProgressFiles } = await import('../modules/progress/progress-migration')
+  await importProgressFiles(db)
   // 0066 AI foundation: legacy profile bundles and the translation pick become
   // connections/models plus a default model. The schema half is already
   // committed above; this conversion is transactional and retries on the next

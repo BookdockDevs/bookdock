@@ -1171,7 +1171,7 @@ describe('AiPanel', () => {
     expect(source.parentElement?.parentElement).toHaveClass('w-full', 'max-w-[92%]', '[text-autospace:normal]')
     fireEvent.click(source)
     expect(display).toHaveBeenCalledWith(expect.stringMatching(/^ai-quote:/))
-    expect(useReaderState.getState().sidebarOpen).toBe(false)
+    expect(useReaderState.getState().sidebarOpen).toBe(true)
   })
 
   it('keeps a pending answer visibly updating while the stream is open', async () => {

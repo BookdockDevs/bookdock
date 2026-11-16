@@ -45,7 +45,9 @@ function version(overrides: Partial<CatalogBook['versions'][number]> = {}): Cata
 
 function work(overrides: Partial<CatalogBook> = {}): CatalogBook {
   return {
-    id: 'lb1', libraryId: 'lib_city', categoryId: null, title: 'City Book', author: 'Someone',
+    id: 'lb1', libraryId: 'lib_city', categoryPath: null, title: 'City Book', author: 'Someone',
+    authors: ['Someone'], meta: {}, hidden: false, effectiveHidden: false, hiddenReason: null,
+    deletedAt: null, defaultVersionLinkId: null,
     description: '', coverKey: null, pinnedAt: null, tags: [], versions: [version()], createdAt: 1, updatedAt: 1, ...overrides,
   }
 }
@@ -172,7 +174,7 @@ describe('CatalogListRow', () => {
   it('shows the same info line as a private row: category, tags, size, date', () => {
     useUiStore.setState({ listInfoItems: ['shelf', 'tags', 'size', 'createdAt'] })
     try {
-      renderRow(work({ categoryId: 'cat-1', tags: [{ id: 't1', name: '科幻' }] }))
+      renderRow(work({ categoryPath: ['小说分类'], tags: ['科幻'] }))
       expect(screen.getByText('小说分类')).toBeInTheDocument()
       expect(screen.getByText('科幻')).toBeInTheDocument()
       expect(screen.getByText('10 B')).toBeInTheDocument()

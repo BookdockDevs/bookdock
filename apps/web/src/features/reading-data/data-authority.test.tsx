@@ -8,7 +8,7 @@ import { apiDelete, apiGet } from '@/api/client'
 import { DEVICE_VAULT_SCOPE } from '../local-library/catalog'
 import { CatalogSourceContext, type LocalCatalogSource } from './catalog-source-context'
 import { useDataAuthority } from './data-authority'
-import { useDeleteLibraryCategory, useLibraryCategories, useTrashAutoCleanDays } from '../library/hooks'
+import { useDeleteShelf, useLibraryCategories, useTrashAutoCleanDays } from '../library/hooks'
 
 const authState: { user: { id: string; privateLibraryId: string } | null } = { user: null }
 vi.mock('@/stores/auth.store', () => {
@@ -17,11 +17,11 @@ vi.mock('@/stores/auth.store', () => {
 })
 
 const readCatalog = vi.fn()
-const deleteOrganization = vi.fn()
+const deleteShelf = vi.fn()
 const mirrorOrganization = vi.fn()
 vi.mock('@/features/local-library/catalog', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/features/local-library/catalog')>()
-  return { ...actual, localCatalogOperations: () => ({ readCatalog, deleteOrganization, mirrorOrganization }) }
+  return { ...actual, localCatalogOperations: () => ({ readCatalog, deleteShelf, mirrorOrganization }) }
 })
 
 // The projection itself is covered elsewhere; these cases are about which side
@@ -66,7 +66,7 @@ function setup(source?: LocalCatalogSource) {
 beforeEach(() => {
   authState.user = null
   readCatalog.mockReset().mockResolvedValue({ books: [], items: [], version: 1 })
-  deleteOrganization.mockReset().mockResolvedValue(undefined)
+  deleteShelf.mockReset().mockResolvedValue(undefined)
   mirrorOrganization.mockReset().mockResolvedValue(undefined)
   vi.mocked(apiGet).mockReset().mockResolvedValue({ data: [] })
   vi.mocked(apiDelete).mockReset().mockResolvedValue({ data: null })
@@ -104,9 +104,9 @@ describe('categories follow the same authority', () => {
     expect(apiGet).not.toHaveBeenCalled()
     expect(list.result.current.data?.data.map((row) => row.name)).toEqual(['Device category'])
 
-    const remove = renderHook(() => useDeleteLibraryCategory(), { wrapper })
-    remove.result.current.mutate({ libraryId: null, categoryId: 'c1' })
-    await waitFor(() => expect(deleteOrganization).toHaveBeenCalledWith('category', 'c1'))
+    const remove = renderHook(() => useDeleteShelf(), { wrapper })
+    remove.result.current.mutate('s1')
+    await waitFor(() => expect(deleteShelf).toHaveBeenCalledWith('s1'))
     expect(apiDelete).not.toHaveBeenCalled()
   })
 
@@ -118,10 +118,10 @@ describe('categories follow the same authority', () => {
     expect(apiGet).toHaveBeenCalledWith('/libraries/lib-1/categories', expect.any(AbortSignal))
     expect(readCatalog).not.toHaveBeenCalled()
 
-    const remove = renderHook(() => useDeleteLibraryCategory(), { wrapper })
-    remove.result.current.mutate({ libraryId: 'lib-1', categoryId: 'c1' })
-    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/libraries/lib-1/categories/c1'))
-    expect(deleteOrganization).not.toHaveBeenCalled()
+    const remove = renderHook(() => useDeleteShelf(), { wrapper })
+    remove.result.current.mutate('s1')
+    await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/shelves/s1'))
+    expect(deleteShelf).not.toHaveBeenCalled()
   })
 })
 
@@ -132,7 +132,7 @@ describe('trash retention is one policy', () => {
     const { result } = renderHook(() => useTrashAutoCleanDays(), { wrapper })
     await waitFor(() => expect(result.current).toBe(7))
     // No second window from the vault: the row's storage never decides this.
-    expect(deleteOrganization).not.toHaveBeenCalled()
+    expect(deleteShelf).not.toHaveBeenCalled()
     expect(readCatalog).not.toHaveBeenCalled()
   })
 })

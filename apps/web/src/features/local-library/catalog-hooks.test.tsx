@@ -14,7 +14,7 @@ import { hasUndoOpportunity, runUndo } from '@/lib/undo'
 import { useUiStore } from '@/stores/ui.store'
 import i18n from '@/i18n/i18n'
 
-import { useBook, useBooks, useCreateLibraryCategory, useCreateShelf, useDeleteBook, useLibraries, useLibraryCategories, useLibraryPrefsState, useShelves, useTrashEnabled, useUpdateBook, useUpdateLibraryPrefs, useUploadCover } from '../library/hooks'
+import { useBook, useBooks, useCreateShelf, useDeleteBook, useLibraries, useLibraryPrefsState, useShelves, useTrashEnabled, useUpdateBook, useUpdateLibraryPrefs, useUploadCover } from '../library/hooks'
 import { useToastStore } from '@/stores/toast.store'
 import { CatalogSourceContext } from '../reading-data/catalog-source-context'
 import { useCatalogRevealHidden } from '../reading-data/useCatalogRevealHidden'
@@ -96,7 +96,7 @@ describe('common catalog hooks with local authority', () => {
 
   it.each(['pin', 'organize', 'delete'] as const)('keeps local batch %s and its invalidations separate from remote caches', async (action) => {
     const source = localCatalogOperations(scope, repository)
-    const shelf = await source.createOrganization('shelf', 'Device shelf')
+    const shelf = await source.createShelf('Device shelf')
     for (const key of [['books'], ['shelves'], ['tags'], ['batch-selection'], ['reading-records']]) client.setQueryData(key, { remote: true })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const complete = vi.fn()
@@ -162,15 +162,13 @@ describe('common catalog hooks with local authority', () => {
     expect(apiGet).not.toHaveBeenCalled()
   })
 
-  it('creates source-owned shelves and categories through the existing mutation hooks', async () => {
+  it('creates source-owned shelves through the existing mutation hooks', async () => {
     client.setQueryData(['shelves'], { data: [{ id: 'remote-shelf' }] })
-    const { result } = renderHook(() => ({ shelves: useShelves(), categories: useLibraryCategories(null), createShelf: useCreateShelf(), createCategory: useCreateLibraryCategory() }), { wrapper })
+    const { result } = renderHook(() => ({ shelves: useShelves(), createShelf: useCreateShelf() }), { wrapper })
     await waitFor(() => expect(result.current.shelves.isSuccess).toBe(true))
-    await act(async () => { await result.current.createShelf.mutateAsync('Local shelf'); await result.current.createCategory.mutateAsync({ libraryId: null, name: 'Local category' }) })
+    await act(async () => { await result.current.createShelf.mutateAsync('Local shelf') })
     await waitFor(() => expect(result.current.shelves.data?.data).toHaveLength(1))
-    await waitFor(() => expect(result.current.categories.data?.data).toHaveLength(1))
     expect(result.current.shelves.data?.data[0]).not.toHaveProperty('userId')
-    expect(result.current.categories.data?.data[0]).not.toHaveProperty('libraryId')
     expect(client.getQueryData(['shelves'])).toEqual({ data: [{ id: 'remote-shelf' }] })
     expect(client.getQueryState(['shelves'])?.isInvalidated).toBe(false)
     expect(apiGet).not.toHaveBeenCalled(); expect(apiPost).not.toHaveBeenCalled()
@@ -211,7 +209,7 @@ describe('common catalog hooks with local authority', () => {
     const revoke = vi.fn()
     URL.createObjectURL = create; URL.revokeObjectURL = revoke
     try {
-      const view = localCatalogBookView(book, null, { version: 0, items: [] })
+      const view = localCatalogBookView(book, null, { version: 0, shelves: [], valueState: [] })
       const card = render(<BookCardShell row={privateBookRow(view)} />, { wrapper })
       await waitFor(() => expect(client.isFetching()).toBe(0))
       expect(screen.queryByRole('img')).not.toBeInTheDocument()

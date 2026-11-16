@@ -2,13 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { IDBFactory } from 'fake-indexeddb'
 
 import { useAuthStore } from '@/stores/auth.store'
 
 import type { AnnotationRes } from '@bookdock/shared'
 
 import { apiDelete, apiPatch, apiPost, apiPut } from '@/api/client'
-import { useClearLibraryCategory, useClearLibraryTag, useToggleShelfHidden, useToggleTagHidden, useUpdateLibraryCategory, useUpdateLibraryTag } from '@/features/library/hooks'
+import { useClearLibraryCategory, useClearLibraryTag, useToggleShelfHidden, useUpdateLibraryCategory, useUpdateLibraryTag } from '@/features/library/hooks'
 import { useBatchDeleteAnnotations } from '@/features/reader/hooks/useAnnotations'
 import { notify } from '@/lib/notifications'
 
@@ -25,6 +26,7 @@ function setup() {
 }
 
 beforeEach(() => {
+  vi.stubGlobal('indexedDB', new IDBFactory())
   useAuthStore.setState({ user: { id: 'u1', username: 'tester', role: 'member' } })
 
   vi.clearAllMocks()
@@ -32,12 +34,12 @@ beforeEach(() => {
 })
 
 describe('operation feedback', () => {
-  it.each(['shelf', 'tag'])('reports a failed private %s visibility change once', async (kind) => {
+  it('reports a failed private shelf visibility change once', async () => {
     const { client, wrapper } = setup()
     vi.mocked(apiPut).mockRejectedValue(new Error('Offline'))
-    const { result } = renderHook(() => ({ shelf: useToggleShelfHidden(), tag: useToggleTagHidden() }), { wrapper })
+    const { result } = renderHook(() => ({ shelf: useToggleShelfHidden() }), { wrapper })
     await act(async () => {
-      await expect(result.current[kind].mutateAsync({ id: 'item', hidden: true })).rejects.toThrow('Offline')
+      await expect(result.current.shelf.mutateAsync({ id: 'item', hidden: true })).rejects.toThrow('Offline')
     })
     expect(notify.error).toHaveBeenCalledTimes(1)
     expect(notify.error).toHaveBeenCalledWith({ key: 'library.taxonomyVisibilityFailed' })
@@ -52,10 +54,10 @@ describe('operation feedback', () => {
       updateCategory: useUpdateLibraryCategory(), updateTag: useUpdateLibraryTag(),
     }), { wrapper })
     await act(async () => {
-      await result.current.updateCategory.mutateAsync({ libraryId: 'lib', path: ['Fiction'], patch: { name: 'Literature' } })
-      await result.current.updateTag.mutateAsync({ libraryId: 'lib', name: 'Classic', patch: { renamedTo: 'Favorite' } })
-      await result.current.clearCategory.mutateAsync({ libraryId: 'lib', path: ['Literature'] })
-      await result.current.clearTag.mutateAsync({ libraryId: 'lib', name: 'Favorite' })
+      await result.current.updateCategory.mutateAsync({ libraryId: 'lib', path: ['Fiction'], source: 'server', patch: { name: 'Literature' } })
+      await result.current.updateTag.mutateAsync({ libraryId: 'lib', name: 'Classic', source: 'server', patch: { renamedTo: 'Favorite' } })
+      await result.current.clearCategory.mutateAsync({ libraryId: 'lib', path: ['Literature'], source: 'server' })
+      await result.current.clearTag.mutateAsync({ libraryId: 'lib', name: 'Favorite', source: 'server' })
     })
     expect(vi.mocked(notify.success).mock.calls.map(([message]) => message)).toEqual([
       { key: 'toast.categoryUpdated' }, { key: 'toast.tagRenamed' },

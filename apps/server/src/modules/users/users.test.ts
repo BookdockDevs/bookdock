@@ -533,25 +533,11 @@ describe('users module', () => {
         id: workId, libraryId: sharedId, userId: adminId, title: 'City Work',
         createdAt: now, updatedAt: now,
       }).run()
-      const categoryId = createId('cat')
-      db.insert(schema.libraryCategories).values({
-        id: categoryId, libraryId: sharedId, userId: adminId, name: 'Sci-Fi',
-        createdAt: now, updatedAt: now,
-      }).run()
-      const tagId = createId('ltag')
-      db.insert(schema.libraryTags).values({
-        id: tagId, libraryId: sharedId, userId: adminId, name: 'Classic',
-        createdAt: now, updatedAt: now,
-      }).run()
 
       expect((await deleteUser(ownerId, adminId)).id).toBe(adminId)
       expect(db.select().from(schema.users).where(eq(schema.users.id, adminId)).get()).toBeUndefined()
       // The city's rows survive, attributed to the library owner.
       expect(db.select().from(schema.libraryBooks).where(eq(schema.libraryBooks.id, workId)).get())
-        .toMatchObject({ userId: ownerId })
-      expect(db.select().from(schema.libraryCategories).where(eq(schema.libraryCategories.id, categoryId)).get())
-        .toMatchObject({ userId: ownerId })
-      expect(db.select().from(schema.libraryTags).where(eq(schema.libraryTags.id, tagId)).get())
         .toMatchObject({ userId: ownerId })
     })
   })

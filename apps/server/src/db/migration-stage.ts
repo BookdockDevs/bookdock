@@ -56,6 +56,17 @@ export function revertInstanceAndAiJobsSchema(
   // fixture was built by the current chain, so a replay starts from the *new*
   // shape: revert the additions and put the retired column back, or the replay
   // fails on a duplicate column and the fixture keeps a shape no release had.
+  for (const name of [
+    'library_books_classification_insert',
+    'library_books_classification_parent_insert',
+    'library_books_classification_update_old',
+    'library_books_classification_update_parent_old',
+    'library_books_classification_update_new',
+    'library_books_classification_update_parent_new',
+    'library_book_tag_values_membership_insert',
+    'library_book_tag_values_membership_delete',
+    'library_book_tag_values_membership_rename',
+  ]) sqlite.exec(`DROP TRIGGER IF EXISTS ${name}`)
   for (const column of ['category_root', 'category_leaf']) {
     if (table('library_books') && columns('library_books').has(column)) sqlite.exec(`ALTER TABLE library_books DROP COLUMN ${column}`)
   }
