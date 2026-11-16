@@ -843,7 +843,7 @@ Bookdock's visual and interaction design embodies a **"Restrained, Tactile Minim
 
 - **Dual Aesthetic Metaphor**:
   - *Library (Curated Gallery)*: Orderly, book-first presentation. Covers take center stage with Morandi tone palettes and spine binding details; typography pairs literary serif headings (`Songti` / `Source Han Serif`) with modern geometric sans-serif metadata (`Inter` / `PingFang SC`).
-  - *Reader (Ambient Canvas)*: Absolute reading immersion—the interface dissolves into a pure paper canvas (`--bd-read-bg`). Controls are translucent frosted sheets (`backdrop-blur-md`, 1px hairline borders) that summon quietly on demand and tuck away completely during focused reading.
+  - *Reader (Ambient Canvas)*: Absolute reading immersion—the interface dissolves into a pure paper canvas (`--bd-read-bg`). Controls are translucent frosted sheets (`backdrop-blur-md`, 1px hairline borders) that summon quietly on demand and tuck away completely during focused reading. Data-dense flyout menus are the exception: they use opaque cards, because a translucent panel over a high-contrast page bleeds its own content through the rows.
 - **Visual Tokens**: Low-saturation warm neutral tones (`stone-*`); nested proportional radiuses (`rounded-2xl` containers/islands → `rounded-xl` buttons → `rounded-full` capsules); 1px hairline borders (`border-[var(--bd-read-accent)]/80`) paired with subtle ambient shadows.
 - **Reader dialogs**: The reader supplies its occupied left width to dialogs through React context, including dialogs portaled to `document.body`. On desktop, reader-dialog backdrops cover only the visible reading region and center their panels there; the sidebar stays visible and interactive without dismissing the dialog. Touch layouts keep their existing centered or bottom-sheet placement. Dialogs outside the reader retain viewport-wide backdrops and centering.
 - **Dual theme axes**: The app theme (system light/dark, `html.dark`) and the reading theme (`--bd-read-*`) are independent. Reader chrome surfaces carry tone classes (`bd-tone-light`/`bd-tone-dark`, derived from the reading theme's brightness) that pin the `dark:` variant axis to the reading surface, so mixed combinations (e.g. system dark + reader day) stay coherent; body-portaled reader surfaces (`Modal`/`SmartMenu` reader variants, idea overlay) carry the class themselves. Shared form controls consume semantic tokens (`--bd-field-*`, `--bd-seg-*`, `--bd-toggle-*`, …) defined for the app light/dark axis and overridden on `.bd-reader-surface` with reading-theme derivatives, so the same controls look native in settings pages and reader dialogs without per-call-site branching.
@@ -857,6 +857,10 @@ When the desktop reader's sidebar is unpinned and closed, its floating tool dock
 can be summoned across the dock's projected left-side footprint (about 70px
 wide) between the header and the lower reading area. This hover region floats
 over the page without changing its layout; the header remains outside it.
+Reveal requires a short dwell (about 140ms) inside that footprint: it is a
+corridor the pointer crosses on its way elsewhere, so revealing on the first
+pointer move would flash the dock in and straight back out. Leaving still hides
+it immediately.
 
 ---
 

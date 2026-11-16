@@ -2,7 +2,12 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.6] - 2026-11-17
+
+### Highlights
+
+- Read long search results chapter by chapter, with collapsible sticky headers and a one-click fold-all toggle.
+- The table of contents remembers the volumes you folded for each book, and the reader no longer animates or reflows its chrome on entry.
 
 ### Added
 
@@ -11,20 +16,20 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
-- The desktop reader header now displays a pulsing skeleton placeholder while chapter and book titles load, preventing title text flashing before reading content is ready.
-- The reader progress strip now captures pointer events while visible, preventing clicks on its labels and empty space from passing through to the underlying reading area.
-- Improved the desktop reader's floating sidebar container geometry and layered styling to prevent resize handles, shadows, and tooltips from clipping at the borders.
-- Replaced translucent background blurring on floating flyout menus with solid cards, eliminating visual bleed-through from high-contrast backgrounds. The reading-status picker in the library selection bar uses the same solid treatment.
-- The library category picker now displays a taxonomy icon beside the "Uncategorized" entry for visual consistency.
-- Sidebar note, statistic, and AI thread loading skeletons now constrain overflow to prevent layout shifts inside narrow or resized panels.
+- The desktop reader header shows a pulsing skeleton placeholder while the chapter and book titles load, instead of flashing bare title text before the reading content is ready.
+- The reader progress strip captures pointer events while visible, so clicks on its labels and empty space no longer pass through to the reading area underneath.
+- The floating reader sidebar keeps its resize handles, shadow, and flyouts inside its own bounds, and only reveals itself once the pointer dwells on the left edge, so sweeping past no longer flashes the tool icons.
+- Floating flyout menus use solid cards instead of translucent blur, removing bleed-through from high-contrast page backgrounds. The reading-status picker in the library selection bar uses the same solid treatment.
+- Sidebar note, statistics, and AI thread skeletons constrain their overflow, so narrow or resized panels no longer shift while loading.
+- The library category picker shows a taxonomy icon beside the "Uncategorized" entry, matching the other entries.
+- The lightweight E-Ink reader bundle picks up the latest asset caching, image variant handling, and navigation lifecycle fixes.
 
 ### Fixed
 
-- Fixed table of contents losing the fully expanded state on page refresh. Saving an empty list of collapsed volumes is now preserved across local storage reloads instead of falling back to default volume folding.
-- Updated the lightweight E-Ink reader bundle with the latest asset caching, image variant handling, and navigation lifecycle fixes.
+- Fixed the table of contents losing its fully expanded state on page reload. A saved empty list of folded volumes is now preserved instead of falling back to the default folding.
 - Fixed the reader's tool icons disappearing and reappearing on entry: background `/auth/me` refreshes no longer unmount the routed shell, and the shell no longer paints one frame as an anonymous guest before the signed-in identity settles.
 - Fixed the reader header and floating dock playing a spurious entry animation on first paint, where the header slid down from off-screen and the dock expanded from zero width and height.
-- Fixed the reader header icon row shifting sideways when the reading time arrived, and when guest mode omitted the TTS and bookmark buttons; both now hold fixed slots, and the duration is clipped rather than widening its slot.
+- Fixed the reader header icon row shifting sideways when the reading duration arrived, and when guest mode omitted the TTS and bookmark buttons. Both now hold fixed slots, and a long duration is clipped rather than widening its slot.
 - Fixed the search panel flashing "no matches" between typing and the debounced search actually running.
 
 ## [0.8.5] - 2026-11-16
@@ -1344,7 +1349,12 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [Unreleased]
+### [0.8.6] - 2026-11-17
+
+#### 亮点
+
+- 搜索结果按章节分组，分组头可折叠且吸顶，一键即可全部折叠或展开，长结果列表能按章扫读。
+- 目录按书记住你折叠的卷，下次打开时恢复；进入阅读器时顶栏与侧栏不再播放动画或重排。
 
 #### 新增
 
@@ -1353,20 +1363,20 @@ All notable changes to Bookdock are documented here.
 
 #### 优化
 
-- 桌面阅读器顶栏在章节和书名加载期间显示脉冲骨架占位条，避免正文就绪前标题文字闪烁。
-- 阅读器底部进度条在显示时接管指针事件，防止点击标签或空白处穿透触发下层阅读区域。
-- 改进桌面阅读器悬浮侧栏容器几何结构与分层样式，避免调整尺寸手柄、阴影与浮层被边框裁切。
-- 悬浮菜单改用纯色卡片替代半透明背景毛玻璃，消除高对比度背景下的透光干扰；书库选择栏的阅读状态下拉同样改为纯色。
-- 书库分类选择弹窗在“未分类”选项前补充分类图标，保持视觉规范统一。
-- 侧栏笔记、统计与 AI 对话的加载骨架屏限制溢出，避免窄栏或调整尺寸时出现布局抖动。
+- 桌面阅读器顶栏在章节名和书名加载期间显示脉冲骨架占位条，不再先闪出裸标题文字再被正文替换。
+- 阅读器底部进度条在显示时接管指针事件，点击标签或空白处不再穿透触发下层阅读区域。
+- 悬浮阅读侧栏的调整尺寸手柄、阴影与浮层都收在自身边界内；侧栏只在指针停留后才出现，扫过左边缘时不再闪出工具栏图标。
+- 悬浮菜单改用纯色卡片替代半透明背景模糊，消除高对比度书页下的透光干扰；书库选择栏的阅读状态下拉同样改为纯色。
+- 侧栏笔记、统计与 AI 对话的加载骨架屏限制溢出，窄栏或调整尺寸时加载过程不再抖动布局。
+- 书库分类选择弹窗在“未分类”选项前补充分类图标，与其他条目保持一致。
+- 同步更新轻量级墨水屏阅读器的构建产物，包含最新的静态资源缓存、图片变体处理与页面导航生命周期修复。
 
 #### 修复
 
-- 修复刷新页面后目录“全部展开”状态丢失的问题。本地存储反序列化时完整保留空的折叠列表，不再错误回退到默认折叠规则。
-- 同步更新轻量级墨水屏阅读器构建产物，包含最新的静态资源缓存、图片变体处理与页面导航生命周期修复。
-- 修复进入阅读器时工具图标先消失再出现的问题：`/auth/me` 的后台刷新不再卸载整个路由外壳，外壳也不会先以访客身份渲染一帧再重建。
-- 修复阅读器顶栏与悬浮侧栏首帧播放多余入场动画的问题（顶栏从屏幕外滑入、侧栏宽度从 0 展开）。
-- 修复阅读时长到达、或访客态缺少 TTS 与书签按钮时顶栏图标组横向位移的问题，两者现在都占固定槽位，超长时长改为截断而不是撑宽槽位。
+- 修复刷新页面后目录“全部展开”状态丢失的问题。本地存储现在会保留空的折叠列表，不再错误回退到默认折叠规则。
+- 修复进入阅读器时工具图标先消失再出现的问题。`/auth/me` 的后台刷新不再卸载路由外壳，外壳也不会在会话确定前先以访客身份渲染一帧。
+- 修复阅读器顶栏首帧从屏幕外滑入、悬浮侧栏宽度从 0 展开的多余入场动画。
+- 修复阅读时长出现、或访客态缺少 TTS 与书签按钮时顶栏图标组横向位移的问题。两者现在都占固定槽位，超长时长改为截断而不是撑宽槽位。
 - 修复输入搜索词后、防抖搜索尚未开始时先闪一次“未找到匹配”的问题。
 
 ### [0.8.5] - 2026-11-16
