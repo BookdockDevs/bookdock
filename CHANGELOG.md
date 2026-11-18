@@ -2,6 +2,12 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed the table of contents' "locate current chapter" button flashing in and out when entering the reader. The button now appears only after the panel has finished scrolling to the current chapter, and it no longer flickers while the panel auto-scrolls to a newly opened chapter.
+
 ## [0.8.6] - 2026-11-17
 
 ### Highlights
@@ -1348,6 +1354,12 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### 未发布
+
+#### 修复
+
+- 修复刚进入阅读器时目录顶部“定位到当前章节”按钮先出现后消失的闪现。按钮现在只在目录面板完成定位滚动后才出现，切换章节的自动滚动期间也不再闪现。
 
 ### [0.8.6] - 2026-11-17
 

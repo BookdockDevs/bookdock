@@ -628,11 +628,17 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   }, [tab, searchExpanded])
 
   // Tracks whether the current-chapter TOC entry is inside the scroll
-  // viewport; drives the "locate current chapter" button in the header
+  // viewport; drives the "locate current chapter" button in the header.
+  // Sampling is deferred until startup positioning has placed the list
+  // (tocPlaced) and suppressed while a programmatic locate scroll is in
+  // flight (locating): before that, the list sits at a known-wrong scroll
+  // offset, so the raw observation only produces a show-then-hide flash.
   const [currentInView, setCurrentInView] = useState(true)
+  const [locating, setLocating] = useState(false)
+  const [tocPlaced, setTocPlaced] = useState(false)
 
   useEffect(() => {
-    if (tab !== 'toc' || !open || currentIndex < 0 || searchExpanded) return
+    if (tab !== 'toc' || !open || currentIndex < 0 || searchExpanded || !tocPlaced || locating) return
     const item = itemRefs.current.get(currentIndex)
     const container = listRef.current
     if (!item) {
@@ -646,9 +652,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     )
     observer.observe(item)
     return () => observer.disconnect()
-  }, [tab, open, currentIndex, searchExpanded, collapsed, tree])
+  }, [tab, open, currentIndex, searchExpanded, tocPlaced, locating, collapsed, tree])
 
-  const showLocate = tab === 'toc' && currentIndex >= 0 && !searchExpanded && !currentInView
+  const showLocate = tab === 'toc' && currentIndex >= 0 && !searchExpanded && tocPlaced && !locating && !currentInView
 
   const [flashChapterIndex, setFlashChapterIndex] = useState<number | null>(null)
   const [locateRequest, setLocateRequest] = useState(0)
@@ -666,6 +672,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     const item = itemRefs.current.get(currentIndex)
     const container = listRef.current
     if (!item || !container) return
+    setLocating(true)
     const containerRect = container.getBoundingClientRect()
     // Deferred descendants can have stale bounds; the stable row stays in flow.
     const row = item.closest('li') ?? item
@@ -699,6 +706,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
         hasPositioned.current = true
       }
       locateFrame.current = null
+      setLocating(false)
       rememberSidebarScroll('toc', container.scrollTop, lastScrolledIndex.current ?? undefined)
     }
     locateFrame.current = requestAnimationFrame(settle)
@@ -715,6 +723,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     if (locateFrame.current === null) return
     cancelAnimationFrame(locateFrame.current)
     locateFrame.current = null
+    setLocating(false)
     // Snap instantly to the intended landing spot instead of halting mid-flight:
     // halting here used to record the chapter as positioned while the viewport
     // sat at an arbitrary offset (which the unmount flush then persisted, so
@@ -981,7 +990,6 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // chapter changes, the TOC auto-scroll effect below takes precedence.
   // useLayoutEffect restores before paint so the panel doesn't flash at the wrong position.
   const restoredPanel = useRef<NavTab | null>(null)
-  const [tocPlaced, setTocPlaced] = useState(false)
   useLayoutEffect(() => {
     const container = listRef.current
     if (!container || !open || (tab === 'toc' && searchExpanded)) {
@@ -1055,6 +1063,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     return () => {
       if (locateFrame.current !== null) cancelAnimationFrame(locateFrame.current)
       locateFrame.current = null
+      setLocating(false)
     }
   }, [bookId, tab, open, currentIndex, collapsed, searchExpanded, scrollToCurrentChapter, rememberSidebarScroll, tocBookId, tocItems.length, tocPositionReady, pendingNavigationHref, tree])
 
@@ -1066,6 +1075,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     return () => {
       if (locateFrame.current !== null) cancelAnimationFrame(locateFrame.current)
       locateFrame.current = null
+      setLocating(false)
     }
   }, [locateRequest, open, tab, searchExpanded, scrollToCurrentChapter])
 
