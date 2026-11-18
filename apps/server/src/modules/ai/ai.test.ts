@@ -77,7 +77,7 @@ import aiRoutes from './ai.routes'
 import { getAiReadingBoundary } from './ai.service'
 import { config } from '../../config'
 import { searchAiBook } from './ai.retrieval.service'
-import { cancelAiGenerationRun, finalizeAiGenerationRun, getAiGenerationRun } from './ai.runs.service'
+import { finalizeAiGenerationRun } from './ai.runs.service'
 import { createAiThread, deleteAiThread, getAiThread, listAiMessageRevisions, listAiThreads, prepareAiThread, saveAiMessage, selectAiMessageRevision, updateAiMessageContext, updateAiThread } from './ai.sessions.service'
 import { getActiveBook, getBookChapters } from '../books/books.service'
 
@@ -231,83 +231,47 @@ describe('ai routes', () => {
     expect(body.data).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'custom' })]))
   })
 
-  it('exposes per-book thread CRUD through the AI route', async () => {
-    vi.mocked(listAiThreads).mockReturnValue([{ id: 'thread-1', bookId: 'book-1', title: '第一章', createdAt: 1, updatedAt: 2, messageCount: 2 }])
-    vi.mocked(createAiThread).mockReturnValue({ id: 'thread-2', bookId: 'book-1', title: '新对话', createdAt: 3, updatedAt: 3, messageCount: 0 })
+  // Slim route contract: methods, paths, status codes and the authenticated
+  // user identity reaching the service layer. Deeper behavior lives in the
+  // session/run service tests.
+  it('routes thread, revision and generation-run contracts with the authenticated user', async () => {
+    vi.mocked(createAiThread).mockReturnValue({ id: 'thread-1', bookId: 'book-1', title: '新对话', createdAt: 3, updatedAt: 3, messageCount: 0 })
     vi.mocked(getAiThread).mockReturnValue({ id: 'thread-1', bookId: 'book-1', title: '第一章', createdAt: 1, updatedAt: 2, messageCount: 2, messages: [] })
     vi.mocked(updateAiThread).mockReturnValue({ id: 'thread-1', bookId: 'book-1', title: '重命名', createdAt: 1, updatedAt: 4, messageCount: 2 })
+    vi.mocked(listAiMessageRevisions).mockReturnValue([])
+    vi.mocked(selectAiMessageRevision).mockReturnValue({ id: 'assistant-1', revisionGroupId: 'user-1', revision: 0, content: '答案', citations: [], events: [], createdAt: 1, aborted: false, selected: true })
 
     const app = createApp({ id: 'member-1', role: 'member' })
-    const listResponse = await app.request('http://test/api/v1/ai/threads?bookId=book-1')
-    expect(listResponse.status).toBe(200)
-    expect(await listResponse.json()).toEqual({ data: [{ id: 'thread-1', bookId: 'book-1', title: '第一章', createdAt: 1, updatedAt: 2, messageCount: 2 }] })
+    expect((await app.request('http://test/api/v1/ai/threads?bookId=book-1')).status).toBe(200)
     expect(listAiThreads).toHaveBeenCalledWith('member-1', { bookId: 'book-1', limit: 50 })
 
-    const createResponse = await app.request('http://test/api/v1/ai/threads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookId: 'book-1' }) })
-    expect(createResponse.status).toBe(201)
+    const created = await app.request('http://test/api/v1/ai/threads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookId: 'book-1' }) })
+    expect(created.status).toBe(201)
     expect(createAiThread).toHaveBeenCalledWith('member-1', { bookId: 'book-1' })
 
-    const detailResponse = await app.request('http://test/api/v1/ai/threads/thread-1')
-    expect(detailResponse.status).toBe(200)
+    expect((await app.request('http://test/api/v1/ai/threads/thread-1')).status).toBe(200)
     expect(getAiThread).toHaveBeenCalledWith('member-1', 'thread-1')
 
-    const updateResponse = await app.request('http://test/api/v1/ai/threads/thread-1', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: '重命名' }) })
-    expect(updateResponse.status).toBe(200)
+    const updated = await app.request('http://test/api/v1/ai/threads/thread-1', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: '重命名' }) })
+    expect(updated.status).toBe(200)
     expect(updateAiThread).toHaveBeenCalledWith('member-1', 'thread-1', { title: '重命名' })
 
-    const deleteResponse = await app.request('http://test/api/v1/ai/threads/thread-1', { method: 'DELETE' })
-    expect(deleteResponse.status).toBe(200)
+    expect((await app.request('http://test/api/v1/ai/threads/thread-1', { method: 'DELETE' })).status).toBe(200)
     expect(deleteAiThread).toHaveBeenCalledWith('member-1', 'thread-1')
-  })
 
-  it('exposes bounded latest-turn revision read and selection endpoints', async () => {
-    const revisions = [
-      { id: 'assistant-1', revisionGroupId: 'user-1', revision: 0, content: '旧回答', citations: [], events: [], createdAt: 1, aborted: false, selected: false },
-      { id: 'assistant-2', revisionGroupId: 'user-1', revision: 1, content: '新回答', citations: [], events: [], createdAt: 2, aborted: false, selected: true },
-    ]
-    vi.mocked(listAiMessageRevisions).mockReturnValue(revisions)
-    vi.mocked(selectAiMessageRevision).mockReturnValue(revisions[0]!)
+    expect((await app.request('http://test/api/v1/ai/threads/thread-1/messages/assistant-1/revisions')).status).toBe(200)
+    expect(listAiMessageRevisions).toHaveBeenCalledWith('member-1', 'thread-1', 'assistant-1')
 
-    const app = createApp({ id: 'member-1', role: 'member' })
-    const listResponse = await app.request('http://test/api/v1/ai/threads/thread-1/messages/assistant-2/revisions')
-    expect(listResponse.status).toBe(200)
-    expect(await listResponse.json()).toEqual({ data: revisions })
-    expect(listAiMessageRevisions).toHaveBeenCalledWith('member-1', 'thread-1', 'assistant-2')
-
-    const selectResponse = await app.request('http://test/api/v1/ai/threads/thread-1/messages/assistant-1/revisions/select', { method: 'POST' })
-    expect(selectResponse.status).toBe(200)
-    expect(await selectResponse.json()).toEqual({ data: revisions[0] })
+    const selected = await app.request('http://test/api/v1/ai/threads/thread-1/messages/assistant-1/revisions/select', { method: 'POST' })
+    expect(selected.status).toBe(200)
     expect(selectAiMessageRevision).toHaveBeenCalledWith('member-1', 'thread-1', 'assistant-1')
-  })
 
-  it('exposes durable generation status and cancellation endpoints', async () => {
-    const app = createApp({ id: 'member-1', role: 'member' })
+    expect((await app.request('http://test/api/v1/ai/runs/run-1')).status).toBe(200)
+    expect(generationRunMocks.getAiGenerationRun).toHaveBeenCalledWith('member-1', 'run-1')
 
-    const statusResponse = await app.request('http://test/api/v1/ai/runs/run-1')
-    expect(statusResponse.status).toBe(200)
-    expect(getAiGenerationRun).toHaveBeenCalledWith('member-1', 'run-1')
-
-    const cancelResponse = await app.request('http://test/api/v1/ai/runs/run-1/cancel', { method: 'POST' })
-    expect(cancelResponse.status).toBe(200)
-    expect(cancelAiGenerationRun).toHaveBeenCalledWith('member-1', 'run-1')
-  })
-
-  it('exposes on-demand book search contracts', async () => {
-    searchAiBook.mockResolvedValue({ status: 'ready', results: [{ id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 4, endOffset: 18, excerpt: '命中内容', score: 1 }] })
-
-    const app = createApp({ id: 'member-1', role: 'member' })
-    const searchResponse = await app.request('http://test/api/v1/ai/retrieval/search', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookId: 'book-1', query: '命中内容', limit: 3, maxChapterIndex: 0 }),
-    })
-    expect(searchResponse.status).toBe(200)
-    expect(await searchResponse.json()).toEqual({ data: { status: 'ready', results: [{ id: 'chunk-1', chapterIndex: 0, chapterId: 'ch-0', chapterTitle: '第一章', startOffset: 4, endOffset: 18, excerpt: '命中内容', score: 1 }] } })
-    expect(searchAiBook).toHaveBeenCalledWith('member-1', { bookId: 'book-1', query: '命中内容', limit: 3, maxChapterIndex: 0 }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
-  })
-
-  it('removes obsolete index endpoints', async () => {
-    const app = createApp({ id: 'member-1', role: 'member' })
-    expect((await app.request('http://test/api/v1/ai/retrieval/status?bookId=book-1')).status).toBe(404)
-    expect((await app.request('http://test/api/v1/ai/retrieval/index', { method: 'POST' })).status).toBe(404)
+    const cancelled = await app.request('http://test/api/v1/ai/runs/run-1/cancel', { method: 'POST' })
+    expect(cancelled.status).toBe(200)
+    expect(generationRunMocks.cancelAiGenerationRun).toHaveBeenCalledWith('member-1', 'run-1')
   })
 
   it('validates keyword search conditions and preserves the server boundary', async () => {

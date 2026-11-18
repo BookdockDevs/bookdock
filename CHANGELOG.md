@@ -4,6 +4,11 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Batch library actions now report how many books were affected: the toasts for moving to trash, hiding, permanently deleting, restoring, and updating reading status include the book count, as do the move-to-shelf and move-out-of-shelf notices.
+- Single-book action toasts in English now name the book: moving to trash, permanently deleting, and restoring a book show its title instead of a generic message.
+
 ### Fixed
 
 - Fixed the table of contents' "locate current chapter" button flashing in and out when entering the reader. The button now appears only after the panel has finished scrolling to the current chapter, and it no longer flickers while the panel auto-scrolls to a newly opened chapter.
@@ -1356,6 +1361,11 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### 未发布
+
+#### 变更
+
+- 书库批量操作的通知现在会显示受影响的书籍数量：移入回收站、隐藏、彻底删除、恢复和批量更新阅读状态的提示均带上书籍数量，移动到书架和移出书架的通知同样如此。
+- 英文的单本书操作通知现在会显示书名：移入回收站、彻底删除和恢复的提示会带上书名，而不是笼统的说法。
 
 #### 修复
 

@@ -200,6 +200,7 @@ import { booksService } from './books.service'
 - During development and before local commits, run relevant tests and affected type checks; run lint as appropriate. Broaden checks when the impact is unclear.
 - Before pushing or merging, run `pnpm lint`, `pnpm typecheck`, and `pnpm test`. Reuse passing results for the same revision if the relevant environment is unchanged. Documentation-only changes do not require application checks.
 - If a check is blocked, report what ran, what did not, and why. Never present an unrun check as passed.
+- Component test assertions should prefer semantic state the component already exposes (data-state attributes, ARIA attributes, element presence/absence) over verbatim Tailwind class strings. jsdom does not render Tailwind styles, so class-string assertions are only acceptable when specifically guarding a style regression — keep those minimal. When a style refactor turns an old test red without a behavior change, convert that test's class assertions to semantic assertions while fixing it; do not batch-convert existing tests or add new markers to components just for tests.
 
 ## Git & PR instructions
 

@@ -6,7 +6,7 @@
     "dev": "node scripts/sync-version.mjs && node scripts/dev.mjs",
     "build": "node scripts/sync-version.mjs && pnpm --recursive --filter @bookdock/server --filter @bookdock/web run build",
     "build:extension": "pnpm --filter @bookdock/extension run pack",
-    "test": "pnpm --recursive --filter @bookdock/server --filter @bookdock/web --filter @bookdock/extension run test",
+    "test": "pnpm --recursive --filter @bookdock/server --filter @bookdock/web --filter @bookdock/extension --filter @bookdock/shared run test",
     "test:watch": "vitest",
     "lint": "oxlint --deny-warnings",
     "typecheck": "pnpm --recursive run typecheck",

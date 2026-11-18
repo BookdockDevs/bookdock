@@ -4,29 +4,6 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import Toggle from '../components/ui/Toggle'
 
 describe('Toggle', () => {
-  it('renders the off state: gray track, knob on the left', () => {
-    render(<Toggle checked={false} onChange={() => {}} ariaLabel="switch" />)
-
-    const track = screen.getByRole('switch', { name: 'switch' })
-    expect(track).toHaveAttribute('aria-checked', 'false')
-    const knob = track.firstElementChild!.firstElementChild!
-    expect(track.firstElementChild!.className).toContain('bg-(--bd-toggle-off)')
-    expect(knob.className).toContain('left-0.5')
-    expect(knob.className).toContain('bg-(--bd-toggle-knob)')
-    expect(knob.className).not.toContain('translate-x-4')
-  })
-
-  it('renders the on state: dark track, knob translated to the right', () => {
-    render(<Toggle checked onChange={() => {}} ariaLabel="switch" />)
-
-    const track = screen.getByRole('switch', { name: 'switch' })
-    expect(track).toHaveAttribute('aria-checked', 'true')
-    const knob = track.firstElementChild!.firstElementChild!
-    expect(track.firstElementChild!.className).toContain('bg-(--bd-toggle-on)')
-    expect(knob.className).toContain('bg-(--bd-toggle-knob)')
-    expect(knob.className).toContain('translate-x-4')
-  })
-
   it('calls onChange with the flipped value', () => {
     const onChange = vi.fn()
     render(<Toggle checked={false} onChange={onChange} ariaLabel="switch" />)

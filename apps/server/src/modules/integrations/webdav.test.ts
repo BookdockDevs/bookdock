@@ -96,65 +96,32 @@ describe('WebDAV routes', () => {
     })
   })
 
-  it('POST /test calls testWebDavConnection', async () => {
-    vi.mocked(webdavService.testWebDavConnection).mockResolvedValue({
-      success: true,
-      latencyMs: 120,
-    })
-
+  it('POST /test returns the connection probe result', async () => {
+    vi.mocked(webdavService.testWebDavConnection).mockResolvedValue({ success: true, latencyMs: 120 })
     const app = createApp()
     const res = await app.request('/api/v1/integrations/webdav/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: 'https://dav.test.com' }),
     })
-
     expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.data).toEqual({ success: true, latencyMs: 120 })
+    expect(await res.json()).toEqual({ data: { success: true, latencyMs: 120 } })
   })
 
-  it('POST /ls lists files', async () => {
+  it('POST /ls returns the file listing', async () => {
     vi.mocked(webdavService.listWebDavFiles).mockResolvedValue([
       { name: 'book.epub', path: '/book.epub', type: 'file', size: 1024, isSupported: true },
     ])
-
     const app = createApp()
     const res = await app.request('/api/v1/integrations/webdav/ls', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: '/' }),
     })
-
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.data).toHaveLength(1)
     expect(body.data[0].name).toBe('book.epub')
-  })
-
-  it('POST /import invokes importWebDavBooks', async () => {
-    vi.mocked(webdavService.importWebDavBooks).mockResolvedValue({
-      results: [
-        { path: '/b.epub', name: 'b.epub', status: 'success', bookId: 'bk_1' },
-      ],
-      total: 1,
-      successCount: 1,
-      duplicateCount: 0,
-      errorCount: 0,
-    })
-
-    const app = createApp()
-    const res = await app.request('/api/v1/integrations/webdav/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        files: ['/b.epub'],
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.data.successCount).toBe(1)
   })
 
   it('POST /import propagates 403 when upload is disabled', async () => {

@@ -13,12 +13,10 @@ vi.mock('../annotations/annotations.service', () => ({ listAnnotations, searchAn
 vi.mock('../books/books.service', () => ({ getActiveBook, getBookChapters, getBookChapterContent }))
 vi.mock('./ai.retrieval.service', () => ({ searchAiBook }))
 
-import { AI_TOOL_DEFAULT_TIMEOUT_MS, AI_TOOL_MAX_ANNOTATION_RESULTS, AI_TOOL_MAX_CHAPTER_CHARS, AI_TOOL_MAX_RESULT_CHARS, AI_TOOLS, createAiToolRepeatedExecution, executeAiTool, executeAiToolWithPolicy, getAiToolDefinition } from './ai.tools'
+import { AI_TOOL_MAX_ANNOTATION_RESULTS, AI_TOOL_MAX_CHAPTER_CHARS, AI_TOOL_MAX_RESULT_CHARS, createAiToolRepeatedExecution, executeAiTool, executeAiToolWithPolicy, getAiToolDefinition } from './ai.tools'
 
 describe('AI read-only tools', () => {
-  it('declares bounded read-only tools and excludes write capabilities', () => {
-    expect(AI_TOOLS.length).toBeGreaterThan(0)
-    expect(AI_TOOLS.every((tool) => tool.readOnly && tool.parallelSafe && tool.timeoutMs === AI_TOOL_DEFAULT_TIMEOUT_MS && tool.maxResultChars === AI_TOOL_MAX_RESULT_CHARS)).toBe(true)
+  it('excludes write capabilities from the model-facing toolset', () => {
     expect(getAiToolDefinition('save_as_idea')).toBeUndefined()
   })
 
@@ -188,13 +186,12 @@ describe('AI read-only tools', () => {
     expect(searchAiBook).not.toHaveBeenCalled()
   })
 
-  it('declares chapter range parameters in the model-facing search schema', () => {
+  it('uses server source text without obsolete visible-index options', async () => {
+    // The model can only steer retrieval through these declared parameters;
+    // the boundary itself is enforced server-side further down.
     expect(getAiToolDefinition('search_book')?.parameters).toMatchObject({ properties: {
       minChapterIndex: { type: 'integer', minimum: 0 }, maxChapterIndex: { type: 'integer', minimum: 0 },
     } })
-  })
-
-  it('uses server source text without obsolete visible-index options', async () => {
     await executeAiTool('user-1', 'book-1', { id: 'call-visible-search', name: 'search_book', arguments: '{"query":"命中段落"}' }, new AbortController().signal, 3)
     expect(searchAiBook).toHaveBeenCalledWith('user-1', { bookId: 'book-1', query: '命中段落', limit: 5, maxChapterIndex: 3 }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
 

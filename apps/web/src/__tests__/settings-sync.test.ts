@@ -73,8 +73,8 @@ describe('SettingsSync persistence', () => {
   }
 
   function findPutWithSetting(key: string) {
-    return vi.mocked(fetch).mock.calls.find(([, init]) => {
-      if (init?.method !== 'PUT' || typeof init.body !== 'string') return false
+    return vi.mocked(fetch).mock.calls.find(([url, init]) => {
+      if (url !== '/api/v1/settings' || init?.method !== 'PUT' || typeof init.body !== 'string') return false
       return key in JSON.parse(init.body)
     })
   }

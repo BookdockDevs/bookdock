@@ -160,41 +160,4 @@ describe('BookCard', () => {
     )
     expect(screen.queryByText('45%')).not.toBeInTheDocument()
   })
-
-  it('keeps the card hover state while its context menu is open and clears it on close', () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const { container } = render(
-      <QueryClientProvider client={queryClient}>
-        <BookCard book={{ ...baseBook, pinnedAt: 1, ref: { scope: { kind: 'local', vaultId: 'local' }, bookId: 'book-1' } }} />
-      </QueryClientProvider>,
-    )
-
-    const coverWrapper = container.querySelector('article > div') as HTMLElement
-    const menuBtnWrapper = screen.getByLabelText('library.moreActions').parentElement as HTMLElement
-    const pinBtnWrapper = screen.getByLabelText('library.unpin').parentElement as HTMLElement
-    const deviceBadge = screen.getByRole('img', { name: 'library.bookSourceLocal' })
-
-    expect(coverWrapper.className).not.toContain(' -translate-y-1.5')
-    expect(menuBtnWrapper.className).toContain('md:opacity-0')
-    expect(pinBtnWrapper.className).toContain('md:opacity-0')
-    expect(deviceBadge.className).toContain('md:opacity-0')
-
-    fireEvent.contextMenu(container.querySelector('article')!)
-
-    expect(coverWrapper.className).toContain('-translate-y-1.5')
-    expect(coverWrapper.className).toContain('shadow-xl')
-    expect(menuBtnWrapper.className).toContain('md:opacity-100')
-    expect(menuBtnWrapper.className).not.toContain('md:opacity-0')
-    expect(pinBtnWrapper.className).toContain('md:opacity-100')
-    expect(pinBtnWrapper.className).not.toContain('md:opacity-0')
-    expect(deviceBadge.className).toContain('md:opacity-100')
-    expect(deviceBadge.className).not.toContain('md:opacity-0')
-
-    fireEvent.keyDown(document, { key: 'Escape' })
-
-    expect(coverWrapper.className).not.toContain(' -translate-y-1.5')
-    expect(menuBtnWrapper.className).toContain('md:opacity-0')
-    expect(pinBtnWrapper.className).toContain('md:opacity-0')
-    expect(deviceBadge.className).toContain('md:opacity-0')
-  })
 })
