@@ -794,6 +794,7 @@ describe('book reviews', () => {
     expect((await unreadNotificationCount('author')).count).toBe(1)
     expect((await unreadNotificationCount('member')).count).toBe(1)
     expect((await unreadNotificationCount('critic')).count).toBe(1)
+    expect(await unreadNotificationCount('outsider')).toEqual({ count: 0, hasAny: false })
     const memberEvent = (await listNotifications('member', { page: 1, pageSize: 20 })).entries[0]
     expect(memberEvent).toMatchObject({ event: 'reply', commentId: reply, actor: { id: 'critic' } })
     expect(await notificationTarget('outsider', memberEvent.id)).toEqual({ available: false })
@@ -813,7 +814,7 @@ describe('book reviews', () => {
     const review = await createReview('author', { bookVersionId: 'v1', body: 'visible', visibility: 'shared' })
     await createReviewComment('outsider', review.id, { body: 'interaction' })
     const select = vi.spyOn(db, 'select')
-    expect((await unreadNotificationCount('author')).count).toBe(1)
+    expect(await unreadNotificationCount('author')).toEqual({ count: 1, hasAny: true })
     const projectedQueries = select.mock.calls.length
     expect((await unreadNotificationCount('author')).count).toBe(1)
     expect(select).toHaveBeenCalledTimes(projectedQueries)
@@ -823,7 +824,11 @@ describe('book reviews', () => {
     expect(select.mock.calls.length).toBeGreaterThan(projectedQueries)
 
     await updateReview('author', review.id, { visibility: 'private' })
-    expect((await unreadNotificationCount('author')).count).toBe(0)
+    // Visibility filtering only affects the unread count; the bell's existence
+    // flag stays true and never exposes how many rows became hidden.
+    const hidden = await unreadNotificationCount('author')
+    expect(hidden.count).toBe(0)
+    expect(hidden.hasAny).toBe(true)
     await updateReview('author', review.id, { visibility: 'shared' })
     expect((await unreadNotificationCount('author')).count).toBe(1)
 

@@ -410,7 +410,11 @@ deleted targets remain unavailable without rebinding. Every list, count, preview
 and target request checks current shared visibility and exact source access with
 existing domain permission helpers. Private, deleted and inaccessible targets
 are omitted from lists and unread counts; stale links return a generic
-unavailable result without identity, body or source metadata. Restored access
+unavailable result without identity, body or source metadata. The unread
+summary also carries an existence flag (`hasAny`) that only reports whether the
+account currently stores any notification rows, including rows whose targets
+are temporarily inaccessible; no exact row total is exposed, so recipients
+cannot infer the number of hidden records. Restored access
 restores retained events with their existing read state. Deleted interactions do
 not resolve to a parent or a replacement. Revoked likes are also unavailable;
 re-liking restores the existing event rather than creating another. Mark-all-read covers currently readable

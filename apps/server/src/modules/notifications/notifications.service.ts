@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
-import type { InteractionNotification, NotificationPage, NotificationQuery, NotificationTarget } from '@bookdock/shared'
+import type { InteractionNotification, NotificationPage, NotificationQuery, NotificationTarget, NotificationUnreadSummary } from '@bookdock/shared'
 import { reviewExcerpt } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
@@ -161,7 +161,7 @@ export async function listNotifications(userId: string, query: NotificationQuery
   return { entries: entries.slice(0, query.pageSize), page: query.page, hasMore: entries.length > query.pageSize }
 }
 
-const unreadCountCache = new Map<string, { count: number; at: number; db: ReturnType<typeof getDb>; changes: number }>()
+const unreadCountCache = new Map<string, { summary: NotificationUnreadSummary; at: number; db: ReturnType<typeof getDb>; changes: number }>()
 const UNREAD_COUNT_TTL = 15_000
 
 export function invalidateUnreadNotificationCount(userId?: string) {
@@ -175,7 +175,7 @@ export function deleteNotification(userId: string, id: string) {
     .where(and(eq(interactionNotifications.id, id), eq(interactionNotifications.userId, userId))).run()
 }
 
-export async function unreadNotificationCount(userId: string) {
+export async function unreadNotificationCount(userId: string): Promise<NotificationUnreadSummary> {
   const db = getDb()
   // Target visibility and source permissions can change without notification
   // writes. A connection-local write count covers those paths without coupling
@@ -184,22 +184,33 @@ export async function unreadNotificationCount(userId: string) {
   const cached = unreadCountCache.get(userId)
   const now = Date.now()
   if (cached && cached.db === db && cached.changes === changes && now - cached.at < UNREAD_COUNT_TTL) {
-    return { count: cached.count }
+    return cached.summary
   }
 
-  const raw = db.select({ count: sql<number>`count(*)` })
+  // Existence only (read included, no visibility filtering): the bell needs to
+  // know whether any notification was ever received, and the exact row count
+  // must not leak how many records visibility filtering hides.
+  const hasAny = (db.select({ count: sql<number>`count(*)` })
     .from(interactionNotifications)
-    .where(and(eq(interactionNotifications.userId, userId), isNull(interactionNotifications.readAt)))
-    .get()
+    .where(eq(interactionNotifications.userId, userId))
+    .get()?.count ?? 0) > 0
+  const raw = hasAny
+    ? db.select({ count: sql<number>`count(*)` })
+      .from(interactionNotifications)
+      .where(and(eq(interactionNotifications.userId, userId), isNull(interactionNotifications.readAt)))
+      .get()
+    : undefined
   if (!raw || raw.count === 0) {
-    unreadCountCache.set(userId, { count: 0, at: now, db, changes })
-    return { count: 0 }
+    const summary = { count: 0, hasAny }
+    unreadCountCache.set(userId, { summary, at: now, db, changes })
+    return summary
   }
 
   let count = 0
   for await (const _entry of availableNotifications(userId, true)) count += 1
-  unreadCountCache.set(userId, { count, at: now, db, changes })
-  return { count }
+  const summary = { count, hasAny }
+  unreadCountCache.set(userId, { summary, at: now, db, changes })
+  return summary
 }
 
 export async function notificationTarget(userId: string, id: string): Promise<NotificationTarget> {

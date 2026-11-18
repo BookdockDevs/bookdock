@@ -20,6 +20,10 @@ export interface InteractionNotification {
 }
 
 export type NotificationPage = ArchivePage<InteractionNotification>
+// hasAny only says whether any notification row exists (read included); the
+// exact row total is withheld so recipients cannot infer hidden records from
+// the gap between the total and the visible entries.
+export interface NotificationUnreadSummary { count: number; hasAny: boolean }
 export const notificationQuerySchema = archiveQuerySchema.extend({
   unread: z.preprocess(
     (value) => value === undefined ? 'false' : value,

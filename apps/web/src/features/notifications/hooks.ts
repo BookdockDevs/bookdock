@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { NotificationPage, NotificationTarget } from '@bookdock/shared'
+import type { NotificationPage, NotificationTarget, NotificationUnreadSummary } from '@bookdock/shared'
 
 import { apiDelete, apiGet, apiPut } from '@/api/client'
 import { useAuthStore } from '@/stores/auth.store'
@@ -9,7 +9,7 @@ export function useUnreadNotifications() {
   const user = useAuthStore((state) => state.user)
   return useQuery({
     queryKey: ['notifications', user?.id, 'unread'],
-    queryFn: () => apiGet<{ data: { count: number } }>('/notifications/unread'),
+    queryFn: () => apiGet<{ data: NotificationUnreadSummary }>('/notifications/unread'),
     enabled: Boolean(user), staleTime: 10_000, refetchInterval: 30_000, refetchOnWindowFocus: true,
   })
 }

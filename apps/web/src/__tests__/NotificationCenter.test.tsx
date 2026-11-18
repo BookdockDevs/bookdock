@@ -9,6 +9,7 @@ import * as api from '@/api/client'
 import NotificationCenter from '@/features/notifications/NotificationCenter'
 import NotificationBell from '@/features/notifications/components/NotificationBell'
 import NotificationDrawer from '@/features/notifications/components/NotificationDrawer'
+import { useUnreadNotifications } from '@/features/notifications/hooks'
 import { useReviewAction } from '@/features/reviews/hooks/useReviews'
 import { useIdeaAction } from '@/features/reader/hooks/useIdeas'
 import i18n from '@/i18n/i18n'
@@ -35,6 +36,14 @@ function wrapper() {
   return ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }
 
+// Renders the unread summary so tests can wait for the query to settle even
+// when the bell itself stays hidden.
+function UnreadProbe() {
+  const unread = useUnreadNotifications()
+  if (unread.isError) return <span>probe:error</span>
+  return <span>{unread.data ? `probe:${unread.data.data.hasAny}` : 'probe:loading'}</span>
+}
+
 beforeEach(async () => {
   vi.clearAllMocks()
   search = { page: 1 }
@@ -45,7 +54,7 @@ beforeEach(async () => {
 describe('notification center', () => {
   it('keeps the bell highlighted only while its popover is open across dismissal paths', async () => {
     vi.mocked(api.apiGet).mockImplementation(async (path) => path.endsWith('/unread')
-      ? { data: { count: 0 } }
+      ? { data: { count: 0, hasAny: true } }
       : { data: { entries: [], page: 1, hasMore: false } })
     function Notifications() {
       const [open, setOpen] = useState(false)
@@ -56,7 +65,7 @@ describe('notification center', () => {
       </>
     }
     render(<Notifications />, { wrapper: wrapper() })
-    const bell = screen.getByRole('button', { name: '通知中心' })
+    const bell = await screen.findByRole('button', { name: '通知中心' })
     expect(bell).toHaveAttribute('aria-expanded', 'false')
 
     for (const dismissal of ['toggle', 'escape', 'close', 'outside']) {
@@ -77,7 +86,7 @@ describe('notification center', () => {
   it('shares unread state with the global entry and refreshes it after a read write', async () => {
     let read = false
     vi.mocked(api.apiGet).mockImplementation(async (path) => path === '/notifications/unread'
-      ? { data: { count: read ? 0 : 1 } }
+      ? { data: { count: read ? 0 : 1, hasAny: true } }
       : { data: { entries: [{ ...entry, readAt: read ? 1 : null }], page: 1, hasMore: false } })
     vi.mocked(api.apiPut).mockImplementation(async () => { read = true; return { data: null } })
     render(<><NotificationBell /><NotificationCenter /></>, { wrapper: wrapper() })
@@ -92,11 +101,56 @@ describe('notification center', () => {
     expect(screen.getByRole('link', { name: /Visible reply/ })).toHaveAttribute('href', '/notifications?page=1&id=event')
   })
 
+  it('hides the bell until any notification was received and keeps it on query failure', async () => {
+    vi.mocked(api.apiGet).mockImplementation(async () => ({ data: { count: 0, hasAny: false } }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const mount = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    const view = render(<><NotificationBell /><UnreadProbe /></>, { wrapper: mount })
+    expect(await screen.findByText('probe:false')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '通知中心' })).not.toBeInTheDocument()
+
+    vi.mocked(api.apiGet).mockImplementation(async () => ({ data: { count: 0, hasAny: true } }))
+    await act(() => client.invalidateQueries({ queryKey: ['notifications', 'recipient'] }))
+    expect(await screen.findByText('probe:true')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '通知中心' })).toBeInTheDocument()
+    expect(screen.queryByTestId('notification-unread-dot')).not.toBeInTheDocument()
+
+    vi.mocked(api.apiGet).mockImplementation(async () => ({ data: { count: 0, hasAny: false } }))
+    await act(() => client.invalidateQueries({ queryKey: ['notifications', 'recipient'] }))
+    expect(await screen.findByText('probe:false')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '通知中心' })).not.toBeInTheDocument()
+    view.unmount()
+
+    vi.mocked(api.apiGet).mockRejectedValue(new Error('network'))
+    render(<NotificationBell />, { wrapper: wrapper() })
+    expect(await screen.findByRole('link', { name: '通知中心' })).toBeInTheDocument()
+  })
+
+  it('closes the open drawer after its last entry is deleted', async () => {
+    let emptied = false
+    vi.mocked(api.apiGet).mockImplementation(async (path) => path.endsWith('/unread')
+      ? { data: emptied ? { count: 0, hasAny: false } : { count: 1, hasAny: true } }
+      : { data: { entries: emptied ? [] : [entry], page: 1, hasMore: false } })
+    vi.mocked(api.apiDelete).mockImplementation(async () => { emptied = true; return { data: null } })
+    const onClose = vi.fn()
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    const anchorRef = { current: anchor } as RefObject<HTMLButtonElement | null>
+    try {
+      render(<NotificationDrawer anchorRef={anchorRef} open={true} onClose={onClose} />, { wrapper: wrapper() })
+      fireEvent.click(await screen.findByRole('button', { name: '删除通知' }))
+      await waitFor(() => expect(api.apiDelete).toHaveBeenCalledWith('/notifications/event'))
+      await waitFor(() => expect(onClose).toHaveBeenCalled())
+    } finally {
+      anchor.remove()
+    }
+  })
+
   it('shows only an unavailable state for stale or inaccessible target links', async () => {
     search = { page: 1, id: 'hidden' }
     vi.mocked(api.apiGet).mockImplementation(async (path) => path.endsWith('/target')
       ? { data: { available: false } }
-      : path.endsWith('/unread') ? { data: { count: 0 } } : { data: { entries: [], page: 1, hasMore: false } })
+      : path.endsWith('/unread') ? { data: { count: 0, hasAny: false } } : { data: { entries: [], page: 1, hasMore: false } })
     render(<NotificationCenter />, { wrapper: wrapper() })
     expect(await screen.findByText(/这条互动已不可用/)).toBeInTheDocument()
     expect(screen.queryByText('Exact interaction')).not.toBeInTheDocument()
@@ -106,7 +160,7 @@ describe('notification center', () => {
   it('resets the open detail when the drawer closes and reopens', async () => {
     vi.mocked(api.apiGet).mockImplementation(async (path: string) => {
       if (path.endsWith('/target')) return { data: { available: true, notification: entry } }
-      if (path.endsWith('/unread')) return { data: { count: 1 } }
+      if (path.endsWith('/unread')) return { data: { count: 1, hasAny: true } }
       return { data: { entries: [entry], page: 1, hasMore: false } }
     })
     vi.mocked(api.apiPut).mockResolvedValue({ data: null })
@@ -133,7 +187,7 @@ describe('notification center', () => {
     const contentLike: InteractionNotification = { ...base, id: 'like-content', domain: 'idea', event: 'like', targetId: 'idea', commentId: null, preview: 'Idea summary' }
     const commentLike: InteractionNotification = { ...base, id: 'like-comment', domain: 'review', event: 'like', targetId: 'review', commentId: 'comment', preview: 'Liked comment body' }
     vi.mocked(api.apiGet).mockImplementation(async (path) => path.endsWith('/unread')
-      ? { data: { count: 0 } }
+      ? { data: { count: 0, hasAny: true } }
       : { data: { entries: [contentLike, commentLike], page: 1, hasMore: false } })
     render(<NotificationCenter />, { wrapper: wrapper() })
     expect(await screen.findByText(/赞了你的想法/)).toBeInTheDocument()

@@ -49,6 +49,12 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
     }
   }, [open])
 
+  // Deleting the last notification hides the bell, so the open drawer would
+  // float above nothing; close it as soon as the emptied summary arrives.
+  useEffect(() => {
+    if (open && !unread.isError && unread.data?.data.hasAny === false) onClose()
+  }, [open, onClose, unread.data, unread.isError])
+
   useLayoutEffect(() => {
     if (!open) {
       setPosition(null)

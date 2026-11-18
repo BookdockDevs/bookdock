@@ -6,6 +6,7 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- The notification bell in the sidebar only shows while the account has notification records: it appears with the first incoming notification and hides again once the record list is emptied, so self-hosted instances without social interactions no longer keep an always-empty entry. The open notification popover now closes itself when its last entry is removed.
 - Batch library actions now report how many books were affected: the toasts for moving to trash, hiding, permanently deleting, restoring, and updating reading status include the book count, as do the move-to-shelf and move-out-of-shelf notices.
 - Single-book action toasts in English now name the book: moving to trash, permanently deleting, and restoring a book show its title instead of a generic message.
 
@@ -1364,6 +1365,7 @@ All notable changes to Bookdock are documented here.
 
 #### 变更
 
+- 侧栏的通知铃铛只在账号存在通知记录时显示：收到第一条通知时出现，记录清空后再次隐藏，没有社交互动的自托管实例不再常驻一个永远为空的入口。在通知弹层里删掉最后一条通知时，弹层会同步关闭。
 - 书库批量操作的通知现在会显示受影响的书籍数量：移入回收站、隐藏、彻底删除、恢复和批量更新阅读状态的提示均带上书籍数量，移动到书架和移出书架的通知同样如此。
 - 英文的单本书操作通知现在会显示书名：移入回收站、彻底删除和恢复的提示会带上书名，而不是笼统的说法。
 
