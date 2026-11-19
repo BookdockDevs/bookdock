@@ -54,7 +54,7 @@ jobs:
       - run: pnpm --filter @bookdock/extension test
       - run: pnpm build:extension
       - run: node scripts/verify-extension-package.mjs
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: bookdock-extension
           path: apps/extension/dist/*.zip
