@@ -56,6 +56,8 @@ describe('convertTxtToEpub', () => {
 
     expect(css).toBeDefined()
     expect(css).not.toMatch(/font-family\s*:/i)
+    expect(css).not.toMatch(/background\s*:/i)
+    expect(css).not.toMatch(/color\s*:/i)
   })
 
   it('handles a single chapter fallback', async () => {

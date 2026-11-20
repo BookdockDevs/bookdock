@@ -20,9 +20,10 @@ interface ReaderSidebarProps {
   mobileDockVisible?: boolean
   onFooterSummon?: (summon: boolean) => void
   guestReadOnly: boolean
+  hasWallpaper?: boolean
 }
 
-export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionReady, onStatsTabOpen, chromePinned, footerVisible, mobileDockVisible, onFooterSummon, guestReadOnly }: ReaderSidebarProps) {
+export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionReady, onStatsTabOpen, chromePinned, footerVisible, mobileDockVisible, onFooterSummon, guestReadOnly, hasWallpaper }: ReaderSidebarProps) {
   const _ = useTranslation()
   const isTouch = useIsTouch()
   const activeNavTab = useReaderState((s) => s.activeNavTab)
@@ -47,6 +48,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
   const [locked, setLocked] = useState(toolbarLocked)
   const [hovered, setHovered] = useState(false)
   const [floatingActive, setFloatingActive] = useState(false)
+  // One composite for the whole sidebar surface. With a wallpaper this is a wash
+  // of the theme colour rather than a darkened copy of the image, which is what
+  // made the panel look like a different material from the page behind it.
+  const dockBg = cn('bg-[var(--bd-read-panel-bg)]', hasWallpaper && 'backdrop-blur-md')
   // `sidebarOpen` is seeded in a layout effect, so the first commit can carry the
   // store's stale `false` and then flip to `true`. With transitions armed that
   // plays a width/height animation out of nothing — the dock appears to open and
@@ -375,7 +380,8 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         >
           <div
             className={cn(
-              'order-1 w-full overflow-hidden bg-[var(--bd-read-bg)]',
+              'order-1 w-full overflow-hidden',
+              dockBg,
               transitionsOn && 'transition-[height]',
               sidebarOpen && (activeNavTab === 'ai' ? 'h-[80dvh] max-h-[720px]' : 'h-[65dvh] max-h-[520px]'),
               !sidebarOpen && 'h-0',
@@ -404,7 +410,7 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
             data-testid="reader-tool-dock"
             data-toast-obstacle={mobileControlsVisible ? '' : undefined}
             className={cn(
-              'order-2 flex h-[calc(3.5rem+env(safe-area-inset-bottom))] w-full shrink-0 items-center border-t border-[var(--bd-read-accent)] px-1 pb-[env(safe-area-inset-bottom)] bg-[var(--bd-read-bg)]',
+              'order-2 flex h-[calc(3.5rem+env(safe-area-inset-bottom))] w-full shrink-0 items-center border-t border-[var(--bd-read-accent)] px-1 pb-[env(safe-area-inset-bottom)] bg-[var(--bd-read-panel-bg)]',
               mobileControlsVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
             )}
           >
@@ -442,7 +448,10 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         <div
           ref={dockRef}
           data-testid="reader-tool-dock"
-          className="order-none h-full w-[56px] flex shrink-0 flex-col items-center border-r border-[var(--bd-read-accent)] py-3 bg-[var(--bd-read-bg)] opacity-100"
+          className={cn(
+            'order-none h-full w-[56px] flex shrink-0 flex-col items-center border-r border-[var(--bd-read-accent)]/40 py-3 opacity-100',
+            dockBg,
+          )}
         >
           <ToolDock
             activeNavTab={activeNavTab}
@@ -460,7 +469,8 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         </div>
         <div
           className={cn(
-            'order-none h-full flex shrink-0 overflow-hidden bg-[var(--bd-read-bg)]',
+            'order-none h-full flex shrink-0 overflow-hidden',
+            dockBg,
             !resizingDir && transitionsOn && 'transition-[width] duration-200 will-change-[width]',
           )}
           style={{ width: sidebarOpen ? panelWidth : 0 }}
@@ -521,12 +531,11 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
         id="reader-navigation"
         data-testid="reader-sidebar"
         className={cn(
-          'absolute left-3 top-16 z-[45] flex rounded-2xl shadow-2xl ring-1 ring-[var(--bd-read-accent)]/80 backdrop-blur-md overflow-visible',
+          'absolute left-3 top-16 z-[45] flex rounded-2xl bg-[var(--bd-read-panel-bg)] shadow-2xl ring-1 ring-[var(--bd-read-accent)]/80 backdrop-blur-md overflow-visible',
           floatingHeight == null ? 'bottom-16' : '',
         )}
         style={{
           width: 48 + panelWidth,
-          backgroundColor: 'var(--bd-read-bg)',
           ...(floatingHeight != null ? { height: floatingHeight, maxHeight: 'calc(100vh - 5rem)' } : {}),
         }}
       >
@@ -658,7 +667,13 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
           floatingActive ? '-mr-2' : '',
           isCapsuleVisible ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
         )}
-        style={{ backgroundColor: 'color-mix(in srgb, var(--bd-read-bg) 92%, transparent)' }}
+        style={{
+          // Same surface as the panel this capsule expands into; the 92% mix is
+          // kept for the no-wallpaper case so that rendering is unchanged there.
+          backgroundColor: hasWallpaper
+            ? 'var(--bd-read-panel-bg)'
+            : 'color-mix(in srgb, var(--bd-read-bg) 92%, transparent)',
+        }}
         onPointerEnter={handleHoverPointerEnter}
         onPointerMove={handleHoverPointerMove}
         onPointerLeave={handleHoverPointerLeave}

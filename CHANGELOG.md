@@ -4,15 +4,35 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Highlights
+
+- Build reading themes from reusable palettes, CSS cards, and automatic highlight rules, and try them on the open book.
+- Choose separate day and night defaults, with independent appearance choices for individual books.
+- Share themes and individual cards in a ZIP that includes the images they use.
+
+### Added
+
+- The reader and Settings share an editor for themes and their cards. In the reader, choose a whole theme or mix a palette, an optional CSS card, and selected highlight rules for the open book. Try an unsaved draft on the book before saving it.
+- Palettes can set separate paper and outside-page colors in scrolled reading. Add a wallpaper with adjustable opacity and blur, or use image assets in custom CSS.
+- Style TXT and reflowable EPUB content with custom CSS. The editor shows validation errors and lets you insert references to images and fonts from your reading font library.
+- Automatic highlights match text or regular expressions within paragraphs. Style the whole match or individual capture groups with text color, background color, or a solid, wavy, or dashed line. Preview rules on your own sample text. Where automatic highlights overlap manual marks, the manual mark takes precedence for the shared effect.
+- Manage themes, palettes, CSS cards, and highlight rules in Settings. Reorder the lists by dragging, select items across lists for batch deletion or export, and undo deletions.
+- Import and export themes and standalone cards together in one ZIP. Imports reuse matching items and give name collisions a numbered suffix. Images travel with the package. Fonts use the receiving device's font library and the stylesheet's fallbacks.
+
 ### Changed
 
-- The notification bell in the sidebar only shows while the account has notification records: it appears with the first incoming notification and hides again once the record list is emptied, so self-hosted instances without social interactions no longer keep an always-empty entry. The open notification popover now closes itself when its last entry is removed.
-- Batch library actions now report how many books were affected: the toasts for moving to trash, hiding, permanently deleting, restoring, and updating reading status include the book count, as do the move-to-shelf and move-out-of-shelf notices.
-- Single-book action toasts in English now name the book: moving to trash, permanently deleting, and restoring a book show its title instead of a generic message.
+- Reading presets now control typography, layout, and behavior independently of themes. Day and night each have a default theme and can each have a book-specific choice. Picking the current default clears that slot's choice. Restore following clears both choices and keeps the book's layout settings and preset binding.
+- The sidebar notification bell appears when the account has notification records. Clearing the last record closes the open notification panel and hides the bell.
+- Library batch notifications show how many books were affected when moving books to or from shelves or the trash, hiding them, permanently deleting them, or updating reading status. English notifications for trashing, restoring, and permanently deleting a single book include its title.
 
 ### Fixed
 
-- Fixed the table of contents' "locate current chapter" button flashing in and out when entering the reader. The button now appears only after the panel has finished scrolling to the current chapter, and it no longer flickers while the panel auto-scrolls to a newly opened chapter.
+- The table of contents waits until automatic scrolling finishes before showing the button for locating the current chapter, preventing flashes when opening a book or changing chapters.
+
+### Upgrade notes
+
+- Existing custom themes are converted into themes with reusable cards, keeping their theme IDs. Appearance follows the new day and night defaults after upgrade, and theme choices previously stored in reading presets are retired.
+- Theme definitions sync with account settings. Wallpaper and CSS image files stay in the current browser. Use a theme ZIP to carry them to another device.
 
 ## [0.8.6] - 2026-11-17
 
@@ -1363,15 +1383,35 @@ All notable changes to Bookdock are documented here.
 
 ### 未发布
 
+#### 亮点
+
+- 用可复用的配色、CSS 卡片和自动高亮规则组合阅读主题，并在当前书中试用。
+- 分别设置日间和夜间默认主题，也可以为每本书单独设置两套外观。
+- 将主题和独立卡片打包成一个 ZIP，随包分享引用的图片。
+
+#### 新增
+
+- 阅读器和设置页共用主题及卡片编辑器。阅读时可以为当前书选择整套主题，也可以自由搭配配色、CSS 卡片和高亮规则。未保存的草稿可以先在当前书中试用。
+- 滚动阅读支持分别设置书页和页外底色。配色可添加壁纸并调整不透明度和模糊程度，自定义 CSS 也可引用图片素材。
+- 支持用自定义 CSS 调整 TXT 和可重排 EPUB 的正文样式。编辑器会标出校验错误，也可插入图片和阅读字体库中的字体引用。
+- 自动高亮可在段落内匹配文本或正则表达式，为整段匹配或各个捕获组分别设置文字色、底色、实线、波浪线或虚线，并用自填样文预览效果。与手动标记重叠时，同类效果以手动标记为准。
+- 在设置页集中管理主题、配色、CSS 卡片和高亮规则。各列表支持拖动排序，可跨列表多选删除或导出，并可撤销删除。
+- 主题和独立卡片可放进同一个 ZIP 导入或导出。导入时会复用内容相同的项目，名称冲突时追加数字后缀。图片随包传递，字体由接收设备的字体库和样式中指定的后备字体提供。
+
 #### 变更
 
-- 侧栏的通知铃铛只在账号存在通知记录时显示：收到第一条通知时出现，记录清空后再次隐藏，没有社交互动的自托管实例不再常驻一个永远为空的入口。在通知弹层里删掉最后一条通知时，弹层会同步关闭。
-- 书库批量操作的通知现在会显示受影响的书籍数量：移入回收站、隐藏、彻底删除、恢复和批量更新阅读状态的提示均带上书籍数量，移动到书架和移出书架的通知同样如此。
-- 英文的单本书操作通知现在会显示书名：移入回收站、彻底删除和恢复的提示会带上书名，而不是笼统的说法。
+- 阅读预设独立管理字体排版、布局和阅读行为。日间和夜间各有一套默认主题，也可以分别为本书指定外观。选中当前时段的默认主题会清除该时段的本书选择。恢复跟随会清除日夜两项选择，保留本书的排版设置和预设绑定。
+- 账号有通知记录时，侧栏才显示通知铃铛。清空最后一条通知后，已打开的通知面板会关闭，铃铛随之隐藏。
+- 批量移入或移出书架、移入或移出回收站、隐藏、彻底删除和更新阅读状态时，提示会显示受影响的书籍数量。英文界面的单本书回收、恢复和彻底删除提示会带上书名。
 
 #### 修复
 
-- 修复刚进入阅读器时目录顶部“定位到当前章节”按钮先出现后消失的闪现。按钮现在只在目录面板完成定位滚动后才出现，切换章节的自动滚动期间也不再闪现。
+- 打开书籍或切换章节时，目录会等自动滚动完成后再显示定位到当前章节的按钮，避免按钮闪现。
+
+#### 升级说明
+
+- 现有自定义主题会转换为由可复用卡片组成的主题，并保留原有主题 ID。升级后，外观跟随新的日间和夜间默认设置，阅读预设中原有的主题选择不再生效。
+- 主题定义随账号设置同步。壁纸和 CSS 引用的图片保存在当前浏览器内，可通过主题 ZIP 带到另一台设备。
 
 ### [0.8.6] - 2026-11-17
 

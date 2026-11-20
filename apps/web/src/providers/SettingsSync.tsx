@@ -8,7 +8,7 @@ import { apiPut } from '@/api/client'
 import { readReaderShortcuts, readerShortcutStorageKey } from '@/features/reader/lib/reader-shortcuts'
 import { bindReadingPreferenceAccount, DEVICE_READING_CONFIG_KEY, DEVICE_SETTINGS_KEY, readingPreferenceAccountId, withReadingPreferenceHydration } from '@/features/reader/lib/reading-preference-owner'
 import { emptyConfig, parseReadingConfig, READING_PROFILE_DEFAULTS, serializeReadingConfig } from '@/features/reader/lib/reading-profiles'
-import { customThemesFromSync } from '@/lib/reading-theme'
+import { readThemeLibrary, serializeThemeLibrary } from '@/features/reading-theme/theme-library'
 import { notify } from '@/lib/notifications'
 import { fetchSettings, readStoredSettings } from '@/lib/settings-cache'
 import { useAuthStore } from '@/stores/auth.store'
@@ -55,7 +55,7 @@ function pickSettings(state: ReturnType<typeof useUiStore.getState>): SettingsRe
   }
   // Custom themes sync as a JSON string: reading configs reference them by
   // id, so the referenced resource must travel with the intent.
-  settings.customThemes = JSON.stringify(state.customThemes)
+  settings.customThemes = serializeThemeLibrary(state.themeLibrary)
   return settings
 }
 
@@ -63,7 +63,7 @@ function settingsChanged(
   state: ReturnType<typeof useUiStore.getState>,
   prevState: ReturnType<typeof useUiStore.getState>,
 ): boolean {
-  if (JSON.stringify(state.customThemes) !== JSON.stringify(prevState.customThemes)) return true
+  if (state.themeLibrary !== prevState.themeLibrary) return true
   if (JSON.stringify(state.fontPreferences) !== JSON.stringify(prevState.fontPreferences)) return true
   if (JSON.stringify(state.fontOrder) !== JSON.stringify(prevState.fontOrder)) return true
   if (JSON.stringify(state.selectionToolbarOrder) !== JSON.stringify(prevState.selectionToolbarOrder)) return true
@@ -132,6 +132,8 @@ function clearPendingSettings(userId: string, payload: SettingsRes) {
 }
 
 function applySettings(settings: Partial<SettingsRes>) {
+  const readingConfig = settings.readingConfig
+  const validReadingConfig = parseReadingConfig(readingConfig)
   withReadingPreferenceHydration(() => {
     if (typeof settings.readerShortcuts === 'string') {
       try { localStorage.setItem(readerShortcutStorageKey(useAuthStore.getState().user?.id ?? null), settings.readerShortcuts) } catch { /* ignore */ }
@@ -140,6 +142,7 @@ function applySettings(settings: Partial<SettingsRes>) {
     useUiStore.setState((state) => {
       const patch: Partial<typeof state> = {}
       for (const key of SETTINGS_KEYS) {
+        if (key === 'readingConfig' && !validReadingConfig) continue
         if (key in settings) {
           // @ts-expect-error dynamic settings keys
           patch[key] = settings[key]
@@ -156,19 +159,19 @@ function applySettings(settings: Partial<SettingsRes>) {
     if (Array.isArray(settings.selectionToolbarHidden)) {
       try { localStorage.setItem('bd-selection-toolbar-hidden', JSON.stringify(settings.selectionToolbarHidden)) } catch { /* ignore */ }
     }
-    if (typeof settings.readingConfig === 'string') {
+    if (typeof readingConfig === 'string' && validReadingConfig) {
       try {
-        localStorage.setItem('bd-reading-config', settings.readingConfig)
+        localStorage.setItem('bd-reading-config', readingConfig)
         if (!readingPreferenceAccountId()) {
           const existing = localStorage.getItem(DEVICE_READING_CONFIG_KEY)
-          if (!existing || parseReadingConfig(existing)) localStorage.setItem(DEVICE_READING_CONFIG_KEY, settings.readingConfig)
+          if (!existing || parseReadingConfig(existing)) localStorage.setItem(DEVICE_READING_CONFIG_KEY, readingConfig)
         }
       } catch {
         // ignore
       }
     }
-    const syncedThemes = customThemesFromSync(settings.customThemes)
-    if (syncedThemes) useUiStore.getState().setCustomThemes(syncedThemes)
+    const library = readThemeLibrary(settings.customThemes)
+    if (library) useUiStore.getState().setThemeLibrary(library)
     // The profiles blob is authoritative for the reading keys: re-apply the
     // local resolution chain (bound > device active > global) so the flat fields
     // follow the synced config.

@@ -9,15 +9,15 @@
 // (`bd-reading-active-preset`), per-book bindings in `book.readerSettings.boundPresetId`.
 // Resolution chain: bound preset > device active > global.
 
-// Exactly the settings reachable in the reader's settings menu — fonts,
-// typography, layout (incl. per-mode backing), reading mode, chrome, margins,
-// behavior and theme references. Resource collections (custom themes, fonts)
-// are referenced by id, never snapshotted.
+// The global snapshot adds theme defaults to the settings that reading
+// presets can capture: fonts, layout, reader chrome and reading behavior.
+const READING_THEME_KEYS = ['readingThemeMode', 'readingThemeId', 'lightReadingThemeId', 'darkReadingThemeId'] as const
 export const READING_PROFILE_DEFAULTS = {
   cleanReading: false,
   readingThemeMode: 'system',
   readingThemeId: 'night',
   lightReadingThemeId: 'paper',
+  darkReadingThemeId: 'night',
   fontFamily: 'sans-serif',
   cjkFontFamily: 'sans-serif',
   fontSize: 22,
@@ -66,9 +66,7 @@ export const READING_PROFILE_DEFAULTS = {
 
 export const READING_PROFILE_KEYS = [
   'cleanReading',
-  'readingThemeMode',
-  'readingThemeId',
-  'lightReadingThemeId',
+  ...READING_THEME_KEYS,
   'fontFamily',
   'cjkFontFamily',
   'fontSize',
@@ -119,10 +117,23 @@ export type ReadingProfileKey = (typeof READING_PROFILE_KEYS)[number]
 
 export type ReadingSnapshot = Record<ReadingProfileKey, unknown>
 
+type ReadingPresetKey = Exclude<ReadingProfileKey, (typeof READING_THEME_KEYS)[number]>
+type ReadingPresetSnapshot = Record<ReadingPresetKey, unknown>
+
+function isReadingPresetKey(key: ReadingProfileKey): key is ReadingPresetKey {
+  return !READING_THEME_KEYS.some((themeKey) => key === themeKey)
+}
+
+const READING_PRESET_KEYS = READING_PROFILE_KEYS.filter(isReadingPresetKey)
+
+export function pickReadingPresetSnapshot(snapshot: ReadingPresetSnapshot): ReadingPresetSnapshot {
+  return Object.fromEntries(READING_PRESET_KEYS.map((key) => [key, snapshot[key]])) as ReadingPresetSnapshot
+}
+
 export interface ReadingPreset {
   id: string
   name: string
-  snapshot: ReadingSnapshot
+  snapshot: ReadingPresetSnapshot
 }
 
 export interface ReadingConfig {
@@ -178,7 +189,7 @@ export function parseReadingConfig(raw: string | null | undefined): ReadingConfi
     if (!parsed || typeof parsed !== 'object') return null
     const presets = Array.isArray(parsed.presets)
       ? parsed.presets.filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string' && p.snapshot && typeof p.snapshot === 'object')
-        .map((p) => ({ ...p, snapshot: resolveProfileSnapshot(READING_PROFILE_DEFAULTS, p.snapshot) }))
+        .map((p) => ({ ...p, snapshot: pickReadingPresetSnapshot(resolveProfileSnapshot(READING_PROFILE_DEFAULTS, p.snapshot)) }))
       : []
     const global = parsed.global && typeof parsed.global === 'object' ? parsed.global : null
     if (!global) return null
@@ -206,7 +217,7 @@ export function pickReadingSnapshot(state: object): ReadingSnapshot {
 export function resolveSnapshot(config: ReadingConfig, presetId: string | null): ReadingSnapshot {
   if (presetId) {
     const preset = config.presets.find((p) => p.id === presetId)
-    if (preset) return preset.snapshot
+    if (preset) return { ...config.global, ...pickReadingPresetSnapshot(preset.snapshot) }
   }
   return config.global
 }
@@ -214,7 +225,7 @@ export function resolveSnapshot(config: ReadingConfig, presetId: string | null):
 /** Fold a profile-key change into the target (preset or global). A dangling
  * target id folds into global, mirroring the resolution fallback. */
 export function foldReadingChange(config: ReadingConfig, key: ReadingProfileKey, value: unknown, targetId: string | null): ReadingConfig {
-  const target = targetId
+  const target = targetId && isReadingPresetKey(key)
     ? config.presets.find((p) => p.id === targetId)
     : undefined
   if (target) {
@@ -229,7 +240,7 @@ export function foldReadingChange(config: ReadingConfig, key: ReadingProfileKey,
 /** Creation does not activate: the (device-local) active pointer lives
  * outside the blob, so the caller gets the new preset back to point at it. */
 export function createReadingPreset(config: ReadingConfig, name: string, snapshot: ReadingSnapshot): { config: ReadingConfig; preset: ReadingPreset } {
-  const preset: ReadingPreset = { id: createPresetId(), name, snapshot }
+  const preset: ReadingPreset = { id: createPresetId(), name, snapshot: pickReadingPresetSnapshot(snapshot) }
   return { config: { global: config.global, presets: [...config.presets, preset] }, preset }
 }
 
@@ -250,9 +261,9 @@ export function deleteReadingPreset(config: ReadingConfig, id: string): ReadingC
   }
 }
 
-export function nextPresetName(config: ReadingConfig, base: string): string {
+export function nextPresetName(config: ReadingConfig | null, base: string): string {
   let n = 1
-  const names = new Set(config.presets.map((p) => p.name))
+  const names = new Set(config?.presets.map((p) => p.name))
   while (names.has(`${base} ${n}`)) n += 1
   return `${base} ${n}`
 }

@@ -618,21 +618,49 @@ export const paintBookBackground = (el, bg) => {
 // document body stays blanked; scrolled mode restores the captured background
 // into the document itself, where it scrolls naturally at content width.
 // `docBackground` is the captured computed shorthand ('' = transparent).
-// In scrolled mode `canvasBackground` (the theme fallback) is pinned onto
-// <html> with important priority: without an html background the body
-// background propagates to the full viewport canvas and fills the whole
-// reading area instead of the page column. Runs on every background replace,
-// so flow toggles without a section reload still end in the right state.
-export const syncDocumentBackgroundForFlow = (doc, docBackground, scrolled, canvasBackground) => {
+// In scrolled mode `canvasBackground` (the theme's outside-page color) is
+// pinned onto <html> with important priority: without an html background the
+// body background propagates to the full viewport canvas and fills the whole
+// reading area instead of the page column. `pageColor` (dual-color themes)
+// paints the centered body column as the book page; ''/undefined keeps the
+// legacy transparent body. `transparentCanvas` (phase-4 wallpaper/decoration
+// mode) pins a transparent canvas instead so the host-side background and
+// decoration surfaces show through: the pinned background-image stays
+// non-none purely to keep the body column from propagating to the canvas.
+// Runs on every background replace, so flow toggles without a section reload
+// still end in the right state — including scrubbing a previous theme's page
+// color and canvas pinning when switching flows or themes.
+export const syncDocumentBackgroundForFlow = (doc, docBackground, scrolled, canvasBackground, pageColor, transparentCanvas) => {
     if (!doc?.body) return
     const html = doc.documentElement
     if (scrolled) {
-        if (canvasBackground && html) html.style.setProperty('background-color', canvasBackground, 'important')
-        if (!docBackground) return
-        doc.body.style.background = docBackground
+        if (transparentCanvas) {
+            if (html) {
+                html.style.setProperty('background-color', 'transparent', 'important')
+                html.style.setProperty('background-image', 'linear-gradient(transparent, transparent)', 'important')
+            }
+        } else {
+            if (canvasBackground && html) html.style.setProperty('background-color', canvasBackground, 'important')
+            if (html) html.style.removeProperty('background-image')
+        }
+        const style = doc.body.style
+        style.background = docBackground || ''
+        // Use the parsed longhands so gradients and other CSS images count as
+        // authored backgrounds even when their base color is transparent.
+        const { backgroundColor, backgroundImage } = style
+        if (pageColor && (!backgroundImage || backgroundImage === 'none')
+            && (!backgroundColor || backgroundColor === 'transparent' || backgroundColor === 'rgba(0, 0, 0, 0)')) {
+            style.setProperty('background-color', pageColor, 'important')
+        }
         return
     }
-    if (html) html.style.removeProperty('background-color')
+    if (html) {
+        html.style.removeProperty('background-color')
+        html.style.removeProperty('background-image')
+    }
+    // A leftover scrolled page color would make the body opaque and hide the
+    // paginated background segments behind the iframe.
+    doc.body.style.removeProperty('background-color')
     if (!docBackground) return
     doc.body.style.background = 'none'
 }
@@ -752,7 +780,8 @@ class View {
                 // display:none would make container measurements zero.
                 this.#iframe.style.visibility = current ? 'visible' : 'hidden'
                 const { vertical, rtl } = getDirection(doc)
-                this.docBackground = getBackground(doc)
+                const isTxt = this.container?.getAttribute('book-format') === 'txt'
+                this.docBackground = isTxt ? '' : getBackground(doc)
                 doc.body.style.background = 'none'
                 // Resolve the body background image's natural size BEFORE the
                 // first render so the scrolled-mode view is sized to fit it
@@ -1334,6 +1363,8 @@ export class Paginator extends HTMLElement {
     #observer = new ResizeObserver(() => this.render())
     #top
     #background
+    #decoration
+    #outsideStyle
     #container
     #header
     #footer
@@ -1651,9 +1682,24 @@ export class Paginator extends HTMLElement {
         :is(#header, #footer) > :last-child > * {
             text-align: right;
         }
+        /* Phase-4 theme decoration surface: hosts the reader theme's
+           image-bearing outside CSS behind the (transparent) section canvases.
+           Pointer-transparent, hidden outside scrolled flow. */
+        #decoration {
+            grid-column: 1 / -1;
+            grid-row: 2;
+            position: relative;
+            overflow: hidden;
+            pointer-events: none;
+            display: none;
+        }
+        :host([flow="scrolled"]) #top[data-outside-gutters] #decoration {
+            display: block;
+        }
         </style>
         <div id="top">
             <div id="background" part="filter"></div>
+            <div id="decoration"></div>
             <div id="header"></div>
             <div id="container" part="container"></div>
             <div id="footer"></div>
@@ -1662,6 +1708,9 @@ export class Paginator extends HTMLElement {
 
         this.#top = this.#root.getElementById('top')
         this.#background = this.#root.getElementById('background')
+        this.#decoration = this.#root.getElementById('decoration')
+        this.#outsideStyle = document.createElement('style')
+        this.#decoration.append(this.#outsideStyle)
         this.#container = this.#root.getElementById('container')
         this.#header = this.#root.getElementById('header')
         this.#footer = this.#root.getElementById('footer')
@@ -1882,6 +1931,7 @@ export class Paginator extends HTMLElement {
                 break
             case 'background-color':
                 this.#top.style.setProperty('--_background-color', value || 'Canvas')
+                this.#replaceBackground()
                 break
             case 'show-header':
             case 'show-footer':
@@ -2037,14 +2087,21 @@ export class Paginator extends HTMLElement {
     #readBackgroundStyle(doc) {
         const htmlStyle = doc.defaultView.getComputedStyle(doc.documentElement)
         const themeBgColor = htmlStyle.getPropertyValue('--theme-bg-color')
+            || htmlStyle.getPropertyValue('--bd-theme-bg')
+            || this.getAttribute('background-color')
+            || ''
         const overrideColor = htmlStyle.getPropertyValue('--override-color') === 'true'
         const bgTextureId = htmlStyle.getPropertyValue('--bg-texture-id')
+            || this.getAttribute('wallpaper-url')
+            || (this.style ? this.style.getPropertyValue('--bg-texture-id') : '')
         const isDarkMode = htmlStyle.getPropertyValue('color-scheme') === 'dark'
         const fallbackBg = themeBgColor || ''
         const hasTexture = !!bgTextureId && bgTextureId !== 'none'
 
         const resolveBackground = (background) => {
-            if (!background) return fallbackBg
+            const isTransparent = !background
+                || /^\s*(transparent|rgba\(0,\s*0,\s*0,\s*0\))/.test(background)
+            if (isTransparent) return hasTexture ? '' : fallbackBg
             if (themeBgColor) {
                 const parsed = background.split(/\s(?=(?:url|rgb|hsl|#[0-9a-fA-F]{3,6}))/)
                 if ((isDarkMode || overrideColor) && (bgTextureId === 'none' || !bgTextureId)) {
@@ -2103,6 +2160,7 @@ export class Paginator extends HTMLElement {
 
         this.#background.innerHTML = ''
         this.#background.style.display = ''
+        this.#top.style.backgroundColor = ctx.hasTexture ? 'transparent' : ''
         // Under a texture, leave the container transparent so the host texture
         // shows through the gaps a transparent page no longer fills.
         this.#background.style.background = ctx.hasTexture ? '' : ctx.fallbackBg
@@ -2112,6 +2170,7 @@ export class Paginator extends HTMLElement {
         const crossPosProp = this.#vertical ? 'left' : 'top'
         const crossSizeProp = this.#vertical ? 'width' : 'height'
         for (const { start, size, bg } of segments) {
+            if (!bg && ctx.hasTexture) continue
             const seg = document.createElement('div')
             seg.style.position = 'absolute'
             seg.style[posProp] = `${start}px`
@@ -2139,19 +2198,39 @@ export class Paginator extends HTMLElement {
             // rendered blank). The canvas color comes from the paginator's own
             // `background-color` attribute (the reader theme), never the
             // unset `--theme-bg-color` variable, so it is always available.
+            // Dual-color themes (phase-1 rolling book page) split that canvas:
+            // `scrolled-outside-color` paints the area outside the centered
+            // page column, and `scrolled-page-color` paints the column itself;
+            // absent attributes keep the single-color canvas.
+            // Phase-4 wallpaper: `scrolled-outside-image` (a temporary blob
+            // URL) layers over the outside color on the host-side background,
+            // and the section canvases turn transparent so it shows on both
+            // sides of the page column. A failed image load falls back to the
+            // outside color painted underneath.
             const { hasTexture, resolveBackground } = this.#readBackgroundStyle(doc)
             const canvasBg = this.getAttribute('background-color') ?? ''
+            const outsideBg = this.getAttribute('scrolled-outside-color') || canvasBg
+            const outsideImage = this.getAttribute('scrolled-outside-image') || ''
+            const transparentCanvas = Boolean(outsideImage) || Boolean(this.#outsideStyle.textContent) || hasTexture
+            const pageColor = hasTexture ? '' : (this.getAttribute('scrolled-page-color') || (transparentCanvas ? canvasBg : ''))
             this.#background.style.background = ''
             this.#background.innerHTML = ''
             this.#background.style.display = ''
-            this.#background.style.background = hasTexture ? '' : canvasBg
+            this.#top.style.backgroundColor = hasTexture ? 'transparent' : ''
+            this.#background.style.background = hasTexture
+                ? ''
+                : (outsideImage
+                    ? `url("${outsideImage}") center center / cover no-repeat ${outsideBg}`
+                    : outsideBg)
             for (const [, view] of this.#sortedViews) {
                 const resolved = resolveBackground(view.docBackground)
                 syncDocumentBackgroundForFlow(
                     view.document,
                     textureAwareBackground(resolved, hasTexture),
                     true,
-                    canvasBg,
+                    outsideBg,
+                    pageColor,
+                    transparentCanvas,
                 )
                 view.element.style.background = ''
             }
@@ -2194,6 +2273,7 @@ export class Paginator extends HTMLElement {
 
         const flow = this.getAttribute('flow')
         const { width, height } = this.#container.getBoundingClientRect()
+        this.#top.toggleAttribute('data-outside-gutters', flow === 'scrolled' && !vertical && width > maxInlineSize + 32)
         const hostSize = vertical ? height : width
         const divisor = resolvePaginatedColumnCount(flow, maxColumnCount, hostSize, maxInlineSize)
         const size = vertical ? height : width
@@ -2326,7 +2406,26 @@ export class Paginator extends HTMLElement {
         }
         this.#setMarginalTexts()
     }
-    render() {
+    updateSectionStyles(update) {
+        if (!this.#primaryView || !this.#lastLayout) {
+            update()
+            return
+        }
+        this.#flushVisibleState()
+        const position = { offset: this.scrolled ? this.#anchorScrollOffset() : null }
+        update()
+        this.render(position)
+    }
+    // Phase-4 theme decoration: compiled image-bearing outside CSS from the
+    // reader theme, pre-resolved to temporary URLs by the host. Rendered on
+    // the #decoration surface (viewport-fixed, behind the reading content);
+    // a non-empty sheet also switches the scrolled canvases to transparent
+    // mode on the next background replace. '' clears it.
+    setOutsideDecoration(css) {
+        if (this.#outsideStyle.textContent === css) return
+        this.#outsideStyle.textContent = css
+    }
+    render(styleChangePosition) {
         const previousLayout = this.#lastLayout
         if (this.#views.size === 0) return
         const primaryView = this.#primaryView
@@ -2338,14 +2437,16 @@ export class Paginator extends HTMLElement {
         // measurement below is taken against a stale anchor and the reader is
         // thrown back to wherever that anchor happened to point.
         const preserveScrollPosition = this.scrolled && previousLayout?.flow === 'scrolled'
-        if (preserveScrollPosition) this.#flushVisibleState()
+        if (preserveScrollPosition && !styleChangePosition) this.#flushVisibleState()
         // Re-anchoring snaps the anchor's top edge to the viewport top, which
         // discards however far into a line the reader had scrolled — a settings
         // toggle that does not even change the layout still shifted the page by
         // up to a line. Record the anchor's distance from the scroll origin and
         // restore that same distance, so the paragraph under the reader's eyes
         // stays exactly where it was.
-        const anchorOffset = preserveScrollPosition ? this.#anchorScrollOffset() : null
+        const anchorOffset = styleChangePosition
+            ? styleChangePosition.offset
+            : preserveScrollPosition ? this.#anchorScrollOffset() : null
         this.#stabilizing = true
         const layout = this.#beforeRender({
             vertical: this.#vertical,
@@ -2745,8 +2846,10 @@ export class Paginator extends HTMLElement {
         // otherwise blend the two pages instead of occluding.
         const doc = this.#primaryView?.document
         const themeBg = doc?.documentElement
-            ? doc.defaultView.getComputedStyle(doc.documentElement)
-                .getPropertyValue('--theme-bg-color').trim()
+            ? (doc.defaultView.getComputedStyle(doc.documentElement).getPropertyValue('--theme-bg-color').trim()
+                || doc.defaultView.getComputedStyle(doc.documentElement).getPropertyValue('--bd-theme-bg').trim()
+                || this.getAttribute('background-color')
+                || '')
             : ''
         html.style.setProperty('--foliate-vt-bg', themeBg || 'Canvas')
         html.classList.remove(...VIEW_TRANSITION_CLASSES)

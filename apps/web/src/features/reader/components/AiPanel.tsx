@@ -1876,8 +1876,8 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   const latestUserMessageId = useMemo(() => [...messages].reverse().find((message) => message.role === 'user')?.id ?? null, [messages])
 
   return (
-    <div data-testid="ai-panel" className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bd-read-bg)] @container/ai-panel">
-      <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center border-b border-[var(--bd-read-accent)] px-4 @max-[240px]/ai-panel:px-2" style={{ backgroundColor: 'var(--bd-read-bg)' }}>
+    <div data-testid="ai-panel" className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bd-read-panel-bg)] @container/ai-panel">
+      <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center border-b border-[var(--bd-read-accent)] px-4 @max-[240px]/ai-panel:px-2" style={{ backgroundColor: 'var(--bd-read-panel-bg)' }}>
         <div ref={assistantModeMenuRef} className="relative min-w-0 max-w-40 shrink @max-[320px]/ai-panel:max-w-28 @max-[240px]/ai-panel:max-w-20">
           <button type="button" onClick={() => { setAssistantModeMenuOpen((open) => !open); setAttachmentOpen(false); setToolsOpen(false); setModelMenuOpen(false); setHistoryOpen(false); setMoreOpen(false) }} aria-label={_('reader.aiSelectAssistantMode')} aria-haspopup="menu" aria-expanded={assistantModeMenuOpen} title={assistantModeLabel(selectedAssistantMode)} className={`flex min-w-0 max-w-full items-center gap-0.5 rounded px-1 py-0.5 text-sm font-medium text-current outline-none transition-colors hover:bg-stone-500/10 focus-visible:ring-1 focus-visible:ring-[var(--bd-read-primary)] ${assistantModeMenuOpen ? 'bg-stone-500/10' : ''}`}>
             <span className="min-w-0 flex-1 truncate">{assistantModeLabel(selectedAssistantMode)}</span>

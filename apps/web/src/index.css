@@ -34,6 +34,18 @@
   --bd-divider: var(--color-stone-100);
   --bd-label-text: var(--color-stone-500);
   --bd-hint-text: var(--color-stone-400);
+  /* Selection items: theme / palette / CSS / highlight / preset chips. One
+     alpha ladder derived from the surface's own text colour, so the same rules
+     stay legible on white, on dark and on every reading palette (a fixed stone
+     border reads 1.0:1 on cream and 7.7:1 on night). */
+  --bd-sel-bg: color-mix(in srgb, var(--color-stone-900) 4%, transparent);
+  --bd-sel-bg-hover: color-mix(in srgb, var(--color-stone-900) 7%, transparent);
+  --bd-sel-bg-on: color-mix(in srgb, var(--color-stone-900) 11%, transparent);
+  --bd-sel-border: color-mix(in srgb, var(--color-stone-900) 14%, transparent);
+  --bd-sel-border-hover: color-mix(in srgb, var(--color-stone-900) 22%, transparent);
+  --bd-sel-border-on: color-mix(in srgb, var(--color-stone-900) 55%, transparent);
+  --bd-sel-text: color-mix(in srgb, var(--color-stone-900) 78%, transparent);
+  --bd-sel-text-on: var(--color-stone-900);
 }
 
 .dark {
@@ -54,6 +66,14 @@
   --bd-divider: var(--color-stone-800);
   --bd-label-text: var(--color-stone-400);
   --bd-hint-text: var(--color-stone-500);
+  --bd-sel-bg: color-mix(in srgb, var(--color-stone-100) 4%, transparent);
+  --bd-sel-bg-hover: color-mix(in srgb, var(--color-stone-100) 7%, transparent);
+  --bd-sel-bg-on: color-mix(in srgb, var(--color-stone-100) 11%, transparent);
+  --bd-sel-border: color-mix(in srgb, var(--color-stone-100) 14%, transparent);
+  --bd-sel-border-hover: color-mix(in srgb, var(--color-stone-100) 22%, transparent);
+  --bd-sel-border-on: color-mix(in srgb, var(--color-stone-100) 55%, transparent);
+  --bd-sel-text: color-mix(in srgb, var(--color-stone-100) 78%, transparent);
+  --bd-sel-text-on: var(--color-stone-100);
 }
 
 .bd-reader-surface {
@@ -74,6 +94,51 @@
   --bd-divider: color-mix(in srgb, var(--bd-read-text) 12%, transparent);
   --bd-label-text: color-mix(in srgb, var(--bd-read-text) 60%, transparent);
   --bd-hint-text: color-mix(in srgb, var(--bd-read-text) 45%, transparent);
+  --bd-sel-bg: color-mix(in srgb, var(--bd-read-text) 4%, transparent);
+  --bd-sel-bg-hover: color-mix(in srgb, var(--bd-read-text) 7%, transparent);
+  --bd-sel-bg-on: color-mix(in srgb, var(--bd-read-text) 11%, transparent);
+  --bd-sel-border: color-mix(in srgb, var(--bd-read-text) 14%, transparent);
+  --bd-sel-border-hover: color-mix(in srgb, var(--bd-read-text) 22%, transparent);
+  --bd-sel-border-on: color-mix(in srgb, var(--bd-read-text) 55%, transparent);
+  --bd-sel-text: color-mix(in srgb, var(--bd-read-text) 78%, transparent);
+  --bd-sel-text-on: var(--bd-read-text);
+}
+
+/* Reader chrome carries only the tone class (`.bd-tone-light` / `.bd-tone-dark`),
+   not `.bd-reader-surface`: that is the settings popover, the sidebar and reader
+   menus. `dark:` utilities are already neutralised inside `.bd-tone-light`, but
+   raw `.dark { --bd-sel-* }` declarations still cascade down from <html>, so a
+   light reading theme under a dark system painted near-white chips and card
+   names on the cream panel. Re-derive the selection ramp from the reading text
+   wherever the surface declares a tone; the app-level `.dark` / `:root` values
+   keep serving surfaces that have no tone (settings pages, library). */
+.bd-tone-light,
+.bd-tone-dark {
+  --bd-sel-bg: color-mix(in srgb, var(--bd-read-text) 4%, transparent);
+  --bd-sel-bg-hover: color-mix(in srgb, var(--bd-read-text) 7%, transparent);
+  --bd-sel-bg-on: color-mix(in srgb, var(--bd-read-text) 11%, transparent);
+  --bd-sel-border: color-mix(in srgb, var(--bd-read-text) 14%, transparent);
+  --bd-sel-border-hover: color-mix(in srgb, var(--bd-read-text) 22%, transparent);
+  --bd-sel-border-on: color-mix(in srgb, var(--bd-read-text) 55%, transparent);
+  --bd-sel-text: color-mix(in srgb, var(--bd-read-text) 78%, transparent);
+  --bd-sel-text-on: var(--bd-read-text);
+}
+
+/* Sidebar chrome background. The sidebar, its icon rail and every bar inside the
+   panel read this instead of `--bd-read-bg`, so they all composite the same way
+   and the panel stops splitting into a solid header band over a translucent
+   list. Popovers, dialogs and cards keep using `--bd-read-bg`: they are meant to
+   cover what is behind them.
+   Without a wallpaper it resolves to the plain theme background, so every
+   surface renders exactly as it did before; with one it becomes a wash of the
+   theme colour (40%) over the wallpaper. Raise the percentage if text starts to
+   feel loose on a busy wallpaper, lower it to let more of the image through. */
+:root {
+  --bd-read-panel-bg: var(--bd-read-bg);
+}
+
+[data-bd-has-wallpaper] {
+  --bd-read-panel-bg: color-mix(in srgb, var(--bd-read-bg) 40%, transparent);
 }
 
 /* Reader sidebar resize handle & active dragging cursor */
@@ -130,7 +195,13 @@ input[data-password-input]::-ms-clear {
 .bd-slider::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 3px;
-  background: linear-gradient(to right, var(--slider-accent) 0%, var(--slider-accent) var(--slider-fill, 50%), var(--slider-track) var(--slider-fill, 50%), var(--slider-track) 100%);
+  background: linear-gradient(
+    to right,
+    var(--slider-accent, color-mix(in srgb, currentColor 65%, transparent)) 0%,
+    var(--slider-accent, color-mix(in srgb, currentColor 65%, transparent)) var(--slider-fill, 50%),
+    var(--slider-track, color-mix(in srgb, currentColor 18%, transparent)) var(--slider-fill, 50%),
+    var(--slider-track, color-mix(in srgb, currentColor 18%, transparent)) 100%
+  );
 }
 
 .bd-slider::-webkit-slider-thumb {
@@ -138,7 +209,16 @@ input[data-password-input]::-ms-clear {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--slider-accent);
+  /* Two layers on purpose: the thumb is 16px tall while the track is 6px, so a
+     translucent thumb paints the track as a band across its middle. The accent
+     sits on top of an opaque reader-background fill, which makes the thumb
+     opaque no matter whether the call site passes a solid color (the reader
+     panels pass `blendColors`) or a translucent `color-mix`. */
+  background-color: var(--bd-read-bg, #ffffff);
+  background-image: linear-gradient(
+    var(--slider-accent, color-mix(in srgb, currentColor 75%, transparent)),
+    var(--slider-accent, color-mix(in srgb, currentColor 75%, transparent))
+  );
   margin-top: -5px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 1.5px var(--bd-read-bg, #ffffff);
   transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.15s ease;
@@ -157,7 +237,13 @@ input[data-password-input]::-ms-clear {
 .bd-slider::-moz-range-track {
   height: 6px;
   border-radius: 3px;
-  background: linear-gradient(to right, var(--slider-accent) 0%, var(--slider-accent) var(--slider-fill, 50%), var(--slider-track) var(--slider-fill, 50%), var(--slider-track) 100%);
+  background: linear-gradient(
+    to right,
+    var(--slider-accent, color-mix(in srgb, currentColor 65%, transparent)) 0%,
+    var(--slider-accent, color-mix(in srgb, currentColor 65%, transparent)) var(--slider-fill, 50%),
+    var(--slider-track, color-mix(in srgb, currentColor 18%, transparent)) var(--slider-fill, 50%),
+    var(--slider-track, color-mix(in srgb, currentColor 18%, transparent)) 100%
+  );
   border: none;
 }
 
@@ -165,7 +251,12 @@ input[data-password-input]::-ms-clear {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--slider-accent);
+  /* Same two-layer opaque thumb as the -webkit rule above. */
+  background-color: var(--bd-read-bg, #ffffff);
+  background-image: linear-gradient(
+    var(--slider-accent, color-mix(in srgb, currentColor 75%, transparent)),
+    var(--slider-accent, color-mix(in srgb, currentColor 75%, transparent))
+  );
   border: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 0 1.5px var(--bd-read-bg, #ffffff);
   transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.15s ease;
@@ -182,7 +273,7 @@ input[data-password-input]::-ms-clear {
 }
 
 .bd-slider:focus-visible {
-  outline: 2px solid var(--slider-accent);
+  outline: 2px solid var(--slider-accent, currentColor);
   outline-offset: 2px;
 }
 

@@ -29,6 +29,7 @@ import TitleSettingsRow from './components/TitleSettingsRow'
 import UploadSettingsSection from './components/UploadSettingsSection'
 import FontsSettingsSection from './components/FontsSettingsSection'
 import ReplacementsSettingsSection from './components/ReplacementsSettingsSection'
+import ReadingThemesSettingsSection from './components/ReadingThemesSettingsSection'
 import TocRulesSettingsSection from './components/TocRulesSettingsSection'
 import TtsSettingsSection from './components/TtsSettingsSection'
 import AiSettingsSection from './components/AiSettingsSection'
@@ -337,11 +338,14 @@ export default function Settings() {
           )}
           {visitedSections.has('reading') && (
             <div className={active === 'reading' ? 'flex flex-col gap-6' : 'hidden'}>
-              {!isGuest && <TocRulesSettingsSection />}
+              {/* 外观 → 模型/服务 → 阅读辅助 → 规则编辑：
+                  越常改的越靠上，出问题才来配的规则类沉底。 */}
+              <ReadingThemesSettingsSection />
+              <FontsSettingsSection canUploadResources={userResourceUploadAllowed} />
               <TtsSettingsSection id="tts-settings" />
               <AiSettingsSection id="ai-settings" />
-              <FontsSettingsSection canUploadResources={userResourceUploadAllowed} />
               {!isGuest && <DictionariesSettingsSection canImportDictionaries={userResourceUploadAllowed} />}
+              {!isGuest && <TocRulesSettingsSection />}
               {(local || !isGuest || guestVaultAccess) && <ReplacementsSettingsSection />}
             </div>
           )}

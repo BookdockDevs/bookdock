@@ -271,11 +271,6 @@ export interface UpdateBioReq {
   bio: string
 }
 
-export interface UpdateTimezoneReq {
-  /** IANA zone id, or null/'' to fall back to UTC. */
-  timezone: string | null
-}
-
 export interface UpdateMeReq {
   username?: string
   bio?: string
@@ -1494,10 +1489,88 @@ export interface BookMeta {
   tocExcludedLeadingText?: string
 }
 
+/** Line styles a highlight rule may draw under a match. */
+export type HighlightLineStyle = 'solid' | 'wavy' | 'dashed'
+
+/** Automatic line effect (phase-3 follow-up). `color` absent = text color. */
+export interface HighlightRuleLine {
+  style: HighlightLineStyle
+  color?: string
+}
+
+/**
+ * One automatic text-highlight effect set (phase 3): any subset of text color,
+ * background color, and line. Absent fields leave that effect untouched.
+ */
+export interface HighlightRuleStyle {
+  textColor?: string
+  backgroundColor?: string
+  /** Legacy phase-3 boolean: true = solid line in the text color, false = an
+   *  explicit "no line" (still wins the line effect against later rules). */
+  underline?: boolean
+  /** Line effect; wins over the legacy `underline` when both are present. */
+  line?: HighlightRuleLine
+}
+
+/** Style pinned to one capture group of a regex rule (group 1..n). */
+export interface HighlightRuleGroup {
+  index: number
+  style: HighlightRuleStyle
+}
+
+/** One ordered text-highlight rule of a reading theme (phase 3). */
+export interface HighlightRuleDef {
+  /** Stable across reorder/rename so per-book disables stay bound. */
+  id: string
+  name: string
+  /** Literal text, or regex source when `isRegex` */
+  pattern: string
+  isRegex: boolean
+  enabled: boolean
+  /** Optional editor sample, omitted from portable packages. */
+  sampleText?: string
+  /** Whole-match style; unset = no effect on the whole match */
+  style?: HighlightRuleStyle
+  /** Per-capture-group styles; non-participating groups produce no span */
+  groups?: HighlightRuleGroup[]
+}
+
+export interface ReadingThemeCards {
+  paletteId: string
+  cssId: string | null
+  highlightIds: string[]
+}
+
+export type ReadingThemeSelection =
+  | { mode: 'theme'; themeId: string }
+  | { mode: 'custom'; themeId?: string; cards: ReadingThemeCards }
+
+/**
+ * Per-tone selections for one book. Picking a theme while reading is a
+ * day-scheme (or night-scheme) choice, not a global mode switch: a book may pin
+ * different schemes for the light and dark slot, and an unpinned side keeps
+ * following the global chain (system mode then still tracks the device).
+ */
+export interface ReadingThemeSelectionSlots {
+  mode: 'slots'
+  light?: ReadingThemeSelection | null
+  dark?: ReadingThemeSelection | null
+}
+
+/** Stored book appearance: legacy single selection, or the per-tone pair. */
+export type ReadingThemeSelectionState = ReadingThemeSelection | ReadingThemeSelectionSlots
+
 /** User-scoped reading preferences for one BookVersion. */
 export interface ReaderBookSettings {
+  /**
+   * A legacy single selection applies to both tones (that is what it used to
+   * do); new writes always store the per-tone pair.
+   */
+  themeSelection?: ReadingThemeSelectionState | null
   viewSettings?: ViewSettings
   boundPresetId?: string
+  /** Per-book reading-theme override; null means "follow the preset/global chain". */
+  readingThemeId?: string | null
 }
 
 export interface BookDetailRes extends BookListItem {

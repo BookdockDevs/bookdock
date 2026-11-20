@@ -183,7 +183,7 @@ const VolumeHeaderItem = memo(function VolumeHeaderItem({
         isStickyVolume && 'sticky top-0 z-10 -ml-2 -mr-3 pl-2 pr-3 transition-shadow duration-200',
         isStickyVolume && isStuck && 'shadow-[0_4px_16px_-2px_rgba(0,0,0,0.08)] dark:shadow-[0_4px_16px_-2px_rgba(0,0,0,0.36)]',
       )}
-      style={isStickyVolume ? { backgroundColor: 'var(--bd-read-bg)' } : undefined}
+      style={isStickyVolume ? { backgroundColor: 'var(--bd-read-panel-bg)' } : undefined}
     >
       <button
         ref={handleRef}
@@ -229,7 +229,7 @@ const VolumeHeaderItem = memo(function VolumeHeaderItem({
           <span
             className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center pl-6 pr-1.5 text-xs text-[var(--bd-read-sub)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 tabular-nums"
             style={{
-              background: 'linear-gradient(to right, transparent 0px, color-mix(in srgb, var(--color-stone-500, #78716c) 10%, var(--bd-read-bg)) 20px, color-mix(in srgb, var(--color-stone-500, #78716c) 10%, var(--bd-read-bg)) 100%)',
+              background: 'linear-gradient(to right, transparent 0px, color-mix(in srgb, var(--color-stone-500, #78716c) 10%, var(--bd-read-panel-bg)) 20px, color-mix(in srgb, var(--color-stone-500, #78716c) 10%, var(--bd-read-panel-bg)) 100%)',
             }}
           >
             {node.children.length} {t('reader.chapters')}
@@ -238,7 +238,7 @@ const VolumeHeaderItem = memo(function VolumeHeaderItem({
       </button>
       {isStickyVolume && isStuck && (
         <div
-          className="pointer-events-none absolute left-0 right-0 top-full h-2.5 bg-gradient-to-b from-[var(--bd-read-bg)] to-transparent"
+          className="pointer-events-none absolute left-0 right-0 top-full h-2.5 bg-gradient-to-b from-[var(--bd-read-panel-bg)] to-transparent"
           aria-hidden="true"
         />
       )}
@@ -1407,7 +1407,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       {tab === 'notes' && notesSelectionMode ? (
         <div
           className="sticky top-0 z-10 flex h-12 items-center border-b border-[var(--bd-read-accent)] px-3"
-          style={{ backgroundColor: 'var(--bd-read-bg)' }}
+          style={{ backgroundColor: 'var(--bd-read-panel-bg)' }}
         >
           <button
             type="button"
@@ -1457,7 +1457,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       ) : tab !== 'ai' && (
         <div
           className="sticky top-0 z-10 flex h-12 items-center border-b border-[var(--bd-read-accent)] px-3"
-          style={{ backgroundColor: 'var(--bd-read-bg)' }}
+          style={{ backgroundColor: 'var(--bd-read-panel-bg)' }}
         >
           {tab === 'toc' && searchExpanded ? (
             <div className="flex items-center gap-2 min-w-0">
@@ -1701,7 +1701,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                   <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
                 </svg>
                 {(notesFilter.hasActiveFilter || displayTypes.size < ALL_KINDS.length) && (
-                  <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--bd-read-primary)] ring-1 ring-[var(--bd-read-bg)]" />
+                  <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--bd-read-primary)] ring-1 ring-[var(--bd-read-panel-bg)]" />
                 )}
               </button>
             )}
@@ -1863,7 +1863,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
             <>
               {/* Pinned Search Header Summary Bar (Hairline bottom border, stays pinned while scrolling results) */}
               {searchResults.length > 0 && (
-                <div className="flex items-center justify-between border-b border-[var(--bd-read-accent)]/20 px-3 py-1.5 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-bg)]">
+                <div className="flex items-center justify-between border-b border-[var(--bd-read-accent)]/20 px-3 py-1.5 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-panel-bg)]">
                   <div className="flex items-center gap-2 min-w-0">
                     <span>
                       {searchResults.length} {_('reader.matches')}
@@ -1883,12 +1883,12 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                 </div>
               )}
               {searchStatus.truncated && (
-                <div role="status" className="border-b border-[var(--bd-read-accent)]/20 px-3 py-1 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-bg)]">
+                <div role="status" className="border-b border-[var(--bd-read-accent)]/20 px-3 py-1 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-panel-bg)]">
                   {_('reader.searchTruncated', { count: searchResults.length })}
                 </div>
               )}
               {searchStatus.incomplete && (
-                <div role="status" className="border-b border-[var(--bd-read-accent)]/20 px-3 py-1 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-bg)]">
+                <div role="status" className="border-b border-[var(--bd-read-accent)]/20 px-3 py-1 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-panel-bg)]">
                   {_(searchStatus.error === 'regex-timeout' ? 'reader.searchRegexTimeout'
                     : searchStatus.error ? 'reader.searchRegexFailed' : 'reader.searchIncomplete')}
                 </div>
@@ -1922,7 +1922,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
                             else searchChapterHeaderRefs.current.delete(group.chapter!)
                           }}
                           className="sticky top-0 z-10 -ml-2 -mr-3 pl-2 pr-3 py-0.5 transition-shadow"
-                          style={{ backgroundColor: 'var(--bd-read-bg)' }}
+                          style={{ backgroundColor: 'var(--bd-read-panel-bg)' }}
                         >
                           {/* Row height carries the hit area: with py-1 the highlight was a
                               24px band floating inside a ~42px pitch, so collapsed groups read

@@ -45,9 +45,13 @@ export class Overlayer {
     #clipPathPath = null
     #clipPathId
     #redrawFrame = null
+    #highlightInk = []
+    #highlightInkGroup = null
+    #relativeInk
 
-    constructor(doc) {
+    constructor(doc, { relativeInk = false } = {}) {
         this.#doc = doc
+        this.#relativeInk = relativeInk
         this.#clipPathId = `foliate-loupe-clip-${overlayerCounter++}`
         Object.assign(this.#svg.style, {
             position: 'absolute', top: '0', left: '0',
@@ -188,7 +192,41 @@ export class Overlayer {
         this.#svg.removeChild(this.#map.get(key).element)
         this.#map.delete(key)
     }
+    setHighlightInk(ranges) {
+        this.#highlightInk = ranges
+        this.#drawHighlightInk()
+        if (ranges.length) this.#queueRedraw()
+    }
+    #drawHighlightInk() {
+        this.#highlightInkGroup?.remove()
+        this.#highlightInkGroup = null
+        if (!this.#highlightInk.length) return
+        const group = createSVGElement('g')
+        const origin = this.#relativeInk ? this.#svg.getBoundingClientRect() : null
+        const styles = new Map()
+        for (const { range, style, color, opacity } of this.#highlightInk) {
+            if (!range.startContainer.isConnected) continue
+            const element = range.startContainer.parentElement
+            let computed = styles.get(element)
+            if (element && !computed) {
+                computed = this.#doc.defaultView?.getComputedStyle(element)
+                styles.set(element, computed)
+            }
+            let rects = this.#getRects(range)
+            if (origin) rects = rects.map(rect => ({
+                ...rect, left: rect.left - origin.left, right: rect.right - origin.left,
+                top: rect.top - origin.top, bottom: rect.bottom - origin.top,
+            }))
+            group.append(Overlayer.ink(rects, {
+                style, color: color ?? computed?.color ?? 'currentColor',
+                writingMode: computed?.writingMode, opacity,
+            }))
+        }
+        this.#svg.querySelector('defs').after(group)
+        this.#highlightInkGroup = group
+    }
     redraw() {
+        this.#drawHighlightInk()
         for (const obj of this.#map.values()) {
             const { range, draw, options, element } = obj
             this.#svg.removeChild(element)

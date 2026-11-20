@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 
-import type { ViewSettings } from '@bookdock/shared'
+import type { ReaderBookSettings, ReadingThemeSelection, ViewSettings } from '@bookdock/shared'
 
 import type { EffectiveViewSettings, PerBookSettingKey, PerBookSettingValue } from './lib/view-settings'
 
@@ -23,6 +23,9 @@ export interface ViewSettingsContextValue {
   boundPresetId: string | null
   /** Bind/unbind a reading preset to this book (PATCH books/:id/reader-settings) */
   setBoundPreset: (presetId: string | null) => void
+  appearance?: ReaderBookSettings
+  hasThemeSelection?: boolean
+  setThemeSelection: (selection: ReadingThemeSelection | null, clear?: 'current') => void
 }
 
 export const ViewSettingsContext = createContext<ViewSettingsContextValue | null>(null)

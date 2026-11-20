@@ -172,8 +172,6 @@ const STYLE_CSS = `body {
   margin: 0;
   padding: 1em;
   line-height: 1.8;
-  color: #000;
-  background: #fff;
 }
 
 h1 {

@@ -60,6 +60,26 @@ describe('foliate overlayer compatibility', () => {
     expect(group.childElementCount).toBe(2)
   })
 
+  it('draws automatic lines with the same ink as notes without adding hit targets', () => {
+    const text = document.createTextNode('annotation')
+    document.body.append(text)
+    const range = document.createRange()
+    range.selectNodeContents(text)
+    Object.defineProperty(range, 'getClientRects', { value: () => rects })
+    const options = { style: 'dashed', color: '#b45309', opacity: 0.68 }
+    const overlayer = new Overlayer(document)
+    overlayer.setHighlightInk([{ range, ...options }])
+    expect(overlayer.element.querySelector('g g')?.outerHTML).toBe(Overlayer.ink(rects, options).outerHTML)
+    expect(overlayer.hitTest({ x: 20, y: 30 })).toEqual([])
+    overlayer.add('note', range, Overlayer.ink, options)
+    overlayer.redraw()
+    expect(overlayer.hitTest({ x: 20, y: 30 })[0]).toBe('note')
+    overlayer.setHighlightInk([])
+    expect(overlayer.element.querySelector('g g')).toBeNull()
+    expect(overlayer.hitTest({ x: 20, y: 30 })[0]).toBe('note')
+    text.remove()
+  })
+
   it('repaints ranges after the iframe first paint', () => {
     const text = document.createTextNode('annotation')
     document.body.append(text)

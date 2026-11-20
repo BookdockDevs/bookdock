@@ -51,6 +51,22 @@ describe('SettingsPopover', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  it('keeps settings open when an action inside a toast is clicked', () => {
+    const onClose = vi.fn()
+    const onUndo = vi.fn()
+    render(
+      <>
+        <SettingsPopover open onClose={onClose}>settings</SettingsPopover>
+        <div data-toast-id="toast-1">
+          <button onClick={onUndo}>Undo</button>
+        </div>
+      </>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(onUndo).toHaveBeenCalledOnce()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it('does not close when clicking inside', () => {
     const onClose = vi.fn()
     render(

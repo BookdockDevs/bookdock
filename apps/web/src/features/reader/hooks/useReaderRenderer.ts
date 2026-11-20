@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from 'react'
-import type { BookFormat, FontListItem } from '@bookdock/shared'
+import type { BookFormat, FontListItem, HighlightRuleDef } from '@bookdock/shared'
 import type { ReaderBookProvider } from '../content/book-provider'
 import type { readReaderShortcuts } from '../lib/reader-shortcuts'
 
-import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
+import { selectEffectiveCustomTheme, selectEffectiveReadingThemeId, selectEffectiveReadingCss, selectReaderThemeOverride, useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { useInstanceInfo } from '@/features/auth/hooks'
 import { useDeviceFontStore } from '@/features/device-fonts/store'
 import { useDeviceFontUrls } from '@/features/device-fonts/urls'
-import { resolveReadingTheme } from '@/lib/reading-theme'
+import { useThemeAssetUrls } from '@/features/reading-theme/asset-urls'
+import { themeFontSources } from '@/features/reading-theme/font-refs'
+import { resolveEffectiveReadingTheme } from '@/lib/reading-theme'
+import { collectThemeFontRefs, validateUiCss } from '@/lib/theme-css-guard'
 import { notify } from '@/lib/notifications'
 import { FoliateReader } from '../renderers/FoliateReader'
-import { resolveDualFont } from '../fonts'
+import { buildFontOptions, resolveDualFont, useFontLoaderStore } from '../fonts'
 import type { BookReader, ClickAreaMode, MarginalField, RendererEvents } from '../types'
 import type { EffectiveViewSettings } from '../lib/view-settings'
 
@@ -36,6 +39,11 @@ interface UseReaderRendererOptions {
   /** Per-book merged values for the first-batch settings (F1). When omitted,
    *  the global store values are used. */
   settings?: EffectiveViewSettings
+  /** Validated phase-2 user CSS (content for section docs, outside-rooted UI
+   *  subset for section canvases); the host chrome sheet stays in Reader. */
+  userCss?: { content: string; ui: string }
+  /** Phase-3 automatic text-highlight rules ([] = none) */
+  highlightRules?: HighlightRuleDef[]
   /** Per-chapter word counts, indexed by chapter (info-bar word count field) */
   chapterWordCounts?: (number | undefined)[]
   /** Returns a user navigation target queued before the renderer became visible. */
@@ -79,6 +87,14 @@ interface RendererMount {
   dispose: () => void
 }
 
+function withWallpaper(
+  scrolled: { page: string; outside: string } | undefined,
+  pageBg: string,
+  wallpaperUrl: string | undefined,
+): { page: string; outside: string; wallpaper?: string } | undefined {
+  return wallpaperUrl ? { ...(scrolled ?? { page: pageBg, outside: pageBg }), wallpaper: wallpaperUrl } : scrolled
+}
+
 export function useReaderRenderer({
   shortcuts,
   bookProvider,
@@ -92,6 +108,8 @@ export function useReaderRenderer({
   initialCfi,
   initialFraction,
   settings,
+  userCss,
+  highlightRules,
   chapterWordCounts,
   onReady,
   onRelocated,
@@ -136,6 +154,7 @@ export function useReaderRenderer({
 
   const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
+  const overrideTheme = useUiStore(selectReaderThemeOverride)
   const fontFamily = useUiStore((s) => s.fontFamily)
   const cjkFontFamily = useUiStore((s) => s.cjkFontFamily)
   const fontPreferences = useUiStore((s) => s.fontPreferences)
@@ -242,6 +261,33 @@ export function useReaderRenderer({
     [resolvedFont],
   )
   const { urls: deviceFontUrls, missing: missingDeviceFonts } = useDeviceFontUrls(selectedDeviceIds)
+  // Phase-5: the effective content CSS may reference device fonts too. They
+  // hold their own leases (a missing theme reference must never clear the
+  // reading-font selection) and are released when the reference disappears.
+  const contentFontRefs = useMemo(() => collectThemeFontRefs(userCss?.content ?? ''), [userCss?.content])
+  const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
+  const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
+  const fontLatinIds = useFontLoaderStore((s) => s.latinIds)
+  // `fontsData` is folded together every render (it carries the optional
+  // resolved-list override), so the catalog list is memoized on its own
+  // sources: the options below feed two further memos and a fresh array each
+  // render would replay the content stylesheet on every render.
+  const fontCatalog = useMemo(() => resolvedFonts ?? fontsQuery.data?.data ?? [], [resolvedFonts, fontsQuery.data])
+  const fontOptions = useMemo(
+    () => buildFontOptions(fontCatalog, { loadedIds: fontLoadedIds, loadingIds: fontLoadingIds, latinIds: fontLatinIds },
+      fontPreferences, fontOrder, deviceCatalog, builtinDownloadsAllowed),
+    [fontCatalog, fontLoadedIds, fontLoadingIds, fontLatinIds, fontPreferences, fontOrder, deviceCatalog, builtinDownloadsAllowed],
+  )
+  const themeDeviceFontIds = useMemo(() => {
+    if (!contentFontRefs.length) return []
+    const byId = new Map(fontOptions.filter((option) => option.enabled).map((option) => [option.id, option]))
+    return contentFontRefs.filter((id) => byId.get(id)?.device)
+  }, [contentFontRefs, fontOptions])
+  const { urls: themeDeviceFontUrls } = useDeviceFontUrls(themeDeviceFontIds)
+  const themeFonts = useMemo(
+    () => themeFontSources(contentFontRefs, fontOptions, { ...deviceFontUrls, ...themeDeviceFontUrls }),
+    [contentFontRefs, fontOptions, deviceFontUrls, themeDeviceFontUrls],
+  )
   // Second resolution with the pooled URLs held by this reader: device faces
   // only enter the iframe stylesheet once their blob URL is available.
   const fontStack = resolvedFont.stack
@@ -284,8 +330,53 @@ export function useReaderRenderer({
   const onFootnoteCloseRef = useRef(onFootnoteClose)
   const onAtEndReachedRef = useRef(onAtEndReached)
   const onEndOfBookMountRef = useRef(onEndOfBookMount)
-  const theme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [readingThemeId, customThemes])
+  const theme = useMemo(
+    () => resolveEffectiveReadingTheme(overrideTheme, readingThemeId, customThemes),
+    [overrideTheme, readingThemeId, customThemes],
+  )
   const themeRef = useRef(theme)
+  // Phase-4 theme assets: pool the temporary URLs of every asset the effective
+  // theme references (wallpaper + the CSS source's manifest) for the lifetime
+  // of this reader. The JSON key keeps the selector stable across unrelated
+  // store updates, mirroring the highlightRules pattern in Reader.
+  const themeAssetsKey = useUiStore((st) => JSON.stringify({
+    wallpaper: selectEffectiveCustomTheme(st)?.wallpaperAssetId ?? null,
+    assets: selectEffectiveReadingCss(st).assets.map((ref) => ref.id),
+  }))
+  const parsedThemeAssets = useMemo(() => JSON.parse(themeAssetsKey) as { wallpaper: string | null; assets: string[] }, [themeAssetsKey])
+  const themeAssetIds = useMemo(() => {
+    const parsed = parsedThemeAssets
+    return [...new Set([...(parsed.wallpaper ? [parsed.wallpaper] : []), ...parsed.assets])]
+  }, [parsedThemeAssets])
+  const assetScope = useAuthStore((s) => s.user?.id ?? 'device')
+  const { urls: themeAssetUrls, missing: missingThemeAssets } = useThemeAssetUrls(assetScope, themeAssetIds)
+  const resolveThemeAsset = useCallback(
+    (id: string) => parsedThemeAssets.assets.includes(id) ? themeAssetUrls[id] ?? null : null,
+    [parsedThemeAssets.assets, themeAssetUrls],
+  )
+  const userUiCss = useMemo(() => validateUiCss(userCss?.ui ?? '', { resolve: resolveThemeAsset }).hostCss,
+    [userCss?.ui, resolveThemeAsset])
+  const resolveThemeAssetRef = useRef(resolveThemeAsset)
+  resolveThemeAssetRef.current = resolveThemeAsset
+  const effectiveCustomTheme = useUiStore(selectEffectiveCustomTheme)
+  const wallpaperOpacity = effectiveCustomTheme?.wallpaperOpacity ?? 1
+  const wallpaperBlur = effectiveCustomTheme?.wallpaperBlur ?? 0
+  const wallpaperOpacityRef = useRef(wallpaperOpacity)
+  wallpaperOpacityRef.current = wallpaperOpacity
+  const wallpaperBlurRef = useRef(wallpaperBlur)
+  wallpaperBlurRef.current = wallpaperBlur
+  const wallpaperUrl = parsedThemeAssets.wallpaper ? themeAssetUrls[parsedThemeAssets.wallpaper] : undefined
+  const wallpaperRef = useRef(wallpaperUrl)
+  wallpaperRef.current = wallpaperUrl
+  // Missing bytes never block reading: the theme keeps its colors, CSS and
+  // rules, and the user learns which pieces will not render.
+  useEffect(() => {
+    if (missingThemeAssets.length === 0) return
+    notify.warning(
+      { key: 'reader.themeAssetMissing', params: { count: missingThemeAssets.length } },
+      { dedupeKey: `theme-assets-missing-${assetScope}-${missingThemeAssets.join(',')}` },
+    )
+  }, [missingThemeAssets, assetScope])
   const fontRef = useRef({ fontFamily, cjkFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
   const paragraphRef = useRef({ paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout })
   const pageWidthRef = useRef(pageWidth)
@@ -351,6 +442,12 @@ export function useReaderRenderer({
     fontSize: marginalFontSize,
   }
 
+  const userCssRef = useRef(userCss ?? { content: '', ui: '' })
+  userCssRef.current = userCss ?? { content: '', ui: '' }
+  const themeFontsRef = useRef(themeFonts)
+  themeFontsRef.current = themeFonts
+  const highlightRulesRef = useRef<HighlightRuleDef[]>(highlightRules ?? [])
+  highlightRulesRef.current = highlightRules ?? []
   const bookProviderRef = useRef(bookProvider)
   bookProviderRef.current = bookProvider
   const shortcutsRef = useRef(shortcuts)
@@ -420,7 +517,17 @@ export function useReaderRenderer({
     newRenderer.applyPageAnimation(pageAnimationRef.current)
     newRenderer.applyShowHeader(showHeaderRef.current)
     newRenderer.applyShowFooter(showFooterRef.current)
-    newRenderer.applyReadingTheme({ bg: theme.pageBg, text: theme.text, primary: theme.primary })
+    newRenderer.applyReadingTheme({
+      bg: theme.pageBg,
+      text: theme.text,
+      primary: theme.primary,
+      scrolled: withWallpaper(theme.scrolled, theme.pageBg, wallpaperRef.current),
+      wallpaper: wallpaperRef.current ? {
+        url: wallpaperRef.current,
+        opacity: wallpaperOpacityRef.current,
+        blur: wallpaperBlurRef.current,
+      } : undefined,
+    })
     newRenderer.applyFont(fontRef.current)
     newRenderer.applyParagraphStyle(paragraphRef.current)
     newRenderer.applyPageWidth(pageWidthRef.current)
@@ -428,6 +535,9 @@ export function useReaderRenderer({
     newRenderer.applyContinuousScroll(continuousScrollRef.current)
     newRenderer.applyClickSettings(clickAreaModeRef.current)
     newRenderer.applyMarginals(marginalConfigRef.current)
+    newRenderer.applyUserContentCss(userCssRef.current.content, resolveThemeAssetRef.current, themeFontsRef.current)
+    newRenderer.applyUserUiOutsideCss(userCssRef.current.ui, resolveThemeAssetRef.current)
+    newRenderer.applyHighlightRules(highlightRulesRef.current)
 
     let cancelled = false
     const isMountedRenderer = () => !cancelled && rendererRef.current === newRenderer
@@ -611,8 +721,44 @@ export function useReaderRenderer({
   useEffect(() => {
     const current = rendererRef.current
     if (!current) return
-    current.applyReadingTheme({ bg: theme.pageBg, text: theme.text, primary: theme.primary })
-  }, [theme, renderer])
+    current.applyReadingTheme({
+      bg: theme.pageBg,
+      text: theme.text,
+      primary: theme.primary,
+      scrolled: withWallpaper(theme.scrolled, theme.pageBg, wallpaperUrl),
+      wallpaper: wallpaperUrl ? {
+        url: wallpaperUrl,
+        opacity: wallpaperOpacity,
+        blur: wallpaperBlur,
+      } : undefined,
+    })
+  }, [theme, renderer, wallpaperUrl, wallpaperOpacity, wallpaperBlur])
+
+  // Phase-2 user CSS rides the theme settings lifecycle: the mount block
+  // seeds it before any section exists, and these effects replay it once the
+  // renderer is live (same pattern as applyReadingTheme above). Asset URLs and
+  // phase-5 font faces resolve at the injection boundary, so a late-pooled URL
+  // replays the sheet.
+  useEffect(() => {
+    const current = rendererRef.current
+    if (!current) return
+    current.applyUserContentCss(userCss?.content ?? '', resolveThemeAssetRef.current, themeFonts)
+  }, [userCss?.content, renderer, resolveThemeAsset, themeFonts])
+
+  useEffect(() => {
+    const current = rendererRef.current
+    if (!current) return
+    current.applyUserUiOutsideCss(userCss?.ui ?? '', resolveThemeAssetRef.current)
+  }, [userCss?.ui, renderer, resolveThemeAsset])
+
+  // Phase-3 highlight rules ride the same lifecycle as the CSS blocks: the
+  // mount block seeds them before any section exists, this effect replays
+  // them once the renderer is live.
+  useEffect(() => {
+    const current = rendererRef.current
+    if (!current) return
+    current.applyHighlightRules(highlightRules ?? [])
+  }, [highlightRules, renderer])
 
   useEffect(() => {
     const current = rendererRef.current
@@ -706,5 +852,17 @@ export function useReaderRenderer({
     current.setChapterWordCounts(chapterWordCounts)
   }, [chapterWordCounts, renderer])
 
-  return { containerRef, renderer, fontStack, fontCss, preparationFailed: !fontsData && fontsQuery.isError, retryPreparation: fontsQuery.refetch }
+  return {
+    containerRef,
+    renderer,
+    fontStack,
+    fontCss,
+    userUiCss,
+    wallpaperUrl,
+    wallpaperOpacity,
+    wallpaperBlur,
+    hasWallpaper: Boolean(wallpaperUrl),
+    preparationFailed: !fontsData && fontsQuery.isError,
+    retryPreparation: fontsQuery.refetch,
+  }
 }

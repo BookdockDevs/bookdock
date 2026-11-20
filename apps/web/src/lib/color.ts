@@ -43,6 +43,38 @@ export function hslToHex(h: number, s: number, l: number): string {
   return toHex((rgb[0] + m) * 255, (rgb[1] + m) * 255, (rgb[2] + m) * 255)
 }
 
+export function hexToHsv(hex: string): { h: number; s: number; v: number } {
+  const [r, g, b] = parseHex(hex).map((v) => v / 255)
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const d = max - min
+  const v = max
+  const s = max === 0 ? 0 : d / max
+  let h = 0
+  if (d !== 0) {
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0)
+    else if (max === g) h = (b - r) / d + 2
+    else h = (r - g) / d + 4
+    h = (h * 60) % 360
+  }
+  return { h, s, v }
+}
+
+export function hsvToHex(h: number, s: number, v: number): string {
+  const hue = (((h % 360) + 360) % 360) / 60
+  const c = v * s
+  const x = c * (1 - Math.abs((hue % 2) - 1))
+  const m = v - c
+  let rgb: [number, number, number]
+  if (hue < 1) rgb = [c, x, 0]
+  else if (hue < 2) rgb = [x, c, 0]
+  else if (hue < 3) rgb = [0, c, x]
+  else if (hue < 4) rgb = [0, x, c]
+  else if (hue < 5) rgb = [x, 0, c]
+  else rgb = [c, 0, x]
+  return toHex((rgb[0] + m) * 255, (rgb[1] + m) * 255, (rgb[2] + m) * 255)
+}
+
 // weight = share of hexB in the result (0 → hexA, 1 → hexB)
 export function mix(hexA: string, hexB: string, weight: number): string {
   const [r1, g1, b1] = parseHex(hexA)

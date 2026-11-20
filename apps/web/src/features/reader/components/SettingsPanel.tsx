@@ -4,8 +4,8 @@ import { createPortal } from 'react-dom'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
-import { resolveReadingTheme, PRESET_READING_THEMES, type CustomReadingTheme } from '@/lib/reading-theme'
-import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
+import { resolveEffectiveReadingTheme } from '@/lib/reading-theme'
+import { selectEffectiveReadingThemeId, selectReaderThemeOverride, useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { useInstanceInfo } from '@/features/auth/hooks'
@@ -17,22 +17,16 @@ import { useViewSettings } from '../view-settings-context'
 import { MARGINAL_FIELDS } from '../lib/marginals'
 import type { MarginalField } from '../types'
 import type { PerBookSettingKey, PerBookSettingValue } from '../lib/view-settings'
-import { buildFontOptions, ensureBuiltinFontLoaded, ensureDeviceFontFace, ensureUploadedFontLoaded, releaseDeviceFontFace, useFontLoaderStore, type FontOption } from '../fonts'
+import { buildFontOptions, useFontLoaderStore, type FontOption } from '../fonts'
+import { useReaderFontPreviews, type ReaderFontPreviews } from '../hooks/useReaderFontPreviews'
 import { useReaderState } from '../state/reader-state'
 import { DownloadIcon, SpinnerIcon } from './annotation-icons'
 import ReadingPresetPicker from './ReadingPresetPicker'
+import ReadingThemePanel from '@/features/reading-theme/ReadingThemePanel'
 import BookReplacementsDialog from './BookReplacementsDialog'
 import ReaderKeyboardShortcuts from './ReaderKeyboardShortcuts'
 
 type Section = 'font' | 'layout' | 'display' | 'behavior' | 'theme'
-
-interface ThemeDraft {
-  id?: string
-  name: string
-  bg: string
-  fg: string
-  primary: string
-}
 
 interface SliderRowProps {
   label: string
@@ -265,6 +259,14 @@ function ButtonGroup<T extends string | number>({
 
 const FONT_CHIPS_VISIBLE = 7
 
+function visibleFontChips(options: FontOption[], collapsed: boolean, selectedId: string): FontOption[] {
+  if (!collapsed) return options
+  const index = options.findIndex((option) => option.id === selectedId)
+  // Keep an active font from the collapsed tail in the last visible slot.
+  return index < FONT_CHIPS_VISIBLE ? options.slice(0, FONT_CHIPS_VISIBLE)
+    : [...options.slice(0, FONT_CHIPS_VISIBLE - 1), options[index]!]
+}
+
 function fontChipClass(active: boolean) {
   return cn(
     'flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-[13.5px] transition-all duration-150 select-none active:scale-[0.98]',
@@ -328,7 +330,15 @@ function getInitialSection(): Section {
   return 'font'
 }
 
-export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookId?: string; cleanReadingSupported?: boolean }) {
+interface SettingsPanelProps {
+  bookId?: string
+  cleanReadingSupported?: boolean
+  fontPreviews?: ReaderFontPreviews
+}
+
+export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPreviews }: SettingsPanelProps) {
+  const localFontPreviews = useReaderFontPreviews(!fontPreviews)
+  const requestFontPreviews = fontPreviews ?? localFontPreviews
   const [section, setSection] = useState<Section>(getInitialSection)
   const onSetSection = useCallback((s: Section) => {
     setSection(s)
@@ -390,10 +400,6 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
     setLetterSpacing,
     indent,
     setIndent,
-    setReadingThemeId,
-    customThemes,
-    saveCustomTheme,
-    deleteCustomTheme,
     pageWidth,
     setPageWidth,
     verticalPadding,
@@ -448,7 +454,6 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
     setPageAnimation,
   } = useUiStore()
 
-  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
 
   // Rebuild the catalog when the UI language changes: localized font names
   const uiLanguage = i18n.language
@@ -479,7 +484,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
       if (deviceSelection.primary) useDeviceFontStore.getState().selectPrimary(null)
       setFontFamily(opt.id)
     }
-    if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
+    if (opt.source === 'builtin') requestFontPreviews([opt], true)
   }
 
   function onSelectCjkFont(opt: FontOption) {
@@ -489,29 +494,8 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
       if (deviceSelection.cjk) useDeviceFontStore.getState().selectCjk(null)
       setCjkFontFamily(opt.id)
     }
-    if (opt.source === 'builtin') ensureBuiltinFontLoaded(opt.id)
+    if (opt.source === 'builtin') requestFontPreviews([opt], true)
   }
-
-  // Visible builtin identities: gated members see only already-loaded faces,
-  // so the preloader never triggers downloads of never-fetched entries. The
-  // joined id list is a stable dep — rebuilding fontOptions on a latin
-  // classification change must not re-run this effect.
-  const visibleBuiltinIds = useMemo(
-    () => fontOptions.filter((option) => option.builtin).map((option) => option.builtin!.id).join(' '),
-    [fontOptions],
-  )
-  // Mount the public builtin stylesheets when the font list is visible. The
-  // browser fetches each font file only when a rendered chip needs that face.
-  // Device faces are pooled references, held only while the panel shows them.
-  useEffect(() => {
-    if (section !== 'font') return
-    if (visibleBuiltinIds) visibleBuiltinIds.split(' ').forEach((id) => ensureBuiltinFontLoaded(id))
-    uploadedFonts.forEach((f) => void ensureUploadedFontLoaded(f))
-    deviceFonts.forEach((font) => { void ensureDeviceFontFace(font) })
-    return () => {
-      deviceFonts.forEach((font) => releaseDeviceFontFace(font.id))
-    }
-  }, [section, uploadedFonts, deviceFonts, visibleBuiltinIds])
 
   // A dangling device selection (font deleted/disabled on this device) clears
   // itself; the synced selection resumes. Only trusted once the device catalog
@@ -559,29 +543,39 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
   }, [enabledCjkOptions, effectiveCjkFontFamily, setCjkFontFamily, deviceFontStatus, deviceSelection])
 
   const shouldCollapsePrimary = enabledFontOptions.length > FONT_CHIPS_VISIBLE + 1
-  let visibleFontOptions = (!shouldCollapsePrimary || fontsExpanded) ? enabledFontOptions : enabledFontOptions.slice(0, FONT_CHIPS_VISIBLE)
-  if (shouldCollapsePrimary && !fontsExpanded) {
-    const selectedIndex = enabledFontOptions.findIndex((o) => o.id === effectiveFontFamily)
-    if (selectedIndex >= FONT_CHIPS_VISIBLE) {
-      // The selection must stay visible: it takes the last visible slot and
-      // the original occupant shifts into the hidden tail
-      visibleFontOptions = [...enabledFontOptions.slice(0, FONT_CHIPS_VISIBLE - 1), enabledFontOptions[selectedIndex]]
-    }
-  }
-
+  const visibleFontOptions = useMemo(
+    () => visibleFontChips(enabledFontOptions, shouldCollapsePrimary && !fontsExpanded, effectiveFontFamily),
+    [enabledFontOptions, shouldCollapsePrimary, fontsExpanded, effectiveFontFamily],
+  )
   const shouldCollapseCjk = enabledCjkOptions.length > FONT_CHIPS_VISIBLE + 1
-  let visibleCjkOptions = (!shouldCollapseCjk || cjkExpanded) ? enabledCjkOptions : enabledCjkOptions.slice(0, FONT_CHIPS_VISIBLE)
-  if (shouldCollapseCjk && !cjkExpanded) {
-    const selectedIndex = enabledCjkOptions.findIndex((o) => o.id === effectiveCjkFontFamily)
-    if (selectedIndex >= FONT_CHIPS_VISIBLE) {
-      // The selection must stay visible: it takes the last visible slot and
-      // the original occupant shifts into the hidden tail
-      visibleCjkOptions = [...enabledCjkOptions.slice(0, FONT_CHIPS_VISIBLE - 1), enabledCjkOptions[selectedIndex]]
-    }
-  }
+  const visibleCjkOptions = useMemo(
+    () => visibleFontChips(enabledCjkOptions, shouldCollapseCjk && !cjkExpanded, effectiveCjkFontFamily),
+    [enabledCjkOptions, shouldCollapseCjk, cjkExpanded, effectiveCjkFontFamily],
+  )
 
   const selectedPrimaryFont = enabledFontOptions.find((o) => o.id === effectiveFontFamily)
   const showCjkFontPicker = selectedPrimaryFont?.latin ?? false
+
+  useEffect(() => {
+    if (section !== 'font') return
+    requestFontPreviews(visibleFontOptions)
+    if (showCjkFontPicker) requestFontPreviews(visibleCjkOptions)
+  }, [section, requestFontPreviews, visibleFontOptions, showCjkFontPicker, visibleCjkOptions])
+
+  const renderFontChip = (option: FontOption, selectedId: string, onSelect: (option: FontOption) => void) => (
+    <button
+      key={option.id}
+      type="button"
+      aria-pressed={selectedId === option.id}
+      onClick={() => onSelect(option)}
+      className={fontChipClass(selectedId === option.id)}
+      style={{ fontFamily: option.stack }}
+    >
+      {option.name}
+      {option.status === 'idle' && <DownloadIcon size={12} />}
+      {option.status === 'loading' && <SpinnerIcon size={12} />}
+    </button>
+  )
 
   // Per-book layer (F1): when inside the reader, the first-batch settings
   // display the merged effective values and writes route to the per-book diff
@@ -604,38 +598,17 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
     onChange: (value: boolean) => (viewSettings ? viewSettings.updateSetting('cleanReading', value) : setCleanReading(value)),
   }
 
-  const currentTheme = resolveReadingTheme(readingThemeId, customThemes)
+  const themeId = useUiStore(selectEffectiveReadingThemeId)
+  const themeOverride = useUiStore(selectReaderThemeOverride)
+  const themeDefinitions = useUiStore((state) => state.customThemes)
+  const currentTheme = useMemo(() => resolveEffectiveReadingTheme(themeOverride, themeId, themeDefinitions), [themeOverride, themeId, themeDefinitions])
   const [showClickAreaHint, setShowClickAreaHint] = useState(false)
   const clickAreaHintRef = useRef<HTMLDivElement>(null)
   useDismissiblePopup(showClickAreaHint, clickAreaHintRef, () => setShowClickAreaHint(false))
-  const [themeDraft, setThemeDraft] = useState<ThemeDraft | null>(null)
-  const openThemeDraft = useCallback(() => {
-    setThemeDraft({ name: `${_('reader.customTheme')}${customThemes.length + 1}`, bg: '#F4F4F4', fg: '#1c1917', primary: '#57534e' })
-  }, [customThemes.length, _])
-  const editThemeDraft = useCallback((custom: CustomReadingTheme) => {
-    setThemeDraft({
-      id: custom.id,
-      name: custom.name,
-      bg: custom.colors.bg,
-      fg: custom.colors.fg,
-      primary: custom.colors.primary,
-    })
-  }, [])
-  const saveThemeDraft = useCallback(() => {
-    if (!themeDraft) return
-    saveCustomTheme({
-      id: themeDraft.id ?? `custom-${Date.now()}`,
-      name: themeDraft.name.trim() || _('reader.customTheme'),
-      colors: { bg: themeDraft.bg, fg: themeDraft.fg, primary: themeDraft.primary },
-    })
-    setThemeDraft(null)
-  }, [themeDraft, saveCustomTheme, _])
-  const handleDeleteDraft = useCallback(() => {
-    if (themeDraft?.id) {
-      deleteCustomTheme(themeDraft.id)
-      setThemeDraft(null)
-    }
-  }, [themeDraft, deleteCustomTheme])
+
+  // Theme scope resolution: 本书覆盖 → 本书绑定预设 → 设备当前预设 → 全局默认.
+  // The flat store fields already follow the preset chain, so the label only
+  // has to distinguish the per-book override from the resolved preset.
   const sliderVars = useMemo(() => {
     return {
       '--slider-accent': blendColors(currentTheme.bg, currentTheme.text, 0.65),
@@ -690,18 +663,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
               {showCjkFontPicker ? _('reader.primaryFont') : _('reader.sectionFont')}
             </label>
             <div className="grid grid-cols-2 gap-2">
-              {visibleFontOptions.map((opt) => (
-                <button
-                  key={opt.id}
-                  onClick={() => onSelectFont(opt)}
-                  className={fontChipClass(effectiveFontFamily === opt.id)}
-                  style={{ fontFamily: opt.stack }}
-                >
-                  {opt.name}
-                  {opt.status === 'idle' && <DownloadIcon size={12} />}
-                  {opt.status === 'loading' && <SpinnerIcon size={12} />}
-                </button>
-              ))}
+              {visibleFontOptions.map((option) => renderFontChip(option, effectiveFontFamily, onSelectFont))}
               {shouldCollapsePrimary && (
                 <button onClick={() => setFontsExpanded((v) => !v)} className={fontChipClass(false)}>
                   {_(fontsExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
@@ -713,18 +675,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
             <div className="mb-5">
               <label className="mb-2 block text-xs font-medium text-current/75">{_('reader.cjkFont')}</label>
               <div className="grid grid-cols-2 gap-2">
-                {visibleCjkOptions.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => onSelectCjkFont(opt)}
-                    className={fontChipClass(effectiveCjkFontFamily === opt.id)}
-                    style={{ fontFamily: opt.stack }}
-                  >
-                    {opt.name}
-                    {opt.status === 'idle' && <DownloadIcon size={12} />}
-                    {opt.status === 'loading' && <SpinnerIcon size={12} />}
-                  </button>
-                ))}
+                {visibleCjkOptions.map((option) => renderFontChip(option, effectiveCjkFontFamily, onSelectCjkFont))}
                 {shouldCollapseCjk && (
                   <button onClick={() => setCjkExpanded((v) => !v)} className={fontChipClass(false)}>
                     {_(cjkExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
@@ -1168,182 +1119,12 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false }: { bookI
       )}
 
       {section === 'theme' && (
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-current">{_('reader.sectionTheme')}</span>
-            <button
-              type="button"
-              onClick={openThemeDraft}
-              title={_('reader.newTheme')}
-              aria-label={_('reader.newTheme')}
-              className="flex h-6.5 items-center gap-1 rounded-md border border-stone-200/80 bg-stone-500/5 px-2 text-xs font-normal text-[var(--bd-read-sub)] transition-all hover:border-stone-300/90 hover:bg-stone-500/10 hover:text-current active:scale-95 dark:border-stone-800/80"
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              <span>{_('reader.newTheme')}</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2.5">
-            {PRESET_READING_THEMES.map((preset) => {
-              const th = resolveReadingTheme(preset.id, customThemes)
-              const isSelected = readingThemeId === preset.id
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => setReadingThemeId(preset.id)}
-                  className={cn(
-                    'group relative flex h-11 items-center gap-2.5 rounded-xl border px-3 text-left transition-all select-none active:scale-[0.98]',
-                    isSelected
-                      ? 'border-current/60 shadow-sm ring-2 ring-current/25 font-medium'
-                      : 'border-stone-300/60 opacity-85 hover:opacity-100 hover:border-stone-400/80 shadow-xs dark:border-stone-700/60',
-                  )}
-                  style={{ backgroundColor: th.bg, color: th.text }}
-                >
-                  <span
-                    className="h-3.5 w-3.5 shrink-0 rounded-full border border-current/20 shadow-inner"
-                    style={{ backgroundColor: th.primary }}
-                  />
-                  <span className="text-xs">{preset.name}</span>
-                  {isSelected && (
-                    <span className="ml-auto text-xs font-bold text-current">✓</span>
-                  )}
-                </button>
-              )
-            })}
-            {customThemes.map((custom) => {
-              const th = resolveReadingTheme(custom.id, customThemes)
-              const isSelected = readingThemeId === custom.id
-              const isEditing = themeDraft?.id === custom.id
-              return (
-                <div
-                  key={custom.id}
-                  onClick={() => setReadingThemeId(custom.id)}
-                  className={cn(
-                    'group relative flex h-11 items-center gap-2 rounded-xl border px-3 text-left transition-all select-none cursor-pointer active:scale-[0.98]',
-                    isSelected
-                      ? 'border-current/60 shadow-sm ring-2 ring-current/25 font-medium'
-                      : 'border-stone-300/60 opacity-85 hover:opacity-100 hover:border-stone-400/80 shadow-xs dark:border-stone-700/60',
-                    isEditing && 'ring-2 ring-stone-400/60',
-                  )}
-                  style={{ backgroundColor: th.bg, color: th.text }}
-                >
-                  <span
-                    className="h-3.5 w-3.5 shrink-0 rounded-full border border-current/20 shadow-inner"
-                    style={{ backgroundColor: th.primary }}
-                  />
-                  <span className="truncate text-xs flex-1 min-w-0">{custom.name}</span>
-                  {isSelected && (
-                    <span className="text-xs font-bold text-current shrink-0">✓</span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      editThemeDraft(custom)
-                    }}
-                    title={_('reader.editTheme')}
-                    aria-label={_('reader.editTheme')}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-current/50 transition-colors hover:bg-black/10 hover:text-current active:scale-90"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                    </svg>
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-
-          {themeDraft && (
-            <div className="rounded-2xl border border-stone-300/70 bg-stone-500/5 p-4 shadow-sm dark:border-stone-800/80">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-xs font-medium text-[var(--bd-read-sub)]">
-                  {themeDraft.id ? _('reader.editTheme') : _('reader.newTheme')}
-                </span>
-                {themeDraft.id && (
-                  <button
-                    type="button"
-                    onClick={handleDeleteDraft}
-                    className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-red-500 transition-colors hover:bg-red-500/10 active:scale-95"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
-                    </svg>
-                    <span>{_('reader.deleteTheme')}</span>
-                  </button>
-                )}
-              </div>
-
-              <input
-                value={themeDraft.name}
-                onChange={(e) => setThemeDraft({ ...themeDraft, name: e.target.value })}
-                placeholder={_('reader.themeName')}
-                className="mb-3.5 w-full rounded-xl border border-stone-300/70 bg-[var(--bd-read-bg)] px-3 py-2 text-xs font-medium text-current outline-none shadow-xs placeholder:text-[var(--bd-read-sub)] focus:border-current focus:ring-1 focus:ring-current/30 dark:border-stone-700/70"
-              />
-              <div className="flex flex-col gap-2.5 mb-3.5">
-                {([
-                  ['bg', _('reader.themeBg')],
-                  ['fg', _('reader.themeText')],
-                  ['primary', _('reader.themePrimary')],
-                ] as const).map(([key, label]) => (
-                  <div key={key} className="flex items-center justify-between text-xs text-[var(--bd-read-sub)]">
-                    <span>{label}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[11px] uppercase opacity-70">{themeDraft[key]}</span>
-                      <label className="relative flex h-7 w-9 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-stone-300/80 shadow-xs transition-transform hover:scale-105 active:scale-95 dark:border-stone-700">
-                        <span className="absolute inset-0" style={{ backgroundColor: themeDraft[key] }} />
-                        <input
-                          type="color"
-                          value={themeDraft[key]}
-                          onChange={(e) => setThemeDraft({ ...themeDraft, [key]: e.target.value })}
-                          className="absolute inset-0 cursor-pointer opacity-0"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div
-                className="mb-3.5 rounded-xl border border-stone-300/50 p-3 shadow-inner"
-                style={{ backgroundColor: themeDraft.bg, color: themeDraft.fg }}
-              >
-                <div className="mb-1 flex items-center justify-between text-xs font-medium">
-                  <span>{themeDraft.name || _('reader.customTheme')}</span>
-                  <span
-                    className="inline-block h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: themeDraft.primary }}
-                  />
-                </div>
-                <p className="text-[11px] leading-relaxed opacity-85">
-                  白日依山尽，黄河入海流。欲穷千里目，更上一层楼。
-                </p>
-              </div>
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setThemeDraft(null)}
-                  className="rounded-lg px-3 py-1.5 text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current active:scale-95"
-                >
-                  {_('annotation.cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={saveThemeDraft}
-                  className="rounded-lg px-4 py-1.5 text-xs font-medium shadow-sm transition-all active:scale-95"
-                  style={{ backgroundColor: themeDraft.primary, color: themeDraft.bg }}
-                >
-                  {_('reader.saveTheme')}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <ReadingThemePanel key={bookId} book={{
+          id: bookId ?? '',
+          appearance: viewSettings?.appearance,
+          hasThemeSelection: viewSettings?.hasThemeSelection,
+          setSelection: (selection, clear) => viewSettings?.setThemeSelection(selection, clear),
+        }} />
       )}
     </div>
   )

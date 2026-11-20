@@ -6,8 +6,8 @@ import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
 import { blendColors, cn } from '@/lib/utils'
-import { resolveReadingTheme } from '@/lib/reading-theme'
-import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
+import { resolveEffectiveReadingTheme } from '@/lib/reading-theme'
+import { selectEffectiveReadingThemeId, selectReaderThemeOverride, useUiStore } from '@/stores/ui.store'
 
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useTtsSession } from '../hooks/useTtsSession'
@@ -196,11 +196,12 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
   const setTtsFollow = useUiStore((s) => s.setTtsFollow)
   const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
+  const overrideTheme = useUiStore(selectReaderThemeOverride)
   const active = state.status === 'playing' || state.status === 'starting' || state.status === 'paused'
   const selectedEngine = ttsEngine === 'service'
     ? `service:${ttsServiceId ?? ''}`
     : ttsEngine === 'edge' ? 'edge' : 'system'
-  const currentTheme = useMemo(() => resolveReadingTheme(readingThemeId, customThemes), [customThemes, readingThemeId])
+  const currentTheme = useMemo(() => resolveEffectiveReadingTheme(overrideTheme, readingThemeId, customThemes), [overrideTheme, customThemes, readingThemeId])
   const sliderVars = useMemo(() => ({
     '--slider-accent': blendColors(currentTheme.bg, currentTheme.text, 0.55),
     '--slider-track': blendColors(currentTheme.bg, currentTheme.text, 0.15),

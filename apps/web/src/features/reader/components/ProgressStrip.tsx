@@ -86,8 +86,9 @@ export const ProgressStrip = memo(function ProgressStrip({
 
   return (
     <div
+      data-bd-ui="footer"
       className={cn(
-        'absolute left-0 right-0 z-40 flex h-[calc(3rem+env(safe-area-inset-bottom))] items-center gap-1.5 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 pb-[env(safe-area-inset-bottom)] text-xs transition-[bottom,translate] duration-300 sm:gap-3 sm:px-4',
+        'absolute left-0 right-0 z-40 flex h-[calc(3rem+env(safe-area-inset-bottom))] items-center gap-1.5 border-t border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-2 pb-[env(safe-area-inset-bottom)] text-xs transition-[bottom,translate] duration-300 sm:gap-3 sm:px-4',
         mobileDockVisible ? 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))]' : 'bottom-[env(safe-area-inset-bottom)]',
         pinned || visible ? 'translate-y-0 pointer-events-auto' : 'translate-y-full pointer-events-none',
         className,

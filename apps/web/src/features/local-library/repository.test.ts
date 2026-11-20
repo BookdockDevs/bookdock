@@ -178,6 +178,22 @@ describe('authoritative local library transactions', () => {
     expect((await repository.getPreferences(book.ref)).viewSettings).toBeUndefined()
   })
 
+  it('persists the per-book reading-theme override and clears it with a card selection', async () => {
+    await repository.addBook(book, new Blob(['abc']))
+    await repository.patchPreferences(book.ref, { readingThemeId: 'custom-sea' })
+    expect((await repository.getPreferences(book.ref)).readingThemeId).toBe('custom-sea')
+    await repository.patchPreferences(book.ref, { readingThemeId: null })
+    expect((await repository.getPreferences(book.ref)).readingThemeId).toBeUndefined()
+    await repository.patchPreferences(book.ref, { readingThemeId: 'custom-sea' })
+    const themeSelection = { mode: 'custom', cards: { paletteId: 'paper', cssId: null, highlightIds: ['rule-A', 'rule-B'] } }
+    await repository.patchPreferences(book.ref, { themeSelection, viewSettings: { fontSize: 21 } })
+    expect(await repository.getPreferences(book.ref)).toMatchObject({ themeSelection, viewSettings: { fontSize: 21 } })
+    expect((await repository.getPreferences(book.ref)).readingThemeId).toBeUndefined()
+    await repository.patchPreferences(book.ref, { themeSelection: null })
+    expect((await repository.getPreferences(book.ref)).themeSelection).toBeUndefined()
+    expect((await repository.getPreferences(book.ref)).viewSettings).toMatchObject({ fontSize: 21 })
+  })
+
   it('does not retain an orphan file after a quota failure while committing metadata', async () => {
     const add = vi.spyOn(IDBObjectStore.prototype, 'add').mockImplementationOnce(() => { throw new DOMException('Full', 'QuotaExceededError') })
     try { await expect(repository.addBook(book, new Blob(['abc']))).rejects.toMatchObject({ category: 'storage-full' }) } finally { add.mockRestore() }

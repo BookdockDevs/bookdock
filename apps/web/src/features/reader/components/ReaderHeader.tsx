@@ -5,6 +5,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import { formatDuration } from '@/lib/format-duration'
 import { useAutoReadingSession } from '../hooks/useAutoReadingSession'
+import { useReaderFontPreviews } from '../hooks/useReaderFontPreviews'
 import { useTtsSession } from '../hooks/useTtsSession'
 import { isReaderReturn } from '../reader-return'
 import { SettingsPopover } from './SettingsPopover'
@@ -68,6 +69,7 @@ interface ReaderHeaderProps {
 }
 
 export const ReaderHeader = memo(function ReaderHeader({ title, loading = false, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, cleanReadingSupported, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onCloseSettings, onCloseTts, onCloseAutoReading, onTtsStart, onAutoReadingStart, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+  const fontPreviews = useReaderFontPreviews()
   const _ = useTranslation()
   const navigate = useNavigate()
   const router = useRouter({ warn: false })
@@ -108,8 +110,9 @@ export const ReaderHeader = memo(function ReaderHeader({ title, loading = false,
   }, [])
   return (
     <header
+      data-bd-ui="header"
       className={cn(
-        'absolute left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] px-2 text-[var(--bd-read-text)] sm:px-3',
+        'absolute left-0 right-0 top-0 z-50 flex h-12 items-center justify-between border-b border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] px-2 text-[var(--bd-read-text)] sm:px-3',
         transitionsOn && 'transition-transform duration-300',
         visible || settingsOpen || ttsOpen || autoReadingOpen || pinned ? 'translate-y-0 pointer-events-auto' : '-translate-y-full pointer-events-none',
         className,
@@ -257,7 +260,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, loading = false,
               </svg>
             </button>
             <SettingsPopover open={!!settingsOpen} onClose={() => onCloseSettings?.()}>
-              <SettingsPanel bookId={bookId ?? ''} cleanReadingSupported={cleanReadingSupported} />
+              <SettingsPanel bookId={bookId ?? ''} cleanReadingSupported={cleanReadingSupported} fontPreviews={fontPreviews} />
             </SettingsPopover>
           </div>
         )}

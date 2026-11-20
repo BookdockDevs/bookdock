@@ -4,6 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import { useUiStore } from '../stores/ui.store'
 import ReadingPresetPicker from '../features/reader/components/ReadingPresetPicker'
+import { parseReadingConfig } from '../features/reader/lib/reading-profiles'
 import { SettingsPopover } from '../features/reader/components/SettingsPopover'
 import { ViewSettingsContext, type ViewSettingsContextValue } from '../features/reader/view-settings-context'
 
@@ -35,6 +36,7 @@ function contextWith(boundPresetId: string | null, setBoundPreset = vi.fn()): Vi
     updateSetting: vi.fn(),
     boundPresetId,
     setBoundPreset,
+    setThemeSelection: vi.fn(),
   }
 }
 
@@ -55,6 +57,24 @@ describe('ReadingPresetPicker', () => {
     localStorage.clear()
     useUiStore.setState({ readingConfig: baseline.readingConfig })
     useUiStore.setState(baseline)
+  })
+
+  it('shows the entry without a readable config and saves the first preset from the current layout', () => {
+    useUiStore.setState({ readingConfig: '{}', fontSize: 28 })
+    render(
+      <ViewSettingsContext.Provider value={{ ...contextWith(null), perBookDiff: { fontSize: 32 } }}>
+        <ReadingPresetPicker />
+      </ViewSettingsContext.Provider>,
+    )
+    expect(screen.getByText('阅读预设')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '新建预设' }))
+    const input = screen.getByPlaceholderText('预设名称')
+    fireEvent.change(input, { target: { value: '当前排版' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    const config = parseReadingConfig(useUiStore.getState().readingConfig)
+    expect(config?.global.fontSize).toBe(28)
+    expect(config?.presets[0]).toMatchObject({ name: '当前排版', snapshot: { fontSize: 32 } })
   })
 
   it('toggles the device active on an unbound book', () => {

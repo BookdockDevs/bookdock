@@ -6,9 +6,21 @@ interface RuleSelectAllBarProps {
   indeterminate: boolean
   selectedCount: number
   onToggleAll: (checked: boolean) => void
+  /** Overrides the default "全选" label (e.g. the theme library's "全选") */
+  label?: string
+  /** Overrides the default "已选 N 条" text when the list counts items, not rules */
+  countLabel?: string
 }
 
-export default function RuleSelectAllBar({ disabled, allSelected, indeterminate, selectedCount, onToggleAll }: RuleSelectAllBarProps) {
+export default function RuleSelectAllBar({
+  disabled,
+  allSelected,
+  indeterminate,
+  selectedCount,
+  onToggleAll,
+  label,
+  countLabel,
+}: RuleSelectAllBarProps) {
   const _ = useTranslation()
   return (
     <div className="flex items-center justify-between gap-3 border-b border-stone-100 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
@@ -20,9 +32,9 @@ export default function RuleSelectAllBar({ disabled, allSelected, indeterminate,
           disabled={disabled}
           onChange={(event) => onToggleAll(event.target.checked)}
           className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300" />
-        {_('settings.ruleSelectAll')}
+        {label ?? _('settings.ruleSelectAll')}
       </label>
-      <span className="shrink-0 tabular-nums">{_('settings.ruleSelectedCount', { count: selectedCount })}</span>
+      <span className="shrink-0 tabular-nums">{countLabel ?? _('settings.ruleSelectedCount', { count: selectedCount })}</span>
     </div>
   )
 }

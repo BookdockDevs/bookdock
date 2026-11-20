@@ -1,4 +1,4 @@
-import type { BookDetailRes, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+import type { BookDetailRes, ReaderBookSettings, ReadingThemeSelectionState, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 import { apiGet, apiPatch, apiPut } from '@/api/client'
 import { notify } from '@/lib/notifications'
 import { withReveal } from '@/lib/reveal-hidden'
@@ -84,6 +84,10 @@ export function remoteReaderSession(bookId: string, guest: boolean) {
     },
     saveSettings: (viewSettings: ViewSettings | null) => apiPatch<{ data: ReaderBookSettings }>(withReveal(`${base}/reader-settings`), { viewSettings }),
     bindPreset: (boundPresetId: string | null) => apiPatch<{ data: ReaderBookSettings }>(withReveal(`${base}/reader-settings`), { boundPresetId }),
+    setThemeSelection: (themeSelection: ReadingThemeSelectionState | null) => apiPatch<{ data: ReaderBookSettings }>(withReveal(`${base}/reader-settings`), { themeSelection }),
+    setReadingTheme: (themeId: string | null) => apiPatch<{ data: ReaderBookSettings }>(withReveal(`${base}/reader-settings`), {
+      readingThemeId: themeId,
+    }),
     contentUrl: (book: Pick<BookDetailRes, 'revisionId' | 'updatedAt'>) => withReveal(`/api/v1/books/${encodeURIComponent(bookId)}/file?reader=1&revisionId=${encodeURIComponent(book.revisionId ?? '')}&v=${book.updatedAt}`),
   }
 }

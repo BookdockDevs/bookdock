@@ -40,7 +40,7 @@ export default function SettingsFormField({
         {labelExtra}
       </span>
       {children}
-      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+      {error && <p role="alert" className="mt-1 text-xs text-red-500">{error}</p>}
     </>
   )
   if (labelFor) {

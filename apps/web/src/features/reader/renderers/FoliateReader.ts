@@ -30,9 +30,17 @@ import type {
   SearchResult,
   SearchStatus,
   SelectionInfo,
+  ThemeFontSources,
   TtsSegment,
 } from '../types'
 import { sanitizeCleanReadingMarkup, shouldSkipCleanReadingResource } from '../lib/clean-reading'
+import { THEME_CONTENT_FONT_PROPERTY, validateContentCss, validateUiCss, type ThemeAssetResolver } from '../../../lib/theme-css-guard'
+import { resolveThemeFontRefs } from '../../reading-theme/font-refs'
+import { sanitizeHighlightRulesField } from '../../../lib/reading-theme'
+import { applyManualYield, type HighlightSegment } from '../../../lib/highlight-match'
+import { HighlightEngine } from '../lib/highlight-engine'
+import { applyDocHighlights, clearDocHighlights, collectHighlightParagraphs, collectYieldIntervals, createDocHighlightLayer, type DocHighlightLayer, type HighlightInkOverlay, type HighlightParagraph, type ManualAnnotation } from '../lib/highlight-render'
+import type { HighlightRuleDef } from '@bookdock/shared'
 import { markEpubChapterTitle } from '../lib/chapter-title'
 export { sanitizeCleanReadingMarkup, shouldSkipCleanReadingResource } from '../lib/clean-reading'
 export { markEpubChapterTitle } from '../lib/chapter-title'
@@ -640,25 +648,27 @@ export function transformEpubStylesheet(
 }
 
 function isLightCssColor(value: string): boolean {
+  if (!value) return true
   const normalized = value.trim().toLowerCase()
   if (normalized === 'white') return true
+  if (normalized === 'black') return false
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(normalized)
   if (hex) {
-    const value = hex[1]!
-    const expanded = value.length === 3
-      ? value.split('').map((part) => `${part}${part}`).join('')
-      : value
-    const red = Number.parseInt(expanded.slice(0, 2), 16)
-    const green = Number.parseInt(expanded.slice(2, 4), 16)
-    const blue = Number.parseInt(expanded.slice(4, 6), 16)
-    return (0.299 * red + 0.587 * green + 0.114 * blue) / 255 > 0.85
+    try {
+      return !isDark(normalized)
+    } catch {
+      return true
+    }
   }
-  const rgb = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i.exec(normalized)
-  if (!rgb) return false
+  const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(normalized)
+  if (!rgb) return true
   const red = Number(rgb[1])
   const green = Number(rgb[2])
   const blue = Number(rgb[3])
-  return (0.299 * red + 0.587 * green + 0.114 * blue) / 255 > 0.85
+  const [r, g, b] = [red / 255, green / 255, blue / 255].map((v) =>
+    v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+  )
+  return (0.2126 * r! + 0.7152 * g! + 0.0722 * b!) >= 0.5
 }
 
 export function transformEpubMarkup(
@@ -1966,7 +1976,7 @@ export class FoliateReader implements BookReader {
     textAlignJustify: false,
     overrideBookLayout: false,
   }
-  private theme: { bg: string; text: string; primary?: string } = { bg: '#ffffff', text: '#000000' }
+  private theme: { bg: string; text: string; primary?: string; scrolled?: { page: string; outside: string } } = { bg: '#ffffff', text: '#000000' }
   private pageWidth = 0
   private lastFraction: number | null = null
   private lastCfi: string | null = null
@@ -2015,6 +2025,30 @@ export class FoliateReader implements BookReader {
   // section load). They get the same sheet injected directly, so a bare
   // section can never be shown.
   private repairedStyles = new Map<Document, HTMLStyleElement>()
+  private userContentStyleSheet = ''
+  private userUiOutsideStyleSheet = ''
+  private userUiDecorationStyleSheet = ''
+  private readonly userContentStyles = new Map<Document, HTMLStyleElement>()
+  private readonly userUiStyles = new Map<Document, HTMLStyleElement>()
+  // Phase-5 theme font references: the face rules and the rewritten content
+  // sheet are produced together at the injection boundary.
+  private themeFontFacesCss = ''
+  private readonly themeFontStyles = new Map<Document, HTMLStyleElement>()
+  // Automatic text highlights share the section's CSS color and SVG ink layers.
+  private highlightRules: HighlightRuleDef[] = []
+  private highlightRulesJson = ''
+  private highlightGeneration = 0
+  private readonly highlightEngine = new HighlightEngine()
+  private readonly docHighlightLayers = new Map<Document, DocHighlightLayer>()
+  // The match result is cached per document so an annotation change repaints
+  // (manual-overlap yield) without re-running the worker.
+  private readonly docHighlightResults = new Map<Document, { paragraphs: HighlightParagraph[]; segments: HighlightSegment[][] }>()
+  private readonly docManualOverlaps = new WeakMap<Document, { signature: string; annotations: ManualAnnotation[] }>()
+  private manualOverlapSignature = ''
+  private readonly docHighlightJobs = new WeakMap<Document, object>()
+  // Sections seen before their text existed: the attach path skips docs it has
+  // already handled, so these need a retry from the next sync.
+  private readonly docHighlightEmpty = new Set<Document>()
   private selectionDocs = new Map<Document, { index: number; handler: () => void; selectionChangeHandler: () => void; startHandler: () => void; dblHandler: () => void; keyForwardHandler: (e: KeyboardEvent) => void }>()
   private selectionActive = false
   private selectionDismissPending = false
@@ -2401,6 +2435,7 @@ export class FoliateReader implements BookReader {
     renderer.removeAttribute('show-header')
     renderer.removeAttribute('show-footer')
     renderer.setAttribute('background-color', this.theme.bg)
+    this.applyScrolledThemeAttributes(renderer, this.theme)
     const fontStack = this.font.fontStack ?? FONT_OPTIONS[0].value
     renderer.setStyles?.(`
       ${this.font.fontCss ?? ''}
@@ -2777,6 +2812,8 @@ export class FoliateReader implements BookReader {
         // …and any pending search highlights for that section
         const matches = this.searchMatchOffsets.get(index)
         if (this.searchHighlightsVisible && matches?.length) this.drawSearchHighlights(index, matches)
+        const section = view.renderer?.getContents?.().find((item: { index: number }) => item.index === index)
+        if (section?.doc) this.paintDocHighlights(section.doc)
       })
       view.addEventListener('stabilized', () => {
         const reapply = new Set<string>()
@@ -3502,7 +3539,219 @@ export class FoliateReader implements BookReader {
     return typeof title === 'string' ? title : ''
   }
 
-  applyReadingTheme(theme: { bg: string; text: string; primary?: string }) {
+  // Phase-2 user stylesheets: content CSS rides the same per-document
+  // lifecycle as the reader stylesheet (ensureDocumentStyles), the UI
+  // outside-rooted subset mirrors it onto the section canvases. Both are
+  // re-validated here so a stale or corrupted payload can never inject.
+  // Phase-4 asset references resolve to temporary URLs at this boundary only
+  // (the flowing CSS keeps its author form), so re-validation cannot reject a
+  // legal image and no arbitrary URL gets through.
+  applyUserContentCss(css: string, resolveAsset: ThemeAssetResolver = () => null, fontSources?: ThemeFontSources) {
+    const { scopedCss } = validateContentCss(css, { resolve: resolveAsset })
+    // Phase-5 font references resolve after validation: `bd-font:` tokens are
+    // plain quoted family strings there, and only known ids are rewritten, so
+    // injection re-validation never sees a resolved family and an unresolvable
+    // reference simply stays an unknown family the declaration falls through.
+    const resolved = resolveThemeFontRefs(scopedCss, fontSources)
+    if (this.userContentStyleSheet === resolved.css && this.themeFontFacesCss === resolved.faces) return
+    this.userContentStyleSheet = resolved.css
+    this.themeFontFacesCss = resolved.faces
+    this.syncUserStyleSheets()
+    if (this.highlightRules.length) this.refreshDocHighlights()
+  }
+
+  applyUserUiOutsideCss(css: string, resolveAsset: ThemeAssetResolver = () => null) {
+    const { outsideCss, decorationCss } = validateUiCss(css, { resolve: resolveAsset })
+    // A decoration-only change still needs the background repaint (the
+    // transparent-canvas mode depends on the decoration sheet being non-empty)
+    if (this.userUiOutsideStyleSheet === outsideCss && this.userUiDecorationStyleSheet === decorationCss) return
+    this.userUiOutsideStyleSheet = outsideCss
+    this.userUiDecorationStyleSheet = decorationCss
+    this.view?.renderer?.setOutsideDecoration?.(decorationCss)
+    this.syncUserStyleSheets()
+  }
+
+  // Phase-3 automatic highlights: re-validate at the injection boundary and
+  // recompute every live section when the rule set changes; an empty list
+  // clears whatever is drawn. Rules are matched against the live displayed
+  // text (post conversion/replacement), never on the UI thread for regexes.
+  applyHighlightRules(rules: HighlightRuleDef[]) {
+    const normalized = sanitizeHighlightRulesField(rules).map(({ sampleText: _sampleText, ...rule }) => rule)
+    const json = JSON.stringify(normalized)
+    if (json === this.highlightRulesJson) return
+    this.highlightRulesJson = json
+    this.highlightRules = normalized
+    this.refreshDocHighlights()
+  }
+
+  private refreshDocHighlights() {
+    this.highlightGeneration++
+    this.highlightEngine.dispose()
+    for (const doc of this.activeDocs) this.computeDocHighlights(doc)
+  }
+
+  private clearDocHighlightLayer(doc: Document) {
+    this.docHighlightJobs.delete(doc)
+    this.docHighlightResults.delete(doc)
+    this.docHighlightEmpty.delete(doc)
+    const layer = this.docHighlightLayers.get(doc)
+    if (!layer) return
+    clearDocHighlights(doc, layer)
+    this.docHighlightLayers.delete(doc)
+  }
+
+  private computeDocHighlights(doc: Document) {
+    if (this.view?.isFixedLayout) return
+    if (!this.highlightRules.length) {
+      this.clearDocHighlightLayer(doc)
+      return
+    }
+    const paragraphs = collectHighlightParagraphs(doc)
+    const texts = paragraphs.map((p) => p.text)
+    if (!paragraphs.length) {
+      this.clearDocHighlightLayer(doc)
+      // The section is attached but has no text yet: leave a marker so the
+      // next sync retries instead of leaving the chapter unhighlighted until a
+      // full remount.
+      this.docHighlightEmpty.add(doc)
+      return
+    }
+    this.docHighlightEmpty.delete(doc)
+    const generation = this.highlightGeneration
+    const job = {}
+    this.docHighlightJobs.set(doc, job)
+    void this.highlightEngine.run(texts, this.highlightRules).then((segments) => {
+      // Stale replies — rule set changed, book closed, section unloaded —
+      // must never paint into the current document.
+      if (this.destroyed || generation !== this.highlightGeneration || this.docHighlightJobs.get(doc) !== job || !this.activeDocs.has(doc)) return
+      this.docHighlightResults.set(doc, { paragraphs, segments })
+      this.paintDocHighlights(doc)
+    })
+  }
+
+  /** Paint the cached match result of one section, letting manual annotations
+   *  win the effects they cover. Nothing here re-runs the matcher, so an
+   *  annotation change only repaints. */
+  private paintDocHighlights(doc: Document) {
+    const result = this.docHighlightResults.get(doc)
+    if (!result || this.view?.isFixedLayout) return
+    let layer = this.docHighlightLayers.get(doc)
+    if (!layer) {
+      layer = createDocHighlightLayer()
+      this.docHighlightLayers.set(doc, layer)
+    }
+    const annotations = this.manualOverlapRanges(doc)
+    const yields = annotations.length ? collectYieldIntervals(result.paragraphs, annotations) : []
+    const painted = annotations.length
+      ? result.segments.map((segments, index) => applyManualYield(segments, yields[index] ?? []))
+      : result.segments
+    const section = this.view?.renderer?.getContents?.().find((item: { doc: Document }) => item.doc === doc)
+    const overlay = section?.overlayer as HighlightInkOverlay | undefined
+    applyDocHighlights(doc, result.paragraphs, painted, layer,
+      typeof overlay?.setHighlightInk === 'function' ? overlay : null, this.noteInkOpacity())
+  }
+
+  /** Manual annotations of this section as paint-yield intervals. A manual line
+   *  mark suppresses only the automatic line; a marker suppresses only the
+   *  automatic background. Cached by annotation signature: the ranges only
+   *  depend on the document, so a repaint for another reason reuses them. */
+  private manualOverlapRanges(doc: Document): ManualAnnotation[] {
+    if (!this.annotationMap.size) return []
+    const signature = this.manualOverlapSignature
+    const cached = this.docManualOverlaps.get(doc)
+    if (cached?.signature === signature) return cached.annotations
+    const contents = this.view?.renderer?.getContents?.() ?? []
+    const content = contents.find((item: { doc: Document }) => item.doc === doc)
+    if (!content) return []
+    const annotations: ManualAnnotation[] = []
+    for (const annotation of this.annotationMap.values()) {
+      // Mirrors handleDrawAnnotation: a note and an unstyled/underlined/
+      // squiggly highlight draw ink, only the marker style fills a background.
+      const line = annotation.type === 'note' || annotation.style !== 'highlight'
+      const background = annotation.type === 'highlight' && annotation.style === 'highlight'
+      if (!line && !background) continue
+      const range = this.rangeForAnnotationCfi(annotation.cfiRange, doc, content.index)
+      if (!range) continue
+      annotations.push({ range, line, background })
+    }
+    this.docManualOverlaps.set(doc, { signature, annotations })
+    return annotations
+  }
+
+  private rangeForAnnotationCfi(cfi: string, doc: Document, index: number): Range | null {
+    if (!cfi.startsWith('epubcfi(')) return null
+    try {
+      const resolved = this.view?.resolveCFI?.(cfi)
+      if (resolved?.index !== index || typeof resolved.anchor !== 'function') return null
+      const range = resolved.anchor(doc) as Range | null
+      return range?.startContainer ? range : null
+    } catch {
+      return null
+    }
+  }
+
+  private syncUserStyleSheets() {
+    const update = () => {
+      for (const doc of this.activeDocs) this.ensureUserStyleSheets(doc)
+    }
+    const renderer = this.view?.renderer
+    if (renderer?.updateSectionStyles) renderer.updateSectionStyles(update)
+    else update()
+  }
+
+  /** Create/update/move/remove this document's user style sheets. Always
+   *  appended last so user rules keep their place after the reader's own
+   *  sheet (later sheets win ties, and `!important` beats the reader's). */
+  private ensureUserStyleSheets(doc: Document) {
+    if (this.view?.isFixedLayout) return
+    const sync = (current: string, map: Map<Document, HTMLStyleElement>, kind: string) => {
+      const existing = map.get(doc)
+      if (!current) {
+        existing?.remove()
+        if (existing) map.delete(doc)
+        return
+      }
+      const head = doc.head
+      if (!head) return
+      const el = existing ?? (() => {
+        const next = doc.createElement('style')
+        next.dataset.bdUserThemeCss = kind
+        map.set(doc, next)
+        head.appendChild(next)
+        return next
+      })()
+      if (el.textContent !== current) el.textContent = current
+      head.appendChild(el)
+    }
+    sync(this.userContentStyleSheet, this.userContentStyles, 'content')
+    sync(this.userUiOutsideStyleSheet, this.userUiStyles, 'ui-outside')
+    // Theme font faces live in their own sheet: `@import` is only valid at the
+    // top of a stylesheet, and this element is rewritten whenever a referenced
+    // face resolves or disappears.
+    const fontSheet = this.themeFontStyles.get(doc)
+    if (!this.themeFontFacesCss) {
+      fontSheet?.remove()
+      this.themeFontStyles.delete(doc)
+    } else if (doc.head) {
+      const el = fontSheet ?? (() => {
+        const next = doc.createElement('style')
+        next.dataset.bdThemeFonts = ''
+        this.themeFontStyles.set(doc, next)
+        doc.head.appendChild(next)
+        return next
+      })()
+      if (el.textContent !== this.themeFontFacesCss) el.textContent = this.themeFontFacesCss
+      if (el.parentNode !== doc.head) doc.head.appendChild(el)
+    }
+  }
+
+  applyReadingTheme(theme: {
+    bg: string
+    text: string
+    primary?: string
+    scrolled?: { page: string; outside: string; wallpaper?: string }
+    wallpaper?: { url: string; opacity?: number; blur?: number }
+  }) {
     this.theme = theme
     this.emit('readingSettingsChanged')
     if (!this.view?.renderer) return
@@ -3511,7 +3760,16 @@ export class FoliateReader implements BookReader {
     this.view.renderer.style.setProperty('--bd-search-highlight', searchHighlightColor(theme))
     this.view.renderer.style.setProperty('--bd-search-active-highlight', searchActiveHighlightColor(theme))
     this.view.renderer.style.setProperty('--bd-search-active-border', searchActiveBorderColor(theme))
-    this.view.renderer.style.setProperty('background-color', theme.bg)
+    const hasWp = Boolean(theme.wallpaper?.url)
+    this.view.renderer.style.setProperty('background-color', hasWp ? 'transparent' : theme.bg)
+    if (theme.wallpaper?.url) {
+      this.view.renderer.setAttribute('wallpaper-url', theme.wallpaper.url)
+      this.view.renderer.style.setProperty('--bg-texture-id', 'custom-wallpaper')
+    } else {
+      this.view.renderer.removeAttribute('wallpaper-url')
+      this.view.renderer.style.removeProperty('--bg-texture-id')
+    }
+    this.applyScrolledThemeAttributes(this.view.renderer, theme)
     if (this.view.isFixedLayout) {
       const contents = this.view.renderer.getContents?.() as Array<{ doc?: Document }> | undefined
       for (const { doc } of contents ?? []) {
@@ -3521,9 +3779,35 @@ export class FoliateReader implements BookReader {
     this.view.renderer.setAttribute('background-color', theme.bg)
     this.syncActiveDocsTheme()
     this.applyStyles()
+    for (const doc of this.docHighlightResults.keys()) this.paintDocHighlights(doc)
     for (const value of this.renderedAnnotations.keys()) {
       const annotation = this.annotationMap.get(value)
       if (annotation?.style === 'highlight' || annotation?.type === 'note') this.addAnnotationValue(value, false)
+    }
+  }
+
+  // Scrolled-flow dual colors (phase-1 rolling book page): the paginator reads
+  // these attributes when it paints the section canvas and body column. The
+  // `background-color` attribute stays the single paginated/fixed-layout
+  // canvas; absent scrolled attributes keep the legacy single-canvas path.
+  // Phase-4: the resolved wallpaper URL rides the same attributes (absent =
+  // plain outside color; the URL is a pooled temporary blob URL).
+  private applyScrolledThemeAttributes(renderer: HTMLElement, theme: {
+    scrolled?: { page: string; outside: string; wallpaper?: string }
+    wallpaper?: { url: string; opacity?: number; blur?: number }
+  }) {
+    if (theme.scrolled) {
+      renderer.setAttribute('scrolled-page-color', theme.scrolled.page)
+      renderer.setAttribute('scrolled-outside-color', theme.scrolled.outside)
+      if (!theme.wallpaper?.url && theme.scrolled.wallpaper) {
+        renderer.setAttribute('scrolled-outside-image', theme.scrolled.wallpaper)
+      } else {
+        renderer.removeAttribute('scrolled-outside-image')
+      }
+    } else {
+      renderer.removeAttribute('scrolled-page-color')
+      renderer.removeAttribute('scrolled-outside-color')
+      renderer.removeAttribute('scrolled-outside-image')
     }
   }
 
@@ -4353,6 +4637,12 @@ export class FoliateReader implements BookReader {
     this.annotationBuckets = buckets
     this.uncategorizedAnnotations = uncategorized
     this.syncAnnotations()
+    const signature = Array.from(this.annotationMap.values(), (a) => `${a.cfiRange}|${a.type}|${a.style ?? ''}`).join('\n')
+    if (signature === this.manualOverlapSignature) return
+    this.manualOverlapSignature = signature
+    // Creating, editing, or deleting a manual annotation changes which
+    // automatic effects must yield; the cached match result repaints as is.
+    for (const doc of this.docHighlightResults.keys()) this.paintDocHighlights(doc)
   }
 
   private syncAnnotations() {
@@ -4402,6 +4692,10 @@ export class FoliateReader implements BookReader {
     this.emit('annotationOrphaned', { cfiRange: ann.cfiRange, type: ann.type })
   }
 
+  private noteInkOpacity(): number {
+    return isLightCssColor(this.theme.bg) ? 0.68 : 0.85
+  }
+
   private handleDrawAnnotation(detail: any) {
     const { draw, annotation, doc, range } = detail ?? {}
     if (!draw || !annotation?.value || !this.foliateOverlayer) return
@@ -4413,7 +4707,7 @@ export class FoliateReader implements BookReader {
     if (ann.type === 'note') {
       draw(this.foliateOverlayer.ink, {
         color, style: 'dashed', writingMode,
-        opacity: isLightCssColor(this.theme.bg) ? 0.68 : 0.85,
+        opacity: this.noteInkOpacity(),
       })
     } else if (ann.style === 'highlight') {
       const dark = !isLightCssColor(this.theme.bg)
@@ -5100,8 +5394,15 @@ export class FoliateReader implements BookReader {
           // A section that is gone takes its repaired stylesheet with it.
           this.repairedStyles.get(doc)?.remove()
           this.repairedStyles.delete(doc)
+          this.userContentStyles.get(doc)?.remove()
+          this.userContentStyles.delete(doc)
+          this.userUiStyles.get(doc)?.remove()
+          this.userUiStyles.delete(doc)
+          this.themeFontStyles.get(doc)?.remove()
+          this.themeFontStyles.delete(doc)
           this.fontStyles.get(doc)?.remove()
           this.fontStyles.delete(doc)
+          this.clearDocHighlightLayer(doc)
           const sel = this.selectionDocs.get(doc)
           if (sel) {
             doc.removeEventListener('pointerdown', sel.startHandler)
@@ -5138,7 +5439,13 @@ export class FoliateReader implements BookReader {
         }
       }
       for (const { doc, index } of contents) {
-        if (!doc || this.activeDocs.has(doc)) continue
+        if (!doc) continue
+        if (this.activeDocs.has(doc)) {
+          // Attached earlier while its text was still missing: the block below
+          // only styles new docs, so retry here once content has arrived.
+          if (this.docHighlightEmpty.has(doc) && this.highlightRules.length) this.computeDocHighlights(doc)
+          continue
+        }
         // A section whose load was superseded never received the reader
         // stylesheet; style it here so it cannot render the book's own CSS
         // alone (white page, book typography) before the reader is shown.
@@ -5159,6 +5466,13 @@ export class FoliateReader implements BookReader {
         if (this.bookFormat === 'epub' && !this.view?.isFixedLayout) {
           const label = this.view?.getProgressOf?.(index)?.tocItem?.label
           if (typeof label === 'string') markEpubChapterTitle(doc, label)
+        }
+        if (!this.view?.isFixedLayout) {
+          // Phase-2 public style hooks: TXT joins EPUB on the same unified
+          // chapter-title target, and the section canvas joins the React
+          // reader root as the [data-bd-ui="outside"] UI target.
+          if (this.bookFormat === 'txt') doc.body?.querySelector(':scope > h1:first-child')?.setAttribute('data-bd-chapter-title', '')
+          doc.documentElement.setAttribute('data-bd-ui', 'outside')
         }
         normalizeEpubDocumentImages(doc, {
           section: this.book?.sections?.[index],
@@ -5247,6 +5561,9 @@ export class FoliateReader implements BookReader {
         // Alt+ArrowLeft/Right otherwise can turn a page before the host sees it.
         doc.addEventListener('keydown', keyForwardHandler, true)
         this.selectionDocs.set(doc, { index, handler, selectionChangeHandler, startHandler, dblHandler, keyForwardHandler })
+        // Phase-3 automatic highlights: match the freshly rendered section's
+        // displayed text and paint the matched spans.
+        this.computeDocHighlights(doc)
       }
       this.activeDocs = docs
     } catch {
@@ -5265,6 +5582,14 @@ export class FoliateReader implements BookReader {
     this.startupAbort.abort()
     this.releaseBookLease?.()
     this.releaseBookLease = null
+    this.userContentStyles.clear()
+    this.userUiStyles.clear()
+    for (const style of this.themeFontStyles.values()) style.remove()
+    this.themeFontStyles.clear()
+    this.themeFontFacesCss = ''
+    this.docHighlightResults.clear()
+    this.highlightEngine.dispose()
+    for (const doc of this.docHighlightLayers.keys()) this.clearDocHighlightLayer(doc)
     this.setAutoReadingActive(false)
     this.destroyed = true
     // stop any in-flight search loop at the next chapter boundary; the
@@ -5360,6 +5685,7 @@ export class FoliateReader implements BookReader {
   }
 
   private applyAllSettings() {
+    this.view?.renderer?.setAttribute('book-format', this.bookFormat)
     this.applyReadingMode(this.readingMode)
     this.applyPageColumns(this.pageColumns)
     this.applyColumnGap(this.columnGap)
@@ -5370,6 +5696,9 @@ export class FoliateReader implements BookReader {
     this.applyShowHeader(this.showHeader)
     this.applyShowFooter(this.showFooter)
     this.applyContinuousScroll(this.continuousScroll)
+    // The rebuilt view starts with an empty decoration sheet: re-push the
+    // phase-4 outside decoration before the first background replace.
+    this.view?.renderer?.setOutsideDecoration?.(this.userUiDecorationStyleSheet)
     this.applyStyles()
   }
 
@@ -5394,7 +5723,7 @@ export class FoliateReader implements BookReader {
     const forceBookdockFont = this.shouldForceBookdockFont()
     const forceBookdockLayout = cleanReadingActive || this.shouldForceBookLayout()
     const chapterTitleStyles = forceBookdockLayout ? `
-      ${this.bookFormat === 'txt' ? 'body > h1:first-child' : '[data-bd-chapter-title]'} {
+      [data-bd-chapter-title] {
         text-align: ${this.paragraph.chapterTitleAlign} !important;
         font-size: ${this.paragraph.chapterTitleSize}rem !important;
         padding-top: ${this.paragraph.chapterTitleTopSpacing}rem !important;
@@ -5425,7 +5754,7 @@ export class FoliateReader implements BookReader {
     const fontDescendantStyles = forceBookdockFont
       ? `
       body *:not(pre, code, kbd, .code):not(pre *, code *, kbd *, .code *) {
-        font-family: ${fontStack} !important;
+        font-family: var(${THEME_CONTENT_FONT_PROPERTY}, ${fontStack}) !important;
       }`
       : ''
     const fontBodySizeStyles = forceBookdockFont
@@ -5948,7 +6277,6 @@ export class FoliateReader implements BookReader {
     const themeCompatibilityStyles = isDarkTheme
       ? `
       html { color-scheme: dark; }
-      body { background-color: transparent !important; }
       blockquote {
         background: color-mix(in srgb, var(--bd-theme-bg) 80%, #000);
         background-color: color-mix(in srgb, var(--bd-theme-bg) 80%, #000);
@@ -6034,8 +6362,10 @@ export class FoliateReader implements BookReader {
         --bd-min-font-size: 8px;
         --bd-font-weight: ${this.font.fontWeight};
         --bd-theme-bg: ${this.theme.bg};
+        --theme-bg-color: ${this.theme.bg};
         --bd-theme-text: ${this.theme.text};
         --bd-theme-primary: ${this.theme.primary ?? this.theme.text};
+        ${(this.theme as { wallpaper?: { url: string } }).wallpaper?.url ? '--bg-texture-id: custom-wallpaper;' : ''}
         ${APP_STYLE_MARKER}: 1;
         color-scheme: ${isDarkTheme ? 'dark' : 'light'};
       }`
@@ -6092,7 +6422,6 @@ export class FoliateReader implements BookReader {
       ${fontBodySizeStyles}
       ${fontLegacySizeStyles}
       ${inlineThemeStyles}
-      ${this.bookFormat === 'txt' ? 'body { background-color: transparent !important; }' : ''}
       ${paragraphStyles}
       ${chapterTitleStyles}
       ${contentOverflowStyles}
@@ -6100,6 +6429,7 @@ export class FoliateReader implements BookReader {
       ${templateCompatibilityStyles}
       ${cleanReadingStyles}
       html { background-color: transparent !important; }
+      ${(this.readingMode === 'page' || Boolean((this.theme as { wallpaper?: { url: string } }).wallpaper?.url)) ? 'body { background-color: transparent !important; }' : ''}
       body {
         padding-top: ${vPad}px !important;
         padding-bottom: ${vPad}px !important;
@@ -6465,6 +6795,7 @@ export class FoliateReader implements BookReader {
       this.fontStyles.get(doc)?.remove()
       this.fontStyles.delete(doc)
     }
+    this.ensureUserStyleSheets(doc)
     if (this.documentHasAppStyles(doc)) return true
     if (!this.appStyleSheet) return false
     let el = this.repairedStyles.get(doc)
@@ -6475,6 +6806,7 @@ export class FoliateReader implements BookReader {
       this.repairedStyles.set(doc, el)
     }
     if (el.textContent !== this.appStyleSheet) el.textContent = this.appStyleSheet
+    this.ensureUserStyleSheets(doc)
     return this.documentHasAppStyles(doc)
   }
 

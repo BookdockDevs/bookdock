@@ -40,7 +40,6 @@ import { contentFileAssociationSchema } from './content-file'
 import { readingCoverageSchema, readingDateSchema, readingTimeFragmentSchema, readingTimezoneSchema } from './reading-ledger'
 
 export const bookFormatSchema = z.enum(['epub', 'txt'])
-export const undoReceiptSchema = z.object({ token: z.string().uuid(), label: z.string().max(120), expiresAt: z.number().int().optional(), generation: z.number().int().optional() })
 
 // Fields configurable per position on the header/footer info bar (F4).
 export const marginalFieldSchema = z.enum(['none', 'bookTitle', 'chapter', 'chapterProgress', 'bookProgress', 'chapterWordCount', 'time'])
@@ -940,9 +939,70 @@ export const viewSettingsSchema = z.object({
   pageVerticalPadding: z.number().min(0).max(120).optional(),
 })
 
+// Phase-3 text highlight rules (theme definitions). Colors are hex; group
+// indexes target capture groups 1..32 of the rule's regex.
+// `underline` is the legacy phase-3 boolean (solid line in the text color);
+// `line` is the current effect and wins when both are present.
+export const highlightRuleStyleSchema = z.object({
+  textColor: z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional(),
+  backgroundColor: z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional(),
+  underline: z.boolean().optional(),
+  line: z.object({
+    style: z.enum(['solid', 'wavy', 'dashed']),
+    color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional(),
+  }).optional(),
+})
+
+/** Kept as a named export so the rules panel and ingest share one shape. */
+export const highlightRuleLineSchema = highlightRuleStyleSchema.shape.line
+
+export const highlightRuleGroupSchema = z.object({
+  index: z.number().int().min(1).max(32),
+  style: highlightRuleStyleSchema,
+})
+
+export const highlightRuleSchema = z.object({
+  id: z.string().min(1).max(100),
+  name: z.string().min(1).max(50),
+  pattern: z.string().min(1).max(300),
+  isRegex: z.boolean(),
+  enabled: z.boolean(),
+  style: highlightRuleStyleSchema.optional(),
+  groups: z.array(highlightRuleGroupSchema).max(32).optional(),
+})
+
+export const readingThemeCardsSchema = z.object({
+  paletteId: z.string().min(1).max(100),
+  cssId: z.string().min(1).max(100).nullable(),
+  highlightIds: z.array(z.string().min(1).max(100)).max(64),
+})
+
+export const readingThemeSelectionSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('theme'), themeId: z.string().min(1).max(100) }),
+  z.object({ mode: z.literal('custom'), themeId: z.string().min(1).max(100).optional(), cards: readingThemeCardsSchema }),
+])
+
+// Per-tone pair: the light and dark slot each hold their own selection, so a
+// system-mode reader keeps following the device instead of pinning both tones
+// to whatever was picked first.
+export const readingThemeSelectionSlotsSchema = z.object({
+  mode: z.literal('slots'),
+  light: readingThemeSelectionSchema.nullable().optional(),
+  dark: readingThemeSelectionSchema.nullable().optional(),
+})
+
+export const readingThemeSelectionStateSchema = z.union([
+  readingThemeSelectionSlotsSchema,
+  readingThemeSelectionSchema,
+])
+
 export const readerBookSettingsSchema = z.object({
+  themeSelection: readingThemeSelectionStateSchema.nullable().optional(),
   viewSettings: viewSettingsSchema.nullable().optional(),
   boundPresetId: z.string().nullable().optional(),
+  // Per-book reading-theme override (仅本书). Merge semantics like boundPresetId:
+  // absent leaves the stored value, a string writes it, null clears it.
+  readingThemeId: z.string().max(100).nullable().optional(),
 })
 
 export const systemUpdateStartSchema = z.object({

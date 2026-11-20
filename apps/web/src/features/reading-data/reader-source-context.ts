@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { AiMessageRes, AiThreadDetailRes, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, ClientArchiveBookDetailView, AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq, ReadingRecordCreateReq, ClientReadingSessionUpdate, ReadingLedgerOverview, ReadingLedgerStatsRes, ReadingLedgerSessionPage, ReadingLedgerSession, ReadingRecordBookDetailRes, ReadingRange, ClientReadingRounds, ClientReadingRoundAction, ClientLibraryDetailView, ClientPublicationStructure, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+import type { AiMessageRes, AiThreadDetailRes, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, ClientArchiveBookDetailView, AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq, ReadingRecordCreateReq, ClientReadingSessionUpdate, ReadingLedgerOverview, ReadingLedgerStatsRes, ReadingLedgerSessionPage, ReadingLedgerSession, ReadingRecordBookDetailRes, ReadingRange, ClientReadingRounds, ClientReadingRoundAction, ClientLibraryDetailView, ClientPublicationStructure, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings, ReadingThemeSelectionState } from '@bookdock/shared'
 import type { ReaderBookProvider } from '../reader/content/book-provider'
 import type { ClientBookRef, ClientPreferenceOwner } from '@bookdock/shared'
 
@@ -41,6 +41,9 @@ export interface LocalReaderSession {
   deleteNote(id: string, expectedVersion?: number): Promise<void>
   saveSettings(settings: ViewSettings | null): Promise<{ data: ReaderBookSettings }>
   bindPreset(presetId: string | null, owner: ClientPreferenceOwner): Promise<void>
+  /** 仅本书 reading-theme override; null restores following (clears only the theme) */
+  setThemeSelection(selection: ReadingThemeSelectionState | null): Promise<void>
+  setReadingTheme(themeId: string | null): Promise<void>
   listAiThreads(): Promise<{ data: AiThreadRes[] }>
   getAiThread(threadId: string): Promise<{ data: AiThreadDetailRes }>
   saveAiThreadTurn(input: LocalAiTurnInput): Promise<{ data: AiThreadDetailRes }>

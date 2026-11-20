@@ -1,17 +1,28 @@
+import { Blob as NativeBlob } from 'node:buffer'
+
 import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
 import { act, cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { IDBFactory } from 'fake-indexeddb'
+import { useState } from 'react'
+import JSZip from 'jszip'
 import i18n from '../i18n/i18n'
 import { SettingsPanel } from '../features/reader/components/SettingsPanel'
+import * as readerFonts from '../features/reader/fonts'
 import { useFontLoaderStore } from '../features/reader/fonts'
+import { useReaderFontPreviews } from '../features/reader/hooks/useReaderFontPreviews'
 import { useDeviceFontStore } from '../features/device-fonts/store'
 import type { DeviceFontMeta } from '../features/device-fonts/db'
 import { useUiStore } from '../stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { useInstanceInfo } from '@/features/auth/hooks'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
-import type { TextReplacementRes } from '@bookdock/shared'
+import type { ReadingThemeSelection, ReadingThemeSelectionState, TextReplacementRes } from '@bookdock/shared'
 import { LocalReaderContext, type LocalReaderSession } from '@/features/reading-data/reader-source-context'
 import { useAuthStore } from '@/stores/auth.store'
+import { ThemeAssetStore } from '@/features/reading-theme/assets'
+import { INITIAL_THEME_LIBRARY, readThemeLibrary, serializeThemeLibrary, themeSelectionForSlot, writeThemeSelectionForSlot } from '@/features/reading-theme/theme-library'
+import ReadingThemesSettingsSection from '@/features/settings/components/ReadingThemesSettingsSection'
+import { ViewSettingsContext, type ViewSettingsContextValue } from '@/features/reader/view-settings-context'
 
 vi.mock('@/api/hooks/useFonts', () => ({
   useFonts: vi.fn(() => ({ data: { data: [] } })),
@@ -59,24 +70,333 @@ describe('SettingsPanel', () => {
     useUiStore.setState({ fontPreferences: {} })
   })
 
-  it('allows local theme creation and uses connected font resources independently of book authority', () => {
+  const settings = (): ViewSettingsContextValue => ({
+    effective: { cleanReading: false, fontSize: 18, lineHeight: 1.8, pageWidth: 800, horizontalPadding: 24, verticalPadding: 24, pageColumns: 2, columnGap: 5 },
+    perBookActive: false, setPerBookActive: vi.fn(), updateSetting: vi.fn(),
+    boundPresetId: null, setBoundPreset: vi.fn(), setThemeSelection: vi.fn(),
+  })
+
+  it('seeds four editable themes and palettes and saves a theme with a palette created inside it', () => {
     useAuthStore.setState({ user: { id: 'font-account', username: 'Reader', role: 'user' } })
     try {
       render(<LocalReaderContext.Provider value={{} as LocalReaderSession}><SettingsPanel /></LocalReaderContext.Provider>)
       expect(useFonts).toHaveBeenLastCalledWith(true)
       fireEvent.click(screen.getByTitle('主题'))
-      fireEvent.click(screen.getByRole('button', { name: i18n.t('reader.newTheme') }))
-      expect(screen.getByPlaceholderText(i18n.t('reader.themeName'))).toBeInTheDocument()
-      fireEvent.change(screen.getByPlaceholderText(i18n.t('reader.themeName')), { target: { value: 'Device theme' } })
-      fireEvent.click(screen.getByRole('button', { name: i18n.t('reader.saveTheme') }))
-      expect(useUiStore.getState().customThemes.some((theme) => theme.name === 'Device theme')).toBe(true)
+      const palette = screen.getByRole('region', { name: '配色' })
+      expect(within(palette).getByRole('button', { name: '白纸' })).toHaveAttribute('aria-pressed', 'true')
+      const themes = screen.getByRole('region', { name: '主题' })
+      fireEvent.contextMenu(within(palette).getByRole('button', { name: '白纸' }))
+      expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
+      fireEvent.click(document.body)
+      fireEvent.contextMenu(within(themes).getByRole('button', { name: '白纸' }))
+      expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
+      fireEvent.click(document.body)
+      expect(useUiStore.getState().themeLibrary.themes).toHaveLength(4)
+      fireEvent.click(screen.getByRole('button', { name: '新建主题' }))
+      const dialog = within(screen.getByRole('dialog'))
+      fireEvent.change(dialog.getByRole('textbox', { name: '名称' }), { target: { value: 'Device theme' } })
+      fireEvent.click(dialog.getByRole('button', { name: '新建配色' }))
+      const paletteDialog = within(screen.getByRole('dialog', { name: '配色' }))
+      fireEvent.change(paletteDialog.getByRole('textbox', { name: '名称' }), { target: { value: 'Device palette' } })
+      fireEvent.click(paletteDialog.getByRole('button', { name: '保存' }))
+      const created = useUiStore.getState().themeLibrary.palettes.at(-1)!
+      expect(created.name).toBe('Device palette')
+      expect(dialog.getByRole('combobox', { name: '配色' })).toHaveValue(created.id)
+      fireEvent.click(dialog.getByRole('button', { name: '保存' }))
+      expect(useUiStore.getState().themeLibrary.themes.at(-1)).toMatchObject({ name: 'Device theme', cards: { paletteId: created.id, cssId: null, highlightIds: [] } })
     } finally { act(() => useAuthStore.setState({ user: null })) }
+  })
+
+  it('offers the same whole themes for both defaults and leaves standalone palettes out', () => {
+    const store = useUiStore.getState()
+    store.setThemeLibrary({ ...INITIAL_THEME_LIBRARY, palettes: [...INITIAL_THEME_LIBRARY.palettes, { ...INITIAL_THEME_LIBRARY.palettes[0]!, id: 'standalone', name: '独立配色' }] })
+    render(<ReadingThemesSettingsSection />)
+    const day = screen.getByRole('button', { name: '日间默认主题' })
+    const night = screen.getByRole('button', { name: '夜间默认主题' })
+    expect(day).toHaveTextContent('白纸')
+    expect(night).toHaveTextContent('夜间')
+
+    fireEvent.click(day)
+    const dayOptions = within(screen.getByRole('listbox', { name: '日间默认主题' })).getAllByRole('option')
+    expect(dayOptions.map((item) => item.textContent)).toEqual(['白纸', '米黄', '护眼', '夜间'])
+    fireEvent.click(dayOptions[3]!)
+    expect(day).toHaveTextContent('夜间')
+
+    fireEvent.click(night)
+    const nightOptions = within(screen.getByRole('listbox', { name: '夜间默认主题' })).getAllByRole('option')
+    expect(nightOptions.map((item) => item.textContent)).toEqual(['白纸', '米黄', '护眼', '夜间'])
+    fireEvent.click(nightOptions[1]!)
+    expect(night).toHaveTextContent('米黄')
+  })
+
+  it('merges a theme import with changes made while the ZIP is being read', async () => {
+    useUiStore.getState().setThemeLibrary(INITIAL_THEME_LIBRARY)
+    const zip = new JSZip()
+    zip.file('manifest.json', JSON.stringify({
+      format: 'bookdock-theme-package',
+      version: 1,
+      themes: [],
+      palettes: [{ name: 'Imported palette', colors: { bg: '#132435', fg: '#ffffff', primary: '#e0a355' } }],
+      assets: [],
+    }))
+    const bytes = await zip.generateAsync({ type: 'arraybuffer' })
+    const read = Promise.withResolvers<ArrayBuffer>()
+    const file = new File([bytes], 'themes.zip', { type: 'application/zip' })
+    Object.defineProperty(file, 'arrayBuffer', { value: () => read.promise })
+    const { container } = render(<ReadingThemesSettingsSection />)
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } })
+    const edited = { ...INITIAL_THEME_LIBRARY.palettes[0]!, id: 'saved-during-import', name: 'Saved during import' }
+    act(() => useUiStore.getState().setThemeLibrary({
+      ...INITIAL_THEME_LIBRARY, palettes: [...INITIAL_THEME_LIBRARY.palettes, edited],
+    }))
+    read.resolve(bytes)
+    await waitFor(() => expect(useUiStore.getState().themeLibrary.palettes.map(({ name }) => name))
+      .toEqual(expect.arrayContaining([edited.name, 'Imported palette'])))
+  })
+
+  it('keeps the night choice when the day theme returns to default and can clear both explicitly', () => {
+    useUiStore.setState({
+      themeLibrary: INITIAL_THEME_LIBRARY, readingThemeMode: 'light', lightReadingThemeId: 'paper', darkReadingThemeId: 'night',
+    })
+    function BookThemeSettings() {
+      const [selection, setSelection] = useState<ReadingThemeSelectionState | null>({
+        mode: 'slots',
+        light: { mode: 'theme', themeId: 'cream' },
+        dark: { mode: 'theme', themeId: 'sepia' },
+      })
+      const [slot, setSlot] = useState<'light' | 'dark'>('light')
+      return <ViewSettingsContext.Provider value={{
+        ...settings(),
+        appearance: { themeSelection: themeSelectionForSlot(selection, slot) },
+        hasThemeSelection: Boolean(selection),
+        setThemeSelection: (next, clear) => setSelection(next === null && clear !== 'current'
+          ? null : writeThemeSelectionForSlot(selection, slot, next)),
+      }}>
+        <button type="button" onClick={() => {
+          setSlot('dark')
+          useUiStore.setState({ readingThemeMode: 'dark' })
+        }}>Test night mode</button>
+        <SettingsPanel bookId="book" />
+      </ViewSettingsContext.Provider>
+    }
+    render(<BookThemeSettings />)
+    fireEvent.click(screen.getByTitle('主题'))
+    const themes = within(screen.getByRole('region', { name: '主题' }))
+    fireEvent.click(themes.getByRole('button', { name: '白纸' }))
+    expect(themes.getByRole('button', { name: '白纸' })).toHaveAttribute('aria-pressed', 'true')
+    expect(themes.getByRole('button', { name: '跟随默认' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Test night mode' }))
+    expect(themes.getByRole('button', { name: '护眼' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(themes.getByRole('button', { name: '跟随默认' }))
+    expect(themes.getByRole('button', { name: '夜间' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('selects only custom items in edit mode and deletes them in one step', () => {
+    const custom = { id: 'mine', name: '我的主题', cards: { paletteId: 'paper', cssId: null, highlightIds: [] } }
+    useUiStore.getState().setThemeLibrary({
+      ...INITIAL_THEME_LIBRARY,
+      themes: [...INITIAL_THEME_LIBRARY.themes, custom],
+      css: [{ id: 'css-a', name: '暗纹', contentCss: '', uiCss: '', assets: [] }],
+    })
+    render(<ReadingThemesSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: /编辑模式/ }))
+    const themes = screen.getByRole('region', { name: '主题' })
+
+    // 内置主题可拖不可勾：点它不改变选择，也不会打开编辑器
+    fireEvent.click(within(themes).getByRole('button', { name: '白纸' }))
+    expect(screen.getByText('已选 0 项')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    fireEvent.click(within(themes).getByRole('button', { name: '我的主题' }))
+    fireEvent.click(within(screen.getByRole('region', { name: '自定义 CSS' })).getByRole('button', { name: '暗纹' }))
+    expect(screen.getByText('已选 2 项')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '删除所选' }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '删除' }))
+    expect(useUiStore.getState().themeLibrary.themes.some(({ id }) => id === 'mine')).toBe(false)
+    expect(useUiStore.getState().themeLibrary.css).toHaveLength(0)
+  })
+
+  it('retains image bytes saved by another tab when deleting from a stale library', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory())
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const scope = useAuthStore.getState().user?.id ?? 'device'
+      const otherTab = new ThemeAssetStore()
+      const blob = new NativeBlob(['image data'], { type: 'image/png' }) as unknown as Blob
+      const assetId = 'asset-other-tab'
+      await otherTab.storePrepared(scope, [{ key: assetId, image: {
+        blob,
+        asset: {
+          id: assetId, scope, fileName: 'wallpaper.png', mime: 'image/png',
+          size: blob.size, width: 1, height: 1, contentHash: 'hash', createdAt: 0,
+        },
+      } }])
+      expect(await otherTab.getBlob(scope, assetId)).not.toBeNull()
+      useUiStore.getState().setThemeLibrary({
+        ...INITIAL_THEME_LIBRARY,
+        css: [{ id: 'temporary', name: 'Temporary CSS', contentCss: '', uiCss: '', assets: [] }],
+      })
+      render(<ReadingThemesSettingsSection />)
+      fireEvent.click(screen.getByRole('button', { name: /编辑模式/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Temporary CSS' }))
+      fireEvent.click(screen.getByRole('button', { name: '删除所选' }))
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '删除' }))
+      expect(useUiStore.getState().themeLibrary.css).toHaveLength(0)
+      await act(() => vi.advanceTimersByTimeAsync(11_100))
+      expect(await otherTab.getBlob(scope, assetId)).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('keeps edits to the initial palette and does not reseed a deleted initial theme on read', () => {
+    const migrated = readThemeLibrary(JSON.stringify({ version: 2, palettes: [], themes: [], css: [], highlights: [] }))!
+    expect(migrated.themes).toHaveLength(4)
+    const library = {
+      ...migrated,
+      palettes: migrated.palettes.map((palette) => palette.id === 'paper' ? { ...palette, colors: { ...palette.colors, bg: '#dddddd' } } : palette),
+      themes: migrated.themes.filter((theme) => theme.id !== 'night'),
+    }
+    useUiStore.getState().setThemeLibrary(readThemeLibrary(serializeThemeLibrary(library))!)
+    expect(useUiStore.getState().themeLibrary.themes.some(({ id }) => id === 'night')).toBe(false)
+    expect(useUiStore.getState().customThemes.find(({ id }) => id === 'paper')?.colors.bg).toBe('#dddddd')
+  })
+
+  it('selects a whole theme, toggles CSS and individual rules, and restores the named selection', () => {
+    const palette = { id: 'ink', name: '纸色', colors: { bg: '#111111', fg: '#eeeeee', primary: '#888888' } }
+    const rule = { id: 'r1', name: '对白', pattern: '正文', enabled: true, isRegex: false }
+    useUiStore.getState().setThemeLibrary({
+      palettes: [...INITIAL_THEME_LIBRARY.palettes, palette],
+      css: [{ id: 'c1', name: '章标题', contentCss: 'p { color: red }', uiCss: '', assets: [] }],
+      highlights: [rule, { ...rule, id: 'r2', name: '书名' }, { ...rule, id: 'r3', name: '括号' }],
+      themes: [...INITIAL_THEME_LIBRARY.themes,
+        { id: 't1', name: '古籍', cards: { paletteId: palette.id, cssId: 'c1', highlightIds: ['r1', 'r2'] } },
+        { id: 't2', name: '古籍无 CSS', cards: { paletteId: palette.id, cssId: null, highlightIds: ['r1', 'r2'] } },
+        { id: 't3', name: '古籍单条', cards: { paletteId: palette.id, cssId: 'c1', highlightIds: ['r2'] } },
+      ],
+    })
+    const onSelection = vi.fn()
+    function BookThemeSettings() {
+      const [selection, setSelection] = useState<ReadingThemeSelection | null>(null)
+      return <ViewSettingsContext.Provider value={{ ...settings(), appearance: { themeSelection: selection }, setThemeSelection: (value) => { onSelection(value); setSelection(value) } }}>
+        <SettingsPanel bookId="book" />
+      </ViewSettingsContext.Provider>
+    }
+    const globalBefore = useUiStore.getState().readingConfig
+    render(<BookThemeSettings />)
+    fireEvent.click(screen.getByTitle('主题'))
+    const card = (name: string) => screen.getByRole('button', { name, exact: true })
+    const palettes = within(screen.getByRole('region', { name: '配色' }))
+    fireEvent.click(palettes.getByRole('button', { name: '白纸' }))
+    expect(onSelection).not.toHaveBeenCalled()
+    fireEvent.click(palettes.getByRole('button', { name: '米黄' }))
+    expect(onSelection).toHaveBeenLastCalledWith({ mode: 'theme', themeId: 'cream' })
+    expect(within(screen.getByRole('region', { name: '主题' })).getByRole('button', { name: '米黄' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(card('古籍'))
+    expect(onSelection).toHaveBeenLastCalledWith({ mode: 'theme', themeId: 't1' })
+    for (const name of ['古籍', '纸色', '章标题', '对白', '书名']) expect(card(name)).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(card('章标题'))
+    expect(card('章标题')).toHaveAttribute('aria-pressed', 'false')
+    expect(onSelection).toHaveBeenLastCalledWith({ mode: 'theme', themeId: 't2' })
+    fireEvent.click(card('章标题'))
+    expect(card('古籍')).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(card('对白'))
+    expect(card('对白')).toHaveAttribute('aria-pressed', 'false')
+    expect(card('书名')).toHaveAttribute('aria-pressed', 'true')
+    expect(onSelection).toHaveBeenLastCalledWith({ mode: 'theme', themeId: 't3' })
+    fireEvent.click(card('括号'))
+    // A hand-edited combination matches no saved theme: "custom" is expressed by
+    // the 主题 row having no pressed chip instead of a badge.
+    expect(within(screen.getByRole('region', { name: '主题' })).queryAllByRole('button', { pressed: true })).toHaveLength(0)
+    expect(card('括号')).toHaveAttribute('aria-pressed', 'true')
+    expect(card('书名')).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(card('古籍'))
+    const writes = onSelection.mock.calls.length
+    fireEvent.click(card('纸色'))
+    fireEvent.click(card('古籍'))
+    expect(onSelection).toHaveBeenCalledTimes(writes)
+    expect(card('古籍')).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(card('跟随默认'))
+    expect(onSelection).toHaveBeenLastCalledWith(null)
+    expect(useUiStore.getState().readingConfig).toBe(globalBefore)
+  })
+
+  it('creates an independent CSS card inside a theme and reuses it from another theme', () => {
+    render(<SettingsPanel bookId="book" />)
+    fireEvent.click(screen.getByTitle('主题'))
+    fireEvent.click(screen.getByRole('button', { name: '新建主题' }))
+    const theme = within(screen.getByRole('dialog', { name: '新建主题' }))
+    fireEvent.change(theme.getByRole('textbox', { name: '名称' }), { target: { value: '第一套' } })
+    fireEvent.click(theme.getByRole('button', { name: '新建 CSS' }))
+    const css = within(screen.getByRole('dialog', { name: '自定义 CSS' }))
+    fireEvent.change(css.getByRole('textbox', { name: '名称' }), { target: { value: '章标题' } })
+    fireEvent.change(css.getByRole('textbox', { name: '正文 CSS' }), { target: { value: 'p { color: red }' } })
+    fireEvent.click(css.getByRole('button', { name: '保存' }))
+    const savedCard = useUiStore.getState().themeLibrary.css[0]!
+    expect(theme.getByRole('combobox', { name: '自定义 CSS' })).toHaveValue(savedCard.id)
+    fireEvent.click(theme.getByRole('button', { name: '保存' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建主题' }))
+    const next = within(screen.getByRole('dialog', { name: '新建主题' }))
+    fireEvent.change(next.getByRole('textbox', { name: '名称' }), { target: { value: '第二套' } })
+    fireEvent.change(next.getByRole('combobox', { name: '自定义 CSS' }), { target: { value: savedCard.id } })
+    fireEvent.click(next.getByRole('button', { name: '保存' }))
+    const library = useUiStore.getState().themeLibrary
+    expect(library.themes.slice(-2).map((item) => item.cards.cssId)).toEqual([savedCard.id, savedCard.id])
+    expect(readThemeLibrary(serializeThemeLibrary(library))).toEqual(library)
+    fireEvent.contextMenu(screen.getByRole('button', { name: '章标题' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const editor = within(screen.getByRole('dialog', { name: '自定义 CSS' }))
+    fireEvent.change(editor.getByRole('textbox', { name: '正文 CSS' }), { target: { value: 'p { color: blue }' } })
+    fireEvent.click(editor.getByRole('button', { name: '保存' }))
+    expect(useUiStore.getState().customThemes.slice(-2).map((item) => item.contentCss)).toEqual(['p { color: blue }', 'p { color: blue }'])
+  })
+
+  it('tests CSS on the active book with the editor closed and leaves no draft behind on a book switch', () => {
+    const { rerender } = render(<SettingsPanel bookId="first-book" />)
+    fireEvent.click(screen.getByTitle('主题'))
+    fireEvent.click(screen.getByRole('button', { name: '新建 CSS' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '正文 CSS' }), { target: { value: 'p { color: red }' } })
+    fireEvent.click(screen.getByRole('button', { name: '预览' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(useUiStore.getState().readerThemeTrial?.contentCss).toBe('p { color: red }')
+    fireEvent.click(screen.getByRole('button', { name: '返回编辑' }))
+    expect(screen.getByRole('textbox', { name: '正文 CSS' })).toHaveValue('p { color: red }')
+    expect(useUiStore.getState().readerThemeTrial).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '预览' }))
+
+    rerender(<SettingsPanel bookId="second-book" />)
+    expect(useUiStore.getState().readerThemeTrial).toBeNull()
+    expect(useUiStore.getState().themeLibrary.css).toEqual([])
+  })
+
+  it('keeps the local font preview mounted between CSS editor tabs', () => {
+    useDeviceFontStore.setState({ status: 'ready', fonts: [deviceFont] })
+    const { unmount } = render(<SettingsPanel bookId="book" />)
+    fireEvent.click(screen.getByTitle('主题'))
+    fireEvent.click(screen.getByRole('button', { name: '新建 CSS' }))
+    const css = within(screen.getByRole('dialog', { name: '自定义 CSS' }))
+    expect(css.queryByTitle(deviceFont.family)).toBeNull()
+    const fontsTab = css.getByRole('button', { name: /字体参考/ })
+    fireEvent.click(fontsTab)
+    const font = css.getByTitle(deviceFont.family)
+    fireEvent.click(css.getByRole('button', { name: /图片素材/ }))
+    expect(font).not.toBeVisible()
+    fireEvent.click(fontsTab)
+    expect(css.getByTitle(deviceFont.family)).toBe(font)
+    expect(font).toBeVisible()
+    unmount()
+    expect(font).not.toBeInTheDocument()
   })
 
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     localStorage.removeItem('bd-settings-section')
     mockUploadedFonts([])
+    useUiStore.getState().setThemeLibrary(INITIAL_THEME_LIBRARY)
     useFontLoaderStore.setState({ loadedIds: [], loadingIds: [], latinIds: [] })
     useUiStore.setState({
       fontFamily: 'sans-serif',
@@ -110,8 +430,6 @@ describe('SettingsPanel', () => {
 
   const primaryRow = () => (screen.queryByText('主字体') ?? screen.getByText('字体')).parentElement!
   const cjkRow = () => screen.getByText('中文字体').parentElement!
-  const chipNames = (row: HTMLElement) => Array.from(row.querySelectorAll('button')).map((b) => b.textContent)
-
   it('renders font section by default without CJK companion for CJK primary font', () => {
     render(<SettingsPanel />)
 
@@ -122,6 +440,58 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('字体粗细')).toBeInTheDocument()
     expect(screen.getByText('两端对齐')).toBeInTheDocument()
     expect(screen.getByText('覆盖书籍字体')).toBeInTheDocument()
+  })
+
+  it('loads visible device previews once and keeps them across reader settings closes', async () => {
+    const localFonts = Array.from({ length: 9 }, (_, index) => ({
+      ...deviceFont,
+      id: `device-preview-${index}`,
+      family: `Device SimSun ${index}`,
+    }))
+    useUiStore.setState({ fontPreferences: ONLY_DEVICE_ENABLED })
+    useDeviceFontStore.setState({ status: 'ready', fonts: localFonts, order: localFonts.map(({ id }) => id) })
+    const fontFaceSet = Object.getOwnPropertyDescriptor(document, 'fonts')
+    const loadFont = vi.fn().mockResolvedValue([{}])
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load: loadFont } })
+    let finishFirst!: (url: string) => void
+    const first = new Promise<string>((resolve) => { finishFirst = resolve })
+    const ensure = vi.spyOn(readerFonts, 'ensureDeviceFontFace').mockImplementation((font) =>
+      font.id === localFonts[0]!.id ? first : Promise.resolve(null))
+    const release = vi.spyOn(readerFonts, 'releaseDeviceFontFace').mockImplementation(() => {})
+    function Reader({ open }: { open: boolean }) {
+      const previews = useReaderFontPreviews()
+      return open ? <SettingsPanel fontPreviews={previews} /> : null
+    }
+    const { rerender, unmount } = render(<Reader open />)
+    try {
+      const getChip = () => screen.getByRole('button', { name: localFonts[0]!.family })
+      expect(ensure).toHaveBeenCalledTimes(7)
+      expect(getChip().textContent).toBe(localFonts[0]!.family)
+      expect(getChip().style.fontFamily).toContain(`bd-font-${localFonts[0]!.id}`)
+      expect(loadFont).not.toHaveBeenCalled()
+      await act(async () => finishFirst('blob:font'))
+      expect(loadFont).toHaveBeenCalledWith(expect.stringContaining(localFonts[0]!.id), localFonts[0]!.family)
+      fireEvent.click(screen.getByTitle('主题'))
+      expect(release).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByTitle('字体'))
+      expect(getChip().textContent).toBe(localFonts[0]!.family)
+      rerender(<Reader open={false} />)
+      expect(release).not.toHaveBeenCalled()
+      rerender(<Reader open />)
+      expect(getChip().textContent).toBe(localFonts[0]!.family)
+      expect(ensure).toHaveBeenCalledTimes(7)
+      expect(loadFont).toHaveBeenCalledTimes(1)
+      fireEvent.click(within(primaryRow()).getByText('更多'))
+      expect(ensure).toHaveBeenCalledTimes(9)
+      unmount()
+      expect(release).toHaveBeenCalledTimes(9)
+    } finally {
+      unmount()
+      ensure.mockRestore()
+      release.mockRestore()
+      if (fontFaceSet) Object.defineProperty(document, 'fonts', fontFaceSet)
+      else Reflect.deleteProperty(document, 'fonts')
+    }
   })
 
   it('hides marginal font size when both info bar sections are disabled', () => {
@@ -141,7 +511,11 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('主字体')).toBeInTheDocument()
     expect(screen.getByText('中文字体')).toBeInTheDocument()
     // primary: 4 online + 6 system = 10 options, first 6 chips + promoted selected font '西文衬线' + 更多
-    expect(chipNames(primaryRow())).toEqual(['黑体', '宋体', '思源宋体', '思源黑体', '霞鹜文楷', '楷体', '西文衬线', '更多'])
+    const primary = within(primaryRow())
+    expect(primary.getAllByRole('button')).toEqual(
+      ['黑体', '宋体', '思源宋体', '思源黑体', '霞鹜文楷', '楷体', '西文衬线', '更多']
+        .map((name) => primary.getByRole('button', { name, exact: true })),
+    )
     expect(within(primaryRow()).getByText('霞鹜文楷')).toBeInTheDocument()
     // cjk: 4 system + 3 online = 7 options, all 7 chips fit without a More chip
     expect(within(cjkRow()).getByText('霞鹜文楷')).toBeInTheDocument()
@@ -273,10 +647,8 @@ describe('SettingsPanel', () => {
     const themeButton = screen.getByTitle('主题')
     fireEvent.click(themeButton)
 
-    expect(screen.getByText('白纸')).toBeInTheDocument()
-    expect(screen.getByText('米黄')).toBeInTheDocument()
-    expect(screen.getByText('护眼')).toBeInTheDocument()
-    expect(screen.getByText('夜间')).toBeInTheDocument()
+    const palettes = within(screen.getByRole('region', { name: '配色' }))
+    for (const name of ['白纸', '米黄', '护眼', '夜间']) expect(palettes.getByRole('button', { name })).toBeInTheDocument()
   })
 
   it('toggles two-column justify switch', () => {

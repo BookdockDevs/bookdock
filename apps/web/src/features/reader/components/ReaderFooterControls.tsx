@@ -28,6 +28,7 @@ export default function ReaderFooterControls({
 }: ReaderFooterControlsProps) {
   return (
     <div
+      data-bd-ui="footer"
       data-reader-corner-control=""
       className={cn(
         'absolute right-0 z-[60] flex h-24 w-max max-w-[calc(100vw-1rem)] items-end justify-end transition-[bottom,translate] duration-300 pointer-events-none',

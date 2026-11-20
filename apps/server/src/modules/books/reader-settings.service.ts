@@ -1,7 +1,7 @@
 import { and, eq, ne, sql } from 'drizzle-orm'
 
 import { readerBookSettingsSchema } from '@bookdock/shared'
-import type { ReaderBookSettings, ViewSettings } from '@bookdock/shared'
+import type { ReaderBookSettings, ReadingThemeSelectionState, ViewSettings } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { contentRevisions, libraries, libraryBookVersions, settings } from '../../db/schema'
@@ -24,6 +24,8 @@ function storedSettings(userId: string, bookId: string): ReaderBookSettings | nu
   return {
     ...(parsed.data.viewSettings !== undefined && parsed.data.viewSettings !== null ? { viewSettings: parsed.data.viewSettings } : {}),
     ...(parsed.data.boundPresetId !== undefined && parsed.data.boundPresetId !== null ? { boundPresetId: parsed.data.boundPresetId } : {}),
+    ...(parsed.data.themeSelection ? { themeSelection: parsed.data.themeSelection } : {}),
+    ...(parsed.data.readingThemeId !== undefined && parsed.data.readingThemeId !== null ? { readingThemeId: parsed.data.readingThemeId } : {}),
   }
 }
 
@@ -119,13 +121,20 @@ export function getReaderBookSettings(userId: string | null, bookId: string): Re
   return storedSettings(userId, bookId) ?? {}
 }
 
-export function updateReaderBookSettings(userId: string, bookId: string, input: { viewSettings?: ViewSettings | null; boundPresetId?: string | null }) {
+export function updateReaderBookSettings(userId: string, bookId: string, input: { themeSelection?: ReadingThemeSelectionState | null; viewSettings?: ViewSettings | null; boundPresetId?: string | null; readingThemeId?: string | null }) {
   const current = getReaderBookSettings(userId, bookId)
   const next: ReaderBookSettings = { ...current }
   if (input.viewSettings === null) delete next.viewSettings
   else if (input.viewSettings !== undefined) next.viewSettings = { ...(current.viewSettings ?? {}), ...input.viewSettings }
   if (input.boundPresetId === null) delete next.boundPresetId
   else if (input.boundPresetId !== undefined) next.boundPresetId = input.boundPresetId
+  if (input.readingThemeId === null) delete next.readingThemeId
+  else if (input.readingThemeId !== undefined) next.readingThemeId = input.readingThemeId
+  if (input.themeSelection !== undefined) {
+    delete next.readingThemeId
+    if (input.themeSelection === null) delete next.themeSelection
+    else next.themeSelection = input.themeSelection
+  }
   saveSettings(userId, bookId, next)
   return next
 }

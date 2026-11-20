@@ -1,3 +1,5 @@
+import type { HighlightRuleDef } from '@bookdock/shared'
+import type { ThemeAssetResolver } from '../../lib/theme-css-guard'
 import type { TextReplacementRule } from './lib/text-replacements'
 import type { MediaOverlayCue } from './lib/media-overlay'
 
@@ -206,10 +208,12 @@ export interface RendererEvents {
   readingSettingsChanged: () => void
 }
 
-export interface TocItem {
-  label: string
-  href: string
-  level?: number
+/** Phase-5 theme font references resolved against the reader's font catalog:
+ *  `stacks` replaces each `"bd-font:<id>"` token, `faces` carries the
+ *  `@import`/`@font-face` rules that make those faces available. */
+export interface ThemeFontSources {
+  stacks: Map<string, string>
+  faces: Map<string, string>
 }
 
 export interface BookReader {
@@ -226,7 +230,19 @@ export interface BookReader {
   applyPageColumns(columns: number): void
   applyColumnGap(gapPercent: number): void
   applyPageAnimation(enabled: boolean): void
-  applyReadingTheme(theme: { bg: string; text: string; primary?: string }): void
+  applyReadingTheme(theme: {
+    bg: string
+    text: string
+    primary?: string
+    scrolled?: { page: string; outside: string; wallpaper?: string }
+    wallpaper?: { url: string; opacity?: number; blur?: number }
+  }): void
+  /** Phase-2 user content CSS for section documents ('' = none); phase-4 asset refs and phase-5 font refs resolve at this boundary */
+  applyUserContentCss(css: string, resolveAsset?: ThemeAssetResolver, fontSources?: ThemeFontSources): void
+  /** Phase-2 user UI CSS, outside-rooted subset for the section canvases (host chrome styles via React) */
+  applyUserUiOutsideCss(css: string, resolveAsset?: ThemeAssetResolver): void
+  /** Phase-3 automatic text-highlight rules ([] = none) */
+  applyHighlightRules(rules: HighlightRuleDef[]): void
   applyFont(cfg: FontConfig): void
   applyParagraphStyle(cfg: ParagraphStyle): void
   applyPageWidth(width: number): void
@@ -356,7 +372,6 @@ export interface SearchResult {
 }
 
 export type NavTab = 'toc' | 'notes' | 'stats' | 'ai'
-export type PageWidth = number
 
 // Font ids: the system stacks below, builtin CDN ids (fonts.ts), or
 // uploaded font ids — the registry resolves any id to a concrete stack

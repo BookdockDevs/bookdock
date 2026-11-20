@@ -1,13 +1,16 @@
+import Spinner from '@/components/ui/Spinner'
 import { useTranslation } from '@/hooks/useTranslation'
 
 interface RuleSelectionActionsProps {
   disabled: boolean
   selectedCount: number
+  /** Export in flight: the icon spins so the greyed-out button still reads as working. */
+  exporting?: boolean
   onExport?: () => void
   onDelete: () => void
 }
 
-export default function RuleSelectionActions({ disabled, selectedCount, onExport, onDelete }: RuleSelectionActionsProps) {
+export default function RuleSelectionActions({ disabled, selectedCount, exporting = false, onExport, onDelete }: RuleSelectionActionsProps) {
   const _ = useTranslation()
   const inactive = disabled || selectedCount === 0
 
@@ -16,15 +19,16 @@ export default function RuleSelectionActions({ disabled, selectedCount, onExport
       {onExport && <button
         type="button"
         disabled={inactive}
+        aria-busy={exporting}
         onClick={onExport}
         aria-label={_('settings.ruleExportSelected')}
         title={_('settings.ruleExportSelected')}
         className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
       >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {exporting ? <Spinner size="xs" /> : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4" />
           <path d="M12 14V3m-5 5 5-5 5 5" />
-        </svg>
+        </svg>}
       </button>}
       <button
         type="button"

@@ -208,7 +208,7 @@ describe('reader stylesheet injection', () => {
       getAttribute: vi.fn(() => null),
       setStyles: vi.fn(),
       getContents: vi.fn(() => []),
-      style: { setProperty: vi.fn() },
+      style: { setProperty: vi.fn(), removeProperty: vi.fn() },
     }
     ;(reader as any).view = {
       close: vi.fn(),
@@ -222,5 +222,188 @@ describe('reader stylesheet injection', () => {
     await (reader as any).reloadViewForConversion()
 
     expect(events).toEqual([true, false])
+  })
+})
+
+describe('phase-5 theme font references', () => {
+  function themeFontSheet(doc: Document): HTMLStyleElement | null {
+    return doc.querySelector('style[data-bd-theme-fonts]')
+  }
+
+  function sources(faces: Record<string, string>, stacks: Record<string, string>) {
+    return { stacks: new Map(Object.entries(stacks)), faces: new Map(Object.entries(faces)) }
+  }
+
+  it('rewrites the reference and injects the referenced faces into one sheet', () => {
+    const { reader } = readerWithStyles()
+    reader.applyFont({ fontFamily: 'serif', size: 18, lineHeight: 1.8, fontWeight: 400, overrideBookFont: true })
+    const doc = bareChapter()
+    ;(reader as any).activeDocs = new Set([doc])
+    ;(reader as any).ensureDocumentStyles(doc)
+
+    reader.applyUserContentCss(
+      '[data-bd-chapter-title] { font-family: "bd-font:lxgw-wenkai", serif }',
+      undefined,
+      sources({ 'lxgw-wenkai': '@import url("https://cdn.example/lxgw.css");' }, { 'lxgw-wenkai': '"LXGW WenKai"' }),
+    )
+
+    const content = doc.querySelector('style[data-bd-user-theme-css="content"]')!
+    expect(content.textContent).toContain('font-family: "LXGW WenKai", serif;')
+    expect(content.textContent).toContain('--bd-theme-content-font-family: "LXGW WenKai", serif;')
+    expect(doc.querySelector('style[data-bd-app-style="repaired"]')!.textContent)
+      .toContain('font-family: var(--bd-theme-content-font-family,')
+    expect(content.textContent).not.toContain('bd-font:lxgw-wenkai')
+    expect(themeFontSheet(doc)!.textContent).toBe('@import url("https://cdn.example/lxgw.css");')
+  })
+
+  it('re-injects when a device face URL arrives although the CSS text is unchanged', () => {
+    const { reader } = readerWithStyles()
+    const doc = bareChapter()
+    ;(reader as any).activeDocs = new Set([doc])
+    ;(reader as any).ensureDocumentStyles(doc)
+    const css = 'p { font-family: "bd-font:device-abc", serif }'
+    const stacks = { 'device-abc': '"bd-font-device-abc"' }
+
+    reader.applyUserContentCss(css, undefined, sources({}, {}))
+    expect(themeFontSheet(doc)).toBeNull()
+
+    reader.applyUserContentCss(css, undefined, sources({ 'device-abc': '@font-face { font-family: "bd-font-device-abc"; src: url("blob:http://localhost/font"); }' }, stacks))
+    expect(themeFontSheet(doc)!.textContent).toContain('blob:http://localhost/font')
+  })
+
+  it('leaves an unresolvable reference as an unknown family and still injects the sheet', () => {
+    const { reader } = readerWithStyles()
+    const doc = bareChapter()
+    ;(reader as any).activeDocs = new Set([doc])
+    ;(reader as any).ensureDocumentStyles(doc)
+
+    reader.applyUserContentCss('p { font-family: "bd-font:gone", serif }', undefined, sources({}, {}))
+
+    expect(doc.querySelector('style[data-bd-user-theme-css="content"]')!.textContent).toContain('"bd-font:gone"')
+    expect(themeFontSheet(doc)).toBeNull()
+  })
+
+  it('removes the faces with the stylesheet', () => {
+    const { reader } = readerWithStyles()
+    const doc = bareChapter()
+    ;(reader as any).activeDocs = new Set([doc])
+    ;(reader as any).ensureDocumentStyles(doc)
+    const fontSources = sources({ 'lxgw-wenkai': '@import url("https://cdn.example/lxgw.css");' }, { 'lxgw-wenkai': '"LXGW WenKai"' })
+
+    reader.applyUserContentCss('p { font-family: "bd-font:lxgw-wenkai" }', undefined, fontSources)
+    expect(themeFontSheet(doc)).not.toBeNull()
+
+    reader.applyUserContentCss('', undefined, fontSources)
+    expect(themeFontSheet(doc)).toBeNull()
+  })
+})
+
+describe('phase-2 user CSS injection', () => {
+  function chapterWithReaderStyles(reader: FoliateReader): Document {
+    const doc = bareChapter()
+    ;(reader as any).ensureDocumentStyles(doc)
+    return doc
+  }
+
+  function userSheet(doc: Document, kind: string): HTMLStyleElement | null {
+    return doc.querySelector(`style[data-bd-user-theme-css="${kind}"]`)
+  }
+
+  it('injects the content sheet into section documents after the reader stylesheet', () => {
+    const { reader } = readerWithStyles()
+    const doc = chapterWithReaderStyles(reader)
+    ;(reader as any).activeDocs = new Set([doc])
+
+    reader.applyUserContentCss('p { text-indent: 2em }')
+
+    const sheet = userSheet(doc, 'content')
+    expect(sheet).not.toBeNull()
+    expect(sheet!.textContent).toBe('p:where(body *) { text-indent: 2em; }')
+    // always appended last, so user rules keep winning ties against the reader sheet
+    expect(doc.head!.lastElementChild).toBe(sheet)
+  })
+
+  it('re-applies the stored sheets to newly loaded sections and keeps their order', () => {
+    const { reader } = readerWithStyles()
+    reader.applyUserContentCss('p { color: red }')
+    reader.applyUserUiOutsideCss('[data-bd-ui="outside"] { border: 1px solid teal }')
+
+    const doc = bareChapter()
+    ;(reader as any).ensureDocumentStyles(doc)
+
+    expect(userSheet(doc, 'content')!.textContent).toBe('p:where(body *) { color: red; }')
+    expect(userSheet(doc, 'ui-outside')!.textContent).toBe('[data-bd-ui="outside"] { border: 1px solid teal; }')
+    expect(doc.head!.lastElementChild).toBe(userSheet(doc, 'ui-outside'))
+  })
+
+  it('updates live decoration when a local image resolves and clears it on theme change', () => {
+    const { reader } = readerWithStyles()
+    const doc = chapterWithReaderStyles(reader)
+    const renderer = (reader as any).view.renderer
+    renderer.setOutsideDecoration = vi.fn()
+    const css = '[data-bd-ui="outside"] { background-image: url("bd-asset:figure") }'
+    reader.applyUserUiOutsideCss(css, () => null)
+    expect(renderer.setOutsideDecoration).not.toHaveBeenCalled()
+    reader.applyUserUiOutsideCss(css, () => 'blob:http://localhost/figure')
+    expect(renderer.setOutsideDecoration).toHaveBeenLastCalledWith('#decoration { background-image: url("blob:http://localhost/figure"); }')
+    expect(userSheet(doc, 'ui-outside')).toBeNull()
+    reader.applyUserUiOutsideCss('')
+    expect(renderer.setOutsideDecoration).toHaveBeenLastCalledWith('')
+  })
+
+  it('removes the sheets when the CSS is cleared (off, trial stop, restore follow)', () => {
+    const { reader } = readerWithStyles()
+    const doc = chapterWithReaderStyles(reader)
+    reader.applyUserContentCss('p { color: red }')
+    reader.applyUserUiOutsideCss('[data-bd-ui="outside"] { border: none }')
+
+    reader.applyUserContentCss('')
+    reader.applyUserUiOutsideCss('')
+
+    expect(userSheet(doc, 'content')).toBeNull()
+    expect(userSheet(doc, 'ui-outside')).toBeNull()
+  })
+
+  it('re-validates at the renderer boundary so a corrupted payload cannot inject', () => {
+    const { reader } = readerWithStyles()
+    const doc = chapterWithReaderStyles(reader)
+
+    reader.applyUserContentCss('html { display: none } body { background: url(https://x.example/a.png) }')
+    reader.applyUserUiOutsideCss('[data-bd-ui="header"] { color: red } [data-bd-ui="outside"] { color: red }')
+
+    expect(userSheet(doc, 'content')).toBeNull()
+    expect(userSheet(doc, 'ui-outside')).toBeNull()
+  })
+
+  it('never injects user sheets into fixed-layout documents', () => {
+    const reader = new FoliateReader('', '', undefined, 'epub')
+    ;(reader as any).view = { isFixedLayout: true, renderer: document.createElement('div') }
+    const doc = bareChapter()
+
+    reader.applyUserContentCss('p { color: red }')
+
+    expect(userSheet(doc, 'content')).toBeNull()
+  })
+
+  it('exposes the unified chapter-title and outside targets on section documents', () => {
+    const { reader } = readerWithStyles()
+    const doc = bareChapter()
+    ;(reader as any).view = {
+      renderer: Object.assign(document.createElement('div'), { getContents: () => [{ doc, index: 0 }] }),
+      getProgressOf: () => ({ tocItem: { label: 'Chapter' } }),
+    }
+    ;(reader as any).syncDoc()
+
+    // TXT joins EPUB on the same [data-bd-chapter-title] target
+    expect(doc.body.querySelector('h1')?.hasAttribute('data-bd-chapter-title')).toBe(true)
+    // the section canvas carries the outside UI target
+    expect(doc.documentElement.getAttribute('data-bd-ui')).toBe('outside')
+  })
+
+  it('styles chapter titles through the unified target for TXT', () => {
+    const { setStyles } = readerWithStyles()
+    const css = String(setStyles.mock.calls[0]?.[0] ?? '')
+    expect(css).toContain('[data-bd-chapter-title] {')
+    expect(css).not.toContain('body > h1:first-child')
   })
 })

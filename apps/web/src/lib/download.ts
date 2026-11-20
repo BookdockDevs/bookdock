@@ -17,7 +17,10 @@ export function downloadJsonFile(fileName: string, data: RuleTransferFile) {
     notify.error({ key: prepared.reason === 'limit' ? 'settings.ruleExportLimit' : 'settings.ruleExportInvalid' })
     return
   }
-  const blob = new Blob([prepared.text], { type: 'application/json' })
+  downloadBlob(fileName, new Blob([prepared.text], { type: 'application/json' }))
+}
+
+export function downloadBlob(fileName: string, blob: Blob): void {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -25,5 +28,5 @@ export function downloadJsonFile(fileName: string, data: RuleTransferFile) {
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }

@@ -56,8 +56,14 @@ describe('foliate paginator renderer contract', () => {
     expect(captureAt).toBeGreaterThan(-1)
     expect(captureAt).toBeLessThan(attributeChangeAt)
     expect(renderSource).toMatch(/this\.scrolled && previousLayout\?\.flow === ["']scrolled["']/)
-    expect(renderSource).toContain('anchorOffset = preserveScrollPosition ? this.#anchorScrollOffset() : null')
+    expect(renderSource).toContain('preserveScrollPosition ? this.#anchorScrollOffset() : null')
     expect(renderSource).toContain('flow-switch')
+  })
+
+  it('captures the reading position before updating section styles', () => {
+    const source = Paginator.prototype.updateSectionStyles.toString()
+    expect(source).toMatch(/#flushVisibleState\(\)[\s\S]*#anchorScrollOffset\(\)[\s\S]*update\(\)[\s\S]*this\.render\(position\)/)
+    expect(Paginator.prototype.render.toString()).toContain('styleChangePosition.offset')
   })
 
   it('keeps the captured text anchor when a flow switch settles', () => {
@@ -185,6 +191,66 @@ describe('foliate paginator renderer contract', () => {
     expect(transparent.documentElement.style.backgroundColor).toBe('rgb(9, 9, 9)')
   })
 
+  it('paints and scrubs the dual scrolled page color without leaking across flows', () => {
+    const dual = { body: document.createElement('body'), documentElement: document.createElement('html') }
+    // Scrolled mode: outside color pins the canvas, paper color paints the body column
+    syncDocumentBackgroundForFlow(dual as unknown as Document, '', true, 'rgb(3, 3, 3)', 'rgb(250, 250, 240)')
+    expect(dual.body.style.backgroundColor).toBe('rgb(250, 250, 240)')
+    expect(dual.body.style.getPropertyPriority('background-color')).toBe('important')
+    expect(dual.documentElement.style.backgroundColor).toBe('rgb(3, 3, 3)')
+    // A book's own background still wins over the paper color
+    syncDocumentBackgroundForFlow(dual as unknown as Document, 'rgb(1, 2, 3) url(bg.jpg)', true, 'rgb(3, 3, 3)', 'rgb(250, 250, 240)')
+    expect(dual.body.style.background).toContain('bg.jpg')
+    // Switching to paginated scrubs the page color so the body stays blanked
+    syncDocumentBackgroundForFlow(dual as unknown as Document, '', false)
+    expect(dual.body.style.backgroundColor).toBe('')
+    // A legacy theme (no page color) clears any previous theme's color
+    syncDocumentBackgroundForFlow(dual as unknown as Document, '', true, 'rgb(9, 9, 9)')
+    expect(dual.body.style.backgroundColor).toBe('')
+    // A captured computed shorthand serializes a transparent page as the
+    // truthy 'rgba(0, 0, 0, 0)' — it must still count as transparent
+    syncDocumentBackgroundForFlow(dual as unknown as Document, 'rgba(0, 0, 0, 0)', true, 'rgb(3, 3, 3)', 'rgb(250, 250, 240)')
+    expect(dual.body.style.backgroundColor).toBe('rgb(250, 250, 240)')
+  })
+
+  it('paints a transparent scrolled canvas in wallpaper mode and scrubs it on flow switches', () => {
+    const doc = { body: document.createElement('body'), documentElement: document.createElement('html') }
+    // Wallpaper mode: the canvas turns transparent so the host-side
+    // background/decoration shows through; the page column keeps its color
+    // because the pinned background-image stays non-none (no propagation).
+    syncDocumentBackgroundForFlow(doc as unknown as Document, '', true, 'rgb(3, 3, 3)', 'rgb(250, 250, 240)', true)
+    expect(doc.documentElement.style.backgroundColor).toBe('transparent')
+    expect(doc.documentElement.style.backgroundImage).toContain('linear-gradient')
+    expect(doc.body.style.backgroundColor).toBe('rgb(250, 250, 240)')
+    // A book's own background still paints the column in wallpaper mode
+    syncDocumentBackgroundForFlow(doc as unknown as Document, 'rgb(1, 2, 3) url(bg.jpg)', true, 'rgb(3, 3, 3)', 'rgb(250, 250, 240)', true)
+    expect(doc.body.style.background).toContain('bg.jpg')
+    // Switching to paginated scrubs the transparent pinning
+    syncDocumentBackgroundForFlow(doc as unknown as Document, '', false)
+    expect(doc.documentElement.style.backgroundColor).toBe('')
+    expect(doc.documentElement.style.backgroundImage).toBe('')
+    expect(doc.body.style.backgroundColor).toBe('')
+    // Back to scrolled without wallpaper: the opaque outside color returns
+    syncDocumentBackgroundForFlow(doc as unknown as Document, '', true, 'rgb(3, 3, 3)', 'rgb(250, 250, 240)')
+    expect(doc.documentElement.style.backgroundColor).toBe('rgb(3, 3, 3)')
+    expect(doc.documentElement.style.backgroundImage).toBe('')
+    expect(doc.body.style.backgroundColor).toBe('rgb(250, 250, 240)')
+  })
+
+  it.each([undefined, '#fff8e7'])('preserves an authored gradient on a transparent base with page color %s', (pageColor) => {
+    const doc = document.implementation.createHTMLDocument()
+    const background = 'rgba(0, 0, 0, 0) linear-gradient(red, blue)'
+    syncDocumentBackgroundForFlow(doc, background, true, '#333', pageColor)
+
+    expect(doc.body.style.backgroundImage).toBe('linear-gradient(red, blue)')
+    expect(doc.body.style.backgroundColor).toBe('rgba(0, 0, 0, 0)')
+  })
+
+  it('reads the dual scrolled colors from the theme attributes', () => {
+    expect(paginatorSource).toContain("getAttribute('scrolled-outside-color')")
+    expect(paginatorSource).toContain("getAttribute('scrolled-page-color')")
+  })
+
   it('bounds the continuous-scroll window without trimming the active section', () => {
     expect(continuousScrollTrimBefore(
       [[4, 900], [5, 900], [6, 900], [7, 900]],
@@ -274,5 +340,12 @@ describe('foliate paginator renderer contract', () => {
 
   it('defines snap drain cooldown duration to absorb residual wheel ticks', () => {
     expect(Paginator.SNAP_DRAIN_DURATION).toBe(350)
+  })
+
+  it('updates top background variable and triggers background replacement when background-color changes', () => {
+    const renderer = document.createElement('foliate-paginator') as InstanceType<typeof Paginator>
+    const top = renderer.shadowRoot?.querySelector('#top') as HTMLElement
+    renderer.setAttribute('background-color', '#E6D6B4')
+    expect(top.style.getPropertyValue('--_background-color')).toBe('#E6D6B4')
   })
 })

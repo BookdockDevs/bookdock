@@ -346,7 +346,19 @@ describe('ReaderSidebar on pointer devices', () => {
 
     expect(sidebar).toHaveClass('absolute', 'top-16', 'bottom-16', 'rounded-2xl', 'shadow-2xl')
     expect(sidebar).not.toHaveClass('left-0', 'top-0')
-    expect(sidebar.style.backgroundColor).toContain('var(--bd-read-bg)')
+    expect(sidebar).toHaveClass('bg-[var(--bd-read-panel-bg)]')
+  })
+
+  it('drops the darkened wallpaper overlay for the shared panel surface', () => {
+    act(() => useReaderState.setState({ sidebarOpen: true, activeNavTab: 'toc' }))
+    const { container } = render(
+      <ReaderSidebar bookId="b1" onStatsTabOpen={vi.fn()} chromePinned={false} guestReadOnly={false} hasWallpaper />,
+    )
+    const sidebar = outerEl(container)
+
+    expect(sidebar).toHaveClass('bg-[var(--bd-read-panel-bg)]', 'backdrop-blur-md')
+    expect(sidebar.className).not.toContain('bg-black/10')
+    expect(sidebar.style.backgroundColor).toBe('')
   })
 
   it('keeps floating island open on outside clicks and only toggles closed via active dock button', () => {

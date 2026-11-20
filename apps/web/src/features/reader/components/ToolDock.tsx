@@ -89,7 +89,7 @@ export function ToolDock({ activeNavTab, sidebarOpen, locked, floating = false, 
   ]
 
   return (
-    <div className={cn(
+    <div data-bd-ui="toolbar" className={cn(
       'relative z-10 pointer-events-auto flex',
       mobile
         ? 'min-w-0 flex-1 items-stretch justify-around gap-1 overflow-x-auto px-1'

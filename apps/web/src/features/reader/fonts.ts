@@ -329,7 +329,7 @@ export function ensureBuiltinFontLoaded(id: string): void {
  *  stylesheet has declared its @font-face rules. A device face acquired here
  *  is released again — card previews hold their own reference for the dialog
  *  lifetime. */
-export async function waitForCardFont(font: ResolvedFont, text: string): Promise<void> {
+export async function waitForCardFont(font: ResolvedFont, text: string, weights = [400, 500, 600, 700]): Promise<boolean> {
   const deviceHeld = font.device ? await ensureDeviceFontFace(font.device) : undefined
   try {
     if (font.device && !deviceHeld) throw new Error('card font file unavailable')
@@ -354,17 +354,12 @@ export async function waitForCardFont(font: ResolvedFont, text: string): Promise
     }
     if (font.uploaded) await ensureUploadedFontLoaded(font.uploaded)
     const family = font.stack.split(',')[0].trim()
-    if (typeof document.fonts?.load !== 'function') return
-    await Promise.all([400, 500, 600, 700].map(async (weight) => {
-      await document.fonts.load(`${weight} 16px ${family}`, text || '汉')
-    }))
+    if (typeof document.fonts?.load !== 'function') return false
+    const faces = await Promise.all(weights.map((weight) => document.fonts.load(`${weight} 16px ${family}`, text || '汉')))
+    return faces.every((loaded) => loaded.length > 0)
   } finally {
     if (font.device) releaseDeviceFontFace(font.device.id)
   }
-}
-
-export function ensureBuiltinFontsLoaded(): void {
-  BUILTIN_FONTS.forEach((font) => ensureBuiltinFontLoaded(font.id))
 }
 
 const injectedUploadedIds = new Set<string>()
@@ -446,6 +441,7 @@ interface DeviceFaceEntry {
 }
 
 const injectedDeviceEntries = new Map<string, DeviceFaceEntry>()
+const classifiedDeviceIds = new Set<string>()
 
 function releaseEntryPool(entry: DeviceFaceEntry, id: string): void {
   if (entry.url && !entry.poolReleased) {
@@ -483,8 +479,11 @@ async function loadDeviceFace(font: DeviceFontMeta, entry: DeviceFaceEntry): Pro
   entry.style = style
   if (typeof document.fonts?.load === 'function') {
     try {
-      await document.fonts.load(`16px "${uploadedFontAlias(font.id)}"`)
-      setUploadedLatin(font.id, !canRenderCjk(uploadedFontAlias(font.id)))
+      const faces = await document.fonts.load(`16px "${uploadedFontAlias(font.id)}"`)
+      if (faces.length && injectedDeviceEntries.get(font.id) === entry) {
+        classifiedDeviceIds.add(font.id)
+        setUploadedLatin(font.id, !canRenderCjk(uploadedFontAlias(font.id)))
+      }
     } catch (err) {
       console.warn(`[fonts] failed to load device font ${font.id}:`, err)
     }
@@ -506,7 +505,7 @@ export function ensureDeviceFontFace(font: DeviceFontMeta): Promise<string | nul
     existing.refs += 1
     return existing.ready
   }
-  if (!isCjkFontName(font.family)) setUploadedLatin(font.id, true)
+  if (!classifiedDeviceIds.has(font.id) && !isCjkFontName(font.family)) setUploadedLatin(font.id, true)
   const entry: DeviceFaceEntry = { style: null, refs: 1, ready: null!, url: null, poolReleased: false }
   entry.ready = loadDeviceFace(font, entry)
   injectedDeviceEntries.set(font.id, entry)

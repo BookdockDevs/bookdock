@@ -1258,6 +1258,34 @@ describe('reader settings (per-book reading settings)', () => {
     expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: null, boundPresetId: null })).toEqual({})
     expect(metaOf()).toEqual({})
   })
+
+  it('stores the per-book reading-theme override independently and clears it without touching the rest', () => {
+    updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 24 }, boundPresetId: 'preset-a' })
+    expect(updateReaderBookSettings(ownerId, book.id, { readingThemeId: 'custom-sea' })).toEqual({
+      viewSettings: { fontSize: 24 },
+      boundPresetId: 'preset-a',
+      readingThemeId: 'custom-sea',
+    })
+    // Clearing the theme keeps the typography diff and the preset binding
+    expect(updateReaderBookSettings(ownerId, book.id, { readingThemeId: null })).toEqual({
+      viewSettings: { fontSize: 24 },
+      boundPresetId: 'preset-a',
+    })
+    // Another user's book stays untouched
+    const otherUser = seedUser(db, 'other-theme-user')
+    expect(getReaderBookSettings(otherUser, book.id)).toEqual({})
+    expect(updateReaderBookSettings(otherUser, book.id, { readingThemeId: 'custom-sea' })).toEqual({ readingThemeId: 'custom-sea' })
+    expect(getReaderBookSettings(ownerId, book.id).readingThemeId).toBeUndefined()
+  })
+
+  it('atomically replaces legacy appearance with card selection and leaves layout preferences intact', () => {
+    const viewSettings = { fontSize: 22 }
+    updateReaderBookSettings(ownerId, book.id, { viewSettings, readingThemeId: 'cream' })
+    const themeSelection = { mode: 'custom' as const, themeId: 'saved', cards: { paletteId: 'paper', cssId: null, highlightIds: ['rule-1', 'rule-2'] } }
+    expect(updateReaderBookSettings(ownerId, book.id, { themeSelection })).toEqual({ viewSettings, themeSelection })
+    expect(getReaderBookSettings(ownerId, book.id)).toEqual({ viewSettings, themeSelection })
+    expect(updateReaderBookSettings(ownerId, book.id, { themeSelection: null })).toEqual({ viewSettings })
+  })
 })
 
 describe('updateBook coverPaletteId (pinned placeholder cover palette)', () => {

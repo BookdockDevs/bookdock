@@ -49,7 +49,7 @@ describe('ui.store resetUserScopedPrefs', () => {
     expect(store.getState().ttsVoiceId).toBe('')
     expect(store.getState().readingTimerMode).toBe('auto')
     expect(store.getState().fontSize).toBe(22)
-    expect(store.getState().customThemes).toEqual([])
+    expect(store.getState().customThemes.map(({ id }) => id)).toEqual(['paper', 'cream', 'sepia', 'night'])
   })
 
   it('keeps device-adaptation preferences, which describe the screen not the reader', async () => {

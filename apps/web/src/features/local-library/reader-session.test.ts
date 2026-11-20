@@ -50,10 +50,12 @@ describe('local reader adapter behavior', () => {
     const owner = { kind: 'account' as const, connectionId: 'server-a', accountId: 'reader-a' }
     await session.saveSettings({ fontSize: 29, lineHeight: 2 })
     await session.bindPreset('same-preset-id', owner)
+    await session.setReadingTheme('paper')
     await repository.close()
     const reopened = await openLocalReaderSession(ref)
     const detail = (await reopened.getBook()).data
     expect(detail.readerSettings?.viewSettings).toEqual({ fontSize: 29, lineHeight: 2 })
+    expect(detail.readerSettings?.readingThemeId).toBe('paper')
     expect(detail.clientPresetBinding).toEqual({ presetId: 'same-preset-id', owner })
     expect(resolveClientPresetBinding(detail.clientPresetBinding, owner)).toBe('same-preset-id')
     expect(resolveClientPresetBinding(detail.clientPresetBinding, { ...owner, accountId: 'reader-b' })).toBeNull()
@@ -61,8 +63,10 @@ describe('local reader adapter behavior', () => {
     expect(resolveClientPresetBinding(detail.clientPresetBinding, { kind: 'device' })).toBeNull()
     expect((await (await openLocalReaderSession(otherRef)).getBook()).data.clientPresetBinding).toBeNull()
     await reopened.bindPreset(null, owner)
+    await reopened.setReadingTheme(null)
     expect((await reopened.getBook()).data.clientPresetBinding).toBeNull()
     expect((await reopened.getBook()).data.readerSettings?.viewSettings).toEqual({ fontSize: 29, lineHeight: 2 })
+    expect((await reopened.getBook()).data.readerSettings?.readingThemeId).toBeUndefined()
   })
 
   it('reads actual catalog metadata and percentages without fabricating a server file path', async () => {

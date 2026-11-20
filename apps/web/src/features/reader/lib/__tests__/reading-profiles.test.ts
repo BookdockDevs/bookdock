@@ -9,6 +9,7 @@ import {
   foldReadingChange,
   nextPresetName,
   parseReadingConfig,
+  pickReadingPresetSnapshot,
   pickReadingSnapshot,
   renameReadingPreset,
   resolveProfileSnapshot,
@@ -27,8 +28,8 @@ function configWith(preset: ReadingPreset): ReadingConfig {
 }
 
 describe('reading profiles', () => {
-  it('covers every reading-menu setting (48 keys)', () => {
-    expect(READING_PROFILE_KEYS).toHaveLength(48)
+  it('covers every reading-menu setting', () => {
+    expect(READING_PROFILE_KEYS).toHaveLength(49)
     expect(READING_PROFILE_KEYS).toContain('cleanReading')
     expect(READING_PROFILE_KEYS).toContain('readingThemeMode')
     expect(READING_PROFILE_KEYS).toContain('fontFamily')
@@ -40,7 +41,7 @@ describe('reading profiles', () => {
   })
 
   it('parses and round-trips a config', () => {
-    const cfg = configWith({ id: 'p1', name: '护眼', snapshot: snapshot({ fontSize: 22 }) })
+    const cfg = configWith({ id: 'p1', name: '护眼', snapshot: pickReadingPresetSnapshot(snapshot({ fontSize: 22 })) })
     const raw = serializeReadingConfig(cfg)
     expect(parseReadingConfig(raw)).toEqual(cfg)
   })
@@ -145,6 +146,13 @@ describe('reading profiles', () => {
     const next = foldReadingChange(configWith(preset), 'fontSize', 24, 'p1')
     expect(next.presets[0].snapshot.fontSize).toBe(24)
     expect(next.global.fontSize).toBe(16)
+  })
+
+  it('routes a theme setting to global even when a layout preset is targeted', () => {
+    const preset = { id: 'p1', name: 'Layout', snapshot: pickReadingPresetSnapshot(snapshot({ fontSize: 20 })) }
+    const next = foldReadingChange(configWith(preset), 'darkReadingThemeId', 'cream', 'p1')
+    expect(next.global.darkReadingThemeId).toBe('cream')
+    expect(next.presets[0]).toEqual(preset)
   })
 
   it('folds changes into the global config without a target', () => {

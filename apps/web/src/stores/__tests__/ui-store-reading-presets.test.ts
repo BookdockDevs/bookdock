@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useUiStore } from '@/stores/ui.store'
-import { parseReadingConfig, serializeReadingConfig, READING_PROFILE_KEYS } from '@/features/reader/lib/reading-profiles'
+import { selectEffectiveHighlightRules, selectEffectiveReadingThemeId, selectEffectiveReadingCss, selectReaderThemeOverride, useUiStore } from '@/stores/ui.store'
+import { parseReadingConfig, pickReadingPresetSnapshot, pickReadingSnapshot, serializeReadingConfig } from '@/features/reader/lib/reading-profiles'
 
 // Snapshot the store right after module load (jsdom defaults + seeded config);
 // tests restore this baseline to stay independent of each other.
@@ -10,6 +10,133 @@ const baseline = useUiStore.getState()
 function currentConfig() {
   return parseReadingConfig(useUiStore.getState().readingConfig)!
 }
+
+describe('ui.store theme scope writes', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useUiStore.setState({ readingConfig: baseline.readingConfig })
+    useUiStore.setState(baseline)
+  })
+
+  it('changing the theme while a preset is active updates the global theme only', () => {
+    useUiStore.getState().createReadingPreset('P1')
+    const preset = currentConfig().presets[0]!
+    useUiStore.getState().setSystemTheme('light')
+    useUiStore.getState().setReadingThemeId('cream')
+    const cfg = currentConfig()
+    // A pick fills the slot of the tone the reader is in; the mode is a
+    // separate decision and stays on `system` so the device can still flip it.
+    expect(cfg.global).toMatchObject({ readingThemeId: 'cream', lightReadingThemeId: 'cream', readingThemeMode: 'system' })
+    expect(cfg.presets[0]).toEqual(preset)
+    expect(useUiStore.getState().activePresetId).toBe(preset.id)
+    expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('cream')
+  })
+
+  it('keeps system mode switching day and night after a daytime pick', () => {
+    const store = useUiStore.getState()
+    store.setReadingThemeMode('system')
+    store.setSystemTheme('light')
+    store.setGlobalDefaultTheme('dark', 'sepia')
+    store.setReadingThemeId('cream')
+    expect(useUiStore.getState()).toMatchObject({ readingThemeMode: 'system', lightReadingThemeId: 'cream' })
+    expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('cream')
+    store.setSystemTheme('dark')
+    expect(useUiStore.getState().readingThemeMode).toBe('system')
+    expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('sepia')
+    // A pick made while the device is dark lands on the night slot.
+    store.setReadingThemeId('night')
+    expect(useUiStore.getState()).toMatchObject({ darkReadingThemeId: 'night', lightReadingThemeId: 'cream', readingThemeMode: 'system' })
+    store.setSystemTheme('light')
+    expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('cream')
+  })
+
+  it('a manual day lock ignores the device turning dark', () => {
+    const store = useUiStore.getState()
+    store.setSystemTheme('light')
+    store.setReadingThemeId('cream')
+    store.setReadingThemeMode('light')
+    store.setSystemTheme('dark')
+    expect(useUiStore.getState().readingThemeMode).toBe('light')
+    expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('cream')
+  })
+
+  it('switches legacy layout presets while preserving defaults and the single-book theme', () => {
+    const legacy = {
+      global: { ...currentConfig().global, readingThemeMode: 'light', lightReadingThemeId: 'cream', darkReadingThemeId: 'sepia' },
+      presets: [{ id: 'legacy', name: 'Legacy', snapshot: { fontSize: 36, readingThemeMode: 'dark', darkReadingThemeId: 'night' } }],
+    }
+    useUiStore.setState({ readingConfig: JSON.stringify(legacy) })
+    const store = useUiStore.getState()
+    store.setReaderThemeOverride('book', 'paper')
+    store.activateReadingPreset('legacy')
+    expect(useUiStore.getState().fontSize).toBe(36)
+    expect(useUiStore.getState()).toMatchObject({ readingThemeMode: 'light', lightReadingThemeId: 'cream', darkReadingThemeId: 'sepia' })
+    expect(selectReaderThemeOverride(useUiStore.getState())?.id).toBe('paper')
+    store.activateReadingPreset(null)
+    expect(useUiStore.getState().fontSize).toBe(legacy.global.fontSize)
+    expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('cream')
+    expect(selectReaderThemeOverride(useUiStore.getState())?.id).toBe('paper')
+  })
+
+  it('saveCustomTheme writes the definition without changing the selection', () => {
+    const before = useUiStore.getState().readingThemeId
+    const beforeLight = useUiStore.getState().lightReadingThemeId
+    useUiStore.getState().saveCustomTheme({ id: 'custom-t1', name: 'T', colors: { bg: '#111111', fg: '#eeeeee', primary: '#888888', pageBg: '#101820', outsideBg: '#050505' } })
+    expect(useUiStore.getState().customThemes.some((t) => t.id === 'custom-t1')).toBe(true)
+    expect(useUiStore.getState().readingThemeId).toBe(before)
+    expect(useUiStore.getState().lightReadingThemeId).toBe(beforeLight)
+  })
+
+  it('trial and override session slots shadow the chain but never touch the config blob', () => {
+    const before = useUiStore.getState().readingConfig
+    const trial = { id: 'trial-draft', name: 'T', colors: { bg: '#111111', fg: '#eeeeee', primary: '#888888', pageBg: '#101820', outsideBg: '#050505' } }
+    useUiStore.getState().setReaderThemeOverride('book-1', 'custom-missing')
+    useUiStore.getState().setReaderThemeTrial('book-1', trial)
+    // The trial shadows the override; a dangling override id falls back to null
+    expect(selectReaderThemeOverride(useUiStore.getState())?.id).toBe('trial-draft')
+    useUiStore.getState().setReaderThemeTrial(null, null)
+    expect(selectReaderThemeOverride(useUiStore.getState())).toBeNull()
+    // The persisted config blob is untouched by both slots
+    expect(useUiStore.getState().readingConfig).toBe(before)
+    useUiStore.getState().setReaderThemeOverride(null, null)
+    expect(useUiStore.getState().readerThemeOverrideId).toBeNull()
+  })
+})
+
+describe('ui.store effective reading CSS (phase 2)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useUiStore.setState(baseline)
+  })
+
+  it('follows the effective theme and lets a trial draft carry CSS', () => {
+    useUiStore.getState().saveCustomTheme({ id: 'css-src', name: 'Ink', colors: { bg: '#111111', fg: '#eeeeee', primary: '#888888' }, contentCss: 'p { color: red }', uiCss: '[data-bd-ui="header"] { color: blue }' })
+    useUiStore.getState().setReadingThemeId('css-src')
+    expect(selectEffectiveReadingCss(useUiStore.getState()).contentCss).toBe('p { color: red }')
+    // a trial draft carries CSS with its colors
+    useUiStore.getState().setReaderThemeTrial('book-1', { id: 't', name: 'T', colors: { bg: '#111111', fg: '#eeeeee', primary: '#888888' }, contentCss: 'p { margin: 2em }' })
+    expect(selectEffectiveReadingCss(useUiStore.getState()).contentCss).toBe('p { margin: 2em }')
+    useUiStore.getState().setReaderThemeTrial(null, null)
+  })
+})
+
+describe('ui.store effective highlight rules (phase 3)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useUiStore.setState(baseline)
+  })
+
+  const dialogueRule = { id: 'r1', name: '对白', pattern: '「[^」]*」', isRegex: true, enabled: true, style: { backgroundColor: '#F5E3B8' } }
+
+  it('follows the effective theme chain and lets a trial draft carry rules', () => {
+    useUiStore.getState().saveCustomTheme({ id: 'hl-src', name: 'Novel', colors: { bg: '#111111', fg: '#eeeeee', primary: '#888888' }, highlightRules: [dialogueRule] })
+    useUiStore.getState().setReadingThemeId('hl-src')
+    expect(selectEffectiveHighlightRules(useUiStore.getState())).toEqual([dialogueRule])
+    useUiStore.getState().setReaderThemeTrial('book-1', { id: 't', name: 'T', colors: { bg: '#111111', fg: '#eeeeee', primary: '#888888' }, highlightRules: [dialogueRule] })
+    expect(selectEffectiveHighlightRules(useUiStore.getState())).toEqual([dialogueRule])
+    useUiStore.getState().setReaderThemeTrial(null, null)
+  })
+})
 
 describe('ui.store reading preset routing', () => {
   beforeEach(() => {
@@ -33,7 +160,7 @@ describe('ui.store reading preset routing', () => {
     expect(useUiStore.getState().activePresetId).toBe(cfg.presets[0].id)
   })
 
-  it('creating a preset snapshots every current setting (all 40 keys)', () => {
+  it('creating a preset snapshots layout and behavior without theme defaults', () => {
     const state = useUiStore.getState()
     // Nudge a few representative settings away from their defaults first
     state.setFontSize(26)
@@ -41,10 +168,11 @@ describe('ui.store reading preset routing', () => {
     state.setReadingMode('page')
     useUiStore.getState().createReadingPreset('全量')
     const snapshot = currentConfig().presets[0].snapshot
-    const after = useUiStore.getState()
-    for (const key of READING_PROFILE_KEYS) {
-      expect(snapshot[key]).toBe(after[key])
-    }
+    const after = pickReadingSnapshot(useUiStore.getState())
+    expect(snapshot).toEqual(pickReadingPresetSnapshot(after))
+    expect(snapshot).not.toHaveProperty('lightReadingThemeId')
+    expect(snapshot).not.toHaveProperty('darkReadingThemeId')
+    expect(snapshot).not.toHaveProperty('readingThemeMode')
   })
 
   it('creating while another preset is active copies the displayed (preset) values', () => {
@@ -191,4 +319,40 @@ describe('ui.store reading preset routing', () => {
     expect(legacy.global.chapterTitleSize).toBe(1.5)
     expect(legacy.presets[0].snapshot.chapterTitleSize).toBe(1.5)
   })
+})
+
+it('allows the dark palette on the daytime slot and a whole custom theme on the nighttime slot', () => {
+  useUiStore.setState(baseline)
+  const store = useUiStore.getState()
+  store.saveCustomTheme({ id: 'ink', name: 'Ink', colors: { bg: '#fff', fg: '#000', primary: '#00f' }, contentCss: 'p { color: red }' })
+  store.setReadingThemeMode('system')
+  store.setSystemTheme('light')
+  store.setGlobalDefaultTheme('light', 'night')
+  store.setGlobalDefaultTheme('dark', 'ink')
+  expect(useUiStore.getState().readingThemeMode).toBe('system')
+  expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('night')
+  store.setSystemTheme('dark')
+  expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('ink')
+  expect(selectEffectiveReadingCss(useUiStore.getState()).contentCss).toBe('p { color: red }')
+  expect(currentConfig().global).toMatchObject({ lightReadingThemeId: 'night', darkReadingThemeId: 'ink' })
+})
+
+it('restores saved reading presets and the active layout on startup before settings sync', async () => {
+  localStorage.clear()
+  try {
+    localStorage.setItem('bd-read-font-size', '20')
+    localStorage.setItem('bd-reading-config', JSON.stringify({
+      global: { fontSize: 24 },
+      presets: [{ id: 'saved-layout', name: 'Saved layout', snapshot: { fontSize: 31 } }],
+    }))
+    localStorage.setItem('bd-reading-active-preset', 'saved-layout')
+    vi.resetModules()
+    const { useUiStore: reloadedStore } = await import('@/stores/ui.store')
+    const state = reloadedStore.getState()
+    expect(parseReadingConfig(state.readingConfig)?.presets.map(({ name }) => name)).toEqual(['Saved layout'])
+    expect(state.activePresetId).toBe('saved-layout')
+    expect(state.fontSize).toBe(31)
+  } finally {
+    localStorage.clear()
+  }
 })

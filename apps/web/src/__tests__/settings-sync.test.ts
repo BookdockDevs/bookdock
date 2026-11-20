@@ -79,6 +79,18 @@ describe('SettingsSync persistence', () => {
     })
   }
 
+  it('keeps existing reading presets when sync returns an unreadable reading config', async () => {
+    useUiStore.getState().createReadingPreset('Existing layout')
+    const original = useUiStore.getState().readingConfig
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ data: { readingConfig: '' } }), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    mountSync()
+    await vi.runAllTimersAsync()
+
+    expect(useUiStore.getState().readingConfig).toBe(original)
+  })
+
   it('saves a preset even though creation also changes the active pointer', async () => {
     mountSync()
     await vi.runAllTimersAsync()
@@ -217,7 +229,7 @@ describe('SettingsSync persistence', () => {
     }
     vi.stubGlobal('BroadcastChannel', FakeChannel)
 
-    useUiStore.setState({ customThemes: [theme] })
+    useUiStore.getState().setCustomThemes([theme])
     mountSync()
     await vi.runAllTimersAsync()
 
@@ -252,7 +264,7 @@ describe('SettingsSync persistence', () => {
     }
     vi.stubGlobal('BroadcastChannel', FakeChannel)
 
-    useUiStore.setState({ customThemes: [theme] })
+    useUiStore.getState().setCustomThemes([theme])
     mountSync()
     await vi.runAllTimersAsync()
 
@@ -269,7 +281,7 @@ describe('SettingsSync persistence', () => {
     await vi.advanceTimersByTimeAsync(3000)
 
     // A real change is still adopted, which is the whole point of the channel.
-    expect(useUiStore.getState().customThemes).toEqual([night])
+    expect(useUiStore.getState().customThemes.at(-1)).toEqual(night)
     expect(channels.flatMap((channel) => channel.posted)).toEqual(expect.arrayContaining([
       expect.objectContaining({ userId: user.id }),
     ]))
@@ -320,7 +332,7 @@ describe('SettingsSync persistence', () => {
     // The echo loop: a received payload is re-parsed into new theme objects, so
     // reference equality called every reply an edit and two tabs answered each
     // other once a second, forever. Content equality is what says "not a change".
-    useUiStore.setState({ customThemes: [theme] })
+    useUiStore.getState().setCustomThemes([theme])
     const before = useUiStore.getState().customThemes
 
     // Same content, different array and different object identity.
@@ -330,12 +342,12 @@ describe('SettingsSync persistence', () => {
   })
 
   it('still applies a synced custom-theme list whose content differs', () => {
-    useUiStore.setState({ customThemes: [theme] })
+    useUiStore.getState().setCustomThemes([theme])
     const other = { id: 't2', name: 'Night', colors: { bg: '#000', fg: '#eee', primary: '#0af' } }
 
     useUiStore.getState().setCustomThemes([other])
 
-    expect(useUiStore.getState().customThemes).toEqual([other])
+    expect(useUiStore.getState().customThemes.at(-1)).toEqual(other)
   })
 
   it('keeps device font preferences, order and selection out of the account payload', async () => {

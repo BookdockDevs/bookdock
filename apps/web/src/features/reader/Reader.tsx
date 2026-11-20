@@ -10,7 +10,8 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { selectReadingTone, useUiStore } from '@/stores/ui.store'
+import { effectiveThemeCards, materializeTheme, themeSelectionForSlot, writeThemeSelectionForSlot } from '@/features/reading-theme/theme-library'
+import { selectEffectiveHighlightRules, selectEffectiveReadingCss, selectEffectiveReadingThemeId, selectReadingThemeSlot, selectReadingTone, useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { LOCAL_READER_SHORTCUT_SCOPE, isReaderContentTarget, isReaderModalOpen, isReaderShortcutModalOpen, readReaderShortcuts, shortcutMatches } from './lib/reader-shortcuts'
 import { useSettingsSyncStore } from '@/stores/settings-sync.store'
@@ -81,7 +82,8 @@ import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
 import { ImageViewer } from './components/ImageViewer'
 import { BOOKMARK_CONTEXT_MAX_LENGTH, resolveClientPresetBinding } from '@bookdock/shared'
-import type { AnnotationRes, BookDetailRes, ClientLibraryDetailView, ClientLibraryListView, ClientPreferenceOwner, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+import { readingThemeSelectionStateSchema } from '@bookdock/shared'
+import type { AnnotationRes, BookDetailRes, ClientLibraryDetailView, ClientLibraryListView, ClientPreferenceOwner, HighlightRuleDef, ReadingThemeSelection, ReadingThemeSelectionState, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
 
 // Reader chrome geometry (desktop hover). The summon bands match the visible
 // chrome rows exactly — the header is h-12 and the progress strip is 3rem — so
@@ -301,17 +303,15 @@ export default function Reader() {
       const insideCanvas = rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
       const overDialog = target instanceof Element && Boolean(target.closest('[role="dialog"]'))
       const overToast = target instanceof Element && Boolean(target.closest('[data-toast-id]'))
-      // The unpinned sidebar overlays the canvas while staying out of flow, so the
-      // canvas rect alone cannot tell pointer-over-sidebar from pointer-over-text;
-      // hovering the panel must not summon the chrome underneath it.
       const overSidebar = target instanceof Element && Boolean(target.closest('#reader-navigation'))
+      const overTrialBar = target instanceof Element && Boolean(target.closest('[data-theme-trial-bar]'))
       const currentReadingMode = useUiStore.getState().readingMode
       // Once the footer is up it keeps a taller keep-alive band, so the pointer can
       // travel from the strip up to a capsule without falling out of the sensor.
       const footerBand = footerVisibleRef.current ? CHROME_FOOTER_SUSTAIN_BAND : CHROME_FOOTER_BAND
-      const inHeader = Boolean(insideCanvas && !overDialog && !overToast && !overSidebar && rect && clientY <= rect.top + CHROME_HEADER_BAND
+      const inHeader = Boolean(insideCanvas && !overDialog && !overToast && !overSidebar && !overTrialBar && rect && clientY <= rect.top + CHROME_HEADER_BAND
         && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
-      const inFooter = Boolean(insideCanvas && !overDialog && !overToast && !overSidebar && rect && clientY >= rect.bottom - footerBand
+      const inFooter = Boolean(insideCanvas && !overDialog && !overToast && !overSidebar && !overTrialBar && rect && clientY >= rect.bottom - footerBand
         && clientX >= rect.left
         && (currentReadingMode !== 'scroll' || clientX < rect.right - 20))
       // Staying inside a band also cancels a pending hide, not just crossing into it.
@@ -678,6 +678,89 @@ export default function Reader() {
       globalSetterForKey(key, value)
     }
   }, [saveViewSettings, globalSetterForKey, readingMode])
+
+  const guestThemeKey = isGuest ? `bd-guest-book-theme:${id}` : null
+  const [guestTheme, setGuestTheme] = useState<{ key: string; selection: ReadingThemeSelectionState | null }>()
+  const storedGuestTheme = useMemo(() => {
+    if (!guestThemeKey) return null
+    try {
+      return readingThemeSelectionStateSchema.parse(JSON.parse(localStorage.getItem(guestThemeKey) ?? 'null'))
+    } catch {
+      return null
+    }
+  }, [guestThemeKey])
+  const storedSelection = guestTheme?.key === guestThemeKey ? guestTheme.selection : storedGuestTheme
+  const storedAppearance = bookQuery.data?.data?.readerSettings
+  const hasThemeSelection = guestThemeKey ? Boolean(storedSelection)
+    : Boolean(storedAppearance?.themeSelection || storedAppearance?.readingThemeId)
+  const themeLibrary = useUiStore((state) => state.themeLibrary)
+  const fallbackThemeId = useUiStore(selectEffectiveReadingThemeId)
+  // The book keeps one selection per tone, so a daytime pick stops applying the
+  // moment the reader moves to night (device flip in system mode, or a manual
+  // lock). Resolution happens here; everything downstream keeps seeing a single
+  // selection for the tone that is actually on screen.
+  const themeSlot = useUiStore(selectReadingThemeSlot)
+  const appearance = useMemo(() => {
+    const stored = guestThemeKey ? { themeSelection: storedSelection } : storedAppearance
+    if (!stored) return stored
+    return { ...stored, themeSelection: themeSelectionForSlot(stored.themeSelection, themeSlot) }
+  }, [guestThemeKey, storedSelection, storedAppearance, themeSlot])
+  const composition = useMemo(() => {
+    if (!appearance?.themeSelection && !appearance?.readingThemeId) return null
+    const { cards } = effectiveThemeCards(themeLibrary, fallbackThemeId, appearance)
+    return materializeTheme(themeLibrary, { id: 'book-appearance', name: '', cards })
+  }, [appearance, themeLibrary, fallbackThemeId])
+  const setThemeSelectionMutation = useMutation({
+    scope: { id: `reader-theme:${cacheId}` },
+    mutationFn: async (selection: ReadingThemeSelectionState | null) => { await dataSource.setThemeSelection(selection) },
+    onError: (error) => {
+      if (queryClient.isMutating({ mutationKey: ['reader-theme', cacheId] }) <= 1) {
+        void queryClient.invalidateQueries({ queryKey: ['book', cacheId] })
+      }
+      notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-theme:${id}` })
+    },
+    mutationKey: ['reader-theme', cacheId],
+  })
+  const { mutate: persistThemeSelection } = setThemeSelectionMutation
+  const setThemeSelection = useCallback((selection: ReadingThemeSelection | null, clear?: 'current') => {
+    const queryKey = ['book', cacheId]
+    const settings = queryClient.getQueryData<{ data: BookDetailRes }>(queryKey)?.data.readerSettings
+    const storedState = guestThemeKey ? storedSelection : settings?.themeSelection ??
+      (settings?.readingThemeId ? { mode: 'theme' as const, themeId: settings.readingThemeId } : null)
+    const next = selection === null && clear !== 'current' ? null
+      : writeThemeSelectionForSlot(storedState, themeSlot, selection)
+    if (!guestThemeKey) {
+      // Publish synchronously so the next pick starts from this pair, even
+      // while its persistence request is still queued.
+      void queryClient.cancelQueries({ queryKey })
+      queryClient.setQueryData<{ data: BookDetailRes }>(queryKey, (old) => {
+        if (!old?.data) return old
+        const readerSettings = { ...old.data.readerSettings }
+        delete readerSettings.readingThemeId
+        if (next) readerSettings.themeSelection = next
+        else delete readerSettings.themeSelection
+        return { ...old, data: { ...old.data, readerSettings } }
+      })
+      persistThemeSelection(next)
+      return
+    }
+    setGuestTheme({ key: guestThemeKey, selection: next })
+    try {
+      if (next) localStorage.setItem(guestThemeKey, JSON.stringify(next))
+      else localStorage.removeItem(guestThemeKey)
+    } catch {
+      // The appearance remains available for the open book in private mode.
+    }
+  }, [cacheId, guestThemeKey, persistThemeSelection, queryClient, storedSelection, themeSlot])
+
+  const setReaderThemeOverride = useUiStore((s) => s.setReaderThemeOverride)
+  const setReaderThemeTrial = useUiStore((s) => s.setReaderThemeTrial)
+  useEffect(() => {
+    setReaderThemeOverride(id, null, composition)
+    return () => setReaderThemeOverride(null, null)
+  }, [id, composition, setReaderThemeOverride])
+  useEffect(() => () => setReaderThemeTrial(null, null), [id, setReaderThemeTrial])
+
   const viewSettingsContextValue = useMemo(
     () => ({
       effective: effectiveSettings,
@@ -687,8 +770,11 @@ export default function Reader() {
       perBookDiff: perBook,
       boundPresetId,
       setBoundPreset,
+      appearance,
+      hasThemeSelection,
+      setThemeSelection,
     }),
-    [effectiveSettings, perBookActive, setPerBookActive, updateSetting, perBook, boundPresetId, setBoundPreset],
+    [effectiveSettings, perBookActive, setPerBookActive, updateSetting, perBook, boundPresetId, setBoundPreset, appearance, hasThemeSelection, setThemeSelection],
   )
 
   const progressQuery = useQuery({
@@ -1154,7 +1240,27 @@ export default function Reader() {
 
   const shortcutOwner = local ? LOCAL_READER_SHORTCUT_SCOPE : authUser?.id ?? null
   const resolvedShortcuts = useCallback(() => readReaderShortcuts(shortcutOwner), [shortcutOwner])
-  const { containerRef, renderer, fontStack, fontCss, preparationFailed, retryPreparation } = useReaderRenderer({
+  const userContentCssRaw = useUiStore((st) => selectEffectiveReadingCss(st).contentCss)
+  const userUiCssRaw = ''
+  // Phase-3 automatic highlight rules: the effective (trial / per-book
+  // override / follow) list; the JSON string keeps the selector stable across
+  // unrelated store updates.
+  const highlightRulesJson = useUiStore((st) => JSON.stringify(selectEffectiveHighlightRules(st)))
+  const highlightRules = useMemo(() => JSON.parse(highlightRulesJson) as HighlightRuleDef[], [highlightRulesJson])
+
+  const {
+    containerRef,
+    renderer,
+    fontStack,
+    fontCss,
+    userUiCss,
+    wallpaperUrl,
+    wallpaperOpacity,
+    wallpaperBlur,
+    hasWallpaper,
+    preparationFailed,
+    retryPreparation,
+  } = useReaderRenderer({
     shortcuts: resolvedShortcuts,
     bookProvider: local?.provider ?? cachedRemoteProvider,
     resolvedFonts: local && !authUser ? [] : undefined,
@@ -1169,6 +1275,8 @@ export default function Reader() {
     initialCfi: initialCfiRef.current,
     initialFraction: initialFractionRef.current,
     settings: effectiveSettings,
+    userCss: { content: userContentCssRaw, ui: userUiCssRaw },
+    highlightRules,
     onViewRebuilding: (pending) => setViewRebuilding(pending),
     chapterWordCounts,
     onRendered: (renderedUrl) => {
@@ -2097,9 +2205,9 @@ export default function Reader() {
 
   if (bookQuery.isError) {
     return (
-      <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+      <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
-        <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+        <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-500 dark:bg-red-500/20" aria-hidden="true">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
@@ -2131,9 +2239,9 @@ export default function Reader() {
 
   if (!bookQuery.isLoading && !bookQuery.data?.data) {
     return (
-      <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+      <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
-        <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+        <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-stone-500/10 text-[var(--bd-read-sub)]" aria-hidden="true">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
@@ -2160,7 +2268,29 @@ export default function Reader() {
       <RendererContext.Provider value={rendererContextValue}>
       <AutoReadingSessionProvider renderer={renderer} coordinator={playbackCoordinator} onStart={onAutoReadingStart}>
       <TtsSessionProvider renderer={renderer} coordinator={playbackCoordinator} guestReadOnly={isGuest} onStart={onTtsStart}>
-      <div className={`fixed inset-0 z-30 ${readingTone}`} style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}>
+      <div
+        data-bd-ui="outside"
+        data-bd-user-ui-root
+        data-bd-has-wallpaper={hasWallpaper ? 'true' : undefined}
+        className={`fixed inset-0 z-30 bg-[var(--bd-read-bg)] text-[var(--bd-read-text)] ${readingTone}`}
+      >
+        {wallpaperUrl && (
+          <div
+            data-bd-wallpaper
+            aria-hidden="true"
+            className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
+          >
+            <div
+              className="absolute inset-0 bg-center bg-cover bg-no-repeat transition-[opacity,filter] duration-300"
+              style={{
+                backgroundImage: `url("${wallpaperUrl}")`,
+                opacity: wallpaperOpacity ?? 1,
+                filter: wallpaperBlur ? `blur(${wallpaperBlur}px)` : undefined,
+              }}
+            />
+          </div>
+        )}
+        {renderer && !renderer.isFixedLayout && userUiCss && <style data-bd-user-ui-css>{userUiCss}</style>}
         {local && localSaveError && <div role="alert" className="absolute left-1/2 top-4 z-[80] w-max max-w-[90vw] -translate-x-1/2 space-y-2 rounded-xl border border-amber-400 bg-stone-50 p-4 text-sm text-stone-900 shadow-lg">
           <p>{_('localLibrary.progressFailed')}</p>
           <div className="flex gap-3"><Button onClick={async () => { try { await local.getProgress(); flushPendingProgress() } catch (error) { setLocalSaveError(error instanceof Error ? error.message : 'Local storage is unavailable') } }}>{_('localLibrary.retryPosition')}</Button><Button onClick={() => window.location.reload()}>{_('localLibrary.restorePosition')}</Button></div>
@@ -2169,7 +2299,7 @@ export default function Reader() {
           <p>{_('localLibrary.timerSaveFailed')}</p>
           <Button onClick={async () => { try { retryManualTimer(); flushReadingTimer(); await localTimerDestination?.retry(); if (localTimerScopeRef.current === cacheId) setLocalTimerError(null) } catch { if (localTimerScopeRef.current === cacheId) setLocalTimerError(cacheId) } }}>{_('errors.retry')}</Button>
         </div>}
-        <div className="flex h-full w-full">
+        <div className="relative z-10 flex h-full w-full">
             <ReaderSidebar
               bookId={id}
               tocPositionReady={readerReady}
@@ -2179,6 +2309,7 @@ export default function Reader() {
               mobileDockVisible={mobileDockVisible}
               onFooterSummon={onFooterEnter}
               guestReadOnly={isGuest}
+              hasWallpaper={hasWallpaper}
             />
           <div
             data-reader-canvas
@@ -2281,7 +2412,7 @@ export default function Reader() {
               // Solid theme background: the foliate iframe behind is blank
               // white until its theme styles are injected — without this the
               // loading overlay would flash white on every reader open
-              <div data-testid="reader-loading-surface" className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[var(--bd-read-page-bg)] text-sm text-[var(--bd-read-sub)]">
+              <div data-testid="reader-loading-surface" className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-[var(--bd-read-bg)] text-sm text-[var(--bd-read-sub)]">
                 {settingsFailed || preparationFailed ? (
                   <div className="pointer-events-auto flex flex-col items-center gap-3">
                     <span>{_('errors.loadFailed')}</span>
@@ -2291,7 +2422,7 @@ export default function Reader() {
                     }}>{_('reader.retry')}</Button>
                   </div>
                 ) : progressQuery.isError && initialCfiRef.current === undefined && !progressStartOver ? (
-                  <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+                  <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
                     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-500 dark:bg-red-500/20" aria-hidden="true">
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
@@ -2332,7 +2463,7 @@ export default function Reader() {
                     </div>
                   </div>
                 ) : loadError ? (
-                  <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+                  <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
                     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-500 dark:bg-red-500/20" aria-hidden="true">
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />

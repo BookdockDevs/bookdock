@@ -4,11 +4,11 @@ import { initRemoteOfflineSync } from '@/features/remote-cache/offline-sync'
 import DownloadDialogHost from '@/features/library/components/DownloadDialogHost'
 import { isDeviceBook } from '@/features/reading-data/book-source'
 import { evictLocalEpubCacheByPrefix } from '@/features/reader/content/local-epub-provider'
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useMemo, type ReactNode } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
-import { selectEffectiveReadingThemeId, useUiStore } from '../stores/ui.store'
-import { resolveReadingTheme } from '../lib/reading-theme'
+import { selectEffectiveReadingThemeId, selectReaderThemeOverride, useUiStore } from '../stores/ui.store'
+import { resolveEffectiveReadingTheme } from '../lib/reading-theme'
 import { queryClient } from '../lib/query-client'
 import '@/i18n/i18n'
 import { Toast } from '../components/ui/Toast'
@@ -126,10 +126,16 @@ export function UndoHotkey() {
 function ThemeStyleInjector() {
   const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
   const customThemes = useUiStore((s) => s.customThemes)
+  const overrideTheme = useUiStore(selectReaderThemeOverride)
   const fontSize = useUiStore((s) => s.fontSize)
   const lineHeight = useUiStore((s) => s.lineHeight)
 
-  const theme = resolveReadingTheme(readingThemeId, customThemes)
+  // The override layer keeps reader chrome (including body-portaled modals)
+  // consistent with the open book's 仅本书 theme or trial draft.
+  const theme = useMemo(
+    () => resolveEffectiveReadingTheme(overrideTheme, readingThemeId, customThemes),
+    [overrideTheme, readingThemeId, customThemes],
+  )
 
   useEffect(() => {
     const root = document.documentElement

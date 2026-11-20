@@ -1,4 +1,4 @@
-import { acceptsReadingTimerClaim, classificationValueKey, clientBookRefSchema, settingsUpdateSchema, clientReplacementSchema, replacementCreateSchema, replacementUpdateSchema, clientNoteImageSchema, CONTENT_DRAFT_TTL_MS, IDEA_IMAGE_MAX_COUNT, clientBookKey, clientBookSchema, clientPublicationReplacementSchema, clientCatalogAttributesSchema, clientCatalogPreferencesSchema, clientManualTimerSnapshotSchema, clientNoteSchema, clientOrganizationSchema, emptyClientOrganization, clientReadingCaptureGroupSchema, clientReadingCaptureSchema, clientReadingEntrySchema, clientReadingCoverageIntervalsSchema, clientReadingGroupEntrySchema, clientReadingSessionSchema, clientReadingSessionCommandSchema, clientReadingLedgerClearSchema, clientReadingSessionUpdateSchema, clientReadingRoundsSchema, clientReadingStateSchema, clientReadingTimerDraftSchema, clientReviewSchema, localDraftEnvelopeSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, mergeTimeFragments, readingTimerClaimSchema, sameClientBook, subtractTimeFragments, viewSettingsSchema } from '@bookdock/shared'
+import { acceptsReadingTimerClaim, classificationValueKey, clientBookRefSchema, settingsUpdateSchema, clientReplacementSchema, replacementCreateSchema, replacementUpdateSchema, clientNoteImageSchema, CONTENT_DRAFT_TTL_MS, IDEA_IMAGE_MAX_COUNT, clientBookKey, clientBookSchema, clientPublicationReplacementSchema, clientCatalogAttributesSchema, clientCatalogPreferencesSchema, clientManualTimerSnapshotSchema, clientNoteSchema, clientOrganizationSchema, emptyClientOrganization, clientReadingCaptureGroupSchema, clientReadingCaptureSchema, clientReadingEntrySchema, clientReadingCoverageIntervalsSchema, clientReadingGroupEntrySchema, clientReadingSessionSchema, clientReadingSessionCommandSchema, clientReadingLedgerClearSchema, clientReadingSessionUpdateSchema, clientReadingRoundsSchema, clientReadingStateSchema, clientReadingTimerDraftSchema, clientReviewSchema, readerBookSettingsSchema, localDraftEnvelopeSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, mergeTimeFragments, readingTimerClaimSchema, sameClientBook, subtractTimeFragments, viewSettingsSchema } from '@bookdock/shared'
 import type { AiMessageRes, AiThreadDetailRes, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, ArchiveDeleteRes, TrashSettings, ClientReplacement, TextReplacementRes, ReplacementCreateReq, ReplacementUpdateReq, ClientNoteImage, ClientBook, ClientTxtPublication, LocalEditorDraftEnvelope, ClientPublicationReplacement, EditorTxtSaveRes, ClientReadingLedgerClear, ClientVaultReadingSnapshot, ClientBookNotesSnapshot, ClientBookRef, ClassificationKind, ClientCatalogAttributes, ClientCatalogPreferences, ClientShelfItem, ClientManualTimerSnapshot, ClientNote, ClientOrganization, ClientReadingCapture, ClientReadingCaptureGroup, ClientReadingEntry, ClientReadingBookSnapshot, ClientReadingGroupEntry, ClientReadingLedger, ClientReadingSession, ClientReadingSessionCommand, ClientReadingSessionUpdate, ClientReadingRounds, ClientReadingRoundAction, ClientReadingState, ClientReadingTimerDraft, ClientReview, ClientReviewInput, ReadingTimerClaimInput, ReadingTimerLease, ReadStatus } from '@bookdock/shared'
 
 import { createCoverThumbnail } from './cover-thumbnail'
@@ -2154,6 +2154,15 @@ export class LocalLibraryRepository {
       if ('viewSettings' in patch) {
         if (patch.viewSettings === null) delete next.viewSettings
         else next.viewSettings = viewSettingsSchema.parse({ ...(current.viewSettings as object | undefined), ...viewSettingsSchema.parse(patch.viewSettings) })
+      }
+      if ('themeSelection' in patch) {
+        delete next.readingThemeId
+        if (patch.themeSelection === null) delete next.themeSelection
+        else next.themeSelection = readerBookSettingsSchema.shape.themeSelection.parse(patch.themeSelection)
+      }
+      if ('readingThemeId' in patch) {
+        if (patch.readingThemeId === null) delete next.readingThemeId
+        else next.readingThemeId = readerBookSettingsSchema.shape.readingThemeId.parse(patch.readingThemeId)
       }
       await request(store.put(next, key(ref)))
     })

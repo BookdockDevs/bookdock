@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react'
 
 import SmartMenu from '@/components/ui/SmartMenu'
+import SelectChip from '@/features/reading-theme/SelectChip'
+import ThemeIcon from '@/features/reading-theme/ThemeIcon'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useUiStore } from '@/stores/ui.store'
 import { pointerAnchor, type MenuAnchor } from '@/lib/menu-anchor'
-import { cn } from '@/lib/utils'
 
 import { useViewSettings } from '../view-settings-context'
 import { useIsTouch } from '../hooks/useIsTouch'
@@ -72,7 +73,7 @@ export default function ReadingPresetPicker() {
   }
 
   function startCreate() {
-    if (creating || !cfg) return
+    if (creating) return
     setDraftName(nextPresetName(cfg, _('reader.presetDefaultBase')))
     setCreating(true)
   }
@@ -98,25 +99,22 @@ export default function ReadingPresetPicker() {
     setRenamingId(null)
   }
 
-  if (!cfg) return null
-
   return (
     <div>
-      <div className="mb-2.5 flex items-center justify-between">
+      <div className="mb-2.5 flex items-start justify-between">
         <span className="text-sm font-medium text-current" title={_('reader.presetSection')}>
           {_('reader.presetSection')}
         </span>
+        {/* -mt-1 keeps the 28px icon button centred on the 20px title line
+            instead of pushing the title down by half the difference */}
         <button
           type="button"
           onClick={startCreate}
           title={_('reader.presetCreate')}
           aria-label={_('reader.presetCreate')}
-          className="flex h-6 items-center gap-1 rounded-md border border-stone-200/80 bg-stone-500/5 px-2 text-xs font-normal text-[var(--bd-read-sub)] transition-all hover:border-stone-300/90 hover:bg-stone-500/10 hover:text-current active:scale-95 dark:border-stone-800/80"
+          className="-mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-current/65 transition-colors hover:bg-(--bd-sel-bg-hover) hover:text-current focus-visible:outline-2 focus-visible:outline-current"
         >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          <span>{_('reader.presetCreate')}</span>
+          <ThemeIcon name="plus" size={13} />
         </button>
       </div>
 
@@ -144,32 +142,23 @@ export default function ReadingPresetPicker() {
                   }}
                   onBlur={commitRename}
                   placeholder={_('reader.presetNamePlaceholder')}
-                  className="h-8 w-24 rounded-lg border border-stone-400/50 bg-[var(--bd-read-bg)] px-2 text-xs text-current outline-none shadow-sm placeholder:text-[var(--bd-read-sub)]"
+                  className="h-8 w-24 rounded-lg border-[1.5px] border-(--bd-sel-border-on) bg-(--bd-sel-bg) px-2 text-xs text-(--bd-sel-text-on) outline-none placeholder:text-(--bd-hint-text)"
                 />
               ) : (
-                <button
-                  type="button"
-                  onClick={() => onChipClick(preset)}
+                <SelectChip
                   title={effective ? (bound ? _('reader.presetUnbind') : _('reader.presetBackToGlobal')) : preset.name}
-                  className={cn(
-                    'relative flex min-h-[2rem] items-center gap-1.5 rounded-lg px-3 py-1 text-xs select-none transition-all duration-150 active:scale-[0.98]',
-                    effective
-                      ? 'border border-stone-400/50 bg-[var(--bd-read-bg)] font-medium text-current shadow-sm ring-1 ring-stone-400/20 dark:border-stone-600/50 dark:ring-stone-600/20'
-                      : 'border border-stone-300/60 bg-[var(--bd-read-bg)]/80 font-normal text-[var(--bd-read-sub)] shadow-xs hover:border-stone-400 hover:text-current dark:border-stone-700/60 dark:bg-stone-800/30',
-                  )}
-                >
-                  {effective && (
-                    <span className="text-[10px] font-bold text-current">✓</span>
-                  )}
-                  <span className="max-w-24 truncate">{preset.name}</span>
-                  {/* Bound-to-this-book marker: plain text suffix — the tiny
-                      pin badge rendered as an unreadable dot at 8px */}
-                  {bound && (
-                    <span className="shrink-0 text-[10px] leading-none opacity-60">
+                  selected={effective}
+                  onClick={() => onChipClick(preset)}
+                  meta={bound && (
+                    /* Bound-to-this-book marker: plain text suffix — the tiny
+                       pin badge rendered as an unreadable dot at 8px */
+                    <span className="shrink-0 text-[10px] leading-none text-(--bd-hint-text)">
                       · {_('reader.presetBoundBadge')}
                     </span>
                   )}
-                </button>
+                >
+                  {preset.name}
+                </SelectChip>
               )}
 
               {/* Bind/rename/delete affordances: pointer devices get a
@@ -182,7 +171,7 @@ export default function ReadingPresetPicker() {
                       type="button"
                       title={bound ? _('reader.presetUnbind') : _('reader.presetBind')}
                       onClick={() => setBoundPreset(bound ? null : preset.id)}
-                      className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-(--bd-sel-text) transition-colors hover:bg-(--bd-sel-bg-hover) hover:text-current"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M12 17v5" />
@@ -194,7 +183,7 @@ export default function ReadingPresetPicker() {
                     type="button"
                     title={_('reader.presetRename')}
                     onClick={() => startRename(preset)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/10 hover:text-current"
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-(--bd-sel-text) transition-colors hover:bg-(--bd-sel-bg-hover) hover:text-current"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -205,7 +194,7 @@ export default function ReadingPresetPicker() {
                     type="button"
                     title={_('reader.presetDelete')}
                     onClick={() => deleteReadingPreset(preset.id)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--bd-read-sub)] transition-colors hover:bg-red-500/10 hover:text-red-500"
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-(--bd-sel-text) transition-colors hover:bg-red-500/10 hover:text-red-500"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" />
@@ -228,11 +217,11 @@ export default function ReadingPresetPicker() {
             }}
             onBlur={commitCreate}
             placeholder={_('reader.presetNamePlaceholder')}
-            className="h-8 w-24 rounded-lg border border-stone-400/50 bg-[var(--bd-read-bg)] px-2 text-xs text-current outline-none shadow-sm placeholder:text-[var(--bd-read-sub)]"
+            className="h-8 w-24 rounded-lg border-[1.5px] border-(--bd-sel-border-on) bg-(--bd-sel-bg) px-2 text-xs text-(--bd-sel-text-on) outline-none placeholder:text-(--bd-hint-text)"
           />
         )}
         {presets.length === 0 && !creating && (
-          <p className="py-0.5 text-xs text-[var(--bd-read-sub)] opacity-70">
+          <p className="py-0.5 text-xs text-(--bd-hint-text)">
             {_('reader.presetNone')}
           </p>
         )}

@@ -577,7 +577,7 @@ export const NotesPanel = memo(function NotesPanel({
   return (
     <div className={cn('space-y-4 pt-3 pb-6', items.length === 0 && 'flex flex-1 flex-col pt-0 pb-0')}>
       {selectionMode && !hideSelectionToolbar && (
-        <div className="sticky top-0 z-10 -mx-1 flex items-center gap-2 rounded-xl border border-stone-200/60 bg-[var(--bd-read-bg)] px-3 py-2 text-xs shadow-xs dark:border-stone-800/60">
+        <div className="sticky top-0 z-10 -mx-1 flex items-center gap-2 rounded-xl border border-stone-200/60 bg-[var(--bd-read-panel-bg)] px-3 py-2 text-xs shadow-xs dark:border-stone-800/60">
           <button
             type="button"
             onClick={selectAll}

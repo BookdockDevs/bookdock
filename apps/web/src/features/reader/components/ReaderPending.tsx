@@ -30,7 +30,7 @@ export default function ReaderPending() {
       role="status"
       aria-busy="true"
       className="fixed inset-0 z-30 flex items-center justify-center"
-      style={{ backgroundColor: 'var(--bd-read-page-bg)', color: 'var(--bd-read-text)' }}
+      style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}
     >
       <ReaderLoadingBadge />
     </div>
