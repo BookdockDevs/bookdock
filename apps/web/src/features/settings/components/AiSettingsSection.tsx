@@ -18,6 +18,7 @@ import SmartMenu from '@/components/ui/SmartMenu'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { useTranslation } from '@/hooks/useTranslation'
+import { downloadBlob, timestampSuffix } from '@/lib/download'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
@@ -26,11 +27,14 @@ import AiConnectionEditor from './AiConnectionEditor'
 import AiPromptRow from './AiPromptRow'
 import AiProviderMenuItems from './AiProviderMenuItems'
 import EditModeButton from './EditModeButton'
+import ExportConfirmDialog from './ExportConfirmDialog'
+import RuleSelectAllBar from './RuleSelectAllBar'
+import RuleSelectionActions from './RuleSelectionActions'
 import SettingsCard from './SettingsCard'
 import SettingsFormActions from './SettingsFormActions'
 import SettingsFormField from './SettingsFormField'
 import { settingsFormClass, settingsInputClass, settingsTextareaClass } from './settingsForm'
-import { PlusIcon, SlidersIcon, TrashIcon } from './row-icons'
+import { ExportIcon, ImportIcon, PlusIcon, SlidersIcon, TrashIcon } from './row-icons'
 
 interface AiPromptFormState {
   id?: string
@@ -265,6 +269,11 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
   const [sortDrafts, setSortDrafts] = useState<AiPromptTemplate[] | null>(null)
   const [form, setForm] = useState<AiPromptFormState | null>(null)
   const [pendingDelete, setPendingDelete] = useState<AiPromptTemplate | null>(null)
+  const [pendingBulkDelete, setPendingBulkDelete] = useState<AiPromptTemplate[] | null>(null)
+  const [pendingExport, setPendingExport] = useState<AiPromptTemplate[] | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [importing, setImporting] = useState(false)
+  const importInputRef = useRef<HTMLInputElement>(null)
   const [sorting, setSorting] = useState(false)
   const [variableHelpOpen, setVariableHelpOpen] = useState(false)
   const [formErrors, setFormErrors] = useState({ name: false, prompt: false })
@@ -274,6 +283,68 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   useDismissiblePopup(variableHelpOpen, variableHelpRef, () => setVariableHelpOpen(false))
   const drafts = sortDrafts ?? prompts
+  const selectedPrompts = drafts.filter((prompt) => selectedIds.includes(prompt.id))
+  const selectedDeletablePrompts = selectedPrompts.filter((prompt) => prompt.mine)
+
+  function exportPromptsJson(targets: AiPromptTemplate[]) {
+    if (!targets.length) return
+    const payload = {
+      kind: 'bookdock-ai-prompts',
+      version: 1,
+      prompts: targets.map((item) => ({
+        name: item.name,
+        prompt: item.prompt,
+      })),
+    }
+    downloadBlob(
+      `bookdock-ai-prompts-${timestampSuffix()}.json`,
+      new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
+    )
+  }
+
+  async function onImportPromptsFile(file: File | undefined) {
+    if (!file || importing) return
+    setImporting(true)
+    try {
+      const parsed: unknown = JSON.parse(await file.text())
+      const rawList = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === 'object' && Array.isArray((parsed as { prompts?: unknown }).prompts)
+          ? (parsed as { prompts: unknown[] }).prompts
+          : null
+      if (!rawList) {
+        notify.error({ key: 'settings.aiPromptImportInvalid' })
+        return
+      }
+      const candidates = rawList.filter((item): item is { name: string; prompt: string } =>
+        Boolean(item) &&
+        typeof item === 'object' &&
+        typeof (item as { name?: unknown }).name === 'string' &&
+        (item as { name: string }).name.trim().length > 0 &&
+        typeof (item as { prompt?: unknown }).prompt === 'string' &&
+        (item as { prompt: string }).prompt.trim().length > 0,
+      )
+      if (!candidates.length) {
+        notify.error({ key: 'settings.aiPromptImportInvalid' })
+        return
+      }
+      let importedCount = 0
+      for (const item of candidates) {
+        await createPrompt.mutateAsync({
+          name: item.name.trim().slice(0, 60),
+          prompt: item.prompt.trim(),
+          availability: 'user',
+        })
+        importedCount += 1
+      }
+      notify.success({ key: 'settings.aiPromptImported', params: { count: importedCount } })
+    } catch (error) {
+      if (error instanceof SyntaxError) notify.error({ key: 'settings.aiPromptImportInvalid' })
+      else showError(error)
+    } finally {
+      setImporting(false)
+    }
+  }
 
   /** Restore is additive: it only re-adds missing built-in commands, so no confirm. */
   function restoreMissing() {
@@ -349,9 +420,10 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
   }
 
   function toggleSorting() {
-    if (busy) return
+    if (busy || importing) return
     if (!sorting) {
       setSortDrafts(prompts)
+      setSelectedIds([])
       setSorting(true)
       return
     }
@@ -359,6 +431,7 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
     const sourceIds = prompts.map((prompt) => prompt.id)
     setSorting(false)
     setSortDrafts(null)
+    setSelectedIds([])
     if (draftIds.length === sourceIds.length && draftIds.every((id, index) => id === sourceIds[index])) return
     reorderPrompts.mutate(draftIds, { onError: showError })
   }
@@ -379,8 +452,18 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
     setPendingDelete(null)
   }
 
-  return <section className="border-t border-stone-100 pt-5 dark:border-stone-800">
-    <div className="mb-3 flex items-center justify-between gap-3">
+  async function confirmBulkDelete() {
+    if (!pendingBulkDelete?.length) return
+    for (const item of pendingBulkDelete) {
+      await deletePrompt.mutateAsync(item.id)
+      setSortDrafts((current) => current?.filter((prompt) => prompt.id !== item.id) ?? current)
+      setSelectedIds((prev) => prev.filter((id) => id !== item.id))
+    }
+    setPendingBulkDelete(null)
+  }
+
+  return <section className="border-t border-stone-100 pt-2.5 dark:border-stone-800">
+    <div className="mb-1 flex items-center justify-between gap-3">
       <div className="min-w-0">
         <h3 className="flex items-baseline gap-1.5 text-sm font-semibold text-stone-900 dark:text-stone-100">
           <span>{_('settings.aiPrompts')}</span>
@@ -388,19 +471,77 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
         </h3>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        {sorting && restoreAvailable && <button type="button" onClick={restoreMissing} disabled={busy} aria-label={_('settings.aiPromptsRestore')} title={_('settings.aiPromptsRestore')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-stone-200"><RestoreDefaultsIcon /></button>}
-        <EditModeButton active={sorting} disabled={busy} onClick={toggleSorting} />
-        {!sorting && <button type="button" onClick={openCreate} disabled={busy} aria-label={_('settings.aiPromptAdd')} title={_('settings.aiPromptAdd')} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"><PlusIcon /></button>}
+        {sorting && (
+          <RuleSelectionActions
+            disabled={busy || importing}
+            deleteDisabled={selectedDeletablePrompts.length === 0}
+            selectedCount={selectedPrompts.length}
+            onExport={() => setPendingExport(selectedPrompts)}
+            onDelete={() => setPendingBulkDelete(selectedDeletablePrompts)}
+          />
+        )}
+        {sorting && restoreAvailable && <button type="button" onClick={restoreMissing} disabled={busy || importing} aria-label={_('settings.aiPromptsRestore')} title={_('settings.aiPromptsRestore')} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-stone-800 dark:hover:text-stone-200"><RestoreDefaultsIcon /></button>}
+        {!sorting && (
+          <>
+            <button
+              type="button"
+              disabled={busy || importing}
+              onClick={() => importInputRef.current?.click()}
+              aria-label={_('settings.aiPromptImport')}
+              title={_('settings.aiPromptImport')}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+            >
+              <ImportIcon />
+            </button>
+            <button
+              type="button"
+              disabled={busy || importing || prompts.length === 0}
+              onClick={() => setPendingExport(prompts)}
+              aria-label={_('settings.aiPromptExportAll')}
+              title={_('settings.aiPromptExportAll')}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+            >
+              <ExportIcon />
+            </button>
+          </>
+        )}
+        <EditModeButton active={sorting} disabled={busy || importing} onClick={toggleSorting} />
+        {!sorting && <button type="button" onClick={openCreate} disabled={busy || importing} aria-label={_('settings.aiPromptAdd')} title={_('settings.aiPromptAdd')} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"><PlusIcon /></button>}
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            event.target.value = ''
+            void onImportPromptsFile(file)
+          }}
+        />
       </div>
     </div>
+    {sorting && drafts.length > 0 && (
+      <RuleSelectAllBar
+        disabled={busy || importing}
+        allSelected={selectedPrompts.length === drafts.length}
+        indeterminate={selectedPrompts.length > 0 && selectedPrompts.length < drafts.length}
+        selectedCount={selectedPrompts.length}
+        onToggleAll={(checked) => setSelectedIds(checked ? drafts.map((prompt) => prompt.id) : [])}
+      />
+    )}
     {drafts.length === 0 ? <p className="rounded-lg border border-dashed border-stone-200 px-3 py-4 text-center text-xs text-stone-400 dark:border-stone-700">{_('settings.aiPromptsEmpty')}</p> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={drafts.map((prompt) => prompt.id)} strategy={verticalListSortingStrategy}>
         <ul className="divide-y divide-stone-100 dark:divide-stone-800">
           {drafts.map((prompt) => <AiPromptRow
             key={prompt.id}
             prompt={prompt}
-            disabled={busy}
+            disabled={busy || importing}
             sorting={sorting}
+            selectable
+            selected={selectedIds.includes(prompt.id)}
+            onSelectChange={(checked) => {
+              setSelectedIds((prev) => checked ? (prev.includes(prompt.id) ? prev : [...prev, prompt.id]) : prev.filter((id) => id !== prompt.id))
+            }}
             onToggle={(enabled) => updatePrompt.mutate({ id: prompt.id, body: { enabled } }, { onError: showError })}
             onEdit={() => openEdit(prompt)}
             onDelete={() => setPendingDelete(prompt)}
@@ -409,6 +550,32 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
       </SortableContext>
     </DndContext>}
     {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.aiPromptDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} errorFallback="settings.aiPromptSaveFailed" onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
+    {pendingBulkDelete && (
+      <ConfirmDialog
+        title={_('settings.confirmDeleteTitle')}
+        message={<>
+          <p>{_('settings.aiPromptBulkDeleteConfirm', { count: pendingBulkDelete.length })}</p>
+          <ul className="mt-2 max-h-40 list-disc overflow-y-auto break-words pl-4">
+            {pendingBulkDelete.map((item) => <li key={item.id}>{item.name}</li>)}
+          </ul>
+        </>}
+        confirmLabel={_('settings.confirmDeleteAction')}
+        confirmVariant="danger"
+        errorFallback="settings.aiPromptSaveFailed"
+        onConfirm={confirmBulkDelete}
+        onClose={() => setPendingBulkDelete(null)}
+      />
+    )}
+    {pendingExport && (
+      <ExportConfirmDialog
+        items={pendingExport.map((item) => item.name)}
+        onConfirm={() => {
+          exportPromptsJson(pendingExport)
+          setPendingExport(null)
+        }}
+        onClose={() => setPendingExport(null)}
+      />
+    )}
     {form && <Modal title={_(form.id ? 'settings.aiPromptEdit' : 'settings.aiPromptAdd')} onClose={busy ? () => undefined : closeForm}>
       <form noValidate className={settingsFormClass} onSubmit={(event) => { event.preventDefault(); submitForm() }}>
         <SettingsFormField label={_('settings.aiPromptName')} required error={formErrors.name ? _('settings.aiPromptNameRequired') : undefined}>

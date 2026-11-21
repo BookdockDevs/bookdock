@@ -3,6 +3,11 @@ import { Blob as NativeBlob, File as NativeFile } from 'node:buffer'
 import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('@/api/hooks/useReadingThemes', () => ({
+  uploadThemeAssetToServer: vi.fn(async () => ({})),
+  fetchThemeAssetFromServer: vi.fn(async () => null),
+}))
+
 import JSZip from 'jszip'
 
 import type { CustomReadingTheme } from '@/lib/reading-theme'

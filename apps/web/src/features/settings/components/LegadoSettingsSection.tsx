@@ -112,7 +112,7 @@ export default function LegadoSettingsSection() {
             />
           )
         }
-        bodyClassName={settingsQuery.isError || settingsQuery.isLoading ? undefined : 'mt-2.5 space-y-3.5 pt-2.5'}
+        bodyClassName={settingsQuery.isError || settingsQuery.isLoading ? undefined : 'space-y-3.5 pt-3'}
       >
         {settingsQuery.isError ? (
           <QueryErrorState className="py-4" isRetrying={settingsQuery.isFetching} onRetry={settingsQuery.refetch} />

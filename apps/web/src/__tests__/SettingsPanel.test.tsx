@@ -43,6 +43,13 @@ vi.mock('@/api/hooks/useReplacements', () => ({
   useBookReplacements: vi.fn(() => ({ data: { data: [] } })),
 }))
 
+vi.mock('@/api/hooks/useReadingThemes', () => ({
+  uploadThemeAssetToServer: vi.fn(async () => ({})),
+  fetchThemeAssetFromServer: vi.fn(async () => null),
+  publishInstanceThemeItemsApi: vi.fn(async () => ({ palettes: [], css: [], highlights: [], themes: [] })),
+  removeInstanceThemeItemApi: vi.fn(async () => ({ palettes: [], css: [], highlights: [], themes: [] })),
+}))
+
 const mockReplacements = (list: TextReplacementRes[]) => {
   vi.mocked(useBookReplacements).mockReturnValue({ data: { data: list } } as ReturnType<typeof useBookReplacements>)
 }

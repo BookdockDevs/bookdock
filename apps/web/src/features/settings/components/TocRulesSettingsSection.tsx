@@ -17,6 +17,7 @@ import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
 import EditModeButton from './EditModeButton'
+import ExportConfirmDialog from './ExportConfirmDialog'
 import RuleSelectAllBar from './RuleSelectAllBar'
 import RuleSelectionActions from './RuleSelectionActions'
 import SettingsCard from './SettingsCard'
@@ -43,6 +44,7 @@ export default function TocRulesSettingsSection() {
       ...serverRules.filter((rule) => !draftIdSet.has(rule.id))]
     : serverRules
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [pendingExport, setPendingExport] = useState<TocRuleRes[] | null>(null)
   const selectedRules = rules.filter((rule) => selectedIds.includes(rule.id))
   // Published rules from another account run here (and can be switched off or
   // reordered) but their definition belongs to the publisher: no edit, no
@@ -76,6 +78,11 @@ export default function TocRulesSettingsSection() {
       },
       onError: showError,
     })
+  }
+
+  function requestExportRules(targets: TocRuleRes[]) {
+    if (!listReady || targets.length === 0) return
+    setPendingExport(targets)
   }
 
   function exportRules(targets: TocRuleRes[]) {
@@ -145,7 +152,7 @@ export default function TocRulesSettingsSection() {
         }
         action={
           <div className="flex shrink-0 items-center gap-1">
-            {sorting && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={() => exportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules.filter((rule) => rule.mine !== false))} />}
+            {sorting && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={() => requestExportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules.filter((rule) => rule.mine !== false))} />}
             {!sorting && <>
               <button
                 type="button"
@@ -160,7 +167,7 @@ export default function TocRulesSettingsSection() {
               <button
                 type="button"
                 disabled={busy || !listReady || serverRules.length === 0}
-                onClick={() => exportRules(serverRules)}
+                onClick={() => requestExportRules(serverRules)}
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
                 aria-label={_('settings.tocExportAll')}
                 title={_('settings.tocExportAll')}
@@ -202,7 +209,6 @@ export default function TocRulesSettingsSection() {
             </button>}
           </div>
         }
-        bodyClassName={sorting ? undefined : 'pt-3'}
       >
       {sorting && (
         <RuleSelectAllBar
@@ -267,6 +273,17 @@ export default function TocRulesSettingsSection() {
           onConfirm={confirmDelete}
           confirmDisabled={busy}
           onClose={() => { if (!busy) setPendingDelete(null) }}
+        />
+      )}
+
+      {pendingExport && (
+        <ExportConfirmDialog
+          items={pendingExport.map((rule) => rule.name)}
+          onConfirm={() => {
+            exportRules(pendingExport)
+            setPendingExport(null)
+          }}
+          onClose={() => setPendingExport(null)}
         />
       )}
 

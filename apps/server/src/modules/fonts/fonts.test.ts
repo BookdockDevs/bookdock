@@ -7,6 +7,7 @@ import { Readable } from 'node:stream'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
+import JSZip from 'jszip'
 
 import type { FontListItem } from '@bookdock/shared'
 
@@ -131,11 +132,15 @@ describe('fonts routes', () => {
   let owner: TestUser
   let member: TestUser
 
-  function createApp(currentUser: TestUser) {
+  function createApp(currentUser: TestUser | null) {
     const app = new Hono()
     app.onError(errorHandler)
     app.use('/api/v1/fonts/*', async (c, next) => {
-      c.set('user', { id: currentUser.id, username: currentUser.username, role: currentUser.role, avatarKey: null })
+      if (currentUser) {
+        c.set('user', { id: currentUser.id, username: currentUser.username, role: currentUser.role, avatarKey: null })
+      } else {
+        c.set('guest', true)
+      }
       return next()
     })
     app.route('/api/v1/fonts', fontsRoutes)
@@ -463,5 +468,58 @@ describe('fonts routes', () => {
     })
     const sharedVisible = await memberApp.request(`http://test/api/v1/fonts/${font.id}/file`)
     expect(sharedVisible.status).toBe(200)
+  })
+
+  it('exports a single font with attachment header and batch-exports multiple fonts as zip', async () => {
+    const ownerApp = createApp(owner)
+    const memberApp = createApp(member)
+    const guestApp = createApp(null)
+
+    const contentA = Buffer.from('font-a-bytes')
+    const contentB = Buffer.from('font-b-bytes')
+    const upA = await ownerApp.request(uploadRequest(new File([contentA], 'Alpha.ttf')))
+    const upB = await ownerApp.request(uploadRequest(new File([contentB], 'Alpha.ttf'), 'instance'))
+    const { data: fontA } = (await upA.json()) as { data: FontListItem }
+    const { data: fontB } = (await upB.json()) as { data: FontListItem }
+
+    // Guest cannot download or batch export
+    const guestDl = await guestApp.request(`http://test/api/v1/fonts/${fontB.id}/file?download=1`)
+    expect(guestDl.status).toBe(403)
+    const guestBatch = await guestApp.request('http://test/api/v1/fonts/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [fontB.id] }),
+    })
+    expect(guestBatch.status).toBe(403)
+
+    // Single download includes attachment disposition and original filename
+    const singleDl = await ownerApp.request(`http://test/api/v1/fonts/${fontA.id}/file?download=1`)
+    expect(singleDl.status).toBe(200)
+    expect(singleDl.headers.get('Content-Disposition')).toContain('attachment;')
+    expect(singleDl.headers.get('Content-Disposition')).toContain('Alpha.ttf')
+    expect(Buffer.from(await singleDl.arrayBuffer()).equals(contentA)).toBe(true)
+
+    // Member cannot export owner's private fontA
+    const forbiddenBatch = await memberApp.request('http://test/api/v1/fonts/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [fontA.id, fontB.id] }),
+    })
+    expect(forbiddenBatch.status).toBe(404)
+
+    // Owner batch exports both into a zip, deduplicating identical filenames
+    const batch = await ownerApp.request('http://test/api/v1/fonts/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [fontA.id, fontB.id] }),
+    })
+    expect(batch.status).toBe(200)
+    expect(batch.headers.get('Content-Type')).toBe('application/zip')
+    expect(batch.headers.get('Content-Disposition')).toContain('bookdock-fonts.zip')
+    const zip = await JSZip.loadAsync(Buffer.from(await batch.arrayBuffer()))
+    const names = Object.keys(zip.files).sort()
+    expect(names).toEqual(['Alpha (2).ttf', 'Alpha.ttf'])
+    expect(Buffer.from(await zip.file('Alpha.ttf')!.async('nodebuffer')).equals(contentA)).toBe(true)
+    expect(Buffer.from(await zip.file('Alpha (2).ttf')!.async('nodebuffer')).equals(contentB)).toBe(true)
   })
 })

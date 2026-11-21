@@ -19,6 +19,7 @@ import { createHighlightRuleId, highlightRuleIssue, highlightRulePreset, HIGHLIG
 export interface HighlightRulesDraftSectionProps {
   rules: HighlightRuleDef[]
   single?: boolean
+  scopeControl?: ReactNode
   onChange: (rules: HighlightRuleDef[]) => void
 }
 
@@ -87,8 +88,8 @@ function ColorField({ label, value, placeholder, emptyGlyph, onOpenPicker, onInp
   const filled = Boolean(value)
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <span className="text-xs font-medium text-current/80">{label}</span>
-      <div className="flex h-[42px] min-w-0 items-center gap-2 rounded-lg border border-stone-300/70 bg-stone-500/5 p-1.5 pr-2.5 transition-colors focus-within:border-stone-400 focus-within:bg-stone-500/10 focus-within:ring-1 focus-within:ring-stone-400/20 dark:border-stone-700/80">
+      <span className="text-xs font-normal text-current/55">{label}</span>
+      <div className="flex h-[42px] min-w-0 items-center gap-2 rounded-lg border border-stone-300/80 bg-transparent p-1.5 pr-2.5 transition-colors focus-within:border-stone-400 focus-within:bg-stone-500/5 focus-within:ring-1 focus-within:ring-stone-400/20 dark:border-stone-700/80">
         <button
           type="button"
           aria-label={label}
@@ -286,6 +287,7 @@ interface PresetDropdownProps {
   onSelect: (kind: HighlightPresetKind) => void
   label?: string
   disabled?: boolean
+  compact?: boolean
   className?: string
 }
 
@@ -296,7 +298,7 @@ const PRESET_OPTIONS: { kind: HighlightPresetKind; labelKey: string; hint: strin
   { kind: 'punctuation', labelKey: 'reader.themeHighlightPresetPunctuation', hint: '，。！？' },
 ]
 
-function PresetDropdown({ onSelect, label, disabled, className }: PresetDropdownProps) {
+function PresetDropdown({ onSelect, label, disabled, compact = false, className }: PresetDropdownProps) {
   const _ = useTranslation()
   const menu = useMenuAnchor()
 
@@ -310,7 +312,9 @@ function PresetDropdown({ onSelect, label, disabled, className }: PresetDropdown
         aria-expanded={menu.open}
         aria-label={label ?? _('reader.themeHighlightPresetsLabel')}
         title={label ?? _('reader.themeHighlightPresetsLabel')}
-        className="inline-flex items-center gap-1 rounded-lg border border-stone-300/70 bg-stone-500/5 px-2 py-1 text-xs font-medium text-current/75 transition-colors hover:border-stone-400 hover:bg-stone-500/10 hover:text-current disabled:opacity-40 cursor-pointer"
+        className={compact
+          ? 'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-current/70 transition-colors hover:bg-stone-500/10 hover:text-current disabled:opacity-40 cursor-pointer'
+          : 'inline-flex items-center gap-1 rounded-lg border border-stone-300/70 bg-stone-500/5 px-2 py-1 text-xs font-medium text-current/75 transition-colors hover:border-stone-400 hover:bg-stone-500/10 hover:text-current disabled:opacity-40 cursor-pointer'}
       >
         <span>{label ?? _('reader.themeHighlightPresetsLabel')}</span>
         <ThemeIcon name="down" size={11} className="opacity-60" />
@@ -349,7 +353,7 @@ function PresetDropdown({ onSelect, label, disabled, className }: PresetDropdown
   )
 }
 
-export default function HighlightRulesDraftSection({ rules, single = false, onChange }: HighlightRulesDraftSectionProps) {
+export default function HighlightRulesDraftSection({ rules, single = false, scopeControl, onChange }: HighlightRulesDraftSectionProps) {
   const _ = useTranslation()
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -571,23 +575,29 @@ export default function HighlightRulesDraftSection({ rules, single = false, onCh
                   }
                 >
                   {/* Name field */}
-                  <SettingsFormField
-                    label={_('reader.themeHighlightName')}
-                    labelExtra={
-                      <PresetDropdown
-                        onSelect={(kind) => applyPreset(kind, index)}
-                      />
-                    }
-                  >
-                    <input
-                      type="text"
-                      value={rule.name}
-                      maxLength={50}
-                      onChange={(e) => update(index, { ...rule, name: e.target.value })}
-                      aria-label={_('reader.themeHighlightName')}
-                      className={settingsInputClass}
-                    />
-                  </SettingsFormField>
+                  <div className={single && scopeControl ? 'flex flex-col gap-3 sm:flex-row sm:items-end' : ''}>
+                    <div className={single && scopeControl ? 'min-w-0 flex-1' : ''}>
+                      <SettingsFormField
+                        label={_('reader.themeHighlightName')}
+                        labelExtra={
+                          <PresetDropdown
+                            compact={single}
+                            onSelect={(kind) => applyPreset(kind, index)}
+                          />
+                        }
+                      >
+                        <input
+                          type="text"
+                          value={rule.name}
+                          maxLength={50}
+                          onChange={(e) => update(index, { ...rule, name: e.target.value })}
+                          aria-label={_('reader.themeHighlightName')}
+                          className={settingsInputClass}
+                        />
+                      </SettingsFormField>
+                    </div>
+                    {single && scopeControl}
+                  </div>
 
                   {/* Pattern field with Regex toggle on the label row */}
                   <SettingsFormField
@@ -637,8 +647,8 @@ export default function HighlightRulesDraftSection({ rules, single = false, onCh
                   </SettingsFormField>
 
                   {/* Whole match styling */}
-                  <div className="flex flex-col gap-1.5 @container">
-                    <span className="text-xs font-medium text-current/80">
+                  <div className="flex flex-col gap-2 border-t border-current/10 pt-3.5 @container">
+                    <span className="text-[13px] font-semibold text-current/90">
                       {_('reader.themeHighlightWholeMatch')}
                     </span>
                     <RuleStyleEditor

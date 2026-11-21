@@ -21,6 +21,7 @@ import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
 import EditModeButton from './EditModeButton'
+import ExportConfirmDialog from './ExportConfirmDialog'
 import ReplacementForm from './ReplacementForm'
 import ReplacementImportDialog from './ReplacementImportDialog'
 import RuleSelectAllBar from './RuleSelectAllBar'
@@ -59,6 +60,7 @@ export default function ReplacementsSettingsSection() {
     [data],
   )
   const [draftIds, setDraftIds] = useState<string[] | null>(null)
+  const [pendingExport, setPendingExport] = useState<TextReplacementRes[] | null>(null)
   const rules = useMemo(() => {
     if (!draftIds) return serverRules
     const rulesById = new Map(serverRules.map((rule) => [rule.id, rule]))
@@ -150,6 +152,11 @@ export default function ReplacementsSettingsSection() {
     setDraftIds(arrayMove(rules, oldIndex, newIndex).map((rule) => rule.id))
   }
 
+  function requestExportRules(targets: TextReplacementRes[]) {
+    if (!listReady || targets.length === 0) return
+    setPendingExport(targets)
+  }
+
   function exportRules(targets: TextReplacementRes[]) {
     if (!listReady || targets.length === 0) return
     downloadJsonFile(
@@ -183,7 +190,7 @@ export default function ReplacementsSettingsSection() {
         }
         action={
           <div className="flex shrink-0 items-center gap-1">
-            {editing && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={local ? undefined : () => exportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules.filter((rule) => rule.mine !== false))} />}
+            {editing && <RuleSelectionActions disabled={busy || !listReady} selectedCount={selectedRules.length} onExport={local ? undefined : () => requestExportRules(selectedRules)} onDelete={() => setPendingDelete(selectedRules.filter((rule) => rule.mine !== false))} />}
             {!editing && <>
               {!local && <button
                 type="button"
@@ -198,7 +205,7 @@ export default function ReplacementsSettingsSection() {
               {!local && <button
                 type="button"
                 disabled={busy || !listReady || rules.length === 0}
-                onClick={() => exportRules(rules)}
+                onClick={() => requestExportRules(rules)}
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
                 aria-label={_('settings.replacementsExportAll')}
                 title={_('settings.replacementsExportAll')}
@@ -303,6 +310,17 @@ export default function ReplacementsSettingsSection() {
             onDone={() => { setFormSaving(false); setForm(null) }}
           />
         </Modal>
+      )}
+
+      {pendingExport && (
+        <ExportConfirmDialog
+          items={pendingExport.map((rule) => rule.name || rule.pattern || '')}
+          onConfirm={() => {
+            exportRules(pendingExport)
+            setPendingExport(null)
+          }}
+          onClose={() => setPendingExport(null)}
+        />
       )}
 
       {importOpen && (

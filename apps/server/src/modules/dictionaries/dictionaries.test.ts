@@ -5,6 +5,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { Hono } from 'hono'
+import JSZip from 'jszip'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { dictionaryLookupSchema } from '@bookdock/shared'
@@ -211,6 +212,53 @@ describe('personal dictionaries', () => {
     sqlite.exec("DELETE FROM instance")
     resetInstanceCache()
     await deleteDictionary('owner', 'owner', ((await allowed.json()) as { data: { id: string } }).data.id)
+  })
+  it('exports single-file dictionary directly and multi-file or batch dictionaries as zip', async () => {
+    const singleMdx = dictionaryFixture({ alpha: '<p>A</p>' })
+    const single = await importDictionary('reader', [new File([singleMdx], 'single.mdx')])
+    const multiMdx = dictionaryFixture({ beta: '<p>B</p>' })
+    const multi = await importDictionary('reader', [
+      new File([multiMdx], 'multi.mdx'),
+      new File(['body { color: red; }'], 'multi.css'),
+    ])
+
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('*', async (c, next) => { c.set('user', { id: 'reader', username: 'Reader', role: 'member', avatarKey: null }); c.set('guest', false); await next() })
+    app.route('/api/v1/dictionaries', routes)
+
+    // Single-file dictionary downloads directly without wrapping in a zip
+    const singleRes = await app.request(`/api/v1/dictionaries/${single.id}/export`)
+    expect(singleRes.status).toBe(200)
+    expect(singleRes.headers.get('Content-Disposition')).toContain('single.mdx')
+    expect(Buffer.from(await singleRes.arrayBuffer()).equals(singleMdx)).toBe(true)
+
+    // Multi-file dictionary packs into <name>.zip
+    const multiRes = await app.request(`/api/v1/dictionaries/${multi.id}/export`)
+    expect(multiRes.status).toBe(200)
+    expect(multiRes.headers.get('Content-Type')).toBe('application/zip')
+    expect(multiRes.headers.get('Content-Disposition')).toContain(`${multi.name}.zip`)
+    const multiZip = await JSZip.loadAsync(Buffer.from(await multiRes.arrayBuffer()))
+    expect(Object.keys(multiZip.files).sort()).toEqual(['multi.css', 'multi.mdx'])
+
+    // Batch export packs each dictionary in its own folder
+    const batchRes = await app.request('/api/v1/dictionaries/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [single.id, multi.id] }),
+    })
+    expect(batchRes.status).toBe(200)
+    expect(batchRes.headers.get('Content-Type')).toBe('application/zip')
+    expect(batchRes.headers.get('Content-Disposition')).toContain('bookdock-dictionaries.zip')
+    const batchZip = await JSZip.loadAsync(Buffer.from(await batchRes.arrayBuffer()))
+    expect(Object.keys(batchZip.files).filter((n) => !n.endsWith('/')).sort()).toEqual([
+      `${multi.name} (2)/multi.css`,
+      `${multi.name} (2)/multi.mdx`,
+      `${single.name}/single.mdx`,
+    ])
+
+    await deleteDictionary('reader', single.id)
+    await deleteDictionary('reader', multi.id)
   })
   it.runIf(Boolean(process.env.BOOKDOCK_TEST_MDX))('imports and queries an explicitly supplied real MDX using disposable data', async () => {
     const filePath = process.env.BOOKDOCK_TEST_MDX!

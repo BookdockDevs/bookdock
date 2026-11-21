@@ -2292,3 +2292,26 @@ export interface AiChatJobRes {
 export type AiChatJobCreateReq =
   | { kind: 'book'; clientRequestId: string; request: AiChatReq }
   | { kind: 'local'; clientRequestId: string; scopeKey: string; threadId: string; request: AiLocalChatReq }
+
+export type ThemeAssetScope = 'user' | 'instance'
+
+export interface ThemeAssetRes {
+  assetId: string
+  fileName: string
+  mime: 'image/png' | 'image/jpeg' | 'image/webp'
+  size: number
+  width: number
+  height: number
+  contentHash: string
+  scope: ThemeAssetScope
+  createdAt: number
+}
+
+export type InstanceThemeItemKind = 'theme' | 'palette' | 'css' | 'highlight'
+
+export interface InstanceThemeLibraryRes {
+  palettes: Record<string, unknown>[]
+  css: Record<string, unknown>[]
+  highlights: Record<string, unknown>[]
+  themes: Record<string, unknown>[]
+}

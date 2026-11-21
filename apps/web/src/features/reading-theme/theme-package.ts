@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 
 import { highlightRuleSchema } from '@bookdock/shared'
 
+import { fetchThemeAssetFromServer, uploadThemeAssetToServer } from '@/api/hooks/useReadingThemes'
 import { isHexColor, sanitizeHighlightRulesField, sanitizeThemeAssetId, sanitizeThemeAssetRefs, type ThemeAssetRef } from '@/lib/reading-theme'
 import { collectCssAssetRefs, remapCssAssetRefs, validateContentCss, validateUiCss } from '@/lib/theme-css-guard'
 import { timestampSuffix } from '@/lib/download'
@@ -124,8 +125,18 @@ export async function buildThemeLibraryPackage(
   const missing: string[] = []
   const metadata = referencedIds.length ? await store.list(scope) : []
   for (const id of referencedIds) {
-    const meta = metadata.find((candidate) => candidate.id === id)
-    const blob = meta ? await store.getBlob(scope, id) : null
+    let meta = metadata.find((candidate) => candidate.id === id)
+    let blob = meta ? await store.getBlob(scope, id) : null
+    if ((!meta || !blob) && scope !== 'device') {
+      const remoteBlob = await fetchThemeAssetFromServer(id).catch(() => null)
+      if (remoteBlob) {
+        const prepared = await prepareThemeAsset(scope, remoteBlob).catch(() => null)
+        if (prepared) {
+          meta = { ...prepared.asset, id }
+          blob = prepared.blob
+        }
+      }
+    }
     if (!meta || !blob) {
       missing.push(id)
       continue
@@ -226,6 +237,23 @@ export async function importThemePackage(
     stored = await store.storePrepared(scope, images)
   } catch (error) {
     throw new ThemePackageError('storage', error instanceof ThemeAssetError ? error.message : 'Image storage failed')
+  }
+  if (scope !== 'device') {
+    try {
+      await Promise.all(images.map(({ key, image }) => {
+        const saved = stored.get(key)
+        if (!saved) return Promise.resolve()
+        return uploadThemeAssetToServer({
+          assetId: saved.id,
+          blob: image.blob,
+          fileName: saved.fileName,
+          width: saved.width,
+          height: saved.height,
+        })
+      }))
+    } catch (error) {
+      throw new ThemePackageError('storage', error instanceof Error ? error.message : 'Image upload failed')
+    }
   }
   const idMap = new Map([...stored].map(([id, asset]) => [id, asset.id]))
   return remapBundleAssetIds(bundle, idMap)

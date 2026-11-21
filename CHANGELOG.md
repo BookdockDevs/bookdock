@@ -17,7 +17,11 @@ All notable changes to Bookdock are documented here.
 - Style TXT and reflowable EPUB content with custom CSS. The editor shows validation errors and lets you insert references to images and fonts from your reading font library.
 - Automatic highlights match text or regular expressions within paragraphs. Style the whole match or individual capture groups with text color, background color, or a solid, wavy, or dashed line. Preview rules on your own sample text. Where automatic highlights overlap manual marks, the manual mark takes precedence for the shared effect.
 - Manage themes, palettes, CSS cards, and highlight rules in Settings. Reorder the lists by dragging, select items across lists for batch deletion or export, and undo deletions.
-- Import and export themes and standalone cards together in one ZIP. Imports reuse matching items and give name collisions a numbered suffix. Images travel with the package. Fonts use the receiving device's font library and the stylesheet's fallbacks.
+- Import and export themes and standalone cards together in one ZIP. Imports reuse matching items and give name collisions a numbered suffix. Images travel with the package and also sync with your account on the server so they remain available across devices. Fonts use the receiving device's font library and the stylesheet's fallbacks.
+- Export uploaded fonts, device fonts, and dictionaries as source files—single files download directly and multi-file dictionaries or batch selections stream as ZIP archives—with an export confirmation dialog showing item names and estimated total size.
+- Instance owners can publish reading themes, palettes, custom CSS cards, and highlight rules (along with referenced wallpaper and CSS image assets) as instance built-ins via the "Availability" (`Only me` / `Shared`) control in the theme editors; members and guests can use or duplicate them as personal copies while keeping originals read-only.
+- Import, export, and batch-delete AI quick commands in Settings using the same header actions and selection bar as TOC rules and text replacements.
+- Support batch deletion for uploaded/device fonts and dictionaries in Settings edit mode, respecting ownership and instance-scope permissions.
 
 ### Changed
 
@@ -31,18 +35,20 @@ All notable changes to Bookdock are documented here.
 - The sidebar notification bell appears when the account has notification records. Clearing the last record closes the open notification panel and hides the bell.
 - Library batch notifications show how many books were affected when moving books to or from shelves or the trash, hiding them, permanently deleting them, or updating reading status. English notifications for trashing, restoring, and permanently deleting a single book include its title.
 - The TTS service editor and the library create and manage dialogs mark required fields with a red asterisk. TTS credential fields show the mark only while creating a new service, and the library access password shows it when password access is selected.
+- Unified Settings card spacing, upload progress bars, export confirmation dialogs, font edit-mode checkbox alignment, and visual typography hierarchy across theme/palette/CSS/highlight dialogs.
 
 ### Fixed
 
 - The table of contents waits until automatic scrolling finishes before showing the button for locating the current chapter, preventing flashes when opening a book or changing chapters.
 - The AI connection Base URL no longer shows a required asterisk; leaving it empty falls back to the provider default address.
+- Fixed a settings sync race where `PUT /api/v1/settings` triggered a redundant `GET /settings` refetch, which could overwrite subsequent rapid toggle changes (such as font switches) during the debounce window.
 - Full-book search no longer aborts on the first chapter that fails to scan: the slow or unreadable chapter is skipped and the remaining chapters are searched, and the search gives up after about 30 seconds of accumulated scan timeouts instead of holding the search slot open. Plain-text searches report a neutral timeout notice instead of a regex timeout, and chapters with many replacement-rule matches no longer stall the scan.
 
 ### Upgrade notes
 
 - Existing custom themes are converted into themes with reusable cards, keeping their theme IDs. Appearance follows the new day and night defaults after upgrade, and theme choices previously stored in reading presets are retired.
 - Existing per-book layout overrides and per-book theme choices migrate into the new per-book groups (fonts, layout, display, theme) with their values and rule order kept; a group with stored differences reads as enabled after upgrade.
-- Theme definitions sync with account settings. Wallpaper and CSS image files stay in the current browser. Use a theme ZIP to carry them to another device.
+- Theme definitions and their wallpaper/CSS image assets sync to the server (`theme_assets` and `instance_theme_items` via migration `0069`), with local IndexedDB caching and automatic server fallback across devices.
 
 ## [0.8.6] - 2026-11-17
 
@@ -1406,7 +1412,11 @@ All notable changes to Bookdock are documented here.
 - 支持用自定义 CSS 调整 TXT 和可重排 EPUB 的正文样式。编辑器会标出校验错误，也可插入图片和阅读字体库中的字体引用。
 - 自动高亮可在段落内匹配文本或正则表达式，为整段匹配或各个捕获组分别设置文字色、底色、实线、波浪线或虚线，并用自填样文预览效果。与手动标记重叠时，同类效果以手动标记为准。
 - 在设置页集中管理主题、配色、CSS 卡片和高亮规则。各列表支持拖动排序，可跨列表多选删除或导出，并可撤销删除。
-- 主题和独立卡片可放进同一个 ZIP 导入或导出。导入时会复用内容相同的项目，名称冲突时追加数字后缀。图片随包传递，字体由接收设备的字体库和样式中指定的后备字体提供。
+- 主题和独立卡片可放进同一个 ZIP 导入或导出。导入时会复用内容相同的项目，名称冲突时追加数字后缀。图片随包传递并同步至账号的服务端存储以支持跨设备使用，字体由接收设备的字体库和样式中指定的后备字体提供。
+- 支持导出已上传字体、本机字体及词典源文件（单文件直接下载，多文件词典或批量导出打包为 ZIP），并在导出前提供包含条目清单与预估总大小的确认弹窗。
+- 实例所有者可在主题、配色、自定义 CSS 与高亮规则编辑弹窗中通过「可用范围（仅自己 / 共享）」将其发布为实例内置资源（自动同步关联壁纸与 CSS 图片素材）；普通成员与访客可直接使用或复制为个人副本后二创，原件保持只读。
+- 设置中的 AI 快捷指令补齐导入、导出及多选批量删除功能，交互与目录规则、文本替换保持一致。
+- 字体与词典在编辑模式下支持多选批量删除（遵循个人归属与实例权限边界）。
 
 #### 变更
 
@@ -1420,18 +1430,20 @@ All notable changes to Bookdock are documented here.
 - 账号有通知记录时，侧栏才显示通知铃铛。清空最后一条通知后，已打开的通知面板会关闭，铃铛随之隐藏。
 - 批量移入或移出书架、移入或移出回收站、隐藏、彻底删除和更新阅读状态时，提示会显示受影响的书籍数量。英文界面的单本书回收、恢复和彻底删除提示会带上书名。
 - 语音服务编辑器和书库创建、管理弹窗会标记必填字段：语音服务密钥仅在新建时显示星号，访问密码在选择密码访问时显示星号。
+- 统一了六个设置分页的卡片顶部间距、资源上传进度条、导出确认弹窗、字体编辑模式复选框对齐，以及主题/配色/CSS/高亮规则弹窗的三层视觉层级与通透输入框样式。
 
 #### 修复
 
 - 打开书籍或切换章节时，目录会等自动滚动完成后再显示定位到当前章节的按钮，避免按钮闪现。
 - AI 连接的 Base URL 不再显示必填星号，留空时自动使用服务商默认地址。
+- 修复设置同步竞态问题：`PUT /api/v1/settings` 成功后不再额外触发 `GET /settings` 回灌，改为直接更新本地查询缓存，避免连续切换开关（如字体开关）在防抖窗口内被旧快照覆盖。
 - 全书搜索遇到扫描失败的章节不再整体中断：该章会被跳过，其余章节继续搜索，累计超时约满 30 秒会主动结束并保留已扫到的结果，不会长时间占用搜索。普通文本搜索的超时提示改为中性表述，不再误报正则超时；应用大量替换规则的章节扫描大章节时不再卡死。
 
 #### 升级说明
 
 - 现有自定义主题会转换为由可复用卡片组成的主题，并保留原有主题 ID。升级后，外观跟随新的日间和夜间默认设置，阅读预设中原有的主题选择不再生效。
 - 现有的单本书排版覆盖与单本书主题选择会自动迁移至新的单本书分组（字体、布局、显示、主题）中，并保留原有数值与规则顺序；存有差异的分组在升级后会自动处于开启状态。
-- 主题定义随账号设置同步。壁纸和 CSS 引用的图片保存在当前浏览器内，可通过主题 ZIP 带到另一台设备。
+- 主题定义与壁纸/CSS 图片素材现已同步至服务端（迁移 `0069` 新增 `theme_assets` 与 `instance_theme_items` 表），本地通过 IndexedDB 缓存并在跨设备时自动从服务端拉取恢复。
 
 ### [0.8.6] - 2026-11-17
 

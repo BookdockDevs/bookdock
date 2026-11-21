@@ -3,8 +3,9 @@ import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { HighlightRuleDef } from '@bookdock/shared'
+import type { HighlightRuleDef, InstanceThemeItemKind } from '@bookdock/shared'
 
+import { publishInstanceThemeItemsApi, removeInstanceThemeItemApi, uploadThemeAssetToServer } from '@/api/hooks/useReadingThemes'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Spinner from '@/components/ui/Spinner'
 import { localRecordId } from '@/features/local-library/id'
@@ -37,11 +38,13 @@ import {
 } from '@/features/reading-theme/theme-library'
 import { useTranslation } from '@/hooks/useTranslation'
 import { downloadBlob } from '@/lib/download'
+import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import { useAuthStore } from '@/stores/auth.store'
 import { getThemeLibrarySnapshot, useUiStore } from '@/stores/ui.store'
 
 import EditModeButton from './EditModeButton'
+import ExportConfirmDialog from './ExportConfirmDialog'
 import RuleSelectAllBar from './RuleSelectAllBar'
 import RuleSelectionActions from './RuleSelectionActions'
 import SettingsCard from './SettingsCard'
@@ -78,7 +81,7 @@ function Region({ label, count, addLabel, onAdd, editing, children }: {
   children: ReactNode
 }) {
   return (
-    <section aria-label={label} className="grid gap-1.5 border-b border-stone-200/60 pb-3 last:border-b-0 last:pb-0 dark:border-stone-800/60">
+    <section aria-label={label} className="grid gap-1 border-b border-stone-200/60 pb-2.5 last:border-b-0 last:pb-0 dark:border-stone-800/60">
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 truncate text-xs font-medium text-stone-600 dark:text-stone-300">
           {label}
@@ -117,14 +120,18 @@ function SortableItem({ id, editing, children }: { id: string; editing: boolean;
 export default function ReadingThemesSettingsSection() {
   const _ = useTranslation()
   const library = useUiStore((state) => state.themeLibrary)
+  const instanceThemeLibrary = useUiStore((state) => state.instanceThemeLibrary)
   const setLibrary = useUiStore((state) => state.setThemeLibrary)
+  const setInstanceThemeLibrary = useUiStore((state) => state.setInstanceThemeLibrary)
   const scope = useAuthStore((state) => state.user?.id ?? 'device')
+  const isOwner = useAuthStore((state) => state.user?.role === 'owner')
 
   const [editing, setEditing] = useState(false)
   const [selection, setSelection] = useState<Record<Group, string[]>>({ theme: [], palette: [], css: [], highlight: [] })
   const [themeEditor, setThemeEditor] = useState<{ theme: SavedReadingTheme; existing: boolean } | null>(null)
   const [cardEditor, setCardEditor] = useState<{ edit: ThemeCardEdit; onCreated?: (id: string) => void } | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Array<{ group: Group; id: string; name: string }> | null>(null)
+  const [pendingExport, setPendingExport] = useState<ThemePackageSelection | null>(null)
   const [importing, setImporting] = useState(false)
   const [exporting, setExporting] = useState(false)
   const input = useRef<HTMLInputElement>(null)
@@ -135,11 +142,90 @@ export default function ReadingThemesSettingsSection() {
   )
   const { urls: wallpapers, missing: missingWallpapers } = useThemeAssetUrls(scope, paletteAssetIds)
 
+  const isInstanceItem = (kind: Group, id: string): boolean => {
+    if (!instanceThemeLibrary) return false
+    const list = kind === 'theme'
+      ? instanceThemeLibrary.themes
+      : kind === 'palette'
+        ? instanceThemeLibrary.palettes
+        : kind === 'css'
+          ? instanceThemeLibrary.css
+          : instanceThemeLibrary.highlights
+    return list.some((item) => (item as { id?: unknown }).id === id)
+  }
+
+  async function toggleInstanceBuiltIn(
+    kind: InstanceThemeItemKind,
+    itemId: string,
+    next: boolean,
+    sourceLibrary: ReadingThemeLibrary = library,
+  ) {
+    try {
+      if (!next) {
+        const nextInstance = await removeInstanceThemeItemApi(kind, itemId)
+        setInstanceThemeLibrary(nextInstance)
+        return
+      }
+      const items: { kind: InstanceThemeItemKind; itemId: string; payload: Record<string, unknown> }[] = []
+      const assetIds = new Set<string>()
+      const addCard = (cardKind: Exclude<InstanceThemeItemKind, 'theme'>, id: string) => {
+        if (cardKind === 'palette') {
+          const card = sourceLibrary.palettes.find((item) => item.id === id)
+          if (!card || BUILTIN_IDS.has(card.id)) return
+          if (card.wallpaperAssetId) assetIds.add(card.wallpaperAssetId)
+          items.push({ kind: 'palette', itemId: card.id, payload: card as unknown as Record<string, unknown> })
+        } else if (cardKind === 'css') {
+          const card = sourceLibrary.css.find((item) => item.id === id)
+          if (!card) return
+          for (const asset of card.assets) assetIds.add(asset.id)
+          items.push({ kind: 'css', itemId: card.id, payload: card as unknown as Record<string, unknown> })
+        } else {
+          const card = sourceLibrary.highlights.find((item) => item.id === id)
+          if (!card) return
+          items.push({ kind: 'highlight', itemId: card.id, payload: card as unknown as Record<string, unknown> })
+        }
+      }
+      if (kind === 'theme') {
+        const theme = sourceLibrary.themes.find((item) => item.id === itemId)
+        if (!theme || BUILTIN_IDS.has(theme.id)) return
+        items.push({ kind: 'theme', itemId: theme.id, payload: theme as unknown as Record<string, unknown> })
+        if (theme.cards.paletteId) addCard('palette', theme.cards.paletteId)
+        if (theme.cards.cssId) addCard('css', theme.cards.cssId)
+        for (const hid of theme.cards.highlightIds) addCard('highlight', hid)
+      } else {
+        addCard(kind, itemId)
+      }
+      if (!items.length) return
+      if (assetIds.size > 0) {
+        const assetStore = new ThemeAssetStore()
+        const metas = await assetStore.list(scope).catch(() => [])
+        await Promise.all(Array.from(assetIds).map(async (assetId) => {
+          const blob = await assetStore.getBlob(scope, assetId).catch(() => null)
+          if (!blob) return
+          const meta = metas.find((item) => item.id === assetId)
+          await uploadThemeAssetToServer({
+            assetId,
+            blob,
+            fileName: meta?.fileName ?? `${assetId}.png`,
+            width: meta?.width,
+            height: meta?.height,
+          })
+        }))
+      }
+      const nextInstance = await publishInstanceThemeItemsApi({ items, assetIds: Array.from(assetIds) })
+      setInstanceThemeLibrary(nextInstance)
+      return true
+    } catch (error) {
+      notify.error(getUserErrorNotification(error, 'library.operationFailed'))
+      return false
+    }
+  }
+
   const selectable: Record<Group, string[]> = {
-    theme: library.themes.filter((theme) => !BUILTIN_IDS.has(theme.id)).map((theme) => theme.id),
-    palette: library.palettes.filter((palette) => !BUILTIN_IDS.has(palette.id)).map((palette) => palette.id),
-    css: library.css.map((card) => card.id),
-    highlight: library.highlights.map((rule) => rule.id),
+    theme: library.themes.filter((theme) => !BUILTIN_IDS.has(theme.id) && (isOwner || !isInstanceItem('theme', theme.id))).map((theme) => theme.id),
+    palette: library.palettes.filter((palette) => !BUILTIN_IDS.has(palette.id) && (isOwner || !isInstanceItem('palette', palette.id))).map((palette) => palette.id),
+    css: library.css.filter((card) => isOwner || !isInstanceItem('css', card.id)).map((card) => card.id),
+    highlight: library.highlights.filter((rule) => isOwner || !isInstanceItem('highlight', rule.id)).map((rule) => rule.id),
   }
   const selectablePairs = GROUPS.flatMap((group) => selectable[group].map((id) => [group, id] as const))
   const selectedTotal = GROUPS.reduce((total, group) => total + selection[group].length, 0)
@@ -173,26 +259,30 @@ export default function ReadingThemesSettingsSection() {
     selection.themes.length + selection.palettes.length + selection.css.length + selection.highlights.length
   const totalOf = (counts: ThemeBundleCounts) => counts.themes + counts.palettes + counts.css + counts.highlights
 
-  const exportItems = (targets: ThemePackageSelection) => {
+  const requestExportItems = (targets: ThemePackageSelection) => {
+    const count = countOf(targets)
+    if (!count || exporting) return
+    setPendingExport(targets)
+  }
+
+  const executeExportItems = async (targets: ThemePackageSelection) => {
     const count = countOf(targets)
     if (!count || exporting) return
     setExporting(true)
-    void (async () => {
-      try {
-        const { blob, missing } = await buildThemeLibraryPackage(targets, useUiStore.getState().themeLibrary, new ThemeAssetStore(), scope)
-        if (!blob) {
-          notify.error({ key: 'reader.themeExportMissing', params: { count: missing.length } })
-          return
-        }
-        if (scope !== (useAuthStore.getState().user?.id ?? 'device')) return
-        downloadBlob(themeLibraryPackageFileName(targets), blob)
-        notify.success({ key: 'reader.themeExportDone', params: { count } })
-      } catch {
-        notify.error({ key: 'reader.themeExportFailed' })
-      } finally {
-        setExporting(false)
+    try {
+      const { blob, missing } = await buildThemeLibraryPackage(targets, useUiStore.getState().themeLibrary, new ThemeAssetStore(), scope)
+      if (!blob) {
+        notify.error({ key: 'reader.themeExportMissing', params: { count: missing.length } })
+        return
       }
-    })()
+      if (scope !== (useAuthStore.getState().user?.id ?? 'device')) return
+      downloadBlob(themeLibraryPackageFileName(targets), blob)
+      notify.success({ key: 'reader.themeExportDone', params: { count } })
+    } catch {
+      notify.error({ key: 'reader.themeExportFailed' })
+    } finally {
+      setExporting(false)
+    }
   }
 
   const importFile = async (file?: File) => {
@@ -227,21 +317,33 @@ export default function ReadingThemesSettingsSection() {
     setEditing((current) => !current)
   }
 
-  const saveCard = (edit: ThemeCardEdit) => {
+  const saveCard = async (edit: ThemeCardEdit, nextScope?: 'user' | 'instance') => {
     if (!edit.card) return
     const current = useUiStore.getState().themeLibrary
     let next: ReadingThemeLibrary
     if (edit.kind === 'palette') next = { ...current, palettes: upsertThemeCard(current.palettes, edit.card) }
     else if (edit.kind === 'css') next = { ...current, css: upsertThemeCard(current.css, edit.card) }
     else next = { ...current, highlights: upsertThemeCard(current.highlights, edit.card) }
+    if (nextScope === 'user' && isInstanceItem(edit.kind, edit.card.id)) {
+      const removed = await toggleInstanceBuiltIn(edit.kind, edit.card.id, false, next)
+      if (!removed) return
+    }
     setLibrary(next)
+    if (nextScope === 'instance') {
+      const published = await toggleInstanceBuiltIn(edit.kind, edit.card.id, true, next)
+      if (!published) return
+    }
     cardEditor?.onCreated?.(edit.card.id)
     setCardEditor(null)
   }
 
-  const deleteCard = (edit: ThemeCardEdit) => {
+  const deleteCard = async (edit: ThemeCardEdit) => {
     const card = edit.card
     if (!card) return
+    if (isOwner && isInstanceItem(edit.kind, card.id)) {
+      const removed = await toggleInstanceBuiltIn(edit.kind, card.id, false)
+      if (!removed) return
+    }
     const before = getThemeLibrarySnapshot()
     const { library: next, affected } = removeThemeCard(before.library, edit.kind, card.id)
     setLibrary(next)
@@ -254,7 +356,11 @@ export default function ReadingThemesSettingsSection() {
     setCardEditor(null)
   }
 
-  const deleteTheme = (theme: SavedReadingTheme) => {
+  const deleteTheme = async (theme: SavedReadingTheme) => {
+    if (isOwner && isInstanceItem('theme', theme.id)) {
+      const removed = await toggleInstanceBuiltIn('theme', theme.id, false)
+      if (!removed) return
+    }
     const state = useUiStore.getState()
     const before = getThemeLibrarySnapshot()
     const inUse = theme.id === state.readingThemeId || theme.id === state.lightReadingThemeId || theme.id === state.darkReadingThemeId
@@ -275,8 +381,16 @@ export default function ReadingThemesSettingsSection() {
     if (items.length) setPendingDelete(items)
   }
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!pendingDelete) return
+    if (isOwner) {
+      for (const item of pendingDelete) {
+        if (isInstanceItem(item.group, item.id)) {
+          const removed = await toggleInstanceBuiltIn(item.group, item.id, false)
+          if (!removed) return
+        }
+      }
+    }
     const before = getThemeLibrarySnapshot()
     // Card deletes first: every theme that referenced one gets re-pointed, and
     // a theme delete afterwards works on the already-settled library.
@@ -314,9 +428,18 @@ export default function ReadingThemesSettingsSection() {
     reorder(activeGroup as Group, activeId, overId)
   }
 
-  const saveTheme = (theme: SavedReadingTheme) => {
+  const saveTheme = async (theme: SavedReadingTheme, nextScope?: 'user' | 'instance') => {
     const current = useUiStore.getState().themeLibrary
-    setLibrary({ ...current, themes: upsertThemeCard(current.themes, { ...theme, cards: normalizeThemeCards(current, theme.cards) }) })
+    const next = { ...current, themes: upsertThemeCard(current.themes, { ...theme, cards: normalizeThemeCards(current, theme.cards) }) }
+    if (nextScope === 'user' && isInstanceItem('theme', theme.id)) {
+      const removed = await toggleInstanceBuiltIn('theme', theme.id, false, next)
+      if (!removed) return
+    }
+    setLibrary(next)
+    if (nextScope === 'instance') {
+      const published = await toggleInstanceBuiltIn('theme', theme.id, true, next)
+      if (!published) return
+    }
     setThemeEditor(null)
   }
 
@@ -375,7 +498,7 @@ export default function ReadingThemesSettingsSection() {
                 disabled={exporting || importing}
                 exporting={exporting}
                 selectedCount={selectedTotal}
-                onExport={() => exportItems(selectionOf())}
+                onExport={() => requestExportItems(selectionOf())}
                 onDelete={requestDelete}
               />
             )}
@@ -396,7 +519,7 @@ export default function ReadingThemesSettingsSection() {
                   type="button"
                   disabled={exporting || importing || countOf(everything()) === 0}
                   aria-busy={exporting}
-                  onClick={() => exportItems(everything())}
+                  onClick={() => requestExportItems(everything())}
                   className={iconButton}
                   aria-label={_('reader.themeExportAll')}
                   title={_('reader.themeExportAll')}
@@ -408,7 +531,7 @@ export default function ReadingThemesSettingsSection() {
             <EditModeButton active={editing} disabled={exporting || importing} onClick={toggleEditing} />
           </div>
         }
-        bodyClassName="pt-3"
+        bodyClassName={editing ? undefined : 'pt-1.5'}
       >
         <input ref={input} type="file" accept=".zip,application/zip" hidden onChange={(event) => {
           const file = event.target.files?.[0]
@@ -431,7 +554,7 @@ export default function ReadingThemesSettingsSection() {
         )}
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-          <div className="grid gap-2.5">
+          <div className={editing ? 'grid gap-2 pt-1.5' : 'grid gap-2'}>
             <Region
               label={_('reader.themeSavedLabel')}
               count={library.themes.length}
@@ -540,6 +663,24 @@ export default function ReadingThemesSettingsSection() {
         />
       )}
 
+      {pendingExport && (
+        <ExportConfirmDialog
+          items={[
+            ...pendingExport.themes.map((t) => t.name),
+            ...pendingExport.palettes.map((p) => p.name),
+            ...pendingExport.css.map((c) => c.name),
+            ...pendingExport.highlights.map((h) => h.name),
+          ]}
+          zipHint
+          confirmDisabled={exporting}
+          onConfirm={async () => {
+            await executeExportItems(pendingExport)
+            setPendingExport(null)
+          }}
+          onClose={() => { if (!exporting) setPendingExport(null) }}
+        />
+      )}
+
       {themeEditor && (
         <ThemeCombinationDialog
           key={themeEditor.theme.id}
@@ -547,6 +688,9 @@ export default function ReadingThemesSettingsSection() {
           existing={themeEditor.existing}
           library={library}
           variant="default"
+          scope={isInstanceItem('theme', themeEditor.theme.id) ? 'instance' : 'user'}
+          canChangeScope={isOwner && !BUILTIN_IDS.has(themeEditor.theme.id)}
+          readOnly={isInstanceItem('theme', themeEditor.theme.id) && !isOwner}
           onClose={() => setThemeEditor(null)}
           onSave={saveTheme}
           onCreateCard={(kind, onCreated) => setCardEditor({ edit: { kind }, onCreated })}
@@ -554,7 +698,7 @@ export default function ReadingThemesSettingsSection() {
           onCopyCard={copyCard}
           onCopy={(draft) => setThemeEditor({ existing: false, theme: { ...draft, id: localRecordId(), name: uniqueName(draft.name, themeLibraryNames(library, 'theme')) } })}
           onDelete={themeEditor.existing ? () => deleteTheme(themeEditor.theme) : undefined}
-          onExport={themeEditor.existing ? () => exportItems({ themes: [themeEditor.theme], palettes: [], css: [], highlights: [] }) : undefined}
+          onExport={themeEditor.existing ? () => requestExportItems({ themes: [themeEditor.theme], palettes: [], css: [], highlights: [] }) : undefined}
         />
       )}
 
@@ -563,6 +707,14 @@ export default function ReadingThemesSettingsSection() {
           key={`${cardEditor.edit.kind}:${cardEditor.edit.card?.id ?? 'new'}`}
           editor={cardEditor.edit}
           variant="default"
+          resourceScope={cardEditor.edit.card && isInstanceItem(cardEditor.edit.kind, cardEditor.edit.card.id) ? 'instance' : 'user'}
+          canChangeScope={isOwner && (!cardEditor.edit.card || !BUILTIN_IDS.has(cardEditor.edit.card.id))}
+          readOnly={cardEditor.edit.card ? isInstanceItem(cardEditor.edit.kind, cardEditor.edit.card.id) && !isOwner : false}
+          onCopy={cardEditor.edit.card ? (edit) => {
+            if (!edit.card) return
+            copyCard(edit.kind, edit.card)
+            setCardEditor(null)
+          } : undefined}
           onClose={() => setCardEditor(null)}
           onSave={saveCard}
           onDelete={cardEditor.edit.card ? () => deleteCard(cardEditor!.edit) : undefined}

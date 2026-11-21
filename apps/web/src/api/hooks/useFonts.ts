@@ -2,9 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { FontListItem, FontScope } from '@bookdock/shared'
 
+import { downloadBlob, timestampSuffix } from '@/lib/download'
 import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 
-import { apiDelete, apiGet, apiPatch, apiUpload } from '../client'
+import { apiDelete, apiGet, apiPatch, apiPostBlob, apiUpload } from '../client'
 
 const FONTS_KEY = ['fonts'] as const
 
@@ -59,4 +60,18 @@ export function useUpdateFontScope() {
       void queryClient.invalidateQueries({ queryKey: FONTS_KEY })
     },
   })
+}
+
+export function triggerFontDownload(id: string, fileName: string): void {
+  const anchor = document.createElement('a')
+  anchor.href = `/api/v1/fonts/${encodeURIComponent(id)}/file?download=1`
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+export async function exportFontsZip(ids: string[]): Promise<void> {
+  const blob = await apiPostBlob('/fonts/export', { ids })
+  downloadBlob(`bookdock-fonts-${timestampSuffix()}.zip`, blob)
 }

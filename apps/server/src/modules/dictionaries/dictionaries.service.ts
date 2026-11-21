@@ -421,3 +421,34 @@ export async function dictionaryResource(userId: string | null, id: string, key:
   }
   throw new AppError('DICTIONARY_NOT_FOUND')
 }
+
+export function getDictionaryExportFiles(userId: string, id: string): {
+  name: string
+  files: { fileName: string; filePath: string }[]
+} {
+  const { item, directoryUserId } = resolveDictionary(userId, id, false)
+  const directory = dictionaryDirectory(directoryUserId, item.id)
+  const diskEntries: { diskName: string; exportName: string }[] = [
+    { diskName: item.mdx, exportName: path.basename(item.fileNames[0] ?? item.mdx) },
+    ...item.mdds.map((mdd, index) => ({
+      diskName: mdd,
+      exportName: path.basename(item.fileNames[1 + index] ?? mdd),
+    })),
+    ...(item.cssFiles ?? []).map((css) => ({
+      diskName: path.basename(css),
+      exportName: path.basename(css),
+    })),
+  ]
+  const files: { fileName: string; filePath: string }[] = []
+  for (const entry of diskEntries) {
+    const filePath = path.join(directory, entry.diskName)
+    if (!existsSync(filePath)) {
+      throw new AppError('DICTIONARY_NOT_FOUND', 'Dictionary file missing')
+    }
+    files.push({ fileName: entry.exportName, filePath })
+  }
+  if (files.length === 0) {
+    throw new AppError('DICTIONARY_NOT_FOUND', 'Dictionary file missing')
+  }
+  return { name: item.name, files }
+}

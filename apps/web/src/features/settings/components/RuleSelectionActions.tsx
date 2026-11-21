@@ -6,11 +6,12 @@ interface RuleSelectionActionsProps {
   selectedCount: number
   /** Export in flight: the icon spins so the greyed-out button still reads as working. */
   exporting?: boolean
+  deleteDisabled?: boolean
   onExport?: () => void
-  onDelete: () => void
+  onDelete?: () => void
 }
 
-export default function RuleSelectionActions({ disabled, selectedCount, exporting = false, onExport, onDelete }: RuleSelectionActionsProps) {
+export default function RuleSelectionActions({ disabled, selectedCount, exporting = false, deleteDisabled = false, onExport, onDelete }: RuleSelectionActionsProps) {
   const _ = useTranslation()
   const inactive = disabled || selectedCount === 0
 
@@ -30,9 +31,9 @@ export default function RuleSelectionActions({ disabled, selectedCount, exportin
           <path d="M12 14V3m-5 5 5-5 5 5" />
         </svg>}
       </button>}
-      <button
+      {onDelete && <button
         type="button"
-        disabled={inactive}
+        disabled={inactive || deleteDisabled}
         onClick={onDelete}
         aria-label={_('settings.ruleDeleteSelected')}
         title={_('settings.ruleDeleteSelected')}
@@ -42,7 +43,7 @@ export default function RuleSelectionActions({ disabled, selectedCount, exportin
           <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
           <path d="M10 10v8M14 10v8" />
         </svg>
-      </button>
+      </button>}
     </>
   )
 }

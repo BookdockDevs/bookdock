@@ -232,7 +232,7 @@ export default function StorageBackendSection({ active = true }: StorageBackendS
             </button>
           )
         }
-        bodyClassName="space-y-4 pt-4"
+        bodyClassName="space-y-4 pt-3"
       >
         {configQuery.isError && (!config || isAccessRevocationError(configQuery.error)) ? (
           <QueryErrorState

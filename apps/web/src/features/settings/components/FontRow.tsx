@@ -14,6 +14,9 @@ interface FontRowProps {
   isOwner: boolean
   disabled: boolean
   sorting: boolean
+  selectable?: boolean
+  selected?: boolean
+  onSelectChange?: (checked: boolean) => void
   onToggle: () => void
   onLoad: () => void
   onEdit: () => void
@@ -36,7 +39,19 @@ export function SpinnerIcon() {
   )
 }
 
-export default function FontRow({ font, isOwner, disabled, sorting, onToggle, onLoad, onEdit, onDelete }: FontRowProps) {
+export default function FontRow({
+  font,
+  isOwner,
+  disabled,
+  sorting,
+  selectable = false,
+  selected = false,
+  onSelectChange,
+  onToggle,
+  onLoad,
+  onEdit,
+  onDelete,
+}: FontRowProps) {
   const _ = useTranslation()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: font.id,
@@ -57,6 +72,19 @@ export default function FontRow({ font, isOwner, disabled, sorting, onToggle, on
         isDragging && 'relative z-10 opacity-70 shadow-md ring-1 ring-violet-500/30',
       )}
     >
+      {sorting && (
+        <input
+          type="checkbox"
+          checked={selectable ? selected : false}
+          disabled={disabled || !selectable}
+          aria-label={font.name}
+          onChange={(event) => onSelectChange?.(event.target.checked)}
+          className={cn(
+            'h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300',
+            !selectable && 'cursor-not-allowed opacity-40',
+          )}
+        />
+      )}
       {sorting && (
         <button
           type="button"

@@ -299,6 +299,36 @@ export const fonts = sqliteTable('fonts', {
   contentHashIdx: index('fonts_content_hash_idx').on(table.contentHash),
 }))
 
+export const themeAssets = sqliteTable('theme_assets', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  assetId: text('asset_id').notNull(),
+  scope: text('scope', { enum: ['user', 'instance'] }).notNull().default('user'),
+  fileName: text('file_name').notNull(),
+  mime: text('mime', { enum: ['image/png', 'image/jpeg', 'image/webp'] }).notNull(),
+  contentHash: text('content_hash').notNull(),
+  size: integer('size').notNull(),
+  width: integer('width').notNull().default(0),
+  height: integer('height').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+}, (table) => ({
+  userAssetUnique: uniqueIndex('theme_assets_user_asset_unique').on(table.userId, table.assetId),
+  assetScopeIdx: index('theme_assets_asset_scope_idx').on(table.assetId, table.scope),
+  contentHashIdx: index('theme_assets_content_hash_idx').on(table.contentHash),
+}))
+
+export const instanceThemeItems = sqliteTable('instance_theme_items', {
+  id: text('id').primaryKey(),
+  kind: text('kind', { enum: ['theme', 'palette', 'css', 'highlight'] }).notNull(),
+  itemId: text('item_id').notNull(),
+  ownerUserId: text('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+  kindItemUnique: uniqueIndex('instance_theme_items_kind_item_unique').on(table.kind, table.itemId),
+}))
+
 // TOC rules (目录规则): named presets of regex patterns that split TXT books
 // into chapters. patterns is a JSON array of TocRulePattern (level/regex/
 // replacement/name/enabled). sortOrder drives both the picker order and the

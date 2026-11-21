@@ -1,4 +1,4 @@
-import type { HighlightRuleDef, HighlightRuleGroup, HighlightRuleStyle } from '@bookdock/shared'
+import type { HighlightRuleDef, HighlightRuleGroup, HighlightRuleStyle, InstanceThemeLibraryRes } from '@bookdock/shared'
 
 import { localRecordId } from '@/features/local-library/id'
 
@@ -595,4 +595,52 @@ export function mergeThemeBundle(
     highlights: reused.highlights.size,
   }
   return { library: next, added, merged }
+}
+
+function mergeById<T extends { id: string }>(personal: T[], instance: T[]): T[] {
+  const seen = new Set(personal.map((item) => item.id))
+  const additions = instance.filter((item) => !seen.has(item.id))
+  if (additions.length === 0) return personal
+  return [...personal, ...additions]
+}
+
+export function mergeInstanceThemeLibrary(
+  personal: ReadingThemeLibrary,
+  instance: InstanceThemeLibraryRes | null | undefined,
+): ReadingThemeLibrary {
+  if (!instance) return personal
+  const parsed = readThemeLibrary(JSON.stringify({
+    version: 3,
+    palettes: instance.palettes ?? [],
+    css: instance.css ?? [],
+    highlights: instance.highlights ?? [],
+    themes: instance.themes ?? [],
+  }))
+  if (!parsed) return personal
+  return {
+    palettes: mergeById(personal.palettes, parsed.palettes),
+    css: mergeById(personal.css, parsed.css),
+    highlights: mergeById(personal.highlights, parsed.highlights),
+    themes: mergeById(personal.themes, parsed.themes),
+  }
+}
+
+export function stripInstanceThemeItems(
+  library: ReadingThemeLibrary,
+  instance: InstanceThemeLibraryRes | null | undefined,
+): ReadingThemeLibrary {
+  if (!instance) return library
+  const presetIds = new Set(PRESET_READING_THEMES.map((item) => item.id))
+  const instanceIds = {
+    palettes: new Set((instance.palettes ?? []).map((item) => String((item as { id?: unknown }).id ?? ''))),
+    css: new Set((instance.css ?? []).map((item) => String((item as { id?: unknown }).id ?? ''))),
+    highlights: new Set((instance.highlights ?? []).map((item) => String((item as { id?: unknown }).id ?? ''))),
+    themes: new Set((instance.themes ?? []).map((item) => String((item as { id?: unknown }).id ?? ''))),
+  }
+  return {
+    palettes: library.palettes.filter((item) => presetIds.has(item.id) || !instanceIds.palettes.has(item.id)),
+    css: library.css.filter((item) => !instanceIds.css.has(item.id)),
+    highlights: library.highlights.filter((item) => !instanceIds.highlights.has(item.id)),
+    themes: library.themes.filter((item) => presetIds.has(item.id) || !instanceIds.themes.has(item.id)),
+  }
 }

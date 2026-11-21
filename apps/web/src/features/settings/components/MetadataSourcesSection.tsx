@@ -384,7 +384,7 @@ export default function MetadataSourcesSection() {
           </svg>
         }
         iconBgClass="bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
-        bodyClassName="pt-1"
+        bodyClassName="pt-3"
         action={
           <div className="flex shrink-0 items-center gap-2">
             {SOURCE_VIEWS.length > 1 && (

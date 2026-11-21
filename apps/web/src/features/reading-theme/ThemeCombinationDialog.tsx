@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import SegmentedControl from '@/components/ui/SegmentedControl'
 import SmartMenu, { readerMenuItemClass } from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { pointerAnchor, type MenuAnchor } from '@/lib/menu-anchor'
@@ -23,7 +24,7 @@ interface ThemeCombinationDialogProps {
   library: ReadingThemeLibrary
   variant: 'default' | 'reader'
   onClose: () => void
-  onSave: (theme: SavedReadingTheme) => void
+  onSave: (theme: SavedReadingTheme, scope?: 'user' | 'instance') => void
   onCreateCard: (kind: ThemeCardEdit['kind'], onCreated: (id: string) => void) => void
   onEditCard?: (edit: ThemeCardEdit) => void
   onCopyCard?: (kind: ThemeCardEdit['kind'], card: ThemeCardEdit['card']) => void
@@ -31,10 +32,13 @@ interface ThemeCombinationDialogProps {
   onDelete?: () => void
   onExport?: () => void
   onTrial?: (theme: SavedReadingTheme | null) => void
+  scope?: 'user' | 'instance'
+  canChangeScope?: boolean
+  readOnly?: boolean
 }
 
 const inputClass =
-  'w-full min-w-0 rounded-lg border border-stone-300/70 bg-stone-500/5 px-3 py-2 text-sm text-current placeholder:text-current/35 outline-none transition-colors focus:border-stone-400 focus:bg-stone-500/10 focus:ring-1 focus:ring-stone-400/20 dark:border-stone-700/80'
+  'w-full min-w-0 rounded-lg border border-stone-300/80 bg-transparent px-3 py-2 text-sm text-current placeholder:text-current/35 outline-none transition-colors focus:border-stone-400 focus:bg-stone-500/5 focus:ring-1 focus:ring-stone-400/20 dark:border-stone-700/80'
 
 export default function ThemeCombinationDialog({
   initial,
@@ -46,12 +50,17 @@ export default function ThemeCombinationDialog({
   onCreateCard,
   onEditCard,
   onCopyCard,
+  onCopy,
   onDelete,
   onTrial,
+  scope = 'user',
+  canChangeScope = false,
+  readOnly = false,
 }: ThemeCombinationDialogProps) {
   const _ = useTranslation()
-  const scope = useAuthStore((state) => state.user?.id ?? 'device')
+  const assetScope = useAuthStore((state) => state.user?.id ?? 'device')
   const [draft, setDraft] = useState(initial)
+  const [draftScope, setDraftScope] = useState<'user' | 'instance'>(scope)
   const [trial, setTrial] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [contextMenu, setContextMenu] = useState<{
@@ -67,7 +76,7 @@ export default function ThemeCombinationDialog({
     () => library.palettes.flatMap((item) => (item.wallpaperAssetId ? [item.wallpaperAssetId] : [])),
     [library.palettes],
   )
-  const { urls: wallpapers } = useThemeAssetUrls(scope, paletteAssetIds)
+  const { urls: wallpapers } = useThemeAssetUrls(assetScope, paletteAssetIds)
 
   const change = (patch: Partial<ThemeDefinitionCards>) =>
     setDraft((current) => ({ ...current, cards: { ...current.cards, ...patch } }))
@@ -122,24 +131,28 @@ export default function ThemeCombinationDialog({
               size="sm"
               onClick={deleting ? () => setDeleting(false) : onClose}
             >
-              {_('library.cancel')}
+              {_(readOnly ? 'library.close' : 'library.cancel')}
             </Button>
-            {deleting ? (
+            {deleting && !readOnly ? (
               <Button type="button" variant="danger" size="sm" onClick={onDelete}>
                 {_('reader.deleteTheme')}
               </Button>
-            ) : (
+            ) : !readOnly ? (
               <Button
                 type="button"
                 variant="primary"
                 size="sm"
                 disabled={!hasComponent || (cards.paletteId != null && !hasPalette) || !draft.name.trim()}
                 title={!hasComponent ? _('reader.themeNeedsComponent') : undefined}
-                onClick={() => onSave({ ...draft, name: draft.name.trim() })}
+                onClick={() => onSave({ ...draft, name: draft.name.trim() }, canChangeScope ? draftScope : undefined)}
               >
                 {_('reader.saveTheme')}
               </Button>
-            )}
+            ) : onCopy ? (
+              <Button type="button" variant="primary" size="sm" onClick={() => onCopy(draft)}>
+                {_('reader.copyTheme')}
+              </Button>
+            ) : null}
           </div>
         </div>
       }
@@ -150,21 +163,40 @@ export default function ThemeCombinationDialog({
         </p>
       ) : (
         <div className="flex flex-col gap-4.5 px-1 py-1">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-current/80">{_('reader.themeName')}</span>
-            <input
-              value={draft.name}
-              maxLength={100}
-              aria-label={_('reader.themeName')}
-              className={inputClass}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            />
-          </label>
+          <div className={canChangeScope ? 'flex flex-col gap-3 sm:flex-row sm:items-end' : ''}>
+            <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <span className="text-xs font-normal text-current/55">{_('reader.themeName')}</span>
+              <input
+                value={draft.name}
+                maxLength={100}
+                disabled={readOnly}
+                aria-label={_('reader.themeName')}
+                className={inputClass}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              />
+            </label>
+            {canChangeScope && (
+              <div className="flex shrink-0 flex-col gap-1.5 sm:w-44">
+                <span className="text-xs font-normal text-current/55">{_('settings.resourceScope')}</span>
+                <SegmentedControl
+                  ariaLabel={_('settings.resourceScope')}
+                  value={draftScope}
+                  onChange={setDraftScope}
+                  size="md"
+                  fullWidth
+                  options={(['user', 'instance'] as const).map((value) => ({
+                    value,
+                    label: _(value === 'user' ? 'settings.resourceScopeUser' : 'settings.resourceScopeInstance'),
+                  }))}
+                />
+              </div>
+            )}
+          </div>
 
           {/* Palette selection area */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2.5 border-t border-current/10 pt-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-current/80">{_('reader.themePaletteLabel')}</span>
+              <span className="text-[13px] font-semibold text-current/90">{_('reader.themePaletteLabel')}</span>
               <button
                 type="button"
                 aria-label={_('reader.themeNewPalette')}
@@ -244,9 +276,9 @@ export default function ThemeCombinationDialog({
           </div>
 
           {/* Custom CSS selection area */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2.5 border-t border-current/10 pt-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-current/80">{_('reader.themeCssLabel')}</span>
+              <span className="text-[13px] font-semibold text-current/90">{_('reader.themeCssLabel')}</span>
               <button
                 type="button"
                 aria-label={_('reader.themeNewCss')}
@@ -304,9 +336,9 @@ export default function ThemeCombinationDialog({
           </div>
 
           {/* Highlight rules selection area */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2.5 border-t border-current/10 pt-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-current/80">{_('reader.themeHighlightRulesTitle')}</span>
+              <span className="text-[13px] font-semibold text-current/90">{_('reader.themeHighlightRulesTitle')}</span>
               <button
                 type="button"
                 aria-label={_('reader.themeNewHighlight')}

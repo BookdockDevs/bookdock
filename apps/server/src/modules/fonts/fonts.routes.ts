@@ -1,9 +1,10 @@
 import { Readable } from 'node:stream'
 
+import JSZip from 'jszip'
 import { z } from 'zod'
 import { Hono } from 'hono'
 
-import type { FontListItem } from '@bookdock/shared'
+import { fontExportSchema, type FontListItem } from '@bookdock/shared'
 
 import { config } from '../../config'
 import { getStorage } from '../../storage'
@@ -25,6 +26,28 @@ const FONT_CONTENT_TYPES: Record<FontListItem['format'], string> = {
   otf: 'font/otf',
   woff: 'font/woff',
   woff2: 'font/woff2',
+}
+
+function attachmentHeader(fileName: string): string {
+  const safeName = fileName.replace(/[\r\n"/\\]/g, '_')
+  const asciiFallback = safeName.replace(/[^\x20-\x7e]/g, '_') || 'download'
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(safeName)}`
+}
+
+function uniqueEntryName(rawName: string, used: Set<string>): string {
+  const clean = rawName.replace(/[\r\n/\\]/g, '_') || 'font'
+  if (!used.has(clean)) {
+    used.add(clean)
+    return clean
+  }
+  const dot = clean.lastIndexOf('.')
+  const stem = dot > 0 ? clean.slice(0, dot) : clean
+  const ext = dot > 0 ? clean.slice(dot) : ''
+  let n = 2
+  while (used.has(`${stem} (${n})${ext}`)) n += 1
+  const candidate = `${stem} (${n})${ext}`
+  used.add(candidate)
+  return candidate
 }
 
 const fontsRoutes = new Hono()
@@ -89,8 +112,50 @@ fontsRoutes.delete('/:id', async (c) => {
   return c.json({ data: null })
 })
 
+fontsRoutes.post('/export', async (c) => {
+  const user = c.get('user')
+  if (!user || c.get('guest')) {
+    throw new AppError('FORBIDDEN', 'Login required to export fonts')
+  }
+  const parsed = fontExportSchema.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) {
+    throw new AppError('VALIDATION_ERROR', 'Invalid font export request', parsed.error.flatten())
+  }
+  const ids = Array.from(new Set(parsed.data.ids))
+  const storage = getStorage()
+  const rows = await Promise.all(ids.map((id) => getFontFile(user.id, id)))
+  const zip = new JSZip()
+  const usedNames = new Set<string>()
+  for (const row of rows) {
+    const key = fontKey(row.contentHash, row.format)
+    if (!(await storage.exists(key))) {
+      throw new AppError('FONT_NOT_FOUND', 'Font file missing')
+    }
+    const stream = await storage.get(key) as Readable
+    const entryName = uniqueEntryName(row.fileName, usedNames)
+    zip.file(entryName, stream)
+  }
+  const nodeStream = zip.generateNodeStream({
+    type: 'nodebuffer',
+    streamFiles: true,
+    compression: 'STORE',
+  })
+  return new Response(Readable.toWeb(nodeStream as unknown as Readable) as unknown as ReadableStream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': attachmentHeader('bookdock-fonts.zip'),
+      'Cache-Control': 'private, no-store',
+    },
+  })
+})
+
 fontsRoutes.get('/:id/file', async (c) => {
   const user = c.get('user')
+  const download = c.req.query('download') === '1' || c.req.query('download') === 'true'
+  if (download && (!user || c.get('guest'))) {
+    throw new AppError('FORBIDDEN', 'Login required to export fonts')
+  }
   const row = await getFontFile(user?.id ?? null, c.req.param('id'))
   if (!user && row.scope !== 'instance') {
     throw new AppError('FONT_NOT_FOUND')
@@ -104,12 +169,16 @@ fontsRoutes.get('/:id/file', async (c) => {
   for await (const chunk of await storage.get(key) as Readable) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
   }
-  // The blob is content-hash addressed; the payload never changes under the same URL.
-  return c.newResponse(new Uint8Array(Buffer.concat(chunks)), 200, {
+  const headers: Record<string, string> = {
     'Content-Type': FONT_CONTENT_TYPES[row.format],
     'Content-Length': String(row.size),
-    'Cache-Control': 'private, immutable, max-age=31536000',
-  })
+    'Cache-Control': download ? 'private, no-store' : 'private, immutable, max-age=31536000',
+  }
+  if (download) {
+    headers['Content-Disposition'] = attachmentHeader(row.fileName)
+  }
+  // The blob is content-hash addressed; the payload never changes under the same URL.
+  return c.newResponse(new Uint8Array(Buffer.concat(chunks)), 200, headers)
 })
 
 export default fontsRoutes

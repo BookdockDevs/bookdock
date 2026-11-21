@@ -5,6 +5,7 @@ import type { SettingsRes } from '@bookdock/shared'
 import { DEFAULT_SELECTION_TOOLBAR_ORDER, settingsUpdateSchema } from '@bookdock/shared'
 
 import { apiPut } from '@/api/client'
+import { useInstanceThemeLibrary } from '@/api/hooks/useReadingThemes'
 import { readReaderShortcuts, readerShortcutStorageKey } from '@/features/reader/lib/reader-shortcuts'
 import { bindReadingPreferenceAccount, DEVICE_READING_CONFIG_KEY, DEVICE_SETTINGS_KEY, readingPreferenceAccountId, withReadingPreferenceHydration } from '@/features/reader/lib/reading-preference-owner'
 import { emptyConfig, parseReadingConfig, READING_PROFILE_DEFAULTS, serializeReadingConfig } from '@/features/reader/lib/reading-profiles'
@@ -55,7 +56,7 @@ function pickSettings(state: ReturnType<typeof useUiStore.getState>): SettingsRe
   }
   // Custom themes sync as a JSON string: reading configs reference them by
   // id, so the referenced resource must travel with the intent.
-  settings.customThemes = serializeThemeLibrary(state.themeLibrary)
+  settings.customThemes = serializeThemeLibrary(state.personalThemeLibrary)
   return settings
 }
 
@@ -63,7 +64,7 @@ function settingsChanged(
   state: ReturnType<typeof useUiStore.getState>,
   prevState: ReturnType<typeof useUiStore.getState>,
 ): boolean {
-  if (state.themeLibrary !== prevState.themeLibrary) return true
+  if (state.personalThemeLibrary !== prevState.personalThemeLibrary) return true
   if (JSON.stringify(state.fontPreferences) !== JSON.stringify(prevState.fontPreferences)) return true
   if (JSON.stringify(state.fontOrder) !== JSON.stringify(prevState.fontOrder)) return true
   if (JSON.stringify(state.selectionToolbarOrder) !== JSON.stringify(prevState.selectionToolbarOrder)) return true
@@ -206,6 +207,7 @@ export function SettingsSync() {
   const mutateRef = useRef(saveSettings)
   const settingsUserRef = useRef<string | null | undefined>(undefined)
   const suppressSyncRef = useRef(false)
+  const skipNextHydrateRef = useRef(false)
   useEffect(() => {
     mutateRef.current = saveSettings
   }, [saveSettings])
@@ -222,6 +224,13 @@ export function SettingsSync() {
     queryKey: ['settings'],
     queryFn: fetchSettings,
   })
+  const { data: instanceThemeRes } = useInstanceThemeLibrary(true)
+
+  useEffect(() => {
+    if (instanceThemeRes?.data) {
+      useUiStore.getState().setInstanceThemeLibrary(instanceThemeRes.data)
+    }
+  }, [instanceThemeRes])
 
   useEffect(() => {
     if (settingsUserRef.current !== userId) {
@@ -257,6 +266,10 @@ export function SettingsSync() {
 
   useEffect(() => {
     if (!userId || isGuest || !settingsRes?.data) return
+    if (skipNextHydrateRef.current) {
+      skipNextHydrateRef.current = false
+      return
+    }
     const pending = getPendingSettings(userId)
     if (pending) return
 
@@ -365,7 +378,12 @@ export function SettingsSync() {
           mutateRef.current({ userId: user.id, settings: payloadToSave }, {
             onSuccess: () => {
               clearPendingSettings(user.id, payloadToSave)
-              void queryClient.invalidateQueries({ queryKey: ['settings'] })
+              if (useAuthStore.getState().user?.id === user.id && !getPendingSettings(user.id)) {
+                skipNextHydrateRef.current = true
+                queryClient.setQueryData<{ data: SettingsRes }>(['settings'], (prev) =>
+                  prev?.data ? { data: { ...prev.data, ...payloadToSave } } : prev,
+                )
+              }
             },
           })
         }

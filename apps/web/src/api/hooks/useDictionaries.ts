@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { DictionaryItem, DictionaryList, DictionaryLookupResult, DictionaryScope } from '@bookdock/shared'
 
+import { downloadBlob, timestampSuffix } from '@/lib/download'
 import { assertSessionEpoch, getSessionEpoch } from '@/lib/session-scope'
 import { useAuthStore } from '@/stores/auth.store'
 
-import { apiDelete, apiGet, apiPatch, apiPut, apiUpload } from '../client'
+import { apiDelete, apiGet, apiPatch, apiPostBlob, apiPut, apiUpload } from '../client'
 
 export const DICTIONARIES_KEY = ['dictionaries'] as const
 export const dictionaryListKey = (accountId: string | null) => [...DICTIONARIES_KEY, 'account', accountId] as const
@@ -101,4 +102,18 @@ export function useDictionaryMutation() {
       void client.invalidateQueries({ queryKey: ['storage-backend'] })
     },
   })
+}
+
+export function triggerDictionaryExport(id: string, name: string, fileNames: string[]): void {
+  const anchor = document.createElement('a')
+  anchor.href = `/api/v1/dictionaries/${encodeURIComponent(id)}/export`
+  anchor.download = fileNames.length > 1 ? `${name}.zip` : (fileNames[0] ?? `${name}.mdx`)
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+export async function exportDictionariesZip(ids: string[]): Promise<void> {
+  const blob = await apiPostBlob('/dictionaries/export', { ids })
+  downloadBlob(`bookdock-dictionaries-${timestampSuffix()}.zip`, blob)
 }

@@ -3,6 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import type { HighlightRuleDef } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
+import { uploadThemeAssetToServer } from '@/api/hooks/useReadingThemes'
 import CodeEditor, { type CodeEditorHandle } from '@/components/ui/CodeEditor'
 import Modal from '@/components/ui/Modal'
 import SegmentedControl from '@/components/ui/SegmentedControl'
@@ -33,10 +34,14 @@ export type ThemeCardEdit =
 interface ThemeEditorDialogProps {
   editor: ThemeCardEdit
   variant: 'default' | 'reader'
-  onSave: (card: ThemeCardEdit) => void
+  onSave: (card: ThemeCardEdit, resourceScope?: 'user' | 'instance') => void
   onClose: () => void
   onDelete?: () => void
   onTrial?: (draft: ThemeCardEdit | null) => void
+  onCopy?: (card: ThemeCardEdit) => void
+  resourceScope?: 'user' | 'instance'
+  canChangeScope?: boolean
+  readOnly?: boolean
 }
 
 const colors = [
@@ -52,14 +57,26 @@ function colorsEqual(a?: string, b?: string): boolean {
 }
 
 const formInput =
-  'w-full min-w-0 rounded-lg border border-stone-300/70 bg-stone-500/5 px-3 py-2 text-sm text-current placeholder:text-current/35 outline-none transition-colors focus:border-stone-400 focus:bg-stone-500/10 focus:ring-1 focus:ring-stone-400/20 dark:border-stone-700/80'
+  'w-full min-w-0 rounded-lg border border-stone-300/80 bg-transparent px-3 py-2 text-sm text-current placeholder:text-current/35 outline-none transition-colors focus:border-stone-400 focus:bg-stone-500/5 focus:ring-1 focus:ring-stone-400/20 dark:border-stone-700/80'
 const iconAction =
   'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-current/60 hover:bg-stone-500/10 hover:text-current transition-colors disabled:opacity-35'
 
-export default function ThemeEditorDialog({ editor, variant, onSave, onClose, onDelete, onTrial }: ThemeEditorDialogProps) {
+export default function ThemeEditorDialog({
+  editor,
+  variant,
+  onSave,
+  onClose,
+  onDelete,
+  onTrial,
+  onCopy,
+  resourceScope = 'user',
+  canChangeScope = false,
+  readOnly = false,
+}: ThemeEditorDialogProps) {
   const _ = useTranslation()
   const inputId = useId()
   const scope = useAuthStore((s) => s.user?.id ?? 'device')
+  const [draftResourceScope, setDraftResourceScope] = useState<'user' | 'instance'>(resourceScope)
   const store = useMemo(() => new ThemeAssetStore(), [])
   const [name, setName] = useState(editor.card?.name ?? '')
   const [newId] = useState(localRecordId)
@@ -310,8 +327,21 @@ export default function ThemeEditorDialog({ editor, variant, onSave, onClose, on
     busyRef.current = true
     setBusy(true)
     try {
-      if (entries.length) await store.storePrepared(scope, entries)
-      if (started === generation.current && scope === (useAuthStore.getState().user?.id ?? 'device')) onSave(card)
+      if (entries.length) {
+        await store.storePrepared(scope, entries)
+        if (scope !== 'device') {
+          await Promise.all(entries.map(({ image }) => uploadThemeAssetToServer({
+            assetId: image.asset.id,
+            blob: image.blob,
+            fileName: image.asset.fileName,
+            width: image.asset.width,
+            height: image.asset.height,
+          })))
+        }
+      }
+      if (started === generation.current && scope === (useAuthStore.getState().user?.id ?? 'device')) {
+        onSave(card, canChangeScope ? draftResourceScope : undefined)
+      }
     } catch (error) {
       const full = error instanceof ThemeAssetError && (error.category === 'too-many' || error.category === 'storage-full')
       notify.error({ key: full ? 'reader.themeAssetsStorageFull' : 'reader.themeAssetSaveFailed' })
@@ -446,13 +476,13 @@ export default function ThemeEditorDialog({ editor, variant, onSave, onClose, on
               disabled={busy}
               onClick={deleting ? () => setDeleting(false) : onClose}
             >
-              {_('library.cancel')}
+              {_(readOnly ? 'library.close' : 'library.cancel')}
             </Button>
-            {deleting ? (
+            {deleting && !readOnly ? (
               <Button type="button" variant="danger" size="sm" onClick={onDelete}>
                 {_('reader.deleteTheme')}
               </Button>
-            ) : (
+            ) : !readOnly ? (
               <Button
                 type="button"
                 variant="primary"
@@ -462,7 +492,11 @@ export default function ThemeEditorDialog({ editor, variant, onSave, onClose, on
               >
                 {_('reader.saveTheme')}
               </Button>
-            )}
+            ) : onCopy ? (
+              <Button type="button" variant="primary" size="sm" onClick={() => onCopy(editor)}>
+                {_('reader.copyTheme')}
+              </Button>
+            ) : null}
           </div>
         </div>
       }
@@ -474,17 +508,36 @@ export default function ThemeEditorDialog({ editor, variant, onSave, onClose, on
       ) : (
         <div className={`flex flex-col gap-3 px-1 py-1 ${editor.kind === 'css' ? 'flex-1 min-h-0' : 'gap-4.5'}`}>
           {editor.kind !== 'highlight' && (
-            <label htmlFor={inputId} className="flex shrink-0 flex-col gap-1.5">
-              <span className="text-xs font-medium text-current/80">{_('reader.themeName')}</span>
-              <input
-                id={inputId}
-                aria-label={_('reader.themeName')}
-                className={formInput}
-                value={name}
-                maxLength={100}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
+            <div className={canChangeScope ? 'flex shrink-0 flex-col gap-3 sm:flex-row sm:items-end' : 'shrink-0'}>
+              <label htmlFor={inputId} className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <span className="text-xs font-normal text-current/55">{_('reader.themeName')}</span>
+                <input
+                  id={inputId}
+                  aria-label={_('reader.themeName')}
+                  className={formInput}
+                  value={name}
+                  maxLength={100}
+                  disabled={readOnly}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+              {canChangeScope && (
+                <div className="flex shrink-0 flex-col gap-1.5 sm:w-44">
+                  <span className="text-xs font-normal text-current/55">{_('settings.resourceScope')}</span>
+                  <SegmentedControl
+                    ariaLabel={_('settings.resourceScope')}
+                    value={draftResourceScope}
+                    onChange={setDraftResourceScope}
+                    size="md"
+                    fullWidth
+                    options={(['user', 'instance'] as const).map((value) => ({
+                      value,
+                      label: _(value === 'user' ? 'settings.resourceScopeUser' : 'settings.resourceScopeInstance'),
+                    }))}
+                  />
+                </div>
+              )}
+            </div>
           )}
           {editor.kind !== 'highlight' && (
             <input
@@ -501,9 +554,9 @@ export default function ThemeEditorDialog({ editor, variant, onSave, onClose, on
           )}
           {editor.kind === 'palette' && (
             <>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2.5 border-t border-current/10 pt-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-current/80">{_('reader.themeColorSection')}</span>
+                  <span className="text-[13px] font-semibold text-current/90">{_('reader.themeColorSection')}</span>
                   <button
                     type="button"
                     onClick={handleSmartPalette}
@@ -531,8 +584,8 @@ export default function ThemeEditorDialog({ editor, variant, onSave, onClose, on
                     const hexVal = /^#[0-9a-f]{6}$/i.test(val) ? val : '#ffffff'
                     return (
                       <label key={key} className="flex min-w-0 flex-col gap-1.5">
-                        <span className="text-xs font-medium text-current/80">{_(labelKey)}</span>
-                        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-stone-300/70 bg-stone-500/5 p-1.5 pr-2.5 transition-colors focus-within:border-stone-400 focus-within:bg-stone-500/10 focus-within:ring-1 focus-within:ring-stone-400/20 dark:border-stone-700/80">
+                        <span className="text-xs font-normal text-current/55">{_(labelKey)}</span>
+                        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-stone-300/80 bg-transparent p-1.5 pr-2.5 transition-colors focus-within:border-stone-400 focus-within:bg-stone-500/5 focus-within:ring-1 focus-within:ring-stone-400/20 dark:border-stone-700/80">
                           <button
                             type="button"
                             aria-label={_(labelKey)}
@@ -577,8 +630,8 @@ export default function ThemeEditorDialog({ editor, variant, onSave, onClose, on
                   }}
                 />
               )}
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-current/80">{_('reader.themeWallpaper')}</span>
+              <div className="flex flex-col gap-2 border-t border-current/10 pt-4">
+                <span className="text-[13px] font-semibold text-current/90">{_('reader.themeWallpaper')}</span>
                 {palette.wallpaperAssetId ? (
                   <>
                     <div className="flex items-center gap-3 rounded-xl border border-stone-300/70 bg-stone-500/5 p-2.5 dark:border-stone-700/80">
@@ -795,7 +848,27 @@ export default function ThemeEditorDialog({ editor, variant, onSave, onClose, on
             </div>
           )}
           {editor.kind === 'highlight' && (
-            <HighlightRulesDraftSection single rules={rules} onChange={setRules} />
+            <HighlightRulesDraftSection
+              single
+              rules={rules}
+              onChange={setRules}
+              scopeControl={canChangeScope ? (
+                <div className="flex shrink-0 flex-col gap-1 sm:w-44">
+                  <span className="text-xs font-normal text-current/55">{_('settings.resourceScope')}</span>
+                  <SegmentedControl
+                    ariaLabel={_('settings.resourceScope')}
+                    value={draftResourceScope}
+                    onChange={setDraftResourceScope}
+                    size="md"
+                    fullWidth
+                    options={(['user', 'instance'] as const).map((value) => ({
+                      value,
+                      label: _(value === 'user' ? 'settings.resourceScopeUser' : 'settings.resourceScopeInstance'),
+                    }))}
+                  />
+                </div>
+              ) : undefined}
+            />
           )}
           {largeImage && urls[largeImage] && (() => {
             const isWallpaper = editor.kind === 'palette' && largeImage === palette.wallpaperAssetId

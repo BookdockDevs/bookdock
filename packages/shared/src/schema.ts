@@ -1156,3 +1156,22 @@ export const bookSaveSchema = z.object({
 export type BookSaveReq = z.infer<typeof bookSaveSchema>
 
 export const readRevisionSchema = z.object({ revisionId: z.string().min(1).max(128) })
+
+export const fontExportSchema = z.object({
+  ids: z.array(z.string().min(1).max(100)).min(1).max(100),
+})
+
+export const dictionaryExportSchema = z.object({
+  ids: z.array(z.string().min(1).max(100)).min(1).max(50),
+})
+
+export const instanceThemeItemKindSchema = z.enum(['theme', 'palette', 'css', 'highlight'])
+
+export const instanceThemePublishSchema = z.object({
+  items: z.array(z.object({
+    kind: instanceThemeItemKindSchema,
+    itemId: z.string().min(1).max(120),
+    payload: z.record(z.unknown()),
+  })).min(1).max(64),
+  assetIds: z.array(z.string().min(1).max(120)).max(64).optional(),
+})

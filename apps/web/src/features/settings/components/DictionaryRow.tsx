@@ -15,12 +15,24 @@ interface DictionaryRowProps {
   isOwner: boolean
   editing: boolean
   disabled: boolean
+  selected?: boolean
+  onSelectChange?: (checked: boolean) => void
   onToggle: (enabled: boolean) => void
   onEdit: () => void
   onDelete: () => void
 }
 
-export default function DictionaryRow({ item, isOwner, editing, disabled, onToggle, onEdit, onDelete }: DictionaryRowProps) {
+export default function DictionaryRow({
+  item,
+  isOwner,
+  editing,
+  disabled,
+  selected = false,
+  onSelectChange,
+  onToggle,
+  onEdit,
+  onDelete,
+}: DictionaryRowProps) {
   const _ = useTranslation()
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id: item.id,
@@ -39,6 +51,16 @@ export default function DictionaryRow({ item, isOwner, editing, disabled, onTogg
         isDragging && 'relative z-10 opacity-70 shadow-md ring-1 ring-stone-400/30',
       )}
     >
+      {editing && (
+        <input
+          type="checkbox"
+          checked={selected}
+          disabled={disabled}
+          aria-label={item.name}
+          onChange={(event) => onSelectChange?.(event.target.checked)}
+          className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300"
+        />
+      )}
       {editing && (
         <button
           type="button"

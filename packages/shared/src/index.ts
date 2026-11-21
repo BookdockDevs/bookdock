@@ -410,6 +410,10 @@ export {
   highlightRuleGroupSchema,
   highlightRuleSchema,
   readRevisionSchema,
+  fontExportSchema,
+  dictionaryExportSchema,
+  instanceThemeItemKindSchema,
+  instanceThemePublishSchema,
   bookUpdateSchema,
   bookSaveSchema,
   systemUpdateStartSchema,
@@ -696,7 +700,7 @@ export type { ReaderBookGroupsPatch, ReaderBookSettingsPatch } from './reader-bo
 
 export { txtChapterHref } from './txt-publication'
 
-export type { AiChatJobRes, AiChatJobCreateReq } from './contract'
+export type { AiChatJobRes, AiChatJobCreateReq, ThemeAssetScope, ThemeAssetRes, InstanceThemeItemKind, InstanceThemeLibraryRes } from './contract'
 export { aiChatJobCreateSchema, aiChatJobListSchema } from './schema'
 
 export { createAiPassageCitations } from './ai-citations'

@@ -3,24 +3,34 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, rectSortingStrategy } from '@dnd-kit/sortable'
 
-import { useDeleteFont, useFonts, useUploadFont } from '@/api/hooks/useFonts'
+import JSZip from 'jszip'
+
+import { exportFontsZip, triggerFontDownload, useDeleteFont, useFonts, useUploadFont } from '@/api/hooks/useFonts'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import SmartMenu, { menuItemClass } from '@/components/ui/SmartMenu'
-import { DeviceFontError } from '@/features/device-fonts/db'
+import { DeviceFontError, DeviceFontStore } from '@/features/device-fonts/db'
 import { useDeviceFontStore } from '@/features/device-fonts/store'
 import { buildFontOptions, ensureBuiltinFontLoaded, ensureDeviceFontFace, ensureUploadedFontLoaded, releaseDeviceFontFace, useFontLoaderStore, type FontOption } from '@/features/reader/fonts'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useMenuAnchor } from '@/hooks/useMenuAnchor'
+import { downloadBlob, timestampSuffix } from '@/lib/download'
+import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import i18n from '@/i18n/i18n'
 import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
 
 import EditModeButton from './EditModeButton'
+import ExportConfirmDialog from './ExportConfirmDialog'
 import FontEditor from './FontEditor'
 import FontRow from './FontRow'
+import ResourceUploadProgress from './ResourceUploadProgress'
+import RuleSelectAllBar from './RuleSelectAllBar'
+import RuleSelectionActions from './RuleSelectionActions'
 import SettingsCard from './SettingsCard'
+import { ExportIcon } from './row-icons'
+import Spinner from '@/components/ui/Spinner'
 
 interface FontsSettingsSectionProps {
   /** False hides the upload entry while the instance keeps member resource uploads off. */
@@ -58,6 +68,8 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
   const deviceInputRef = useRef<HTMLInputElement>(null)
   const importMenu = useMenuAnchor()
   const [pendingDelete, setPendingDelete] = useState<FontOption | null>(null)
+  const [pendingBulkDelete, setPendingBulkDelete] = useState<FontOption[] | null>(null)
+  const [pendingExport, setPendingExport] = useState<FontOption[] | null>(null)
   const [editingFont, setEditingFont] = useState<FontOption | null>(null)
   const [uploadState, setUploadState] = useState<{
     fileName: string
@@ -83,7 +95,26 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
   )
   const [sorting, setSorting] = useState(false)
   const [draftFonts, setDraftFonts] = useState<FontOption[] | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [exporting, setExporting] = useState(false)
   const displayFonts = sorting ? draftFonts ?? fonts : fonts
+  const exportableFonts = useMemo(
+    () => displayFonts.filter((font) => (font.source === 'uploaded' && !isGuest && font.uploaded) || (font.source === 'device' && font.device)),
+    [displayFonts, isGuest],
+  )
+  const exportableIds = useMemo(() => exportableFonts.map((font) => font.id), [exportableFonts])
+  const selectedExportIds = useMemo(
+    () => selectedIds.filter((id) => exportableIds.includes(id)),
+    [exportableIds, selectedIds],
+  )
+  const selectedDeletableFonts = useMemo(
+    () => selectedExportIds
+      .map((id) => displayFonts.find((font) => font.id === id))
+      .filter((font): font is FontOption =>
+        font !== undefined && (font.source === 'device' || (font.source === 'uploaded' && Boolean(font.uploaded) && (font.uploaded!.mine || isOwner))),
+      ),
+    [displayFonts, isOwner, selectedExportIds],
+  )
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const enabledCount = displayFonts.filter((font) => font.enabled).length
   const serverImportAllowed = !isGuest && (isOwner || canUploadResources)
@@ -201,25 +232,38 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
     else setFontPreference(font.id, { enabled })
   }
 
-  // ConfirmDialog awaits this, so failures surface inline there and the
-  // dialog closes only after the font is actually removed.
-  async function confirmDelete() {
-    const target = pendingDelete
-    if (!target) return
+  async function removeSingleFont(target: FontOption) {
     if (target.source === 'device' && target.device) {
       const deviceId = target.device.id
       await useDeviceFontStore.getState().removeFont(deviceId)
       if (sorting) setDraftFonts((current) => current?.filter((font) => font.id !== deviceId) ?? current)
-      notify.success({ key: 'toast.fontDeleted' })
-      setPendingDelete(null)
     } else if (target.uploaded) {
       const uploadedId = target.uploaded.id
       await deleteFont.mutateAsync(uploadedId)
       removeFontPreference(uploadedId)
       if (sorting) setDraftFonts((current) => current?.filter((font) => font.id !== uploadedId) ?? current)
-      notify.success({ key: 'toast.fontDeleted' })
-      setPendingDelete(null)
     }
+  }
+
+  // ConfirmDialog awaits this, so failures surface inline there and the
+  // dialog closes only after the font is actually removed.
+  async function confirmDelete() {
+    const target = pendingDelete
+    if (!target) return
+    await removeSingleFont(target)
+    notify.success({ key: 'toast.fontDeleted' })
+    setPendingDelete(null)
+  }
+
+  async function confirmBulkDelete() {
+    const targets = pendingBulkDelete
+    if (!targets?.length) return
+    for (const target of targets) {
+      await removeSingleFont(target)
+    }
+    setSelectedIds((prev) => prev.filter((id) => !targets.some((target) => target.id === id)))
+    notify.success({ key: 'toast.fontDeleted' })
+    setPendingBulkDelete(null)
   }
 
   function toggleSorting() {
@@ -236,7 +280,69 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
     useDeviceFontStore.getState().setOrder(next.map((font) => font.id))
     setFontOrder(next.filter((font) => font.source !== 'device').map((font) => font.id))
     setDraftFonts(null)
+    setSelectedIds([])
     setSorting(false)
+  }
+
+  function requestExportFontIds(ids: string[]) {
+    const targets = ids
+      .map((id) => exportableFonts.find((font) => font.id === id))
+      .filter((font): font is FontOption => font !== undefined)
+    if (!targets.length || exporting) return
+    setPendingExport(targets)
+  }
+
+  async function executeExportFonts(targets: FontOption[]) {
+    setExporting(true)
+    try {
+      const hasDevice = targets.some((font) => font.source === 'device')
+      if (!hasDevice) {
+        if (targets.length === 1 && targets[0]!.uploaded) {
+          triggerFontDownload(targets[0]!.uploaded.id, targets[0]!.uploaded.fileName)
+        } else {
+          await exportFontsZip(targets.map((font) => font.uploaded!.id))
+        }
+        return
+      }
+      const deviceStore = new DeviceFontStore()
+      if (targets.length === 1 && targets[0]!.device) {
+        const blob = await deviceStore.getBlob(targets[0]!.device.id)
+        if (!blob) throw new Error('Device font file missing')
+        downloadBlob(targets[0]!.device.fileName, blob)
+        return
+      }
+      const zip = new JSZip()
+      const usedNames = new Set<string>()
+      const uniqueName = (raw: string) => {
+        const clean = raw.replace(/[\r\n/\\]/g, '_') || 'font'
+        if (!usedNames.has(clean)) { usedNames.add(clean); return clean }
+        const dot = clean.lastIndexOf('.')
+        const stem = dot > 0 ? clean.slice(0, dot) : clean
+        const ext = dot > 0 ? clean.slice(dot) : ''
+        let n = 2
+        while (usedNames.has(`${stem} (${n})${ext}`)) n += 1
+        const candidate = `${stem} (${n})${ext}`
+        usedNames.add(candidate)
+        return candidate
+      }
+      for (const font of targets) {
+        if (font.source === 'device' && font.device) {
+          const blob = await deviceStore.getBlob(font.device.id)
+          if (!blob) throw new Error('Device font file missing')
+          zip.file(uniqueName(font.device.fileName), blob)
+        } else if (font.source === 'uploaded' && font.uploaded) {
+          const res = await fetch(`/api/v1/fonts/${encodeURIComponent(font.uploaded.id)}/file`)
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          zip.file(uniqueName(font.uploaded.fileName), await res.blob())
+        }
+      }
+      const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+      downloadBlob(`bookdock-fonts-${timestampSuffix()}.zip`, zipBlob)
+    } catch (error) {
+      notify.error(getUserErrorNotification(error, 'settings.fontOperationFailed'))
+    } finally {
+      setExporting(false)
+    }
   }
 
   function onDragEnd({ active, over }: DragEndEvent) {
@@ -261,19 +367,43 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
         }
         action={
           <div className="flex shrink-0 items-center gap-1">
-            <EditModeButton active={sorting} disabled={deleteFont.isPending || uploadFont.isPending} onClick={toggleSorting} />
-            <button
-              ref={importMenu.btnRef}
-              type="button"
-              disabled={sorting}
-              onClick={(event) => importMenu.toggleFromButton(event, 'below')}
-              aria-expanded={importMenu.open}
-              aria-label={_('settings.fontsAdd')}
-              title={_('settings.fontsAdd')}
-              className={`flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200 ${importMenu.open ? 'bg-stone-100 text-stone-800 dark:bg-stone-800 dark:text-stone-200' : ''}`}
-            >
-              <PlusIcon />
-            </button>
+            {sorting && exportableIds.length > 0 && (
+              <RuleSelectionActions
+                disabled={deleteFont.isPending || uploadFont.isPending || exporting}
+                exporting={exporting}
+                deleteDisabled={selectedDeletableFonts.length === 0}
+                selectedCount={selectedExportIds.length}
+                onExport={() => requestExportFontIds(selectedExportIds)}
+                onDelete={() => setPendingBulkDelete(selectedDeletableFonts)}
+              />
+            )}
+            {!sorting && exportableIds.length > 0 && (
+              <button
+                type="button"
+                disabled={deleteFont.isPending || uploadFont.isPending || exporting}
+                aria-busy={exporting}
+                onClick={() => requestExportFontIds(exportableIds)}
+                aria-label={_('settings.fontsExport')}
+                title={_('settings.fontsExport')}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+              >
+                {exporting ? <Spinner size="xs" /> : <ExportIcon />}
+              </button>
+            )}
+            <EditModeButton active={sorting} disabled={deleteFont.isPending || uploadFont.isPending || exporting} onClick={toggleSorting} />
+            {!sorting && (
+              <button
+                ref={importMenu.btnRef}
+                type="button"
+                onClick={(event) => importMenu.toggleFromButton(event, 'below')}
+                aria-expanded={importMenu.open}
+                aria-label={_('settings.fontsAdd')}
+                title={_('settings.fontsAdd')}
+                className={`flex h-8 w-8 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-stone-800 dark:hover:text-stone-200 ${importMenu.open ? 'bg-stone-100 text-stone-800 dark:bg-stone-800 dark:text-stone-200' : ''}`}
+              >
+                <PlusIcon />
+              </button>
+            )}
             {importMenu.open && (
               <SmartMenu
                 triggerRef={importMenu.btnRef}
@@ -332,51 +462,51 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
             />
           </div>
         }
-        bodyClassName="pt-3"
+        bodyClassName={sorting && exportableIds.length > 0 ? undefined : 'pt-3'}
       >
         {uploadState && (
-          <div className="mb-3 flex items-center gap-3 rounded-xl bg-stone-50 px-3 py-2 text-xs dark:bg-stone-800/60">
-            <span className="shrink-0 text-stone-500 dark:text-stone-400">
-              <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-              </svg>
-            </span>
-            <span className="min-w-0 flex-1 truncate text-stone-700 dark:text-stone-300">
-              {uploadState.fileName}
-            </span>
-            <span className="shrink-0 tabular-nums text-stone-400 dark:text-stone-500">
-              {uploadState.phase === 'processing' ? _('library.processing') : `${uploadState.progress}%`}
-            </span>
-            <span className="w-24 shrink-0">
-              <span className="block h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
-                <span
-                  className="block h-full rounded-full bg-stone-800 transition-all duration-200 dark:bg-stone-200"
-                  style={{ width: `${uploadState.phase === 'processing' ? 100 : uploadState.progress}%` }}
-                />
-              </span>
-            </span>
-          </div>
+          <ResourceUploadProgress fileName={uploadState.fileName} progress={uploadState.progress} phase={uploadState.phase} />
         )}
 
       {fontsQuery.isError && (
         <QueryErrorState className="mb-3 py-3" isRetrying={fontsQuery.isFetching} onRetry={fontsQuery.refetch} />
       )}
+      {sorting && exportableIds.length > 0 && (
+        <div className="mb-2">
+          <RuleSelectAllBar
+            disabled={exporting || deleteFont.isPending || uploadFont.isPending}
+            allSelected={selectedExportIds.length === exportableIds.length}
+            indeterminate={selectedExportIds.length > 0 && selectedExportIds.length < exportableIds.length}
+            selectedCount={selectedExportIds.length}
+            onToggleAll={(checked) => setSelectedIds(checked ? exportableIds : [])}
+          />
+        </div>
+      )}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={displayFonts.map((font) => font.id)} strategy={rectSortingStrategy}>
           <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            {displayFonts.map((font) => (
-              <FontRow
-                key={`${font.source}:${font.id}`}
-                font={font}
-                isOwner={isOwner}
-                disabled={deleteFont.isPending || uploadFont.isPending}
-                sorting={sorting}
-                onToggle={() => onToggle(font)}
-                onLoad={() => { if (font.builtin) ensureBuiltinFontLoaded(font.builtin.id) }}
-                onEdit={() => setEditingFont(font)}
-                onDelete={() => setPendingDelete(font)}
-              />
-            ))}
+            {displayFonts.map((font) => {
+              const canExport = (font.source === 'uploaded' && !isGuest && Boolean(font.uploaded)) || (font.source === 'device' && Boolean(font.device))
+              return (
+                <FontRow
+                  key={`${font.source}:${font.id}`}
+                  font={font}
+                  isOwner={isOwner}
+                  disabled={deleteFont.isPending || uploadFont.isPending || exporting}
+                  sorting={sorting}
+                  selectable={canExport}
+                  selected={canExport && selectedExportIds.includes(font.id)}
+                  onSelectChange={(checked) => {
+                    if (!canExport) return
+                    setSelectedIds((prev) => checked ? (prev.includes(font.id) ? prev : [...prev, font.id]) : prev.filter((id) => id !== font.id))
+                  }}
+                  onToggle={() => onToggle(font)}
+                  onLoad={() => { if (font.builtin) ensureBuiltinFontLoaded(font.builtin.id) }}
+                  onEdit={() => setEditingFont(font)}
+                  onDelete={() => setPendingDelete(font)}
+                />
+              )
+            })}
           </ul>
         </SortableContext>
       </DndContext>
@@ -390,6 +520,35 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
           errorFallback="settings.fontOperationFailed"
           onConfirm={confirmDelete}
           onClose={() => setPendingDelete(null)}
+        />
+      )}
+      {pendingBulkDelete && (
+        <ConfirmDialog
+          title={_('settings.confirmDeleteTitle')}
+          message={<>
+            <p>{_('settings.fontsBulkDeleteConfirm', { count: pendingBulkDelete.length })}</p>
+            <ul className="mt-2 max-h-40 list-disc overflow-y-auto break-words pl-4">
+              {pendingBulkDelete.map((font) => <li key={`${font.source}:${font.id}`}>{font.name}</li>)}
+            </ul>
+          </>}
+          confirmLabel={_('settings.confirmDeleteAction')}
+          confirmVariant="danger"
+          errorFallback="settings.fontOperationFailed"
+          onConfirm={confirmBulkDelete}
+          onClose={() => setPendingBulkDelete(null)}
+        />
+      )}
+      {pendingExport && (
+        <ExportConfirmDialog
+          items={pendingExport.map((font) => font.name)}
+          estimatedBytes={pendingExport.reduce((sum, font) => sum + (font.uploaded?.size ?? font.device?.size ?? 0), 0)}
+          zipHint={pendingExport.length > 1}
+          confirmDisabled={exporting}
+          onConfirm={async () => {
+            await executeExportFonts(pendingExport)
+            setPendingExport(null)
+          }}
+          onClose={() => { if (!exporting) setPendingExport(null) }}
         />
       )}
       {editingFont && <FontEditor font={editingFont} isOwner={isOwner} onClose={() => setEditingFont(null)} />}

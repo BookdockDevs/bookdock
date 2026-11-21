@@ -14,12 +14,25 @@ interface AiPromptRowProps {
   prompt: AiPromptTemplate
   disabled: boolean
   sorting: boolean
+  selectable?: boolean
+  selected?: boolean
+  onSelectChange?: (checked: boolean) => void
   onToggle: (enabled: boolean) => void
   onEdit: () => void
   onDelete: () => void
 }
 
-export default function AiPromptRow({ prompt, disabled, sorting, onToggle, onEdit, onDelete }: AiPromptRowProps) {
+export default function AiPromptRow({
+  prompt,
+  disabled,
+  sorting,
+  selectable = false,
+  selected = false,
+  onSelectChange,
+  onToggle,
+  onEdit,
+  onDelete,
+}: AiPromptRowProps) {
   const _ = useTranslation()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: prompt.id,
@@ -31,6 +44,19 @@ export default function AiPromptRow({ prompt, disabled, sorting, onToggle, onEdi
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn('flex items-center gap-3 py-2.5', !prompt.enabled && 'opacity-60', isDragging && 'relative z-10 opacity-60')}
     >
+      {sorting && (
+        <input
+          type="checkbox"
+          checked={selectable ? selected : false}
+          disabled={disabled || !selectable}
+          aria-label={prompt.name}
+          onChange={(event) => onSelectChange?.(event.target.checked)}
+          className={cn(
+            'h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300',
+            !selectable && 'cursor-not-allowed opacity-40',
+          )}
+        />
+      )}
       {sorting && (
         <button
           type="button"

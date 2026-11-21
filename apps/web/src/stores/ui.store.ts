@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { FontPreferences, HighlightRuleDef, TtsEngine, SelectionToolbarActionKey } from '@bookdock/shared'
+import type { FontPreferences, HighlightRuleDef, InstanceThemeLibraryRes, TtsEngine, SelectionToolbarActionKey } from '@bookdock/shared'
 import { DEFAULT_SELECTION_TOOLBAR_ORDER, SELECTION_TOOLBAR_ACTION_KEYS } from '@bookdock/shared'
 import type { AutoReadingMode, FontFamily, ReadingMode, IdeaDisplayMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField, NavTab, ParagraphStyle } from '../features/reader/types'
 import {
@@ -49,7 +49,7 @@ import {
   persistStatsModuleOrder,
 } from '../features/stats/stats-modules'
 
-import { findThemeCombination, INITIAL_THEME_LIBRARY, materializeTheme, readThemeLibrary, resolveDefaultThemeChoice, savePortableTheme, serializeThemeLibrary, undoThemeLibraryDeletion, type ReadingThemeLibrary } from '@/features/reading-theme/theme-library'
+import { findThemeCombination, INITIAL_THEME_LIBRARY, materializeTheme, mergeInstanceThemeLibrary, readThemeLibrary, resolveDefaultThemeChoice, savePortableTheme, serializeThemeLibrary, stripInstanceThemeItems, undoThemeLibraryDeletion, type ReadingThemeLibrary } from '@/features/reading-theme/theme-library'
 
 /** Cover fill mode inside the grid card: object-cover vs object-contain. */
 export type CoverFit = 'crop' | 'full'
@@ -124,7 +124,10 @@ interface UiState {
   setGlobalAppearanceCss: (mode: 'follow' | 'off' | 'card', cssId?: string | null) => void
   setGlobalHighlightLayers: (layers: { adds: string[]; removes: string[] }) => void
   customThemes: CustomReadingTheme[]
+  personalThemeLibrary: ReadingThemeLibrary
+  instanceThemeLibrary: InstanceThemeLibraryRes | null
   themeLibrary: ReadingThemeLibrary
+  setInstanceThemeLibrary: (instance: InstanceThemeLibraryRes | null) => void
   readerThemeComposition: CustomReadingTheme | null
   // Session-only effective-theme layer for the open book (仅本书 selection or
   // the editor's trial draft). Never persisted, never synced; the Reader owns
@@ -673,6 +676,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   appearanceCssId: null,
   highlightAdds: [],
   highlightRemoves: [],
+  personalThemeLibrary: initialThemeLibrary,
+  instanceThemeLibrary: null,
   themeLibrary: initialThemeLibrary,
   customThemes: initialThemeLibrary.themes.map((theme) => materializeTheme(initialThemeLibrary, theme)),
   readerThemeComposition: null,
@@ -1148,9 +1153,23 @@ export const useUiStore = create<UiState>((set, get) => ({
     get().setThemeLibrary(themes.reduce(savePortableTheme, INITIAL_THEME_LIBRARY))
   },
   setThemeLibrary: (themeLibrary) => {
-    if (serializeThemeLibrary(get().themeLibrary) === serializeThemeLibrary(themeLibrary)) return
-    persistThemeLibrary(themeLibrary)
-    set({ themeLibrary, customThemes: themeLibrary.themes.map((theme) => materializeTheme(themeLibrary, theme)) })
+    const personal = stripInstanceThemeItems(themeLibrary, get().instanceThemeLibrary)
+    const merged = mergeInstanceThemeLibrary(personal, get().instanceThemeLibrary)
+    if (serializeThemeLibrary(get().themeLibrary) === serializeThemeLibrary(merged)) return
+    persistThemeLibrary(personal)
+    set({
+      personalThemeLibrary: personal,
+      themeLibrary: merged,
+      customThemes: merged.themes.map((theme) => materializeTheme(merged, theme)),
+    })
+  },
+  setInstanceThemeLibrary: (instance) => {
+    const merged = mergeInstanceThemeLibrary(get().personalThemeLibrary, instance)
+    set({
+      instanceThemeLibrary: instance,
+      themeLibrary: merged,
+      customThemes: merged.themes.map((theme) => materializeTheme(merged, theme)),
+    })
   },
   setFontFamily: (fontFamily) => {
     setStorage('bd-font-family', fontFamily)
@@ -1427,8 +1446,9 @@ export const useUiStore = create<UiState>((set, get) => ({
       ttsRate: 1,
       ttsAutoNext: true,
       ttsFollow: true,
-      customThemes: INITIAL_THEME_LIBRARY.themes.map((theme) => materializeTheme(INITIAL_THEME_LIBRARY, theme)),
-      themeLibrary: INITIAL_THEME_LIBRARY,
+      customThemes: mergeInstanceThemeLibrary(INITIAL_THEME_LIBRARY, get().instanceThemeLibrary).themes.map((theme) => materializeTheme(mergeInstanceThemeLibrary(INITIAL_THEME_LIBRARY, get().instanceThemeLibrary), theme)),
+      personalThemeLibrary: INITIAL_THEME_LIBRARY,
+      themeLibrary: mergeInstanceThemeLibrary(INITIAL_THEME_LIBRARY, get().instanceThemeLibrary),
       readerThemeComposition: null,
       readerThemeOverrideBookKey: null,
       readerThemeOverrideId: null,

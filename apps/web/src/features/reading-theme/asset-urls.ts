@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 
+import { fetchThemeAssetFromServer } from '@/api/hooks/useReadingThemes'
+
 import { ThemeAssetStore } from './assets'
 
 const store = new ThemeAssetStore()
@@ -40,9 +42,10 @@ function acquireThemeAssetUrl(scope: string, id: string): Promise<string | null>
     if (url) bumpRef(key)
     return url
   })
-  const created = store.getBlob(scope, id).then((blob) => {
-    if (!blob) return null
-    const url = URL.createObjectURL(blob)
+  const created = store.getBlob(scope, id).then(async (blob) => {
+    const resolved = blob ?? await fetchThemeAssetFromServer(id).catch(() => null)
+    if (!resolved) return null
+    const url = URL.createObjectURL(resolved)
     bumpRef(key)
     useThemeAssetUrlStore.setState((s) => ({ urls: { ...s.urls, [key]: url } }))
     return url
