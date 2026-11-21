@@ -3,7 +3,7 @@ import { useRef, useState } from 'react'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
-import type { ResourceAvailability, TocRulePattern, TocRuleRes } from '@bookdock/shared'
+import { isValidTocRegex, type ResourceAvailability, type TocRulePattern, type TocRuleRes } from '@bookdock/shared'
 
 import { useCreateTocRule, useUpdateTocRule } from '@/api/hooks/useTocRules'
 import Modal from '@/components/ui/Modal'
@@ -100,11 +100,7 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
     const newErrors = drafts.map((d) => {
       const trimmed = d.regex.trim()
       if (!trimmed) return 'required' as const
-      try {
-        new RegExp(trimmed)
-      } catch {
-        return 'invalidRegex' as const
-      }
+      if (!isValidTocRegex(trimmed)) return 'invalidRegex' as const
       return null
     })
     setNameError(emptyName)

@@ -33,6 +33,7 @@ import {
   sanitizeUsername,
 } from './constants'
 import { compileReplacementRegex } from './text-replacement-engine'
+import { isValidTocRegex } from './rule-transfer'
 import { authorListSchema } from './library'
 import { contentFileAssociationSchema } from './content-file'
 import { readingCoverageSchema, readingDateSchema, readingTimeFragmentSchema, readingTimezoneSchema } from './reading-ledger'
@@ -653,7 +654,7 @@ export const tocRuleCreateSchema = z.object({
   sortOrder: z.number().int().optional(),
   patterns: tocRulePatternsSchema,
   availability: resourceAvailabilitySchema.optional(),
-}).refine((v) => v.patterns.every((p) => p.regex === undefined || isValidRegex(p.regex)), {
+}).refine((v) => v.patterns.every((p) => p.regex === undefined || isValidTocRegex(p.regex)), {
   message: 'pattern is not a valid regular expression',
   path: ['patterns'],
 })
@@ -664,7 +665,7 @@ export const tocRuleUpdateSchema = z.object({
   sortOrder: z.number().int().optional(),
   patterns: tocRulePatternsSchema.optional(),
   availability: resourceAvailabilitySchema.optional(),
-}).refine((v) => v.patterns === undefined || v.patterns.every((p) => p.regex === undefined || isValidRegex(p.regex)), {
+}).refine((v) => v.patterns === undefined || v.patterns.every((p) => p.regex === undefined || isValidTocRegex(p.regex)), {
   message: 'pattern is not a valid regular expression',
   path: ['patterns'],
 })
@@ -685,7 +686,7 @@ export const tocPreviewSchema = z.object({
   excludedChapterIds: z.array(z.string().min(1)).max(5000).optional(),
   limit: z.number().int().min(1).max(5000).optional(),
   offset: z.number().int().min(0).optional(),
-}).refine((v) => v.customPatterns === undefined || v.customPatterns.every((p) => isValidRegex(p.regex)), {
+}).refine((v) => v.customPatterns === undefined || v.customPatterns.every((p) => isValidTocRegex(p.regex)), {
   message: 'pattern is not a valid regular expression',
   path: ['customPatterns'],
 })
@@ -694,7 +695,7 @@ export const reTocSchema = z.object({
   tocRuleId: z.string().nullable().optional(),
   customPatterns: tocRulePatternsSchema.optional(),
   excludedChapterIds: z.array(z.string().min(1)).max(5000).optional(),
-}).refine((v) => v.customPatterns === undefined || v.customPatterns.every((p) => isValidRegex(p.regex)), {
+}).refine((v) => v.customPatterns === undefined || v.customPatterns.every((p) => isValidTocRegex(p.regex)), {
   message: 'pattern is not a valid regular expression',
   path: ['customPatterns'],
 })
@@ -959,6 +960,15 @@ export const highlightRuleGroupSchema = z.object({
   style: highlightRuleStyleSchema,
 })
 
+function isValidHighlightRegex(pattern: string): boolean {
+  try {
+    new RegExp(pattern, 'gu')
+    return true
+  } catch {
+    return false
+  }
+}
+
 export const highlightRuleSchema = z.object({
   id: z.string().min(1).max(100),
   name: z.string().min(1).max(50),
@@ -967,6 +977,9 @@ export const highlightRuleSchema = z.object({
   enabled: z.boolean(),
   style: highlightRuleStyleSchema.optional(),
   groups: z.array(highlightRuleGroupSchema).optional(),
+}).refine((v) => !v.isRegex || isValidHighlightRegex(v.pattern), {
+  message: 'pattern is not a valid regular expression',
+  path: ['pattern'],
 })
 
 export const readingThemeCardsSchema = z.object({

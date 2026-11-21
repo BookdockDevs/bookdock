@@ -1,7 +1,7 @@
 import { parentPort } from 'node:worker_threads'
 
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
-import { applyPointMatch, applyRuleToRuns, findPointMatch, type TextRun } from '@bookdock/shared'
+import { applyPointMatch, applyRuleToRuns, findPointMatch, findSearchMatches, type TextRun } from '@bookdock/shared'
 import { Converter } from 'opencc-js'
 
 export interface SearchInput {
@@ -123,38 +123,11 @@ function extract(markup: string): string {
 }
 
 function matches(text: string, input: SearchInput): Array<{ start: number; end: number }> {
-  const output: Array<{ start: number; end: number }> = []
-  if (!text || !input.query) return output
-  if (input.mode === 'regex') {
-    let regex: RegExp
-    try { regex = new RegExp(input.query, input.matchCase ? 'gu' : 'giu') } catch { return output }
-    for (const match of text.matchAll(regex)) {
-      if (!match[0]) continue
-      output.push({ start: match.index, end: match.index + match[0].length })
-      if (output.length >= 2001) break
-    }
-    return output
-  }
-  const query = input.query.replace(/\s+/g, ' ').trim()
-  if (!query) return output
-  const haystack = input.matchCase ? text : text.toLowerCase()
-  const needle = input.matchCase ? query : query.toLowerCase()
-  let at = -1
-  while ((at = haystack.indexOf(needle, at + 1)) >= 0) {
-    output.push({ start: at, end: at + needle.length })
-    if (output.length >= 2001) break
-  }
-  if (!output.length && /\s/.test(query)) {
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+')
-    let regex: RegExp
-    try { regex = new RegExp(escaped, input.matchCase ? 'gu' : 'giu') } catch { return output }
-    for (const match of text.matchAll(regex)) {
-      if (!match[0]) continue
-      output.push({ start: match.index, end: match.index + match[0].length })
-      if (output.length >= 2001) break
-    }
-  }
-  return output
+  return findSearchMatches(text, input.query, {
+    mode: input.mode,
+    matchCase: input.matchCase,
+    limit: 2001,
+  })
 }
 
 function excerpt(text: string, start: number, end: number) {

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { closestCenter, DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 
-import type { TocPreviewChapter, TocPreviewReq, TocRulePattern } from '@bookdock/shared'
+import { isValidTocRegex, type TocPreviewChapter, type TocPreviewReq, type TocRulePattern } from '@bookdock/shared'
 
 import { tocPreviewPost, useReToc, useTocPreview, useTocRules, type TocTarget } from '@/api/hooks/useTocRules'
 import { Button } from '@/components/ui/Button'
@@ -128,11 +128,7 @@ export default function BookCustomTocEditor({
     const newErrors = drafts.map((d) => {
       const trimmed = d.regex.trim()
       if (!trimmed) return 'required' as const
-      try {
-        new RegExp(trimmed)
-      } catch {
-        return 'invalidRegex' as const
-      }
+      if (!isValidTocRegex(trimmed)) return 'invalidRegex' as const
       return null
     })
     setErrors(newErrors)

@@ -599,6 +599,12 @@ export {
 } from './text-replacement-engine'
 
 export {
+  findSearchMatches,
+  type SearchMatch,
+  type SearchMatchOptions,
+} from './search-match'
+
+export {
   TOC_TRANSFER_KIND,
   REPLACEMENT_TRANSFER_KIND,
   RULE_TRANSFER_FORMAT_VERSION,

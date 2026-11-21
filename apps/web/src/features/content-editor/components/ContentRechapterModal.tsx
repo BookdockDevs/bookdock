@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { closestCenter, DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import {
+  isValidTocRegex,
   normalizeTxtText,
   pickTxtTocRule,
   tocRuleCreateSchema,
@@ -255,11 +256,7 @@ export default function ContentRechapterModal({
     const newErrors = patternDrafts.map((d) => {
       const trimmed = d.regex.trim()
       if (!trimmed) return 'required' as const
-      try {
-        new RegExp(trimmed)
-      } catch {
-        return 'invalidRegex' as const
-      }
+      if (!isValidTocRegex(trimmed)) return 'invalidRegex' as const
       return null
     })
     setPatternErrors(newErrors)
