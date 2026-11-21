@@ -244,7 +244,14 @@ export default function ThemeEditorDialog({ editor, variant, onSave, onClose, on
   const valid = editor.kind === 'palette' ? colors.every(([field]) => isHexColor(palette.colors[field]))
     : editor.kind === 'css' ? content.ok : Boolean(rule && !highlightRuleIssue(rule))
   const cardName = (editor.kind === 'highlight' ? rule?.name : name)?.trim()
-  const title = _(editor.kind === 'palette' ? 'reader.themePaletteLabel' : editor.kind === 'css' ? 'reader.themeCssLabel' : 'reader.themeHighlightRuleLabel')
+  const existing = Boolean(editor.card)
+  const title = _(
+    editor.kind === 'palette'
+      ? (existing ? 'reader.themeEditPalette' : 'reader.themeNewPalette')
+      : editor.kind === 'css'
+        ? (existing ? 'reader.themeEditCss' : 'reader.themeNewCss')
+        : (existing ? 'reader.themeEditHighlight' : 'reader.themeNewHighlight'),
+  )
   const buildCard = (): ThemeCardEdit => {
     const id = !editor.card ? newId : editor.card.id
     const name = cardName || title

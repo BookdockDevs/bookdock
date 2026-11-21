@@ -1297,7 +1297,7 @@ describe('AiPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'reader.aiSend' }))
 
     const basis = await screen.findByRole('button', { name: /reader.aiBasisSummary/ })
-    expect(basis.parentElement).toHaveClass('mt-1')
+    expect(basis.parentElement?.parentElement).toHaveClass('mt-1')
     expect(basis.closest('.rounded-xl')).toBeNull()
     expect(screen.getByRole('button', { name: 'reader.aiCitationJump' })).toBeInTheDocument()
     fireEvent.click(basis)

@@ -91,7 +91,7 @@ export class ThemePackageError extends Error {
 
 function collectBundleAssetIds(bundle: PortableThemeBundle): string[] {
   const ids = new Set<string>()
-  const palettes = [...bundle.themes.map((theme) => theme.palette), ...bundle.palettes]
+  const palettes = [...bundle.themes.flatMap((theme) => theme.palette ? [theme.palette] : []), ...bundle.palettes]
   for (const palette of palettes) if (palette.wallpaperAssetId) ids.add(palette.wallpaperAssetId)
   const css = [...bundle.themes.flatMap((theme) => theme.css ? [theme.css] : []), ...bundle.css]
   for (const card of css) for (const asset of card.assets ?? []) ids.add(asset.id)
@@ -276,7 +276,7 @@ function remapBundleAssetIds(bundle: PortableThemeBundle, idMap: Map<string, str
   })
   const remapTheme = (theme: PortableTheme): PortableTheme => ({
     ...theme,
-    palette: remapPalette(theme.palette),
+    ...(theme.palette ? { palette: remapPalette(theme.palette) } : {}),
     ...(theme.css ? { css: remapCss(theme.css) } : {}),
   })
   return {
@@ -493,12 +493,13 @@ function readPortableRule(raw: unknown): PortableHighlightRule {
 function readPortableTheme(raw: unknown): PortableTheme {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ThemePackageError('manifest', 'Invalid theme entry')
   const entry = raw as Record<string, unknown>
-  if (!entry.palette) throw new ThemePackageError('manifest', 'Theme has no palette')
   const highlights = readList(entry.highlights).map(readPortableRule)
-  return {
+  const theme: PortableTheme = {
     name: readName(entry.name, 100, 'Theme'),
-    palette: readPortablePalette(entry.palette),
+    ...(entry.palette !== undefined ? { palette: readPortablePalette(entry.palette) } : {}),
     ...(entry.css !== undefined ? { css: readPortableCss(entry.css) } : {}),
     ...(highlights.length ? { highlights } : {}),
   }
+  if (!theme.palette && !theme.css && !theme.highlights) throw new ThemePackageError('manifest', 'Theme has no palette')
+  return theme
 }

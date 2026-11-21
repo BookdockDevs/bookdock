@@ -1,5 +1,5 @@
-import type { ClientBook, ClientCatalogEntry, ClientCategoryView, ClientLibraryBookView, ClientLibraryDetailView, ClientOrganization, ClientReadingState, ClientTaxonomyView, ViewSettings } from '@bookdock/shared'
-import { classificationValueKey, clientPresetBindingSchema, readerBookSettingsSchema } from '@bookdock/shared'
+import type { ClientBook, ClientCatalogEntry, ClientCategoryView, ClientLibraryBookView, ClientLibraryDetailView, ClientOrganization, ClientReadingState, ClientTaxonomyView } from '@bookdock/shared'
+import { classificationValueKey, clientPresetBindingSchema, migrateLegacyReaderBookSettings, readerBookSettingsSchema } from '@bookdock/shared'
 
 /** The stored preference row for one value, if the sidebar has ever touched it. */
 function valueState(organization: ClientOrganization, kind: 'category' | 'tag', value: string) {
@@ -51,11 +51,7 @@ export function localCatalogDetailView(book: ClientCatalogEntry['book'], state: 
     revisionId: book.content?.contentId,
     meta: { ...(book.catalog?.metadata ? { bookmeta: book.catalog.metadata } : {}), ...(book.textSource?.ruleSelection ? { customTocPatterns: book.textSource.ruleSelection.patterns ?? undefined, tocRuleId: book.textSource.ruleSelection.patterns ? 'custom' : undefined, tocRuleLabel: book.textSource.ruleSelection.label ?? undefined, tocRuleAuto: book.textSource.ruleSelection.auto } : {}), ...(book.textSource ? { wordCount: book.textSource.chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0) } : {}) },
     tags: book.catalog?.tags ?? [],
-    readerSettings: {
-      themeSelection: readerBookSettingsSchema.shape.themeSelection.catch(undefined).parse(settings.themeSelection),
-      viewSettings: settings.viewSettings as ViewSettings | undefined,
-      readingThemeId: readerBookSettingsSchema.shape.readingThemeId.catch(undefined).parse(settings.readingThemeId),
-    },
+    readerSettings: migrateLegacyReaderBookSettings(readerBookSettingsSchema.catch({}).parse(settings)),
     clientPresetBinding: clientPresetBindingSchema.nullable().parse(settings.presetBinding ?? null),
   }
 }

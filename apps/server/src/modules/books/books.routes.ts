@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, editorEpubSaveSchema, editorTxtSaveSchema, LOCAL_IMPORT_MAX_IMAGES, LOCAL_IMPORT_MAX_PAYLOAD_BYTES, localBookDuplicateCheckSchema, localBookImportPayloadSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, bookSaveSchema, readerBookSettingsSchema, readRevisionSchema, reTocSchema, tocPreviewSchema, parseCategoryQuery } from '@bookdock/shared'
+import { appendContentSchema, batchOrganizeSchema, batchSelectionSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, editorEpubSaveSchema, editorTxtSaveSchema, LOCAL_IMPORT_MAX_IMAGES, LOCAL_IMPORT_MAX_PAYLOAD_BYTES, localBookDuplicateCheckSchema, localBookImportPayloadSchema, privateBatchTrashSchema, privateBatchUpdateSchema, paginationSchema, bookMembershipSchema, bookUploadOptionsSchema, bookFormatSchema, bookUpdateSchema, bookSaveSchema, readerBookSettingsPatchSchema, readRevisionSchema, reTocSchema, tocPreviewSchema, parseCategoryQuery } from '@bookdock/shared'
 import {
   listBooks,
   getActiveBook,
@@ -431,7 +431,7 @@ booksRoutes.patch('/:id/reader-settings', async (c) => {
   }
   const id = c.req.param('id')
   await assertReadableBook(user.id, id, requestShowHidden(c))
-  const parsed = readerBookSettingsSchema.safeParse(await c.req.json().catch(() => null))
+  const parsed = readerBookSettingsPatchSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid reader settings', parsed.error.flatten())
   }

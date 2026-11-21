@@ -14,5 +14,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/__tests__/setup.ts'],
+    // Disposable workspace snapshots under .tmp must never enter a test run.
+    exclude: ['**/node_modules/**', '**/.git/**', '**/.tmp/**'],
   },
 })

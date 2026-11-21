@@ -20,6 +20,9 @@ describe('highlight engine', () => {
     class TestWorker {
       onmessage: ((event: { data: unknown }) => void) | null = null
       terminate = terminated
+      constructor() {
+        queueMicrotask(() => this.onmessage?.({ data: { type: 'ready' } }))
+      }
       postMessage({ paragraphs, rule, order }: { paragraphs: string[]; rule: HighlightRuleDef; order: number }) {
         if (rule.id === 'slow') return
         this.onmessage?.({ data: paragraphs.map((text) => collectHighlightSpans(text, [rule], order)) })
@@ -48,5 +51,25 @@ describe('highlight engine', () => {
       { ...base, id: 'regex', name: 'Regex', pattern: 'a' },
       { ...base, id: 'literal', name: 'Literal', pattern: 'b', isRegex: false },
     ])).resolves.toEqual([[{ start: 1, end: 2, textColor: '#ff0000' }]])
+  })
+
+  it('waits for slow worker boot beyond per-rule timeout before matching regexes', async () => {
+    vi.useFakeTimers()
+    class SlowBootWorker {
+      onmessage: ((event: { data: unknown }) => void) | null = null
+      terminate = vi.fn()
+      constructor() {
+        setTimeout(() => this.onmessage?.({ data: { type: 'ready' } }), HIGHLIGHT_RULE_TIMEOUT_MS + 100)
+      }
+      postMessage({ paragraphs, rule, order }: { paragraphs: string[]; rule: HighlightRuleDef; order: number }) {
+        this.onmessage?.({ data: paragraphs.map((text) => collectHighlightSpans(text, [rule], order)) })
+      }
+    }
+    vi.stubGlobal('Worker', SlowBootWorker)
+    const engine = new HighlightEngine()
+    const result = engine.run(['abc'], [{ ...base, id: 'first', name: 'First', pattern: 'a' }])
+    await vi.advanceTimersByTimeAsync(HIGHLIGHT_RULE_TIMEOUT_MS + 100)
+    await expect(result).resolves.toEqual([[{ start: 0, end: 1, textColor: '#ff0000' }]])
+    engine.dispose()
   })
 })

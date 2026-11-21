@@ -13,12 +13,54 @@ export interface SidebarScrollPosition {
   top: number
   currentIndex?: number
   anchorHref?: string
+  anchorId?: string
   anchorOffset?: number
+  pinnedToBottom?: boolean
   collapsedKeys?: string[]
   /** Page-load token tagging the save. The loader drops it, so a position
    *  restored from a previous load reads as stale: stale positions must not
    *  suppress the TOC locate-on-open. */
   sessionId?: string
+}
+
+/** Captures the first visible anchored item in a scroll container and its top offset. */
+export function captureScrollAnchor(
+  container: HTMLElement | null,
+  selector: string,
+  datasetKey: string,
+  topInset = 0,
+): { id: string; offset: number } | null {
+  if (!container) return null
+  const viewportTop = container.getBoundingClientRect().top
+  const threshold = viewportTop + topInset
+  const viewportBottom = viewportTop + container.clientHeight
+  const items = Array.from(container.querySelectorAll<HTMLElement>(selector))
+  let fallback: HTMLElement | undefined
+  for (const item of items) {
+    const rect = item.getBoundingClientRect()
+    if (rect.top >= threshold && rect.top < viewportBottom) {
+      const id = item.dataset[datasetKey]
+      return id ? { id, offset: rect.top - viewportTop } : null
+    }
+    if (!fallback && rect.bottom > threshold && rect.top < viewportBottom) {
+      fallback = item
+    }
+  }
+  const id = fallback?.dataset[datasetKey]
+  return fallback && id ? { id, offset: fallback.getBoundingClientRect().top - viewportTop } : null
+}
+
+/** Restores scrollTop and re-anchors to the target element when its layout height changed. */
+export function restoreScrollAnchor(
+  container: HTMLElement,
+  savedTop: number,
+  anchorEl: HTMLElement | null | undefined,
+  anchorOffset?: number,
+): void {
+  container.scrollTop = savedTop
+  if (anchorEl && anchorOffset !== undefined) {
+    container.scrollTop += anchorEl.getBoundingClientRect().top - container.getBoundingClientRect().top - anchorOffset
+  }
 }
 
 type SidebarScrollPositions = Record<string, Partial<Record<NavTab, SidebarScrollPosition>>>
@@ -49,7 +91,9 @@ function loadSidebarScrollPositions(): SidebarScrollPositions {
         if (typeof top !== 'number' || !Number.isFinite(top) || top < 0) continue
         const currentIndex = (rawPosition as Record<string, unknown>).currentIndex
         const anchorHref = (rawPosition as Record<string, unknown>).anchorHref
+        const anchorId = (rawPosition as Record<string, unknown>).anchorId
         const anchorOffset = (rawPosition as Record<string, unknown>).anchorOffset
+        const pinnedToBottom = (rawPosition as Record<string, unknown>).pinnedToBottom
         const rawCollapsedKeys = (rawPosition as Record<string, unknown>).collapsedKeys
         const collapsedKeys = Array.isArray(rawCollapsedKeys)
           ? rawCollapsedKeys.filter((k): k is string => typeof k === 'string')
@@ -59,6 +103,9 @@ function loadSidebarScrollPositions(): SidebarScrollPositions {
           ...(typeof currentIndex === 'number' && Number.isInteger(currentIndex) && currentIndex >= 0 ? { currentIndex } : {}),
           ...(typeof anchorHref === 'string' && typeof anchorOffset === 'number' && Number.isFinite(anchorOffset)
             ? { anchorHref, anchorOffset } : {}),
+          ...(typeof anchorId === 'string' && typeof anchorOffset === 'number' && Number.isFinite(anchorOffset)
+            ? { anchorId, anchorOffset } : {}),
+          ...(typeof pinnedToBottom === 'boolean' ? { pinnedToBottom } : {}),
           ...(collapsedKeys !== undefined ? { collapsedKeys } : {}),
         }
       }
@@ -171,7 +218,9 @@ export const useReaderState = create<ReaderState>((set) => ({
     if (existing?.top === position.top
       && existing?.currentIndex === position.currentIndex
       && existing?.anchorHref === position.anchorHref
+      && existing?.anchorId === position.anchorId
       && existing?.anchorOffset === position.anchorOffset
+      && existing?.pinnedToBottom === position.pinnedToBottom
       && sameCollapsed
       && existing?.sessionId === READER_SESSION_ID) return state
     const tagged = { ...position, sessionId: READER_SESSION_ID }

@@ -3,9 +3,9 @@ import { createPortal } from 'react-dom'
 
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
-import { blendColors, cn } from '@/lib/utils'
-import { resolveEffectiveReadingTheme } from '@/lib/reading-theme'
-import { selectEffectiveReadingThemeId, selectReaderThemeOverride, useUiStore } from '@/stores/ui.store'
+import { cn } from '@/lib/utils'
+import { selectEffectiveReadingTheme, selectGlobalAppearanceState, selectReadingThemeSlot, useUiStore } from '@/stores/ui.store'
+import { resolveAppearance, toggleAppearanceHighlight } from '@/features/reading-theme/appearance'
 import { useAuthStore } from '@/stores/auth.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { useInstanceInfo } from '@/features/auth/hooks'
@@ -16,156 +16,28 @@ import { useBookReplacements } from '@/api/hooks/useReplacements'
 import { useViewSettings } from '../view-settings-context'
 import { MARGINAL_FIELDS } from '../lib/marginals'
 import type { MarginalField } from '../types'
-import type { PerBookSettingKey, PerBookSettingValue } from '../lib/view-settings'
+import type { BookSettingsGroup } from '../lib/view-settings'
 import { buildFontOptions, useFontLoaderStore, type FontOption } from '../fonts'
 import { useReaderFontPreviews, type ReaderFontPreviews } from '../hooks/useReaderFontPreviews'
 import { useReaderState } from '../state/reader-state'
 import { DownloadIcon, SpinnerIcon } from './annotation-icons'
 import ReadingPresetPicker from './ReadingPresetPicker'
 import ReadingThemePanel from '@/features/reading-theme/ReadingThemePanel'
+import ThemeIcon from '@/features/reading-theme/ThemeIcon'
 import BookReplacementsDialog from './BookReplacementsDialog'
 import ReaderKeyboardShortcuts from './ReaderKeyboardShortcuts'
+import { readerPanelVars } from '../lib/reader-panel-vars'
+import {
+  ButtonGroup,
+  ControlGroup,
+  InlineControlRow,
+  PanelSection,
+  PanelSectionList,
+  SliderRow,
+  ToggleRow,
+} from './ReaderPanelPrimitives'
 
 type Section = 'font' | 'layout' | 'display' | 'behavior' | 'theme'
-
-interface SliderRowProps {
-  label: string
-  value: number
-  min: number
-  max: number
-  step?: number
-  suffix?: string
-  /** Overrides the trailing value text entirely (e.g. "自动" instead of "0自动") */
-  formatValue?: (value: number) => string
-  stepper?: {
-    decLabel?: React.ReactNode
-    incLabel?: React.ReactNode
-    decAria?: string
-    incAria?: string
-  }
-  onChange: (value: number) => void
-}
-
-function SliderRow({ label, value, min, max, step = 1, suffix = '', formatValue, stepper, onChange }: SliderRowProps) {
-  // While dragging, only the local draft moves — committing to the store on
-  // every input event would re-layout the whole book on every tick
-  const [draft, setDraft] = useState<number | null>(null)
-  const shown = draft ?? value
-  const commit = () => {
-    if (draft !== null && draft !== value) onChange(draft)
-    setDraft(null)
-  }
-  const pct = Math.round(((shown - min) / (max - min)) * 100)
-  const shownText = formatValue ? formatValue(shown) : `${shown}${suffix}`
-
-  const handleStep = (delta: number) => {
-    const next = Math.min(max, Math.max(min, Math.round((value + delta) * 100) / 100))
-    if (next !== value) onChange(next)
-  }
-
-  return (
-    <div className="mb-4">
-      <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-        <span className="font-medium text-current/75">{label}</span>
-        {stepper ? (
-          <div className="flex items-center rounded-md bg-stone-500/10 p-0.5 text-current dark:bg-stone-500/15">
-            <button
-              type="button"
-              disabled={value <= min}
-              onClick={() => handleStep(-step)}
-              aria-label={stepper.decAria ?? 'Decrease'}
-              className="flex h-5 w-5 items-center justify-center rounded text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-90 disabled:pointer-events-none disabled:opacity-30"
-            >
-              {stepper.decLabel ?? <span className="text-[13px] font-semibold leading-none">−</span>}
-            </button>
-            <span className="min-w-[2.75rem] px-1 text-center font-medium tabular-nums text-current">
-              {shownText}
-            </span>
-            <button
-              type="button"
-              disabled={value >= max}
-              onClick={() => handleStep(step)}
-              aria-label={stepper.incAria ?? 'Increase'}
-              className="flex h-5 w-5 items-center justify-center rounded text-xs text-[var(--bd-read-sub)] transition-colors hover:bg-stone-500/15 hover:text-current active:scale-90 disabled:pointer-events-none disabled:opacity-30"
-            >
-              {stepper.incLabel ?? <span className="text-[13px] font-semibold leading-none">+</span>}
-            </button>
-          </div>
-        ) : (
-          <span className="tabular-nums font-medium text-current">{shownText}</span>
-        )}
-      </div>
-      <input
-        type="range"
-        aria-label={label}
-        min={min}
-        max={max}
-        step={step}
-        value={shown}
-        onChange={(e) => setDraft(Number(e.target.value))}
-        onPointerUp={commit}
-        onPointerCancel={commit}
-        onKeyUp={commit}
-        onBlur={commit}
-        className="bd-slider w-full"
-        style={{ '--slider-fill': `${pct}%` } as React.CSSProperties}
-      />
-    </div>
-  )
-}
-
-interface ToggleRowProps {
-  label: string
-  hint?: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-}
-
-function ToggleRow({ label, hint, checked, onChange }: ToggleRowProps) {
-  return (
-    <div
-      onClick={() => onChange(!checked)}
-      className={cn(
-        'group flex cursor-pointer select-none justify-between gap-3 py-1.5 transition-colors',
-        hint ? 'items-start' : 'items-center',
-      )}
-    >
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-current">{label}</div>
-        {hint && <div className="mt-1 text-xs leading-relaxed text-current/65">{hint}</div>}
-      </div>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation()
-          onChange(!checked)
-        }}
-        className={cn(
-          'relative h-6 w-10 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current',
-          hint && 'mt-0.5',
-        )}
-        style={{ backgroundColor: checked ? 'var(--toggle-on-bg)' : 'var(--toggle-off-bg)' }}
-        aria-checked={checked}
-        aria-label={label}
-        role="switch"
-      >
-        <span
-          className={cn(
-            'absolute top-1 h-4 w-4 rounded-full bg-[var(--bd-read-bg)] shadow-sm transition-transform',
-            checked ? 'left-5' : 'left-1',
-          )}
-        />
-      </button>
-    </div>
-  )
-}
-
-interface ButtonGroupProps<T extends string | number> {
-  options: { value: T; label: string; icon?: React.ReactNode }[]
-  value: T
-  onChange: (value: T) => void
-  size?: 'default' | 'sm'
-}
 
 function FieldSelect({
   value,
@@ -214,50 +86,7 @@ function FieldSelect({
   )
 }
 
-function ButtonGroup<T extends string | number>({
-  options,
-  value,
-  onChange,
-  size = 'default',
-}: ButtonGroupProps<T>) {
-  const isSm = size === 'sm'
-  return (
-    <div
-      className={cn(
-        'grid bg-current/[0.06]',
-        isSm ? 'gap-0.5 rounded-lg p-0.5' : 'gap-1 rounded-xl p-1',
-      )}
-      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
-    >
-      {options.map((opt) => {
-        const isSelected = value === opt.value
-        return (
-          <button
-            key={String(opt.value)}
-            type="button"
-            onClick={() => onChange(opt.value)}
-            title={opt.label}
-            aria-label={opt.label}
-            className={cn(
-              'flex items-center justify-center tracking-wide transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-current/40 active:scale-[0.98]',
-              isSm
-                ? 'min-h-[1.75rem] rounded-md px-2 py-1 text-xs'
-                : 'min-h-[2.125rem] rounded-lg px-2.5 py-1.5 text-[13px]',
-              isSelected
-                ? 'bg-[var(--bd-read-bg)] font-medium text-current shadow-xs ring-1 ring-current/10'
-                : 'font-normal text-current/75 hover:text-current hover:bg-current/5',
-            )}
-          >
-            {opt.icon ?? opt.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-
-const FONT_CHIPS_VISIBLE = 7
+const FONT_CHIPS_VISIBLE = 8
 
 function visibleFontChips(options: FontOption[], collapsed: boolean, selectedId: string): FontOption[] {
   if (!collapsed) return options
@@ -269,10 +98,10 @@ function visibleFontChips(options: FontOption[], collapsed: boolean, selectedId:
 
 function fontChipClass(active: boolean) {
   return cn(
-    'flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-[13.5px] transition-all duration-150 select-none active:scale-[0.98]',
+    'flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-lg border-[1.5px] px-2.5 text-[13.5px] transition-[background-color,border-color,color,opacity] duration-150 select-none outline-none active:scale-[0.985] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-(--bd-sel-border-on)',
     active
-      ? 'border border-stone-400/40 bg-[var(--bd-read-bg)] font-medium text-current shadow-sm ring-1 ring-stone-400/20 dark:border-stone-600/40 dark:ring-stone-600/20'
-      : 'border border-stone-200/70 bg-stone-500/5 font-normal text-current/75 hover:border-stone-300/80 hover:bg-stone-500/10 hover:text-current dark:border-stone-800/80 dark:hover:border-stone-700/80',
+      ? 'border-(--bd-sel-border-on) bg-(--bd-sel-bg-on) font-medium text-(--bd-sel-text-on)'
+      : 'border-(--bd-sel-border) bg-(--bd-sel-bg) font-normal text-(--bd-sel-text) hover:border-(--bd-sel-border-hover) hover:bg-(--bd-sel-bg-hover) hover:text-(--bd-sel-text-on)',
   )
 }
 
@@ -333,10 +162,13 @@ function getInitialSection(): Section {
 interface SettingsPanelProps {
   bookId?: string
   cleanReadingSupported?: boolean
+  /** 「覆盖书籍字体/布局」 only applies to normal reflowable EPUB; TXT and
+   *  fixed-layout books always read with the ordinary settings. */
+  overrideSupported?: boolean
   fontPreviews?: ReaderFontPreviews
 }
 
-export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPreviews }: SettingsPanelProps) {
+export function SettingsPanel({ bookId, cleanReadingSupported = false, overrideSupported = false, fontPreviews }: SettingsPanelProps) {
   const localFontPreviews = useReaderFontPreviews(!fontPreviews)
   const requestFontPreviews = fontPreviews ?? localFontPreviews
   const [section, setSection] = useState<Section>(getInitialSection)
@@ -373,6 +205,8 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
   const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
   const fontLatinIds = useFontLoaderStore((s) => s.latinIds)
 
+  // One whole-store subscription: the panel is reader-scoped and small, and
+  // every control's non-context fallback reads from it.
   const {
     fontFamily,
     setFontFamily,
@@ -381,79 +215,44 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
     fontPreferences,
     fontOrder,
     fontSize,
-    setFontSize,
     fontWeight,
-    setFontWeight,
-    lineHeight,
-    setLineHeight,
-    paragraphSpacing,
-    setParagraphSpacing,
-    chapterTitleAlign,
-    setChapterTitleAlign,
-    chapterTitleSize,
-    setChapterTitleSize,
-    chapterTitleTopSpacing,
-    setChapterTitleTopSpacing,
-    chapterTitleBottomSpacing,
-    setChapterTitleBottomSpacing,
-    letterSpacing,
-    setLetterSpacing,
-    indent,
-    setIndent,
-    pageWidth,
-    setPageWidth,
-    verticalPadding,
-    setVerticalPadding,
-    horizontalPadding,
-    setHorizontalPadding,
+    readingMode: storeReadingMode,
+    marginalFontSize,
     textAlignJustify,
-    setTextAlignJustify,
-    cleanReading,
-    setCleanReading,
+    pageWidth,
+    horizontalPadding,
+    verticalPadding,
+    lineHeight,
+    paragraphSpacing,
+    letterSpacing,
+    indent,
+    chapterTitleAlign,
+    chapterTitleSize,
+    chapterTitleTopSpacing,
+    chapterTitleBottomSpacing,
     overrideBookFont,
-    setOverrideBookFont,
     overrideBookLayout,
-    setOverrideBookLayout,
-    readingMode,
-    setReadingMode,
     pageColumns,
-    setPageColumns,
     columnGap,
-    setColumnGap,
-    showHeader,
-    setShowHeader,
-    showFooter,
-    setShowFooter,
-    showFriendIdeas,
-    setShowFriendIdeas,
-    ideaDisplayMode,
-    setIdeaDisplayMode,
-    chineseConversion,
-    setChineseConversion,
     continuousScroll,
-    setContinuousScroll,
-    autoMarkSelection,
-    setAutoMarkSelection,
+    pageAnimation,
+    chineseConversion,
+    cleanReading,
+    headerLeft,
+    headerCenter,
+    headerRight,
+    footerLeft,
+    footerCenter,
+    footerRight,
+    showFriendIdeas,
+    ideaDisplayMode,
+    showHeader,
+    showFooter,
     clickAreaMode,
     setClickAreaMode,
-    headerLeft,
-    setHeaderLeft,
-    headerCenter,
-    setHeaderCenter,
-    headerRight,
-    setHeaderRight,
-    footerLeft,
-    setFooterLeft,
-    footerCenter,
-    setFooterCenter,
-    footerRight,
-    setFooterRight,
-    marginalFontSize,
-    setMarginalFontSize,
-    pageAnimation,
-    setPageAnimation,
+    autoMarkSelection,
+    setAutoMarkSelection,
   } = useUiStore()
-
 
   // Rebuild the catalog when the UI language changes: localized font names
   const uiLanguage = i18n.language
@@ -468,17 +267,53 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
   const enabledCjkOptions = useMemo(() => enabledFontOptions.filter((option) => !option.latin), [enabledFontOptions])
   const [fontsExpanded, setFontsExpanded] = useState(false)
   const [cjkExpanded, setCjkExpanded] = useState(false)
-  // A device selection overrides the synced font ids on this device only; the
-  // readingConfig blob never receives a device reference.
-  const effectiveFontFamily = deviceSelection.primary ?? fontFamily
-  const effectiveCjkFontFamily = deviceSelection.cjk ?? cjkFontFamily
 
-  // Selecting applies immediately (font-display: swap renders the fallback
-  // first); the click only kicks off the download as visual feedback. A device
-  // pick writes the device-local selection instead of the synced font ids; a
-  // server/system pick clears the device override so the synced chain resumes.
+  // Per-book layer: inside the reader every control shows the merged effective
+  // value and writes route by the tab's group toggle; outside the reader
+  // (no context) everything falls back to the global store.
+  const viewSettings = useViewSettings()
+  const effective = viewSettings?.effective
+  const groups = viewSettings?.groups
+  const groupOn = (group: BookSettingsGroup) =>
+    effective ? (group === 'font' ? viewSettings!.groups.font != null
+      : group === 'layout' ? viewSettings!.groups.layout != null
+        : viewSettings!.groups.display != null) : false
+  const updateField = (key: string, value: number | boolean | string) => {
+    if (viewSettings) viewSettings.updateField(key, value)
+    else useUiStore.getState().setReadingSetting(key, value)
+  }
+
+  // Effective font ids follow the same chain the renderer resolves: the book's
+  // device pick, its synced id, the global device pick, the global synced id —
+  // first candidate this device can actually resolve wins. The last candidate
+  // is the store value (not the merged effective one): a per-book id that this
+  // device cannot resolve must fall through to the global font, not repeat
+  // itself.
+  const enabledFontIds = useMemo(() => new Set(enabledFontOptions.map((option) => option.id)), [enabledFontOptions])
+  const pickAvailableFont = (...candidates: Array<string | null | undefined>): string | null =>
+    candidates.find((id): id is string => !!id && enabledFontIds.has(id)) ?? candidates.find((id): id is string => !!id) ?? null
+  const effectiveFontFamily = pickAvailableFont(
+    viewSettings?.bookDeviceFonts?.primary,
+    groups?.font?.fontFamily,
+    deviceSelection.primary,
+    fontFamily,
+  )
+  const effectiveCjkFontFamily = pickAvailableFont(
+    viewSettings?.bookDeviceFonts?.cjk,
+    groups?.font?.cjkFontFamily,
+    deviceSelection.cjk,
+    cjkFontFamily,
+  )
+
   function onSelectFont(opt: FontOption) {
-    if (opt.source === 'device') {
+    if (effective && groupOn('font')) {
+      // Device picks stay on this device; synced ids write into the group.
+      if (opt.source === 'device') viewSettings!.setBookDeviceFont('primary', opt.id)
+      else {
+        viewSettings!.setBookDeviceFont('primary', null)
+        updateField('fontFamily', opt.id)
+      }
+    } else if (opt.source === 'device') {
       useDeviceFontStore.getState().selectPrimary(opt.id)
     } else {
       if (deviceSelection.primary) useDeviceFontStore.getState().selectPrimary(null)
@@ -488,7 +323,13 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
   }
 
   function onSelectCjkFont(opt: FontOption) {
-    if (opt.source === 'device') {
+    if (effective && groupOn('font')) {
+      if (opt.source === 'device') viewSettings!.setBookDeviceFont('cjk', opt.id)
+      else {
+        viewSettings!.setBookDeviceFont('cjk', null)
+        updateField('cjkFontFamily', opt.id)
+      }
+    } else if (opt.source === 'device') {
       useDeviceFontStore.getState().selectCjk(opt.id)
     } else {
       if (deviceSelection.cjk) useDeviceFontStore.getState().selectCjk(null)
@@ -497,24 +338,26 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
     if (opt.source === 'builtin') requestFontPreviews([opt], true)
   }
 
-  // A dangling device selection (font deleted/disabled on this device) clears
-  // itself; the synced selection resumes. Only trusted once the device catalog
-  // has loaded, so a fresh mount never clears a selection that is about to
-  // reappear.
+  // A dangling global device selection (font deleted/disabled on this device)
+  // clears itself; the synced selection resumes. Per-book picks are not
+  // cleared — the chain falls through at resolution instead.
   useEffect(() => {
     if (deviceFontStatus !== 'ready') return
-    if (deviceSelection.primary && !enabledFontOptions.some((option) => option.id === deviceSelection.primary)) {
+    if (deviceSelection.primary && !enabledFontOptions.some((option) => option.id === deviceSelection.primary) && !(viewSettings?.groups.font != null)) {
       useDeviceFontStore.getState().selectPrimary(null)
     }
-    if (deviceSelection.cjk && !enabledCjkOptions.some((option) => option.id === deviceSelection.cjk)) {
+    if (deviceSelection.cjk && !enabledCjkOptions.some((option) => option.id === deviceSelection.cjk) && !(viewSettings?.groups.font != null)) {
       useDeviceFontStore.getState().selectCjk(null)
     }
-  }, [deviceFontStatus, deviceSelection, enabledFontOptions, enabledCjkOptions])
+  }, [deviceFontStatus, deviceSelection, enabledFontOptions, enabledCjkOptions, viewSettings])
 
+  const perBookFontGroupOn = viewSettings?.groups.font != null
   // Auto-fallback routes by the fallback's source: a device fallback becomes
   // the device selection (never the synced account ids), a server/system
-  // fallback clears the device override and writes the account settings.
+  // fallback clears the device override and writes the account settings. A
+  // per-book font group resolves its own chain without writing the globals.
   useEffect(() => {
+    if (perBookFontGroupOn) return
     if (enabledFontOptions.some((option) => option.id === effectiveFontFamily)) return
     const fallback = enabledFontOptions[0]
     if (!fallback || deviceFontStatus !== 'ready') return
@@ -524,9 +367,10 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
       if (deviceSelection.primary) useDeviceFontStore.getState().selectPrimary(null)
       setFontFamily(fallback.id)
     }
-  }, [enabledFontOptions, effectiveFontFamily, setFontFamily, deviceFontStatus, deviceSelection])
+  }, [perBookFontGroupOn, enabledFontOptions, effectiveFontFamily, setFontFamily, deviceFontStatus, deviceSelection])
 
   useEffect(() => {
+    if (perBookFontGroupOn) return
     if (enabledCjkOptions.some((option) => option.id === effectiveCjkFontFamily)) return
     // No CJK candidate at all (every non-latin font disabled): leave the cjk
     // selection untouched instead of writing a latin font into it — the
@@ -540,16 +384,16 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
       if (deviceSelection.cjk) useDeviceFontStore.getState().selectCjk(null)
       setCjkFontFamily(fallback.id)
     }
-  }, [enabledCjkOptions, effectiveCjkFontFamily, setCjkFontFamily, deviceFontStatus, deviceSelection])
+  }, [perBookFontGroupOn, enabledCjkOptions, effectiveCjkFontFamily, setCjkFontFamily, deviceFontStatus, deviceSelection])
 
-  const shouldCollapsePrimary = enabledFontOptions.length > FONT_CHIPS_VISIBLE + 1
+  const shouldCollapsePrimary = enabledFontOptions.length > FONT_CHIPS_VISIBLE
   const visibleFontOptions = useMemo(
-    () => visibleFontChips(enabledFontOptions, shouldCollapsePrimary && !fontsExpanded, effectiveFontFamily),
+    () => visibleFontChips(enabledFontOptions, shouldCollapsePrimary && !fontsExpanded, effectiveFontFamily ?? ''),
     [enabledFontOptions, shouldCollapsePrimary, fontsExpanded, effectiveFontFamily],
   )
-  const shouldCollapseCjk = enabledCjkOptions.length > FONT_CHIPS_VISIBLE + 1
+  const shouldCollapseCjk = enabledCjkOptions.length > FONT_CHIPS_VISIBLE
   const visibleCjkOptions = useMemo(
-    () => visibleFontChips(enabledCjkOptions, shouldCollapseCjk && !cjkExpanded, effectiveCjkFontFamily),
+    () => visibleFontChips(enabledCjkOptions, shouldCollapseCjk && !cjkExpanded, effectiveCjkFontFamily ?? ''),
     [enabledCjkOptions, shouldCollapseCjk, cjkExpanded, effectiveCjkFontFamily],
   )
 
@@ -562,61 +406,93 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
     if (showCjkFontPicker) requestFontPreviews(visibleCjkOptions)
   }, [section, requestFontPreviews, visibleFontOptions, showCjkFontPicker, visibleCjkOptions])
 
-  const renderFontChip = (option: FontOption, selectedId: string, onSelect: (option: FontOption) => void) => (
+  const renderFontChip = (option: FontOption, selectedId: string | null, onSelect: (option: FontOption) => void) => (
     <button
       key={option.id}
       type="button"
+      title={option.name}
       aria-pressed={selectedId === option.id}
       onClick={() => onSelect(option)}
       className={fontChipClass(selectedId === option.id)}
       style={{ fontFamily: option.stack }}
     >
-      {option.name}
-      {option.status === 'idle' && <DownloadIcon size={12} />}
-      {option.status === 'loading' && <SpinnerIcon size={12} />}
+      <span className="min-w-0 truncate">{option.name}</span>
+      {option.status === 'idle' && <span className="shrink-0"><DownloadIcon size={12} /></span>}
+      {option.status === 'loading' && <span className="shrink-0"><SpinnerIcon size={12} /></span>}
     </button>
   )
 
-  // Per-book layer (F1): when inside the reader, the first-batch settings
-  // display the merged effective values and writes route to the per-book diff
-  // (or the global store, depending on the "This book only" switch). Outside the
-  // reader (no context) everything falls back to the global store.
-  const viewSettings = useViewSettings()
-  const bindSetting = <K extends Exclude<PerBookSettingKey, 'cleanReading'>,>(key: K, storeValue: number, storeSetter: (v: number) => void) => ({
-    value: viewSettings ? viewSettings.effective[key] : storeValue,
-    onChange: (v: number) => (viewSettings ? viewSettings.updateSetting(key, v as PerBookSettingValue<K>) : storeSetter(v)),
-  })
-  const fontSizeBinding = bindSetting('fontSize', fontSize, setFontSize)
-  const lineHeightBinding = bindSetting('lineHeight', lineHeight, setLineHeight)
-  const pageWidthBinding = bindSetting('pageWidth', pageWidth, setPageWidth)
-  const horizontalPaddingBinding = bindSetting('horizontalPadding', horizontalPadding, setHorizontalPadding)
-  const verticalPaddingBinding = bindSetting('verticalPadding', verticalPadding, setVerticalPadding)
-  const pageColumnsBinding = bindSetting('pageColumns', pageColumns, setPageColumns)
-  const columnGapBinding = bindSetting('columnGap', columnGap, setColumnGap)
-  const cleanReadingBinding = {
-    value: viewSettings?.effective.cleanReading ?? cleanReading,
-    onChange: (value: boolean) => (viewSettings ? viewSettings.updateSetting('cleanReading', value) : setCleanReading(value)),
-  }
-
-  const themeId = useUiStore(selectEffectiveReadingThemeId)
-  const themeOverride = useUiStore(selectReaderThemeOverride)
-  const themeDefinitions = useUiStore((state) => state.customThemes)
-  const currentTheme = useMemo(() => resolveEffectiveReadingTheme(themeOverride, themeId, themeDefinitions), [themeOverride, themeId, themeDefinitions])
+  const currentTheme = useUiStore(selectEffectiveReadingTheme)
   const [showClickAreaHint, setShowClickAreaHint] = useState(false)
   const clickAreaHintRef = useRef<HTMLDivElement>(null)
   useDismissiblePopup(showClickAreaHint, clickAreaHintRef, () => setShowClickAreaHint(false))
 
-  // Theme scope resolution: 本书覆盖 → 本书绑定预设 → 设备当前预设 → 全局默认.
-  // The flat store fields already follow the preset chain, so the label only
-  // has to distinguish the per-book override from the resolved preset.
-  const sliderVars = useMemo(() => {
-    return {
-      '--slider-accent': blendColors(currentTheme.bg, currentTheme.text, 0.65),
-      '--slider-track': blendColors(currentTheme.bg, currentTheme.text, 0.15),
-      '--toggle-on-bg': blendColors(currentTheme.bg, currentTheme.text, 0.65),
-      '--toggle-off-bg': blendColors(currentTheme.bg, currentTheme.text, 0.20),
-    } as React.CSSProperties
-  }, [currentTheme])
+  const sliderVars = useMemo(() => readerPanelVars(currentTheme), [currentTheme])
+
+  // Numeric/boolean/string control binding: the effective value when inside
+  // the reader, the global store otherwise.
+  const num = (key: string, storeValue: number) => ({
+    value: effective ? (effective as unknown as Record<string, number>)[key] : storeValue,
+    onChange: (v: number) => updateField(key, v),
+  })
+  const bool = (key: string, storeValue: boolean) => ({
+    checked: effective ? (effective as unknown as Record<string, boolean>)[key] : storeValue,
+    onChange: (v: boolean) => updateField(key, v),
+  })
+  const text = (key: string, storeValue: string) => ({
+    value: effective ? (effective as unknown as Record<string, string>)[key] : storeValue,
+    onChange: (v: string) => updateField(key, v),
+  })
+
+  const fontSizeBinding = num('fontSize', fontSize)
+  const fontWeightBinding = num('fontWeight', fontWeight)
+  const marginalFontSizeBinding = num('marginalFontSize', marginalFontSize)
+  const overrideBookFontBinding = bool('overrideBookFont', overrideBookFont)
+  const lineHeightBinding = num('lineHeight', lineHeight)
+  const paragraphSpacingBinding = num('paragraphSpacing', paragraphSpacing)
+  const letterSpacingBinding = num('letterSpacing', letterSpacing)
+  const indentBinding = num('indent', indent)
+  const textAlignJustifyBinding = bool('textAlignJustify', textAlignJustify)
+  const overrideBookLayoutBinding = bool('overrideBookLayout', overrideBookLayout)
+  const pageWidthBinding = num('pageWidth', pageWidth)
+  const horizontalPaddingBinding = num('horizontalPadding', horizontalPadding)
+  const verticalPaddingBinding = num('verticalPadding', verticalPadding)
+  const chapterTitleAlignBinding = text('chapterTitleAlign', chapterTitleAlign)
+  const chapterTitleSizeBinding = num('chapterTitleSize', chapterTitleSize)
+  const chapterTitleTopSpacingBinding = num('chapterTitleTopSpacing', chapterTitleTopSpacing)
+  const chapterTitleBottomSpacingBinding = num('chapterTitleBottomSpacing', chapterTitleBottomSpacing)
+  const readingModeBinding = text('readingMode', storeReadingMode)
+  const pageColumnsBinding = num('pageColumns', pageColumns)
+  const columnGapBinding = num('columnGap', columnGap)
+  const continuousScrollBinding = text('continuousScroll', continuousScroll)
+  const pageAnimationBinding = bool('pageAnimation', pageAnimation)
+  const chineseConversionBinding = text('chineseConversion', chineseConversion)
+  const cleanReadingBinding = bool('cleanReading', cleanReading)
+  const showHeaderBinding = bool('showHeader', showHeader)
+  const showFooterBinding = bool('showFooter', showFooter)
+  const headerLeftBinding = text('headerLeft', headerLeft)
+  const headerCenterBinding = text('headerCenter', headerCenter)
+  const headerRightBinding = text('headerRight', headerRight)
+  const footerLeftBinding = text('footerLeft', footerLeft)
+  const footerCenterBinding = text('footerCenter', footerCenter)
+  const footerRightBinding = text('footerRight', footerRight)
+  const showFriendIdeasBinding = bool('showFriendIdeas', showFriendIdeas)
+  const ideaDisplayModeBinding = text('ideaDisplayMode', ideaDisplayMode)
+
+  // 强制覆盖只在普通流式 EPUB 可用；纯净阅读开启时由它接管原书样式与媒体，
+  // 两项隐藏。Guests on server books cannot PATCH the groups; the theme group
+  // stays available (browser-local for them).
+  const overrideVisible = overrideSupported && !(cleanReadingBinding.checked && cleanReadingSupported)
+  const canWriteGroups = Boolean(local || serviceAccount)
+
+  const themeLibrary = useUiStore((s) => s.themeLibrary)
+  const globalAppearanceState = useUiStore(selectGlobalAppearanceState)
+  const themePanelSlot = useUiStore(selectReadingThemeSlot)
+  const standaloneAppearance = useMemo(
+    () => resolveAppearance(themeLibrary, globalAppearanceState, undefined, themePanelSlot),
+    [themeLibrary, globalAppearanceState, themePanelSlot],
+  )
+  const themePanelAppearance = viewSettings?.appearance ?? standaloneAppearance
 
   return (
     <div className="p-4 text-sm" style={sliderVars}>
@@ -640,11 +516,6 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
             <circle cx="12" cy="12" r="3" />
           </svg>
         </SectionIcon>
-        <SectionIcon active={section === 'behavior'} onClick={() => onSetSection('behavior')} label={_('reader.sectionBehavior')}>
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
-          </svg>
-        </SectionIcon>
         <SectionIcon active={section === 'theme'} onClick={() => onSetSection('theme')} label={_('reader.sectionTheme')}>
           <svg className="h-4 w-4" viewBox="-1 -1 26 26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M11.98 0C12.48 0 12.98 0 13.48 0C13.63 0.07 13.81 0.04 13.97 0.06C14.3 0.1 14.63 0.14 14.96 0.2C15.92 0.36 16.86 0.66 17.75 1.04C21 2.44 23.54 5.47 23.22 9.17C23.13 10.15 22.88 11.13 22.25 11.9C21.4 12.94 20.09 13.27 18.87 13.63C17.73 13.96 16.57 14.3 16 15.44C15.86 15.71 15.79 15.99 15.72 16.27C15.32 17.92 17 19.22 17.71 20.5C18.3 21.58 17.99 22.69 16.95 23.33C16.44 23.64 15.86 23.78 15.28 23.89C15.05 23.94 14.72 23.89 14.5 24C13.98 24 13.46 24 12.94 24C12.75 23.91 12.2 23.92 11.97 23.9C11.35 23.83 10.74 23.71 10.14 23.57C8.16 23.1 6.23 22.08 4.71 20.71C3.4 19.53 2.33 18.08 1.65 16.46C-0.39 11.58 1.14 6.01 5.17 2.68C6.49 1.59 8.06 0.83 9.7 0.39C10.17 0.26 10.66 0.16 11.15 0.1C11.37 0.07 11.79 0.09 11.98 0Z" />
@@ -654,89 +525,113 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
             <circle cx="9.94" cy="18.38" r="1" fill="currentColor" stroke="none" />
           </svg>
         </SectionIcon>
+        <SectionIcon active={section === 'behavior'} onClick={() => onSetSection('behavior')} label={_('reader.sectionBehavior')}>
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
+        </SectionIcon>
       </div>
 
       {section === 'font' && (
-        <div>
-          <div className="mb-5">
-            <label className="mb-2 block text-xs font-medium text-current/75">
-              {showCjkFontPicker ? _('reader.primaryFont') : _('reader.sectionFont')}
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {visibleFontOptions.map((option) => renderFontChip(option, effectiveFontFamily, onSelectFont))}
-              {shouldCollapsePrimary && (
-                <button onClick={() => setFontsExpanded((v) => !v)} className={fontChipClass(false)}>
-                  {_(fontsExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
-                </button>
-              )}
-            </div>
-          </div>
-          {showCjkFontPicker && (
-            <div className="mb-5">
-              <label className="mb-2 block text-xs font-medium text-current/75">{_('reader.cjkFont')}</label>
-              <div className="grid grid-cols-2 gap-2">
-                {visibleCjkOptions.map((option) => renderFontChip(option, effectiveCjkFontFamily, onSelectCjkFont))}
-                {shouldCollapseCjk && (
-                  <button onClick={() => setCjkExpanded((v) => !v)} className={fontChipClass(false)}>
-                    {_(cjkExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
+        <PanelSectionList>
+          <PanelSection>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-current/75">
+                  {showCjkFontPicker ? _('reader.primaryFont') : _('reader.sectionFont')}
+                </label>
+                {shouldCollapsePrimary && (
+                  <button
+                    type="button"
+                    className={cn(
+                      'flex h-6 w-6 items-center justify-center rounded-md text-current/60 transition-transform hover:bg-current/10 hover:text-current',
+                      fontsExpanded && 'rotate-180',
+                    )}
+                    aria-expanded={fontsExpanded}
+                    aria-label={_(fontsExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
+                    title={_(fontsExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
+                    onClick={() => setFontsExpanded((v) => !v)}
+                  >
+                    <ThemeIcon name="more" size={13} />
                   </button>
                 )}
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                {visibleFontOptions.map((option) => renderFontChip(option, effectiveFontFamily, onSelectFont))}
+              </div>
             </div>
-          )}
+            {showCjkFontPicker && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium text-current/75">{_('reader.cjkFont')}</label>
+                  {shouldCollapseCjk && (
+                    <button
+                      type="button"
+                      className={cn(
+                        'flex h-6 w-6 items-center justify-center rounded-md text-current/60 transition-transform hover:bg-current/10 hover:text-current',
+                        cjkExpanded && 'rotate-180',
+                      )}
+                      aria-expanded={cjkExpanded}
+                      aria-label={_(cjkExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
+                      title={_(cjkExpanded ? 'reader.fontsCollapse' : 'reader.fontsMore')}
+                      onClick={() => setCjkExpanded((v) => !v)}
+                    >
+                      <ThemeIcon name="more" size={13} />
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {visibleCjkOptions.map((option) => renderFontChip(option, effectiveCjkFontFamily, onSelectCjkFont))}
+                </div>
+              </div>
+            )}
 
-          <SliderRow
-            label={_('reader.fontSize')}
-            value={fontSizeBinding.value}
-            min={12}
-            max={64}
-            suffix="px"
-            stepper={{
-              decAria: _('reader.fontSizeDec'),
-              incAria: _('reader.fontSizeInc'),
-            }}
-            onChange={fontSizeBinding.onChange}
-          />
-          {(showHeader || showFooter) && (
             <SliderRow
-              label={_('reader.marginalFontSize')}
-              value={marginalFontSize}
-              min={0}
-              max={24}
-              step={1}
-              formatValue={(v) => (v === 0 ? _('reader.marginalFontSizeAuto') : `${v}px`)}
-              onChange={setMarginalFontSize}
+              label={_('reader.fontSize')}
+              value={fontSizeBinding.value}
+              min={12}
+              max={64}
+              suffix="px"
+              stepper={{
+                decAria: _('reader.fontSizeDec'),
+                incAria: _('reader.fontSizeInc'),
+              }}
+              onChange={fontSizeBinding.onChange}
             />
-          )}
-          <SliderRow label={_('reader.fontWeight')} value={fontWeight} min={100} max={900} step={100} onChange={setFontWeight} />
+            <SliderRow label={_('reader.fontWeight')} value={fontWeightBinding.value} min={100} max={900} step={100} onChange={fontWeightBinding.onChange} />
+          </PanelSection>
 
-          <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <ToggleRow
-              label={_('reader.textAlignJustify')}
-              hint={_('reader.textAlignJustifyHint')}
-              checked={textAlignJustify}
-              onChange={setTextAlignJustify}
-            />
-            <ToggleRow
-              label={_('reader.overrideBookFont')}
-              hint={_('reader.overrideBookFontHint')}
-              checked={overrideBookFont}
-              onChange={setOverrideBookFont}
-            />
-          </div>
-        </div>
+          {overrideVisible && (
+            <PanelSection>
+              <ToggleRow
+                label={_('reader.overrideBookFont')}
+                hint={_('reader.overrideBookFontHint')}
+                checked={overrideBookFontBinding.checked}
+                onChange={overrideBookFontBinding.onChange}
+              />
+            </PanelSection>
+          )}
+
+          {viewSettings && canWriteGroups && (
+            <PanelSection>
+              <ToggleRow
+                label={_('reader.perBookFont')}
+                hint={_('reader.perBookGroupHint')}
+                checked={groupOn('font')}
+                onChange={(v) => viewSettings.setGroupEnabled('font', v)}
+              />
+            </PanelSection>
+          )}
+        </PanelSectionList>
       )}
 
       {section === 'layout' && (
-        <div className="space-y-4">
-          <div>
-            <div className="mb-3 text-xs font-semibold text-current/75">
-              {_('reader.layoutPageGroup')}
-            </div>
+        <PanelSectionList>
+          <PanelSection title={_('reader.layoutPageGroup')}>
             <SliderRow
               label={_('reader.pageWidth')}
               value={pageWidthBinding.value}
-              min={readingMode === 'page' ? 0 : 400}
+              min={readingModeBinding.value === 'page' ? 0 : 400}
               max={1800}
               step={50}
               suffix="px"
@@ -745,232 +640,264 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
             />
             <SliderRow label={_('reader.horizontalPadding')} value={horizontalPaddingBinding.value} min={0} max={120} step={4} suffix="px" onChange={horizontalPaddingBinding.onChange} />
             <SliderRow label={_('reader.verticalPadding')} value={verticalPaddingBinding.value} min={0} max={120} step={4} suffix="px" onChange={verticalPaddingBinding.onChange} />
-          </div>
+          </PanelSection>
 
-          <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <div className="mb-3 text-xs font-semibold text-current/75">
-              {_('reader.layoutTextGroup')}
-            </div>
+          <PanelSection title={_('reader.layoutTextGroup')}>
             <SliderRow label={_('reader.lineHeight')} value={lineHeightBinding.value} min={1.2} max={2.5} step={0.1} onChange={lineHeightBinding.onChange} />
-            <SliderRow label={_('reader.paragraphSpacing')} value={paragraphSpacing} min={0} max={3} step={0.1} suffix="em" onChange={setParagraphSpacing} />
-            <SliderRow label={_('reader.letterSpacing')} value={letterSpacing} min={-1} max={3} step={0.5} suffix="px" onChange={setLetterSpacing} />
-            <SliderRow label={_('reader.indent')} value={indent} min={0} max={4} step={0.5} suffix="em" onChange={setIndent} />
-          </div>
+            <SliderRow label={_('reader.paragraphSpacing')} value={paragraphSpacingBinding.value} min={0} max={3} step={0.1} suffix="em" onChange={paragraphSpacingBinding.onChange} />
+            <SliderRow label={_('reader.letterSpacing')} value={letterSpacingBinding.value} min={-1} max={3} step={0.5} suffix="px" onChange={letterSpacingBinding.onChange} />
+            <SliderRow label={_('reader.indent')} value={indentBinding.value} min={0} max={4} step={0.5} suffix="em" onChange={indentBinding.onChange} />
+            <ToggleRow label={_('reader.textAlignJustify')} hint={_('reader.textAlignJustifyHint')} checked={textAlignJustifyBinding.checked} onChange={textAlignJustifyBinding.onChange} />
+          </PanelSection>
 
-          <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <div className="mb-3 text-xs font-semibold text-current/75">
-              {_('reader.chapterTitleGroup')}
-            </div>
-            <div className="mb-4">
-              <div className="mb-1.5 text-xs font-medium text-current/75">{_('reader.chapterTitleAlign')}</div>
+          <PanelSection title={_('reader.chapterTitleGroup')}>
+            <InlineControlRow label={_('reader.chapterTitleAlign')}>
               <ButtonGroup
+                inline
                 options={[
-                  { value: 'start', label: _('reader.chapterTitleStart') },
-                  { value: 'center', label: _('reader.chapterTitleCenter') },
-                  { value: 'end', label: _('reader.chapterTitleEnd') },
+                  {
+                    value: 'start',
+                    label: _('reader.chapterTitleStart'),
+                    icon: (
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                        <path d="M4 6h16M4 12h10M4 18h14" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    value: 'center',
+                    label: _('reader.chapterTitleCenter'),
+                    icon: (
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                        <path d="M4 6h16M7 12h10M5 18h14" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    value: 'end',
+                    label: _('reader.chapterTitleEnd'),
+                    icon: (
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                        <path d="M4 6h16M10 12h10M6 18h14" />
+                      </svg>
+                    ),
+                  },
                 ]}
-                value={chapterTitleAlign}
-                onChange={setChapterTitleAlign}
+                value={(chapterTitleAlignBinding.value as 'start' | 'center' | 'end')}
+                onChange={chapterTitleAlignBinding.onChange}
               />
-            </div>
-            <SliderRow label={_('reader.chapterTitleSize')} value={chapterTitleSize} min={1} max={2} step={0.1} suffix="×" stepper={{ decAria: _('reader.chapterTitleSizeDec'), incAria: _('reader.chapterTitleSizeInc') }} onChange={setChapterTitleSize} />
-            <SliderRow label={_('reader.chapterTitleTopSpacing')} value={chapterTitleTopSpacing} min={0} max={6} step={0.25} suffix="em" onChange={setChapterTitleTopSpacing} />
-            <SliderRow label={_('reader.chapterTitleBottomSpacing')} value={chapterTitleBottomSpacing} min={0} max={6} step={0.25} suffix="em" onChange={setChapterTitleBottomSpacing} />
-          </div>
+            </InlineControlRow>
+            <SliderRow label={_('reader.chapterTitleSize')} value={chapterTitleSizeBinding.value} min={1} max={2} step={0.1} suffix="×" stepper={{ decAria: _('reader.chapterTitleSizeDec'), incAria: _('reader.chapterTitleSizeInc') }} onChange={chapterTitleSizeBinding.onChange} />
+            <SliderRow label={_('reader.chapterTitleTopSpacing')} value={chapterTitleTopSpacingBinding.value} min={0} max={6} step={0.25} suffix="em" onChange={chapterTitleTopSpacingBinding.onChange} />
+            <SliderRow label={_('reader.chapterTitleBottomSpacing')} value={chapterTitleBottomSpacingBinding.value} min={0} max={6} step={0.25} suffix="em" onChange={chapterTitleBottomSpacingBinding.onChange} />
+          </PanelSection>
 
-          <div className="border-t border-[var(--bd-read-accent)] pt-1">
-            <ToggleRow
-              label={_('reader.overrideBookLayout')}
-              hint={_('reader.overrideBookLayoutHint')}
-              checked={overrideBookLayout}
-              onChange={setOverrideBookLayout}
-            />
-          </div>
-        </div>
+          {overrideVisible && (
+            <PanelSection>
+              <ToggleRow
+                label={_('reader.overrideBookLayout')}
+                hint={_('reader.overrideBookLayoutHint')}
+                checked={overrideBookLayoutBinding.checked}
+                onChange={overrideBookLayoutBinding.onChange}
+              />
+            </PanelSection>
+          )}
+
+          {viewSettings && canWriteGroups && (
+            <PanelSection>
+              <ToggleRow
+                label={_('reader.perBookLayout')}
+                hint={_('reader.perBookGroupHint')}
+                checked={groupOn('layout')}
+                onChange={(v) => viewSettings.setGroupEnabled('layout', v)}
+              />
+            </PanelSection>
+          )}
+        </PanelSectionList>
       )}
 
       {section === 'display' && (
-        <div className="space-y-2">
-          <div>
-            <div className="mb-3 text-xs font-semibold text-current/75">
-              {_('reader.displayReadingMethodGroup')}
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.readingMode')}</label>
-                <ButtonGroup
-                  options={[
-                    { value: 'scroll', label: _('reader.readingModeScroll') },
-                    { value: 'page', label: _('reader.readingModePage') },
-                  ]}
-                  value={readingMode}
-                  onChange={setReadingMode}
-                />
-              </div>
-
-              {readingMode === 'page' && (
-                <>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.columnCount')}</label>
-                    <ButtonGroup
-                      size="sm"
-                      options={[
-                        { value: 1, label: '1' },
-                        { value: 2, label: '2' },
-                        { value: 3, label: '3' },
-                      ]}
-                      value={pageColumnsBinding.value}
-                      onChange={pageColumnsBinding.onChange}
-                    />
-                  </div>
-                  {pageColumnsBinding.value > 1 && (
-                    <SliderRow
-                      label={_('reader.columnGap')}
-                      value={columnGapBinding.value}
-                      min={0}
-                      max={15}
-                      step={1}
-                      suffix="%"
-                      onChange={columnGapBinding.onChange}
-                    />
-                  )}
-                </>
-              )}
-
-              {readingMode === 'scroll' && (
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.continuousScroll')}</label>
-                  <ButtonGroup
-                    size="sm"
-                    options={[
-                      { value: 'off', label: _('reader.continuousScrollOff') },
-                      { value: 'snap', label: _('reader.continuousScrollSnap') },
-                      { value: 'seamless', label: _('reader.continuousScrollSeamless') },
-                    ]}
-                    value={continuousScroll}
-                    onChange={setContinuousScroll}
-                  />
-                </div>
-              )}
-
-              <ToggleRow
-                label={_('reader.pageAnimation')}
-                checked={pageAnimation}
-                onChange={setPageAnimation}
+        <PanelSectionList>
+          <PanelSection title={_('reader.displayReadingMethodGroup')}>
+            <InlineControlRow label={_('reader.readingMode')}>
+              <ButtonGroup
+                inline
+                options={[
+                  { value: 'scroll', label: _('reader.readingModeScroll') },
+                  { value: 'page', label: _('reader.readingModePage') },
+                ]}
+                value={(readingModeBinding.value as 'scroll' | 'page')}
+                onChange={readingModeBinding.onChange}
               />
-            </div>
-          </div>
+            </InlineControlRow>
 
-          <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <div className="mb-3 text-xs font-semibold text-current/75">
-              {_('reader.displayTextGroup')}
-            </div>
+            {readingModeBinding.value === 'page' && (
+              <>
+                <InlineControlRow label={_('reader.columnCount')}>
+                  <ButtonGroup
+                    inline
+                    options={[
+                      { value: 1, label: '1' },
+                      { value: 2, label: '2' },
+                      { value: 3, label: '3' },
+                    ]}
+                    value={pageColumnsBinding.value}
+                    onChange={pageColumnsBinding.onChange}
+                  />
+                </InlineControlRow>
+                {pageColumnsBinding.value > 1 && (
+                  <SliderRow
+                    label={_('reader.columnGap')}
+                    value={columnGapBinding.value}
+                    min={0}
+                    max={15}
+                    step={1}
+                    suffix="%"
+                    onChange={columnGapBinding.onChange}
+                  />
+                )}
+              </>
+            )}
 
-            <div className="space-y-3">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.chineseConversion')}</label>
+            {readingModeBinding.value === 'scroll' && (
+              <ControlGroup label={_('reader.continuousScroll')}>
                 <ButtonGroup
                   size="sm"
                   options={[
-                    { value: 'off', label: _('reader.chineseConversionOff') },
-                    { value: 'simplified', label: _('reader.chineseConversionSimplified') },
-                    { value: 'traditional', label: _('reader.chineseConversionTraditional') },
+                    { value: 'off', label: _('reader.continuousScrollOff') },
+                    { value: 'snap', label: _('reader.continuousScrollSnap') },
+                    { value: 'seamless', label: _('reader.continuousScrollSeamless') },
                   ]}
-                  value={chineseConversion}
-                  onChange={(v) => setChineseConversion(v === chineseConversion ? 'off' : v)}
+                  value={(continuousScrollBinding.value as 'off' | 'snap' | 'seamless')}
+                  onChange={continuousScrollBinding.onChange}
                 />
-              </div>
+              </ControlGroup>
+            )}
 
-              {cleanReadingSupported && (
-                <ToggleRow
-                  label={_('reader.cleanReading')}
-                  checked={cleanReadingBinding.value}
-                  onChange={cleanReadingBinding.onChange}
-                />
+            <ToggleRow label={_('reader.pageAnimation')} checked={pageAnimationBinding.checked} onChange={pageAnimationBinding.onChange} />
+          </PanelSection>
+
+          <PanelSection title={_('reader.displayTextGroup')}>
+            <ControlGroup label={_('reader.chineseConversion')}>
+              <ButtonGroup
+                size="sm"
+                options={[
+                  { value: 'off', label: _('reader.chineseConversionOff') },
+                  { value: 'simplified', label: _('reader.chineseConversionSimplified') },
+                  { value: 'traditional', label: _('reader.chineseConversionTraditional') },
+                ]}
+                value={(chineseConversionBinding.value as 'off' | 'simplified' | 'traditional')}
+                onChange={(v) => updateField('chineseConversion', v === chineseConversionBinding.value ? 'off' : v)}
+              />
+            </ControlGroup>
+
+            {cleanReadingSupported && (
+              <ToggleRow
+                label={_('reader.cleanReading')}
+                checked={cleanReadingBinding.checked}
+                onChange={cleanReadingBinding.onChange}
+              />
+            )}
+          </PanelSection>
+
+          <PanelSection title={_('reader.displayAidsGroup')}>
+            <div className="flex flex-col gap-2">
+              <ToggleRow label={_('reader.header')} checked={showHeaderBinding.checked} onChange={showHeaderBinding.onChange} />
+              {showHeaderBinding.checked && (
+                <div className="flex overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-stone-500/5 divide-x divide-[var(--bd-read-accent)]">
+                  <FieldSelect value={(headerLeftBinding.value as MarginalField)} onChange={headerLeftBinding.onChange} ariaLabel={_('reader.marginalFieldAria', { section: _('reader.header'), position: _('reader.marginalPositionLeft') })} />
+                  <FieldSelect value={(headerCenterBinding.value as MarginalField)} onChange={headerCenterBinding.onChange} ariaLabel={_('reader.marginalFieldAria', { section: _('reader.header'), position: _('reader.marginalPositionCenter') })} />
+                  <FieldSelect value={(headerRightBinding.value as MarginalField)} onChange={headerRightBinding.onChange} ariaLabel={_('reader.marginalFieldAria', { section: _('reader.header'), position: _('reader.marginalPositionRight') })} />
+                </div>
               )}
             </div>
-          </div>
 
-          <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <div className="mb-3 text-xs font-semibold text-current/75">
-              {_('reader.displayAidsGroup')}
+            <div className="flex flex-col gap-2">
+              <ToggleRow label={_('reader.footer')} checked={showFooterBinding.checked} onChange={showFooterBinding.onChange} />
+              {showFooterBinding.checked && (
+                <div className="flex overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-stone-500/5 divide-x divide-[var(--bd-read-accent)]">
+                  <FieldSelect value={(footerLeftBinding.value as MarginalField)} onChange={footerLeftBinding.onChange} ariaLabel={_('reader.marginalFieldAria', { section: _('reader.footer'), position: _('reader.marginalPositionLeft') })} />
+                  <FieldSelect value={(footerCenterBinding.value as MarginalField)} onChange={footerCenterBinding.onChange} ariaLabel={_('reader.marginalFieldAria', { section: _('reader.footer'), position: _('reader.marginalPositionCenter') })} />
+                  <FieldSelect value={(footerRightBinding.value as MarginalField)} onChange={footerRightBinding.onChange} ariaLabel={_('reader.marginalFieldAria', { section: _('reader.footer'), position: _('reader.marginalPositionRight') })} />
+                </div>
+              )}
             </div>
 
-            <div className="space-y-2">
-              <div>
-                <ToggleRow label={_('reader.header')} checked={showHeader} onChange={setShowHeader} />
-                {showHeader && (
-                  <div className="mt-1 mb-2.5 flex overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-stone-500/5 divide-x divide-[var(--bd-read-accent)]">
-                    <FieldSelect
-                      value={headerLeft}
-                      onChange={setHeaderLeft}
-                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.header'), position: _('reader.marginalPositionLeft') })}
-                    />
-                    <FieldSelect
-                      value={headerCenter}
-                      onChange={setHeaderCenter}
-                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.header'), position: _('reader.marginalPositionCenter') })}
-                    />
-                    <FieldSelect
-                      value={headerRight}
-                      onChange={setHeaderRight}
-                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.header'), position: _('reader.marginalPositionRight') })}
-                    />
-                  </div>
-                )}
-              </div>
+            {(showHeaderBinding.checked || showFooterBinding.checked) && (
+              <SliderRow
+                label={_('reader.marginalFontSize')}
+                value={marginalFontSizeBinding.value}
+                min={0}
+                max={24}
+                step={1}
+                formatValue={(v) => (v === 0 ? _('reader.marginalFontSizeAuto') : `${v}px`)}
+                onChange={marginalFontSizeBinding.onChange}
+              />
+            )}
 
-              <div>
-                <ToggleRow label={_('reader.footer')} checked={showFooter} onChange={setShowFooter} />
-                {showFooter && (
-                  <div className="mt-1 mb-2.5 flex overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-stone-500/5 divide-x divide-[var(--bd-read-accent)]">
-                    <FieldSelect
-                      value={footerLeft}
-                      onChange={setFooterLeft}
-                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.footer'), position: _('reader.marginalPositionLeft') })}
-                    />
-                    <FieldSelect
-                      value={footerCenter}
-                      onChange={setFooterCenter}
-                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.footer'), position: _('reader.marginalPositionCenter') })}
-                    />
-                    <FieldSelect
-                      value={footerRight}
-                      onChange={setFooterRight}
-                      ariaLabel={_('reader.marginalFieldAria', { section: _('reader.footer'), position: _('reader.marginalPositionRight') })}
-                    />
-                  </div>
-                )}
-              </div>
+            <ToggleRow label={_('reader.showFriendIdeas')} checked={showFriendIdeasBinding.checked} onChange={showFriendIdeasBinding.onChange} />
 
-              <div>
-                <ToggleRow label={_('reader.showFriendIdeas')} checked={showFriendIdeas} onChange={setShowFriendIdeas} />
-                {showFriendIdeas && (
-                  <div className="mt-1 mb-1">
-                    <label className="mb-1.5 block text-xs font-medium text-current/75">{_('reader.ideaDisplayMode')}</label>
-                    <ButtonGroup
-                      size="sm"
-                      options={[
-                        { value: 'sidebar', label: _('reader.ideaDisplaySidebar') },
-                        { value: 'modal', label: _('reader.ideaDisplayModal') },
-                      ]}
-                      value={ideaDisplayMode}
-                      onChange={setIdeaDisplayMode}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
+            <InlineControlRow label={_('reader.ideaDisplayMode')}>
+              <ButtonGroup
+                inline
+                options={[
+                  { value: 'sidebar', label: _('reader.ideaDisplaySidebar') },
+                  { value: 'modal', label: _('reader.ideaDisplayModal') },
+                ]}
+                value={(ideaDisplayModeBinding.value as 'sidebar' | 'modal')}
+                onChange={ideaDisplayModeBinding.onChange}
+              />
+            </InlineControlRow>
+          </PanelSection>
+
+          {viewSettings && canWriteGroups && (
+            <PanelSection>
+              <ToggleRow
+                label={_('reader.perBookDisplay')}
+                hint={_('reader.perBookGroupHint')}
+                checked={groupOn('display')}
+                onChange={(v) => viewSettings.setGroupEnabled('display', v)}
+              />
+            </PanelSection>
+          )}
+        </PanelSectionList>
+      )}
+
+      {section === 'theme' && (
+        <PanelSectionList>
+          <div className="pb-3.5 last:pb-0">
+            <ReadingThemePanel
+              key={bookId}
+              appearance={themePanelAppearance}
+              bookTheme={viewSettings?.bookTheme}
+              onPickTheme={viewSettings?.pickTheme ?? ((themeId) => useUiStore.getState().setGlobalReadingTheme(themeId, themePanelSlot))}
+              onPickPalette={viewSettings?.pickPalette ?? ((paletteId) => useUiStore.getState().setGlobalSlotPalette(themePanelSlot, paletteId))}
+              onSetCss={viewSettings?.setCss ?? ((mode, cssId) => useUiStore.getState().setGlobalAppearanceCss(mode, cssId))}
+              onToggleHighlight={viewSettings?.toggleHighlight ?? ((ruleId) => {
+                const layers = toggleAppearanceHighlight(themeLibrary, globalAppearanceState, undefined, themePanelSlot, ruleId)
+                if (layers) useUiStore.getState().setGlobalHighlightLayers(layers)
+              })}
+              bookId={bookId}
+            />
           </div>
-        </div>
+          {viewSettings && (
+            <PanelSection>
+              <ToggleRow
+                label={_('reader.perBookTheme')}
+                hint={_('reader.perBookGroupHint')}
+                checked={viewSettings.groups.theme != null}
+                onChange={(v) => viewSettings.setGroupEnabled('theme', v)}
+              />
+            </PanelSection>
+          )}
+        </PanelSectionList>
       )}
 
       {section === 'behavior' && (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3">
-            <div>
-              <div className="mb-2 flex items-center justify-between">
+        <PanelSectionList>
+          <PanelSection>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
                 <div ref={clickAreaHintRef} className="relative flex w-fit items-center gap-1.5">
                   <span className="text-sm font-medium text-current">{_('reader.clickArea')}</span>
                   <button
@@ -1096,35 +1023,17 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, fontPrevi
               checked={autoMarkSelection}
               onChange={setAutoMarkSelection}
             />
-          </div>
+          </PanelSection>
 
-          <div className="flex flex-col gap-3.5 border-t border-[var(--bd-read-accent)]/20 pt-3.5">
-            {viewSettings && (
-              <ToggleRow
-                label={_('reader.perBookOnly')}
-                hint={_('reader.perBookOnlyHint')}
-                checked={viewSettings.perBookActive}
-                onChange={viewSettings.setPerBookActive}
-              />
-            )}
-
+          <PanelSection>
             <ReadingPresetPicker />
-          </div>
+          </PanelSection>
 
-          <div className="flex flex-col gap-2 border-t border-[var(--bd-read-accent)]/20 pt-3">
+          <PanelSection gap="compact">
             {bookId && <ReplacementsEntryRow bookId={bookId} />}
             <KeyboardShortcutsEntryRow />
-          </div>
-        </div>
-      )}
-
-      {section === 'theme' && (
-        <ReadingThemePanel key={bookId} book={{
-          id: bookId ?? '',
-          appearance: viewSettings?.appearance,
-          hasThemeSelection: viewSettings?.hasThemeSelection,
-          setSelection: (selection, clear) => viewSettings?.setThemeSelection(selection, clear),
-        }} />
+          </PanelSection>
+        </PanelSectionList>
       )}
     </div>
   )
@@ -1138,7 +1047,7 @@ function KeyboardShortcutsEntryRow() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full items-center justify-between gap-2 rounded-xl border border-stone-200/70 bg-stone-500/5 px-3.5 py-2.5 text-left transition-all duration-150 hover:border-stone-300/80 hover:bg-stone-500/10 active:scale-[0.99] dark:border-stone-800/80 dark:hover:border-stone-700/80"
+        className="flex w-full items-center justify-between gap-2 rounded-xl border-[1.5px] border-(--bd-sel-border) bg-(--bd-sel-bg) px-3.5 py-2.5 text-left transition-all duration-150 hover:border-(--bd-sel-border-hover) hover:bg-(--bd-sel-bg-hover) active:scale-[0.99]"
       >
         <span className="text-[13.5px] font-medium text-current">{_('reader.keyboardShortcuts')}</span>
         <div className="flex shrink-0 items-center gap-1.5 text-xs text-[var(--bd-read-sub)]">
@@ -1179,7 +1088,7 @@ function ReplacementsEntryRow({ bookId }: { bookId: string }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full items-center justify-between gap-2 rounded-xl border border-stone-200/70 bg-stone-500/5 px-3.5 py-2.5 text-left transition-all duration-150 hover:border-stone-300/80 hover:bg-stone-500/10 active:scale-[0.99] dark:border-stone-800/80 dark:hover:border-stone-700/80"
+        className="flex w-full items-center justify-between gap-2 rounded-xl border-[1.5px] border-(--bd-sel-border) bg-(--bd-sel-bg) px-3.5 py-2.5 text-left transition-all duration-150 hover:border-(--bd-sel-border-hover) hover:bg-(--bd-sel-bg-hover) active:scale-[0.99]"
       >
         <span className="text-[13.5px] font-medium text-current">{_('reader.replacements')}</span>
         <div className="flex shrink-0 items-center gap-1.5 text-xs">

@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef } from 'react'
 
 import { useDeviceFontStore } from '@/features/device-fonts/store'
+import { useUiStore } from '@/stores/ui.store'
 
-import { ensureDeviceFontFace, releaseDeviceFontFace, stackFirstFamily, waitForCardFont, type FontOption } from '../fonts'
+import { buildFontOptions, ensureDeviceFontFace, releaseDeviceFontFace, stackFirstFamily, useFontLoaderStore, waitForCardFont, type FontOption } from '../fonts'
+
+const PREWARM_LIMIT = 7
 
 export function useReaderFontPreviews(enabled = true) {
   const deviceFonts = useDeviceFontStore((state) => state.fonts)
   const devicePreferences = useDeviceFontStore((state) => state.preferences)
+  const deviceOrder = useDeviceFontStore((state) => state.order)
   const deviceStatus = useDeviceFontStore((state) => state.status)
   const entries = useRef(new Map<string, { device: boolean; failed: boolean }>())
 
@@ -42,6 +46,33 @@ export function useReaderFontPreviews(enabled = true) {
       releaseDeviceFontFace(id)
     }
   }, [deviceFonts, devicePreferences, deviceStatus, enabled])
+
+  useEffect(() => {
+    if (!enabled || deviceStatus !== 'ready') return
+    const run = () => {
+      const { fontPreferences, fontOrder } = useUiStore.getState()
+      const options = buildFontOptions(
+        [],
+        useFontLoaderStore.getState(),
+        fontPreferences,
+        fontOrder,
+        { fonts: deviceFonts, preferences: devicePreferences, order: deviceOrder },
+        true,
+      )
+      // Prewarm only already-local or previously cached faces; never trigger
+      // uncached builtin font downloads before the user opens the picker.
+      const ready = options
+        .filter((option) => option.enabled && (option.source === 'device' || (option.source === 'builtin' && option.status === 'ready')))
+        .slice(0, PREWARM_LIMIT)
+      if (ready.length > 0) request(ready)
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      const handle = window.requestIdleCallback(run, { timeout: 1500 })
+      return () => window.cancelIdleCallback(handle)
+    }
+    const timer = window.setTimeout(run, 300)
+    return () => window.clearTimeout(timer)
+  }, [deviceFonts, deviceOrder, devicePreferences, deviceStatus, enabled, request])
 
   useEffect(() => {
     const held = entries.current

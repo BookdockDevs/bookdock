@@ -1235,56 +1235,118 @@ describe('reader settings (per-book reading settings)', () => {
     return row.meta as Record<string, unknown>
   }
 
-  it('stores user settings separately from the content revision', () => {
-    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 24 } })).toEqual({ viewSettings: { fontSize: 24 } })
-    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { lineHeight: 2.2 } })).toEqual({ viewSettings: { fontSize: 24, lineHeight: 2.2 } })
-    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { cleanReading: true } })).toEqual({ viewSettings: { fontSize: 24, lineHeight: 2.2, cleanReading: true } })
-    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { cleanReading: false } })).toEqual({ viewSettings: { fontSize: 24, lineHeight: 2.2, cleanReading: false } })
+  it('stores group settings separately from the content revision', () => {
+    expect(updateReaderBookSettings(ownerId, book.id, { font: { fontSize: 24 } })).toEqual({ font: { fontSize: 24 } })
+    expect(updateReaderBookSettings(ownerId, book.id, { layout: { lineHeight: 2.2 } })).toEqual({ font: { fontSize: 24 }, layout: { lineHeight: 2.2 } })
+    expect(updateReaderBookSettings(ownerId, book.id, { display: { cleanReading: true } })).toEqual({
+      font: { fontSize: 24 },
+      layout: { lineHeight: 2.2 },
+      display: { cleanReading: true },
+    })
+    expect(updateReaderBookSettings(ownerId, book.id, { display: { cleanReading: false } })).toEqual({
+      font: { fontSize: 24 },
+      layout: { lineHeight: 2.2 },
+      display: { cleanReading: false },
+    })
     expect(updateReaderBookSettings(ownerId, book.id, { boundPresetId: 'preset-a' })).toEqual({
-      viewSettings: { fontSize: 24, lineHeight: 2.2, cleanReading: false },
+      font: { fontSize: 24 },
+      layout: { lineHeight: 2.2 },
+      display: { cleanReading: false },
       boundPresetId: 'preset-a',
     })
     expect(metaOf().viewSettings).toBeUndefined()
     expect(metaOf().boundPresetId).toBeUndefined()
   })
 
-  it('reads reader settings directly from book states without probing revision metadata', () => {
-    updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 20 }, boundPresetId: 'preset-stored' })
-    expect(getReaderBookSettings(ownerId, book.id)).toEqual({ viewSettings: { fontSize: 20 }, boundPresetId: 'preset-stored' })
+  it('migrates legacy flat patches into the groups', () => {
+    // The 13-key legacy viewSettings diff folds into font/layout/display by field
+    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 20, lineHeight: 2, cleanReading: true } })).toEqual({
+      font: { fontSize: 20 },
+      layout: { lineHeight: 2 },
+      display: { cleanReading: true },
+    })
+    // A legacy single-theme patch becomes a per-slot selection
+    expect(updateReaderBookSettings(ownerId, book.id, { readingThemeId: 'cream' })).toEqual({
+      font: { fontSize: 20 },
+      layout: { lineHeight: 2 },
+      display: { cleanReading: true },
+      theme: { selections: { light: { themeId: 'cream', paletteId: null }, dark: { themeId: 'cream', paletteId: null } } },
+    })
+    expect(getReaderBookSettings(ownerId, book.id)).toMatchObject({
+      font: { fontSize: 20 },
+      layout: { lineHeight: 2 },
+      display: { cleanReading: true },
+      theme: { selections: { light: { themeId: 'cream' } } },
+    })
   })
 
-  it('clears each user-level setting without touching content metadata', () => {
-    updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 24 }, boundPresetId: 'preset-a' })
-    expect(updateReaderBookSettings(ownerId, book.id, { viewSettings: null, boundPresetId: null })).toEqual({})
+  it('reads reader settings directly from book states without probing revision metadata', () => {
+    updateReaderBookSettings(ownerId, book.id, { font: { fontSize: 20 }, boundPresetId: 'preset-stored' })
+    expect(getReaderBookSettings(ownerId, book.id)).toEqual({ font: { fontSize: 20 }, boundPresetId: 'preset-stored' })
+  })
+
+  it('clears each user-level group without touching content metadata', () => {
+    updateReaderBookSettings(ownerId, book.id, { font: { fontSize: 24 }, boundPresetId: 'preset-a' })
+    expect(updateReaderBookSettings(ownerId, book.id, { font: null, boundPresetId: null })).toEqual({})
     expect(metaOf()).toEqual({})
   })
 
-  it('stores the per-book reading-theme override independently and clears it without touching the rest', () => {
-    updateReaderBookSettings(ownerId, book.id, { viewSettings: { fontSize: 24 }, boundPresetId: 'preset-a' })
-    expect(updateReaderBookSettings(ownerId, book.id, { readingThemeId: 'custom-sea' })).toEqual({
-      viewSettings: { fontSize: 24 },
+  it('stores the per-book theme group independently and clears it without touching the rest', () => {
+    updateReaderBookSettings(ownerId, book.id, { font: { fontSize: 24 }, boundPresetId: 'preset-a' })
+    expect(updateReaderBookSettings(ownerId, book.id, { theme: { selections: { light: { themeId: 'custom-sea', paletteId: null } } } })).toEqual({
+      font: { fontSize: 24 },
       boundPresetId: 'preset-a',
-      readingThemeId: 'custom-sea',
+      theme: { selections: { light: { themeId: 'custom-sea', paletteId: null } } },
     })
-    // Clearing the theme keeps the typography diff and the preset binding
-    expect(updateReaderBookSettings(ownerId, book.id, { readingThemeId: null })).toEqual({
-      viewSettings: { fontSize: 24 },
+    // Clearing the theme group keeps the typography group and the preset binding
+    expect(updateReaderBookSettings(ownerId, book.id, { theme: null })).toEqual({
+      font: { fontSize: 24 },
       boundPresetId: 'preset-a',
     })
     // Another user's book stays untouched
     const otherUser = seedUser(db, 'other-theme-user')
     expect(getReaderBookSettings(otherUser, book.id)).toEqual({})
-    expect(updateReaderBookSettings(otherUser, book.id, { readingThemeId: 'custom-sea' })).toEqual({ readingThemeId: 'custom-sea' })
-    expect(getReaderBookSettings(ownerId, book.id).readingThemeId).toBeUndefined()
+    expect(updateReaderBookSettings(otherUser, book.id, { theme: { highlights: { adds: ['rule-1'], removes: [] } } })).toEqual({
+      theme: { highlights: { adds: ['rule-1'], removes: [] } },
+    })
   })
 
-  it('atomically replaces legacy appearance with card selection and leaves layout preferences intact', () => {
-    const viewSettings = { fontSize: 22 }
-    updateReaderBookSettings(ownerId, book.id, { viewSettings, readingThemeId: 'cream' })
+  it('accepts clearing and reopening each reader settings group through the route', async () => {
+    const app = new Hono()
+    app.onError(errorHandler)
+    app.use('/api/v1/*', async (c, next) => {
+      c.set('user', { id: ownerId, username: 'owner', role: 'owner', avatarKey: null })
+      return next()
+    })
+    app.route('/api/v1/books', booksRoutes)
+    const patch = (body: object) => app.request(`/api/v1/books/${book.id}/reader-settings`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    updateReaderBookSettings(ownerId, book.id, {
+      font: { fontSize: 24 }, layout: { lineHeight: 2 }, display: { pageColumns: 2 }, theme: { css: { mode: 'off' } },
+      boundPresetId: 'preset-a',
+    })
+    const cleared = await patch({ font: null, layout: null, display: null, theme: null })
+    expect(cleared.status).toBe(200)
+    expect(await cleared.json()).toEqual({ data: { boundPresetId: 'preset-a' } })
+
+    const emptyGroups = { font: {}, layout: {}, display: {}, theme: {} }
+    const reopened = await patch(emptyGroups)
+    expect(reopened.status).toBe(200)
+    expect(await reopened.json()).toEqual({ data: { ...emptyGroups, boundPresetId: 'preset-a' } })
+  })
+
+  it('migrates a legacy card-combination appearance without flattening its CSS or rules', () => {
     const themeSelection = { mode: 'custom' as const, themeId: 'saved', cards: { paletteId: 'paper', cssId: null, highlightIds: ['rule-1', 'rule-2'] } }
-    expect(updateReaderBookSettings(ownerId, book.id, { themeSelection })).toEqual({ viewSettings, themeSelection })
-    expect(getReaderBookSettings(ownerId, book.id)).toEqual({ viewSettings, themeSelection })
-    expect(updateReaderBookSettings(ownerId, book.id, { themeSelection: null })).toEqual({ viewSettings })
+    const slot = { themeId: 'saved', paletteId: 'paper', legacyCards: { cssId: null, highlightIds: ['rule-1', 'rule-2'] } }
+    updateReaderBookSettings(ownerId, book.id, { font: { fontSize: 22 } })
+    const expected = { font: { fontSize: 22 }, theme: { selections: { light: slot, dark: slot } } }
+    expect(updateReaderBookSettings(ownerId, book.id, { themeSelection })).toEqual(expected)
+    expect(getReaderBookSettings(ownerId, book.id)).toEqual(expected)
+    expect(updateReaderBookSettings(ownerId, book.id, { themeSelection: null })).toEqual({ font: { fontSize: 22 } })
   })
 })
 

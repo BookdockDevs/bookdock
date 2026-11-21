@@ -29,9 +29,14 @@ function configWith(preset: ReadingPreset): ReadingConfig {
 
 describe('reading profiles', () => {
   it('covers every reading-menu setting', () => {
-    expect(READING_PROFILE_KEYS).toHaveLength(49)
+    expect(READING_PROFILE_KEYS).toHaveLength(55)
     expect(READING_PROFILE_KEYS).toContain('cleanReading')
     expect(READING_PROFILE_KEYS).toContain('readingThemeMode')
+    // Appearance layers are global-only keys: presets never capture them
+    for (const key of ['lightPaletteId', 'darkPaletteId', 'appearanceCssMode', 'appearanceCssId', 'highlightAdds', 'highlightRemoves']) {
+      expect(READING_PROFILE_KEYS).toContain(key)
+      expect(pickReadingPresetSnapshot(snapshot({ [key]: 'x' } as never))).not.toHaveProperty(key)
+    }
     expect(READING_PROFILE_KEYS).toContain('fontFamily')
     expect(READING_PROFILE_KEYS).toContain('cjkFontFamily')
     expect(READING_PROFILE_KEYS).toContain('fontSize')

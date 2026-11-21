@@ -1560,15 +1560,94 @@ export interface ReadingThemeSelectionSlots {
 /** Stored book appearance: legacy single selection, or the per-tone pair. */
 export type ReadingThemeSelectionState = ReadingThemeSelection | ReadingThemeSelectionSlots
 
+/** One day/night slot's per-book theme state; null = inherit the chain. */
+export interface ReaderBookSlotTheme {
+  themeId: string | null
+  paletteId: string | null
+  legacyCards?: { cssId?: string | null; highlightIds: string[] }
+}
+
+/**
+ * Per-book appearance layer. `selections` are slot-scoped (theme chip +
+ * palette); `css` and `highlights` are shared across day/night. Absent parts
+ * inherit the global appearance.
+ */
+export interface ReaderBookThemeSettings {
+  selections?: {
+    light?: ReaderBookSlotTheme
+    dark?: ReaderBookSlotTheme
+  }
+  css?: { mode: 'follow' | 'off' | 'card'; cssId?: string | null }
+  highlights?: { adds: string[]; removes: string[] }
+}
+
+/** Per-book group values; presence of the group is its enablement. */
+export interface ReaderBookFontSettings {
+  fontFamily?: string
+  cjkFontFamily?: string
+  fontSize?: number
+  fontWeight?: number
+  overrideBookFont?: boolean
+}
+
+export interface ReaderBookLayoutSettings {
+  lineHeight?: number
+  paragraphSpacing?: number
+  letterSpacing?: number
+  indent?: number
+  textAlignJustify?: boolean
+  chapterTitleAlign?: 'start' | 'center' | 'end'
+  chapterTitleSize?: number
+  chapterTitleTopSpacing?: number
+  chapterTitleBottomSpacing?: number
+  pageWidth?: number
+  horizontalPadding?: number
+  verticalPadding?: number
+  scrollPageWidth?: number
+  scrollHorizontalPadding?: number
+  scrollVerticalPadding?: number
+  pagePageWidth?: number
+  pageHorizontalPadding?: number
+  pageVerticalPadding?: number
+  overrideBookLayout?: boolean
+}
+
+export type MarginalField = 'none' | 'bookTitle' | 'chapter' | 'chapterProgress' | 'bookProgress' | 'chapterWordCount' | 'time'
+
+export interface ReaderBookDisplaySettings {
+  readingMode?: 'scroll' | 'page'
+  pageColumns?: number
+  columnGap?: number
+  continuousScroll?: 'off' | 'snap' | 'seamless'
+  pageAnimation?: boolean
+  chineseConversion?: 'off' | 'simplified' | 'traditional'
+  cleanReading?: boolean
+  showHeader?: boolean
+  headerLeft?: MarginalField
+  headerCenter?: MarginalField
+  headerRight?: MarginalField
+  showFooter?: boolean
+  footerLeft?: MarginalField
+  footerCenter?: MarginalField
+  footerRight?: MarginalField
+  marginalFontSize?: number
+  showFriendIdeas?: boolean
+  ideaDisplayMode?: 'sidebar' | 'modal'
+}
+
 /** User-scoped reading preferences for one BookVersion. */
 export interface ReaderBookSettings {
-  /**
-   * A legacy single selection applies to both tones (that is what it used to
-   * do); new writes always store the per-tone pair.
-   */
+  /** Per-book groups (2026-11 model): presence of a group = enabled for this book. */
+  font?: ReaderBookFontSettings
+  layout?: ReaderBookLayoutSettings
+  display?: ReaderBookDisplaySettings
+  theme?: ReaderBookThemeSettings
+  /** null clears the binding. */
+  boundPresetId?: string | null
+  /** Legacy fields; migrated into the groups by migrateLegacyReaderBookSettings. */
   themeSelection?: ReadingThemeSelectionState | null
-  viewSettings?: ViewSettings
-  boundPresetId?: string
+  /** null clears the legacy diff. */
+  viewSettings?: ViewSettings | null
   /** Per-book reading-theme override; null means "follow the preset/global chain". */
   readingThemeId?: string | null
 }

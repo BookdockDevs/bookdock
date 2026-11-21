@@ -14,3 +14,5 @@ self.onmessage = (event: MessageEvent<{ paragraphs: string[]; rule: HighlightRul
   }
   self.postMessage(result)
 }
+
+self.postMessage({ type: 'ready' })

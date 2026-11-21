@@ -99,6 +99,17 @@ describe('computeHighlightSegments', () => {
     expect(segments).toEqual([{ start: 0, end: 4, textColor: '#111111' }])
   })
 
+  it('runs every enabled rule past the former 64-rule cap', () => {
+    // One distinct CJK char per rule keeps matches disjoint: the last rule in
+    // the list must still paint, not be dropped by a count cap.
+    const charOf = (i: number) => String.fromCharCode(0x4e00 + i)
+    const rules = Array.from({ length: 80 }, (_, i) => rule({ id: `r${i}`, pattern: charOf(i), style: { textColor: `#0000${i.toString(16).padStart(2, '0')}` } }))
+    const text = Array.from({ length: 80 }, (_, i) => charOf(i)).join('')
+    const segments = computeHighlightSegments(text, rules)
+    expect(segments).toHaveLength(80)
+    expect(segments.at(-1)).toEqual({ start: 79, end: 80, textColor: '#00004f' })
+  })
+
   it('resolves same-effect conflicts by list order but lets different effects coexist', () => {
     // 三体: rule A (earlier) wins the color; rule B still contributes nothing
     // else. 《》: only rule B styles color → gold. Background comes from B

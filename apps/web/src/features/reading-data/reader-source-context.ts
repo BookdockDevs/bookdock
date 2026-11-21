@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { AiMessageRes, AiThreadDetailRes, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, ClientArchiveBookDetailView, AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq, ReadingRecordCreateReq, ClientReadingSessionUpdate, ReadingLedgerOverview, ReadingLedgerStatsRes, ReadingLedgerSessionPage, ReadingLedgerSession, ReadingRecordBookDetailRes, ReadingRange, ClientReadingRounds, ClientReadingRoundAction, ClientLibraryDetailView, ClientPublicationStructure, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings, ReadingThemeSelectionState } from '@bookdock/shared'
+import type { AiMessageRes, AiThreadDetailRes, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, ClientArchiveBookDetailView, AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq, ReadingRecordCreateReq, ClientReadingSessionUpdate, ReadingLedgerOverview, ReadingLedgerStatsRes, ReadingLedgerSessionPage, ReadingLedgerSession, ReadingRecordBookDetailRes, ReadingRange, ClientReadingRounds, ClientReadingRoundAction, ClientLibraryDetailView, ClientPublicationStructure, ReaderBookGroupsPatch, ReaderBookSettings, ReadingProgressRes, ReadingProgressUpdateReq, ReadingThemeSelectionState } from '@bookdock/shared'
 import type { ReaderBookProvider } from '../reader/content/book-provider'
 import type { ClientBookRef, ClientPreferenceOwner } from '@bookdock/shared'
 
@@ -39,7 +39,7 @@ export interface LocalReaderSession {
   createNote(body: AnnotationCreateReq, commandId?: string): Promise<{ data: AnnotationRes }>
   updateNote(id: string, body: AnnotationUpdateReq, expectedVersion?: number): Promise<{ data: AnnotationRes }>
   deleteNote(id: string, expectedVersion?: number): Promise<void>
-  saveSettings(settings: ViewSettings | null): Promise<{ data: ReaderBookSettings }>
+  saveSettings(patch: ReaderBookGroupsPatch): Promise<{ data: ReaderBookSettings }>
   bindPreset(presetId: string | null, owner: ClientPreferenceOwner): Promise<void>
   /** 仅本书 reading-theme override; null restores following (clears only the theme) */
   setThemeSelection(selection: ReadingThemeSelectionState | null): Promise<void>

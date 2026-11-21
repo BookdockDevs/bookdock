@@ -284,8 +284,9 @@ function sanitizeDualColors(colors: BaseThemeColors): BaseThemeColors {
 export { sanitizeDualColors }
 
 // Phase-3 highlight rules: same leniency as the CSS blocks — an invalid rule
-// is dropped (or trimmed) and the rest of the theme survives. The caps mirror
-// the matching engine so a synced payload can never exceed the runtime budget.
+// is dropped (or trimmed) and the rest of the theme survives. Per-rule caps
+// (pattern length, group count) mirror the matching engine; the rule count is
+// unlimited, matching the runtime.
 function sanitizeRuleStyle(raw: unknown): HighlightRuleStyle | null {
   if (!raw || typeof raw !== 'object') return null
   const style = raw as Record<string, unknown>
@@ -326,7 +327,7 @@ function sanitizeRuleGroups(raw: unknown): HighlightRuleGroup[] | null {
 export function sanitizeHighlightRulesField(raw: unknown): HighlightRuleDef[] {
   if (!Array.isArray(raw)) return []
   const rules: HighlightRuleDef[] = []
-  for (const item of raw.slice(0, HIGHLIGHT_LIMITS.maxRules)) {
+  for (const item of raw) {
     if (!item || typeof item !== 'object') continue
     const rule = item as Record<string, unknown>
     const id = typeof rule.id === 'string' && rule.id ? rule.id.slice(0, 100) : ''

@@ -123,8 +123,9 @@ export const ReaderSidebar = memo(function ReaderSidebar({ bookId, tocPositionRe
 
   useEffect(() => {
     if (resizingDir) return
-    setSidebarWidth(panelWidth)
-  }, [panelWidth, resizingDir, setSidebarWidth])
+    setPanelWidth(sidebarWidth)
+    panelRefWidth.current = sidebarWidth
+  }, [sidebarWidth, resizingDir])
 
   // Settle the unreported reading segment so the stats tab shows fresh numbers
   const statsTabActive = sidebarOpen && activeNavTab === 'stats'

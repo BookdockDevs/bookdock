@@ -974,7 +974,8 @@ export const highlightRuleSchema = z.object({
 export const readingThemeCardsSchema = z.object({
   paletteId: z.string().min(1).max(100),
   cssId: z.string().min(1).max(100).nullable(),
-  highlightIds: z.array(z.string().min(1).max(100)).max(64),
+  // No count cap: every enabled rule must survive persistence and sync.
+  highlightIds: z.array(z.string().min(1).max(100)),
 })
 
 export const readingThemeSelectionSchema = z.discriminatedUnion('mode', [
@@ -996,13 +997,117 @@ export const readingThemeSelectionStateSchema = z.union([
   readingThemeSelectionSchema,
 ])
 
+// Per-book reader settings are four independent groups (font, layout, display,
+// theme) plus the preset binding. A group's presence IS its enablement: an
+// empty object means "enabled for this book, no explicit differences yet", and
+// a group absent from the payload is untouched. Within a group every field is
+// optional — present = this book's explicit value, which is kept even when it
+// happens to equal the shared value (inherit vs explicit-off are distinct).
+// The legacy flat fields below are still accepted and migrated on read.
+export const readerBookFontSettingsSchema = z.object({
+  fontFamily: z.string().max(100).optional(),
+  cjkFontFamily: z.string().max(100).optional(),
+  fontSize: z.number().min(12).max(64).optional(),
+  fontWeight: z.number().min(100).max(900).optional(),
+  overrideBookFont: z.boolean().optional(),
+})
+
+export const readerBookLayoutSettingsSchema = z.object({
+  lineHeight: z.number().min(1.2).max(2.5).optional(),
+  paragraphSpacing: z.number().min(0).max(3).optional(),
+  letterSpacing: z.number().min(-1).max(3).optional(),
+  indent: z.number().min(0).max(4).optional(),
+  textAlignJustify: z.boolean().optional(),
+  chapterTitleAlign: z.enum(['start', 'center', 'end']).optional(),
+  chapterTitleSize: z.number().min(1).max(2).optional(),
+  chapterTitleTopSpacing: z.number().min(0).max(6).optional(),
+  chapterTitleBottomSpacing: z.number().min(0).max(6).optional(),
+  // Dual-backed page geometry mirrors the global store: the flat value reflects
+  // the mode it was saved under, the mode-specific backing keeps both modes.
+  pageWidth: z.number().min(0).max(1800).optional(),
+  horizontalPadding: z.number().min(0).max(120).optional(),
+  verticalPadding: z.number().min(0).max(120).optional(),
+  scrollPageWidth: z.number().min(0).max(1800).optional(),
+  scrollHorizontalPadding: z.number().min(0).max(120).optional(),
+  scrollVerticalPadding: z.number().min(0).max(120).optional(),
+  pagePageWidth: z.number().min(0).max(1800).optional(),
+  pageHorizontalPadding: z.number().min(0).max(120).optional(),
+  pageVerticalPadding: z.number().min(0).max(120).optional(),
+  overrideBookLayout: z.boolean().optional(),
+})
+
+export const readerBookDisplaySettingsSchema = z.object({
+  readingMode: z.enum(['scroll', 'page']).optional(),
+  pageColumns: z.number().int().min(1).max(3).optional(),
+  columnGap: z.number().min(0).max(15).optional(),
+  continuousScroll: z.enum(['off', 'snap', 'seamless']).optional(),
+  pageAnimation: z.boolean().optional(),
+  chineseConversion: z.enum(['off', 'simplified', 'traditional']).optional(),
+  cleanReading: z.boolean().optional(),
+  showHeader: z.boolean().optional(),
+  headerLeft: marginalFieldSchema.optional(),
+  headerCenter: marginalFieldSchema.optional(),
+  headerRight: marginalFieldSchema.optional(),
+  showFooter: z.boolean().optional(),
+  footerLeft: marginalFieldSchema.optional(),
+  footerCenter: marginalFieldSchema.optional(),
+  footerRight: marginalFieldSchema.optional(),
+  marginalFontSize: z.number().min(0).max(24).optional(),
+  showFriendIdeas: z.boolean().optional(),
+  ideaDisplayMode: z.enum(['sidebar', 'modal']).optional(),
+})
+
+/** One day/night slot's per-book theme state; null = inherit the chain. */
+export const readerBookSlotThemeSchema = z.object({
+  themeId: z.string().max(100).nullable(),
+  paletteId: z.string().max(100).nullable(),
+  legacyCards: readingThemeCardsSchema.pick({ cssId: true, highlightIds: true }).partial({ cssId: true }).optional(),
+})
+
+/**
+ * Per-book appearance layer. `selections` are slot-scoped (theme chip + palette);
+ * `css` and `highlights` are shared across day/night. css absent = inherit the
+ * global mode; highlights absent = inherit the global list untouched.
+ */
+export const readerBookThemeSettingsSchema = z.object({
+  selections: z.object({
+    light: readerBookSlotThemeSchema.optional(),
+    dark: readerBookSlotThemeSchema.optional(),
+  }).optional(),
+  css: z.object({
+    mode: z.enum(['follow', 'off', 'card']),
+    cssId: z.string().max(100).nullable().optional(),
+  }).optional(),
+  highlights: z.object({
+    // Saved choices span both tones and are uncapped, like every rule list.
+    adds: z.array(z.string().max(100)),
+    removes: z.array(z.string().max(100)),
+  }).optional(),
+})
+
 export const readerBookSettingsSchema = z.object({
-  themeSelection: readingThemeSelectionStateSchema.nullable().optional(),
-  viewSettings: viewSettingsSchema.nullable().optional(),
+  font: readerBookFontSettingsSchema.optional(),
+  layout: readerBookLayoutSettingsSchema.optional(),
+  display: readerBookDisplaySettingsSchema.optional(),
+  theme: readerBookThemeSettingsSchema.optional(),
   boundPresetId: z.string().nullable().optional(),
+  // Legacy fields (pre four-group model). Accepted for old clients and stored
+  // rows; migrated into the groups by migrateLegacyReaderBookSettings.
+  viewSettings: viewSettingsSchema.nullable().optional(),
+  themeSelection: readingThemeSelectionStateSchema.nullable().optional(),
   // Per-book reading-theme override (仅本书). Merge semantics like boundPresetId:
   // absent leaves the stored value, a string writes it, null clears it.
   readingThemeId: z.string().max(100).nullable().optional(),
+})
+
+export const readerBookSettingsPatchSchema = readerBookSettingsSchema.extend({
+  font: readerBookFontSettingsSchema.nullish(),
+  layout: readerBookLayoutSettingsSchema.nullish(),
+  display: readerBookDisplaySettingsSchema.nullish(),
+  theme: readerBookThemeSettingsSchema.extend({
+    css: readerBookThemeSettingsSchema.shape.css.unwrap().nullish(),
+    highlights: readerBookThemeSettingsSchema.shape.highlights.unwrap().nullish(),
+  }).nullish(),
 })
 
 export const systemUpdateStartSchema = z.object({

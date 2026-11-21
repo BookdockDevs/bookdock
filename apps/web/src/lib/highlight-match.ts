@@ -29,7 +29,6 @@ export interface HighlightSpan {
 }
 
 export const HIGHLIGHT_LIMITS = {
-  maxRules: 64,
   maxPatternLength: 300,
   maxSampleLength: 4000,
   maxGroups: 32,
@@ -213,7 +212,7 @@ export function collectHighlightSpans(text: string, rules: HighlightRuleDef[], f
   if (!text || text.length > HIGHLIGHT_LIMITS.maxParagraphLength) return []
   const spans: HighlightSpan[] = []
   let totalMatches = 0
-  for (let order = 0; order < rules.length && order < HIGHLIGHT_LIMITS.maxRules; order++) {
+  for (let order = 0; order < rules.length; order++) {
     const rule = rules[order]!
     if (!rule.enabled) continue
     const { matches } = matchRuleInParagraph(text, rule)

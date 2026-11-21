@@ -1,5 +1,5 @@
-import type { AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq, ClientBookRef, ClientLocator, ClientNote, ReadingProgressRes, ReadingRange, ViewSettings } from '@bookdock/shared'
-import { clientLocatorSchema, clientPresetBindingSchema, clientReadingCaptureSchema, clientBookKey, readingRangeSchema } from '@bookdock/shared'
+import type { AnnotationCreateReq, AnnotationRes, AnnotationUpdateReq, ClientBookRef, ClientLocator, ClientNote, ReadingProgressRes, ReadingRange } from '@bookdock/shared'
+import { readerBookSettingsSchema, clientLocatorSchema, clientPresetBindingSchema, clientReadingCaptureSchema, clientBookKey, readingRangeSchema } from '@bookdock/shared'
 import type { LocalReaderSession } from '../reading-data/reader-source-context'
 import { localEpubProvider } from '../reader/content/local-epub-provider'
 import { addReadingCoverage } from '../reader/lib/reading-coverage'
@@ -194,10 +194,10 @@ export async function openLocalReaderSession(ref: ClientBookRef, recordsOnly = f
       return { data: noteView(await repository.saveNote(next, expectedVersion ?? existing.version, [], body)) }
     },
     async deleteNote(id, expectedVersion) { await repository.deleteNote(ref, id, expectedVersion) },
-    async saveSettings(viewSettings) {
-      await repository.patchPreferences(ref, { viewSettings })
+    async saveSettings(patch) {
+      await repository.patchPreferences(ref, patch)
       const settings = await repository.getPreferences(ref)
-      return { data: { viewSettings: settings.viewSettings as ViewSettings | undefined } }
+      return { data: readerBookSettingsSchema.parse(settings) }
     },
     async bindPreset(presetId, owner) {
       const binding = presetId === null ? null : clientPresetBindingSchema.parse({ presetId, owner })

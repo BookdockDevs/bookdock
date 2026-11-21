@@ -1,4 +1,4 @@
-import { acceptsReadingTimerClaim, classificationValueKey, clientBookRefSchema, settingsUpdateSchema, clientReplacementSchema, replacementCreateSchema, replacementUpdateSchema, clientNoteImageSchema, CONTENT_DRAFT_TTL_MS, IDEA_IMAGE_MAX_COUNT, clientBookKey, clientBookSchema, clientPublicationReplacementSchema, clientCatalogAttributesSchema, clientCatalogPreferencesSchema, clientManualTimerSnapshotSchema, clientNoteSchema, clientOrganizationSchema, emptyClientOrganization, clientReadingCaptureGroupSchema, clientReadingCaptureSchema, clientReadingEntrySchema, clientReadingCoverageIntervalsSchema, clientReadingGroupEntrySchema, clientReadingSessionSchema, clientReadingSessionCommandSchema, clientReadingLedgerClearSchema, clientReadingSessionUpdateSchema, clientReadingRoundsSchema, clientReadingStateSchema, clientReadingTimerDraftSchema, clientReviewSchema, readerBookSettingsSchema, localDraftEnvelopeSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, mergeTimeFragments, readingTimerClaimSchema, sameClientBook, subtractTimeFragments, viewSettingsSchema } from '@bookdock/shared'
+import { acceptsReadingTimerClaim, applyReaderBookSettingsPatch, classificationValueKey, clientBookRefSchema, settingsUpdateSchema, clientReplacementSchema, replacementCreateSchema, replacementUpdateSchema, clientNoteImageSchema, CONTENT_DRAFT_TTL_MS, IDEA_IMAGE_MAX_COUNT, clientBookKey, clientBookSchema, clientPublicationReplacementSchema, clientCatalogAttributesSchema, clientCatalogPreferencesSchema, clientManualTimerSnapshotSchema, clientNoteSchema, clientOrganizationSchema, emptyClientOrganization, clientReadingCaptureGroupSchema, clientReadingCaptureSchema, clientReadingEntrySchema, clientReadingCoverageIntervalsSchema, clientReadingGroupEntrySchema, clientReadingSessionSchema, clientReadingSessionCommandSchema, clientReadingLedgerClearSchema, clientReadingSessionUpdateSchema, clientReadingRoundsSchema, clientReadingStateSchema, clientReadingTimerDraftSchema, clientReviewSchema, migrateLegacyReaderBookSettings, readerBookSettingsPatchSchema, readerBookSettingsSchema, localDraftEnvelopeSchema, CONTENT_EDITOR_MAX_REQUEST_BYTES, mergeTimeFragments, readingTimerClaimSchema, sameClientBook, subtractTimeFragments } from '@bookdock/shared'
 import type { AiMessageRes, AiThreadDetailRes, AiThreadRes, AiThreadSettings, AiThreadUpdateReq, ArchiveDeleteRes, TrashSettings, ClientReplacement, TextReplacementRes, ReplacementCreateReq, ReplacementUpdateReq, ClientNoteImage, ClientBook, ClientTxtPublication, LocalEditorDraftEnvelope, ClientPublicationReplacement, EditorTxtSaveRes, ClientReadingLedgerClear, ClientVaultReadingSnapshot, ClientBookNotesSnapshot, ClientBookRef, ClassificationKind, ClientCatalogAttributes, ClientCatalogPreferences, ClientShelfItem, ClientManualTimerSnapshot, ClientNote, ClientOrganization, ClientReadingCapture, ClientReadingCaptureGroup, ClientReadingEntry, ClientReadingBookSnapshot, ClientReadingGroupEntry, ClientReadingLedger, ClientReadingSession, ClientReadingSessionCommand, ClientReadingSessionUpdate, ClientReadingRounds, ClientReadingRoundAction, ClientReadingState, ClientReadingTimerDraft, ClientReview, ClientReviewInput, ReadingTimerClaimInput, ReadingTimerLease, ReadStatus } from '@bookdock/shared'
 
 import { createCoverThumbnail } from './cover-thumbnail'
@@ -2151,18 +2151,16 @@ export class LocalLibraryRepository {
       const store = tx.objectStore('settings')
       const current = await request<Record<string, unknown> | undefined>(store.get(key(ref))) ?? {}
       const next = { ...current, ...patch }
-      if ('viewSettings' in patch) {
-        if (patch.viewSettings === null) delete next.viewSettings
-        else next.viewSettings = viewSettingsSchema.parse({ ...(current.viewSettings as object | undefined), ...viewSettingsSchema.parse(patch.viewSettings) })
-      }
-      if ('themeSelection' in patch) {
-        delete next.readingThemeId
-        if (patch.themeSelection === null) delete next.themeSelection
-        else next.themeSelection = readerBookSettingsSchema.shape.themeSelection.parse(patch.themeSelection)
-      }
-      if ('readingThemeId' in patch) {
-        if (patch.readingThemeId === null) delete next.readingThemeId
-        else next.readingThemeId = readerBookSettingsSchema.shape.readingThemeId.parse(patch.readingThemeId)
+      // Reader settings — groups and legacy fields alike — fold through the
+      // shared patch application so the two shapes never coexist in the row.
+      const settingKeys = ['font', 'layout', 'display', 'theme', 'boundPresetId', 'viewSettings', 'themeSelection', 'readingThemeId'] as const
+      if (settingKeys.some((settingKey) => settingKey in patch)) {
+        const parsed = readerBookSettingsPatchSchema.parse(patch)
+        const merged = applyReaderBookSettingsPatch(migrateLegacyReaderBookSettings(readerBookSettingsSchema.parse(current)), parsed)
+        for (const settingKey of settingKeys) {
+          if (merged[settingKey] === undefined) delete next[settingKey]
+          else next[settingKey] = merged[settingKey]
+        }
       }
       await request(store.put(next, key(ref)))
     })

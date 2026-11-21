@@ -1,31 +1,39 @@
 import { createContext, useContext } from 'react'
 
-import type { ReaderBookSettings, ReadingThemeSelection, ViewSettings } from '@bookdock/shared'
+import type { ReaderBookThemeSettings, ReaderBookSlotTheme } from '@bookdock/shared'
 
-import type { EffectiveViewSettings, PerBookSettingKey, PerBookSettingValue } from './lib/view-settings'
+import type { BookSettingGroups, EffectiveReadingSettings, BookSettingsGroup } from './lib/view-settings'
+import type { ResolvedAppearance } from '@/features/reading-theme/appearance'
+import type { BookDeviceFontSelection } from './lib/book-device-fonts'
 
-// Per-book reading-settings layer (F1). Provided by Reader.tsx; consumed by
-// SettingsPanel (display + writes) and the "仅本书" toggle. useReaderRenderer
-// receives the effective values as a prop instead, keeping it context-free.
+// Per-book reader settings layer. Provided by Reader.tsx; consumed by
+// SettingsPanel (display + writes), the theme tab and useReaderRenderer
+// (which receives the effective values as a prop instead).
 export interface ViewSettingsContextValue {
-  effective: EffectiveViewSettings
-  /** Whether changes to the supported settings apply to this book only */
-  perBookActive: boolean
-  setPerBookActive: (active: boolean) => void
-  updateSetting: <K extends PerBookSettingKey>(key: K, value: PerBookSettingValue<K>) => void
-  /**
-   * Raw per-book override diff (book.readerSettings.viewSettings). Preset creation
-   * overlays it onto the snapshot so a preset made while 仅本书 is on captures
-   * the effective (WYSIWYG) values.
-   */
-  perBookDiff?: ViewSettings
-  /** Reading preset bound to this book (book.readerSettings.boundPresetId); null when unbound */
+  /** Fully merged effective values for every group field. */
+  effective: EffectiveReadingSettings
+  /** The book's stored groups; a group's presence is its enablement. */
+  groups: BookSettingGroups
+  /** Enable (captures edits into the group) or disable + clear a group. */
+  setGroupEnabled: (group: BookSettingsGroup | 'theme', enabled: boolean) => void
+  /** Write one field: into the book's group when enabled, else the shared chain. */
+  updateField: (key: string, value: number | boolean | string) => void
+  /** This device's per-book font picks (undefined = none); writes stay local. */
+  bookDeviceFonts?: BookDeviceFontSelection
+  setBookDeviceFont: (slot: 'primary' | 'cjk', fontId: string | null) => void
+  /** Reading preset bound to this book; null when unbound. */
   boundPresetId: string | null
-  /** Bind/unbind a reading preset to this book (PATCH books/:id/reader-settings) */
+  /** Bind/unbind a reading preset to this book. */
   setBoundPreset: (presetId: string | null) => void
-  appearance?: ReaderBookSettings
-  hasThemeSelection?: boolean
-  setThemeSelection: (selection: ReadingThemeSelection | null, clear?: 'current') => void
+  /** Per-book theme group state (absent = theme edits go global). */
+  bookTheme?: ReaderBookThemeSettings
+  /** Resolved appearance for the current reading slot (global + book layers). */
+  appearance: ResolvedAppearance
+  /** Theme tab writes, routed by the theme group's enablement. */
+  pickTheme: (themeId: string) => void
+  pickPalette: (paletteId: string) => void
+  setCss: (mode: 'off' | 'card', cssId?: string | null) => void
+  toggleHighlight: (ruleId: string) => void
 }
 
 export const ViewSettingsContext = createContext<ViewSettingsContextValue | null>(null)
@@ -33,3 +41,5 @@ export const ViewSettingsContext = createContext<ViewSettingsContextValue | null
 export function useViewSettings(): ViewSettingsContextValue | null {
   return useContext(ViewSettingsContext)
 }
+
+export type { ReaderBookSlotTheme }

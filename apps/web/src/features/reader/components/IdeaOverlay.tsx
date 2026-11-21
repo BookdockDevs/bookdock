@@ -11,6 +11,7 @@ import { avatarUrl } from '@/lib/avatar'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
 import { selectReadingTone, useUiStore } from '@/stores/ui.store'
+import { useViewSettings } from '../view-settings-context'
 
 import { getLastHighlightStyle } from './annotation-colors'
 import { AiSparkleIcon, BulbIcon, ChevronDownIcon, CloseIcon, CopyIcon, ExcerptShareIcon, PencilIcon, QuoteLeftIcon, SearchIcon, StyleGlyph } from './annotation-icons'
@@ -109,7 +110,9 @@ export function IdeaOverlay({
   const local = useLocalReader()
   const _ = useTranslation()
   const isTouch = useIsTouch()
-  const ideaDisplayMode = useUiStore((s) => s.ideaDisplayMode)
+  const viewSettings = useViewSettings()
+  const sharedIdeaDisplayMode = useUiStore((s) => s.ideaDisplayMode)
+  const ideaDisplayMode = viewSettings?.effective.ideaDisplayMode ?? sharedIdeaDisplayMode
   // Body portal: carries its own tone class so the `dark:` axis follows the
   // reading theme instead of the system preference.
   const readingTone = useUiStore(selectReadingTone)

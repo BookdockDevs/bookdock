@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 
 import { useUiStore } from '@/stores/ui.store'
+import { useViewSettings } from '../view-settings-context'
 import { notify } from '@/lib/notifications'
 
 import { AutoReadingController, type AutoReadingPreferences } from '../lib/auto-reading'
@@ -16,7 +17,9 @@ interface AutoReadingSessionProviderProps {
 }
 
 export function AutoReadingSessionProvider({ renderer, coordinator, onStart, children }: AutoReadingSessionProviderProps) {
-  const readingMode = useUiStore((state) => state.readingMode)
+  const viewSettings = useViewSettings()
+  const sharedReadingMode = useUiStore((state) => state.readingMode)
+  const readingMode = viewSettings?.effective.readingMode ?? sharedReadingMode
   const mode = useUiStore((state) => state.autoReadingMode)
   const speed = useUiStore((state) => state.autoReadingSpeed)
   const preferences = useMemo<AutoReadingPreferences>(() => ({ mode, speed, readingMode }), [mode, readingMode, speed])

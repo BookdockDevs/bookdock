@@ -10,8 +10,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { effectiveThemeCards, materializeTheme, themeSelectionForSlot, writeThemeSelectionForSlot } from '@/features/reading-theme/theme-library'
-import { selectEffectiveHighlightRules, selectEffectiveReadingCss, selectEffectiveReadingThemeId, selectReadingThemeSlot, selectReadingTone, useUiStore } from '@/stores/ui.store'
+import { selectEffectiveHighlightRules, selectEffectiveReadingCss, selectGlobalAppearanceState, selectReadingThemeSlot, selectReadingTone, useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { LOCAL_READER_SHORTCUT_SCOPE, isReaderContentTarget, isReaderModalOpen, isReaderShortcutModalOpen, readReaderShortcuts, shortcutMatches } from './lib/reader-shortcuts'
 import { useSettingsSyncStore } from '@/stores/settings-sync.store'
@@ -73,17 +72,20 @@ import { DEFAULT_IDEA_COLOR, getLastHighlightStyle } from './components/annotati
 import { setActiveReplacements, setAutoMarkSelectionMode } from './renderers/FoliateReader'
 import ReplacementForm from '../settings/components/ReplacementForm'
 import { ViewSettingsContext } from './view-settings-context'
-import { mergeViewSettings, viewSettingsDiffForKey, hasViewSettings } from './lib/view-settings'
+import { mergeBookSettings, settingPatchForKey, type BookSettingGroups, type GlobalReadingSettings } from './lib/view-settings'
+import { getBookDeviceFonts, setBookDeviceFonts, type BookDeviceFontSelection } from './lib/book-device-fonts'
 import { readingRateOf, RATE_SAMPLE_MIN_INTERVAL_MS } from './lib/progress-model'
 import { getSessionEpoch } from '@/lib/session-scope'
-import type { PerBookSettingKey, PerBookSettingValue, GlobalViewSettings } from './lib/view-settings'
-import type { BookReader, FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnotation, SelectionInfo } from './types'
+import type { BookReader, FootnoteEntry, ImageMediaContextInfo, ImageMediaInfo, ReaderAnnotation, ReadingMode, SelectionInfo } from './types'
 import { ReaderPlaybackCoordinator } from './lib/playback-coordinator'
 import { FootnotePopup } from './components/FootnotePopup'
 import { ImageViewer } from './components/ImageViewer'
-import { BOOKMARK_CONTEXT_MAX_LENGTH, resolveClientPresetBinding } from '@bookdock/shared'
+import { BOOKMARK_CONTEXT_MAX_LENGTH, mergeReaderBookGroups, migrateLegacyReaderBookSettings, readerBookThemeSettingsSchema, resolveClientPresetBinding, type ReaderBookGroupsPatch } from '@bookdock/shared'
 import { readingThemeSelectionStateSchema } from '@bookdock/shared'
-import type { AnnotationRes, BookDetailRes, ClientLibraryDetailView, ClientLibraryListView, ClientPreferenceOwner, HighlightRuleDef, ReadingThemeSelection, ReadingThemeSelectionState, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+import { findThemeCombination, materializeTheme } from '@/features/reading-theme/theme-library'
+import { resolveAppearance, themeApplication, toggleAppearanceHighlight } from '@/features/reading-theme/appearance'
+import type { ReaderBookSettings, ReaderBookThemeSettings } from '@bookdock/shared'
+import type { AnnotationRes, BookDetailRes, ClientLibraryDetailView, ClientLibraryListView, ClientPreferenceOwner, HighlightRuleDef, ReadingProgressRes, ReadingProgressUpdateReq } from '@bookdock/shared'
 
 // Reader chrome geometry (desktop hover). The summon bands match the visible
 // chrome rows exactly — the header is h-12 and the progress strip is 3rem — so
@@ -305,7 +307,7 @@ export default function Reader() {
       const overToast = target instanceof Element && Boolean(target.closest('[data-toast-id]'))
       const overSidebar = target instanceof Element && Boolean(target.closest('#reader-navigation'))
       const overTrialBar = target instanceof Element && Boolean(target.closest('[data-theme-trial-bar]'))
-      const currentReadingMode = useUiStore.getState().readingMode
+      const currentReadingMode = effectiveReadingModeRef.current
       // Once the footer is up it keeps a taller keep-alive band, so the pointer can
       // travel from the strip up to a capsule without falling out of the sensor.
       const footerBand = footerVisibleRef.current ? CHROME_FOOTER_SUSTAIN_BAND : CHROME_FOOTER_BAND
@@ -403,10 +405,12 @@ export default function Reader() {
   const setCurrentChapter = useReaderState((s) => s.setCurrentChapter)
   const setCurrentChapterHref = useReaderState((s) => s.setCurrentChapterHref)
   const setCurrentChapterIndex = useReaderState((s) => s.setCurrentChapterIndex)
-  const readingMode = useUiStore((s) => s.readingMode)
+  const storeReadingMode = useUiStore((s) => s.readingMode)
+  // The book's effective reading mode (per-book display group may differ);
+  // kept in a ref so early event handlers see the current value.
+  const effectiveReadingModeRef = useRef<ReadingMode>(storeReadingMode)
   const toolbarLocked = useUiStore((s) => s.toolbarLocked)
   const sidebarWidth = useUiStore((s) => s.sidebarWidth)
-  const ideaDisplayMode = useUiStore((s) => s.ideaDisplayMode)
   const ideaSidebarWidth = useUiStore((s) => s.ideaSidebarWidth)
   // Pins the `dark:` axis for the whole reader chrome subtree to the reading
   // theme's brightness instead of the system preference (see index.css).
@@ -418,20 +422,10 @@ export default function Reader() {
   useTranslationConfig({ enabled: Boolean(authUser) })
   useAiConfig({ enabled: Boolean(authUser) })
   useDictionaries({ enabled: Boolean(authUser) })
-  const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
-  const publicIdeas = useReaderIdeas(id, showFriendIdeas && !revisionQuarantined, displayedRevisionId)
-  const publicMarkers = useMemo(() => publicIdeas.isError || !showFriendIdeas ? [] : (publicIdeas.data?.data ?? []).filter((idea) => !idea.own && idea.locationAvailable), [publicIdeas.isError, publicIdeas.data, showFriendIdeas])
   const deepLinkHandled = useRef(false)
   const pendingDeepLink = useRef<string | null>(null)
   const annotationClickHandledRef = useRef(false)
   const annotationClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const isIdeaSidebarOpen = Boolean(
-    selection &&
-    !isTouch &&
-    ideaDisplayMode === 'sidebar' &&
-    isSelectionIdea(selection, null, annotations?.data, publicMarkers),
-  )
 
   const bookmarks = useMemo(
     () => displayedRevisionId
@@ -488,117 +482,191 @@ export default function Reader() {
   })
   usePageTitle(bookQuery.data?.data?.title ?? _('reader.loading'))
 
-  // --- Per-book reading settings (F1 layering) ---------------------------
-  const fontSize = useUiStore((s) => s.fontSize)
-  const cleanReading = useUiStore((s) => s.cleanReading)
-  const lineHeight = useUiStore((s) => s.lineHeight)
-  const pageWidth = useUiStore((s) => s.pageWidth)
-  const horizontalPadding = useUiStore((s) => s.horizontalPadding)
-  const verticalPadding = useUiStore((s) => s.verticalPadding)
-  const pageColumns = useUiStore((s) => s.pageColumns)
-  const columnGap = useUiStore((s) => s.columnGap)
+  // Guest book theme group: browser-local storage with the same shape the
+  // account syncs; legacy guest selections migrate through the shared function.
+  const guestThemeKey = isGuest ? `bd-guest-book-theme:${id}` : null
+  const [guestTheme, setGuestTheme] = useState<{ key: string; theme: ReaderBookThemeSettings | undefined }>()
+  const storedGuestTheme = useMemo<ReaderBookThemeSettings | undefined>(() => {
+    if (!guestThemeKey) return undefined
+    try {
+      const raw: unknown = JSON.parse(localStorage.getItem(guestThemeKey) ?? 'null')
+      if (!raw || typeof raw !== 'object') return undefined
+      const parsed = readingThemeSelectionStateSchema.safeParse(raw)
+      if (parsed.success) return migrateLegacyReaderBookSettings({ themeSelection: parsed.data }).theme
+      const group = readerBookThemeSettingsSchema.safeParse(raw)
+      if (group.success) return group.data
+    } catch { /* The appearance remains available for the open book in private mode. */ }
+    return undefined
+  }, [guestThemeKey])
+  // --- Per-book reading settings (four groups) ----------------------------
+  // Global chain values: every group field plus all mode-specific backings.
+  const storeFontFamily = useUiStore((s) => s.fontFamily)
+  const storeCjkFontFamily = useUiStore((s) => s.cjkFontFamily)
+  const storeFontSize = useUiStore((s) => s.fontSize)
+  const storeFontWeight = useUiStore((s) => s.fontWeight)
+  const storeLineHeight = useUiStore((s) => s.lineHeight)
+  const storeParagraphSpacing = useUiStore((s) => s.paragraphSpacing)
+  const storeChapterTitleAlign = useUiStore((s) => s.chapterTitleAlign)
+  const storeChapterTitleSize = useUiStore((s) => s.chapterTitleSize)
+  const storeChapterTitleTopSpacing = useUiStore((s) => s.chapterTitleTopSpacing)
+  const storeChapterTitleBottomSpacing = useUiStore((s) => s.chapterTitleBottomSpacing)
+  const storeLetterSpacing = useUiStore((s) => s.letterSpacing)
+  const storeIndent = useUiStore((s) => s.indent)
+  const storeTextAlignJustify = useUiStore((s) => s.textAlignJustify)
+  const storeOverrideBookFont = useUiStore((s) => s.overrideBookFont)
+  const storeOverrideBookLayout = useUiStore((s) => s.overrideBookLayout)
+  const storeCleanReading = useUiStore((s) => s.cleanReading)
+  const storePageColumns = useUiStore((s) => s.pageColumns)
+  const storeColumnGap = useUiStore((s) => s.columnGap)
+  const storeContinuousScroll = useUiStore((s) => s.continuousScroll)
+  const storePageAnimation = useUiStore((s) => s.pageAnimation)
+  const storeChineseConversion = useUiStore((s) => s.chineseConversion)
+  const storeShowHeader = useUiStore((s) => s.showHeader)
+  const storeHeaderLeft = useUiStore((s) => s.headerLeft)
+  const storeHeaderCenter = useUiStore((s) => s.headerCenter)
+  const storeHeaderRight = useUiStore((s) => s.headerRight)
+  const storeShowFooter = useUiStore((s) => s.showFooter)
+  const storeFooterLeft = useUiStore((s) => s.footerLeft)
+  const storeFooterCenter = useUiStore((s) => s.footerCenter)
+  const storeFooterRight = useUiStore((s) => s.footerRight)
+  const storeMarginalFontSize = useUiStore((s) => s.marginalFontSize)
+  const storeShowFriendIdeas = useUiStore((s) => s.showFriendIdeas)
+  const storeIdeaDisplayMode = useUiStore((s) => s.ideaDisplayMode)
   const scrollPageWidth = useUiStore((s) => s.scrollPageWidth)
   const scrollHorizontalPadding = useUiStore((s) => s.scrollHorizontalPadding)
   const scrollVerticalPadding = useUiStore((s) => s.scrollVerticalPadding)
   const pagePageWidth = useUiStore((s) => s.pagePageWidth)
   const pageHorizontalPadding = useUiStore((s) => s.pageHorizontalPadding)
   const pageVerticalPadding = useUiStore((s) => s.pageVerticalPadding)
-  const globalSettings: GlobalViewSettings = useMemo(() => ({
-    cleanReading,
-    fontSize,
-    lineHeight,
-    pageWidth,
-    horizontalPadding,
-    verticalPadding,
-    pageColumns,
-    columnGap,
+
+  const globalSettings: GlobalReadingSettings = useMemo(() => ({
+    fontFamily: storeFontFamily,
+    cjkFontFamily: storeCjkFontFamily,
+    fontSize: storeFontSize,
+    fontWeight: storeFontWeight,
+    overrideBookFont: storeOverrideBookFont,
+    lineHeight: storeLineHeight,
+    paragraphSpacing: storeParagraphSpacing,
+    letterSpacing: storeLetterSpacing,
+    indent: storeIndent,
+    textAlignJustify: storeTextAlignJustify,
+    chapterTitleAlign: storeChapterTitleAlign,
+    chapterTitleSize: storeChapterTitleSize,
+    chapterTitleTopSpacing: storeChapterTitleTopSpacing,
+    chapterTitleBottomSpacing: storeChapterTitleBottomSpacing,
+    overrideBookLayout: storeOverrideBookLayout,
+    readingMode: storeReadingMode,
+    pageColumns: storePageColumns,
+    columnGap: storeColumnGap,
+    continuousScroll: storeContinuousScroll,
+    pageAnimation: storePageAnimation,
+    chineseConversion: storeChineseConversion,
+    cleanReading: storeCleanReading,
+    showHeader: storeShowHeader,
+    headerLeft: storeHeaderLeft,
+    headerCenter: storeHeaderCenter,
+    headerRight: storeHeaderRight,
+    showFooter: storeShowFooter,
+    footerLeft: storeFooterLeft,
+    footerCenter: storeFooterCenter,
+    footerRight: storeFooterRight,
+    marginalFontSize: storeMarginalFontSize,
+    showFriendIdeas: storeShowFriendIdeas,
+    ideaDisplayMode: storeIdeaDisplayMode,
     scrollPageWidth,
     scrollHorizontalPadding,
     scrollVerticalPadding,
     pagePageWidth,
     pageHorizontalPadding,
     pageVerticalPadding,
-    readingMode,
   }), [
-    cleanReading, fontSize, lineHeight, pageWidth, horizontalPadding, verticalPadding, pageColumns, columnGap,
+    storeFontFamily, storeCjkFontFamily, storeFontSize, storeFontWeight, storeOverrideBookFont,
+    storeLineHeight, storeParagraphSpacing, storeLetterSpacing, storeIndent, storeTextAlignJustify,
+    storeChapterTitleAlign, storeChapterTitleSize, storeChapterTitleTopSpacing, storeChapterTitleBottomSpacing,
+    storeOverrideBookLayout, storeReadingMode, storePageColumns, storeColumnGap, storeContinuousScroll,
+    storePageAnimation, storeChineseConversion, storeCleanReading, storeShowHeader, storeHeaderLeft,
+    storeHeaderCenter, storeHeaderRight, storeShowFooter, storeFooterLeft, storeFooterCenter,
+    storeFooterRight, storeMarginalFontSize, storeShowFriendIdeas, storeIdeaDisplayMode,
     scrollPageWidth, scrollHorizontalPadding, scrollVerticalPadding,
-    pagePageWidth, pageHorizontalPadding, pageVerticalPadding, readingMode,
+    pagePageWidth, pageHorizontalPadding, pageVerticalPadding,
   ])
-  const setFontSize = useUiStore((s) => s.setFontSize)
-  const setCleanReading = useUiStore((s) => s.setCleanReading)
-  const setLineHeight = useUiStore((s) => s.setLineHeight)
-  const setPageWidth = useUiStore((s) => s.setPageWidth)
-  const setHorizontalPadding = useUiStore((s) => s.setHorizontalPadding)
-  const setVerticalPadding = useUiStore((s) => s.setVerticalPadding)
-  const setPageColumns = useUiStore((s) => s.setPageColumns)
-  const setColumnGap = useUiStore((s) => s.setColumnGap)
-  const globalSetterForKey = useCallback(
-    <K extends PerBookSettingKey,>(key: K, value: PerBookSettingValue<K>) => {
-      if (key === 'cleanReading') {
-        if (typeof value === 'boolean') setCleanReading(value)
-        return
-      }
-      if (typeof value !== 'number') return
-      switch (key) {
-        case 'fontSize': setFontSize(value); break
-        case 'lineHeight': setLineHeight(value); break
-        case 'pageWidth': setPageWidth(value); break
-        case 'horizontalPadding': setHorizontalPadding(value); break
-        case 'verticalPadding': setVerticalPadding(value); break
-        case 'pageColumns': setPageColumns(value); break
-        case 'columnGap': setColumnGap(value); break
-      }
-    },
-    [setCleanReading, setFontSize, setLineHeight, setPageWidth, setHorizontalPadding, setVerticalPadding, setPageColumns, setColumnGap],
-  )
 
   // Per-book settings belong to the current user and BookVersion, not to the
-  // shared content revision.
-  const perBook = bookQuery.data?.data?.readerSettings?.viewSettings
-  const effectiveSettings = useMemo(() => mergeViewSettings(globalSettings, perBook), [globalSettings, perBook])
+  // shared content revision. Guests keep their theme group in browser-local
+  // storage; the other groups need the server.
+  const storedReaderSettings = bookQuery.data?.data?.readerSettings
+  const bookThemeGroup = guestThemeKey
+    ? (guestTheme?.key === guestThemeKey ? guestTheme.theme : storedGuestTheme)
+    : storedReaderSettings?.theme
+  const bookGroups: BookSettingGroups = useMemo(() => ({
+    font: storedReaderSettings?.font,
+    layout: storedReaderSettings?.layout,
+    display: storedReaderSettings?.display,
+    theme: bookThemeGroup,
+  }), [storedReaderSettings, bookThemeGroup])
+  const effectiveSettings = useMemo(() => mergeBookSettings(globalSettings, bookGroups), [globalSettings, bookGroups])
+  effectiveReadingModeRef.current = effectiveSettings.readingMode
+  const { showFriendIdeas } = effectiveSettings
+  const publicIdeas = useReaderIdeas(id, showFriendIdeas && !revisionQuarantined, displayedRevisionId)
+  const publicMarkers = useMemo(() => publicIdeas.isError || !showFriendIdeas ? [] : (publicIdeas.data?.data ?? []).filter((idea) => !idea.own && idea.locationAvailable), [publicIdeas.isError, publicIdeas.data, showFriendIdeas])
 
-  // Optimistic cache update so the panel and renderer follow immediately;
-  // the PATCH itself is debounced and diffs are merged while pending.
-  const saveViewSettingsMutation = useMutation({
-    mutationFn: (viewSettings: ViewSettings | null) =>
-      dataSource.saveSettings(viewSettings),
-    onMutate: (viewSettings) => {
-      queryClient.setQueryData(['book', cacheId], (old: { data: BookDetailRes } | undefined) => {
-        if (!old?.data) return old
-        const readerSettings = { ...(old.data.readerSettings ?? {}) }
-        if (viewSettings === null) delete readerSettings.viewSettings
-        else readerSettings.viewSettings = { ...(readerSettings.viewSettings ?? {}), ...viewSettings }
-        return { ...old, data: { ...old.data, readerSettings } }
-      })
+  const settingsSessionEpoch = getSessionEpoch()
+  const settingsWrites = useMemo(() => ({
+    epoch: settingsSessionEpoch,
+    cacheId,
+    pending: null as ReaderBookSettings | null,
+    timer: null as ReturnType<typeof setTimeout> | null,
+    needsRefresh: false,
+  }), [cacheId, settingsSessionEpoch])
+  const { mutate: persistSettings } = useMutation({
+    mutationKey: ['reader-book-settings', cacheId],
+    scope: { id: `reader-book-settings:${cacheId}` },
+    networkMode: local ? 'always' : 'online',
+    mutationFn: async (write: { patch: ReaderBookGroupsPatch; save: typeof dataSource.saveSettings; queue: typeof settingsWrites }) => {
+      if (write.queue.epoch === getSessionEpoch()) await write.save(write.patch)
     },
-    onError: (error) => {
-      void queryClient.invalidateQueries({ queryKey: ['book', cacheId] })
-      notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-settings:${id}` })
+    onError: (error, write) => {
+      if (write.queue.epoch !== getSessionEpoch()) return
+      write.queue.needsRefresh = true
+      notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-settings:${write.queue.cacheId}` })
+    },
+    onSettled: (_data, _error, write) => {
+      if (write.queue.epoch === getSessionEpoch() && write.queue.needsRefresh && write.queue.timer === null &&
+        queryClient.isMutating({ mutationKey: ['reader-book-settings', write.queue.cacheId], exact: true }) <= 1) {
+        write.queue.needsRefresh = false
+        void queryClient.invalidateQueries({ queryKey: ['book', write.queue.cacheId] })
+      }
     },
   })
-  const mutateViewSettingsRef = useRef(saveViewSettingsMutation.mutate)
-  mutateViewSettingsRef.current = saveViewSettingsMutation.mutate
-  const pendingViewSettingsRef = useRef<ViewSettings | null>(null)
-  const viewSettingsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const saveViewSettings = useCallback((patch: ViewSettings | null) => {
-    if (patch === null) {
-      pendingViewSettingsRef.current = null
-    } else {
-      pendingViewSettingsRef.current = { ...(pendingViewSettingsRef.current ?? {}), ...patch }
+  const flushSettings = useCallback(() => {
+    if (settingsWrites.timer !== null) clearTimeout(settingsWrites.timer)
+    settingsWrites.timer = null
+    const patch = settingsWrites.pending
+    settingsWrites.pending = null
+    if (patch) persistSettings({ patch, save: dataSource.saveSettings, queue: settingsWrites })
+  }, [dataSource.saveSettings, persistSettings, settingsWrites])
+  const saveGroups = useCallback((patch: ReaderBookGroupsPatch, immediate = false) => {
+    const queryKey = ['book', cacheId]
+    void queryClient.cancelQueries({ queryKey })
+    queryClient.setQueryData(['book', cacheId], (old: { data: BookDetailRes } | undefined) => {
+      if (!old?.data) return old
+      const readerSettings = mergeReaderBookGroups(old.data.readerSettings ?? {}, patch)
+      return { ...old, data: { ...old.data, readerSettings } }
+    })
+    if (immediate) {
+      // A reset followed by enable must reach storage as two ordered writes.
+      flushSettings()
+      persistSettings({ patch, save: dataSource.saveSettings, queue: settingsWrites })
+      return
     }
-    if (viewSettingsTimerRef.current) clearTimeout(viewSettingsTimerRef.current)
-    viewSettingsTimerRef.current = setTimeout(() => {
-      const payload = pendingViewSettingsRef.current
-      pendingViewSettingsRef.current = null
-      mutateViewSettingsRef.current(payload)
-    }, 400)
-  }, [])
-  useEffect(() => () => {
-    if (viewSettingsTimerRef.current) clearTimeout(viewSettingsTimerRef.current)
-  }, [])
+    settingsWrites.pending = mergeReaderBookGroups(settingsWrites.pending ?? {}, patch)
+    if (settingsWrites.timer !== null) clearTimeout(settingsWrites.timer)
+    settingsWrites.timer = setTimeout(flushSettings, 400)
+  }, [cacheId, dataSource.saveSettings, flushSettings, persistSettings, queryClient, settingsWrites])
+  useEffect(() => () => flushSettings(), [flushSettings])
 
   // --- Per-book preset binding ----------------------------------------------
-  // Same optimistic-cache pattern as the viewSettings mutation above.
+  // Same optimistic-cache pattern as the settings mutation above.
   const presetOwner: ClientPreferenceOwner = authUser ? { kind: 'account', connectionId: 'same-origin', accountId: authUser.id } : { kind: 'device' }
   const localPresetBinding = (bookQuery.data?.data as ClientLibraryDetailView | undefined)?.clientPresetBinding
   const boundPresetId = local ? resolveClientPresetBinding(localPresetBinding, presetOwner) : bookQuery.data?.data?.readerSettings?.boundPresetId ?? null
@@ -639,119 +707,93 @@ export default function Reader() {
     }
   }, [boundPresetId, setBoundPresetId, applyReadingResolution])
 
-  const [perBookActive, setPerBookActiveState] = useState(false)
-  // The Reader component persists across /books/:id navigation, so the
-  // previous book's per-book state must not leak into the next one
-  const activeBookIdRef = useRef<string | null>(null)
-  // Set while the user manually turned "仅本书" off but the PATCH clearing the
-  // diff is still pending — the diff arriving must not flip the toggle back on
-  const suppressAutoEnableRef = useRef(false)
-  useEffect(() => {
-    if (activeBookIdRef.current !== id) {
-      activeBookIdRef.current = id
-      suppressAutoEnableRef.current = false
-      setPerBookActiveState(hasViewSettings(perBook))
-      return
-    }
-    if (hasViewSettings(perBook)) {
-      // diff arrived late (bookQuery) or a change created the first override
-      if (!suppressAutoEnableRef.current) setPerBookActiveState(true)
-    } else {
-      suppressAutoEnableRef.current = false
-    }
-  }, [id, perBook])
-  const perBookActiveRef = useRef(perBookActive)
-  perBookActiveRef.current = perBookActive
-  const setPerBookActive = useCallback((active: boolean) => {
-    setPerBookActiveState(active)
-    if (active) {
-      suppressAutoEnableRef.current = false
-    } else {
-      suppressAutoEnableRef.current = true
-      saveViewSettings(null)
-    }
-  }, [saveViewSettings])
-  const updateSetting = useCallback(<K extends PerBookSettingKey,>(key: K, value: PerBookSettingValue<K>) => {
-    if (perBookActiveRef.current) {
-      saveViewSettings(viewSettingsDiffForKey(key, value, readingMode))
-    } else {
-      globalSetterForKey(key, value)
-    }
-  }, [saveViewSettings, globalSetterForKey, readingMode])
-
-  const guestThemeKey = isGuest ? `bd-guest-book-theme:${id}` : null
-  const [guestTheme, setGuestTheme] = useState<{ key: string; selection: ReadingThemeSelectionState | null }>()
-  const storedGuestTheme = useMemo(() => {
-    if (!guestThemeKey) return null
-    try {
-      return readingThemeSelectionStateSchema.parse(JSON.parse(localStorage.getItem(guestThemeKey) ?? 'null'))
-    } catch {
-      return null
-    }
-  }, [guestThemeKey])
-  const storedSelection = guestTheme?.key === guestThemeKey ? guestTheme.selection : storedGuestTheme
-  const storedAppearance = bookQuery.data?.data?.readerSettings
-  const hasThemeSelection = guestThemeKey ? Boolean(storedSelection)
-    : Boolean(storedAppearance?.themeSelection || storedAppearance?.readingThemeId)
-  const themeLibrary = useUiStore((state) => state.themeLibrary)
-  const fallbackThemeId = useUiStore(selectEffectiveReadingThemeId)
-  // The book keeps one selection per tone, so a daytime pick stops applying the
-  // moment the reader moves to night (device flip in system mode, or a manual
-  // lock). Resolution happens here; everything downstream keeps seeing a single
-  // selection for the tone that is actually on screen.
-  const themeSlot = useUiStore(selectReadingThemeSlot)
-  const appearance = useMemo(() => {
-    const stored = guestThemeKey ? { themeSelection: storedSelection } : storedAppearance
-    if (!stored) return stored
-    return { ...stored, themeSelection: themeSelectionForSlot(stored.themeSelection, themeSlot) }
-  }, [guestThemeKey, storedSelection, storedAppearance, themeSlot])
-  const composition = useMemo(() => {
-    if (!appearance?.themeSelection && !appearance?.readingThemeId) return null
-    const { cards } = effectiveThemeCards(themeLibrary, fallbackThemeId, appearance)
-    return materializeTheme(themeLibrary, { id: 'book-appearance', name: '', cards })
-  }, [appearance, themeLibrary, fallbackThemeId])
-  const setThemeSelectionMutation = useMutation({
-    scope: { id: `reader-theme:${cacheId}` },
-    mutationFn: async (selection: ReadingThemeSelectionState | null) => { await dataSource.setThemeSelection(selection) },
-    onError: (error) => {
-      if (queryClient.isMutating({ mutationKey: ['reader-theme', cacheId] }) <= 1) {
-        void queryClient.invalidateQueries({ queryKey: ['book', cacheId] })
-      }
-      notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-theme:${id}` })
+  type GroupKey = keyof BookSettingGroups
+  const activeGroups = useRef(bookGroups)
+  activeGroups.current = bookGroups
+  // Field writes: into the book's group when enabled, else the shared chain
+  // (bound preset first, then device active, else global) via the store's
+  // key-based write, which follows the book's effective reading mode for the
+  // dual-backed page geometry.
+  const globalSetterForKey = useCallback(
+    (key: string, value: number | boolean | string) => {
+      useUiStore.getState().setReadingSetting(key, value, effectiveReadingModeRef.current)
     },
-    mutationKey: ['reader-theme', cacheId],
-  })
-  const { mutate: persistThemeSelection } = setThemeSelectionMutation
-  const setThemeSelection = useCallback((selection: ReadingThemeSelection | null, clear?: 'current') => {
-    const queryKey = ['book', cacheId]
-    const settings = queryClient.getQueryData<{ data: BookDetailRes }>(queryKey)?.data.readerSettings
-    const storedState = guestThemeKey ? storedSelection : settings?.themeSelection ??
-      (settings?.readingThemeId ? { mode: 'theme' as const, themeId: settings.readingThemeId } : null)
-    const next = selection === null && clear !== 'current' ? null
-      : writeThemeSelectionForSlot(storedState, themeSlot, selection)
-    if (!guestThemeKey) {
-      // Publish synchronously so the next pick starts from this pair, even
-      // while its persistence request is still queued.
-      void queryClient.cancelQueries({ queryKey })
-      queryClient.setQueryData<{ data: BookDetailRes }>(queryKey, (old) => {
-        if (!old?.data) return old
-        const readerSettings = { ...old.data.readerSettings }
-        delete readerSettings.readingThemeId
-        if (next) readerSettings.themeSelection = next
-        else delete readerSettings.themeSelection
-        return { ...old, data: { ...old.data, readerSettings } }
-      })
-      persistThemeSelection(next)
+    [],
+  )
+  const updateField = useCallback(
+    (key: string, value: number | boolean | string) => {
+      const { group, patch } = settingPatchForKey(key, value as never, effectiveReadingModeRef.current)
+      if (activeGroups.current[group]) saveGroups({ [group]: patch })
+      else globalSetterForKey(key, value)
+    },
+    [saveGroups, globalSetterForKey],
+  )
+
+  // Per-book device font picks stay on this device; they shadow the group's
+  // synced font ids when the font group is on.
+  const bookFontKey = local ? cacheId : JSON.stringify([authUser?.id, cacheId])
+  const storedBookDeviceFonts = useMemo(() => getBookDeviceFonts(bookFontKey), [bookFontKey])
+  const [deviceFontEdits, setDeviceFontEdits] = useState<{ key: string; fonts?: BookDeviceFontSelection }>()
+  const bookDeviceFontsState = bookGroups.font
+    ? (deviceFontEdits?.key === bookFontKey ? deviceFontEdits.fonts : storedBookDeviceFonts)
+    : undefined
+  const setBookDeviceFont = useCallback((slot: 'primary' | 'cjk', fontId: string | null) => {
+    const next = { ...bookDeviceFontsState }
+    if (fontId) next[slot] = fontId
+    else delete next[slot]
+    const fonts = next.primary || next.cjk ? next : undefined
+    setBookDeviceFonts(bookFontKey, fonts ?? null)
+    setDeviceFontEdits({ key: bookFontKey, fonts })
+  }, [bookDeviceFontsState, bookFontKey])
+  const setGroupEnabled = useCallback((group: GroupKey, enabled: boolean) => {
+    const next = enabled ? {} : null
+    if (guestThemeKey) {
+      if (group === 'theme') {
+        activeGroups.current = { ...activeGroups.current, theme: next ?? undefined }
+        setGuestTheme({ key: guestThemeKey, theme: next ?? undefined })
+        try {
+          if (next) localStorage.setItem(guestThemeKey, JSON.stringify(next))
+          else localStorage.removeItem(guestThemeKey)
+        } catch { /* The appearance remains available for the open book in private mode. */ }
+      }
       return
     }
-    setGuestTheme({ key: guestThemeKey, selection: next })
-    try {
-      if (next) localStorage.setItem(guestThemeKey, JSON.stringify(next))
-      else localStorage.removeItem(guestThemeKey)
-    } catch {
-      // The appearance remains available for the open book in private mode.
+    if (group === 'font' && !enabled) {
+      setBookDeviceFonts(bookFontKey, null)
+      setDeviceFontEdits({ key: bookFontKey })
     }
-  }, [cacheId, guestThemeKey, persistThemeSelection, queryClient, storedSelection, themeSlot])
+    activeGroups.current = { ...activeGroups.current, [group]: next ?? undefined }
+    saveGroups({ [group]: next }, true)
+  }, [bookFontKey, saveGroups, guestThemeKey])
+
+  const readingMode = effectiveSettings.readingMode
+  const ideaDisplayMode = effectiveSettings.ideaDisplayMode
+  const isIdeaSidebarOpen = Boolean(
+    selection &&
+    !isTouch &&
+    ideaDisplayMode === 'sidebar' &&
+    isSelectionIdea(selection, null, annotations?.data, publicMarkers),
+  )
+
+  // --- Appearance (theme group + global layers) ---------------------------
+  const themeLibrary = useUiStore((s) => s.themeLibrary)
+  const globalAppearanceState = useUiStore(selectGlobalAppearanceState)
+  const themeSlot = useUiStore(selectReadingThemeSlot)
+  const appearance = useMemo(
+    () => resolveAppearance(themeLibrary, globalAppearanceState, bookThemeGroup, themeSlot),
+    [themeLibrary, globalAppearanceState, bookThemeGroup, themeSlot],
+  )
+  // The book's resolved appearance materializes into the session override so
+  // every downstream selector (colors, CSS, rules, wallpaper) sees it; without
+  // a book theme group the store's global-layer selectors resolve directly.
+  const composition = useMemo(() => {
+    if (!bookThemeGroup) return null
+    return materializeTheme(themeLibrary, {
+      id: 'book-appearance',
+      name: '',
+      cards: { paletteId: appearance.effectivePaletteId, cssId: appearance.cssId, highlightIds: appearance.highlightIds },
+    })
+  }, [bookThemeGroup, themeLibrary, appearance])
 
   const setReaderThemeOverride = useUiStore((s) => s.setReaderThemeOverride)
   const setReaderThemeTrial = useUiStore((s) => s.setReaderThemeTrial)
@@ -761,20 +803,81 @@ export default function Reader() {
   }, [id, composition, setReaderThemeOverride])
   useEffect(() => () => setReaderThemeTrial(null, null), [id, setReaderThemeTrial])
 
+  // Theme-tab writes. Global scope: the store's appearance layers. Book scope
+  // (theme group enabled): patch the book's theme group; conflicts resolve by
+  // writing only into the current editing scope.
+  const patchBookTheme = useCallback((patch: NonNullable<ReaderBookGroupsPatch['theme']>) => {
+    if (guestThemeKey) {
+      const next = mergeReaderBookGroups({ theme: bookThemeGroup }, { theme: patch }).theme ?? {}
+      setGuestTheme({ key: guestThemeKey, theme: next })
+      try {
+        localStorage.setItem(guestThemeKey, JSON.stringify(next))
+      } catch { /* The appearance remains available for the open book in private mode. */ }
+      return
+    }
+    saveGroups({ theme: patch }, true)
+  }, [guestThemeKey, bookThemeGroup, saveGroups])
+
+  const pickTheme = useCallback((themeId: string) => {
+    const slot = themeSlot
+    const theme = findThemeCombination(themeLibrary, themeId)
+    if (!theme) return
+    if (activeGroups.current.theme) {
+      const cssMode = bookThemeGroup?.css?.mode ?? globalAppearanceState.cssMode
+      const changes = themeApplication(theme, appearance, cssMode === 'follow' || bookThemeGroup?.selections?.[slot]?.legacyCards?.cssId !== undefined,
+        bookThemeGroup?.highlights ?? { adds: [], removes: [] }, globalAppearanceState.highlightRemoves)
+      patchBookTheme({
+        selections: { [slot]: { themeId, paletteId: theme.cards.paletteId ? null : appearance.effectivePaletteId } },
+        ...changes,
+      })
+    } else {
+      useUiStore.getState().setGlobalReadingTheme(themeId, slot)
+    }
+  }, [themeSlot, themeLibrary, appearance, bookThemeGroup, globalAppearanceState, patchBookTheme])
+
+  const pickPalette = useCallback((paletteId: string) => {
+    const slot = themeSlot
+    if (activeGroups.current.theme) {
+      patchBookTheme({ selections: { [slot]: { themeId: null, ...bookThemeGroup?.selections?.[slot], paletteId } } })
+    } else {
+      useUiStore.getState().setGlobalSlotPalette(slot, paletteId)
+    }
+  }, [themeSlot, bookThemeGroup, patchBookTheme])
+
+  const setCssOverride = useCallback((mode: 'off' | 'card', cssId?: string | null) => {
+    if (activeGroups.current.theme) {
+      patchBookTheme({ css: mode === 'card' ? { mode, cssId: cssId ?? null } : { mode } })
+    } else {
+      useUiStore.getState().setGlobalAppearanceCss(mode, cssId)
+    }
+  }, [patchBookTheme])
+
+  const toggleHighlight = useCallback((ruleId: string) => {
+    const bookTheme = activeGroups.current.theme
+    const layers = toggleAppearanceHighlight(themeLibrary, globalAppearanceState, bookTheme, themeSlot, ruleId)
+    if (!layers) return
+    if (bookTheme) patchBookTheme({ highlights: layers })
+    else useUiStore.getState().setGlobalHighlightLayers(layers)
+  }, [themeLibrary, globalAppearanceState, themeSlot, patchBookTheme])
+
   const viewSettingsContextValue = useMemo(
     () => ({
       effective: effectiveSettings,
-      perBookActive,
-      setPerBookActive,
-      updateSetting,
-      perBookDiff: perBook,
+      groups: bookGroups,
+      setGroupEnabled,
+      updateField,
+      bookDeviceFonts: bookDeviceFontsState,
+      setBookDeviceFont,
       boundPresetId,
       setBoundPreset,
+      bookTheme: bookThemeGroup,
       appearance,
-      hasThemeSelection,
-      setThemeSelection,
+      pickTheme,
+      pickPalette,
+      setCss: setCssOverride,
+      toggleHighlight,
     }),
-    [effectiveSettings, perBookActive, setPerBookActive, updateSetting, perBook, boundPresetId, setBoundPreset, appearance, hasThemeSelection, setThemeSelection],
+    [effectiveSettings, bookGroups, setGroupEnabled, updateField, bookDeviceFontsState, setBookDeviceFont, boundPresetId, setBoundPreset, bookThemeGroup, appearance, pickTheme, pickPalette, setCssOverride, toggleHighlight],
   )
 
   const progressQuery = useQuery({
@@ -1275,6 +1378,8 @@ export default function Reader() {
     initialCfi: initialCfiRef.current,
     initialFraction: initialFractionRef.current,
     settings: effectiveSettings,
+    bookFonts: bookGroups.font,
+    bookDeviceFonts: bookDeviceFontsState,
     userCss: { content: userContentCssRaw, ui: userUiCssRaw },
     highlightRules,
     onViewRebuilding: (pending) => setViewRebuilding(pending),
@@ -2113,11 +2218,11 @@ export default function Reader() {
         if (run('settings', onToggleSettings)) return
         if (run('fontIncrease', () => {
           const next = Math.min(64, effectiveSettings.fontSize + 1)
-          if (next !== effectiveSettings.fontSize) updateSetting('fontSize', next)
+          if (next !== effectiveSettings.fontSize) updateField('fontSize', next)
         })) return
         if (run('fontDecrease', () => {
           const next = Math.max(12, effectiveSettings.fontSize - 1)
-          if (next !== effectiveSettings.fontSize) updateSetting('fontSize', next)
+          if (next !== effectiveSettings.fontSize) updateField('fontSize', next)
         })) return
         if (run('search', () => {
           state.setActiveNavTab('toc')
@@ -2194,7 +2299,7 @@ export default function Reader() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [playbackCoordinator, readingMode, navigate, toggleChrome, isGuest, local, onToggleSettings, onHistoryBack, onHistoryForward, currentChapterIndex, containerEl, effectiveSettings.fontSize, updateSetting])
+  }, [playbackCoordinator, readingMode, navigate, toggleChrome, isGuest, local, onToggleSettings, onHistoryBack, onHistoryForward, currentChapterIndex, containerEl, effectiveSettings.fontSize, updateField])
 
   // Belt-and-braces: a stale "consumed" mark from a previous session (Esc
   // closed a popup, then the reader was left without another Esc) must not
@@ -2336,6 +2441,7 @@ export default function Reader() {
                   readingMode={readingMode}
                   bookId={id}
                   cleanReadingSupported={cleanReadingSupported}
+                  overrideSupported={cleanReadingSupported}
                   estimatedMinutes={estimatedMinutes}
                   onAddBookmark={isGuest ? undefined : onAddBookmark}
                   onToggleSettings={onToggleSettings}

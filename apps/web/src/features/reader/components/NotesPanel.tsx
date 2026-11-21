@@ -683,7 +683,7 @@ export const NotesPanel = memo(function NotesPanel({
               </div>
               <ul className="space-y-2">
                 {g.list.map((a) => (
-                  <li key={a.id}>{renderCard(a)}</li>
+                  <li key={a.id} data-note-id={a.id}>{renderCard(a)}</li>
                 ))}
               </ul>
             </div>

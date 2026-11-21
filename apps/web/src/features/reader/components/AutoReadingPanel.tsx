@@ -1,12 +1,13 @@
 import type { CSSProperties } from 'react'
 
 import { useTranslation } from '@/hooks/useTranslation'
-import { blendColors, cn } from '@/lib/utils'
-import { resolveReadingTheme } from '@/lib/reading-theme'
-import { selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
+import { cn } from '@/lib/utils'
+import { selectEffectiveReadingTheme, useUiStore } from '@/stores/ui.store'
 
 import { useAutoReadingSession } from '../hooks/useAutoReadingSession'
 import type { AutoReadingMode, ReadingMode } from '../types'
+import { readerPanelVars } from '../lib/reader-panel-vars'
+import { ButtonGroup, ControlGroup, PanelSection, PanelSectionList, SliderRow, ToggleRow } from './ReaderPanelPrimitives'
 
 function PlayIcon() {
   return (
@@ -33,36 +34,6 @@ function StopIcon() {
   )
 }
 
-interface ReaderToggleProps {
-  label: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-}
-
-function ReaderToggle({ label, checked, onChange }: ReaderToggleProps) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-xs text-[var(--bd-read-sub)]">{label}</span>
-      <button
-        type="button"
-        onClick={() => onChange(!checked)}
-        className="relative h-6 w-10 shrink-0 rounded-full transition-colors"
-        style={{ backgroundColor: checked ? 'var(--toggle-on-bg)' : 'var(--toggle-off-bg)' }}
-        aria-checked={checked}
-        aria-label={label}
-        role="switch"
-      >
-        <span
-          className={cn(
-            'absolute top-1 h-4 w-4 rounded-full bg-[var(--bd-read-bg)] transition-transform',
-            checked ? 'left-5' : 'left-1',
-          )}
-        />
-      </button>
-    </div>
-  )
-}
-
 interface AutoReadingPanelProps {
   readingMode: ReadingMode
   /** Fired once a start settles, to dismiss the popover and unpin the chrome. */
@@ -78,15 +49,8 @@ export default function AutoReadingPanel({ readingMode, onStart }: AutoReadingPa
   const setAutoReadingSpeed = useUiStore((s) => s.setAutoReadingSpeed)
   const autoReadingProgressBar = useUiStore((s) => s.autoReadingProgressBar)
   const setAutoReadingProgressBar = useUiStore((s) => s.setAutoReadingProgressBar)
-  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
-  const customThemes = useUiStore((s) => s.customThemes)
-  const currentTheme = resolveReadingTheme(readingThemeId, customThemes)
-  const sliderVars = {
-    '--slider-accent': blendColors(currentTheme.bg, currentTheme.text, 0.55),
-    '--slider-track': blendColors(currentTheme.bg, currentTheme.text, 0.15),
-    '--toggle-on-bg': blendColors(currentTheme.bg, currentTheme.text, 0.55),
-    '--toggle-off-bg': blendColors(currentTheme.bg, currentTheme.text, 0.15),
-  } as CSSProperties
+  const currentTheme = useUiStore(selectEffectiveReadingTheme)
+  const sliderVars: CSSProperties = readerPanelVars(currentTheme)
   const active = state.status === 'running' || state.status === 'paused'
 
   function changeMode(mode: AutoReadingMode) {
@@ -108,7 +72,7 @@ export default function AutoReadingPanel({ readingMode, onStart }: AutoReadingPa
 
   return (
     <div className="flex flex-col" style={sliderVars}>
-      <div className="border-b border-[var(--bd-read-accent)] p-4">
+      <div className="border-b border-[var(--bd-read-accent)]/35 p-4">
         <div className="flex w-full">
           <button
             type="button"
@@ -136,56 +100,50 @@ export default function AutoReadingPanel({ readingMode, onStart }: AutoReadingPa
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 p-4">
-        {readingMode === 'scroll' && (
-          <div className="flex flex-col gap-1.5 text-xs">
-            <span className="text-[var(--bd-read-sub)]">{_('reader.autoReadingMode')}</span>
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-[var(--bd-read-accent)] p-1">
-              {(['smooth', 'timed'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  aria-pressed={autoReadingMode === mode}
-                  onClick={() => changeMode(mode)}
-                  className={cn(
-                    'h-8 rounded-md px-2 text-sm transition-colors',
-                    autoReadingMode === mode ? 'bg-stone-500/15 text-current' : 'text-[var(--bd-read-sub)] hover:bg-stone-500/10',
-                  )}
-                >
-                  {mode === 'smooth' ? _('reader.autoReadingSmooth') : _('reader.autoReadingTimed')}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+      <div className="p-4">
+        <PanelSectionList>
+          <PanelSection>
+            {readingMode === 'scroll' && (
+              <ControlGroup label={_('reader.autoReadingMode')}>
+                <ButtonGroup
+                  size="sm"
+                  options={[
+                    { value: 'smooth', label: _('reader.autoReadingSmooth') },
+                    { value: 'timed', label: _('reader.autoReadingTimed') },
+                  ]}
+                  value={autoReadingMode}
+                  onChange={changeMode}
+                />
+              </ControlGroup>
+            )}
 
-        <div>
-          <div className="mb-1.5 flex items-center justify-between text-xs">
-            <span className="text-[var(--bd-read-sub)]">{_('reader.autoReadingSpeed')}</span>
-            <span className="tabular-nums">{autoReadingSpeed}</span>
-          </div>
-          <input
-            type="range"
-            min="1"
-            max="100"
-            step="1"
-            value={autoReadingSpeed}
-            onChange={(event) => setAutoReadingSpeed(Number(event.target.value))}
-            aria-label={_('reader.autoReadingSpeed')}
-            className="bd-slider w-full"
-            style={{ '--slider-fill': `${autoReadingSpeed}%` } as CSSProperties}
-          />
-        </div>
-        {!(readingMode === 'scroll' && autoReadingMode === 'smooth') && (
-          <div className="border-t border-[var(--bd-read-accent)] pt-3">
-            <ReaderToggle
-              label={_('reader.autoReadingProgressBar')}
-              checked={autoReadingProgressBar}
-              onChange={setAutoReadingProgressBar}
+            <SliderRow
+              label={_('reader.autoReadingSpeed')}
+              value={autoReadingSpeed}
+              min={1}
+              max={100}
+              step={1}
+              commitOnRelease={false}
+              onChange={setAutoReadingSpeed}
             />
-          </div>
-        )}
-        {state.error && <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{_(state.error)}</p>}
+          </PanelSection>
+
+          {!(readingMode === 'scroll' && autoReadingMode === 'smooth') && (
+            <PanelSection>
+              <ToggleRow
+                label={_('reader.autoReadingProgressBar')}
+                checked={autoReadingProgressBar}
+                onChange={setAutoReadingProgressBar}
+              />
+            </PanelSection>
+          )}
+
+          {state.error && (
+            <PanelSection>
+              <p role="alert" className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-500">{_(state.error)}</p>
+            </PanelSection>
+          )}
+        </PanelSectionList>
       </div>
     </div>
   )

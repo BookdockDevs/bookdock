@@ -36,7 +36,7 @@ describe('ui.store theme scope writes', () => {
     const store = useUiStore.getState()
     store.setReadingThemeMode('system')
     store.setSystemTheme('light')
-    store.setGlobalDefaultTheme('dark', 'sepia')
+    store.setGlobalReadingTheme('sepia', 'dark')
     store.setReadingThemeId('cream')
     expect(useUiStore.getState()).toMatchObject({ readingThemeMode: 'system', lightReadingThemeId: 'cream' })
     expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('cream')
@@ -198,6 +198,43 @@ describe('ui.store reading preset routing', () => {
     expect(a.snapshot.lineHeight).toBe(state.lineHeight)
   })
 
+  it('a preset created with an active 仅本书 diff is applied, not only shown active', () => {
+    const globalSize = useUiStore.getState().fontSize
+    useUiStore.getState().createReadingPreset('A', { fontSize: 22 })
+    const aId = useUiStore.getState().activePresetId!
+    // Activation re-resolves the flat fields to the captured values; with the
+    // book groups later disabled the preset applies, not the old global values
+    expect(useUiStore.getState().fontSize).toBe(22)
+    useUiStore.getState().applyReadingResolution()
+    expect(useUiStore.getState().fontSize).toBe(22)
+    useUiStore.getState().activateReadingPreset(null)
+    expect(useUiStore.getState().fontSize).toBe(globalSize)
+    useUiStore.getState().activateReadingPreset(aId)
+    expect(useUiStore.getState().fontSize).toBe(22)
+  })
+
+  it('a preset captured under a per-book page mode keeps its width across mode round-trips', () => {
+    // Global chain sits in scroll mode; the overlay pins page mode + width
+    expect(useUiStore.getState().readingMode).toBe('scroll')
+    useUiStore.getState().createReadingPreset('Page', { readingMode: 'page', pagePageWidth: 1250, pageWidth: 1250 })
+    const cfg = currentConfig()
+    const preset = cfg.presets[0]!
+    expect(preset.snapshot.readingMode).toBe('page')
+    // The mirror is re-derived for the snapshot's own mode, so it no longer
+    // carries the scroll-mode width
+    expect(preset.snapshot.pageWidth).toBe(1250)
+    const scrollWidth = cfg.global.scrollPageWidth
+    useUiStore.getState().activateReadingPreset(preset.id)
+    expect(useUiStore.getState().readingMode).toBe('page')
+    expect(useUiStore.getState().pageWidth).toBe(1250)
+    // Round-tripping must not write the stale mirror into the other backing
+    useUiStore.getState().setReadingMode('scroll')
+    expect(useUiStore.getState().scrollPageWidth).toBe(scrollWidth)
+    useUiStore.getState().setReadingMode('page')
+    expect(useUiStore.getState().pagePageWidth).toBe(1250)
+    expect(useUiStore.getState().pageWidth).toBe(1250)
+  })
+
   it('edits while a preset is active fold into the preset, not the global config', () => {
     useUiStore.getState().createReadingPreset('护眼')
     const globalSizeBefore = currentConfig().global.fontSize
@@ -327,8 +364,8 @@ it('allows the dark palette on the daytime slot and a whole custom theme on the 
   store.saveCustomTheme({ id: 'ink', name: 'Ink', colors: { bg: '#fff', fg: '#000', primary: '#00f' }, contentCss: 'p { color: red }' })
   store.setReadingThemeMode('system')
   store.setSystemTheme('light')
-  store.setGlobalDefaultTheme('light', 'night')
-  store.setGlobalDefaultTheme('dark', 'ink')
+  store.setGlobalReadingTheme('night', 'light')
+  store.setGlobalReadingTheme('ink', 'dark')
   expect(useUiStore.getState().readingThemeMode).toBe('system')
   expect(selectEffectiveReadingThemeId(useUiStore.getState())).toBe('night')
   store.setSystemTheme('dark')

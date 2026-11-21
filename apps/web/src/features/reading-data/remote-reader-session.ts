@@ -1,4 +1,5 @@
-import type { BookDetailRes, ReaderBookSettings, ReadingThemeSelectionState, ReadingProgressRes, ReadingProgressUpdateReq, ViewSettings } from '@bookdock/shared'
+import type { BookDetailRes, ReaderBookGroupsPatch, ReaderBookSettings, ReadingThemeSelectionState, ReadingProgressRes, ReadingProgressUpdateReq } from '@bookdock/shared'
+import { migrateLegacyReaderBookSettings, readerBookSettingsSchema } from '@bookdock/shared'
 import { apiGet, apiPatch, apiPut } from '@/api/client'
 import { notify } from '@/lib/notifications'
 import { withReveal } from '@/lib/reveal-hidden'
@@ -34,7 +35,16 @@ export function remoteReaderSession(bookId: string, guest: boolean) {
         if (!isOfflineOrNetworkError(error)) throw error
         const cached = await remoteBookCache.getBookRecord(scope, bookId).catch(() => null)
         if (!cached) throw error
-        return { data: cached.detail }
+        // A snapshot cached before the four-group upgrade still carries the
+        // legacy readerSettings fields; migrate at this boundary (idempotent,
+        // repeated every offline open) so per-book settings survive offline.
+        const detail = cached.detail
+        return {
+          data: {
+            ...detail,
+            readerSettings: migrateLegacyReaderBookSettings(readerBookSettingsSchema.catch({}).parse(detail.readerSettings ?? {})),
+          },
+        }
       }
     },
     getProgress: async () => {
@@ -82,7 +92,7 @@ export function remoteReaderSession(bookId: string, guest: boolean) {
         return persistOffline()
       }
     },
-    saveSettings: (viewSettings: ViewSettings | null) => apiPatch<{ data: ReaderBookSettings }>(withReveal(`${base}/reader-settings`), { viewSettings }),
+    saveSettings: (patch: ReaderBookGroupsPatch) => apiPatch<{ data: ReaderBookSettings }>(withReveal(`${base}/reader-settings`), patch),
     bindPreset: (boundPresetId: string | null) => apiPatch<{ data: ReaderBookSettings }>(withReveal(`${base}/reader-settings`), { boundPresetId }),
     setThemeSelection: (themeSelection: ReadingThemeSelectionState | null) => apiPatch<{ data: ReaderBookSettings }>(withReveal(`${base}/reader-settings`), { themeSelection }),
     setReadingTheme: (themeId: string | null) => apiPatch<{ data: ReaderBookSettings }>(withReveal(`${base}/reader-settings`), {

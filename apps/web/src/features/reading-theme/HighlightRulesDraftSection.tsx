@@ -352,7 +352,6 @@ function PresetDropdown({ onSelect, label, disabled, className }: PresetDropdown
 export default function HighlightRulesDraftSection({ rules, single = false, onChange }: HighlightRulesDraftSectionProps) {
   const _ = useTranslation()
   const [editingId, setEditingId] = useState<string | null>(null)
-  const atLimit = rules.length >= HIGHLIGHT_LIMITS.maxRules
 
   const update = (index: number, next: HighlightRuleDef) => {
     const rules_ = cloneRules(rules)
@@ -436,24 +435,17 @@ export default function HighlightRulesDraftSection({ rules, single = false, onCh
             {_('reader.themeHighlightRulesTitle')}
           </span>
           <div className="flex items-center gap-2">
-            <PresetDropdown onSelect={(kind) => applyPreset(kind)} disabled={atLimit} />
+            <PresetDropdown onSelect={(kind) => applyPreset(kind)} />
             <button
               type="button"
               onClick={addBlank}
-              disabled={atLimit}
-              className="inline-flex items-center gap-1 rounded-lg border border-stone-300/70 bg-stone-500/5 px-2.5 py-1 text-xs font-medium text-current/75 transition-colors hover:border-stone-400 hover:bg-stone-500/10 hover:text-current disabled:opacity-40 cursor-pointer"
+              className="inline-flex items-center gap-1 rounded-lg border border-stone-300/70 bg-stone-500/5 px-2.5 py-1 text-xs font-medium text-current/75 transition-colors hover:border-stone-400 hover:bg-stone-500/10 hover:text-current cursor-pointer"
             >
               <ThemeIcon name="plus" size={12} />
               <span>{_('reader.themeHighlightAdd')}</span>
             </button>
           </div>
         </div>
-      )}
-
-      {atLimit && (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          {_('reader.themeHighlightLimit', { count: HIGHLIGHT_LIMITS.maxRules })}
-        </p>
       )}
 
       {rules.length === 0 && (
@@ -535,8 +527,7 @@ export default function HighlightRulesDraftSection({ rules, single = false, onCh
                   <button
                     type="button"
                     onClick={() => duplicate(index)}
-                    disabled={atLimit}
-                    className="flex h-6 w-6 items-center justify-center rounded text-current/60 transition-colors hover:bg-stone-500/10 hover:text-current disabled:opacity-30 cursor-pointer"
+                    className="flex h-6 w-6 items-center justify-center rounded text-current/60 transition-colors hover:bg-stone-500/10 hover:text-current cursor-pointer"
                     title={_('reader.themeHighlightDuplicate')}
                   >
                     <ThemeIcon name="copy" size={13} />
@@ -585,7 +576,6 @@ export default function HighlightRulesDraftSection({ rules, single = false, onCh
                     labelExtra={
                       <PresetDropdown
                         onSelect={(kind) => applyPreset(kind, index)}
-                        disabled={atLimit}
                       />
                     }
                   >

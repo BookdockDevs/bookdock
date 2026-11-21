@@ -9,6 +9,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useLocalReader } from '../../reading-data/reader-source-context'
 import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
+import { useViewSettings } from '../view-settings-context'
 
 import type { PopupRect, SelectionGeometry } from '../types'
 import { markEscConsumed } from '../lib/esc-consumed'
@@ -47,7 +48,9 @@ export function NoteEditorPopup({ rect, geometry, initialNote, saving, onSave, o
   const local = useLocalReader()
   const imagesEnabled = Boolean(local || bookVersionId)
   const _ = useTranslation()
-  const readingMode = useUiStore((s) => s.readingMode)
+  const viewSettings = useViewSettings()
+  const sharedReadingMode = useUiStore((s) => s.readingMode)
+  const readingMode = viewSettings?.effective.readingMode ?? sharedReadingMode
   const [draft, setDraft] = useState(initialNote)
   const [visibility, setVisibility] = useState(initialVisibility)
   const [files, setFiles] = useState<Pick<AnnotationUpdateReq, 'imageIds' | 'draftId'>>()

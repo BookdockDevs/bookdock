@@ -215,7 +215,7 @@ describe('local-to-server import', () => {
     expect(ledger.rounds).toHaveLength(1)
     expect(ledger.totalSeconds).toBe(45)
 
-    expect(getReaderBookSettings(userId, res.book.id)).toEqual({ viewSettings: { fontSize: 19 } })
+    expect(getReaderBookSettings(userId, res.book.id)).toEqual({ font: { fontSize: 19 } })
     expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.bookVersionId, res.book.id)).all()).toHaveLength(1)
     expect(db.select().from(schema.textReplacementOverrides).where(eq(schema.textReplacementOverrides.bookVersionId, res.book.id)).all()).toHaveLength(1)
 

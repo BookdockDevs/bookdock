@@ -15,6 +15,7 @@ import {
   parseReadingConfig,
   type ReadingPreset,
 } from '../lib/reading-profiles'
+import { flattenGroupFields } from '../lib/view-settings'
 
 // Reading-setting presets (grill 定案 2026-08-12, activation rework
 // 2026-08-13): icon-ish chips colored by the preset's own reading theme +
@@ -33,9 +34,9 @@ export default function ReadingPresetPicker() {
   const renameReadingPreset = useUiStore((s) => s.renameReadingPreset)
   const deleteReadingPreset = useUiStore((s) => s.deleteReadingPreset)
   const activateReadingPreset = useUiStore((s) => s.activateReadingPreset)
-  // Book context: 仅本书's raw diff rides into the new preset so a preset
-  // created while a book-level override is active captures the effective
-  // (WYSIWYG) values; the binding fields drive the pin affordance.
+  // Book context: the per-book groups' explicit fields ride into the new
+  // preset so a preset created while book-level groups are active captures the
+  // effective (WYSIWYG) values; the binding fields drive the pin affordance.
   const viewSettings = useViewSettings()
   const boundPresetId = viewSettings?.boundPresetId ?? null
   const setBoundPreset = viewSettings?.setBoundPreset ?? null
@@ -84,7 +85,7 @@ export default function ReadingPresetPicker() {
       setCreating(false)
       return
     }
-    createReadingPreset(name, viewSettings?.perBookDiff as Record<string, unknown> | undefined)
+    createReadingPreset(name, flattenGroupFields(viewSettings?.groups))
     setCreating(false)
   }
 
@@ -101,18 +102,18 @@ export default function ReadingPresetPicker() {
 
   return (
     <div>
-      <div className="mb-2.5 flex items-start justify-between">
-        <span className="text-sm font-medium text-current" title={_('reader.presetSection')}>
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <span className="text-xs font-semibold text-current/75" title={_('reader.presetSection')}>
           {_('reader.presetSection')}
         </span>
-        {/* -mt-1 keeps the 28px icon button centred on the 20px title line
+        {/* -mt-1.5 keeps the 28px icon button centred on the 16px title line
             instead of pushing the title down by half the difference */}
         <button
           type="button"
           onClick={startCreate}
           title={_('reader.presetCreate')}
           aria-label={_('reader.presetCreate')}
-          className="-mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-current/65 transition-colors hover:bg-(--bd-sel-bg-hover) hover:text-current focus-visible:outline-2 focus-visible:outline-current"
+          className="-mt-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-current/65 transition-colors hover:bg-(--bd-sel-bg-hover) hover:text-current focus-visible:outline-2 focus-visible:outline-current"
         >
           <ThemeIcon name="plus" size={13} />
         </button>

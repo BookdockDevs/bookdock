@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import type { HighlightRuleDef, ReaderBookSettings, ReadingThemeCards, ReadingThemeSelection } from '@bookdock/shared'
+import type { HighlightRuleDef, ReaderBookThemeSettings } from '@bookdock/shared'
 
 import { localRecordId } from '@/features/local-library/id'
 import SmartMenu, { readerMenuDangerItemClass, readerMenuItemClass } from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { downloadBlob } from '@/lib/download'
-import { HIGHLIGHT_LIMITS } from '@/lib/highlight-match'
 import { pointerAnchor, type MenuAnchor } from '@/lib/menu-anchor'
 import { notify } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth.store'
-import { getThemeLibrarySnapshot, selectEffectiveReadingThemeId, useUiStore } from '@/stores/ui.store'
+import { getThemeLibrarySnapshot, selectGlobalAppearanceState, selectReadingThemeSlot, useUiStore } from '@/stores/ui.store'
+import { trialAppearanceAfterTheme, type ResolvedAppearance } from './appearance'
 
 import PaletteChip from './PaletteChip'
 import SelectChip from './SelectChip'
@@ -21,16 +21,19 @@ import ThemeIcon from './ThemeIcon'
 import { useThemeAssetUrls } from './asset-urls'
 import { ThemeAssetStore } from './assets'
 import { publishThemeDeleteUndo } from './theme-delete-undo'
-import { effectiveThemeCards, findThemeCombination, matchThemeCards, materializeTheme, normalizeThemeCards, removeThemeCard, selectionForCards, themeLibraryNames, uniqueName, upsertThemeCard, type ReadingThemeLibrary, type SavedReadingTheme, type ThemeCssCard, type ThemePalette } from './theme-library'
+import { materializeTheme, normalizeThemeCards, removeThemeCard, themeLibraryNames, uniqueName, upsertThemeCard, type ReadingThemeLibrary, type SavedReadingTheme, type ThemeCssCard, type ThemePalette } from './theme-library'
 import { buildThemeLibraryPackage, themeLibraryPackageFileName } from './theme-package'
 
 interface ReadingThemePanelProps {
-  book?: {
-    id: string
-    appearance?: ReaderBookSettings
-    hasThemeSelection?: boolean
-    setSelection: (selection: ReadingThemeSelection | null, clear?: 'current') => void
-  }
+  /** Resolved appearance of the slot being edited (global + book layers). */
+  appearance?: ResolvedAppearance
+  /** The book's theme group; trials simulate an apply inside it. */
+  bookTheme?: ReaderBookThemeSettings
+  onPickTheme?: (themeId: string) => void
+  onPickPalette?: (paletteId: string) => void
+  onSetCss?: (mode: 'off' | 'card', cssId?: string | null) => void
+  onToggleHighlight?: (ruleId: string) => void
+  bookId?: string
 }
 
 type Group = 'theme' | ThemeCardEdit['kind']
@@ -45,12 +48,21 @@ function withCard(library: ReadingThemeLibrary, edit: ThemeCardEdit): ReadingThe
   return { ...library, highlights: upsertThemeCard(library.highlights, edit.card) }
 }
 
-export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
+export default function ReadingThemePanel({
+  appearance,
+  bookTheme,
+  onPickTheme,
+  onPickPalette,
+  onSetCss,
+  onToggleHighlight,
+  bookId,
+}: ReadingThemePanelProps) {
   const _ = useTranslation()
   const library = useUiStore((state) => state.themeLibrary)
-  const fallbackId = useUiStore(selectEffectiveReadingThemeId)
   const setLibrary = useUiStore((state) => state.setThemeLibrary)
   const setTrial = useUiStore((state) => state.setReaderThemeTrial)
+  const globalAppearanceState = useUiStore(selectGlobalAppearanceState)
+  const slot = useUiStore(selectReadingThemeSlot)
   const scope = useAuthStore((state) => state.user?.id ?? 'device')
   const [expanded, setExpanded] = useState<Partial<Record<Group, boolean>>>({})
   const [themeEditor, setThemeEditor] = useState<{ theme: SavedReadingTheme; existing: boolean } | null>(null)
@@ -65,44 +77,19 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
     confirming?: boolean
   } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const bookId = book?.id
   useEffect(() => () => { if (bookId) setTrial(bookId, null) }, [bookId, setTrial])
 
-  const { cards, themeId } = effectiveThemeCards(library, fallbackId, book?.appearance)
-  const saved = findThemeCombination(library, themeId)
-  const selectedThemeId = matchThemeCards(library, cards, themeId)?.id
-  const isDefaultTheme = Boolean(
-    selectedThemeId === fallbackId &&
-      (!book?.appearance?.themeSelection || book.appearance.themeSelection.mode === 'theme'),
-  )
-  const follows =
-    (!book?.appearance?.themeSelection &&
-      !book?.appearance?.readingThemeId) ||
-    isDefaultTheme
-  const variant = book ? 'reader' : 'default'
+  const paletteId = appearance?.effectivePaletteId ?? 'paper'
+  const cssId = appearance?.cssId ?? null
+  const highlightIds = useMemo(() => appearance?.highlightIds ?? [], [appearance])
+  const selectedThemeId = appearance?.selectedThemeId ?? null
+  const variant = 'reader'
   const palettes = library.palettes
   const paletteAssetIds = useMemo(() => library.palettes.flatMap((item) => item.wallpaperAssetId ? [item.wallpaperAssetId] : []), [library.palettes])
   const { urls: wallpapers, missing: missingWallpapers } = useThemeAssetUrls(scope, paletteAssetIds)
 
-  const applyCards = (changes: Partial<ReadingThemeCards>) => {
-    const nextSelection = selectionForCards(library, { ...cards, ...changes }, themeId)
-    if (nextSelection.mode === 'theme' && nextSelection.themeId === fallbackId) {
-      book?.setSelection(null, 'current')
-    } else {
-      book?.setSelection(nextSelection)
-    }
-  }
-  const toggleHighlight = (id: string) => {
-    const ids = cards.highlightIds
-    if (ids.includes(id)) {
-      applyCards({ highlightIds: ids.filter((rule) => rule !== id) })
-      return
-    }
-    const next = [...ids, id]
-    const original = saved?.cards.highlightIds ?? []
-    applyCards({ highlightIds: [...original.filter((rule) => next.includes(rule)), ...next.filter((rule) => !original.includes(rule))] })
-  }
-  const newTheme = () => setThemeEditor({ theme: { id: localRecordId(), name: '', cards }, existing: false })
+  const toggleHighlight = (id: string) => onToggleHighlight?.(id)
+  const newTheme = () => setThemeEditor({ theme: { id: localRecordId(), name: '', cards: { paletteId, cssId, highlightIds } }, existing: false })
   const saveTheme = (theme: SavedReadingTheme) => {
     const current = useUiStore.getState().themeLibrary
     setLibrary({ ...current, themes: upsertThemeCard(current.themes, { ...theme, cards: normalizeThemeCards(current, theme.cards) }) })
@@ -136,15 +123,14 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
   }
   const themeInUse = (theme: SavedReadingTheme) => {
     const state = useUiStore.getState()
-    const pinned = book?.appearance?.themeSelection
-    const pinnedThemeId = pinned && pinned.mode !== 'slots' ? pinned.themeId : undefined
     return theme.id === state.readingThemeId || theme.id === state.lightReadingThemeId
-      || theme.id === state.darkReadingThemeId || pinnedThemeId === theme.id
+      || theme.id === state.darkReadingThemeId || selectedThemeId === theme.id
   }
   const deleteTheme = (theme: SavedReadingTheme) => {
+    const state = useUiStore.getState()
     const before = getThemeLibrarySnapshot()
     const inUse = themeInUse(theme)
-    useUiStore.getState().deleteCustomTheme(theme.id)
+    state.deleteCustomTheme(theme.id)
     publishThemeDeleteUndo(
       before,
       { key: inUse ? 'reader.themeDeletedInUse' : 'reader.themeDeleted', params: { name: theme.name } },
@@ -155,11 +141,25 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
     if (!edit?.card) { setTrial(bookId, null); return }
     const { id } = edit.card
     const next = withCard(library, edit)
-    const selected = { ...cards }
+    const selected = { paletteId, cssId, highlightIds: [...highlightIds] }
     if (edit.kind === 'palette') selected.paletteId = id
     else if (edit.kind === 'css') selected.cssId = id
-    else if (!selected.highlightIds.includes(id)) selected.highlightIds = [id, ...selected.highlightIds].slice(0, HIGHLIGHT_LIMITS.maxRules)
+    // Toggling appends the rule at the end of the chain — the trial must
+    // mirror that priority, not grant the new rule the front slot.
+    else if (!selected.highlightIds.includes(id)) selected.highlightIds = [...selected.highlightIds, id]
     setTrial(bookId, materializeTheme(next, { id: 'trial', name: '', cards: selected }))
+  }
+  // A whole-theme trial resolves what applying the draft would produce (the
+  // theme's own components replace, undefined components are kept) instead of
+  // materializing the draft in isolation.
+  const trialTheme = (draft: SavedReadingTheme | null) => {
+    if (!bookId || !draft) { setTrial(bookId ?? null, null); return }
+    const resolved = trialAppearanceAfterTheme(library, globalAppearanceState, bookTheme, slot, draft)
+    setTrial(bookId, materializeTheme(library, {
+      id: 'trial',
+      name: '',
+      cards: { paletteId: resolved.effectivePaletteId, cssId: resolved.cssId, highlightIds: resolved.highlightIds },
+    }))
   }
   const exportTheme = async (theme: SavedReadingTheme) => {
     const current = useUiStore.getState().themeLibrary
@@ -191,11 +191,11 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
     const isExpanded = expanded[group] === true
     const visible = isExpanded ? items : items.filter(({ id }, index) => index < collapsedCount || current.includes(id))
     return (
-      <section key={group} aria-label={label} className="grid gap-2 border-b border-stone-200/60 pb-3.5 last:border-b-0 last:pb-0 dark:border-stone-800/60">
+      <section key={group} aria-label={label} className="flex flex-col gap-2 py-3.5 first:pt-0 last:pb-0">
         {/* 标题行不参与图标按钮的居中：28px 按钮与 16px 文字行高差的一半用 -mt-1.5 抵掉，
             否则标题会比其它 tab（字体/布局/显示）的区块标题低 6px */}
         <div className="flex items-start justify-between gap-2">
-          <span className="min-w-0 truncate text-xs font-medium text-current/75">{label}</span>
+          <span className="min-w-0 truncate text-xs font-semibold text-current/75">{label}</span>
           <div className="-mt-1.5 flex shrink-0 items-center gap-0.5">
             {action}
             {(isExpanded || visible.length < items.length) && (
@@ -226,7 +226,7 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
             {visible.map(render)}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-stone-300/60 p-3 text-center text-xs text-current/50 dark:border-stone-700/60">
+          <div className="rounded-lg border border-dashed border-[var(--bd-read-accent)]/50 p-3 text-center text-xs text-current/55">
             {group === 'css' ? _('reader.themeCssEmpty') : _('reader.themeHighlightEmpty')}
           </div>
         )}
@@ -247,9 +247,9 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
       <SelectChip
         key={id}
         title={name}
-        selected={book ? selected : undefined}
+        selected={selected}
         disabled={disabled}
-        onClick={book ? onSelect : onEdit}
+        onClick={onSelect}
         onContextMenu={(e) => {
           e.preventDefault()
           setContextMenu({
@@ -267,7 +267,7 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
   }
 
   return (
-    <div className="grid gap-3">
+    <div className="flex flex-col divide-y divide-[var(--bd-read-accent)]/35">
       {region(
         'theme',
         _('reader.themeSavedLabel'),
@@ -280,13 +280,7 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
             theme.id,
             theme.name,
             theme.id === selectedThemeId,
-            () => {
-              if (theme.id === fallbackId) {
-                if (!follows) book?.setSelection(null, 'current')
-              } else if (theme.id !== selectedThemeId) {
-                book?.setSelection({ mode: 'theme', themeId: theme.id })
-              }
-            },
+            () => onPickTheme?.(theme.id),
             () => setThemeEditor({ theme, existing: true }),
             {
               onCopy: () =>
@@ -304,26 +298,15 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
           )
         },
         newTheme,
-        book && (book.hasThemeSelection ?? !follows) && (
-          <button
-            type="button"
-            aria-label={_('reader.themeFollowDefault')}
-            title={_('reader.themeFollowDefault')}
-            className={iconButton}
-            onClick={() => book.setSelection(null)}
-          >
-            <ThemeIcon name="follow" size={13} />
-          </button>
-        ),
       )}
       {region(
         'palette',
         _('reader.themePaletteLabel'),
         _('reader.themeNewPalette'),
         palettes,
-        [cards.paletteId],
+        [paletteId],
         (palette) => {
-          const selected = Boolean(book && palette.id === cards.paletteId)
+          const selected = Boolean(palette.id === paletteId)
           const wallpaper = palette.wallpaperAssetId ? wallpapers[palette.wallpaperAssetId] : undefined
           const edit = () => setCardEditor({ edit: { kind: 'palette', card: palette } })
           const isBuiltIn = ['paper', 'cream', 'sepia', 'night'].includes(palette.id)
@@ -336,14 +319,10 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
               wallpaperUrl={wallpaper}
               wallpaperPending={Boolean(palette.wallpaperAssetId) && !wallpaper && !missingWallpapers.includes(palette.wallpaperAssetId!)}
               wallpaperLabel={_('reader.themeWallpaper')}
-              selected={book ? selected : undefined}
-              onClick={
-                book
-                  ? () => {
-                      if (!selected) applyCards({ paletteId: palette.id })
-                    }
-                  : edit
-              }
+              selected={selected}
+              onClick={() => {
+                if (!selected) onPickPalette?.(palette.id)
+              }}
               onContextMenu={(e) => {
                 e.preventDefault()
                 setContextMenu({
@@ -370,13 +349,13 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
         _('reader.themeCssLabel'),
         _('reader.themeNewCss'),
         library.css,
-        cards.cssId ? [cards.cssId] : [],
+        cssId ? [cssId] : [],
         (card) =>
           nameCard(
             card.id,
             card.name,
-            cards.cssId === card.id,
-            () => applyCards({ cssId: cards.cssId === card.id ? null : card.id }),
+            cssId === card.id,
+            () => onSetCss?.(cssId === card.id ? 'off' : 'card', card.id),
             () => setCardEditor({ edit: { kind: 'css', card } }),
             {
               onCopy: () => {
@@ -397,9 +376,9 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
         _('reader.themeHighlightRulesTitle'),
         _('reader.themeNewHighlight'),
         library.highlights,
-        cards.highlightIds,
+        highlightIds,
         (card) => {
-          const selected = cards.highlightIds.includes(card.id)
+          const selected = highlightIds.includes(card.id)
           return nameCard(
             card.id,
             card.name,
@@ -407,7 +386,6 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
             () => toggleHighlight(card.id),
             () => setCardEditor({ edit: { kind: 'highlight', card } }),
             {
-              disabled: Boolean(book && !selected && cards.highlightIds.length >= HIGHLIGHT_LIMITS.maxRules),
               onCopy: () => {
                 const copyCard = {
                   ...card,
@@ -442,10 +420,10 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
         onCopy={(draft) => setThemeEditor({ existing: false, theme: { ...draft, id: localRecordId(), name: uniqueName(draft.name, themeLibraryNames(library, 'theme')) } })}
         onDelete={() => { deleteTheme(themeEditor.theme); setThemeEditor(null) }}
         onExport={() => void exportTheme(themeEditor.theme)}
-        onTrial={bookId ? (draft) => setTrial(bookId, draft ? materializeTheme(library, draft) : null) : undefined} />}
+        onTrial={bookId ? trialTheme : undefined} />}
       {cardEditor && <ThemeEditorDialog key={`${cardEditor.edit.kind}:${cardEditor.edit.card?.id ?? 'new'}`}
         editor={cardEditor.edit} variant={variant} onClose={closeCard} onSave={saveCard}
-        onDelete={!cardEditor.edit.card ? undefined : () => deleteCard(cardEditor.edit)} onTrial={book ? trialCard : undefined} />}
+        onDelete={!cardEditor.edit.card ? undefined : () => deleteCard(cardEditor.edit)} onTrial={bookId ? trialCard : undefined} />}
       {contextMenu && (
         <SmartMenu
           id="theme-card-context-menu"

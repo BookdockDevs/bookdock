@@ -22,7 +22,12 @@ All notable changes to Bookdock are documented here.
 ### Changed
 
 - Floating reader context menus (such as theme cards and preset chips) use a refined high-contrast surface with dual-layer shadows and full-contrast typography, eliminating edge blur and color bleed on light, cream, and parchment reading themes.
-- Reading presets now control typography, layout, and behavior independently of themes. Day and night each have a default theme and can each have a book-specific choice. Picking the current default clears that slot's choice. Restore following clears both choices and keeps the book's layout settings and preset binding.
+- Reading presets now control typography, layout, and behavior only; themes, palettes, custom CSS, and highlight rules always follow the reader's Theme tab and never change when switching presets.
+- The reader Settings tabs are font, layout, display, theme, and behavior. The first four each carry a "for this book" toggle: turning it on captures only the fields you explicitly change for that book, turning it off clears that group, and the other groups keep working. With the toggle off, edits write into the bound reading preset (or the global default), exactly as before.
+- A theme stays selected while the current look matches what it specifies: a highlight-only theme keeps your palette and CSS and stays selected when you change either, as long as its highlight rules remain active and in order. If any component defined by the selected theme stops matching, the theme card loses its selection. Exactly one CSS card applies: the global appearance can follow the theme, be off, or name one card, and a book inherits that or overrides it. Highlight rules layer the theme's rules, then global additions and removals, then the book's, keeping their order.
+- Use the reader's Theme tab to apply themes, palettes, CSS, and highlight rules. Theme and palette edits apply to whichever of day or night is currently active in the reader. App Settings manages the theme library and its imports and exports.
+- The desktop reader sidebar remembers pinned and floating widths separately, so resizing one mode no longer overwrites the other. Switching between pinned and floating modes re-anchors notes and AI conversation scroll positions by visible item (or keeps the AI thread pinned to the bottom), matching the table of contents.
+- The AI assistant panel moves conversation export into the header overflow menu, refines the conversation history popover, and places message actions in a fixed-height row—always visible on the latest reply and fading in on hover or focus for earlier messages—so moving the pointer no longer shifts message bubbles.
 - The sidebar notification bell appears when the account has notification records. Clearing the last record closes the open notification panel and hides the bell.
 - Library batch notifications show how many books were affected when moving books to or from shelves or the trash, hiding them, permanently deleting them, or updating reading status. English notifications for trashing, restoring, and permanently deleting a single book include its title.
 - The TTS service editor and the library create and manage dialogs mark required fields with a red asterisk. TTS credential fields show the mark only while creating a new service, and the library access password shows it when password access is selected.
@@ -36,6 +41,7 @@ All notable changes to Bookdock are documented here.
 ### Upgrade notes
 
 - Existing custom themes are converted into themes with reusable cards, keeping their theme IDs. Appearance follows the new day and night defaults after upgrade, and theme choices previously stored in reading presets are retired.
+- Existing per-book layout overrides and per-book theme choices migrate into the new per-book groups (fonts, layout, display, theme) with their values and rule order kept; a group with stored differences reads as enabled after upgrade.
 - Theme definitions sync with account settings. Wallpaper and CSS image files stay in the current browser. Use a theme ZIP to carry them to another device.
 
 ## [0.8.6] - 2026-11-17
@@ -1405,7 +1411,12 @@ All notable changes to Bookdock are documented here.
 #### 变更
 
 - 优化阅读器浮动右键菜单（主题卡片、阅读预设等）的显示效果：采用微质感高对比卡片底色与双层立体投影，并提升文字图标对比度，解决浅色与羊皮纸等暖色背景下菜单发虚、与底色融为一体的问题。
-- 阅读预设独立管理字体排版、布局和阅读行为。日间和夜间各有一套默认主题，也可以分别为本书指定外观。选中当前时段的默认主题会清除该时段的本书选择。恢复跟随会清除日夜两项选择，保留本书的排版设置和预设绑定。
+- 阅读预设仅管理字体排版、布局和阅读行为；主题、配色、自定义 CSS 与高亮规则始终跟随阅读器的“主题”标签页，切换预设时不再改变外观。
+- 阅读器设置分为字体、布局、显示、主题与行为五个标签页，前四个均提供“仅对本书生效”开关：开启后仅记录在本书中显式修改的字段，关闭则清除该分组的本书覆盖，其余分组互不影响；未开启时，修改直接写入当前绑定的阅读预设（或全局默认）。
+- 只要当前外观仍符合所选主题的设定，主题卡片就会保持选中状态（例如纯高亮主题在调整配色或 CSS 后仍保持选中，只要其高亮规则仍按顺序启用）；若主题定义的任一组成部分不再匹配，则会取消选中。自定义 CSS 同一时间仅生效一张卡片（全局外观可跟随主题、关闭或指定单张卡片，单本书可继承或覆盖）；高亮规则按“主题规则 → 全局增删 → 本书增删”依次叠加并保留顺序。
+- 在阅读器的“主题”标签页中应用主题、配色、CSS 与高亮规则，对主题和配色的调整会作用于当前激活的日间或夜间模式；应用设置页负责主题库的集中管理与导入导出。
+- 桌面端阅读侧栏分别记忆固定与悬浮两种模式下的宽度，调整其中一种不会覆盖另一种；在固定与悬浮之间切换时，笔记与 AI 对话列表会与目录一样按当前可见条目（或 AI 贴底状态）自动重锚滚动位置。
+- 阅读器 AI 助理面板将导出对话收纳进顶栏“更多”菜单、优化会话历史浮层排版，并将消息操作栏改为固定高度行（最新一条回复常驻显示，历史消息在悬停或聚焦时淡入），避免指针移动时气泡上下跳动。
 - 账号有通知记录时，侧栏才显示通知铃铛。清空最后一条通知后，已打开的通知面板会关闭，铃铛随之隐藏。
 - 批量移入或移出书架、移入或移出回收站、隐藏、彻底删除和更新阅读状态时，提示会显示受影响的书籍数量。英文界面的单本书回收、恢复和彻底删除提示会带上书名。
 - 语音服务编辑器和书库创建、管理弹窗会标记必填字段：语音服务密钥仅在新建时显示星号，访问密码在选择密码访问时显示星号。
@@ -1419,6 +1430,7 @@ All notable changes to Bookdock are documented here.
 #### 升级说明
 
 - 现有自定义主题会转换为由可复用卡片组成的主题，并保留原有主题 ID。升级后，外观跟随新的日间和夜间默认设置，阅读预设中原有的主题选择不再生效。
+- 现有的单本书排版覆盖与单本书主题选择会自动迁移至新的单本书分组（字体、布局、显示、主题）中，并保留原有数值与规则顺序；存有差异的分组在升级后会自动处于开启状态。
 - 主题定义随账号设置同步。壁纸和 CSS 引用的图片保存在当前浏览器内，可通过主题 ZIP 带到另一台设备。
 
 ### [0.8.6] - 2026-11-17

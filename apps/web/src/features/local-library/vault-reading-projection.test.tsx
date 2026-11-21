@@ -65,7 +65,7 @@ describe('vault archive and reading projections', () => {
     expect(after.state).toMatchObject({ position, fraction: 0.2, coverage: null })
     expect(await repository.listNotes(first)).toHaveLength(1)
     expect((await repository.getFile(first)).size).toBe(1)
-    expect(await repository.getPreferences(first)).toMatchObject({ viewSettings: { fontSize: 26 }, coverageIntervals: [] })
+    expect(await repository.getPreferences(first)).toMatchObject({ font: { fontSize: 26 }, coverageIntervals: [] })
     expect((await repository.readReadingBookSnapshot(ref('Second'))).ledger.sessions).toHaveLength(1)
     await expect(repository.addReadingEntry({ capture: before.ledger.sessions[0]!.capture, finished: false })).resolves.toBeNull()
     await repository.addReadingEntry({ capture: { ...before.ledger.sessions[0]!.capture, requestId: 'new-time' }, finished: false })

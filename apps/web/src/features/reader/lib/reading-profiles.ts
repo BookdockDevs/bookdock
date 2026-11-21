@@ -12,12 +12,22 @@
 // The global snapshot adds theme defaults to the settings that reading
 // presets can capture: fonts, layout, reader chrome and reading behavior.
 const READING_THEME_KEYS = ['readingThemeMode', 'readingThemeId', 'lightReadingThemeId', 'darkReadingThemeId'] as const
+// Appearance layers are global-only too: presets never capture them, so
+// switching presets keeps the current appearance (theme/palette/CSS/highlights).
+const READING_APPEARANCE_KEYS = ['lightPaletteId', 'darkPaletteId', 'appearanceCssMode', 'appearanceCssId', 'highlightAdds', 'highlightRemoves'] as const
+
 export const READING_PROFILE_DEFAULTS = {
   cleanReading: false,
   readingThemeMode: 'system',
   readingThemeId: 'night',
   lightReadingThemeId: 'paper',
   darkReadingThemeId: 'night',
+  lightPaletteId: null,
+  darkPaletteId: null,
+  appearanceCssMode: 'follow',
+  appearanceCssId: null,
+  highlightAdds: [],
+  highlightRemoves: [],
   fontFamily: 'sans-serif',
   cjkFontFamily: 'sans-serif',
   fontSize: 22,
@@ -67,6 +77,7 @@ export const READING_PROFILE_DEFAULTS = {
 export const READING_PROFILE_KEYS = [
   'cleanReading',
   ...READING_THEME_KEYS,
+  ...READING_APPEARANCE_KEYS,
   'fontFamily',
   'cjkFontFamily',
   'fontSize',
@@ -117,11 +128,14 @@ export type ReadingProfileKey = (typeof READING_PROFILE_KEYS)[number]
 
 export type ReadingSnapshot = Record<ReadingProfileKey, unknown>
 
-type ReadingPresetKey = Exclude<ReadingProfileKey, (typeof READING_THEME_KEYS)[number]>
+/** Keys the global snapshot owns exclusively; presets never capture them. */
+const READING_GLOBAL_ONLY_KEYS: ReadonlySet<string> = new Set([...READING_THEME_KEYS, ...READING_APPEARANCE_KEYS])
+
+type ReadingPresetKey = Exclude<ReadingProfileKey, (typeof READING_THEME_KEYS)[number] | (typeof READING_APPEARANCE_KEYS)[number]>
 type ReadingPresetSnapshot = Record<ReadingPresetKey, unknown>
 
 function isReadingPresetKey(key: ReadingProfileKey): key is ReadingPresetKey {
-  return !READING_THEME_KEYS.some((themeKey) => key === themeKey)
+  return !READING_GLOBAL_ONLY_KEYS.has(key)
 }
 
 const READING_PRESET_KEYS = READING_PROFILE_KEYS.filter(isReadingPresetKey)

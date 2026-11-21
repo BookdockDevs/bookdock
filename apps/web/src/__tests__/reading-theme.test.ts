@@ -173,9 +173,11 @@ describe('phase-3 highlight rules', () => {
     expect(resolveEffectiveHighlightRules(trial, themed)).toEqual([rules[0]])
   })
 
-  it('caps and drops malformed synced rule payloads', () => {
+  it('keeps the full rule count and drops malformed synced rule payloads', () => {
     const flooded = Array.from({ length: 100 }, (_, i) => ({ id: `r${i}`, name: 'x', pattern: 'x', enabled: true }))
-    expect(sanitizeHighlightRulesField(flooded)).toHaveLength(64)
+    expect(sanitizeHighlightRulesField(flooded)).toHaveLength(100)
+    const malformed = [{ id: '', name: 'x', pattern: 'x', enabled: true }, { id: 'ok', name: 'x', pattern: '', enabled: true }]
+    expect(sanitizeHighlightRulesField(malformed)).toEqual([])
     expect(sanitizeHighlightRulesField('not-an-array')).toEqual([])
   })
 

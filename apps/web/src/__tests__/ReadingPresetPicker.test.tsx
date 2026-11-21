@@ -31,12 +31,20 @@ function contextWith(boundPresetId: string | null, setBoundPreset = vi.fn()): Vi
       pageColumns: 2,
       columnGap: 5,
     },
-    perBookActive: false,
-    setPerBookActive: vi.fn(),
-    updateSetting: vi.fn(),
+    groups: { font: { fontSize: 32 } },
+    setGroupEnabled: vi.fn(),
+    updateField: vi.fn(),
+    bookDeviceFonts: undefined,
+    setBookDeviceFont: vi.fn(),
     boundPresetId,
     setBoundPreset,
-    setThemeSelection: vi.fn(),
+    appearance: {
+      candidateThemeId: 'paper', selectedThemeId: null, paletteId: null, effectivePaletteId: 'paper', cssId: null, highlightIds: [],
+    },
+    pickTheme: vi.fn(),
+    pickPalette: vi.fn(),
+    setCss: vi.fn(),
+    toggleHighlight: vi.fn(),
   }
 }
 
@@ -62,7 +70,7 @@ describe('ReadingPresetPicker', () => {
   it('shows the entry without a readable config and saves the first preset from the current layout', () => {
     useUiStore.setState({ readingConfig: '{}', fontSize: 28 })
     render(
-      <ViewSettingsContext.Provider value={{ ...contextWith(null), perBookDiff: { fontSize: 32 } }}>
+      <ViewSettingsContext.Provider value={contextWith(null)}>
         <ReadingPresetPicker />
       </ViewSettingsContext.Provider>,
     )

@@ -3,6 +3,7 @@ import type { FontPreferences, HighlightRuleDef, TtsEngine, SelectionToolbarActi
 import { DEFAULT_SELECTION_TOOLBAR_ORDER, SELECTION_TOOLBAR_ACTION_KEYS } from '@bookdock/shared'
 import type { AutoReadingMode, FontFamily, ReadingMode, IdeaDisplayMode, ChineseConversion, ContinuousScroll, ClickAreaMode, MarginalField, NavTab, ParagraphStyle } from '../features/reader/types'
 import {
+  deriveReadingTheme,
   findReadingTheme,
   isReadingThemeMode,
   readingThemeSlot,
@@ -18,6 +19,7 @@ import {
   type ReadingTone,
   type SystemTheme,
 } from '../lib/reading-theme'
+import { paletteColorsOf, resolveAppearance, themeApplication, type GlobalAppearanceState } from '../features/reading-theme/appearance'
 import { isDark } from '../lib/color'
 import {
   CONFIG_STORAGE_KEY,
@@ -111,6 +113,16 @@ interface UiState {
   readingThemeId: string
   lightReadingThemeId: string
   darkReadingThemeId: string
+  /** Global appearance layers; per-slot palette null = follow the theme's own. */
+  lightPaletteId: string | null
+  darkPaletteId: string | null
+  appearanceCssMode: 'follow' | 'off' | 'card'
+  appearanceCssId: string | null
+  highlightAdds: string[]
+  highlightRemoves: string[]
+  setGlobalSlotPalette: (slot: ReadingThemeSlot, paletteId: string | null) => void
+  setGlobalAppearanceCss: (mode: 'follow' | 'off' | 'card', cssId?: string | null) => void
+  setGlobalHighlightLayers: (layers: { adds: string[]; removes: string[] }) => void
   customThemes: CustomReadingTheme[]
   themeLibrary: ReadingThemeLibrary
   readerThemeComposition: CustomReadingTheme | null
@@ -280,6 +292,8 @@ interface UiState {
   // Reader sidebar prefs
   toolbarLocked: boolean
   sidebarWidth: number
+  pinnedSidebarWidth: number
+  floatingSidebarWidth: number
   /** Last explicit open/closed choice for the desktop sidebar (pinned or floating);
    *  seeds the sidebar on book open. Device-local like toolbarLocked. */
   sidebarRememberedOpen: boolean
@@ -296,7 +310,10 @@ interface UiState {
   setSystemTheme: (t: SystemTheme) => void
   setReadingThemeMode: (mode: ReadingThemeMode) => void
   cycleReadingThemeMode: () => void
-  setReadingThemeId: (id: string) => void
+  setReadingThemeId: (id: string, slot?: ReadingThemeSlot) => void
+  /** Key-based global write for one reading setting (dual-backing keys follow
+   *  the given effective mode; defaults to the store's own). */
+  setReadingSetting: (key: string, value: number | boolean | string, mode?: ReadingMode) => void
   /** Save (create/update) a custom theme definition; never changes the selection */
   saveCustomTheme: (theme: CustomReadingTheme) => void
   deleteCustomTheme: (id: string) => void
@@ -304,9 +321,8 @@ interface UiState {
   setReaderThemeOverride: (bookKey: string | null, themeId: string | null, composition?: CustomReadingTheme | null) => void
   /** Editor trial draft for the open book; bookKey guards a stale write */
   setReaderThemeTrial: (bookKey: string | null, draft: CustomReadingTheme | null) => void
-  /** Write the global default theme (never the bound/active preset snapshot) */
-  setGlobalReadingTheme: (themeId: string) => void
-  setGlobalDefaultTheme: (mode: 'light' | 'dark', themeId: string) => void
+  /** Apply one theme to the current slot's global appearance */
+  setGlobalReadingTheme: (themeId: string, slot?: ReadingThemeSlot) => void
   /** Write the theme keys of one preset's snapshot */
   /** Replace the whole list (settings sync); persists without theme side effects */
   setCustomThemes: (themes: CustomReadingTheme[]) => void
@@ -386,25 +402,34 @@ export function selectReaderThemeOverride(state: UiState): CustomReadingTheme | 
   return null
 }
 
-/** Effective reading theme: override (trial/仅本书) shadows the global chain. */
+const effectiveThemeCache = new WeakMap<UiState, ReadingTheme>()
+
+/** Effective reading theme: override (trial/本书组成) shadows the global chain. */
 export function selectEffectiveReadingTheme(state: UiState): ReadingTheme {
-  return resolveEffectiveReadingTheme(selectReaderThemeOverride(state), selectEffectiveReadingThemeId(state), state.customThemes)
+  const cached = effectiveThemeCache.get(state)
+  if (cached) return cached
+  const override = selectReaderThemeOverride(state)
+  const value = override
+    ? resolveEffectiveReadingTheme(override, selectEffectiveReadingThemeId(state), state.customThemes)
+    : deriveReadingTheme(paletteColorsOf(state.themeLibrary, selectGlobalAppearance(state).effectivePaletteId, readingThemeSlot(state.readingThemeMode, state.systemTheme)))
+  effectiveThemeCache.set(state, value)
+  return value
 }
 
 export function selectReadingTone(state: UiState): ReadingTone {
   return isDark(selectEffectiveReadingTheme(state).bg) ? 'bd-tone-dark' : 'bd-tone-light'
 }
 
-/** The effective theme whose CSS the book follows (override wins over chain). */
+/** The effective appearance as a full definition (CSS/wallpaper/rules). */
 function selectCssFollowTheme(state: UiState): CustomReadingTheme | null {
   const override = selectReaderThemeOverride(state)
   if (override) return override
-  const fallbackId = selectEffectiveReadingThemeId(state)
-  const found = findReadingTheme(fallbackId, state.customThemes)
-  if (found) return found
-  const fromLib = findThemeCombination(state.themeLibrary, fallbackId)
-  if (fromLib) return materializeTheme(state.themeLibrary, fromLib)
-  return null
+  const resolved = selectGlobalAppearance(state)
+  return materializeTheme(state.themeLibrary, {
+    id: 'global-appearance',
+    name: '',
+    cards: { paletteId: resolved.effectivePaletteId, cssId: resolved.cssId, highlightIds: resolved.highlightIds },
+  })
 }
 
 /** The effective theme as a full definition (phase-4 asset fields ride along). */
@@ -412,10 +437,43 @@ export function selectEffectiveCustomTheme(state: UiState): CustomReadingTheme |
   return selectCssFollowTheme(state)
 }
 
+// Selector results are fresh objects; zustand's snapshot comparison would
+// loop on them, so each snapshot caches its own result (state is immutable).
+const globalAppearanceStateCache = new WeakMap<UiState, GlobalAppearanceState>()
+
+/** Global appearance state projected into the resolver's input shape. */
+export function selectGlobalAppearanceState(state: UiState): GlobalAppearanceState {
+  const cached = globalAppearanceStateCache.get(state)
+  if (cached) return cached
+  const value: GlobalAppearanceState = {
+    lightReadingThemeId: state.lightReadingThemeId,
+    darkReadingThemeId: state.darkReadingThemeId,
+    lightPaletteId: state.lightPaletteId,
+    darkPaletteId: state.darkPaletteId,
+    cssMode: state.appearanceCssMode,
+    cssId: state.appearanceCssId,
+    highlightAdds: state.highlightAdds,
+    highlightRemoves: state.highlightRemoves,
+  }
+  globalAppearanceStateCache.set(state, value)
+  return value
+}
+
+const globalAppearanceCache = new WeakMap<UiState, ReturnType<typeof resolveAppearance>>()
+
+/** The resolved global appearance for the slot that is on screen. */
+export function selectGlobalAppearance(state: UiState) {
+  const cached = globalAppearanceCache.get(state)
+  if (cached) return cached
+  const value = resolveAppearance(state.themeLibrary, selectGlobalAppearanceState(state), undefined, readingThemeSlot(state.readingThemeMode, state.systemTheme))
+  globalAppearanceCache.set(state, value)
+  return value
+}
+
 /**
  * Effective custom CSS for the open book: the editor's trial carries CSS with
- * its colors; otherwise the book follows the effective theme chain. Colors
- * never route through here — they stay on the phase-1 theme resolution.
+ * its colors; otherwise the book follows the resolved appearance chain (whose
+ * global layers — css mode, per-book composition — are already baked in).
  */
 export function selectEffectiveReadingCss(state: UiState): EffectiveThemeCss {
   return resolveEffectiveThemeCss(state.readerThemeTrial, selectCssFollowTheme(state))
@@ -423,7 +481,7 @@ export function selectEffectiveReadingCss(state: UiState): EffectiveThemeCss {
 
 /**
  * Effective highlight rules for the open book: the editor's trial carries its
- * own rules; otherwise the book follows the effective theme chain.
+ * own rules; otherwise the book follows the resolved appearance chain.
  */
 export function selectEffectiveHighlightRules(state: UiState): HighlightRuleDef[] {
   return resolveEffectiveHighlightRules(state.readerThemeTrial, selectCssFollowTheme(state))
@@ -609,6 +667,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   readingThemeId: getInitial<string>('bd-read-theme', 'paper'),
   lightReadingThemeId: getInitial<string>('bd-read-theme-light', 'paper'),
   darkReadingThemeId: 'night',
+  lightPaletteId: null,
+  darkPaletteId: null,
+  appearanceCssMode: 'follow',
+  appearanceCssId: null,
+  highlightAdds: [],
+  highlightRemoves: [],
   themeLibrary: initialThemeLibrary,
   customThemes: initialThemeLibrary.themes.map((theme) => materializeTheme(initialThemeLibrary, theme)),
   readerThemeComposition: null,
@@ -710,7 +774,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   sortOrder: getInitial<string>('bd-sort-order', 'desc') === 'asc' ? ('asc' as const) : ('desc' as const),
   view: getInitial<string>('bd-library-view', 'grid') === 'list' ? ('list' as const) : ('grid' as const),
   toolbarLocked: getInitialBoolean('bd-reader-toolbar-locked', true),
-  sidebarWidth: getInitialNumber('bd-sidebar-width', 288, 200, 640),
+  pinnedSidebarWidth: getInitialNumber('bd-sidebar-width-pinned', getInitialNumber('bd-sidebar-width', 288, 200, 640), 200, 640),
+  floatingSidebarWidth: getInitialNumber('bd-sidebar-width-floating', getInitialNumber('bd-sidebar-width', 288, 200, 640), 200, 640),
+  sidebarWidth: getInitialBoolean('bd-reader-toolbar-locked', true)
+    ? getInitialNumber('bd-sidebar-width-pinned', getInitialNumber('bd-sidebar-width', 288, 200, 640), 200, 640)
+    : getInitialNumber('bd-sidebar-width-floating', getInitialNumber('bd-sidebar-width', 288, 200, 640), 200, 640),
   ideaSidebarWidth: getInitialNumber('bd-idea-sidebar-width', 380, 260, 720),
   sidebarRememberedOpen: getInitialBoolean('bd-reader-sidebar-open', true),
   navTabRemembered: getInitialNavTab(),
@@ -753,7 +821,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setToolbarLocked: (toolbarLocked) => {
     setStorage('bd-reader-toolbar-locked', String(toolbarLocked))
-    set({ toolbarLocked })
+    const sidebarWidth = toolbarLocked ? get().pinnedSidebarWidth : get().floatingSidebarWidth
+    set({ toolbarLocked, sidebarWidth })
   },
   setSidebarRememberedOpen: (sidebarRememberedOpen) => {
     setStorage('bd-reader-sidebar-open', String(sidebarRememberedOpen))
@@ -764,8 +833,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ navTabRemembered })
   },
   setSidebarWidth: (sidebarWidth) => {
-    setStorage('bd-sidebar-width', String(sidebarWidth))
-    set({ sidebarWidth })
+    if (get().toolbarLocked) {
+      setStorage('bd-sidebar-width-pinned', String(sidebarWidth))
+      set({ sidebarWidth, pinnedSidebarWidth: sidebarWidth })
+    } else {
+      setStorage('bd-sidebar-width-floating', String(sidebarWidth))
+      set({ sidebarWidth, floatingSidebarWidth: sidebarWidth })
+    }
   },
   setIdeaSidebarWidth: (ideaSidebarWidth) => {
     setStorage('bd-idea-sidebar-width', String(ideaSidebarWidth))
@@ -778,6 +852,61 @@ export const useUiStore = create<UiState>((set, get) => ({
   setAutoMarkSelection: (autoMarkSelection) => {
     setStorage('bd-auto-mark-selection', String(autoMarkSelection))
     set({ autoMarkSelection })
+  },
+  // Key-based global write used by the reader panel (without a per-book group)
+  // and by the reader's global path. Dual-backing keys follow the given
+  // effective reading mode, which may differ from the store's own; the flat
+  // mirror only follows the store's own mode.
+  setReadingSetting: (key, value, modeOverride) => {
+    const mode = modeOverride ?? get().readingMode
+    switch (key) {
+      case 'fontFamily': get().setFontFamily(value as FontFamily); break
+      case 'cjkFontFamily': get().setCjkFontFamily(value as FontFamily); break
+      case 'fontSize': get().setFontSize(value as number); break
+      case 'fontWeight': get().setFontWeight(value as number); break
+      case 'overrideBookFont': get().setOverrideBookFont(value as boolean); break
+      case 'lineHeight': get().setLineHeight(value as number); break
+      case 'paragraphSpacing': get().setParagraphSpacing(value as number); break
+      case 'letterSpacing': get().setLetterSpacing(value as number); break
+      case 'indent': get().setIndent(value as number); break
+      case 'textAlignJustify': get().setTextAlignJustify(value as boolean); break
+      case 'chapterTitleAlign': get().setChapterTitleAlign(value as ParagraphStyle['chapterTitleAlign']); break
+      case 'chapterTitleSize': get().setChapterTitleSize(value as number); break
+      case 'chapterTitleTopSpacing': get().setChapterTitleTopSpacing(value as number); break
+      case 'chapterTitleBottomSpacing': get().setChapterTitleBottomSpacing(value as number); break
+      case 'overrideBookLayout': get().setOverrideBookLayout(value as boolean); break
+      case 'pageWidth':
+      case 'horizontalPadding':
+      case 'verticalPadding': {
+        const v = value as number
+        const flatKey = key as 'pageWidth' | 'horizontalPadding' | 'verticalPadding'
+        const backingKey = mode === 'page'
+          ? `page${flatKey.charAt(0).toUpperCase()}${flatKey.slice(1)}` as 'pagePageWidth' | 'pageHorizontalPadding' | 'pageVerticalPadding'
+          : `scroll${flatKey.charAt(0).toUpperCase()}${flatKey.slice(1)}` as 'scrollPageWidth' | 'scrollHorizontalPadding' | 'scrollVerticalPadding'
+        const patch: Partial<Record<string, number>> = { [backingKey]: v }
+        if (mode === get().readingMode) patch[flatKey] = v
+        useUiStore.setState(patch)
+        break
+      }
+      case 'readingMode': get().setReadingMode(value as ReadingMode); break
+      case 'pageColumns': get().setPageColumns(value as number); break
+      case 'columnGap': get().setColumnGap(value as number); break
+      case 'continuousScroll': get().setContinuousScroll(value as ContinuousScroll); break
+      case 'pageAnimation': get().setPageAnimation(value as boolean); break
+      case 'chineseConversion': get().setChineseConversion(value as ChineseConversion); break
+      case 'cleanReading': get().setCleanReading(value as boolean); break
+      case 'showHeader': get().setShowHeader(value as boolean); break
+      case 'headerLeft': get().setHeaderLeft(value as MarginalField); break
+      case 'headerCenter': get().setHeaderCenter(value as MarginalField); break
+      case 'headerRight': get().setHeaderRight(value as MarginalField); break
+      case 'showFooter': get().setShowFooter(value as boolean); break
+      case 'footerLeft': get().setFooterLeft(value as MarginalField); break
+      case 'footerCenter': get().setFooterCenter(value as MarginalField); break
+      case 'footerRight': get().setFooterRight(value as MarginalField); break
+      case 'marginalFontSize': get().setMarginalFontSize(value as number); break
+      case 'showFriendIdeas': get().setShowFriendIdeas(value as boolean); break
+      case 'ideaDisplayMode': get().setIdeaDisplayMode(value as IdeaDisplayMode); break
+    }
   },
   setClickAreaMode: (clickAreaMode) => {
     setStorage('bd-click-area-mode', clickAreaMode)
@@ -920,11 +1049,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   // A theme pick is a choice *inside* the current tone, not a mode switch:
   // with the reader following the system, a daytime pick must stay on the
   // daytime slot so the device flipping to dark still lands on the night slot.
-  setReadingThemeId: (readingThemeId) => {
+  setReadingThemeId: (readingThemeId, slotOverride) => {
     const state = get()
-    const slot = readingThemeSlot(state.readingThemeMode, state.systemTheme)
-    const patch: Partial<UiState> = { readingThemeId }
-    setStorage('bd-read-theme', readingThemeId)
+    const slot = slotOverride ?? readingThemeSlot(state.readingThemeMode, state.systemTheme)
+    // The flat id mirrors the slot that is actually on screen; an explicit
+    // other-slot write must not move it.
+    const mirrorFlat = slot === readingThemeSlot(state.readingThemeMode, state.systemTheme)
+    const patch: Partial<UiState> = mirrorFlat ? { readingThemeId } : {}
+    if (mirrorFlat) setStorage('bd-read-theme', readingThemeId)
     if (slot === 'light') {
       setStorage('bd-read-theme-light', readingThemeId)
       patch.lightReadingThemeId = readingThemeId
@@ -951,31 +1083,38 @@ export const useUiStore = create<UiState>((set, get) => ({
       ? { readerThemeTrialBookKey: null, readerThemeTrial: null }
       : { readerThemeTrialBookKey: bookKey, readerThemeTrial: draft })
   },
-  // Slot-scoped like setReadingThemeId, but folded into the target snapshot
-  // instead of the resolved one, so "设为全局默认" writes global even while a
-  // preset is active.
-  setGlobalReadingTheme: (themeId) => {
-    const cfg = parseReadingConfig(get().readingConfig)
-    if (!cfg) {
-      // No config blob yet (a fresh account whose readingConfig never seeded):
-      // fall back to the flat store write so the choice still lands somewhere.
-      get().setReadingThemeId(themeId)
-      return
-    }
-    persistReadingConfig(foldThemeKeys(cfg, themeId, null))
-    applyResolutionFlat()
-  },
-  setGlobalDefaultTheme: (mode, themeId) => {
+  // "设为全局默认" for one theme: apply it to the current slot's global
+  // appearance — the slot default id moves, the palette follows the theme when
+  // it has one, and a theme-defined CSS resumes following.
+  setGlobalReadingTheme: (themeId, slotOverride) => {
     const state = get()
-    if (!state.themeLibrary.themes.some(({ id }) => id === themeId)) return
-    const config = parseReadingConfig(state.readingConfig) ?? emptyConfig(pickReadingSnapshot(state))
-    const key = mode === 'light' ? 'lightReadingThemeId' : 'darkReadingThemeId'
-    let next = foldReadingChange(config, key, themeId, null)
-    if (themeSlot(config.global.readingThemeMode, state.systemTheme) === key) {
-      next = foldReadingChange(next, 'readingThemeId', themeId, null)
+    const theme = findThemeCombination(state.themeLibrary, themeId)
+    if (!theme) return
+    const slot = slotOverride ?? readingThemeSlot(state.readingThemeMode, state.systemTheme)
+    const resolved = resolveAppearance(state.themeLibrary, selectGlobalAppearanceState(state), undefined, slot)
+    const changes = themeApplication(theme, resolved, state.appearanceCssMode === 'follow', {
+      adds: state.highlightAdds, removes: state.highlightRemoves,
+    })
+    state.setReadingThemeId(themeId, slot)
+    const patch: Partial<UiState> = {
+      [slot === 'dark' ? 'darkPaletteId' : 'lightPaletteId']: theme.cards.paletteId ? null : resolved.effectivePaletteId,
+      highlightAdds: changes.highlights?.adds ?? [],
+      highlightRemoves: changes.highlights?.removes ?? [],
     }
-    persistReadingConfig(next)
-    applyResolutionFlat()
+    if (changes.css) {
+      patch.appearanceCssMode = changes.css.mode
+      patch.appearanceCssId = changes.css.cssId ?? null
+    }
+    set(patch)
+  },
+  setGlobalSlotPalette: (slot, paletteId) => {
+    set(slot === 'dark' ? { darkPaletteId: paletteId } : { lightPaletteId: paletteId })
+  },
+  setGlobalAppearanceCss: (mode, cssId = null) => {
+    set({ appearanceCssMode: mode, appearanceCssId: mode === 'card' ? cssId : null })
+  },
+  setGlobalHighlightLayers: (layers) => {
+    set({ highlightAdds: layers.adds, highlightRemoves: layers.removes })
   },
   deleteCustomTheme: (id) => {
     const library = get().themeLibrary
@@ -1193,9 +1332,9 @@ export const useUiStore = create<UiState>((set, get) => ({
     const current = pickReadingSnapshot(state)
     const cfg = parseReadingConfig(state.readingConfig) ?? emptyConfig(current)
     // Creation activates immediately: the snapshot is picked from the current
-    // values, so the flat fields stay as-is and only the active pointer moves.
-    // An active 仅本书 diff is overlaid key-by-key so the preset captures the
-    // effective (WYSIWYG) values; per-book edits never touch the config itself.
+    // values and only the active pointer moves. An active 仅本书 diff is
+    // overlaid key-by-key so the preset captures the effective (WYSIWYG)
+    // values; per-book edits never touch the config itself.
     const snapshot = { ...current }
     if (perBookOverlay) {
       for (const [key, value] of Object.entries(perBookOverlay)) {
@@ -1204,9 +1343,15 @@ export const useUiStore = create<UiState>((set, get) => ({
         }
       }
     }
+    normalizeModeMirrors(snapshot)
     const { config, preset } = createPreset(cfg, name.trim(), snapshot)
     persistReadingConfig(config)
     persistActivePresetId(preset.id)
+    // The overlaid snapshot can differ from the flat fields the store still
+    // holds, so re-resolve: with the book groups later disabled the preset's
+    // captured values must be what is actually applied, not the pre-creation
+    // global ones.
+    get().applyReadingResolution()
   },
   renameReadingPreset: (id, name) => {
     const cfg = parseReadingConfig(get().readingConfig)
@@ -1266,6 +1411,12 @@ export const useUiStore = create<UiState>((set, get) => ({
     useUiStore.setState({
       fontPreferences: {},
       fontOrder: [],
+      lightPaletteId: null,
+      darkPaletteId: null,
+      appearanceCssMode: 'follow',
+      appearanceCssId: null,
+      highlightAdds: [],
+      highlightRemoves: [],
       coverFit: 'crop',
       coverRatio: '2:3',
       readingTimerMode: 'auto',
@@ -1314,26 +1465,26 @@ function persistActivePresetId(id: string | null) {
 // Resolution chain: the open book's bound preset wins over the device active;
 // dangling ids fall back (a binding whose preset was deleted resolves to the
 // device active, a dangling active to the global config).
-// Fold a theme selection into the resolved target: null = global snapshot, a
-// preset id = that preset's snapshot. The pick only fills the slot of the tone
-// the reader is in; the mode is left alone, since choosing a scheme is not the
-// same decision as locking the reader to day or night.
-function foldThemeKeys(cfg: ReadingConfig, themeId: string, targetId: string | null): ReadingConfig {
-  const state = useUiStore.getState()
-  const slot = readingThemeSlot(state.readingThemeMode, state.systemTheme)
-  const slotKey = slot === 'dark' ? 'darkReadingThemeId' : 'lightReadingThemeId'
-  const next = foldReadingChange(cfg, slotKey, themeId, targetId)
-  return foldReadingChange(next, 'readingThemeId', themeId, targetId)
-}
-
-function themeSlot(mode: unknown, systemTheme: SystemTheme): 'lightReadingThemeId' | 'darkReadingThemeId' {
-  return mode === 'dark' || (mode === 'system' && systemTheme === 'dark') ? 'darkReadingThemeId' : 'lightReadingThemeId'
-}
-
 function resolvedTargetId(cfg: ReadingConfig, state: { boundPresetId: string | null; activePresetId: string | null }): string | null {
   if (state.boundPresetId && cfg.presets.some((p) => p.id === state.boundPresetId)) return state.boundPresetId
   if (state.activePresetId && cfg.presets.some((p) => p.id === state.activePresetId)) return state.activePresetId
   return null
+}
+
+// The page-geometry mirrors (`pageWidth` / `horizontalPadding` /
+// `verticalPadding`) must reflect whichever mode their snapshot resolves in.
+// A snapshot captured under another mode (per-book overlay, older config)
+// carries the other mode's mirror, and a later mode round-trip would write
+// that stale mirror into the surviving backing, so both capture and
+// resolution re-derive the mirrors from the mode's own backings.
+function normalizeModeMirrors(snapshot: Record<string, unknown>): void {
+  const mode = snapshot.readingMode === 'page' ? 'page' : 'scroll'
+  const mirrorOf: Record<string, string> = mode === 'page'
+    ? { pageWidth: 'pagePageWidth', horizontalPadding: 'pageHorizontalPadding', verticalPadding: 'pageVerticalPadding' }
+    : { pageWidth: 'scrollPageWidth', horizontalPadding: 'scrollHorizontalPadding', verticalPadding: 'scrollVerticalPadding' }
+  for (const [mirror, backing] of Object.entries(mirrorOf)) {
+    if (snapshot[backing] !== undefined) snapshot[mirror] = snapshot[backing]
+  }
 }
 
 // Switch the flat profile-key fields to the resolved snapshot, writing only
@@ -1343,7 +1494,8 @@ function applyResolutionFlat() {
   const state = useUiStore.getState()
   const cfg = parseReadingConfig(state.readingConfig)
   if (!cfg) return
-  const snapshot = resolveSnapshot(cfg, resolvedTargetId(cfg, state))
+  const snapshot = { ...resolveSnapshot(cfg, resolvedTargetId(cfg, state)) }
+  normalizeModeMirrors(snapshot as Record<string, unknown>)
   const flat: Record<string, unknown> = {}
   for (const key of READING_PROFILE_KEYS) {
     // A stored value that is not a valid mode (a config written by an older

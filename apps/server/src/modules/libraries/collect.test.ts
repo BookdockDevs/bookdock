@@ -734,8 +734,8 @@ describe('add-to-private (7.x)', () => {
 
     // Reader settings belong to the member, while palette/content edits remain
     // on the shared revision and are still forbidden for a B.
-    expect(updateReaderBookSettings(memberId, city.bookVersionId, { viewSettings: { fontSize: 20 } }))
-      .toEqual({ viewSettings: { fontSize: 20 } })
+    expect(updateReaderBookSettings(memberId, city.bookVersionId, { font: { fontSize: 20 } }))
+      .toEqual({ font: { fontSize: 20 } })
     await expect(updateBook(memberId, city.bookVersionId, { coverPaletteId: 'warm' as never }))
       .rejects.toMatchObject({ code: 'FORBIDDEN' })
     expect(db.select().from(schema.contentRevisions)

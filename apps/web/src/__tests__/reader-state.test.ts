@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { READER_SESSION_ID, useReaderState } from '../features/reader/state/reader-state'
+import { captureScrollAnchor, READER_SESSION_ID, restoreScrollAnchor, useReaderState } from '../features/reader/state/reader-state'
 
 describe('reader-state resetForBook', () => {
   beforeEach(() => {
@@ -82,5 +82,45 @@ describe('reader-state resetForBook', () => {
     expect(useReaderState.getState().currentChapter).toBeNull()
     expect(useReaderState.getState().currentChapterHref).toBeNull()
     expect(useReaderState.getState().currentChapterIndex).toBeNull()
+  })
+
+  it('captures and restores scroll anchors across layout height changes', () => {
+    const container = document.createElement('div')
+    Object.defineProperty(container, 'clientHeight', { value: 200, configurable: true })
+    container.getBoundingClientRect = () => ({ top: 100, bottom: 300, left: 0, right: 200, width: 200, height: 200, x: 0, y: 100, toJSON: () => ({}) })
+
+    const itemA = document.createElement('div')
+    itemA.dataset.noteId = 'note-a'
+    itemA.getBoundingClientRect = () => ({ top: 60, bottom: 130, left: 0, right: 200, width: 200, height: 70, x: 0, y: 60, toJSON: () => ({}) })
+
+    const itemB = document.createElement('div')
+    itemB.dataset.noteId = 'note-b'
+    itemB.getBoundingClientRect = () => ({ top: 140, bottom: 210, left: 0, right: 200, width: 200, height: 70, x: 0, y: 140, toJSON: () => ({}) })
+
+    container.append(itemA, itemB)
+
+    const anchor = captureScrollAnchor(container, '[data-note-id]', 'noteId', 0)
+    expect(anchor).toEqual({ id: 'note-b', offset: 40 })
+
+    // Simulate narrower/wider layout shifting itemB down by 25px after setting savedTop
+    itemB.getBoundingClientRect = () => ({ top: 165, bottom: 255, left: 0, right: 200, width: 200, height: 90, x: 0, y: 165, toJSON: () => ({}) })
+    restoreScrollAnchor(container, 120, itemB, anchor?.offset)
+    expect(container.scrollTop).toBe(145)
+  })
+
+  it('persists anchorId and pinnedToBottom for notes and ai scroll positions', () => {
+    useReaderState.getState().setSidebarScrollPosition('book-1', 'notes', {
+      top: 120,
+      anchorId: 'note-2',
+      anchorOffset: 36,
+    })
+    useReaderState.getState().setSidebarScrollPosition('book-1', 'ai', {
+      top: 500,
+      pinnedToBottom: true,
+    })
+    expect(useReaderState.getState().sidebarScrollPositions['book-1']).toEqual({
+      notes: { top: 120, anchorId: 'note-2', anchorOffset: 36, sessionId: READER_SESSION_ID },
+      ai: { top: 500, pinnedToBottom: true, sessionId: READER_SESSION_ID },
+    })
   })
 })

@@ -1,7 +1,11 @@
 import { and, eq, ne, sql } from 'drizzle-orm'
 
-import { readerBookSettingsSchema } from '@bookdock/shared'
-import type { ReaderBookSettings, ReadingThemeSelectionState, ViewSettings } from '@bookdock/shared'
+import {
+  applyReaderBookSettingsPatch,
+  migrateLegacyReaderBookSettings,
+  readerBookSettingsSchema,
+} from '@bookdock/shared'
+import type { ReaderBookSettings, ReaderBookSettingsPatch } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
 import { contentRevisions, libraries, libraryBookVersions, settings } from '../../db/schema'
@@ -21,12 +25,7 @@ function storedSettings(userId: string, bookId: string): ReaderBookSettings | nu
   if (!row) return null
   const parsed = readerBookSettingsSchema.safeParse(row.value)
   if (!parsed.success) return null
-  return {
-    ...(parsed.data.viewSettings !== undefined && parsed.data.viewSettings !== null ? { viewSettings: parsed.data.viewSettings } : {}),
-    ...(parsed.data.boundPresetId !== undefined && parsed.data.boundPresetId !== null ? { boundPresetId: parsed.data.boundPresetId } : {}),
-    ...(parsed.data.themeSelection ? { themeSelection: parsed.data.themeSelection } : {}),
-    ...(parsed.data.readingThemeId !== undefined && parsed.data.readingThemeId !== null ? { readingThemeId: parsed.data.readingThemeId } : {}),
-  }
+  return migrateLegacyReaderBookSettings(parsed.data)
 }
 
 function saveSettings(userId: string, bookId: string, value: ReaderBookSettings) {
@@ -66,13 +65,11 @@ export function migrateAllLegacyBookSettings(db: ReturnType<typeof getDb>) {
     if (latestRow) {
       const rawMeta = typeof latestRow.meta === 'string' ? JSON.parse(latestRow.meta) : (latestRow.meta ?? {})
       const meta = (rawMeta && typeof rawMeta === 'object') ? (rawMeta as Record<string, unknown>) : {}
+      const migrated: ReaderBookSettings = {}
       const legacyViewSettings = readerBookSettingsSchema.shape.viewSettings.safeParse(meta.viewSettings)
       const legacyBoundPresetId = readerBookSettingsSchema.shape.boundPresetId.safeParse(meta.boundPresetId)
-
-      const migrated: ReaderBookSettings = {
-        ...(legacyViewSettings.success && legacyViewSettings.data !== undefined && legacyViewSettings.data !== null ? { viewSettings: legacyViewSettings.data } : {}),
-        ...(legacyBoundPresetId.success && legacyBoundPresetId.data !== undefined && legacyBoundPresetId.data !== null ? { boundPresetId: legacyBoundPresetId.data } : {}),
-      }
+      if (legacyViewSettings.success && legacyViewSettings.data) migrated.viewSettings = legacyViewSettings.data
+      if (legacyBoundPresetId.success && legacyBoundPresetId.data) migrated.boundPresetId = legacyBoundPresetId.data
 
       if (Object.keys(migrated).length > 0) {
         const link = db.select({
@@ -93,11 +90,12 @@ export function migrateAllLegacyBookSettings(db: ReturnType<typeof getDb>) {
             eq(settings.key, key),
           )).get()
           if (!existing) {
+            const value = migrateLegacyReaderBookSettings(migrated)
             db.insert(settings).values({
               id: createId('setting'),
               userId: link.userId,
               key,
-              value: migrated,
+              value,
             }).run()
           }
         }
@@ -121,20 +119,13 @@ export function getReaderBookSettings(userId: string | null, bookId: string): Re
   return storedSettings(userId, bookId) ?? {}
 }
 
-export function updateReaderBookSettings(userId: string, bookId: string, input: { themeSelection?: ReadingThemeSelectionState | null; viewSettings?: ViewSettings | null; boundPresetId?: string | null; readingThemeId?: string | null }) {
-  const current = getReaderBookSettings(userId, bookId)
-  const next: ReaderBookSettings = { ...current }
-  if (input.viewSettings === null) delete next.viewSettings
-  else if (input.viewSettings !== undefined) next.viewSettings = { ...(current.viewSettings ?? {}), ...input.viewSettings }
-  if (input.boundPresetId === null) delete next.boundPresetId
-  else if (input.boundPresetId !== undefined) next.boundPresetId = input.boundPresetId
-  if (input.readingThemeId === null) delete next.readingThemeId
-  else if (input.readingThemeId !== undefined) next.readingThemeId = input.readingThemeId
-  if (input.themeSelection !== undefined) {
-    delete next.readingThemeId
-    if (input.themeSelection === null) delete next.themeSelection
-    else next.themeSelection = input.themeSelection
-  }
-  saveSettings(userId, bookId, next)
-  return next
+export function updateReaderBookSettings(
+  userId: string,
+  bookId: string,
+  input: ReaderBookSettingsPatch,
+): ReaderBookSettings {
+  const current = storedSettings(userId, bookId) ?? {}
+  const value = applyReaderBookSettingsPatch(current, input)
+  saveSettings(userId, bookId, value)
+  return value
 }

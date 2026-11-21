@@ -6,7 +6,7 @@ import { isAccessRevocationError } from '@/lib/error-message'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useIsTouch } from '../hooks/useIsTouch'
-import { READER_SESSION_ID, useReaderState } from '../state/reader-state'
+import { captureScrollAnchor, READER_SESSION_ID, restoreScrollAnchor, useReaderState, type SidebarScrollPosition } from '../state/reader-state'
 import type { NavTab, SearchResult, SearchStatus } from '../types'
 import { useAnnotations, useBatchDeleteAnnotations } from '../hooks/useAnnotations'
 import { useBookChapters } from '../hooks/useBookChapters'
@@ -331,6 +331,8 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
   // A fresh (same-session) position replays exactly and suppresses it.
   const lastScrolledIndex = useRef<number | null>(tocPositionFresh ? (rememberedTocPosition?.currentIndex ?? null) : null)
   const savedTocPosition = useRef(tocPositionFresh ? rememberedTocPosition : undefined)
+  const savedNotesPosition = useRef(rememberedScrollPositions.notes)
+  const savedAiPosition = useRef(rememberedScrollPositions.ai)
   const locateFrame = useRef<number | null>(null)
   const hasPositioned = useRef(false)
   const collapsedRef = useRef<Set<number>>(new Set())
@@ -338,26 +340,33 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
 
   const rememberSidebarScroll = useCallback((tabToRemember: NavTab, top: number, index?: number, persist = true) => {
     savedScrollTop.current[tabToRemember] = top
-    const position = {
+    const position: SidebarScrollPosition = {
       top,
       ...(tabToRemember === 'toc' && index !== undefined && index >= 0 ? { currentIndex: index } : {}),
     }
     if (tabToRemember === 'toc') {
-      const container = listRef.current
-      const viewportTop = container?.getBoundingClientRect().top ?? 0
-      const anchor = container && Array.from(container.querySelectorAll<HTMLElement>('[data-toc-href]'))
-        .find((row) => {
-          const rect = row.getBoundingClientRect()
-          return rect.top >= viewportTop + 40 && rect.top < viewportTop + container.clientHeight
-        })
+      const anchor = captureScrollAnchor(listRef.current, '[data-toc-href]', 'tocHref', 40)
       const collapsedKeys = serializeCollapsed(collapsedRef.current, treeRef.current)
       savedTocPosition.current = {
         ...position,
         collapsedKeys,
-        ...(anchor ? { anchorHref: anchor.dataset.tocHref, anchorOffset: anchor.getBoundingClientRect().top - viewportTop } : {}),
+        ...(anchor ? { anchorHref: anchor.id, anchorOffset: anchor.offset } : {}),
       }
       if (persist) setSidebarScrollPosition(bookId, tabToRemember, savedTocPosition.current)
+    } else if (tabToRemember === 'notes') {
+      const anchor = captureScrollAnchor(listRef.current, '[data-note-id]', 'noteId', 0)
+      savedNotesPosition.current = {
+        ...position,
+        ...(anchor ? { anchorId: anchor.id, anchorOffset: anchor.offset } : {}),
+      }
+      if (persist) setSidebarScrollPosition(bookId, tabToRemember, savedNotesPosition.current)
     } else if (persist) setSidebarScrollPosition(bookId, tabToRemember, position)
+  }, [bookId, setSidebarScrollPosition])
+
+  const rememberAiScroll = useCallback((position: SidebarScrollPosition) => {
+    savedScrollTop.current.ai = position.top
+    savedAiPosition.current = position
+    setSidebarScrollPosition(bookId, 'ai', position)
   }, [bookId, setSidebarScrollPosition])
 
   const annotationItems = useMemo(() => annotations?.data ?? [], [annotations?.data])
@@ -560,10 +569,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     if (stuckVolumeRaf.current !== null) cancelAnimationFrame(stuckVolumeRaf.current)
     if (locateFrame.current !== null) cancelAnimationFrame(locateFrame.current)
     if (savedTocPosition.current) setSidebarScrollPosition(bookId, 'toc', savedTocPosition.current)
-    for (const savedTab of ['notes', 'stats', 'ai'] as const) {
-      const top = savedScrollTop.current[savedTab]
-      if (top !== undefined) setSidebarScrollPosition(bookId, savedTab, { top })
-    }
+    if (savedNotesPosition.current) setSidebarScrollPosition(bookId, 'notes', savedNotesPosition.current)
+    if (savedAiPosition.current) setSidebarScrollPosition(bookId, 'ai', savedAiPosition.current)
+    const statsTop = savedScrollTop.current.stats
+    if (statsTop !== undefined) setSidebarScrollPosition(bookId, 'stats', { top: statsTop })
   }, [bookId, setSidebarScrollPosition])
 
   useImperativeHandle(ref, () => ({
@@ -1014,13 +1023,10 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
     const saved = savedScrollTop.current[tab]
     if (tab === 'toc') {
       if (saved !== undefined && currentIndex === lastScrolledIndex.current) {
-        container.scrollTop = saved
         const position = savedTocPosition.current
         const anchorIndex = position?.anchorHref ? tree.findIndex((node) => node.href === position.anchorHref) : -1
-        const anchor = itemRefs.current.get(anchorIndex)?.closest('li')
-        if (anchor && position?.anchorOffset !== undefined) {
-          container.scrollTop += anchor.getBoundingClientRect().top - container.getBoundingClientRect().top - position.anchorOffset
-        }
+        const anchor = itemRefs.current.get(anchorIndex)?.closest('li') ?? null
+        restoreScrollAnchor(container, saved, anchor, position?.anchorOffset)
         restoredPanel.current = tab
         hasPositioned.current = true
         setTocPlaced(true)
@@ -1029,9 +1035,20 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
       }
       return
     }
+    if (tab === 'notes') {
+      if (annotationsQuery.isLoading && !annotations?.data) return
+      const position = savedNotesPosition.current
+      const anchor = position?.anchorId
+        ? Array.from(container.querySelectorAll<HTMLElement>('[data-note-id]'))
+            .find((el) => el.dataset.noteId === position.anchorId) ?? null
+        : null
+      restoreScrollAnchor(container, saved ?? 0, anchor, position?.anchorOffset)
+      restoredPanel.current = tab
+      return
+    }
     container.scrollTop = saved ?? 0
     restoredPanel.current = tab
-  }, [bookId, currentIndex, open, searchExpanded, tab, tocBookId, tocItems.length, tocPositionFresh, tocPositionReady, tree])
+  }, [annotations?.data, annotationsQuery.isLoading, bookId, currentIndex, open, searchExpanded, tab, tocBookId, tocItems.length, tocPositionFresh, tocPositionReady, tree])
 
   // The parsed TOC is authoritative; a synthesized tree must not consume startup positioning.
   useEffect(() => {
@@ -2098,9 +2115,9 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           {!guestReadOnly && (
             <AiPanel
               bookId={bookId}
-              initialScrollTop={savedScrollTop.current.ai}
+              initialScrollPosition={savedAiPosition.current}
               open={open}
-              onScrollPositionChange={(top) => rememberSidebarScroll('ai', top)}
+              onScrollPositionChange={rememberAiScroll}
             />
           )}
         </div>

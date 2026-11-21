@@ -5,14 +5,15 @@ import { useTtsServices } from '@/api/hooks/useTts'
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
-import { blendColors, cn } from '@/lib/utils'
-import { resolveEffectiveReadingTheme } from '@/lib/reading-theme'
-import { selectEffectiveReadingThemeId, selectReaderThemeOverride, useUiStore } from '@/stores/ui.store'
+import { cn } from '@/lib/utils'
+import { selectEffectiveReadingTheme, useUiStore } from '@/stores/ui.store'
 
 import { useReaderApi } from '../hooks/useReaderApi'
 import { useTtsSession } from '../hooks/useTtsSession'
 import { useReaderState } from '../state/reader-state'
 import { SelectedPositionIcon } from './annotation-icons'
+import { readerPanelVars } from '../lib/reader-panel-vars'
+import { PanelSection, PanelSectionList, SliderRow, ToggleRow } from './ReaderPanelPrimitives'
 
 function PlayIcon() {
   return (
@@ -137,40 +138,6 @@ function ReaderSelect({ label, value, options, onChange, disabled = false }: Rea
   )
 }
 
-interface ReaderToggleProps {
-  label: string
-  hint?: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-}
-
-function ReaderToggle({ label, hint, checked, onChange }: ReaderToggleProps) {
-  return (
-    <div className="mb-4 flex items-start justify-between gap-3">
-      <div className="flex-1">
-        <div className="text-sm text-current">{label}</div>
-        {hint && <div className="mt-0.5 text-xs text-[var(--bd-read-sub)]">{hint}</div>}
-      </div>
-      <button
-        type="button"
-        onClick={() => onChange(!checked)}
-        className="relative h-6 w-10 shrink-0 rounded-full transition-colors"
-        style={{ backgroundColor: checked ? 'var(--toggle-on-bg)' : 'var(--toggle-off-bg)' }}
-        aria-checked={checked}
-        aria-label={label}
-        role="switch"
-      >
-        <span
-          className={cn(
-            'absolute top-1 h-4 w-4 rounded-full bg-[var(--bd-read-bg)] transition-transform',
-            checked ? 'left-5' : 'left-1',
-          )}
-        />
-      </button>
-    </div>
-  )
-}
-
 export default function TtsPanel({ onStart }: { onStart?: () => void }) {
   const _ = useTranslation()
   const { controller, state, unavailableReason } = useTtsSession()
@@ -194,22 +161,15 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
   const ttsAutoNext = useUiStore((s) => s.ttsAutoNext)
   const setTtsAutoNext = useUiStore((s) => s.setTtsAutoNext)
   const setTtsFollow = useUiStore((s) => s.setTtsFollow)
-  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
-  const customThemes = useUiStore((s) => s.customThemes)
-  const overrideTheme = useUiStore(selectReaderThemeOverride)
   const active = state.status === 'playing' || state.status === 'starting' || state.status === 'paused'
   const selectedEngine = ttsEngine === 'service'
     ? `service:${ttsServiceId ?? ''}`
     : ttsEngine === 'edge' ? 'edge' : 'system'
-  const currentTheme = useMemo(() => resolveEffectiveReadingTheme(overrideTheme, readingThemeId, customThemes), [overrideTheme, customThemes, readingThemeId])
+  const currentTheme = useUiStore(selectEffectiveReadingTheme)
   const sliderVars = useMemo(() => ({
-    '--slider-accent': blendColors(currentTheme.bg, currentTheme.text, 0.55),
-    '--slider-track': blendColors(currentTheme.bg, currentTheme.text, 0.15),
-    '--toggle-on-bg': blendColors(currentTheme.bg, currentTheme.text, 0.55),
-    '--toggle-off-bg': blendColors(currentTheme.bg, currentTheme.text, 0.10),
+    ...readerPanelVars(currentTheme),
     '--tts-active': currentTheme.primary,
   }) as React.CSSProperties, [currentTheme])
-  const ratePercent = Math.round(((ttsRate - 0.5) / 2.5) * 100)
   useDismissiblePopup(menuOpen, startMenuRef, () => setMenuOpen(false))
 
   function changeEngine(value: string) {
@@ -265,7 +225,7 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
 
   return (
     <div className="flex flex-col" style={sliderVars}>
-      <div className="border-b border-[var(--bd-read-accent)] p-4">
+      <div className="border-b border-[var(--bd-read-accent)]/35 p-4">
         <div ref={startMenuRef} className="relative flex w-full">
           <button
             type="button"
@@ -330,79 +290,76 @@ export default function TtsPanel({ onStart }: { onStart?: () => void }) {
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 p-4">
-        {unavailableReason && <p role="status" className="text-xs text-[var(--bd-read-sub)]">{_(`reader.ttsUnavailable.${unavailableReason}`)}</p>}
-        {servicesQuery.isError && (
-          <QueryErrorState className="py-2" isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} />
-        )}
-        <ReaderSelect
-          label={_('reader.ttsEngine')}
-          value={selectedEngine}
-          onChange={changeEngine}
-          disabled={!controller}
-          options={[
-            { value: 'system', label: _('reader.ttsSystem') },
-            { value: 'edge', label: 'Edge TTS' },
-            ...(ttsEngine === 'service' && !services.some((service) => service.id === ttsServiceId) ? [{ value: selectedEngine, label: _('reader.ttsUnavailable.service') }] : []),
-            ...services.map((service) => ({ value: `service:${service.id}`, label: service.name })),
-          ]}
-        />
+      <div className="p-4">
+        <PanelSectionList>
+          <PanelSection>
+            {unavailableReason && <p role="status" className="text-xs text-[var(--bd-read-sub)]">{_(`reader.ttsUnavailable.${unavailableReason}`)}</p>}
+            {servicesQuery.isError && (
+              <QueryErrorState className="py-2" isRetrying={servicesQuery.isFetching} onRetry={servicesQuery.refetch} />
+            )}
+            <ReaderSelect
+              label={_('reader.ttsEngine')}
+              value={selectedEngine}
+              onChange={changeEngine}
+              disabled={!controller}
+              options={[
+                { value: 'system', label: _('reader.ttsSystem') },
+                { value: 'edge', label: 'Edge TTS' },
+                ...(ttsEngine === 'service' && !services.some((service) => service.id === ttsServiceId) ? [{ value: selectedEngine, label: _('reader.ttsUnavailable.service') }] : []),
+                ...services.map((service) => ({ value: `service:${service.id}`, label: service.name })),
+              ]}
+            />
 
-        <ReaderSelect
-          label={_('reader.ttsVoice')}
-          value={ttsVoiceId}
-          onChange={setTtsVoiceId}
-          disabled={!controller}
-          options={[
-            { value: '', label: _('reader.ttsVoiceDefault') },
-            ...state.voices.map((voice) => ({ value: voice.id, label: `${voice.name}${voice.lang ? ` (${voice.lang})` : ''}` })),
-          ]}
-        />
+            <ReaderSelect
+              label={_('reader.ttsVoice')}
+              value={ttsVoiceId}
+              onChange={setTtsVoiceId}
+              disabled={!controller}
+              options={[
+                { value: '', label: _('reader.ttsVoiceDefault') },
+                ...state.voices.map((voice) => ({ value: voice.id, label: `${voice.name}${voice.lang ? ` (${voice.lang})` : ''}` })),
+              ]}
+            />
 
-        <div>
-          <div className="mb-1.5 flex items-center justify-between text-xs">
-            <span className="text-[var(--bd-read-sub)]">{_('reader.ttsRate')}</span>
-            <span className="tabular-nums">{ttsRate.toFixed(1)}×</span>
-          </div>
-          <input
-            type="range"
-            min="0.5"
-            max="3"
-            step="0.1"
-            value={ttsRate}
-            onChange={(event) => setTtsRate(Number(event.target.value))}
-            className="bd-slider w-full"
-            style={{ '--slider-fill': `${ratePercent}%` } as React.CSSProperties}
-          />
-        </div>
+            <SliderRow
+              label={_('reader.ttsRate')}
+              value={ttsRate}
+              min={0.5}
+              max={3}
+              step={0.1}
+              formatValue={(v) => `${v.toFixed(1)}×`}
+              commitOnRelease={false}
+              onChange={setTtsRate}
+            />
+          </PanelSection>
 
-        <div className="border-t border-[var(--bd-read-accent)] pt-2">
-          <ReaderToggle
-            label={_('reader.ttsAutoNext')}
-            hint={_('reader.ttsAutoNextHint')}
-            checked={ttsAutoNext}
-            onChange={setTtsAutoNext}
-          />
-          <ReaderToggle
-            label={_('reader.ttsFollow')}
-            hint={_('reader.ttsFollowHint')}
-            checked={state.highlighting}
-            onChange={(checked) => {
-              setTtsFollow(checked)
-              controller?.setHighlighting(checked)
-            }}
-          />
-        </div>
-
-        <div className="-mt-6 flex justify-end">
-          <Link
-            to={"/settings"}
-            search={{ section: 'reading', focus: 'tts' }}
-            className="text-xs text-[var(--bd-read-sub)] underline underline-offset-2 transition-colors hover:text-current"
-          >
-            {_('reader.ttsManageServices')}
-          </Link>
-        </div>
+          <PanelSection>
+            <ToggleRow
+              label={_('reader.ttsAutoNext')}
+              hint={_('reader.ttsAutoNextHint')}
+              checked={ttsAutoNext}
+              onChange={setTtsAutoNext}
+            />
+            <ToggleRow
+              label={_('reader.ttsFollow')}
+              hint={_('reader.ttsFollowHint')}
+              checked={state.highlighting}
+              onChange={(checked) => {
+                setTtsFollow(checked)
+                controller?.setHighlighting(checked)
+              }}
+            />
+            <div className="flex justify-end">
+              <Link
+                to={"/settings"}
+                search={{ section: 'reading', focus: 'tts' }}
+                className="text-xs text-[var(--bd-read-sub)] underline underline-offset-2 transition-colors hover:text-current"
+              >
+                {_('reader.ttsManageServices')}
+              </Link>
+            </div>
+          </PanelSection>
+        </PanelSectionList>
       </div>
     </div>
   )

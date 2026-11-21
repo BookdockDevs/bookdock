@@ -169,29 +169,43 @@ describe('authoritative local library transactions', () => {
     await expect(repository.saveNote(note, 0)).rejects.toMatchObject({ category: 'conflict' })
   })
 
-  it('merges view setting patches transactionally and explicitly clears overrides', async () => {
+  it('folds legacy view-setting patches into the groups and clears the groups together', async () => {
     await repository.addBook(book, new Blob(['abc']))
     await repository.patchPreferences(book.ref, { viewSettings: { fontSize: 24 } })
     await repository.patchPreferences(book.ref, { viewSettings: { lineHeight: 2 } })
-    expect((await repository.getPreferences(book.ref)).viewSettings).toEqual({ fontSize: 24, lineHeight: 2 })
+    expect(await repository.getPreferences(book.ref)).toMatchObject({ font: { fontSize: 24 }, layout: { lineHeight: 2 } })
     await repository.patchPreferences(book.ref, { viewSettings: null })
-    expect((await repository.getPreferences(book.ref)).viewSettings).toBeUndefined()
+    expect(await repository.getPreferences(book.ref)).toEqual({})
   })
 
-  it('persists the per-book reading-theme override and clears it with a card selection', async () => {
+  it('folds legacy theme patches into the theme group so the shapes never coexist', async () => {
     await repository.addBook(book, new Blob(['abc']))
     await repository.patchPreferences(book.ref, { readingThemeId: 'custom-sea' })
-    expect((await repository.getPreferences(book.ref)).readingThemeId).toBe('custom-sea')
+    expect(await repository.getPreferences(book.ref)).toMatchObject({
+      theme: { selections: { light: { themeId: 'custom-sea', paletteId: null }, dark: { themeId: 'custom-sea', paletteId: null } } },
+    })
     await repository.patchPreferences(book.ref, { readingThemeId: null })
-    expect((await repository.getPreferences(book.ref)).readingThemeId).toBeUndefined()
-    await repository.patchPreferences(book.ref, { readingThemeId: 'custom-sea' })
+    expect(await repository.getPreferences(book.ref)).toEqual({})
+
     const themeSelection = { mode: 'custom', cards: { paletteId: 'paper', cssId: null, highlightIds: ['rule-A', 'rule-B'] } }
     await repository.patchPreferences(book.ref, { themeSelection, viewSettings: { fontSize: 21 } })
-    expect(await repository.getPreferences(book.ref)).toMatchObject({ themeSelection, viewSettings: { fontSize: 21 } })
-    expect((await repository.getPreferences(book.ref)).readingThemeId).toBeUndefined()
-    await repository.patchPreferences(book.ref, { themeSelection: null })
+    expect(await repository.getPreferences(book.ref)).toMatchObject({
+      theme: {
+        selections: {
+          light: { themeId: null, paletteId: 'paper', legacyCards: { cssId: null, highlightIds: ['rule-A', 'rule-B'] } },
+          dark: { themeId: null, paletteId: 'paper', legacyCards: { cssId: null, highlightIds: ['rule-A', 'rule-B'] } },
+        },
+      },
+      font: { fontSize: 21 },
+    })
     expect((await repository.getPreferences(book.ref)).themeSelection).toBeUndefined()
-    expect((await repository.getPreferences(book.ref)).viewSettings).toMatchObject({ fontSize: 21 })
+
+    // Clearing the legacy selection keeps new-model css/highlights overrides
+    await repository.patchPreferences(book.ref, { theme: { css: { mode: 'off' } } })
+    await repository.patchPreferences(book.ref, { themeSelection: null })
+    const theme = (await repository.getPreferences(book.ref)).theme
+    expect(theme?.selections).toBeUndefined()
+    expect(theme?.css).toEqual({ mode: 'off' })
   })
 
   it('does not retain an orphan file after a quota failure while committing metadata', async () => {

@@ -8,13 +8,11 @@ import type { HighlightRuleDef } from '@bookdock/shared'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Spinner from '@/components/ui/Spinner'
 import { localRecordId } from '@/features/local-library/id'
-import { parseReadingConfig } from '@/features/reader/lib/reading-profiles'
 import { useThemeAssetUrls } from '@/features/reading-theme/asset-urls'
 import { ThemeAssetStore } from '@/features/reading-theme/assets'
 import PaletteChip from '@/features/reading-theme/PaletteChip'
 import SelectChip from '@/features/reading-theme/SelectChip'
 import ThemeCombinationDialog from '@/features/reading-theme/ThemeCombinationDialog'
-import ThemeDefaultPicker from '@/features/reading-theme/ThemeDefaultPicker'
 import ThemeEditorDialog, { type ThemeCardEdit } from '@/features/reading-theme/ThemeEditorDialog'
 import { publishThemeDeleteUndo } from '@/features/reading-theme/theme-delete-undo'
 import {
@@ -28,7 +26,6 @@ import {
   mergeThemeBundle,
   normalizeThemeCards,
   removeThemeCard,
-  resolveDefaultThemeChoice,
   themeLibraryNames,
   uniqueName,
   upsertThemeCard,
@@ -81,7 +78,7 @@ function Region({ label, count, addLabel, onAdd, editing, children }: {
   children: ReactNode
 }) {
   return (
-    <section aria-label={label} className="grid gap-2 border-b border-stone-200/60 pb-3.5 last:border-b-0 last:pb-0 dark:border-stone-800/60">
+    <section aria-label={label} className="grid gap-1.5 border-b border-stone-200/60 pb-3 last:border-b-0 last:pb-0 dark:border-stone-800/60">
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 truncate text-xs font-medium text-stone-600 dark:text-stone-300">
           {label}
@@ -119,13 +116,8 @@ function SortableItem({ id, editing, children }: { id: string; editing: boolean;
 
 export default function ReadingThemesSettingsSection() {
   const _ = useTranslation()
-  const readingConfig = useUiStore((state) => state.readingConfig)
-  const config = useMemo(() => parseReadingConfig(readingConfig), [readingConfig])
   const library = useUiStore((state) => state.themeLibrary)
   const setLibrary = useUiStore((state) => state.setThemeLibrary)
-  const setDefault = useUiStore((state) => state.setGlobalDefaultTheme)
-  const lightThemeId = useUiStore((state) => state.lightReadingThemeId)
-  const darkThemeId = useUiStore((state) => state.darkReadingThemeId)
   const scope = useAuthStore((state) => state.user?.id ?? 'device')
 
   const [editing, setEditing] = useState(false)
@@ -142,9 +134,6 @@ export default function ReadingThemesSettingsSection() {
     [library.palettes],
   )
   const { urls: wallpapers, missing: missingWallpapers } = useThemeAssetUrls(scope, paletteAssetIds)
-
-  const dayChoice = resolveDefaultThemeChoice(library, config?.global.lightReadingThemeId ?? lightThemeId, 'paper')
-  const nightChoice = resolveDefaultThemeChoice(library, config?.global.darkReadingThemeId ?? darkThemeId, 'night')
 
   const selectable: Record<Group, string[]> = {
     theme: library.themes.filter((theme) => !BUILTIN_IDS.has(theme.id)).map((theme) => theme.id),
@@ -427,12 +416,6 @@ export default function ReadingThemesSettingsSection() {
           void importFile(file)
         }} />
 
-        <div className="pb-1">
-          <ThemeDefaultPicker label={_('reader.themeDaytimeDefault')} value={dayChoice} library={library} onChange={(id) => setDefault('light', id)} />
-          <div className="border-t border-stone-200/60 dark:border-stone-800/60" />
-          <ThemeDefaultPicker label={_('reader.themeNighttimeDefault')} value={nightChoice} library={library} onChange={(id) => setDefault('dark', id)} />
-        </div>
-
         {editing && (
           <RuleSelectAllBar
             disabled={selectablePairs.length === 0}
@@ -448,7 +431,7 @@ export default function ReadingThemesSettingsSection() {
         )}
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-          <div className="grid gap-3 pt-3">
+          <div className="grid gap-2.5">
             <Region
               label={_('reader.themeSavedLabel')}
               count={library.themes.length}

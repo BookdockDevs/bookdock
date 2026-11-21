@@ -3,6 +3,7 @@ import type { HighlightRuleDef } from '@bookdock/shared'
 import { collectHighlightSpans, HIGHLIGHT_LIMITS, mergeHighlightSpans, type HighlightSegment, type HighlightSpan } from '@/lib/highlight-match'
 
 export const HIGHLIGHT_RULE_TIMEOUT_MS = 250
+export const HIGHLIGHT_WORKER_BOOT_TIMEOUT_MS = 5000
 /** Upper bound for one section across all of its regex rules. The per-section
  *  budget grows with the rule count (one rule's slot each) so a long rule list
  *  is not starved by a fixed cap, but a pathological book still returns. */
@@ -18,8 +19,10 @@ type RegexOutcome = { spans: HighlightSpan[][] | null; reason: 'ok' | 'timeout' 
 
 export class HighlightEngine {
   private worker: Worker | null = null
+  private workerPromise: Promise<Worker | null> | null = null
   private generation = 0
   private queue: Promise<unknown> = Promise.resolve()
+  private cancelBoot: (() => void) | null = null
   private cancelMatching: (() => void) | null = null
   private reportedWorkerFailure = false
   private reportedTimeout = false
@@ -33,9 +36,11 @@ export class HighlightEngine {
 
   dispose(): void {
     this.generation++
+    this.cancelBoot?.()
     this.cancelMatching?.()
     this.worker?.terminate()
     this.worker = null
+    this.workerPromise = null
   }
 
   private async runSection(paragraphs: string[], rules: HighlightRuleDef[], generation: number): Promise<HighlightSegment[][]> {
@@ -47,12 +52,16 @@ export class HighlightEngine {
       length += text.length
       bounded.push(text)
     }
+    if (rules.some((rule) => rule.enabled && rule.isRegex)) {
+      await this.ensureWorker()
+      if (generation !== this.generation) return []
+    }
     const spans: HighlightSpan[][] = bounded.map(() => [])
     let remaining = MAX_HIGHLIGHT_SPANS
     const started = performance.now()
     const budget = Math.min(HIGHLIGHT_RULE_TIMEOUT_MS * rules.length, HIGHLIGHT_SECTION_BUDGET_MS)
     let skipped = 0
-    for (const [order, rule] of rules.slice(0, HIGHLIGHT_LIMITS.maxRules).entries()) {
+    for (const [order, rule] of rules.entries()) {
       if (!rule.enabled || !remaining) continue
       if (rule.isRegex) {
         const timeout = Math.min(HIGHLIGHT_RULE_TIMEOUT_MS, budget - (performance.now() - started))
@@ -86,14 +95,49 @@ export class HighlightEngine {
     return bounded.map((text, index) => mergeHighlightSpans(text, spans[index]!))
   }
 
-  private matchRegex(paragraphs: string[], rule: HighlightRuleDef, order: number, limit: number, timeout: number): Promise<RegexOutcome> {
-    let worker: Worker
+  private ensureWorker(): Promise<Worker | null> {
+    if (this.worker) return Promise.resolve(this.worker)
+    if (this.workerPromise) return this.workerPromise
+    let rawWorker: Worker
     try {
-      worker = this.worker ??= new Worker(new URL('./highlight.worker.ts', import.meta.url), { type: 'module' })
+      rawWorker = new Worker(new URL('./highlight.worker.ts', import.meta.url), { type: 'module' })
     } catch {
       this.reportWorkerFailure()
-      return Promise.resolve({ spans: null, reason: 'unavailable' })
+      return Promise.resolve(null)
     }
+    const promise = new Promise<Worker | null>((resolve) => {
+      let settled = false
+      const finish = (ready: Worker | null, failed = false) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        this.cancelBoot = null
+        rawWorker.onmessage = rawWorker.onerror = rawWorker.onmessageerror = null
+        if (ready) {
+          this.worker = ready
+        } else {
+          rawWorker.terminate()
+          if (this.workerPromise === promise) this.workerPromise = null
+          if (failed) this.reportWorkerFailure()
+        }
+        resolve(ready)
+      }
+      // Module-worker fetch + parse on reader entry can exceed 250ms; keep
+      // boot latency out of the per-rule regex execution budget.
+      const timer = setTimeout(() => finish(null, true), HIGHLIGHT_WORKER_BOOT_TIMEOUT_MS)
+      this.cancelBoot = () => finish(null)
+      rawWorker.onmessage = (event: MessageEvent<{ type?: string }>) => {
+        if (event.data?.type === 'ready') finish(rawWorker)
+      }
+      rawWorker.onerror = rawWorker.onmessageerror = () => finish(null, true)
+    })
+    this.workerPromise = promise
+    return promise
+  }
+
+  private async matchRegex(paragraphs: string[], rule: HighlightRuleDef, order: number, limit: number, timeout: number): Promise<RegexOutcome> {
+    const worker = await this.ensureWorker()
+    if (!worker) return { spans: null, reason: 'unavailable' }
     return new Promise((resolve) => {
       const finish = (spans: HighlightSpan[][] | null, reason: RegexOutcome['reason']) => {
         clearTimeout(timer)
@@ -101,13 +145,16 @@ export class HighlightEngine {
         worker.onmessage = worker.onerror = worker.onmessageerror = null
         if (!spans) {
           worker.terminate()
-          this.worker = null
+          if (this.worker === worker) this.worker = null
+          this.workerPromise = null
         }
         resolve({ spans, reason })
       }
       const timer = setTimeout(() => finish(null, 'timeout'), timeout)
       this.cancelMatching = () => finish(null, 'timeout')
-      worker.onmessage = (event: MessageEvent<HighlightSpan[][]>) => finish(event.data, 'ok')
+      worker.onmessage = (event: MessageEvent<HighlightSpan[][]>) => {
+        if (Array.isArray(event.data)) finish(event.data, 'ok')
+      }
       worker.onerror = worker.onmessageerror = () => {
         // A worker that fails to load (a dev-server reload mid-HMR, a blocked
         // module) silently drops every regex rule, which reads as "the rule is

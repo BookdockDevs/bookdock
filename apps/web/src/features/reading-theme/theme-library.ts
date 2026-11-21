@@ -1,7 +1,6 @@
-import { readingThemeCardsSchema, type HighlightRuleDef, type HighlightRuleGroup, type HighlightRuleStyle, type ReaderBookSettings, type ReadingThemeCards, type ReadingThemeSelection, type ReadingThemeSelectionState } from '@bookdock/shared'
+import type { HighlightRuleDef, HighlightRuleGroup, HighlightRuleStyle } from '@bookdock/shared'
 
 import { localRecordId } from '@/features/local-library/id'
-import type { ReadingThemeSlot } from '@/lib/reading-theme'
 
 import { customThemesFromSync, isHexColor, PRESET_READING_THEMES, sanitizeDualColors, sanitizeHighlightRulesField, sanitizeThemeAssetId, sanitizeThemeAssetRefs, themeCssOf, type BaseThemeColors, type CustomReadingTheme, type EffectiveThemeCss, type ThemeAssetRef } from '@/lib/reading-theme'
 import { sanitizeThemeCssField, collectCssAssetRefs } from '@/lib/theme-css-guard'
@@ -21,10 +20,26 @@ export interface ThemeCssCard extends EffectiveThemeCss {
   name: string
 }
 
+/**
+ * One saved theme's composition. A theme no longer requires a palette — it
+ * must keep at least one component (palette / CSS / highlights), which the
+ * editors enforce and `removeThemeCard` prunes when a card deletion empties it.
+ */
+export interface ThemeDefinitionCards {
+  paletteId?: string
+  cssId: string | null
+  highlightIds: string[]
+}
+
 export interface SavedReadingTheme {
   id: string
   name: string
-  cards: ReadingThemeCards
+  cards: ThemeDefinitionCards
+}
+
+/** A theme with every component gone carries nothing and is not kept. */
+export function themeHasComponent(theme: SavedReadingTheme): boolean {
+  return theme.cards.paletteId != null || theme.cards.cssId != null || theme.cards.highlightIds.length > 0
 }
 
 export type ThemeHighlightCard = HighlightRuleDef & { legacyId?: string }
@@ -109,9 +124,15 @@ export function readThemeLibrary(raw: unknown): ReadingThemeLibrary | undefined 
         ...rule, ...(typeof item.legacyId === 'string' ? { legacyId: item.legacyId } : {}),
       })))
     const themes: SavedReadingTheme[] = (value.themes as SavedReadingTheme[]).flatMap((item) => {
-      if (!named(item)) return []
-      const parsed = readingThemeCardsSchema.safeParse(item.cards)
-      return parsed.success ? [{ id: item.id, name: item.name, cards: parsed.data }] : []
+      if (!named(item) || !item.cards || typeof item.cards !== 'object') return []
+      const cards = item.cards as { paletteId?: unknown; cssId?: unknown; highlightIds?: unknown }
+      // Palette is optional since themes may consist of CSS/highlights only.
+      const paletteId = typeof cards.paletteId === 'string' && cards.paletteId ? cards.paletteId : undefined
+      const cssId = cards.cssId == null ? null : typeof cards.cssId === 'string' && cards.cssId ? cards.cssId : null
+      const highlightIds = Array.isArray(cards.highlightIds)
+        ? [...new Set(cards.highlightIds.filter((id): id is string => typeof id === 'string' && !!id))]
+        : []
+      return [{ id: item.id, name: item.name, cards: { ...(paletteId ? { paletteId } : {}), cssId, highlightIds } }]
     })
     if (value.version === 2) return {
       palettes: palettes.reduce(upsertThemeCard, INITIAL_THEME_LIBRARY.palettes),
@@ -135,14 +156,21 @@ export function materializeTheme(library: ReadingThemeLibrary, theme: SavedReadi
     libCache = new Map()
     themeMaterializeCache.set(library, libCache)
   }
-  const key = theme.id === 'book-appearance'
-    ? `book-appearance:${theme.cards.paletteId}:${theme.cards.cssId ?? ''}:${theme.cards.highlightIds.join(',')}`
+  const key = theme.id === 'book-appearance' || theme.id === 'global-appearance' || theme.id === 'trial'
+    ? `${theme.id}:${theme.cards.paletteId ?? ''}:${theme.cards.cssId ?? ''}:${theme.cards.highlightIds.join(',')}`
     : theme.id
   const cached = libCache.get(key)
   if (cached) return cached
 
-  const palette = library.palettes.find((item) => item.id === theme.cards.paletteId)
-    ?? library.palettes[0] ?? PRESET_READING_THEMES.find((item) => item.id === theme.cards.paletteId) ?? PRESET_READING_THEMES[0]!
+  // A palette-less theme carries no colors of its own; the neutral paper base
+  // only fills the shape — callers that apply a theme resolve colors from the
+  // current palette state instead of the definition.
+  const palette = theme.cards.paletteId
+    ? library.palettes.find((item) => item.id === theme.cards.paletteId)
+      ?? PRESET_READING_THEMES.find((item) => item.id === theme.cards.paletteId)
+      ?? library.palettes[0]
+      ?? PRESET_READING_THEMES[0]!
+    : library.palettes.find((item) => item.id === 'paper') ?? PRESET_READING_THEMES[0]!
   const css = library.css.find((item) => item.id === theme.cards.cssId)
   const highlights = [...new Set(theme.cards.highlightIds)].flatMap((id) => {
     const rule = library.highlights.find((item) => item.id === id)
@@ -165,29 +193,12 @@ export function materializeTheme(library: ReadingThemeLibrary, theme: SavedReadi
   return result
 }
 
-export function effectiveThemeCards(
-  library: ReadingThemeLibrary,
-  fallbackId: string,
-  preferences?: ReaderBookSettings | null,
-): { themeId?: string; cards: ReadingThemeCards } {
-  // Callers resolve the tone first (Reader keeps one selection per slot, so the
-  // value reaching here is single); a slotted value cannot be interpreted
-  // without knowing the slot and falls through to the chain instead of guessing.
-  const rawSelection = preferences?.themeSelection
-  const selection = rawSelection && rawSelection.mode !== 'slots' ? rawSelection : null
-  const source = selection?.themeId ?? preferences?.readingThemeId ?? fallbackId
-  const theme = findThemeCombination(library, source)
-  const base = theme ?? findThemeCombination(library, fallbackId)
-  const fallbackPalette = PRESET_READING_THEMES.find((item) => item.id === source)?.id ?? (fallbackId === 'night' ? 'night' : 'paper')
-  const baseCards = base?.cards ?? { paletteId: fallbackPalette, cssId: null, highlightIds: [] }
-  if (selection?.mode === 'custom') return { themeId: theme?.id, cards: normalizeThemeCards(library, selection.cards, baseCards.paletteId) }
-  return { themeId: base?.id, cards: normalizeThemeCards(library, baseCards) }
-}
-
-export function normalizeThemeCards(library: ReadingThemeLibrary, cards: ReadingThemeCards, fallback = 'paper'): ReadingThemeCards {
+export function normalizeThemeCards(library: ReadingThemeLibrary, cards: ThemeDefinitionCards, fallback = 'paper'): ThemeDefinitionCards {
   const palettes = library.palettes
   return {
-    paletteId: palettes.some(({ id }) => id === cards.paletteId) ? cards.paletteId
+    // Absent stays absent: palette-less themes are a valid composition.
+    paletteId: cards.paletteId === undefined ? undefined
+      : palettes.some(({ id }) => id === cards.paletteId) ? cards.paletteId
       : palettes.some(({ id }) => id === fallback) ? fallback
       : palettes[0]?.id ?? (fallback === 'night' ? 'night' : 'paper'),
     cssId: library.css.some(({ id }) => id === cards.cssId) ? cards.cssId : null,
@@ -199,7 +210,9 @@ export function normalizeThemeCards(library: ReadingThemeLibrary, cards: Reading
  * Drop one card and re-point every theme that referenced it, in one step —
  * deleting a palette silently moves its themes onto the fallback palette, so
  * the caller needs both the rewritten library (for the undo snapshot) and the
- * number of themes it touched (for the toast).
+ * number of themes it touched (for the toast). A theme left with no component
+ * at all (palette-less and its CSS/highlights just deleted) is pruned here,
+ * keeping "a theme has at least one component" true without a separate sweep.
  */
 export function removeThemeCard(
   library: ReadingThemeLibrary,
@@ -217,21 +230,13 @@ export function removeThemeCard(
     : kind === 'css'
       ? theme.cards.cssId === id
       : theme.cards.highlightIds.includes(id)).length
+  const normalizedThemes = changed.themes
+    .map((theme) => ({ ...theme, cards: normalizeThemeCards(changed, theme.cards) }))
+    .filter(themeHasComponent)
   return {
-    library: { ...changed, themes: changed.themes.map((theme) => ({ ...theme, cards: normalizeThemeCards(changed, theme.cards) })) },
+    library: { ...changed, themes: normalizedThemes },
     affected,
   }
-}
-
-export function sameThemeCards(left: ReadingThemeCards, right: ReadingThemeCards): boolean {
-  return left.paletteId === right.paletteId && left.cssId === right.cssId &&
-    left.highlightIds.length === right.highlightIds.length && left.highlightIds.every((id) => right.highlightIds.includes(id))
-}
-
-export function matchThemeCards(library: ReadingThemeLibrary, cards: ReadingThemeCards, preferredId?: string): SavedReadingTheme | undefined {
-  const matches = (theme: SavedReadingTheme) => sameThemeCards(cards, normalizeThemeCards(library, theme.cards))
-  const preferred = findThemeCombination(library, preferredId)
-  return preferred && matches(preferred) ? preferred : library.themes.find(matches)
 }
 
 function restoreDeletedEntries<T extends { id: string }>(before: T[], after: T[], current: T[]): T[] {
@@ -279,42 +284,6 @@ export function undoThemeLibraryDeletion(
   return library
 }
 
-export function selectionForCards(library: ReadingThemeLibrary, cards: ReadingThemeCards, themeId?: string): ReadingThemeSelection {
-  const match = matchThemeCards(library, cards, themeId)
-  if (match) return { mode: 'theme', themeId: match.id }
-  return { mode: 'custom', themeId: findThemeCombination(library, themeId)?.id, cards }
-}
-
-/** Which stored selection applies to the light or dark slot right now. */
-export function themeSelectionForSlot(
-  value: ReadingThemeSelectionState | null | undefined,
-  slot: ReadingThemeSlot,
-): ReadingThemeSelection | null {
-  if (!value) return null
-  // A legacy single selection predates the pair and always applied to both
-  // tones, so it keeps doing that until the next write splits it.
-  if (value.mode !== 'slots') return value
-  return value[slot] ?? null
-}
-
-/**
- * Fold one tone's pick into the stored appearance. Picking is scoped to the
- * current slot, including when it returns to following its default.
- */
-export function writeThemeSelectionForSlot(
-  current: ReadingThemeSelectionState | null | undefined,
-  slot: ReadingThemeSlot,
-  next: ReadingThemeSelection | null,
-): ReadingThemeSelectionState | null {
-  const carried = current?.mode === 'slots'
-    ? { light: current.light ?? null, dark: current.dark ?? null }
-    : current
-      ? { light: current, dark: current }
-      : { light: null, dark: null }
-  const slots = { ...carried, [slot]: next }
-  return slots.light || slots.dark ? { ...slots, mode: 'slots' } : null
-}
-
 /* ------------------------------------------------------------------ *
  * Portable bundles — the shape a theme package carries, and how an
  * imported bundle folds back into the local library.
@@ -354,7 +323,8 @@ export interface PortableHighlightRule {
 /** A saved theme with its cards inline, so a package never depends on local ids. */
 export interface PortableTheme {
   name: string
-  palette: PortablePalette
+  /** Optional: a palette-less theme (CSS/highlights only) packs without one. */
+  palette?: PortablePalette
   css?: PortableCssCard
   highlights?: PortableHighlightRule[]
 }
@@ -454,12 +424,15 @@ export function portableThemeOf(library: ReadingThemeLibrary, theme: SavedReadin
   const materialized = materializeTheme(library, theme)
   // Cards keep their own names: the theme's name is not the palette's name, and
   // packing it under the theme name would rename the palette on import.
-  const paletteName = library.palettes.find((item) => item.id === theme.cards.paletteId)?.name ?? materialized.name
+  const palette = theme.cards.paletteId
+    ? library.palettes.find((item) => item.id === theme.cards.paletteId)
+    : undefined
+  const paletteName = palette?.name ?? materialized.name
   const cssName = library.css.find((item) => item.id === theme.cards.cssId)?.name ?? materialized.name
   const css = portableCssOf({ ...themeCssOf(materialized), name: cssName })
   return {
     name: materialized.name,
-    palette: portablePaletteOf({ ...materialized, name: paletteName }),
+    ...(palette ? { palette: portablePaletteOf({ ...materialized, name: paletteName }) } : {}),
     ...(css.contentCss || css.uiCss || css.assets?.length ? { css } : {}),
     ...(materialized.highlightRules?.length ? { highlights: materialized.highlightRules.map(portableRuleOf) } : {}),
   }
@@ -497,8 +470,8 @@ function ruleKey(rule: PortableHighlightRule): string {
   return stableJson({ pattern: rule.pattern, isRegex: rule.isRegex, style: rule.style ?? null, groups: rule.groups ?? null })
 }
 
-function cardsKey(cards: ReadingThemeCards): string {
-  return `${cards.paletteId}\u0000${cards.cssId ?? ''}\u0000${cards.highlightIds.join(',')}`
+function cardsKey(cards: ThemeDefinitionCards): string {
+  return `${cards.paletteId ?? ''}\u0000${cards.cssId ?? ''}\u0000${cards.highlightIds.join(',')}`
 }
 
 /**
@@ -593,8 +566,8 @@ export function mergeThemeBundle(
   }
 
   for (const source of bundle.themes) {
-    const cards: ReadingThemeCards = {
-      paletteId: resolvePalette(source.palette),
+    const cards: ThemeDefinitionCards = {
+      ...(source.palette ? { paletteId: resolvePalette(source.palette) } : {}),
       cssId: source.css ? resolveCss(source.css) : null,
       highlightIds: (source.highlights ?? []).map(resolveRule),
     }

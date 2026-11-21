@@ -30,7 +30,7 @@ import { useIsTouch } from '../hooks/useIsTouch'
 import { useAnnotations, useCreateAnnotation } from '../hooks/useAnnotations'
 import { readAiPanelMemory, writeAiPanelMemory, type AiPanelMemory } from '../lib/ai-panel-memory'
 import { LEADING_CLOSING_PUNCTUATION, normalizeMarkdownParagraphLines } from '../lib/markdown'
-import { useReaderState } from '../state/reader-state'
+import { captureScrollAnchor, restoreScrollAnchor, useReaderState, type SidebarScrollPosition } from '../state/reader-state'
 import AiChapterReferenceChip, { ChapterReferenceIcon } from './AiChapterReferenceChip'
 import { AiChatIcon, BulbIcon, CheckIcon, CloseIcon, SelectedPositionIcon } from './annotation-icons'
 
@@ -516,12 +516,12 @@ function StreamingMarkdownText({ store, messageId, citations, onCitationClick, c
 
 interface AiPanelProps {
   bookId: string
-  initialScrollTop?: number
+  initialScrollPosition?: SidebarScrollPosition
   open?: boolean
-  onScrollPositionChange?: (top: number) => void
+  onScrollPositionChange?: (position: SidebarScrollPosition) => void
 }
 
-export default function AiPanel({ bookId, initialScrollTop, open = true, onScrollPositionChange }: AiPanelProps) {
+export default function AiPanel({ bookId, initialScrollPosition, open = true, onScrollPositionChange }: AiPanelProps) {
   const _ = useTranslation()
   const local = useLocalReader()
   const user = useAuthStore((s) => s.user)
@@ -984,16 +984,45 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     textarea.style.height = `${Math.min(Math.max(contentHeight, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT)}px`
     textarea.style.overflowY = contentHeight > COMPOSER_MAX_HEIGHT ? 'auto' : 'hidden'
   }, [prompt])
+  const captureAiScrollPosition = (container: HTMLElement): SidebarScrollPosition => {
+    const nearLatest = container.scrollHeight - container.scrollTop - container.clientHeight <= 64
+    const anchor = nearLatest ? null : captureScrollAnchor(container, '[data-message-id]', 'messageId', 0)
+    return {
+      top: container.scrollTop,
+      pinnedToBottom: nearLatest,
+      ...(anchor ? { anchorId: anchor.id, anchorOffset: anchor.offset } : {}),
+    }
+  }
+  const scrollReportRef = useRef({ open, onScrollPositionChange })
+  scrollReportRef.current = { open, onScrollPositionChange }
+  useEffect(() => () => {
+    const container = messagesContainerRef.current
+    if (container && scrollReportRef.current.open && container.clientHeight > 0) {
+      scrollReportRef.current.onScrollPositionChange?.(captureAiScrollPosition(container))
+    }
+  }, [])
   useLayoutEffect(() => {
     const container = messagesContainerRef.current
     const content = messagesContentRef.current
     if (!container || !content) return
-    if (!initialScrollRestoredRef.current && initialScrollTop !== undefined) {
-      container.scrollTop = initialScrollTop
-      const nearLatest = container.scrollHeight - container.scrollTop - container.clientHeight <= 64
-      shouldStickToLatestRef.current = nearLatest
-      setIsAtLatest(nearLatest)
-      initialScrollRestoredRef.current = true
+    if (!initialScrollRestoredRef.current && initialScrollPosition !== undefined) {
+      if (messages.length > 0 || (!threadQuery.isLoading && !threadQuery.isFetching)) {
+        if (initialScrollPosition.pinnedToBottom) {
+          container.scrollTop = container.scrollHeight
+          shouldStickToLatestRef.current = true
+          setIsAtLatest(true)
+        } else {
+          const anchorEl = initialScrollPosition.anchorId
+            ? Array.from(container.querySelectorAll<HTMLElement>('[data-message-id]'))
+                .find((el) => el.dataset.messageId === initialScrollPosition.anchorId) ?? null
+            : null
+          restoreScrollAnchor(container, initialScrollPosition.top, anchorEl, initialScrollPosition.anchorOffset)
+          const nearLatest = container.scrollHeight - container.scrollTop - container.clientHeight <= 64
+          shouldStickToLatestRef.current = nearLatest
+          setIsAtLatest(nearLatest)
+        }
+        initialScrollRestoredRef.current = true
+      }
     } else if (shouldStickToLatestRef.current) container.scrollTop = container.scrollHeight
     const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => {
       if (shouldStickToLatestRef.current) {
@@ -1009,7 +1038,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
     resizeObserver?.observe(container)
     resizeObserver?.observe(content)
     return () => resizeObserver?.disconnect()
-  }, [initialScrollTop, messages, streaming, threadId])
+  }, [initialScrollPosition, messages, streaming, threadId, threadQuery.isFetching, threadQuery.isLoading])
   useEffect(() => () => {
     if (copiedMessageTimerRef.current !== null) window.clearTimeout(copiedMessageTimerRef.current)
   }, [])
@@ -1107,7 +1136,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
   function handleMessagesScroll() {
     const container = messagesContainerRef.current
     if (!container) return
-    if (open) onScrollPositionChange?.(container.scrollTop)
+    if (open) onScrollPositionChange?.(captureAiScrollPosition(container))
     const nearLatest = container.scrollHeight - container.scrollTop - container.clientHeight <= 64
     shouldStickToLatestRef.current = nearLatest
     setIsAtLatest((current) => current === nearLatest ? current : nearLatest)
@@ -1951,7 +1980,7 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
               const isStoppedPlaceholder = message.aborted && (message.content === _('reader.aiStopped') || message.content === '（已停止）' || message.content === '(已停止)')
               const hasVisibleContent = Boolean(message.content && !isStoppedPlaceholder)
               return (
-                <div key={message.id} className={`group flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div key={message.id} data-message-id={message.id} className={`group flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div className={message.role === 'user' ? 'w-fit max-w-[85%] break-words rounded-xl bg-[var(--bd-read-accent)]/20 p-3 text-sm [text-autospace:normal]' : 'w-fit max-w-[92%] break-words rounded-xl bg-[var(--bd-read-page-bg)] p-3 text-[13.5px] leading-[1.75] [text-autospace:normal]'}>
                     {quoteEntries.length > 0 && <div className="mb-2 w-full text-[11px] text-[var(--bd-read-sub)]">
                       {singleQuote ? singleQuote.id.startsWith('chapter-') ? <AiChapterReferenceChip title={singleQuote.label} disabled={!renderer} onActivate={() => jumpToQuote(singleQuote.target)} ariaLabel={_('reader.aiQuoteJump', { n: 1, label: singleQuote.label })} /> : <button type="button" disabled={!renderer} onClick={() => jumpToQuote(singleQuote.target)} aria-label={_('reader.aiQuoteJump', { n: 1, label: singleQuote.label })} className={`flex min-h-8 max-w-full min-w-0 items-center gap-2 rounded-md border px-2.5 py-1 text-left text-sm transition-colors hover:bg-[var(--bd-read-page-bg)] hover:text-current disabled:cursor-default disabled:opacity-70 ${singleQuote.id === 'selection' ? 'border-[var(--bd-read-primary)]/50 bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'border-[var(--bd-read-accent)] bg-[var(--bd-read-page-bg)] text-current'}`}>
@@ -1987,32 +2016,47 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
                     </form> : isActiveStreamMessage || hasStreamContent ? <StreamingMarkdownText store={streamingTextStore} messageId={message.id} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} thinkingLabel={_('reader.aiThinking')} toolStatus={toolStatus} streaming={isActiveStreamMessage} /> : hasVisibleContent ? (message.role === 'assistant' ? <MarkdownText content={message.content} citations={message.citations} onCitationClick={jumpToCitation} citationLabel={(n) => _('reader.aiCitationJump', { n })} /> : <div className="whitespace-pre-wrap break-words leading-relaxed">{message.content.split(AI_PROMPT_PLACEHOLDER_PATTERN).map((part, partIndex) => AI_PROMPT_PLACEHOLDERS.has(part) ? <span key={`${part}-${partIndex}`} className="mx-0.5 inline-flex items-center rounded-md border border-[var(--bd-read-primary)]/30 bg-[var(--bd-read-primary)]/10 px-1.5 py-0.5 font-mono text-[11.5px] font-medium tracking-tight text-[var(--bd-read-primary)] select-none shadow-[0_1px_2px_rgba(0,0,0,0.02)] align-baseline">{part}</span> : <Fragment key={`${part}-${partIndex}`}>{part}</Fragment>)}</div>) : null}
                   {message.aborted && <div className="mt-2 text-[11px] text-[var(--bd-read-sub)]">{_('reader.aiStoppedLabel')}</div>}
                   </div>
-                  {hasBasis && (
-                    <div className="mt-1 w-full max-w-[92%] pl-2 text-[11px] text-[var(--bd-read-sub)] [text-autospace:normal]">
-                      <button type="button" aria-expanded={basisOpen} aria-controls={`answer-basis-${message.id}`} onClick={() => setOpenBasisId(basisOpen ? null : message.id)} className="flex max-w-full items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:bg-stone-500/15 hover:text-current">
-                        <span>{_('reader.aiBasisSummary', { n: message.citations.length })}</span>
-                        <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${basisOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
-                      </button>
-                      {basisOpen && <div id={`answer-basis-${message.id}`} className="mt-2 space-y-1 rounded-lg bg-stone-500/5 p-2.5">
-                        {message.citations.map((citation, citationIndex) => <button key={`${citation.id}-${citationIndex}`} type="button" disabled={!renderer} onClick={() => jumpToCitation(citation)} title={citation.excerpt} aria-label={_('reader.aiBasisJump', { n: citationIndex + 1, label: citation.sourceType === 'annotation' ? citation.chapterTitle || _('reader.aiNotes') : citation.chapterTitle || _('reader.aiChapterNumber', { n: citation.chapterIndex + 1 }) })} className="flex min-h-9 w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-70">
-                          <span className="shrink-0 pt-0.5">{citationIndex + 1}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium text-current">{citation.sourceType === 'annotation' ? citation.chapterTitle || _('reader.aiNotes') : citation.chapterTitle || _('reader.aiChapterNumber', { n: citation.chapterIndex + 1 })}</span><span className="block max-h-10 overflow-hidden leading-relaxed">{citation.excerpt}</span></span>
-                        </button>)}
-                      </div>}
-                    </div>
-                  )}
-                  {message.role === 'assistant' && (hasVisibleContent || message.aborted) && !streaming && (
-                    <div className="mt-1 flex max-h-7 items-center gap-1 overflow-hidden pl-2 text-[var(--bd-read-sub)] opacity-100 transition-[max-height,margin,opacity] [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:mt-0 [@media(hover:hover)]:max-h-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:mt-1 [@media(hover:hover)]:group-hover:max-h-7 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:pointer-events-auto [@media(hover:hover)]:group-focus-within:mt-1 [@media(hover:hover)]:group-focus-within:max-h-7 [@media(hover:hover)]:group-focus-within:opacity-100">
-                      <button type="button" disabled={!hasVisibleContent} onClick={() => void copyAssistantMessage(message.id, message.content)} aria-label={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} title={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} className={`flex h-7 w-7 items-center justify-center rounded transition-colors active:scale-95 ${copiedMessageId === message.id ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-50'}`}>{copiedMessageId === message.id ? <CheckIcon /> : <CopyIcon />}</button>
-                      {message.ideaTarget && !message.aborted && <button type="button" onClick={() => setIdeaSaveTarget(message)} disabled={message.savedAsIdea || createAnnotation.isPending} aria-label={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} title={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-60"><BulbIcon size={14} /></button>}
-                      {retryRequest && index === messages.length - 1 && <button type="button" onClick={() => void runRequest(retryRequest, 2)} aria-label={_('reader.aiRetry')} title={_('reader.aiRetry')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current"><RetryIcon /></button>}
-                      {revisionOptions.length > 1 && <div className="ml-1 flex items-center gap-0.5 rounded-md bg-stone-500/5 px-0.5" aria-label={_('reader.aiAnswerVersions')}>
-                        <button type="button" disabled={selectedRevisionIndex <= 0 || selectRevisionMutation.isPending} onClick={() => selectRevision(revisionOptions[selectedRevisionIndex - 1]!.id)} aria-label={_('reader.aiPreviousAnswer')} title={_('reader.aiPreviousAnswer')} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14.5 6-6 6 6 6" /></svg></button>
-                        <span className="min-w-8 text-center text-[10px] tabular-nums" aria-live="polite">{selectedRevisionIndex + 1}/{revisionOptions.length}</span>
-                        <button type="button" disabled={selectedRevisionIndex >= revisionOptions.length - 1 || selectRevisionMutation.isPending} onClick={() => selectRevision(revisionOptions[selectedRevisionIndex + 1]!.id)} aria-label={_('reader.aiNextAnswer')} title={_('reader.aiNextAnswer')} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9.5 6 6 6-6 6" /></svg></button>
-                      </div>}
-                    </div>
-                  )}
-                  {isLatestEditableUser && !isEditingMessage && <div className="mt-1 flex max-h-7 items-center justify-end overflow-hidden pr-2 text-[var(--bd-read-sub)] opacity-100 transition-[max-height,margin,opacity] [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:mt-0 [@media(hover:hover)]:max-h-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:mt-1 [@media(hover:hover)]:group-hover:max-h-7 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:pointer-events-auto [@media(hover:hover)]:group-focus-within:mt-1 [@media(hover:hover)]:group-focus-within:max-h-7 [@media(hover:hover)]:group-focus-within:opacity-100">
+                  {(() => {
+                    const showAssistantActions = message.role === 'assistant' && (hasVisibleContent || message.aborted) && !streaming
+                    const isLatestAssistant = showAssistantActions && index === messages.length - 1
+                    const hoverFadeClass = isLatestAssistant
+                      ? ''
+                      : 'transition-opacity [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-has-[:focus-visible]:pointer-events-auto [@media(hover:hover)]:group-has-[:focus-visible]:opacity-100'
+                    const actionButtons = showAssistantActions ? (
+                      <div className={`flex h-7 shrink-0 items-center gap-1 text-[var(--bd-read-sub)] ${hasBasis ? '' : 'mt-1 pl-2'} ${hoverFadeClass}`}>
+                        <button type="button" disabled={!hasVisibleContent} onClick={() => void copyAssistantMessage(message.id, message.content)} aria-label={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} title={copiedMessageId === message.id ? _('reader.aiCopied') : _('reader.aiCopy')} className={`flex h-7 w-7 items-center justify-center rounded transition-colors active:scale-95 ${copiedMessageId === message.id ? 'bg-[var(--bd-read-primary)]/10 text-[var(--bd-read-primary)]' : 'hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-50'}`}>{copiedMessageId === message.id ? <CheckIcon /> : <CopyIcon />}</button>
+                        {message.ideaTarget && !message.aborted && <button type="button" onClick={() => setIdeaSaveTarget(message)} disabled={message.savedAsIdea || createAnnotation.isPending} aria-label={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} title={message.savedAsIdea ? _('reader.aiIdeaSaved') : _('reader.aiSaveAsIdea')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-60"><BulbIcon size={14} /></button>}
+                        {retryRequest && index === messages.length - 1 && <button type="button" onClick={() => void runRequest(retryRequest, 2)} aria-label={_('reader.aiRetry')} title={_('reader.aiRetry')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current"><RetryIcon /></button>}
+                        {revisionOptions.length > 1 && <div className="ml-1 flex items-center gap-0.5 rounded-md bg-stone-500/5 px-0.5" aria-label={_('reader.aiAnswerVersions')}>
+                          <button type="button" disabled={selectedRevisionIndex <= 0 || selectRevisionMutation.isPending} onClick={() => selectRevision(revisionOptions[selectedRevisionIndex - 1]!.id)} aria-label={_('reader.aiPreviousAnswer')} title={_('reader.aiPreviousAnswer')} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14.5 6-6 6 6 6" /></svg></button>
+                          <span className="min-w-8 text-center text-[10px] tabular-nums" aria-live="polite">{selectedRevisionIndex + 1}/{revisionOptions.length}</span>
+                          <button type="button" disabled={selectedRevisionIndex >= revisionOptions.length - 1 || selectRevisionMutation.isPending} onClick={() => selectRevision(revisionOptions[selectedRevisionIndex + 1]!.id)} aria-label={_('reader.aiNextAnswer')} title={_('reader.aiNextAnswer')} className="flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-not-allowed disabled:opacity-35"><svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9.5 6 6 6-6 6" /></svg></button>
+                        </div>}
+                      </div>
+                    ) : null
+
+                    if (hasBasis) {
+                      return (
+                        <div className="mt-1 w-full max-w-[92%] pl-2 text-[11px] text-[var(--bd-read-sub)] [text-autospace:normal]">
+                          <div className="flex min-h-7 items-center justify-between gap-2">
+                            <button type="button" aria-expanded={basisOpen} aria-controls={`answer-basis-${message.id}`} onClick={() => setOpenBasisId(basisOpen ? null : message.id)} className="flex max-w-full items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:bg-stone-500/15 hover:text-current">
+                              <span>{_('reader.aiBasisSummary', { n: message.citations.length })}</span>
+                              <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${basisOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+                            </button>
+                            {actionButtons}
+                          </div>
+                          {basisOpen && <div id={`answer-basis-${message.id}`} className="mt-2 space-y-1 rounded-lg bg-stone-500/5 p-2.5">
+                            {message.citations.map((citation, citationIndex) => <button key={`${citation.id}-${citationIndex}`} type="button" disabled={!renderer} onClick={() => jumpToCitation(citation)} title={citation.excerpt} aria-label={_('reader.aiBasisJump', { n: citationIndex + 1, label: citation.sourceType === 'annotation' ? citation.chapterTitle || _('reader.aiNotes') : citation.chapterTitle || _('reader.aiChapterNumber', { n: citation.chapterIndex + 1 }) })} className="flex min-h-9 w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-stone-500/15 hover:text-current disabled:cursor-default disabled:opacity-70">
+                              <span className="shrink-0 pt-0.5">{citationIndex + 1}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium text-current">{citation.sourceType === 'annotation' ? citation.chapterTitle || _('reader.aiNotes') : citation.chapterTitle || _('reader.aiChapterNumber', { n: citation.chapterIndex + 1 })}</span><span className="block max-h-10 overflow-hidden leading-relaxed">{citation.excerpt}</span></span>
+                            </button>)}
+                          </div>}
+                        </div>
+                      )
+                    }
+
+                    return actionButtons
+                  })()}
+                  {isLatestEditableUser && !isEditingMessage && <div className="mt-1 flex h-7 items-center justify-end pr-2 text-[var(--bd-read-sub)] transition-opacity [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:pointer-events-auto [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-has-[:focus-visible]:pointer-events-auto [@media(hover:hover)]:group-has-[:focus-visible]:opacity-100">
                     <button type="button" onClick={() => beginEditMessage(message)} aria-label={_('reader.aiEditMessage')} title={_('reader.aiEditMessage')} className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-stone-500/15 hover:text-current"><EditIcon /></button>
                   </div>}
                 </div>
@@ -2180,23 +2224,22 @@ export default function AiPanel({ bookId, initialScrollTop, open = true, onScrol
         </div>
       </div>
       {moreOpen && (
-        <aside ref={moreRef} data-testid="ai-more-menu" aria-label={_('reader.aiMore')} className="absolute right-2 top-12 z-20 flex max-h-[min(360px,calc(100vh-5rem))] w-80 max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] p-2 shadow-xl">
-          <section className="p-1">
-            <button type="button" onClick={() => { exportConversation(); setMoreOpen(false) }} disabled={messages.length === 0} aria-label={_('reader.aiExport')} title={_('reader.aiExport')} className="flex min-h-10 w-full items-center rounded-lg border border-transparent px-3 text-left text-sm text-[var(--bd-read-sub)] transition-colors hover:border-[var(--bd-read-accent)] hover:bg-stone-500/5 hover:text-current disabled:cursor-not-allowed disabled:opacity-50">
-              <DownloadIcon />
-              <span className="ml-3 min-w-0 flex-1 truncate">{_('reader.aiExport')}</span>
-              <svg className="ml-3 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
-            </button>
-          </section>
+        <aside ref={moreRef} data-testid="ai-more-menu" aria-label={_('reader.aiMore')} className="absolute right-2 top-[3.25rem] z-20 flex w-44 max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-[var(--bd-read-accent)]/60 bg-[var(--bd-read-bg)] p-1.5 shadow-xl">
+          <button type="button" onClick={() => { exportConversation(); setMoreOpen(false) }} disabled={messages.length === 0} aria-label={_('reader.aiExport')} className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm text-current/80 transition-colors hover:bg-stone-500/10 hover:text-current disabled:cursor-not-allowed disabled:opacity-40">
+            <DownloadIcon />
+            <span className="min-w-0 flex-1 truncate">{_('reader.aiExport')}</span>
+          </button>
         </aside>
       )}
       {historyOpen && (
-        <aside ref={historyRef} data-testid="ai-history" className="absolute right-2 top-12 z-20 flex max-h-[min(380px,calc(100vh-5rem))] w-80 max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)] shadow-xl">
-          <div className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--bd-read-accent)] px-3.5">
-            <h3 className="text-xs font-semibold text-current">{_('reader.aiHistory')}</h3>
-            <span className="rounded-full bg-stone-500/10 px-2 py-0.5 text-[11px] tabular-nums text-[var(--bd-read-sub)]">{historyThreads.length}</span>
+        <aside ref={historyRef} data-testid="ai-history" className="absolute right-2 top-[3.25rem] z-20 flex max-h-[min(380px,calc(100vh-5rem))] w-80 max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-xl border border-[var(--bd-read-accent)]/60 bg-[var(--bd-read-bg)] shadow-xl">
+          <div className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--bd-read-accent)]/35 px-3.5">
+            <h3 className="text-xs font-semibold text-current/80">{_('reader.aiHistory')}</h3>
+            {historyThreads.length > 0 && (
+              <span className="rounded-full bg-current/[0.07] px-2 py-0.5 text-[11px] font-medium tabular-nums text-[var(--bd-read-sub)]">{historyThreads.length}</span>
+            )}
           </div>
-          {threadsQuery.isFetching && historyThreads.length === 0 ? <p className="px-3 py-8 text-center text-xs text-[var(--bd-read-sub)]">{_('reader.loading')}</p> : historyThreads.length === 0 ? <p className="px-3 py-8 text-center text-xs text-[var(--bd-read-sub)]">{_('reader.aiHistoryEmpty')}</p> : (
+          {threadsQuery.isFetching && historyThreads.length === 0 ? <p className="px-3 py-6 text-center text-xs text-[var(--bd-read-sub)]">{_('reader.loading')}</p> : historyThreads.length === 0 ? <p className="px-3 py-6 text-center text-xs text-[var(--bd-read-sub)]">{_('reader.aiHistoryEmpty')}</p> : (
             <ul className="reader-scrollbar [scrollbar-gutter:stable] min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-2 pr-1.5">
               {historyThreads.map((thread) => {
                 const createdAt = new Date(thread.createdAt)

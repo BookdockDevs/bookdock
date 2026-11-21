@@ -48,14 +48,15 @@ describe('local reader adapter behavior', () => {
     await repository.addBook({ ...book, ref: otherRef, content: { book: otherRef, contentId: 'other-content' } }, new Blob(['y']))
     const session = await openLocalReaderSession(ref)
     const owner = { kind: 'account' as const, connectionId: 'server-a', accountId: 'reader-a' }
-    await session.saveSettings({ fontSize: 29, lineHeight: 2 })
+    await session.saveSettings({ font: { fontSize: 29 }, layout: { lineHeight: 2 } })
     await session.bindPreset('same-preset-id', owner)
     await session.setReadingTheme('paper')
     await repository.close()
     const reopened = await openLocalReaderSession(ref)
     const detail = (await reopened.getBook()).data
-    expect(detail.readerSettings?.viewSettings).toEqual({ fontSize: 29, lineHeight: 2 })
-    expect(detail.readerSettings?.readingThemeId).toBe('paper')
+    expect(detail.readerSettings?.font).toEqual({ fontSize: 29 })
+    expect(detail.readerSettings?.layout).toEqual({ lineHeight: 2 })
+    expect(detail.readerSettings?.theme?.selections?.light).toEqual({ themeId: 'paper', paletteId: null })
     expect(detail.clientPresetBinding).toEqual({ presetId: 'same-preset-id', owner })
     expect(resolveClientPresetBinding(detail.clientPresetBinding, owner)).toBe('same-preset-id')
     expect(resolveClientPresetBinding(detail.clientPresetBinding, { ...owner, accountId: 'reader-b' })).toBeNull()
@@ -65,8 +66,9 @@ describe('local reader adapter behavior', () => {
     await reopened.bindPreset(null, owner)
     await reopened.setReadingTheme(null)
     expect((await reopened.getBook()).data.clientPresetBinding).toBeNull()
-    expect((await reopened.getBook()).data.readerSettings?.viewSettings).toEqual({ fontSize: 29, lineHeight: 2 })
-    expect((await reopened.getBook()).data.readerSettings?.readingThemeId).toBeUndefined()
+    expect((await reopened.getBook()).data.readerSettings?.font).toEqual({ fontSize: 29 })
+    expect((await reopened.getBook()).data.readerSettings?.layout).toEqual({ lineHeight: 2 })
+    expect((await reopened.getBook()).data.readerSettings?.theme?.selections).toBeUndefined()
   })
 
   it('reads actual catalog metadata and percentages without fabricating a server file path', async () => {

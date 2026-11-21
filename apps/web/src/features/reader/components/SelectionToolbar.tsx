@@ -18,6 +18,7 @@ import { useTtsSession } from '../hooks/useTtsSession'
 import { useAnnotations, useCreateAnnotation, useDeleteAnnotation, useUpdateAnnotation } from '../hooks/useAnnotations'
 import { useIdeaComposer, useReaderIdeas, useToggleIdeaLike } from '../hooks/useIdeas'
 import { useUiStore } from '@/stores/ui.store'
+import { useViewSettings } from '../view-settings-context'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { IdeaOverlay } from './IdeaOverlay'
 import type { IdeaEntry } from './IdeaOverlay'
@@ -52,7 +53,9 @@ interface SelectionToolbarProps {
 export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: SelectionToolbarProps) {
   const _ = useTranslation()
   const selection = useReaderState((s) => s.selection)
-  const readingMode = useUiStore((s) => s.readingMode)
+  const viewSettings = useViewSettings()
+  const sharedReadingMode = useUiStore((s) => s.readingMode)
+  const readingMode = viewSettings?.effective.readingMode ?? sharedReadingMode
   const liveSelection = useRef<{ source: SelectionInfo; value: SelectionInfo; deltaY: number; visible: boolean } | null>(null)
   const setAiContext = useReaderState((s) => s.setAiContext)
   const setAiPendingCommand = useReaderState((s) => s.setAiPendingCommand)
@@ -75,7 +78,8 @@ export function SelectionToolbar({ bookId, revisionId, fontStack, fontCss }: Sel
   const update = useUpdateAnnotation(bookId)
   const del = useDeleteAnnotation(bookId)
   const { data: annotations } = useAnnotations(bookId, { enabled: !!user || !!local })
-  const showFriendIdeas = useUiStore((state) => state.showFriendIdeas)
+  const sharedShowFriendIdeas = useUiStore((state) => state.showFriendIdeas)
+  const showFriendIdeas = viewSettings?.effective.showFriendIdeas ?? sharedShowFriendIdeas
   const selectionToolbarOrder = useUiStore((state) => state.selectionToolbarOrder)
   const selectionToolbarHidden = useUiStore((state) => state.selectionToolbarHidden)
   const publicIdeas = useReaderIdeas(bookId, showFriendIdeas, revisionId)

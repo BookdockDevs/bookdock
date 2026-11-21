@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 
 import { useAuthStore } from '@/stores/auth.store'
 import { useUiStore } from '@/stores/ui.store'
+import { useViewSettings } from '../view-settings-context'
 
 import { useReaderApi } from '../hooks/useReaderApi'
 import { markEscConsumed } from '../lib/esc-consumed'
@@ -21,7 +22,9 @@ export default function SelectionUtilityPopup({ title, kind, target, onClose, he
   const root = useRef<HTMLDivElement>(null)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
-  const mode = useUiStore((state) => state.readingMode)
+  const viewSettings = useViewSettings()
+  const sharedMode = useUiStore((state) => state.readingMode)
+  const mode = viewSettings?.effective.readingMode ?? sharedMode
   const user = useAuthStore((state) => state.user)
   const initialUserId = useRef(user?.id ?? null)
   const { renderer } = useReaderApi()

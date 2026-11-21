@@ -54,6 +54,8 @@ interface ReaderHeaderProps {
   readingMode?: 'scroll' | 'page'
   bookId?: string
   cleanReadingSupported?: boolean
+  /** 「覆盖书籍字体/布局」 applies only to normal reflowable EPUB. */
+  overrideSupported?: boolean
   onAddBookmark?: () => void
   onToggleSettings?: () => void
   onToggleTts?: () => void
@@ -68,7 +70,7 @@ interface ReaderHeaderProps {
   bookmarkActive?: boolean
 }
 
-export const ReaderHeader = memo(function ReaderHeader({ title, loading = false, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, cleanReadingSupported, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onCloseSettings, onCloseTts, onCloseAutoReading, onTtsStart, onAutoReadingStart, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
+export const ReaderHeader = memo(function ReaderHeader({ title, loading = false, visible, pinned = false, className, estimatedMinutes, settingsOpen, ttsOpen, autoReadingOpen, readingMode = 'scroll', bookId, cleanReadingSupported, overrideSupported, onAddBookmark, onToggleSettings, onToggleTts, onToggleAutoReading, onCloseSettings, onCloseTts, onCloseAutoReading, onTtsStart, onAutoReadingStart, onToggleFullscreen, bookmarkActive }: ReaderHeaderProps) {
   const fontPreviews = useReaderFontPreviews()
   const _ = useTranslation()
   const navigate = useNavigate()
@@ -260,7 +262,7 @@ export const ReaderHeader = memo(function ReaderHeader({ title, loading = false,
               </svg>
             </button>
             <SettingsPopover open={!!settingsOpen} onClose={() => onCloseSettings?.()}>
-              <SettingsPanel bookId={bookId ?? ''} cleanReadingSupported={cleanReadingSupported} fontPreviews={fontPreviews} />
+              <SettingsPanel bookId={bookId ?? ''} cleanReadingSupported={cleanReadingSupported} overrideSupported={overrideSupported} fontPreviews={fontPreviews} />
             </SettingsPopover>
           </div>
         )}

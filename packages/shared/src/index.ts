@@ -246,6 +246,12 @@ export type {
   BookDetailRes,
   PublishedLinkInfo,
   ReaderBookSettings,
+  ReaderBookSlotTheme,
+  ReaderBookThemeSettings,
+  ReaderBookFontSettings,
+  ReaderBookLayoutSettings,
+  ReaderBookDisplaySettings,
+  MarginalField,
   ReadingThemeCards,
   ReadingThemeSelection,
   ReadingThemeSelectionSlots,
@@ -388,6 +394,12 @@ export {
   bookUploadOptionsSchema,
   bookMetadataSchema,
   viewSettingsSchema,
+  readerBookFontSettingsSchema,
+  readerBookLayoutSettingsSchema,
+  readerBookDisplaySettingsSchema,
+  readerBookSlotThemeSchema,
+  readerBookThemeSettingsSchema,
+  readerBookSettingsPatchSchema,
   readerBookSettingsSchema,
   readingThemeCardsSchema,
   readingThemeSelectionSchema,
@@ -678,6 +690,9 @@ export {
   type LocalBookImportSession,
 } from './local-book-transfer'
 export { cleanAuthor, normalizeBookTitle, splitAuthors } from './book-title'
+
+export { applyReaderBookSettingsPatch, mergeReaderBookGroups, migrateLegacyReaderBookSettings } from './reader-book-settings'
+export type { ReaderBookGroupsPatch, ReaderBookSettingsPatch } from './reader-book-settings'
 
 export { txtChapterHref } from './txt-publication'
 

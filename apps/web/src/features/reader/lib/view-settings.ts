@@ -1,121 +1,171 @@
-import type { ViewSettings } from '@bookdock/shared'
-import type { ReadingMode } from '../types'
+import type { MarginalField, ReaderBookDisplaySettings, ReaderBookFontSettings, ReaderBookLayoutSettings, ReaderBookThemeSettings } from '@bookdock/shared'
 
-// First-batch settings that support per-book overrides (F1 layering). Later
-// increments extend this list; the merge/diff machinery is key-agnostic.
-export type PerBookSettingKey = 'cleanReading' | 'fontSize' | 'lineHeight' | 'pageWidth' | 'horizontalPadding' | 'verticalPadding' | 'pageColumns' | 'columnGap'
+import type { ContinuousScroll, ChineseConversion, IdeaDisplayMode, ReadingMode } from '../types'
 
-export type PerBookSettingValue<K extends PerBookSettingKey> = K extends 'cleanReading' ? boolean : number
+// Per-book settings are four independent groups; a group present in
+// book.readerSettings means it is enabled for this book and its fields are the
+// book's explicit values. Later increments extend the key lists; the merge
+// machinery is key-agnostic.
 
-export const PER_BOOK_SETTING_KEYS: readonly PerBookSettingKey[] = [
-  'cleanReading',
-  'fontSize',
-  'lineHeight',
-  'pageWidth',
-  'horizontalPadding',
-  'verticalPadding',
-  'pageColumns',
-  'columnGap',
-]
+export type BookSettingsGroup = 'font' | 'layout' | 'display'
 
-// Flat effective values after merging global (store) with per-book overrides.
-export interface EffectiveViewSettings {
-  cleanReading: boolean
+export type FontSettingKey = keyof ReaderBookFontSettings
+export type LayoutSettingKey = keyof ReaderBookLayoutSettings
+export type DisplaySettingKey = keyof ReaderBookDisplaySettings
+
+// Flat effective values after merging the global chain with the per-book
+// groups. Everything the reader consumes for fonts/layout/display rides here.
+export interface EffectiveReadingSettings {
+  fontFamily: string
+  cjkFontFamily: string
   fontSize: number
+  fontWeight: number
+  overrideBookFont: boolean
+
   lineHeight: number
+  paragraphSpacing: number
+  letterSpacing: number
+  indent: number
+  textAlignJustify: boolean
+  chapterTitleAlign: 'start' | 'center' | 'end'
+  chapterTitleSize: number
+  chapterTitleTopSpacing: number
+  chapterTitleBottomSpacing: number
   pageWidth: number
   horizontalPadding: number
   verticalPadding: number
+  overrideBookLayout: boolean
+
+  readingMode: ReadingMode
   pageColumns: number
   columnGap: number
+  continuousScroll: ContinuousScroll
+  pageAnimation: boolean
+  chineseConversion: ChineseConversion
+  cleanReading: boolean
+  showHeader: boolean
+  headerLeft: MarginalField
+  headerCenter: MarginalField
+  headerRight: MarginalField
+  showFooter: boolean
+  footerLeft: MarginalField
+  footerCenter: MarginalField
+  footerRight: MarginalField
+  marginalFontSize: number
+  showFriendIdeas: boolean
+  ideaDisplayMode: IdeaDisplayMode
 }
 
-export interface GlobalViewSettings {
-  cleanReading: boolean
-  fontSize: number
-  lineHeight: number
-  pageWidth: number
-  horizontalPadding: number
-  verticalPadding: number
-  pageColumns: number
-  columnGap: number
+/** The global chain's values, including every mode-specific backing. */
+export type GlobalReadingSettings = Omit<EffectiveReadingSettings, 'pageWidth' | 'horizontalPadding' | 'verticalPadding'> & {
   scrollPageWidth: number
   scrollHorizontalPadding: number
   scrollVerticalPadding: number
   pagePageWidth: number
   pageHorizontalPadding: number
   pageVerticalPadding: number
-  readingMode: ReadingMode
 }
 
-// Dual-backing keys are merged per mode (the diff's flat value reflects the
-// mode it was saved under, which may differ from the current one) and the
-// flat effective value is derived from the current mode's backing.
-export function mergeViewSettings(global: GlobalViewSettings, perBook: ViewSettings | undefined): EffectiveViewSettings {
-  if (!perBook) {
-    return {
-      cleanReading: global.cleanReading,
-      fontSize: global.fontSize,
-      lineHeight: global.lineHeight,
-      pageWidth: global.pageWidth,
-      horizontalPadding: global.horizontalPadding,
-      verticalPadding: global.verticalPadding,
-      pageColumns: global.pageColumns,
-      columnGap: global.columnGap,
-    }
-  }
-  const scrollPageWidth = perBook.scrollPageWidth ?? global.scrollPageWidth
-  const scrollHorizontalPadding = perBook.scrollHorizontalPadding ?? global.scrollHorizontalPadding
-  const scrollVerticalPadding = perBook.scrollVerticalPadding ?? global.scrollVerticalPadding
-  const pagePageWidth = perBook.pagePageWidth ?? global.pagePageWidth
-  const pageHorizontalPadding = perBook.pageHorizontalPadding ?? global.pageHorizontalPadding
-  const pageVerticalPadding = perBook.pageVerticalPadding ?? global.pageVerticalPadding
+export interface BookSettingGroups {
+  font?: ReaderBookFontSettings
+  layout?: ReaderBookLayoutSettings
+  display?: ReaderBookDisplaySettings
+  theme?: ReaderBookThemeSettings
+}
+
+// Dual-backing keys are merged per mode (the group's flat value reflects the
+// mode it was saved under, which may differ from the book's effective one) and
+// the flat effective value is derived from the effective mode's backing.
+export function mergeBookSettings(global: GlobalReadingSettings, groups: BookSettingGroups | undefined): EffectiveReadingSettings {
+  const font = groups?.font ?? {}
+  const layout = groups?.layout ?? {}
+  const display = groups?.display ?? {}
+  const mode = display.readingMode ?? global.readingMode
+  const pageWidth = mode === 'page'
+    ? layout.pagePageWidth ?? global.pagePageWidth
+    : layout.scrollPageWidth ?? global.scrollPageWidth
+  const horizontalPadding = mode === 'page'
+    ? layout.pageHorizontalPadding ?? global.pageHorizontalPadding
+    : layout.scrollHorizontalPadding ?? global.scrollHorizontalPadding
+  const verticalPadding = mode === 'page'
+    ? layout.pageVerticalPadding ?? global.pageVerticalPadding
+    : layout.scrollVerticalPadding ?? global.scrollVerticalPadding
   return {
-    cleanReading: perBook.cleanReading ?? global.cleanReading,
-    fontSize: perBook.fontSize ?? global.fontSize,
-    lineHeight: perBook.lineHeight ?? global.lineHeight,
-    pageWidth: global.readingMode === 'page' ? pagePageWidth : scrollPageWidth,
-    horizontalPadding: global.readingMode === 'page' ? pageHorizontalPadding : scrollHorizontalPadding,
-    verticalPadding: global.readingMode === 'page' ? pageVerticalPadding : scrollVerticalPadding,
-    pageColumns: perBook.pageColumns ?? global.pageColumns,
-    columnGap: perBook.columnGap ?? global.columnGap,
+    fontFamily: font.fontFamily ?? global.fontFamily,
+    cjkFontFamily: font.cjkFontFamily ?? global.cjkFontFamily,
+    fontSize: font.fontSize ?? global.fontSize,
+    fontWeight: font.fontWeight ?? global.fontWeight,
+    overrideBookFont: font.overrideBookFont ?? global.overrideBookFont,
+
+    lineHeight: layout.lineHeight ?? global.lineHeight,
+    paragraphSpacing: layout.paragraphSpacing ?? global.paragraphSpacing,
+    letterSpacing: layout.letterSpacing ?? global.letterSpacing,
+    indent: layout.indent ?? global.indent,
+    textAlignJustify: layout.textAlignJustify ?? global.textAlignJustify,
+    chapterTitleAlign: layout.chapterTitleAlign ?? global.chapterTitleAlign,
+    chapterTitleSize: layout.chapterTitleSize ?? global.chapterTitleSize,
+    chapterTitleTopSpacing: layout.chapterTitleTopSpacing ?? global.chapterTitleTopSpacing,
+    chapterTitleBottomSpacing: layout.chapterTitleBottomSpacing ?? global.chapterTitleBottomSpacing,
+    pageWidth,
+    horizontalPadding,
+    verticalPadding,
+    overrideBookLayout: layout.overrideBookLayout ?? global.overrideBookLayout,
+
+    readingMode: mode,
+    pageColumns: display.pageColumns ?? global.pageColumns,
+    columnGap: display.columnGap ?? global.columnGap,
+    continuousScroll: display.continuousScroll ?? global.continuousScroll,
+    pageAnimation: display.pageAnimation ?? global.pageAnimation,
+    chineseConversion: display.chineseConversion ?? global.chineseConversion,
+    cleanReading: display.cleanReading ?? global.cleanReading,
+    showHeader: display.showHeader ?? global.showHeader,
+    headerLeft: display.headerLeft ?? global.headerLeft,
+    headerCenter: display.headerCenter ?? global.headerCenter,
+    headerRight: display.headerRight ?? global.headerRight,
+    showFooter: display.showFooter ?? global.showFooter,
+    footerLeft: display.footerLeft ?? global.footerLeft,
+    footerCenter: display.footerCenter ?? global.footerCenter,
+    footerRight: display.footerRight ?? global.footerRight,
+    marginalFontSize: display.marginalFontSize ?? global.marginalFontSize,
+    showFriendIdeas: display.showFriendIdeas ?? global.showFriendIdeas,
+    ideaDisplayMode: display.ideaDisplayMode ?? global.ideaDisplayMode,
   }
 }
 
-// The diff patch to send for a single setting change. Mirrors the global
-// store setters: dual-backing keys carry both the flat value and the backing
-// for the current mode.
-export function viewSettingsDiffForKey<K extends PerBookSettingKey>(key: K, value: PerBookSettingValue<K>, readingMode: ReadingMode): ViewSettings {
-  if (key === 'cleanReading') {
-    if (typeof value !== 'boolean') throw new TypeError('cleanReading must be boolean')
-    return { cleanReading: value }
+/**
+ * The group patch one setting change produces. Mirrors the global store
+ * setters: dual-backing keys carry both the flat value and the backing for the
+ * current mode; the flat value may reflect a different mode later, so
+ * resolution always reads the backing.
+ */
+export function settingPatchForKey(
+  key: string,
+  value: number | boolean | string,
+  readingMode: ReadingMode,
+): { group: BookSettingsGroup; patch: Record<string, unknown> } {
+  if (key === 'fontSize' || key === 'fontWeight' || key === 'overrideBookFont'
+    || key === 'fontFamily' || key === 'cjkFontFamily') {
+    return { group: 'font', patch: { [key]: value } }
   }
-  if (typeof value !== 'number') throw new TypeError(`${key} must be numeric`)
-  switch (key) {
-    case 'fontSize':
-      return { fontSize: value }
-    case 'lineHeight':
-      return { lineHeight: value }
-    case 'pageWidth':
-      return readingMode === 'page'
-        ? { pageWidth: value, pagePageWidth: value }
-        : { pageWidth: value, scrollPageWidth: value }
-    case 'horizontalPadding':
-      return readingMode === 'page'
-        ? { horizontalPadding: value, pageHorizontalPadding: value }
-        : { horizontalPadding: value, scrollHorizontalPadding: value }
-    case 'verticalPadding':
-      return readingMode === 'page'
-        ? { verticalPadding: value, pageVerticalPadding: value }
-        : { verticalPadding: value, scrollVerticalPadding: value }
-    case 'pageColumns':
-      return { pageColumns: value }
-    case 'columnGap':
-      return { columnGap: value }
+  if (key === 'pageWidth' || key === 'horizontalPadding' || key === 'verticalPadding') {
+    const backing = readingMode === 'page' ? `page${key.charAt(0).toUpperCase()}${key.slice(1)}` : `scroll${key.charAt(0).toUpperCase()}${key.slice(1)}`
+    return { group: 'layout', patch: { [key]: value, [backing]: value } }
   }
-  throw new Error(`Unsupported view setting: ${key}`)
+  if (key === 'readingMode' || key === 'pageColumns' || key === 'columnGap' || key === 'continuousScroll' || key === 'pageAnimation'
+    || key === 'chineseConversion' || key === 'cleanReading' || key === 'showHeader' || key === 'headerLeft' || key === 'headerCenter'
+    || key === 'headerRight' || key === 'showFooter' || key === 'footerLeft' || key === 'footerCenter' || key === 'footerRight'
+    || key === 'marginalFontSize' || key === 'showFriendIdeas' || key === 'ideaDisplayMode') {
+    return { group: 'display', patch: { [key]: value } }
+  }
+  return { group: 'layout', patch: { [key]: value } }
 }
 
-export function hasViewSettings(viewSettings: ViewSettings | undefined): boolean {
-  return !!viewSettings && Object.keys(viewSettings).length > 0
+/** Explicit per-book group fields flattened for preset-creation overlays. */
+export function flattenGroupFields(groups: BookSettingGroups | undefined): Record<string, unknown> {
+  if (!groups) return {}
+  return { ...groups.font, ...groups.layout, ...groups.display }
+}
+
+export function hasBookGroups(groups: BookSettingGroups | undefined): boolean {
+  return !!groups && (groups.font != null || groups.layout != null || groups.display != null)
 }

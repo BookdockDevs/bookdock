@@ -1,12 +1,10 @@
 import { useMemo, useRef, useState } from 'react'
 
-import type { ReadingThemeCards } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import SmartMenu, { readerMenuItemClass } from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
-import { HIGHLIGHT_LIMITS } from '@/lib/highlight-match'
 import { pointerAnchor, type MenuAnchor } from '@/lib/menu-anchor'
 import { deriveReadingTheme } from '@/lib/reading-theme'
 import { cn } from '@/lib/utils'
@@ -17,7 +15,7 @@ import SelectChip from './SelectChip'
 import ThemeIcon from './ThemeIcon'
 import ThemeTrialBar from './ThemeTrialBar'
 import { useThemeAssetUrls } from './asset-urls'
-import type { ReadingThemeLibrary, SavedReadingTheme } from './theme-library'
+import type { ReadingThemeLibrary, SavedReadingTheme, ThemeDefinitionCards } from './theme-library'
 
 interface ThemeCombinationDialogProps {
   initial: SavedReadingTheme
@@ -71,16 +69,18 @@ export default function ThemeCombinationDialog({
   )
   const { urls: wallpapers } = useThemeAssetUrls(scope, paletteAssetIds)
 
-  const change = (patch: Partial<ReadingThemeCards>) =>
+  const change = (patch: Partial<ThemeDefinitionCards>) =>
     setDraft((current) => ({ ...current, cards: { ...current.cards, ...patch } }))
   const toggleRule = (id: string) =>
     setDraft((current) => {
       const ids = current.cards.highlightIds
       const highlightIds = ids.includes(id)
         ? ids.filter((rule) => rule !== id)
-        : [...ids, id].slice(0, HIGHLIGHT_LIMITS.maxRules)
+        : [...ids, id]
       return { ...current, cards: { ...current.cards, highlightIds } }
     })
+  // A theme must keep at least one component (palette / CSS / highlights).
+  const hasComponent = cards.paletteId != null || cards.cssId != null || cards.highlightIds.length > 0
   const create = (kind: ThemeCardEdit['kind']) => {
     onCreateCard(kind, (id) => {
       if (kind === 'palette') change({ paletteId: id })
@@ -133,7 +133,8 @@ export default function ThemeCombinationDialog({
                 type="button"
                 variant="primary"
                 size="sm"
-                disabled={!hasPalette || !draft.name.trim()}
+                disabled={!hasComponent || (cards.paletteId != null && !hasPalette) || !draft.name.trim()}
+                title={!hasComponent ? _('reader.themeNeedsComponent') : undefined}
                 onClick={() => onSave({ ...draft, name: draft.name.trim() })}
               >
                 {_('reader.saveTheme')}
@@ -201,7 +202,7 @@ export default function ThemeCombinationDialog({
                     aria-pressed={selected}
                     title={palette.name}
                     style={{ backgroundColor: color.bg, color: color.text }}
-                    onClick={() => change({ paletteId: palette.id })}
+                    onClick={() => change({ paletteId: selected ? undefined : palette.id })}
                     onContextMenu={(e) => {
                       if (!onEditCard && !onCopyCard) return
                       e.preventDefault()
@@ -330,7 +331,6 @@ export default function ThemeCombinationDialog({
                     <SelectChip
                       key={id}
                       selected={selected}
-                      disabled={!selected && cards.highlightIds.length >= HIGHLIGHT_LIMITS.maxRules}
                       onClick={() => toggleRule(id)}
                       onContextMenu={(e) => {
                         if ((!onEditCard && !onCopyCard) || !rule) return

@@ -3,7 +3,7 @@ import type { BookFormat, FontListItem, HighlightRuleDef } from '@bookdock/share
 import type { ReaderBookProvider } from '../content/book-provider'
 import type { readReaderShortcuts } from '../lib/reader-shortcuts'
 
-import { selectEffectiveCustomTheme, selectEffectiveReadingThemeId, selectEffectiveReadingCss, selectReaderThemeOverride, useUiStore } from '@/stores/ui.store'
+import { selectEffectiveCustomTheme, selectEffectiveReadingCss, selectEffectiveReadingTheme, useUiStore } from '@/stores/ui.store'
 import { useAuthStore } from '@/stores/auth.store'
 import { useFonts } from '@/api/hooks/useFonts'
 import { useInstanceInfo } from '@/features/auth/hooks'
@@ -11,13 +11,13 @@ import { useDeviceFontStore } from '@/features/device-fonts/store'
 import { useDeviceFontUrls } from '@/features/device-fonts/urls'
 import { useThemeAssetUrls } from '@/features/reading-theme/asset-urls'
 import { themeFontSources } from '@/features/reading-theme/font-refs'
-import { resolveEffectiveReadingTheme } from '@/lib/reading-theme'
 import { collectThemeFontRefs, validateUiCss } from '@/lib/theme-css-guard'
 import { notify } from '@/lib/notifications'
 import { FoliateReader } from '../renderers/FoliateReader'
 import { buildFontOptions, resolveDualFont, useFontLoaderStore } from '../fonts'
 import type { BookReader, ClickAreaMode, MarginalField, RendererEvents } from '../types'
-import type { EffectiveViewSettings } from '../lib/view-settings'
+import type { BookDeviceFontSelection } from '../lib/book-device-fonts'
+import type { EffectiveReadingSettings } from '../lib/view-settings'
 
 interface UseReaderRendererOptions {
   shortcuts?: () => ReturnType<typeof readReaderShortcuts>
@@ -36,9 +36,14 @@ interface UseReaderRendererOptions {
    *  a re-TOC) and when the saved CFI fails to resolve (renderer falls back
    *  to fraction navigation instead of leaving the view at the book start). */
   initialFraction?: number
-  /** Per-book merged values for the first-batch settings (F1). When omitted,
-   *  the global store values are used. */
-  settings?: EffectiveViewSettings
+  /** Fully merged per-book values for every font/layout/display field. When
+   *  omitted, the global store values are used. */
+  settings?: EffectiveReadingSettings
+  /** The book's own synced font ids (unmerged) — they shadow the global chain
+   *  but lose to the book's device picks. */
+  bookFonts?: { fontFamily?: string; cjkFontFamily?: string }
+  /** This device's per-book font picks; they shadow everything else. */
+  bookDeviceFonts?: BookDeviceFontSelection
   /** Validated phase-2 user CSS (content for section docs, outside-rooted UI
    *  subset for section canvases); the host chrome sheet stays in Reader. */
   userCss?: { content: string; ui: string }
@@ -108,6 +113,8 @@ export function useReaderRenderer({
   initialCfi,
   initialFraction,
   settings,
+  bookFonts,
+  bookDeviceFonts,
   userCss,
   highlightRules,
   chapterWordCounts,
@@ -152,57 +159,79 @@ export function useReaderRenderer({
   const [renderer, setRenderer] = useState<BookReader | null>(null)
   const remountPositionRef = useRef<{ key: string; cfi: string | null; fraction: number | null } | null>(null)
 
-  const readingThemeId = useUiStore(selectEffectiveReadingThemeId)
-  const customThemes = useUiStore((s) => s.customThemes)
-  const overrideTheme = useUiStore(selectReaderThemeOverride)
-  const fontFamily = useUiStore((s) => s.fontFamily)
-  const cjkFontFamily = useUiStore((s) => s.cjkFontFamily)
+  const storeFontFamily = useUiStore((s) => s.fontFamily)
+  const storeCjkFontFamily = useUiStore((s) => s.cjkFontFamily)
   const fontPreferences = useUiStore((s) => s.fontPreferences)
   const fontOrder = useUiStore((s) => s.fontOrder)
   const storeFontSize = useUiStore((s) => s.fontSize)
   const storeCleanReading = useUiStore((s) => s.cleanReading)
-  const fontWeight = useUiStore((s) => s.fontWeight)
+  const storeFontWeight = useUiStore((s) => s.fontWeight)
   const storeLineHeight = useUiStore((s) => s.lineHeight)
-  const paragraphSpacing = useUiStore((s) => s.paragraphSpacing)
-  const chapterTitleAlign = useUiStore((s) => s.chapterTitleAlign)
-  const chapterTitleSize = useUiStore((s) => s.chapterTitleSize)
-  const chapterTitleTopSpacing = useUiStore((s) => s.chapterTitleTopSpacing)
-  const chapterTitleBottomSpacing = useUiStore((s) => s.chapterTitleBottomSpacing)
-  const letterSpacing = useUiStore((s) => s.letterSpacing)
-  const indent = useUiStore((s) => s.indent)
+  const storeParagraphSpacing = useUiStore((s) => s.paragraphSpacing)
+  const storeChapterTitleAlign = useUiStore((s) => s.chapterTitleAlign)
+  const storeChapterTitleSize = useUiStore((s) => s.chapterTitleSize)
+  const storeChapterTitleTopSpacing = useUiStore((s) => s.chapterTitleTopSpacing)
+  const storeChapterTitleBottomSpacing = useUiStore((s) => s.chapterTitleBottomSpacing)
+  const storeLetterSpacing = useUiStore((s) => s.letterSpacing)
+  const storeIndent = useUiStore((s) => s.indent)
   const storePageWidth = useUiStore((s) => s.pageWidth)
   const storeVerticalPadding = useUiStore((s) => s.verticalPadding)
   const storeHorizontalPadding = useUiStore((s) => s.horizontalPadding)
-  const textAlignJustify = useUiStore((s) => s.textAlignJustify)
-  const overrideBookFont = useUiStore((s) => s.overrideBookFont)
-  const overrideBookLayout = useUiStore((s) => s.overrideBookLayout)
-  const readingMode = useUiStore((s) => s.readingMode)
+  const storeTextAlignJustify = useUiStore((s) => s.textAlignJustify)
+  const storeOverrideBookFont = useUiStore((s) => s.overrideBookFont)
+  const storeOverrideBookLayout = useUiStore((s) => s.overrideBookLayout)
+  const storeReadingMode = useUiStore((s) => s.readingMode)
   const storePageColumns = useUiStore((s) => s.pageColumns)
   const storeColumnGap = useUiStore((s) => s.columnGap)
-  const chineseConversion = useUiStore((s) => s.chineseConversion)
-  const continuousScroll = useUiStore((s) => s.continuousScroll)
-  const pageAnimation = useUiStore((s) => s.pageAnimation)
-  const showHeader = useUiStore((s) => s.showHeader)
-  const showFooter = useUiStore((s) => s.showFooter)
+  const storeChineseConversion = useUiStore((s) => s.chineseConversion)
+  const storeContinuousScroll = useUiStore((s) => s.continuousScroll)
+  const storePageAnimation = useUiStore((s) => s.pageAnimation)
+  const storeShowHeader = useUiStore((s) => s.showHeader)
+  const storeShowFooter = useUiStore((s) => s.showFooter)
   const clickAreaMode = useUiStore((s) => s.clickAreaMode)
-  const headerLeft = useUiStore((s) => s.headerLeft)
-  const headerCenter = useUiStore((s) => s.headerCenter)
-  const headerRight = useUiStore((s) => s.headerRight)
-  const footerLeft = useUiStore((s) => s.footerLeft)
-  const footerCenter = useUiStore((s) => s.footerCenter)
-  const footerRight = useUiStore((s) => s.footerRight)
-  const marginalFontSize = useUiStore((s) => s.marginalFontSize)
+  const storeHeaderLeft = useUiStore((s) => s.headerLeft)
+  const storeHeaderCenter = useUiStore((s) => s.headerCenter)
+  const storeHeaderRight = useUiStore((s) => s.headerRight)
+  const storeFooterLeft = useUiStore((s) => s.footerLeft)
+  const storeFooterCenter = useUiStore((s) => s.footerCenter)
+  const storeFooterRight = useUiStore((s) => s.footerRight)
+  const storeMarginalFontSize = useUiStore((s) => s.marginalFontSize)
 
-  // Per-book overrides (F1) take precedence over the global store for the
-  // first-batch keys; everything else keeps reading the store directly.
+  // The merged per-book settings shadow the global store for every font,
+  // layout and display field; the store reads remain the fallback for callers
+  // that do not pass settings.
   const fontSize = settings?.fontSize ?? storeFontSize
   const cleanReading = settings?.cleanReading ?? storeCleanReading
+  const fontWeight = settings?.fontWeight ?? storeFontWeight
   const lineHeight = settings?.lineHeight ?? storeLineHeight
+  const paragraphSpacing = settings?.paragraphSpacing ?? storeParagraphSpacing
+  const chapterTitleAlign = settings?.chapterTitleAlign ?? storeChapterTitleAlign
+  const chapterTitleSize = settings?.chapterTitleSize ?? storeChapterTitleSize
+  const chapterTitleTopSpacing = settings?.chapterTitleTopSpacing ?? storeChapterTitleTopSpacing
+  const chapterTitleBottomSpacing = settings?.chapterTitleBottomSpacing ?? storeChapterTitleBottomSpacing
+  const letterSpacing = settings?.letterSpacing ?? storeLetterSpacing
+  const indent = settings?.indent ?? storeIndent
   const pageWidth = settings?.pageWidth ?? storePageWidth
   const verticalPadding = settings?.verticalPadding ?? storeVerticalPadding
   const horizontalPadding = settings?.horizontalPadding ?? storeHorizontalPadding
+  const textAlignJustify = settings?.textAlignJustify ?? storeTextAlignJustify
+  const overrideBookFont = settings?.overrideBookFont ?? storeOverrideBookFont
+  const overrideBookLayout = settings?.overrideBookLayout ?? storeOverrideBookLayout
+  const readingMode = settings?.readingMode ?? storeReadingMode
   const pageColumns = settings?.pageColumns ?? storePageColumns
   const columnGap = settings?.columnGap ?? storeColumnGap
+  const chineseConversion = settings?.chineseConversion ?? storeChineseConversion
+  const continuousScroll = settings?.continuousScroll ?? storeContinuousScroll
+  const pageAnimation = settings?.pageAnimation ?? storePageAnimation
+  const showHeader = settings?.showHeader ?? storeShowHeader
+  const showFooter = settings?.showFooter ?? storeShowFooter
+  const headerLeft = settings?.headerLeft ?? storeHeaderLeft
+  const headerCenter = settings?.headerCenter ?? storeHeaderCenter
+  const headerRight = settings?.headerRight ?? storeHeaderRight
+  const footerLeft = settings?.footerLeft ?? storeFooterLeft
+  const footerCenter = settings?.footerCenter ?? storeFooterCenter
+  const footerRight = settings?.footerRight ?? storeFooterRight
+  const marginalFontSize = settings?.marginalFontSize ?? storeMarginalFontSize
 
   // Registry resolution lives at this boundary: the renderer only ever
   // receives a concrete stack + optional @font-face/@import css. While the
@@ -251,23 +280,17 @@ export function useReaderRenderer({
   const mountedHere = Boolean(liveMount) && liveMount!.bookId === bookId
     && liveMount!.url === url && liveMount!.mountGeneration === mountGeneration
   const canMount = Boolean(url) && ((ready && preparedUrlRef.current === url) || mountedHere)
-  // A device font selection overrides the account's synced font ids on this
-  // device only; the readingConfig blob is never given a device reference.
-  const effectiveFontFamily = deviceSelection.primary ?? fontFamily
-  const effectiveCjkFontFamily = deviceSelection.cjk ?? cjkFontFamily
-  const resolvedFont = resolveDualFont(effectiveFontFamily, effectiveCjkFontFamily, fontsData?.data ?? [], fontPreferences, fontOrder, deviceCatalog, {}, builtinDownloadsAllowed)
-  const selectedDeviceIds = useMemo(
-    () => [...new Set([resolvedFont.primary.device?.id, resolvedFont.companion.device?.id].filter((id): id is string => Boolean(id)))],
-    [resolvedFont],
-  )
-  const { urls: deviceFontUrls, missing: missingDeviceFonts } = useDeviceFontUrls(selectedDeviceIds)
+  const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
+  const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
+  const fontLatinIds = useFontLoaderStore((s) => s.latinIds)
+  // Font chain: the book's device pick shadows its synced id, which shadows
+  // the global device pick, which shadows the synced account id. A candidate
+  // this device cannot resolve (font deleted/disabled) falls through instead
+  // of blanking the reading font; nothing is written back for book layers.
   // Phase-5: the effective content CSS may reference device fonts too. They
   // hold their own leases (a missing theme reference must never clear the
   // reading-font selection) and are released when the reference disappears.
   const contentFontRefs = useMemo(() => collectThemeFontRefs(userCss?.content ?? ''), [userCss?.content])
-  const fontLoadedIds = useFontLoaderStore((s) => s.loadedIds)
-  const fontLoadingIds = useFontLoaderStore((s) => s.loadingIds)
-  const fontLatinIds = useFontLoaderStore((s) => s.latinIds)
   // `fontsData` is folded together every render (it carries the optional
   // resolved-list override), so the catalog list is memoized on its own
   // sources: the options below feed two further memos and a fresh array each
@@ -278,6 +301,28 @@ export function useReaderRenderer({
       fontPreferences, fontOrder, deviceCatalog, builtinDownloadsAllowed),
     [fontCatalog, fontLoadedIds, fontLoadingIds, fontLatinIds, fontPreferences, fontOrder, deviceCatalog, builtinDownloadsAllowed],
   )
+  const availableFontIds = useMemo(
+    () => new Set(fontOptions.filter((option) => option.enabled).map((option) => option.id)),
+    [fontOptions],
+  )
+  // Device fonts whose bytes no longer resolve yield to the next layer for the
+  // rest of this reader session. The ids accumulate (a skipped pick drops out
+  // of the URL probe, so a replacing set would re-admit it and oscillate);
+  // stored per-book picks are never written back, they just stop occupying
+  // the top slot while their bytes are gone.
+  const [unresolvableFontIds, setUnresolvableFontIds] = useState<ReadonlySet<string>>(() => new Set())
+  const pickAvailableFont = (...candidates: Array<string | null | undefined>): string =>
+    candidates.find((id): id is string => !!id && availableFontIds.has(id) && !unresolvableFontIds.has(id))
+      ?? candidates.find((id): id is string => !!id) ?? 'sans-serif'
+  const effectiveFontFamily = pickAvailableFont(bookDeviceFonts?.primary, bookFonts?.fontFamily, deviceSelection.primary, storeFontFamily)
+  const effectiveCjkFontFamily = pickAvailableFont(bookDeviceFonts?.cjk, bookFonts?.cjkFontFamily, deviceSelection.cjk, storeCjkFontFamily)
+  const resolvedFont = resolveDualFont(effectiveFontFamily, effectiveCjkFontFamily, fontsData?.data ?? [], fontPreferences, fontOrder, deviceCatalog, {}, builtinDownloadsAllowed)
+  const selectedDeviceIds = useMemo(
+    () => [...new Set([resolvedFont.primary.device?.id, resolvedFont.companion.device?.id].filter((id): id is string => Boolean(id)))],
+    [resolvedFont],
+  )
+  const { urls: deviceFontUrls, missing: missingDeviceFonts } = useDeviceFontUrls(selectedDeviceIds)
+
   const themeDeviceFontIds = useMemo(() => {
     if (!contentFontRefs.length) return []
     const byId = new Map(fontOptions.filter((option) => option.enabled).map((option) => [option.id, option]))
@@ -298,6 +343,11 @@ export function useReaderRenderer({
   // fallback stack.
   useEffect(() => {
     if (missingDeviceFonts.length === 0) return
+    setUnresolvableFontIds((current) => {
+      const next = new Set(current)
+      for (const id of missingDeviceFonts) next.add(id)
+      return next.size === current.size ? current : next
+    })
     useDeviceFontStore.getState().clearSelectionFor(missingDeviceFonts)
     notify.warning({ key: 'reader.deviceFontUnavailable', params: { total: missingDeviceFonts.length } }, { dedupeKey: `device-font-missing-${missingDeviceFonts.join(',')}` })
   }, [missingDeviceFonts])
@@ -330,10 +380,10 @@ export function useReaderRenderer({
   const onFootnoteCloseRef = useRef(onFootnoteClose)
   const onAtEndReachedRef = useRef(onAtEndReached)
   const onEndOfBookMountRef = useRef(onEndOfBookMount)
-  const theme = useMemo(
-    () => resolveEffectiveReadingTheme(overrideTheme, readingThemeId, customThemes),
-    [overrideTheme, readingThemeId, customThemes],
-  )
+  // The full appearance chain (trial / per-book composition / global palette
+  // and theme layers) resolves in the store so panel, chrome and body share
+  // one effective result.
+  const theme = useUiStore(selectEffectiveReadingTheme)
   const themeRef = useRef(theme)
   // Phase-4 theme assets: pool the temporary URLs of every asset the effective
   // theme references (wallpaper + the CSS source's manifest) for the lifetime
@@ -377,7 +427,7 @@ export function useReaderRenderer({
       { dedupeKey: `theme-assets-missing-${assetScope}-${missingThemeAssets.join(',')}` },
     )
   }, [missingThemeAssets, assetScope])
-  const fontRef = useRef({ fontFamily, cjkFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
+  const fontRef = useRef({ fontFamily: effectiveFontFamily, cjkFontFamily: effectiveCjkFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
   const paragraphRef = useRef({ paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout })
   const pageWidthRef = useRef(pageWidth)
   const chineseConversionRef = useRef(chineseConversion)
@@ -424,7 +474,7 @@ export function useReaderRenderer({
   onAtEndReachedRef.current = onAtEndReached
   onEndOfBookMountRef.current = onEndOfBookMount
   themeRef.current = theme
-  fontRef.current = { fontFamily, cjkFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont }
+  fontRef.current = { fontFamily: effectiveFontFamily, cjkFontFamily: effectiveCjkFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont }
   paragraphRef.current = { paragraphSpacing, chapterTitleAlign, chapterTitleSize, chapterTitleTopSpacing, chapterTitleBottomSpacing, letterSpacing, indent, verticalPadding, horizontalPadding, textAlignJustify, overrideBookLayout }
   pageWidthRef.current = pageWidth
   chineseConversionRef.current = chineseConversion
@@ -763,8 +813,8 @@ export function useReaderRenderer({
   useEffect(() => {
     const current = rendererRef.current
     if (!current) return
-    current.applyFont({ fontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
-  }, [fontFamily, cjkFontFamily, fontStack, fontCss, fontSize, lineHeight, fontWeight, overrideBookFont, renderer])
+    current.applyFont({ fontFamily: effectiveFontFamily, fontStack, fontCss, size: fontSize, lineHeight, fontWeight, overrideBookFont })
+  }, [effectiveFontFamily, effectiveCjkFontFamily, fontStack, fontCss, fontSize, lineHeight, fontWeight, overrideBookFont, renderer])
 
   useEffect(() => {
     const current = rendererRef.current

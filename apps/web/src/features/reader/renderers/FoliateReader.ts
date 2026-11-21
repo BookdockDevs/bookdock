@@ -3835,13 +3835,18 @@ export class FoliateReader implements BookReader {
   applyParagraphStyle(cfg: ParagraphStyle) {
     this.paragraph = cfg
     this.emit('readingSettingsChanged')
-    for (const doc of this.activeDocs) setEpubParagraphWhitespace(doc, this.shouldForceBookLayout() || this.shouldApplyCleanReading())
+    for (const doc of this.activeDocs) setEpubParagraphWhitespace(doc, this.shouldNormalizeParagraphWhitespace())
     this.applyStyles()
     this.updateLayout()
   }
 
+  // The forced-override toggles apply only inside normal reflowable EPUB; TXT
+  // (generated content, no authored typography to preserve) and clean reading
+  // always read with the reader's own settings regardless of the toggles, and
+  // fixed-layout books skip the overrides entirely.
   private shouldForceBookLayout(): boolean {
-    return this.bookFormat === 'txt' || this.paragraph.overrideBookLayout
+    return this.bookFormat === 'txt'
+      || (this.bookFormat === 'epub' && !this.view?.isFixedLayout && this.paragraph.overrideBookLayout)
   }
 
   private shouldApplyCleanReading(): boolean {
@@ -3849,7 +3854,15 @@ export class FoliateReader implements BookReader {
   }
 
   private shouldForceBookdockFont(): boolean {
-    return this.font.overrideBookFont || this.shouldApplyCleanReading()
+    return this.bookFormat === 'txt'
+      || (this.bookFormat === 'epub' && !this.view?.isFixedLayout && this.font.overrideBookFont)
+      || this.shouldApplyCleanReading()
+  }
+
+  // 段落前导空白归一是格式行为：TXT 生成段落自带全角缩进（与阅读器的缩进
+  // 设置二选一），与覆盖开关无关。
+  private shouldNormalizeParagraphWhitespace(): boolean {
+    return this.shouldForceBookLayout() || this.shouldApplyCleanReading()
   }
 
   applyPageWidth(width: number) {
@@ -5462,7 +5475,7 @@ export class FoliateReader implements BookReader {
           // ignore
         }
         keepEpubTextAlignment(doc)
-        setEpubParagraphWhitespace(doc, this.shouldForceBookLayout() || this.shouldApplyCleanReading())
+        setEpubParagraphWhitespace(doc, this.shouldNormalizeParagraphWhitespace())
         if (this.bookFormat === 'epub' && !this.view?.isFixedLayout) {
           const label = this.view?.getProgressOf?.(index)?.tocItem?.label
           if (typeof label === 'string') markEpubChapterTitle(doc, label)

@@ -94,4 +94,25 @@ describe('ui.store reader sidebar width', () => {
     const store = await freshStore()
     expect(store.getState().sidebarWidth).toBe(640)
   })
+
+  it('remembers pinned and floating sidebar widths independently', async () => {
+    const store = await freshStore()
+    store.getState().setToolbarLocked(true)
+    store.getState().setSidebarWidth(360)
+
+    store.getState().setToolbarLocked(false)
+    expect(store.getState().sidebarWidth).toBe(288)
+    store.getState().setSidebarWidth(420)
+
+    store.getState().setToolbarLocked(true)
+    expect(store.getState().sidebarWidth).toBe(360)
+
+    store.getState().setToolbarLocked(false)
+    expect(store.getState().sidebarWidth).toBe(420)
+
+    const reloaded = await freshStore()
+    expect(reloaded.getState().sidebarWidth).toBe(420)
+    reloaded.getState().setToolbarLocked(true)
+    expect(reloaded.getState().sidebarWidth).toBe(360)
+  })
 })
