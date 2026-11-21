@@ -107,12 +107,12 @@ export default function AiConnectionEditor({ connection, initialProvider, provid
           )
         : _('settings.aiAdd')}
       size={connection ? 'wide' : 'default'}
-      onClose={onClose}
+      onClose={saving ? () => undefined : onClose}
       footer={showForm ? (
         // Sticky bar: the form saves as a whole, while model changes save instantly.
         <div className="ml-auto flex justify-end gap-2">
           <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={saving}>{_('library.cancel')}</Button>
-          <Button type="submit" size="sm" form="ai-connection-form" disabled={saving || !name.trim()}>{_('library.save')}</Button>
+          <Button type="submit" size="sm" form="ai-connection-form" disabled={saving || !name.trim()}>{_(saving ? 'passwordInput.saving' : 'library.save')}</Button>
         </div>
       ) : undefined}
     >
@@ -153,7 +153,7 @@ export default function AiConnectionEditor({ connection, initialProvider, provid
                 )}
               </SettingsFormField>
             </div>
-            <SettingsFormField label={_('settings.aiBaseUrl')} required>
+            <SettingsFormField label={_('settings.aiBaseUrl')}>
               <input aria-label={_('settings.aiBaseUrl')} readOnly={!isOwner} type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://localhost:11434" className={`${settingsInputClass} ${!isOwner ? 'cursor-default bg-stone-50 text-stone-500 dark:bg-stone-800/50' : ''}`} />
               {!isOwner && <p className="mt-1 text-[11px] text-stone-400 dark:text-stone-500">{_('settings.aiBaseUrlMemberHint')}</p>}
             </SettingsFormField>

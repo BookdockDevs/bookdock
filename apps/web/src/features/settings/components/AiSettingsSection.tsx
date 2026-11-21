@@ -101,21 +101,18 @@ export default function AiSettingsSection({ id }: { id?: string }) {
   const connections = useMemo(() => config?.connections ?? [], [config?.connections])
   const models = useMemo(() => config?.models ?? [], [config?.models])
   const modelsByConnection = useMemo(() => groupModelsByConnection(models), [models])
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.aiOperationFailed'))
 
 
   // The editor dialog re-reads the saved connection from the refreshed catalog.
   const editing = editor?.connection ? connections.find((connection) => connection.id === editor.connection!.id) ?? editor.connection : null
 
-  function confirmDelete() {
+  // ConfirmDialog awaits this; failures surface inline there, so no
+  // parallel error toast.
+  async function confirmDelete() {
     if (!pendingDelete) return
-    removeConnection.mutate(pendingDelete.id, {
-      onSuccess: () => {
-        setPendingDelete(null)
-        notify.success({ key: 'settings.aiDeleted' })
-      },
-      onError: showError,
-    })
+    await removeConnection.mutateAsync(pendingDelete.id)
+    setPendingDelete(null)
+    notify.success({ key: 'settings.aiDeleted' })
   }
 
   return (
@@ -244,7 +241,7 @@ export default function AiSettingsSection({ id }: { id?: string }) {
         {!isGuest && config && <AiPromptTemplates prompts={config.prompts} restoreAvailable={config.promptsRestoreAvailable} />}
       </SettingsCard>
 
-      {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.aiDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
+      {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.aiDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} errorFallback="settings.aiOperationFailed" onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
 
       {editor && <AiConnectionEditor connection={editing} initialProvider={editor.provider} providers={providers} models={editing ? modelsByConnection.get(editing.id) ?? [] : []} onClose={() => setEditor(null)} />}
     </>
@@ -374,12 +371,12 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
     setSortDrafts(arrayMove(drafts, currentIndex, targetIndex))
   }
 
-  function confirmDelete() {
+  // ConfirmDialog awaits this; failures surface inline there, so no
+  // parallel error toast.
+  async function confirmDelete() {
     if (!pendingDelete) return
-    deletePrompt.mutate(pendingDelete.id, {
-      onSuccess: () => setPendingDelete(null),
-      onError: showError,
-    })
+    await deletePrompt.mutateAsync(pendingDelete.id)
+    setPendingDelete(null)
   }
 
   return <section className="border-t border-stone-100 pt-5 dark:border-stone-800">
@@ -411,8 +408,8 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
         </ul>
       </SortableContext>
     </DndContext>}
-    {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.aiPromptDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
-    {form && <Modal title={_(form.id ? 'settings.aiPromptEdit' : 'settings.aiPromptAdd')} onClose={closeForm}>
+    {pendingDelete && <ConfirmDialog title={_('settings.confirmDeleteTitle')} message={_('settings.aiPromptDeleteConfirm', { name: pendingDelete.name })} confirmLabel={_('settings.confirmDeleteAction')} errorFallback="settings.aiPromptSaveFailed" onConfirm={confirmDelete} onClose={() => setPendingDelete(null)} />}
+    {form && <Modal title={_(form.id ? 'settings.aiPromptEdit' : 'settings.aiPromptAdd')} onClose={busy ? () => undefined : closeForm}>
       <form noValidate className={settingsFormClass} onSubmit={(event) => { event.preventDefault(); submitForm() }}>
         <SettingsFormField label={_('settings.aiPromptName')} required error={formErrors.name ? _('settings.aiPromptNameRequired') : undefined}>
           <input
@@ -493,7 +490,7 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
             />
           </fieldset>
         )}
-        <SettingsFormActions onCancel={closeForm} cancelDisabled={busy} saveDisabled={busy} />
+        <SettingsFormActions onCancel={closeForm} pending={busy} />
       </form>
     </Modal>}
   </section>

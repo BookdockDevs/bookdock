@@ -1,4 +1,4 @@
-import type { HighlightRuleDef } from '@bookdock/shared'
+import type { HighlightRuleDef, ReaderSearchError } from '@bookdock/shared'
 import type { ThemeAssetResolver } from '../../lib/theme-css-guard'
 import type { TextReplacementRule } from './lib/text-replacements'
 import type { MediaOverlayCue } from './lib/media-overlay'
@@ -359,7 +359,7 @@ export interface SearchStatus {
   partial?: boolean
   canceled?: boolean
   offline?: boolean
-  error?: 'regex-timeout' | 'regex-unavailable' | 'regex-failed'
+  error?: ReaderSearchError | 'regex-unavailable'
 }
 
 export interface SearchResult {

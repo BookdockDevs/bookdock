@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { HighlightRuleDef, ReaderBookSettings, ReadingThemeCards, ReadingThemeSelection } from '@bookdock/shared'
 
 import { localRecordId } from '@/features/local-library/id'
-import SmartMenu from '@/components/ui/SmartMenu'
+import SmartMenu, { readerMenuDangerItemClass, readerMenuItemClass } from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { downloadBlob } from '@/lib/download'
 import { HIGHLIGHT_LIMITS } from '@/lib/highlight-match'
@@ -462,9 +462,9 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
               setContextMenu(null)
               run()
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-current/80 transition-colors hover:bg-stone-500/10 hover:text-current"
+            className={readerMenuItemClass}
           >
-            <ThemeIcon name="edit" size={13} />
+            <ThemeIcon name="edit" size={14} />
             <span>{_('library.edit')}</span>
           </button>
           {contextMenu.onCopy && (
@@ -475,15 +475,15 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
                 setContextMenu(null)
                 run?.()
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-current/80 transition-colors hover:bg-stone-500/10 hover:text-current"
+              className={readerMenuItemClass}
             >
-              <ThemeIcon name="copy" size={13} />
+              <ThemeIcon name="copy" size={14} />
               <span>{_('reader.themeCopyCard')}</span>
             </button>
           )}
           {contextMenu.onDelete && (contextMenu.confirming ? (
             <div className="px-1 pt-1 pb-0.5">
-              <p className="px-1.5 pb-2 text-[11px] leading-snug text-current/70">{contextMenu.deleteHint}</p>
+              <p className="px-1.5 pb-2 text-[11px] leading-snug text-stone-600 dark:text-stone-300">{contextMenu.deleteHint}</p>
               <div className="flex gap-1.5">
                 <button
                   type="button"
@@ -492,14 +492,14 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
                     setContextMenu(null)
                     run?.()
                   }}
-                  className="flex-1 rounded-md bg-red-500/90 px-2 py-1 text-center text-[11px] font-medium text-white transition-colors hover:bg-red-500"
+                  className="flex-1 rounded-md bg-red-600 px-2 py-1 text-center text-[11px] font-medium text-white transition-colors hover:bg-red-700"
                 >
                   {_('reader.deleteTheme')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setContextMenu(null)}
-                  className="flex-1 rounded-md bg-(--bd-sel-bg-hover) px-2 py-1 text-center text-[11px] font-medium text-current transition-colors hover:bg-(--bd-sel-bg-on)"
+                  className="flex-1 rounded-md bg-stone-100 dark:bg-stone-800 px-2 py-1 text-center text-[11px] font-medium text-stone-700 dark:text-stone-300 transition-colors hover:bg-stone-200 dark:hover:bg-stone-700"
                 >
                   {_('library.cancel')}
                 </button>
@@ -517,9 +517,9 @@ export default function ReadingThemePanel({ book }: ReadingThemePanelProps) {
                 setContextMenu(null)
                 run?.()
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-red-500 transition-colors hover:bg-red-500/10"
+              className={readerMenuDangerItemClass}
             >
-              <ThemeIcon name="delete" size={13} />
+              <ThemeIcon name="delete" size={14} />
               <span>{_('reader.deleteTheme')}</span>
             </button>
           ))}

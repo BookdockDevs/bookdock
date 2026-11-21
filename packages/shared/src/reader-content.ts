@@ -158,13 +158,15 @@ export const readerSearchHitSchema = z.object({
   end: z.number().int().positive(),
   excerpt: readerSearchExcerptSchema,
 })
+export const readerSearchErrorSchema = z.enum(['regex-timeout', 'regex-failed', 'chapter-timeout'])
 export const readerSearchEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('batch'), revisionId: z.string().min(1), scanned: z.number().int().nonnegative(), total: z.number().int().nonnegative(), hits: z.array(readerSearchHitSchema).max(100) }),
-  z.object({ type: z.literal('terminal'), revisionId: z.string().min(1), status: z.enum(['complete', 'truncated', 'partial', 'canceled']), scanned: z.number().int().nonnegative(), total: z.number().int().nonnegative(), error: z.enum(['regex-timeout', 'regex-failed']).optional() }),
+  z.object({ type: z.literal('terminal'), revisionId: z.string().min(1), status: z.enum(['complete', 'truncated', 'partial', 'canceled']), scanned: z.number().int().nonnegative(), total: z.number().int().nonnegative(), error: readerSearchErrorSchema.optional() }),
 ])
 
 export type ReaderSearchHit = z.infer<typeof readerSearchHitSchema>
 export type ReaderSearchEvent = z.infer<typeof readerSearchEventSchema>
+export type ReaderSearchError = z.infer<typeof readerSearchErrorSchema>
 
 export function isReaderMarkupType(mediaType: string): boolean {
   const type = mediaType.split(';', 1)[0]?.trim().toLowerCase()

@@ -193,6 +193,8 @@ describe('LegadoSettingsSection', () => {
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalledWith('/legado/access-key', {})
     })
+    // The confirm releases only once the rotation has settled.
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
   })
 
   it('shows QR code modal on desktop when clicking scan to import', async () => {

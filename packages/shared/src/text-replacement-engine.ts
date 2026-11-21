@@ -156,15 +156,22 @@ function locateOffset(
   offset: number,
   side: 'start' | 'end',
 ): { runIndex: number; local: number } {
-  for (let i = 0; i < runs.length; i++) {
-    const start = starts[i]!
-    const end = start + runs[i]!.text.length
-    if (side === 'start' ? offset < end : offset <= end) {
-      return { runIndex: i, local: offset - start }
-    }
+  // `starts` is non-decreasing, so the first run whose end passes the offset
+  // can be binary-searched. A per-edit linear scan made rule application
+  // quadratic in the number of text runs (seconds per chapter).
+  let low = 0
+  let high = runs.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    const end = starts[middle]! + runs[middle]!.text.length
+    if (side === 'start' ? end <= offset : end < offset) low = middle + 1
+    else high = middle
   }
-  const last = runs.length - 1
-  return { runIndex: last, local: runs[last]!.text.length }
+  if (low >= runs.length) {
+    const last = runs.length - 1
+    return { runIndex: last, local: runs[last]!.text.length }
+  }
+  return { runIndex: low, local: offset - starts[low]! }
 }
 
 function applyEdit(runs: TextRun[], starts: number[], edit: ReplacementEdit): void {

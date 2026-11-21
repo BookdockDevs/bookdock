@@ -21,13 +21,17 @@ All notable changes to Bookdock are documented here.
 
 ### Changed
 
+- Floating reader context menus (such as theme cards and preset chips) use a refined high-contrast surface with dual-layer shadows and full-contrast typography, eliminating edge blur and color bleed on light, cream, and parchment reading themes.
 - Reading presets now control typography, layout, and behavior independently of themes. Day and night each have a default theme and can each have a book-specific choice. Picking the current default clears that slot's choice. Restore following clears both choices and keeps the book's layout settings and preset binding.
 - The sidebar notification bell appears when the account has notification records. Clearing the last record closes the open notification panel and hides the bell.
 - Library batch notifications show how many books were affected when moving books to or from shelves or the trash, hiding them, permanently deleting them, or updating reading status. English notifications for trashing, restoring, and permanently deleting a single book include its title.
+- The TTS service editor and the library create and manage dialogs mark required fields with a red asterisk. TTS credential fields show the mark only while creating a new service, and the library access password shows it when password access is selected.
 
 ### Fixed
 
 - The table of contents waits until automatic scrolling finishes before showing the button for locating the current chapter, preventing flashes when opening a book or changing chapters.
+- The AI connection Base URL no longer shows a required asterisk; leaving it empty falls back to the provider default address.
+- Full-book search no longer aborts on the first chapter that fails to scan: the slow or unreadable chapter is skipped and the remaining chapters are searched, and the search gives up after about 30 seconds of accumulated scan timeouts instead of holding the search slot open. Plain-text searches report a neutral timeout notice instead of a regex timeout, and chapters with many replacement-rule matches no longer stall the scan.
 
 ### Upgrade notes
 
@@ -1400,13 +1404,17 @@ All notable changes to Bookdock are documented here.
 
 #### 变更
 
+- 优化阅读器浮动右键菜单（主题卡片、阅读预设等）的显示效果：采用微质感高对比卡片底色与双层立体投影，并提升文字图标对比度，解决浅色与羊皮纸等暖色背景下菜单发虚、与底色融为一体的问题。
 - 阅读预设独立管理字体排版、布局和阅读行为。日间和夜间各有一套默认主题，也可以分别为本书指定外观。选中当前时段的默认主题会清除该时段的本书选择。恢复跟随会清除日夜两项选择，保留本书的排版设置和预设绑定。
 - 账号有通知记录时，侧栏才显示通知铃铛。清空最后一条通知后，已打开的通知面板会关闭，铃铛随之隐藏。
 - 批量移入或移出书架、移入或移出回收站、隐藏、彻底删除和更新阅读状态时，提示会显示受影响的书籍数量。英文界面的单本书回收、恢复和彻底删除提示会带上书名。
+- 语音服务编辑器和书库创建、管理弹窗会标记必填字段：语音服务密钥仅在新建时显示星号，访问密码在选择密码访问时显示星号。
 
 #### 修复
 
 - 打开书籍或切换章节时，目录会等自动滚动完成后再显示定位到当前章节的按钮，避免按钮闪现。
+- AI 连接的 Base URL 不再显示必填星号，留空时自动使用服务商默认地址。
+- 全书搜索遇到扫描失败的章节不再整体中断：该章会被跳过，其余章节继续搜索，累计超时约满 30 秒会主动结束并保留已扫到的结果，不会长时间占用搜索。普通文本搜索的超时提示改为中性表述，不再误报正则超时；应用大量替换规则的章节扫描大章节时不再卡死。
 
 #### 升级说明
 

@@ -52,6 +52,28 @@ describe('InstanceInvitesSection', () => {
     })
   })
 
+  it('blocks the create-form close entries while the invite is being created', () => {
+    ;(authHooks.useInstanceInvites as ReturnType<typeof vi.fn>).mockReturnValue({ data: { data: [] } })
+    ;(authHooks.useCreateInstanceInvite as ReturnType<typeof vi.fn>).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    })
+    render(<InstanceInvitesSection />)
+    fireEvent.click(screen.getByText('admin.createInvite'))
+
+    // Pending arrives through a re-render, like a real mutation would.
+    ;(authHooks.useCreateInstanceInvite as ReturnType<typeof vi.fn>).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: true,
+    })
+    fireEvent.change(screen.getByLabelText('admin.inviteCodeLabel'), { target: { value: 'join-me' } })
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByLabelText('admin.inviteCodeLabel')).toBeInTheDocument()
+    expect(screen.getByText('library.cancel')).toBeDisabled()
+    expect(screen.getByText('passwordInput.creating')).toBeInTheDocument()
+  })
+
   it('renders skeleton loading state and single-line empty state without card description', () => {
     ;(authHooks.useInstanceInvites as ReturnType<typeof vi.fn>).mockReturnValue({
       isLoading: true,

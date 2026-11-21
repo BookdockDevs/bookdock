@@ -73,4 +73,18 @@ describe('ChangePasswordDialog', () => {
     expect(screen.getByLabelText('auth.oldPassword')).toHaveAttribute('type', 'password')
   })
 
+  it('blocks every close entry while the change is in flight', () => {
+    const onClose = vi.fn()
+    ;(useChangePassword as ReturnType<typeof vi.fn>).mockReturnValue({ mutateAsync: vi.fn(), isPending: true })
+
+    render(<ChangePasswordDialog open onClose={onClose} />)
+    expect(screen.getByText('library.cancel')).toBeDisabled()
+
+    // Escape and the backdrop both route through Modal onClose, which is
+    // guarded while pending.
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('auth.oldPassword')).toBeInTheDocument()
+  })
+
 })

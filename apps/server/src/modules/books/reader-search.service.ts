@@ -2,14 +2,23 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 
-import type { ReaderSearchEvent, ReaderSearchRequest } from '@bookdock/shared'
+import type { ReaderSearchError, ReaderSearchEvent, ReaderSearchRequest } from '@bookdock/shared'
 
 import type { ReaderContentBook } from './reader-content.service'
 import { getReaderManifest, readReaderSearchEntry } from './reader-content.service'
 
 const RESULT_LIMIT = 2000
 const BATCH_LIMIT = 50
-const CHAPTER_TIMEOUT_MS = 3000
+// Regex keeps a tight cap so pathological patterns fail fast; plain contains
+// matching may legitimately need to parse and convert multi-MB chapters, so
+// it gets headroom for weak self-hosted hardware.
+const REGEX_CHAPTER_TIMEOUT_MS = 3000
+const CONTAINS_CHAPTER_TIMEOUT_MS = 10_000
+// Repeated chapter timeouts must not hold the single search slot open
+// indefinitely: a pathological pattern times out on every chapter. Once one
+// search has burned this much time in scan timeouts, it gives up and reports
+// the partial result set.
+const SCAN_TIMEOUT_BUDGET_MS = 30_000
 const MAX_SEARCH_TEXT_LENGTH = 16 * 1024 * 1024
 let activeSearches = 0
 
@@ -44,6 +53,8 @@ export function createReaderSearchStream(
         total = spine.length
         let hitCount = 0
         let chapterFailed = false
+        let firstError: ReaderSearchError | null = null
+        const timeoutBudget = createScanTimeoutBudget()
         for (const { entry, sectionIndex } of spine) {
           if (signal.aborted) { status = 'canceled'; break }
           try {
@@ -53,9 +64,21 @@ export function createReaderSearchStream(
             worker ??= createSearchWorker()
             const result = await scanWithWorker(worker, source.data.toString('utf8'), entry.path, request, signal)
             if (result.error) {
-              if (result.error === 'regex-timeout' || result.error === 'regex-failed') {
-                send({ type: 'terminal', revisionId: book.revisionId, status: 'partial', scanned, total, error: result.error })
-                return
+              // One bad chapter must not sink the whole search. A timed-out
+              // worker is still busy on the abandoned scan, so drop it and
+              // recreate for the remaining chapters.
+              chapterFailed = true
+              void worker.terminate()
+              worker = null
+              firstError ??= toReaderSearchError(request.mode, result.error)
+              if (result.error === 'regex-timeout') {
+                timeoutBudget.consume(request.mode === 'regex' ? REGEX_CHAPTER_TIMEOUT_MS : CONTAINS_CHAPTER_TIMEOUT_MS)
+                if (timeoutBudget.exhausted()) {
+                  // Every other loop exit counts the chapter at the bottom;
+                  // this early exit must count the timed-out chapter itself.
+                  scanned++
+                  break
+                }
               }
             }
             const hits = result.matches ?? []
@@ -83,7 +106,7 @@ export function createReaderSearchStream(
           send({ type: 'batch', revisionId: book.revisionId, scanned, total, hits: [] })
         }
         if (status === 'complete' && chapterFailed) status = 'partial'
-        send({ type: 'terminal', revisionId: book.revisionId, status, scanned, total })
+        send({ type: 'terminal', revisionId: book.revisionId, status, scanned, total, error: firstError ?? undefined })
       } catch {
         if (signal.aborted) status = 'canceled'
         else status = 'partial'
@@ -98,6 +121,26 @@ export function createReaderSearchStream(
       release()
     },
   })
+}
+
+/** Worker-protocol scan error → user-facing terminal error. The worker labels
+ * every scan timeout `regex-timeout`; a plain contains search must not be told
+ * to "simplify the regex", so it gets the neutral code instead. A contains
+ * worker crash is reported as a plain partial result (no regex advice). */
+export function toReaderSearchError(mode: ReaderSearchRequest['mode'], error: 'regex-timeout' | 'regex-failed'): ReaderSearchError | null {
+  if (error === 'regex-timeout') return mode === 'regex' ? 'regex-timeout' : 'chapter-timeout'
+  return mode === 'regex' ? 'regex-failed' : null
+}
+
+/** Cumulative scan-timeout time one search may burn before the stream gives
+ * up, so a pattern that times out on every chapter cannot hold the single
+ * search slot open for minutes. Fresh budget per search. */
+export function createScanTimeoutBudget(budgetMs = SCAN_TIMEOUT_BUDGET_MS) {
+  let remaining = budgetMs
+  return {
+    consume(costMs: number) { remaining -= costMs },
+    exhausted() { return remaining <= 0 },
+  }
 }
 
 interface ChapterHit { start: number; end: number; excerpt: { pre: string; match: string; post: string } }
@@ -145,7 +188,7 @@ function scanWithWorker(worker: Worker, markup: string, spineHref: string, reque
     }
     const onError = () => finish({ error: 'regex-failed' }, true)
     const onExit = (code: number) => { if (code !== 0 && !settled) finish({ error: 'regex-failed' }, true) }
-    const timer = setTimeout(() => finish({ error: 'regex-timeout' }), CHAPTER_TIMEOUT_MS)
+    const timer = setTimeout(() => finish({ error: 'regex-timeout' }), request.mode === 'regex' ? REGEX_CHAPTER_TIMEOUT_MS : CONTAINS_CHAPTER_TIMEOUT_MS)
     signal.addEventListener('abort', abort, { once: true })
     worker.on('message', onMessage)
     worker.on('error', onError)

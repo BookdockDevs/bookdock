@@ -34,7 +34,7 @@ export default function PrivateLibraryRenameDialog({ library, onClose }: Private
   }
 
   return (
-    <Modal title={_('library.renameLibrary')} onClose={onClose} size="sm">
+    <Modal title={_('library.renameLibrary')} onClose={updateLibrary.isPending ? () => undefined : onClose} size="sm">
       <div className="mb-6 mt-1 flex items-center gap-3">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-400 dark:bg-stone-800 dark:text-stone-500">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -55,11 +55,11 @@ export default function PrivateLibraryRenameDialog({ library, onClose }: Private
         />
       </div>
       <div className="flex gap-3">
-        <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
+        <Button type="button" variant="secondary" onClick={onClose} disabled={updateLibrary.isPending} className="flex-1">
           {_('library.cancel')}
         </Button>
         <Button type="button" variant="primary" onClick={submit} disabled={!name.trim() || name.trim() === library.name || updateLibrary.isPending} className="flex-1">
-          {_('library.save')}
+          {_(updateLibrary.isPending ? 'passwordInput.saving' : 'library.save')}
         </Button>
       </div>
     </Modal>

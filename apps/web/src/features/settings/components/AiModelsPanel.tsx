@@ -152,7 +152,7 @@ export default function AiModelsPanel({ connection, models, enabledDrafts, onTog
       </div>
 
       {addOpen && (
-        <Modal title={_('settings.aiManualModel')} onClose={() => setAddOpen(false)}>
+        <Modal title={_('settings.aiManualModel')} onClose={create.isPending ? () => undefined : () => setAddOpen(false)}>
           <form className={settingsFormClass} onSubmit={(event) => { event.preventDefault(); addManual() }}>
             <input
               autoFocus
@@ -162,7 +162,7 @@ export default function AiModelsPanel({ connection, models, enabledDrafts, onTog
               aria-label={_('settings.aiManualModel')}
               className={settingsInputClass}
             />
-            <SettingsFormActions onCancel={() => setAddOpen(false)} cancelDisabled={create.isPending} saveDisabled={create.isPending || !manual.trim()} />
+            <SettingsFormActions onCancel={() => setAddOpen(false)} pending={create.isPending} saveDisabled={!manual.trim()} />
           </form>
         </Modal>
       )}

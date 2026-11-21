@@ -1139,6 +1139,7 @@ describe('NavigationPanel', () => {
     it.each([
       [{ truncated: true, incomplete: false }, 'reader.searchTruncated'],
       [{ truncated: false, incomplete: true, error: 'regex-timeout' }, 'reader.searchRegexTimeout'],
+      [{ truncated: false, incomplete: true, error: 'chapter-timeout' }, 'reader.searchChapterTimeout'],
       [{ truncated: false, incomplete: true }, 'reader.searchIncomplete'],
     ] as const)('shows search status %s without claiming no matches', async (status, message) => {
       const statusSearch = vi.fn(async (

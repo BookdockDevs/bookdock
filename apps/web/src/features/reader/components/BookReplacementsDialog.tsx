@@ -5,7 +5,6 @@ import type { TextReplacementRes } from '@bookdock/shared'
 
 import { useBookReplacements, useDeleteReplacement } from '@/api/hooks/useReplacements'
 import { useTranslation } from '@/hooks/useTranslation'
-import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
 import ReplacementForm from '../../settings/components/ReplacementForm'
@@ -101,17 +100,19 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
   ), [pointPatches, chapterIndex])
 
   const [form, setForm] = useState<FormState>(null)
+  // Mirrors ReplacementForm's save state so the modal's back/close entry is
+  // held while a submission is in flight.
+  const [formSaving, setFormSaving] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<TextReplacementRes | null>(null)
 
-  function confirmDelete() {
+  // ConfirmDialog awaits this, so failures surface inline there; the dialog
+  // closes only after the rule is actually gone.
+  async function confirmDelete() {
     if (!pendingDelete) return
-    deleteReplacement.mutate(pendingDelete.clientVersion === undefined ? pendingDelete.id : { id: pendingDelete.id, expectedVersion: pendingDelete.clientVersion }, {
-      onSuccess: () => {
-        if (form?.mode === 'edit' && form.rule.id === pendingDelete.id) setForm(null)
-        notify.success({ key: 'toast.rulesDeleted', params: { count: 1 } })
-      },
-      onError: (err) => notify.error(getUserErrorNotification(err, 'reader.replacementDeleteFailed')),
-    })
+    const target = pendingDelete
+    await deleteReplacement.mutateAsync(target.clientVersion === undefined ? target.id : { id: target.id, expectedVersion: target.clientVersion })
+    if (form?.mode === 'edit' && form.rule.id === target.id) setForm(null)
+    notify.success({ key: 'toast.rulesDeleted', params: { count: 1 } })
     setPendingDelete(null)
   }
 
@@ -163,8 +164,13 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
             </div>
           )
         }
-        // The X always closes; in form mode that means "back to the list"
-        onClose={() => (form ? setForm(null) : onClose())}
+        // The X always closes; in form mode that means "back to the list" —
+        // held while the embedded form is saving.
+        onClose={() => {
+          if (formSaving) return
+          if (form) setForm(null)
+          else onClose()
+        }}
         containerProps={{ 'data-settings-toggle': '' }}
         actions={!form && (
           <button
@@ -184,7 +190,8 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
           <ReplacementForm
             bookId={bookId}
             initial={form.mode === 'edit' ? form.rule : null}
-            onDone={() => setForm(null)}
+            onSavingChange={setFormSaving}
+            onDone={() => { setFormSaving(false); setForm(null) }}
           />
         ) : (
           <BookReplacementsSection
@@ -205,6 +212,7 @@ export default function BookReplacementsDialog({ bookId, onClose }: BookReplacem
           title={_('settings.confirmDeleteTitle')}
           message={_('settings.replacementsDeleteConfirm', { name: pendingDelete.name?.trim() || pendingDelete.pattern || _('library.unknown') })}
           confirmLabel={_('settings.confirmDeleteAction')}
+          errorFallback="reader.replacementDeleteFailed"
           onConfirm={confirmDelete}
           onClose={() => setPendingDelete(null)}
         />

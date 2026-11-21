@@ -96,9 +96,10 @@ export default function LibraryCreateDialog({ onClose, onCreated }: LibraryCreat
       >
         <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
-            <span className="font-medium">{_('library.libraryName')}</span>
+            <span className="font-medium">{_('library.libraryName')}<span className="text-red-500"> *</span></span>
             <input
               aria-label={_('library.libraryName')}
+              required
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={64}
@@ -126,7 +127,7 @@ export default function LibraryCreateDialog({ onClose, onCreated }: LibraryCreat
             <div className="rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-800/40">
               <div className="flex flex-col gap-1.5 text-sm text-stone-700 dark:text-stone-300">
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-xs text-stone-600 dark:text-stone-300">{_('library.libraryAccessPassword')}</span>
+                  <span className="font-medium text-xs text-stone-600 dark:text-stone-300">{_('library.libraryAccessPassword')}<span className="text-red-500"> *</span></span>
                 </div>
                 <PasswordInput
                   required

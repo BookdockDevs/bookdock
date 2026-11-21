@@ -51,7 +51,7 @@ function ChangePasswordForm({ onClose }: Pick<ChangePasswordDialogProps, 'onClos
   }
 
   return (
-    <Modal title={_('auth.changePassword')} onClose={onClose} size="sm">
+    <Modal title={_('auth.changePassword')} onClose={changePassword.isPending ? () => undefined : onClose} size="sm">
       <form onSubmit={handleSubmit} noValidate>
         <div className="mb-3">
           <label htmlFor="oldPassword" className="mb-1.5 block text-sm font-medium text-stone-600 dark:text-stone-400">
@@ -118,7 +118,7 @@ function ChangePasswordForm({ onClose }: Pick<ChangePasswordDialogProps, 'onClos
           </p>
         )}
         <div className="flex justify-end gap-3 pt-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={changePassword.isPending}>
             {_('library.cancel')}
           </Button>
           <Button type="submit" disabled={changePassword.isPending}>

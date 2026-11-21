@@ -9,12 +9,16 @@ import { apiDelete, apiGet, apiPatch, apiPost } from '@/api/client'
 import AccessTokensSection from '@/features/settings/components/AccessTokensSection'
 import i18n from '@/i18n/i18n'
 
-vi.mock('@/api/client', () => ({
-  apiGet: vi.fn(),
-  apiPatch: vi.fn(async () => ({ data: {} })),
-  apiPost: vi.fn(async () => ({ data: {} })),
-  apiDelete: vi.fn(async () => ({ data: null })),
-}))
+vi.mock('@/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client')
+  return {
+    ...actual,
+    apiGet: vi.fn(),
+    apiPatch: vi.fn(async () => ({ data: {} })),
+    apiPost: vi.fn(async () => ({ data: {} })),
+    apiDelete: vi.fn(async () => ({ data: null })),
+  }
+})
 
 vi.mock('@/lib/notifications', () => ({
   notify: { success: vi.fn(), error: vi.fn() },
@@ -158,5 +162,19 @@ describe('AccessTokensSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => expect(apiDelete).toHaveBeenCalledWith('/tokens/t1'))
+    // The confirm closes only once the deletion has actually settled.
+    await waitFor(() => expect(screen.queryByText('删除访问令牌')).not.toBeInTheDocument())
+  })
+
+  it('keeps the delete confirm open with an inline error when deletion fails', async () => {
+    vi.mocked(apiDelete).mockRejectedValueOnce(new Error('boom'))
+    renderSection([LISTED])
+
+    fireEvent.click(await screen.findByRole('button', { name: '删除令牌' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(screen.getByText('删除访问令牌')).toBeInTheDocument()
+    expect(apiDelete).toHaveBeenCalledTimes(1)
   })
 })

@@ -446,21 +446,22 @@ export default function PublishBookDialog({ book, libraries, onClose, onOpenLibr
           })}
           confirmLabel={_('library.pushConfirm')}
           confirmDisabled={pushVersion.isPending}
+          errorFallback="library.pushFailed"
           onClose={() => setPushTarget(null)}
-          onConfirm={() => {
+          // ConfirmDialog awaits this: the push result decides the toast, and
+          // failures stay inline in the confirm instead of arriving after it
+          // has closed.
+          onConfirm={async () => {
             const target = pushTarget
-            setPushTarget(null)
-            pushVersion.mutate({
+            if (!target) return
+            const response = await pushVersion.mutateAsync({
               libraryId: target.libraryId,
               libraryBookId: target.libraryBookId,
               versionLinkId: target.versionLinkId,
-            }, {
-              onSuccess: (response) => {
-                if (response.data.alreadyUpToDate) notify.info({ key: 'library.pushAlreadyUpToDate' })
-                else notify.success({ key: 'library.pushSuccess' })
-              },
-              onError: (err) => notify.error(getUserErrorNotification(err, 'library.pushFailed')),
             })
+            if (response.data.alreadyUpToDate) notify.info({ key: 'library.pushAlreadyUpToDate' })
+            else notify.success({ key: 'library.pushSuccess' })
+            setPushTarget(null)
           }}
         />
       )}

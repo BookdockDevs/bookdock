@@ -49,13 +49,14 @@ export default function LegadoSettingsSection() {
     enabled: enabled && authMode === 'accessKey' && !mutation.isPending,
   })
 
+  // Rotation failures surface inline in the rotate confirm dialog (onConfirm
+  // awaits mutateAsync), so no parallel error toast here.
   const rotateMutation = useMutation({
     mutationFn: () => apiPost<{ data: LegadoAccessKeyCreateRes }>('/legado/access-key', {}),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['legado-access-key'] })
       notify.success({ key: 'settings.legadoRotated' })
     },
-    onError: (error) => notify.error(getUserErrorNotification(error, 'settings.integrationsUpdateFailed')),
   })
 
   const publicSourceUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/v1/legado/source.json` : ''
@@ -311,9 +312,10 @@ export default function LegadoSettingsSection() {
           warning={_('settings.legadoRotateConfirmWarning')}
           confirmLabel={_('settings.legadoRotateConfirmAction')}
           confirmVariant="danger"
+          errorFallback="settings.integrationsUpdateFailed"
           confirmDisabled={rotateMutation.isPending}
-          onConfirm={() => {
-            rotateMutation.mutate()
+          onConfirm={async () => {
+            await rotateMutation.mutateAsync()
             setConfirmRotateOpen(false)
           }}
           onClose={() => setConfirmRotateOpen(false)}

@@ -25,10 +25,14 @@ vi.mock('../hooks/useTranslation', () => ({
     options ? `${key}:${Object.values(options).join(',')}` : key,
 }))
 
-vi.mock('@/api/client', () => ({
-  apiGet: vi.fn(),
-  apiPut: vi.fn(async () => ({ data: {} })),
-}))
+vi.mock('@/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client')
+  return {
+    ...actual,
+    apiGet: vi.fn(),
+    apiPut: vi.fn(async () => ({ data: {} })),
+  }
+})
 
 vi.mock('@/lib/notifications', () => ({
   notify: { success: vi.fn(), error: vi.fn() },
@@ -73,6 +77,17 @@ describe('TrashSettingsRow', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(apiPut).not.toHaveBeenCalled()
     expect(screen.queryByText('settings.trashDisableConfirm')).not.toBeInTheDocument()
+  })
+
+  it('keeps the disable confirm open with an inline error when the toggle fails', async () => {
+    vi.mocked(apiPut).mockRejectedValueOnce(new Error('boom'))
+    renderRow({ autoCleanDays: 30 })
+    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.click(screen.getByText('settings.trashDisableConfirmAction'))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(screen.getByText('settings.trashDisableConfirm')).toBeInTheDocument()
+    expect(apiPut).toHaveBeenCalledTimes(1)
   })
 
   it('hides the retention row and re-enables directly when off', async () => {

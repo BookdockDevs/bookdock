@@ -244,6 +244,8 @@ export default function MetadataSourcesSection() {
     }
   }
 
+  // Deletion failures surface inline in the confirm dialog (onConfirm awaits
+  // mutateAsync), so no parallel error toast here.
   const deleteSource = useMutation({
     mutationFn: (sourceId: string) => apiDelete<{ data: { success: boolean } }>(`/integrations/personal-sources/${sourceId}`),
     onSuccess: () => {
@@ -251,7 +253,6 @@ export default function MetadataSourcesSection() {
       setPendingDelete(null)
       notify.success({ key: 'metadataLookup.deleteSourceSuccess' })
     },
-    onError: (err) => notify.error(getUserErrorNotification(err, 'metadataLookup.deleteSourceError')),
   })
 
   async function install() {
@@ -792,8 +793,11 @@ export default function MetadataSourcesSection() {
           message={_('metadataLookup.deleteSourceConfirmMessage', { name: pendingDelete.name })}
           confirmLabel={_('metadataLookup.deleteSourceConfirmAction')}
           confirmVariant="danger"
+          errorFallback="metadataLookup.deleteSourceError"
           confirmDisabled={deleteSource.isPending}
-          onConfirm={() => deleteSource.mutate(pendingDelete.sourceId)}
+          onConfirm={async () => {
+            await deleteSource.mutateAsync(pendingDelete.sourceId)
+          }}
           onClose={() => setPendingDelete(null)}
         />
       )}

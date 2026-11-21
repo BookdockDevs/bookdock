@@ -47,6 +47,7 @@ export default function TrashSettingsRow() {
   const settingsKey = usesDeviceVault ? catalogQueryKey(local?.scope ?? DEVICE_VAULT_SCOPE, 'trash-settings') : ['settings']
   const _ = useTranslation()
   const queryClient = useQueryClient()
+  const reportError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.trashSettingsUpdateFailed'))
   const [disableOpen, setDisableOpen] = useState(false)
   const settingsQuery = useQuery({
     queryKey: settingsKey,
@@ -86,7 +87,8 @@ export default function TrashSettingsRow() {
         queryClient.setQueryData(settingsKey, ctx.prev)
         if (!usesDeviceVault) writeStoredSettings(ctx.prev.data)
       }
-      notify.error(getUserErrorNotification(error, 'settings.trashSettingsUpdateFailed'))
+      // Auto-save call sites pass their own onError toast; the disable-trash
+      // confirm surfaces failures inline instead (onConfirm awaits mutateAsync).
     },
   })
 
@@ -111,7 +113,7 @@ export default function TrashSettingsRow() {
               ariaLabel={_('settings.trashEnabled')}
               onChange={(v) => {
                 if (!v) setDisableOpen(true)
-                else mutation.mutate({ enabled: true })
+                else mutation.mutate({ enabled: true }, { onError: reportError })
               }}
             />
           )
@@ -140,7 +142,7 @@ export default function TrashSettingsRow() {
                 ariaLabel={_('settings.trashAutoClean')}
                 value={String(current)}
                 pending={mutation.isPending}
-                onChange={(value) => mutation.mutate({ autoCleanDays: Number(value) as (typeof AUTO_CLEAN_DAYS)[number] })}
+                onChange={(value) => mutation.mutate({ autoCleanDays: Number(value) as (typeof AUTO_CLEAN_DAYS)[number] }, { onError: reportError })}
                 options={AUTO_CLEAN_DAYS.map((days) => ({ value: String(days), label: _(LABEL_KEYS[days]) }))}
               />
             </div>
@@ -153,7 +155,7 @@ export default function TrashSettingsRow() {
                 ariaLabel={_('settings.trashCap')}
                 value={String(currentCap)}
                 pending={mutation.isPending}
-                onChange={(value) => mutation.mutate({ maxTrashBytes: Number(value) })}
+                onChange={(value) => mutation.mutate({ maxTrashBytes: Number(value) }, { onError: reportError })}
                 options={TRASH_CAPS.map((cap) => ({ value: String(cap), label: _(CAP_LABEL_KEYS[cap]) }))}
               />
             </div>
@@ -167,9 +169,10 @@ export default function TrashSettingsRow() {
           title={_('settings.trashDisable')}
           message={_('settings.trashDisableConfirm')}
           confirmLabel={_('settings.trashDisableConfirmAction')}
-          onConfirm={() => {
+          errorFallback="settings.trashSettingsUpdateFailed"
+          onConfirm={async () => {
+            await mutation.mutateAsync({ enabled: false })
             setDisableOpen(false)
-            mutation.mutate({ enabled: false })
           }}
           onClose={() => setDisableOpen(false)}
         />

@@ -122,6 +122,25 @@ describe('ReplacementsSettingsSection', () => {
     expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
   })
 
+  it('holds the rule editor open while a save is in flight', () => {
+    mockRules([rule({ id: 't1', name: '去广告' })])
+    vi.mocked(useUpdateReplacement).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useUpdateReplacement>)
+    render(<ReplacementsSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.getByText('编辑文本替换规则')).toBeInTheDocument()
+
+    // Pending arrives through a re-render, like a real mutation would.
+    vi.mocked(useUpdateReplacement).mockReturnValue({ mutate: vi.fn(), isPending: true } as unknown as ReturnType<typeof useUpdateReplacement>)
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '改名' } })
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByText('编辑文本替换规则')).toBeInTheDocument()
+    expect(screen.getByText('保存中…')).toBeInTheDocument()
+    // Restore the factory default so later tests are not stuck in pending.
+    vi.mocked(useUpdateReplacement).mockReset()
+  })
+
   it('deletes a single rule from its row through the confirm dialog', () => {
     const mutation = { mutate: vi.fn(), isPending: false }
     vi.mocked(useDeleteGlobalReplacements).mockReturnValue(mutation as unknown as ReturnType<typeof useDeleteGlobalReplacements>)

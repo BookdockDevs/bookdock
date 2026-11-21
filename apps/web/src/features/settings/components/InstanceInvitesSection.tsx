@@ -471,7 +471,7 @@ export default function InstanceInvitesSection() {
       {createOpen && (
         <Modal
           title={_('admin.createInviteTitle')}
-          onClose={() => setCreateOpen(false)}
+          onClose={createInvite.isPending ? () => undefined : () => setCreateOpen(false)}
           centered
         >
           <form onSubmit={handleCreateSubmit} noValidate className="flex flex-col gap-4">
@@ -647,11 +647,11 @@ export default function InstanceInvitesSection() {
             )}
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" size="sm" variant="secondary" onClick={() => setCreateOpen(false)}>
+              <Button type="button" size="sm" variant="secondary" onClick={() => setCreateOpen(false)} disabled={createInvite.isPending}>
                 {_('library.cancel')}
               </Button>
               <Button type="submit" size="sm" disabled={createInvite.isPending}>
-                {_('admin.inviteCreateSubmit')}
+                {_(createInvite.isPending ? 'passwordInput.creating' : 'admin.inviteCreateSubmit')}
               </Button>
             </div>
           </form>

@@ -27,6 +27,8 @@ interface ReplacementFormProps {
   selection?: SelectionInfo
   /** Existing groups for auto-suggestion dropdown in global scope */
   groups?: string[]
+  /** Reports the in-flight save state so host modals can guard their close entries */
+  onSavingChange?: (saving: boolean) => void
   onDone: () => void
 }
 
@@ -63,7 +65,7 @@ function initialScope(
   return initial.bookId ? 'book' : 'global'
 }
 
-export default function ReplacementForm({ bookId, initial, selection, groups, onDone }: ReplacementFormProps) {
+export default function ReplacementForm({ bookId, initial, selection, groups, onSavingChange, onDone }: ReplacementFormProps) {
   const _ = useTranslation()
   const localCatalog = useLocalCatalog()
   const user = useAuthStore((state) => state.user)
@@ -123,6 +125,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
   }, [existingGroups, group])
 
   const saving = createReplacement.isPending || updateReplacement.isPending
+  useEffect(() => { onSavingChange?.(saving) }, [saving, onSavingChange])
   // Loose check: callers pass no `initial` prop for create mode (undefined)
   const editing = initial != null
   const isPoint = scope === 'point'
@@ -441,7 +444,7 @@ export default function ReplacementForm({ bookId, initial, selection, groups, on
         </fieldset>
       )}
 
-      <SettingsFormActions onCancel={onDone} cancelDisabled={saving} saveDisabled={saving} />
+      <SettingsFormActions onCancel={onDone} pending={saving} />
     </form>
   )
 }

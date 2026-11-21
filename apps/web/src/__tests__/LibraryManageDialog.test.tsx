@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import i18n from '../i18n/i18n'
 import LibraryManageDialog from '../features/library/components/LibraryManageDialog'
 import type { Library } from '@bookdock/shared'
@@ -23,7 +23,7 @@ describe('LibraryManageDialog', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     await i18n.changeLanguage('zh-CN')
-    HOOKS.useUpdateLibrary.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    HOOKS.useUpdateLibrary.mockReturnValue({ mutateAsync: vi.fn(async () => undefined), isPending: false })
   })
 
   function renderDialog(isOwner = true) {
@@ -52,9 +52,8 @@ describe('LibraryManageDialog', () => {
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'Renamed' } })
     expect(save()).not.toBeDisabled()
     fireEvent.click(save())
-    expect(HOOKS.useUpdateLibrary().mutate).toHaveBeenCalledWith(
+    expect(HOOKS.useUpdateLibrary().mutateAsync).toHaveBeenCalledWith(
       { libraryId: 'lib_city', patch: { name: 'Renamed', description: 'All the books', visibility: 'public', trashEnabled: true, trashAutoCleanDays: 30, trashMaxBytes: 0, allowMemberUpload: false } },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
   })
 
@@ -65,9 +64,8 @@ describe('LibraryManageDialog', () => {
     // falling back to printing the key itself.
     fireEvent.click(screen.getByRole('switch', { name: '允许上传文件' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(HOOKS.useUpdateLibrary().mutate).toHaveBeenCalledWith(
+    expect(HOOKS.useUpdateLibrary().mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({ patch: expect.objectContaining({ allowMemberUpload: true }) }),
-      expect.any(Object),
     )
   })
 
@@ -92,10 +90,40 @@ describe('LibraryManageDialog', () => {
     fireEvent.change(screen.getByLabelText('访问密码'), { target: { value: 'pass123' } })
     expect(screen.getByRole('button', { name: '保存' })).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    expect(HOOKS.useUpdateLibrary().mutate).toHaveBeenCalledWith(
+    expect(HOOKS.useUpdateLibrary().mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({ patch: expect.objectContaining({ visibility: 'password', accessPassword: 'pass123' }) }),
-      expect.any(Object),
     )
+  })
+
+  it('confirms disabling trash before saving and closes the confirm on success', async () => {
+    const mutateAsync = vi.fn(async () => undefined)
+    HOOKS.useUpdateLibrary.mockReturnValue({ mutateAsync, isPending: false })
+    renderDialog()
+    fireEvent.click(screen.getByRole('switch', { name: '启用回收站' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    // Disabling purges the trash, so nothing is sent before the confirmation.
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(screen.getByText(/确定要关闭吗？/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认关闭' }))
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ patch: expect.objectContaining({ trashEnabled: false }) }),
+    ))
+    await waitFor(() => expect(screen.queryByText(/确定要关闭吗？/)).not.toBeInTheDocument())
+  })
+
+  it('keeps the disable-trash confirm open with an inline error when the save fails', async () => {
+    const mutateAsync = vi.fn(async () => { throw new Error('boom') })
+    HOOKS.useUpdateLibrary.mockReturnValue({ mutateAsync, isPending: false })
+    renderDialog()
+    fireEvent.click(screen.getByRole('switch', { name: '启用回收站' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认关闭' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(screen.getByText(/确定要关闭吗？/)).toBeInTheDocument()
+    expect(mutateAsync).toHaveBeenCalledTimes(1)
   })
 
   it('shows admins a read-only notice instead of the settings form', () => {

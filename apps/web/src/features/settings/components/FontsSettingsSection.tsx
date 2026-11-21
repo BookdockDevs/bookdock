@@ -12,7 +12,6 @@ import { useDeviceFontStore } from '@/features/device-fonts/store'
 import { buildFontOptions, ensureBuiltinFontLoaded, ensureDeviceFontFace, ensureUploadedFontLoaded, releaseDeviceFontFace, useFontLoaderStore, type FontOption } from '@/features/reader/fonts'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useMenuAnchor } from '@/hooks/useMenuAnchor'
-import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 import i18n from '@/i18n/i18n'
 import { useAuthStore } from '@/stores/auth.store'
@@ -87,7 +86,6 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
   const displayFonts = sorting ? draftFonts ?? fonts : fonts
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const enabledCount = displayFonts.filter((font) => font.enabled).length
-  const showError = (error: unknown) => notify.error(getUserErrorNotification(error, 'settings.fontOperationFailed'))
   const serverImportAllowed = !isGuest && (isOwner || canUploadResources)
   const serverImportReady = serverImportAllowed && !fontsQuery.isPending && !fontsQuery.isError
   const deviceImportReady = deviceFontStatus !== 'loading'
@@ -203,26 +201,25 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
     else setFontPreference(font.id, { enabled })
   }
 
-  function confirmDelete() {
+  // ConfirmDialog awaits this, so failures surface inline there and the
+  // dialog closes only after the font is actually removed.
+  async function confirmDelete() {
     const target = pendingDelete
     if (!target) return
     if (target.source === 'device' && target.device) {
       const deviceId = target.device.id
-      useDeviceFontStore.getState().removeFont(deviceId).then(() => {
-        if (sorting) setDraftFonts((current) => current?.filter((font) => font.id !== deviceId) ?? current)
-        notify.success({ key: 'toast.fontDeleted' })
-      }, showError)
+      await useDeviceFontStore.getState().removeFont(deviceId)
+      if (sorting) setDraftFonts((current) => current?.filter((font) => font.id !== deviceId) ?? current)
+      notify.success({ key: 'toast.fontDeleted' })
+      setPendingDelete(null)
     } else if (target.uploaded) {
-      deleteFont.mutate(target.uploaded.id, {
-        onSuccess: () => {
-          removeFontPreference(target.uploaded!.id)
-          if (sorting) setDraftFonts((current) => current?.filter((font) => font.id !== target.uploaded!.id) ?? current)
-          notify.success({ key: 'toast.fontDeleted' })
-        },
-        onError: showError,
-      })
+      const uploadedId = target.uploaded.id
+      await deleteFont.mutateAsync(uploadedId)
+      removeFontPreference(uploadedId)
+      if (sorting) setDraftFonts((current) => current?.filter((font) => font.id !== uploadedId) ?? current)
+      notify.success({ key: 'toast.fontDeleted' })
+      setPendingDelete(null)
     }
-    setPendingDelete(null)
   }
 
   function toggleSorting() {
@@ -390,6 +387,7 @@ export default function FontsSettingsSection({ canUploadResources = true }: Font
           title={_('settings.confirmDeleteTitle')}
           message={_('settings.fontsDeleteConfirm', { name: pendingDelete.name })}
           confirmLabel={_('settings.confirmDeleteAction')}
+          errorFallback="settings.fontOperationFailed"
           onConfirm={confirmDelete}
           onClose={() => setPendingDelete(null)}
         />

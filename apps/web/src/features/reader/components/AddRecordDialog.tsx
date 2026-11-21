@@ -320,10 +320,6 @@ export default function AddRecordDialog({
   const subTextCls = isReader ? 'text-[var(--bd-read-sub)]' : 'text-stone-400 dark:text-stone-500'
   const dividerCls = isReader ? 'border-[var(--bd-read-accent)]/60' : 'border-stone-200/60 dark:border-stone-800/60'
 
-  // Clean label names: strip "(可选)" or "(选填)" per project convention, use asterisk for required
-  const cleanStartTimeLabel = _('reader.addRecordStartTime').replace(/（.*?）|\(.*?\)/g, '').trim()
-  const cleanProgressLabel = _('readingData.progressOptional').replace(/（.*?）|\(.*?\)/g, '').trim()
-
   // Calendar calculations
   const firstDayOfMonth = new Date(calYear, calMonth, 1)
   const startOffset = (firstDayOfMonth.getDay() + 6) % 7 // Monday = 0
@@ -359,7 +355,7 @@ export default function AddRecordDialog({
             <div className="flex items-center justify-between gap-3">
               <span className={cn('text-sm font-medium', labelTextCls)}>
                 {_('reader.addRecordDate')}
-                <span className="text-red-500"> *</span>
+                <span aria-hidden="true" className="text-red-500"> *</span>
               </span>
 
               <button
@@ -537,7 +533,7 @@ export default function AddRecordDialog({
             {/* 1.2 开始时间 (Defaults to current time directly; no extra click needed) */}
             <div className={cn('mt-3 flex items-center justify-between gap-3 border-t pt-3', dividerCls)}>
               <span className={cn('text-sm font-medium', labelTextCls)}>
-                {cleanStartTimeLabel}
+                {_('reader.addRecordStartTime')}
               </span>
 
               {startTime ? (
@@ -622,7 +618,7 @@ export default function AddRecordDialog({
               <div className="mb-2">
                 <span className={cn('text-sm font-medium', labelTextCls)}>
                   {_('reader.addRecordDuration')}
-                  <span className="text-red-500"> *</span>
+                  <span aria-hidden="true" className="text-red-500"> *</span>
                 </span>
               </div>
 
@@ -692,7 +688,7 @@ export default function AddRecordDialog({
           <div className={cardCls}>
             <div className="mb-2.5 flex items-center justify-between">
               <span className={cn('text-xs font-medium', subTextCls)}>
-                {cleanProgressLabel}
+                {_('readingData.progressOptional')}
               </span>
               {startPct !== '' && endPct !== '' && Number(endPct) >= Number(startPct) && (
                 <span

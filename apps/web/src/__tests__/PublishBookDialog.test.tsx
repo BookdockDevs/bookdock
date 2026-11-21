@@ -20,7 +20,7 @@ vi.mock('../features/library/hooks', () => ({
   useCreateLibraryTag: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePublishPrivateBook: () => ({ mutate: publishMutate, isPending: false }),
   useBook: () => ({ data: bookDetailData }),
-  usePushVersion: () => ({ mutate: pushMutate, isPending: false }),
+  usePushVersion: () => ({ mutateAsync: pushMutate, isPending: false }),
 }))
 
 const book: BookListItem = {
@@ -45,19 +45,19 @@ beforeEach(async () => {
 })
 
 describe('PublishBookDialog', () => {
-  it.each([false, true])('distinguishes a push from already synchronized content (%s)', (alreadyUpToDate) => {
+  it.each([false, true])('distinguishes a push from already synchronized content (%s)', async (alreadyUpToDate) => {
     bookDetailData = { data: { publishedTo: [
       { libraryId: 'shared-owner', libraryName: '馆主书库', libraryBookId: 'lb1', versionLinkId: 'lv1', versionName: '', inSync: false, cityMoved: false, sourceMoved: true },
     ] } }
-    pushMutate.mockImplementation((_vars: unknown, callbacks: { onSuccess: (response: unknown) => void }) => {
-      callbacks.onSuccess({ data: { alreadyUpToDate, revisionNo: 2, diverged: false } })
-    })
+    pushMutate.mockImplementation(async () => ({ data: { alreadyUpToDate, revisionNo: 2, diverged: false } }))
     render(<PublishBookDialog book={book} libraries={libraries} onClose={vi.fn()} onOpenLibrary={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: '推送更新' }))
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '确认推送' }))
-    expect(useToastStore.getState().toasts).toEqual([
-      expect.objectContaining({ type: alreadyUpToDate ? 'info' : 'success', message: { key: alreadyUpToDate ? 'library.pushAlreadyUpToDate' : 'library.pushSuccess' } }),
-    ])
+    await waitFor(() => {
+      expect(useToastStore.getState().toasts).toEqual([
+        expect.objectContaining({ type: alreadyUpToDate ? 'info' : 'success', message: { key: alreadyUpToDate ? 'library.pushAlreadyUpToDate' : 'library.pushSuccess' } }),
+      ])
+    })
     pushMutate.mockReset()
   })
 
@@ -132,7 +132,8 @@ describe('PublishBookDialog', () => {
     expect(screen.getByLabelText('目标书库')).toHaveValue('shared-owner')
   })
 
-  it('gives each published library the action its content state allows', () => {
+  it('gives each published library the action its content state allows', async () => {
+    pushMutate.mockResolvedValue({ data: { alreadyUpToDate: false, revisionNo: 2, diverged: false } })
     bookDetailData = {
       data: {
         publishedTo: [
@@ -172,10 +173,11 @@ describe('PublishBookDialog', () => {
     const confirm = within(screen.getByRole('alertdialog'))
     expect(confirm.getByText('将用本书当前内容更新「A」，目标书库中现有的内容将被替换。确定继续吗？')).toBeInTheDocument()
     fireEvent.click(confirm.getByRole('button', { name: '确认推送' }))
-    expect(pushMutate).toHaveBeenCalledWith(
+    await waitFor(() => expect(pushMutate).toHaveBeenCalledWith(
       { libraryId: 'lib_a', libraryBookId: 'lb3', versionLinkId: 'lbv3' },
-      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
-    )
+    ))
+    // The confirm releases only once the push has settled.
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
   })
 
   it('includes the version name when the library version has one', () => {

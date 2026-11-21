@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 
-import SmartMenu from '@/components/ui/SmartMenu'
+import SmartMenu, { readerMenuDangerItemClass, readerMenuItemClass } from '@/components/ui/SmartMenu'
 import SelectChip from '@/features/reading-theme/SelectChip'
 import ThemeIcon from '@/features/reading-theme/ThemeIcon'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -243,10 +243,10 @@ export default function ReadingPresetPicker() {
                 setBoundPreset(menuPreset.id === boundPresetId ? null : menuPreset.id)
                 setMenu(null)
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
+              className={readerMenuItemClass}
             >
-              <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5"><PinIcon /></span>
-              {menuPreset.id === boundPresetId ? _('reader.presetUnbind') : _('reader.presetBind')}
+              <span className="shrink-0 [&>svg]:h-3.5 [&>svg]:w-3.5"><PinIcon /></span>
+              <span>{menuPreset.id === boundPresetId ? _('reader.presetUnbind') : _('reader.presetBind')}</span>
             </button>
           )}
           <button
@@ -255,10 +255,10 @@ export default function ReadingPresetPicker() {
               startRename(menuPreset)
               setMenu(null)
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-500/10"
+            className={readerMenuItemClass}
           >
-            <span className="text-[var(--bd-read-sub)] [&>svg]:h-3.5 [&>svg]:w-3.5"><PencilIcon /></span>
-            {_('reader.presetRename')}
+            <span className="shrink-0 [&>svg]:h-3.5 [&>svg]:w-3.5"><PencilIcon /></span>
+            <span>{_('reader.presetRename')}</span>
           </button>
           <button
             type="button"
@@ -266,10 +266,10 @@ export default function ReadingPresetPicker() {
               deleteReadingPreset(menuPreset.id)
               setMenu(null)
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-red-500 transition-colors hover:bg-red-500/10"
+            className={readerMenuDangerItemClass}
           >
-            <span className="[&>svg]:h-3.5 [&>svg]:w-3.5"><TrashIcon /></span>
-            {_('reader.presetDelete')}
+            <span className="shrink-0 [&>svg]:h-3.5 [&>svg]:w-3.5"><TrashIcon /></span>
+            <span>{_('reader.presetDelete')}</span>
           </button>
         </SmartMenu>
       )}

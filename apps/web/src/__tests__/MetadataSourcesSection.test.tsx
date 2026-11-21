@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '@/api/client'
+import type { PersonalMetadataSourceView } from '@bookdock/shared'
 import MetadataSourcesSection from '@/features/settings/components/MetadataSourcesSection'
 
 const mocks = vi.hoisted(() => ({
@@ -165,5 +166,47 @@ describe('MetadataSourcesSection', () => {
     expect(screen.queryByText('source-a')).toBeNull()
     expect(screen.getByText('source-b')).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('errors.invalidInput')
+  })
+
+  it('deletes a source only after confirmation and closes the confirm on success', async () => {
+    const source: PersonalMetadataSourceView = {
+      sourceId: 'src1', name: '我的来源', version: '0.1.0', originType: 'zip', hasIcon: false, hasDetail: false, createdAt: 1,
+    }
+    mocks.apiGet.mockImplementation(async (path: string) => {
+      if (path === '/integrations/personal-sources') return { data: [source] }
+      return { data: {} }
+    })
+    mocks.apiDelete.mockResolvedValueOnce({ data: { success: true } })
+    renderSection()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'metadataLookup.deleteSource' }))
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    expect(mocks.apiDelete).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'metadataLookup.deleteSourceConfirmAction' }))
+    await waitFor(() => expect(mocks.apiDelete).toHaveBeenCalledWith('/integrations/personal-sources/src1'))
+    // The confirm releases only once the deletion has settled.
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(mocks.notifySuccess).toHaveBeenCalledWith({ key: 'metadataLookup.deleteSourceSuccess' })
+  })
+
+  it('keeps the source delete confirm open with an inline error when deletion fails', async () => {
+    const source: PersonalMetadataSourceView = {
+      sourceId: 'src1', name: '我的来源', version: '0.1.0', originType: 'zip', hasIcon: false, hasDetail: false, createdAt: 1,
+    }
+    mocks.apiGet.mockImplementation(async (path: string) => {
+      if (path === '/integrations/personal-sources') return { data: [source] }
+      return { data: {} }
+    })
+    mocks.apiDelete.mockRejectedValueOnce(new ApiError('VALIDATION_ERROR', 'Bad source'))
+    renderSection()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'metadataLookup.deleteSource' }))
+    fireEvent.click(screen.getByRole('button', { name: 'metadataLookup.deleteSourceConfirmAction' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    expect(mocks.apiDelete).toHaveBeenCalledTimes(1)
+    expect(mocks.notifyError).not.toHaveBeenCalled()
   })
 })

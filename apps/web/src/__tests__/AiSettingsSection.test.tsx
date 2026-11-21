@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import type { AiConfigRes, AiConnectionRes, AiModelEntryRes, AiPromptTemplate } from '@bookdock/shared'
 
@@ -220,16 +220,46 @@ describe('AiSettingsSection', () => {
     expect(screen.queryByRole('button', { name: '手动添加模型' })).toBeNull()
   })
 
-  it('confirms connection deletion before persisting', () => {
-    const mutate = vi.fn()
-    hookMocks.deleteConnection.mockReturnValue({ mutate, isPending: false })
+  it('confirms connection deletion before persisting', async () => {
+    const mutateAsync = vi.fn(async () => undefined)
+    hookMocks.deleteConnection.mockReturnValue({ mutateAsync, isPending: false })
 
     render(<AiSettingsSection />)
     fireEvent.click(screen.getByRole('button', { name: '删除配置' }))
-    expect(mutate).not.toHaveBeenCalled()
+    expect(mutateAsync).not.toHaveBeenCalled()
     expect(screen.getByText('确定要删除供应商“本地配置”吗？')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(mutate).toHaveBeenCalledWith('connection-1', expect.objectContaining({ onSuccess: expect.any(Function) }))
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith('connection-1'))
+    // The confirm stays up until the deletion settles, then closes itself.
+    await waitFor(() => expect(screen.queryByText('确定要删除供应商“本地配置”吗？')).not.toBeInTheDocument())
+  })
+
+  it('keeps the delete confirm open with an inline error when deletion fails', async () => {
+    const mutateAsync = vi.fn(async () => { throw new Error('boom') })
+    hookMocks.deleteConnection.mockReturnValue({ mutateAsync, isPending: false })
+
+    render(<AiSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '删除配置' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(screen.getByText('确定要删除供应商“本地配置”吗？')).toBeInTheDocument()
+    expect(mutateAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks the prompt-form close entries and reports saving while submission is pending', () => {
+    hookMocks.createPrompt.mockReturnValue({ mutateAsync: vi.fn(async () => undefined), isPending: false })
+    render(<AiSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '新建快捷指令' }))
+
+    // Pending arrives through a re-render, like a real mutation would.
+    hookMocks.createPrompt.mockReturnValue({ mutateAsync: vi.fn(async () => undefined), isPending: true })
+    fireEvent.change(screen.getByLabelText('指令名称'), { target: { value: 'x' } })
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByLabelText('指令名称')).toBeInTheDocument()
+    expect(screen.getByText('保存中…')).toBeInTheDocument()
+    expect(screen.getByText('取消')).toBeDisabled()
   })
 
   it('toggles model exposure, tests a model and removes entries from the dialog', () => {
@@ -408,22 +438,21 @@ describe('AiSettingsSection', () => {
     expect(within(sharedRow).queryByRole('button', { name: '删除快捷指令' })).toBeNull()
   })
 
-  it('confirms quick command deletion before persisting', () => {
-    const mutate = vi.fn()
-    hookMocks.deletePrompt.mockReturnValue({ mutate, isPending: false })
+  it('confirms quick command deletion before persisting', async () => {
+    const mutateAsync = vi.fn(async () => undefined)
+    hookMocks.deletePrompt.mockReturnValue({ mutateAsync, isPending: false })
 
     render(<AiSettingsSection />)
     fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     fireEvent.click(screen.getAllByRole('button', { name: '删除快捷指令' })[0]!)
 
     expect(screen.getByText('确定要删除快捷指令“解释这段”吗？')).toBeInTheDocument()
-    expect(mutate).not.toHaveBeenCalled()
+    expect(mutateAsync).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
 
-    expect(mutate).toHaveBeenCalledWith(
-      'explain-selection',
-      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
-    )
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith('explain-selection'))
+    // The confirm closes only after the deletion has actually settled.
+    await waitFor(() => expect(screen.queryByText('确定要删除快捷指令“解释这段”吗？')).not.toBeInTheDocument())
   })
 
   it('restores missing built-in commands directly without a confirmation', () => {

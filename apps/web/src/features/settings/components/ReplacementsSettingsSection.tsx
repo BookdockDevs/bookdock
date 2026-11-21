@@ -77,6 +77,9 @@ export default function ReplacementsSettingsSection() {
   }, [rules])
 
   const [form, setForm] = useState<FormState>(null)
+  // Mirrors ReplacementForm's save state so the host modal can hold its close
+  // entries while a submission is in flight.
+  const [formSaving, setFormSaving] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<TextReplacementRes[] | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -291,12 +294,13 @@ export default function ReplacementsSettingsSection() {
       {form && (
         <Modal
           title={_(form.mode === 'create' ? 'settings.replacementsNew' : 'settings.replacementsEdit')}
-          onClose={() => setForm(null)}
+          onClose={() => { if (!formSaving) setForm(null) }}
         >
           <ReplacementForm
             initial={form.mode === 'edit' ? form.rule : null}
             groups={existingGroups}
-            onDone={() => setForm(null)}
+            onSavingChange={setFormSaving}
+            onDone={() => { setFormSaving(false); setForm(null) }}
           />
         </Modal>
       )}

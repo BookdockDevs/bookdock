@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import type { TextReplacementRes } from '@bookdock/shared'
 
-import { useBookReplacements, useDeleteReplacement } from '@/api/hooks/useReplacements'
+import { useBookReplacements, useDeleteReplacement, useUpdateReplacement } from '@/api/hooks/useReplacements'
 import i18n from '../i18n/i18n'
 import BookReplacementsDialog from '../features/reader/components/BookReplacementsDialog'
 import { useReaderApi } from '../features/reader/hooks/useReaderApi'
@@ -14,7 +14,7 @@ vi.mock('@/api/hooks/useReplacements', () => ({
   useBookReplacements: vi.fn(() => ({ data: { data: [] } })),
   useCreateReplacement: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useUpdateReplacement: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
-  useDeleteReplacement: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useDeleteReplacement: vi.fn(() => ({ mutateAsync: vi.fn(async () => undefined), isPending: false })),
   useSetReplacementOverride: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }))
 
@@ -50,7 +50,7 @@ describe('BookReplacementsDialog', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('zh-CN')
     vi.mocked(useBookReplacements).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useBookReplacements>)
-    vi.mocked(useDeleteReplacement).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useDeleteReplacement>)
+    vi.mocked(useDeleteReplacement).mockReturnValue({ mutateAsync: vi.fn(async () => undefined), isPending: false } as unknown as ReturnType<typeof useDeleteReplacement>)
     vi.mocked(useReaderApi).mockReturnValue({ renderer: null })
   })
 
@@ -94,8 +94,27 @@ describe('BookReplacementsDialog', () => {
     expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
   })
 
-  it('deletes a point patch from the reader settings dialog', () => {
-    const deleteReplacement = { mutate: vi.fn(), isPending: false }
+  it('holds the edit form open while the rule is saving', () => {
+    mockRules([rule({ id: 't1', name: '去广告' })])
+    vi.mocked(useUpdateReplacement).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useUpdateReplacement>)
+    render(<BookReplacementsDialog bookId="b1" onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.getByText('编辑文本替换规则')).toBeInTheDocument()
+
+    // Pending arrives through a re-render, like a real mutation would.
+    vi.mocked(useUpdateReplacement).mockReturnValue({ mutate: vi.fn(), isPending: true } as unknown as ReturnType<typeof useUpdateReplacement>)
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '改名' } })
+
+    // Escape (and the mask) route through the guarded modal onClose.
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByText('编辑文本替换规则')).toBeInTheDocument()
+    expect(screen.getByText('保存中…')).toBeInTheDocument()
+    // Restore the factory default so later tests are not stuck in pending.
+    vi.mocked(useUpdateReplacement).mockReset()
+  })
+
+  it('deletes a point patch from the reader settings dialog', async () => {
+    const deleteReplacement = { mutateAsync: vi.fn(async () => undefined), isPending: false }
     vi.mocked(useDeleteReplacement).mockReturnValue(deleteReplacement as unknown as ReturnType<typeof useDeleteReplacement>)
     mockRules([rule({ id: 'p1', bookId: 'b1', scope: 'book', matchType: 'point', pattern: null, originalText: '错字', replacement: '对字', spineHref: 'c1', textOffset: 1 })])
     render(<BookReplacementsDialog bookId="b1" onClose={() => {}} />)
@@ -105,7 +124,24 @@ describe('BookReplacementsDialog', () => {
     const confirmButton = screen.getAllByRole('button', { name: '删除' }).find((button) => button.textContent === '删除')
     fireEvent.click(confirmButton!)
 
-    expect(deleteReplacement.mutate).toHaveBeenCalledWith('p1', expect.objectContaining({ onSuccess: expect.any(Function) }))
+    await waitFor(() => expect(deleteReplacement.mutateAsync).toHaveBeenCalledWith('p1'))
+    // The confirm closes only after the rule is actually deleted.
+    await waitFor(() => expect(screen.queryByText(/确定要删除文本替换规则/)).not.toBeInTheDocument())
+  })
+
+  it('keeps the delete confirm open with an inline error when deletion fails', async () => {
+    const deleteReplacement = { mutateAsync: vi.fn(async () => { throw new Error('boom') }), isPending: false }
+    vi.mocked(useDeleteReplacement).mockReturnValue(deleteReplacement as unknown as ReturnType<typeof useDeleteReplacement>)
+    mockRules([rule({ id: 'p1', bookId: 'b1', scope: 'book', matchType: 'point', pattern: null, originalText: '错字', replacement: '对字', spineHref: 'c1', textOffset: 1 })])
+    render(<BookReplacementsDialog bookId="b1" onClose={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    fireEvent.click(screen.getAllByRole('button', { name: '删除' }).find((button) => button.textContent === '删除')!)
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    // Still open for retry; the rule was not removed.
+    expect(screen.getByText(/确定要删除文本替换规则/)).toBeInTheDocument()
+    expect(deleteReplacement.mutateAsync).toHaveBeenCalledTimes(1)
   })
 
   it('displays effective rules count in title capsule and excludes disabled rules', () => {

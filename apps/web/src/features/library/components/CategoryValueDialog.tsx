@@ -49,7 +49,7 @@ export default function CategoryValueDialog({ open, libraryId, source, categorie
     const parentPath = canChangeParent && parentName ? [parentName] : null
     updateCategory.mutate({ libraryId, path, source, patch: { name: value, parentPath } }, { onSuccess: onClose })
   }
-  return <Modal title={_('library.editCategory')} onClose={() => { if (!updateCategory.isPending) onClose() }} size="sm" footer={<div className="flex w-full gap-3"><Button type="button" variant="secondary" className="flex-1" disabled={updateCategory.isPending} onClick={onClose}>{_('library.cancel')}</Button><Button type="button" variant="primary" className="flex-1" disabled={!name.trim() || updateCategory.isPending} onClick={submit}>{_('library.save')}</Button></div>}>
+  return <Modal title={_('library.editCategory')} onClose={() => { if (!updateCategory.isPending) onClose() }} size="sm" footer={<div className="flex w-full gap-3"><Button type="button" variant="secondary" className="flex-1" disabled={updateCategory.isPending} onClick={onClose}>{_('library.cancel')}</Button><Button type="button" variant="primary" className="flex-1" disabled={!name.trim() || updateCategory.isPending} onClick={submit}>{_(updateCategory.isPending ? 'passwordInput.saving' : 'library.save')}</Button></div>}>
     <div className="space-y-3">
       <div className="relative flex items-center">
         <span className="pointer-events-none absolute left-3 flex h-5 w-5 items-center justify-center text-stone-400 dark:text-stone-500"><TaxonomyIcon kind="category" size={17} /></span>

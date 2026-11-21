@@ -1890,6 +1890,7 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
               {searchStatus.incomplete && (
                 <div role="status" className="border-b border-[var(--bd-read-accent)]/20 px-3 py-1 text-xs text-[var(--bd-read-sub)] shrink-0 bg-[var(--bd-read-panel-bg)]">
                   {_(searchStatus.error === 'regex-timeout' ? 'reader.searchRegexTimeout'
+                    : searchStatus.error === 'chapter-timeout' ? 'reader.searchChapterTimeout'
                     : searchStatus.error ? 'reader.searchRegexFailed' : 'reader.searchIncomplete')}
                 </div>
               )}

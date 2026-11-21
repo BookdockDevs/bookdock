@@ -4,7 +4,7 @@ import type { ReadingThemeCards } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
-import SmartMenu from '@/components/ui/SmartMenu'
+import SmartMenu, { readerMenuItemClass } from '@/components/ui/SmartMenu'
 import { useTranslation } from '@/hooks/useTranslation'
 import { HIGHLIGHT_LIMITS } from '@/lib/highlight-match'
 import { pointerAnchor, type MenuAnchor } from '@/lib/menu-anchor'
@@ -368,9 +368,9 @@ export default function ThemeCombinationDialog({
                 setContextMenu(null)
                 run?.()
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-current/80 transition-colors hover:bg-stone-500/10 hover:text-current"
+              className={readerMenuItemClass}
             >
-              <ThemeIcon name="edit" size={13} />
+              <ThemeIcon name="edit" size={14} />
               <span>{_('library.edit')}</span>
             </button>
           )}
@@ -382,9 +382,9 @@ export default function ThemeCombinationDialog({
                 setContextMenu(null)
                 run?.()
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-current/80 transition-colors hover:bg-stone-500/10 hover:text-current"
+              className={readerMenuItemClass}
             >
-              <ThemeIcon name="copy" size={13} />
+              <ThemeIcon name="copy" size={14} />
               <span>{_('reader.themeCopyCard')}</span>
             </button>
           )}

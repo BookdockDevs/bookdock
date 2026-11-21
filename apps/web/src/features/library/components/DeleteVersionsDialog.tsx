@@ -160,7 +160,7 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
       confirmLabel={_('library.delete')}
       confirmDisabled={deleting || checkedVersions.length === 0}
       onClose={() => { if (!deleting) onClose() }}
-      onConfirm={() => void runDelete()}
+      onConfirm={runDelete}
     />
   )
 }

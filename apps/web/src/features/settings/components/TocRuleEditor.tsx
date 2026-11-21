@@ -138,7 +138,7 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
   }
 
   return (
-    <Modal title={editing ? _('settings.tocRulesEdit') : _('settings.tocRulesNew')} onClose={onClose} size="wide">
+    <Modal title={editing ? _('settings.tocRulesEdit') : _('settings.tocRulesNew')} onClose={saving ? () => undefined : onClose} size="wide">
       <form onSubmit={handleSubmit} noValidate className={settingsFormClass}>
         <SettingsFormField label={_('settings.tocRulesName')} required error={nameError ? _('settings.tocRulesNameRequired') : undefined}>
           <input
@@ -213,7 +213,7 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
           </fieldset>
         )}
 
-        <SettingsFormActions onCancel={onClose} cancelDisabled={saving} saveDisabled={saving} />
+        <SettingsFormActions onCancel={onClose} pending={saving} />
       </form>
     </Modal>
   )

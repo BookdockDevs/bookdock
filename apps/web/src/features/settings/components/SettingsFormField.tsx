@@ -30,7 +30,7 @@ export default function SettingsFormField({
   const labelText = (
     <>
       {label}
-      {required && <span className="text-red-500"> *</span>}
+      {required && <span aria-hidden="true" className="text-red-500"> *</span>}
     </>
   )
   const field = (

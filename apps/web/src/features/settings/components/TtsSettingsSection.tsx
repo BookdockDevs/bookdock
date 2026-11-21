@@ -403,12 +403,12 @@ function TtsServiceForm({
   return (
     <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (validatePasswordInputs(event)) onSave() }}>
       <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
-        <span>{_('settings.ttsName')}</span>
+        <span>{_('settings.ttsName')}<span aria-hidden="true" className="text-red-500"> *</span></span>
         <input required value={form.name} onChange={(event) => set({ name: event.target.value })} className={field} />
       </label>
       {isAzure ? (
         <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
-          <span>Region</span>
+          <span>Region<span aria-hidden="true" className="text-red-500"> *</span></span>
           <input required value={String(form.options.region ?? '')} onChange={(event) => set({ options: { ...form.options, region: event.target.value } })} placeholder="global" className={field} />
         </label>
       ) : (
@@ -419,28 +419,28 @@ function TtsServiceForm({
       )}
       {needsModel && (
         <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
-          <span>{_('settings.ttsModel')}</span>
+          <span>{_('settings.ttsModel')}<span aria-hidden="true" className="text-red-500"> *</span></span>
           <input required value={form.model} onChange={(event) => set({ model: event.target.value })} className={field} />
         </label>
       )}
       {isAliyun ? (
         <>
           <div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
-            <span>App Key</span>
+            <span>App Key{!form.id && <span aria-hidden="true" className="text-red-500"> *</span>}</span>
             <PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label="App Key" secret disabled={saving} required={!form.id} value={form.secrets.appKey ?? ''} onChange={(event) => setSecret('appKey', event.target.value)} className={field} />
           </div>
           <label className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
-            <span>Access Key ID</span>
+            <span>Access Key ID{!form.id && <span aria-hidden="true" className="text-red-500"> *</span>}</span>
             <input required={!form.id} value={form.secrets.accessKeyId ?? ''} onChange={(event) => setSecret('accessKeyId', event.target.value)} className={field} />
           </label>
           <div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
-            <span>Access Key Secret</span>
+            <span>Access Key Secret{!form.id && <span aria-hidden="true" className="text-red-500"> *</span>}</span>
             <PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label="Access Key Secret" secret disabled={saving} required={!form.id} value={form.secrets.accessKeySecret ?? ''} onChange={(event) => setSecret('accessKeySecret', event.target.value)} className={field} />
           </div>
         </>
       ) : (
         <div className="flex flex-col gap-1 text-xs text-stone-600 dark:text-stone-300">
-          <span>{_('settings.ttsApiKey')}</span>
+          <span>{_('settings.ttsApiKey')}{!form.id && <span aria-hidden="true" className="text-red-500"> *</span>}</span>
           <PasswordInput key={`${form.id ?? 'new'}-${form.provider}`} aria-label={_('settings.ttsApiKey')} secret disabled={saving} required={!form.id} value={form.secrets.apiKey ?? ''} onChange={(event) => setSecret('apiKey', event.target.value)} autoComplete="new-password" className={field} />
         </div>
       )}

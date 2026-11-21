@@ -19,7 +19,7 @@ import { useUiStore } from '../stores/ui.store'
 vi.mock('@/api/hooks/useFonts', () => ({
   useFonts: vi.fn(() => ({ data: { data: [] } })),
   useUploadFont: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
-  useDeleteFont: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useDeleteFont: vi.fn(() => ({ mutateAsync: vi.fn(async () => undefined), isPending: false })),
   useUpdateFontScope: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
 }))
 
@@ -57,7 +57,7 @@ describe('FontsSettingsSection', () => {
     useAuthStore.setState({ user: { id: 'reader', username: 'reader', role: 'member' } })
     useUiStore.setState({ fontPreferences: {}, fontOrder: [], fontFamily: 'serif' })
     useDeviceFontStore.setState({ status: 'ready', fonts: [], preferences: {}, order: [], selection: { primary: null, cjk: null } })
-    vi.mocked(useDeleteFont).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useDeleteFont>)
+    vi.mocked(useDeleteFont).mockReturnValue({ mutateAsync: vi.fn(async () => undefined), isPending: false } as unknown as ReturnType<typeof useDeleteFont>)
     vi.mocked(useUpdateFontScope).mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue(undefined), isPending: false } as unknown as ReturnType<typeof useUpdateFontScope>)
     mockFonts(fonts)
   })
@@ -177,8 +177,8 @@ describe('FontsSettingsSection', () => {
     expect(useUiStore.getState().fontPreferences.f1).toEqual({ enabled: false })
   })
 
-  it('deletes a font after confirmation', () => {
-    const deleteFont = { mutate: vi.fn(), isPending: false }
+  it('deletes a font after confirmation', async () => {
+    const deleteFont = { mutateAsync: vi.fn(async () => undefined), isPending: false }
     vi.mocked(useDeleteFont).mockReturnValue(deleteFont as unknown as ReturnType<typeof useDeleteFont>)
     render(<FontsSettingsSection />)
 
@@ -186,18 +186,21 @@ describe('FontsSettingsSection', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '删除' })[0])
     expect(screen.getByText('确定要删除字体“我的手写体”吗？')).toBeInTheDocument()
     fireEvent.click(screen.getAllByRole('button', { name: '删除' }).at(-1)!)
-    expect(deleteFont.mutate).toHaveBeenCalledWith('f1', expect.objectContaining({ onError: expect.any(Function) }))
+    await waitFor(() => expect(deleteFont.mutateAsync).toHaveBeenCalledWith('f1'))
+    // The confirm closes only after the deletion has actually settled.
+    await waitFor(() => expect(screen.queryByText('确定要删除字体“我的手写体”吗？')).not.toBeInTheDocument())
+    expect(notify.success).toHaveBeenCalledWith({ key: 'toast.fontDeleted' })
   })
 
   it('does not delete when the confirmation is cancelled', () => {
-    const deleteFont = { mutate: vi.fn(), isPending: false }
+    const deleteFont = { mutateAsync: vi.fn(async () => undefined), isPending: false }
     vi.mocked(useDeleteFont).mockReturnValue(deleteFont as unknown as ReturnType<typeof useDeleteFont>)
     render(<FontsSettingsSection />)
 
     fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     fireEvent.click(screen.getAllByRole('button', { name: '删除' })[0])
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(deleteFont.mutate).not.toHaveBeenCalled()
+    expect(deleteFont.mutateAsync).not.toHaveBeenCalled()
   })
 
   it('opens the server upload picker and the device import picker from the add menu', () => {

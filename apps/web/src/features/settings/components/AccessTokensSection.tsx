@@ -41,13 +41,14 @@ export default function AccessTokensSection() {
     onError: (error) => notify.error(getUserErrorNotification(error, 'settings.tokensUpdateFailed')),
   })
 
+  // Deletion failures surface inline in the confirm dialog (onConfirm awaits
+  // mutateAsync), so no parallel error toast here.
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiDelete(`/tokens/${id}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['access-tokens'] })
       notify.success({ key: 'settings.tokensDeleted' })
     },
-    onError: (error) => notify.error(getUserErrorNotification(error, 'settings.tokensDeleteFailed')),
   })
 
   const tokens = tokensQuery.data?.data.tokens ?? []
@@ -238,9 +239,10 @@ export default function AccessTokensSection() {
           message={_('settings.tokensDeleteConfirmMessage')}
           confirmLabel={_('settings.tokensDeleteConfirmAction')}
           confirmVariant="danger"
+          errorFallback="settings.tokensDeleteFailed"
           confirmDisabled={deleteMutation.isPending}
-          onConfirm={() => {
-            deleteMutation.mutate(pendingDelete.id)
+          onConfirm={async () => {
+            await deleteMutation.mutateAsync(pendingDelete.id)
             setPendingDelete(null)
           }}
           onClose={() => setPendingDelete(null)}
