@@ -9,7 +9,7 @@ import { createId } from '../../lib/id'
 import { AppError } from '../../middleware/error'
 import { getStorage } from '../../storage'
 
-const MAX_THEME_ASSET_BYTES = 10 * 1024 * 1024
+const MAX_THEME_ASSET_BYTES = 20 * 1024 * 1024
 
 const MIME_TO_EXT: Record<'image/png' | 'image/jpeg' | 'image/webp', string> = {
   'image/png': 'png',
@@ -68,7 +68,7 @@ export async function uploadThemeAsset(
     throw new AppError('VALIDATION_ERROR', 'Empty theme asset')
   }
   if (input.file.size > MAX_THEME_ASSET_BYTES) {
-    throw new AppError('UPLOAD_TOO_LARGE', 'Theme asset exceeds 10 MB limit')
+    throw new AppError('UPLOAD_TOO_LARGE', 'Theme asset exceeds 20 MB limit')
   }
   const buffer = Buffer.from(await input.file.arrayBuffer())
   const mime = detectImageMime(buffer, input.file.type)

@@ -14,7 +14,6 @@ type PromptRow = typeof aiPrompts.$inferSelect
 export const AI_PROMPT_PREFERENCE_KEY = 'aiPrompts'
 /** Records that an account has been seeded, so deleting every command sticks. */
 const SEEDED_KEY = 'aiPromptSeeded'
-const MAX_PROMPTS_PER_USER = 24
 
 interface SeedPrompt {
   seedKey: string
@@ -141,11 +140,6 @@ function getOwnedPrompt(userId: string, promptId: string): PromptRow {
   return row
 }
 
-function assertUnderLimit(userId: string) {
-  const count = getDb().select({ count: sql<number>`count(*)` }).from(aiPrompts).where(eq(aiPrompts.userId, userId)).get()?.count ?? 0
-  if (count >= MAX_PROMPTS_PER_USER) throw new AppError('VALIDATION_ERROR', `At most ${MAX_PROMPTS_PER_USER} quick commands can be kept`)
-}
-
 function nextSortOrder(userId: string): number {
   const max = getDb().select({ max: sql<number | null>`max(${aiPrompts.sortOrder})` }).from(aiPrompts).where(eq(aiPrompts.userId, userId)).get()?.max ?? 0
   return max + 10
@@ -158,7 +152,7 @@ function insertOwnPrompt(userId: string, input: { name: string; prompt: string; 
     userId,
     seedKey: null,
     name: input.name.trim().slice(0, 80),
-    prompt: input.prompt.trim().slice(0, 2_000),
+    prompt: input.prompt.trim().slice(0, 20_000),
     scope: input.scope ?? 'both',
     enabled: input.enabled === false ? 0 : 1,
     sortOrder,
@@ -172,7 +166,6 @@ function insertOwnPrompt(userId: string, input: { name: string; prompt: string; 
 
 export function createAiPrompt(userId: string, role: string, input: AiPromptCreateReq): AiPromptTemplate {
   assertCanPublish(role, input.availability)
-  assertUnderLimit(userId)
   const row = insertOwnPrompt(userId, input, nextSortOrder(userId))
   return toRes(row, userId)
 }

@@ -16,7 +16,6 @@ import { z } from 'zod'
 export const MAX_CATEGORY_DEPTH = 2
 export const MAX_CATEGORY_NAME_LENGTH = 100
 export const MAX_TAG_NAME_LENGTH = 100
-export const MAX_BOOK_TAGS = 50
 
 export type ClassificationKind = 'category' | 'tag'
 export const classificationKindSchema = z.enum(['category', 'tag'])
@@ -32,7 +31,7 @@ export const categoryPathSchema = z.array(z.string().trim().min(1).max(MAX_CATEG
   .min(1)
   .max(MAX_CATEGORY_DEPTH)
 
-export const tagNameListSchema = z.array(z.string().trim().min(1).max(MAX_TAG_NAME_LENGTH)).max(MAX_BOOK_TAGS)
+export const tagNameListSchema = z.array(z.string().trim().min(1).max(MAX_TAG_NAME_LENGTH))
 
 /**
  * Trim every name, drop empties, and refuse anything deeper than the two-level
@@ -56,7 +55,6 @@ export function normalizeTagNames(input: readonly string[] | null | undefined): 
     if (!name || seen.has(name)) continue
     seen.add(name)
     names.push(name)
-    if (names.length >= MAX_BOOK_TAGS) break
   }
   return names
 }

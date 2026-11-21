@@ -1084,7 +1084,7 @@ export class LocalLibraryRepository {
   }
 
   async updateBooksMetadata(changes: Array<{ ref: ClientBookRef; patch: Parameters<LocalLibraryRepository['updateMetadata']>[1]; expectedVersion: number }>): Promise<void> {
-    if (!changes.length || changes.length > 2000 || new Set(changes.map((change) => key(change.ref))).size !== changes.length) throw new LocalLibraryError('invalid-input', 'Invalid book selection')
+    if (!changes.length || new Set(changes.map((change) => key(change.ref))).size !== changes.length) throw new LocalLibraryError('invalid-input', 'Invalid book selection')
     for (const change of changes) {
       this.assertLocal(change.ref)
       if (JSON.stringify(change.ref.scope) !== JSON.stringify(changes[0].ref.scope)) throw new LocalLibraryError('invalid-input', 'Selection spans multiple vaults')
@@ -1096,7 +1096,7 @@ export class LocalLibraryRepository {
 
   async rewriteClassificationValue(vaultId: string, kind: ClassificationKind, from: string, to: string | null, changes: Array<{ ref: ClientBookRef; patch: Parameters<LocalLibraryRepository['updateMetadata']>[1]; expectedVersion: number }>, statePatch: { pinned?: boolean; hidden?: boolean } = {}): Promise<void> {
     this.organizationKey(vaultId)
-    if (changes.length > 2000 || new Set(changes.map((change) => key(change.ref))).size !== changes.length) throw new LocalLibraryError('invalid-input', 'Invalid book selection')
+    if (new Set(changes.map((change) => key(change.ref))).size !== changes.length) throw new LocalLibraryError('invalid-input', 'Invalid book selection')
     for (const change of changes) {
       this.assertLocal(change.ref)
       if (change.ref.scope.kind !== 'local' || change.ref.scope.vaultId !== vaultId) throw new LocalLibraryError('invalid-input', 'Selection spans multiple vaults')
@@ -2213,7 +2213,7 @@ export class LocalLibraryRepository {
   }
 
   async restoreSelection(vaultId: string, targets: Array<{ id: string; version: number }>): Promise<void> {
-    if (!targets.length || targets.length > 2000 || new Set(targets.map((target) => target.id)).size !== targets.length) throw new LocalLibraryError('invalid-input', 'Invalid trash selection')
+    if (!targets.length || new Set(targets.map((target) => target.id)).size !== targets.length) throw new LocalLibraryError('invalid-input', 'Invalid trash selection')
     await this.transaction(['books'], 'readwrite', async (tx) => {
       for (const target of targets) {
         const ref = { scope: { kind: 'local' as const, vaultId }, bookId: target.id }
@@ -2546,11 +2546,10 @@ export class LocalLibraryRepository {
       const next = existingIndex >= 0
         ? threads.map((item, index) => (index === existingIndex ? updated : item))
         : [updated, ...threads]
-      const bounded = next
+      const ordered = next
         .slice()
         .sort((left, right) => right.updatedAt - left.updatedAt || right.id.localeCompare(left.id))
-        .slice(0, 50)
-      await request(tx.objectStore('settings').put(bounded, storeKey))
+      await request(tx.objectStore('settings').put(ordered, storeKey))
       return updated
     }, undefined, false)
   }

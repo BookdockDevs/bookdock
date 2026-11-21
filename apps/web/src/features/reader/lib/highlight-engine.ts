@@ -1,6 +1,7 @@
 import type { HighlightRuleDef } from '@bookdock/shared'
 
 import { collectHighlightSpans, HIGHLIGHT_LIMITS, mergeHighlightSpans, type HighlightSegment, type HighlightSpan } from '@/lib/highlight-match'
+import { notify } from '@/lib/notifications'
 
 export const HIGHLIGHT_RULE_TIMEOUT_MS = 250
 export const HIGHLIGHT_WORKER_BOOT_TIMEOUT_MS = 5000
@@ -8,9 +9,9 @@ export const HIGHLIGHT_WORKER_BOOT_TIMEOUT_MS = 5000
  *  budget grows with the rule count (one rule's slot each) so a long rule list
  *  is not starved by a fixed cap, but a pathological book still returns. */
 export const HIGHLIGHT_SECTION_BUDGET_MS = 6000
-export const MAX_HIGHLIGHT_PARAGRAPHS = 512
-export const MAX_HIGHLIGHT_TEXT_LENGTH = 120_000
-export const MAX_HIGHLIGHT_SPANS = 12_000
+export const MAX_HIGHLIGHT_PARAGRAPHS = 1024
+export const MAX_HIGHLIGHT_TEXT_LENGTH = 250_000
+export const MAX_HIGHLIGHT_SPANS = 30_000
 
 /** Why a regex rule produced nothing: only `timeout` means the rule was tried
  *  and cut short, which is worth reporting; a missing worker is reported once
@@ -26,6 +27,7 @@ export class HighlightEngine {
   private cancelMatching: (() => void) | null = null
   private reportedWorkerFailure = false
   private reportedTimeout = false
+  private reportedBudgetTruncated = false
 
   run(paragraphs: string[], rules: HighlightRuleDef[]): Promise<HighlightSegment[][]> {
     const generation = this.generation
@@ -47,8 +49,12 @@ export class HighlightEngine {
     if (generation !== this.generation) return []
     let length = 0
     const bounded: string[] = []
+    let truncatedByBudget = paragraphs.length > MAX_HIGHLIGHT_PARAGRAPHS
     for (const text of paragraphs.slice(0, MAX_HIGHLIGHT_PARAGRAPHS)) {
-      if (length + text.length > MAX_HIGHLIGHT_TEXT_LENGTH) break
+      if (length + text.length > MAX_HIGHLIGHT_TEXT_LENGTH) {
+        truncatedByBudget = true
+        break
+      }
       length += text.length
       bounded.push(text)
     }
@@ -62,7 +68,11 @@ export class HighlightEngine {
     const budget = Math.min(HIGHLIGHT_RULE_TIMEOUT_MS * rules.length, HIGHLIGHT_SECTION_BUDGET_MS)
     let skipped = 0
     for (const [order, rule] of rules.entries()) {
-      if (!rule.enabled || !remaining) continue
+      if (!rule.enabled) continue
+      if (!remaining) {
+        truncatedByBudget = true
+        break
+      }
       if (rule.isRegex) {
         const timeout = Math.min(HIGHLIGHT_RULE_TIMEOUT_MS, budget - (performance.now() - started))
         if (timeout <= 0) {
@@ -92,6 +102,7 @@ export class HighlightEngine {
       }
     }
     if (skipped) this.reportTimeout(skipped)
+    if (truncatedByBudget && rules.some((rule) => rule.enabled)) this.reportBudgetTruncation()
     return bounded.map((text, index) => mergeHighlightSpans(text, spans[index]!))
   }
 
@@ -181,5 +192,11 @@ export class HighlightEngine {
     if (this.reportedTimeout) return
     this.reportedTimeout = true
     console.debug(`[bd] highlight: ${skipped} regex rule(s) timed out or ran out of budget in this section`)
+  }
+
+  private reportBudgetTruncation(): void {
+    if (this.reportedBudgetTruncated) return
+    this.reportedBudgetTruncated = true
+    notify.info({ key: 'reader.highlightBudgetTruncated' })
   }
 }

@@ -52,7 +52,7 @@ export async function prepareLocalTxt(file: Blob, fileName: string, title: strin
   const { text, encoding } = await decodeLocalTxt(file)
   const normalized = normalizeTxtText(text)
   if (!normalized.trim()) throw new Error('TXT file has no readable text')
-  const chapters = scanTxtChapterBoundaries(normalized, undefined, undefined, { maxChapters: 10_000 }).map((chapter) => ({ ...chapter, wordCount: countWords(normalized.slice(chapter.contentStartOffset, chapter.endOffset)) }))
+  const chapters = scanTxtChapterBoundaries(normalized, undefined, undefined, { maxChapters: 30_000 }).map((chapter) => ({ ...chapter, wordCount: countWords(normalized.slice(chapter.contentStartOffset, chapter.endOffset)) }))
   const source = clientTxtPublicationSchema.parse({ schemaVersion: 1, fileName, encoding, artifactVersion: TXT_EPUB_ARTIFACT_VERSION, normalizedLength: normalized.length, chapters })
   return buildLocalTxtPublication(normalized, source, title, contentId)
 }

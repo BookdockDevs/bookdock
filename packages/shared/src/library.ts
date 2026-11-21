@@ -425,10 +425,8 @@ export type PrivateBatchTrashReq = z.infer<typeof privateBatchTrashSchema>
 export type BatchOrganizeReq = z.infer<typeof batchOrganizeSchema>
 
 /** Multipart placement fields; everything is optional and library-scoped. */
-/** Full author list for uploads and edits: trimmed, 1–100 chars each, max 10. */
-export const authorListSchema = z.array(z.string().trim().min(1).max(100)).max(10)
-
-export const MAX_AUTHORS = 10
+/** Full author list for uploads and edits: trimmed, 1–100 chars each. */
+export const authorListSchema = z.array(z.string().trim().min(1).max(100))
 
 /**
  * Author normalization for writes (multi-author): `authors` is the source of
@@ -437,7 +435,7 @@ export const MAX_AUTHORS = 10
  * an explicit `authors` wins, otherwise a lone `author` becomes one element.
  */
 export function normalizeAuthors(input?: { author?: string | null; authors?: string[] | null }): { author: string; authors: string[] } {
-  const authors = [...new Set((input?.authors ?? []).map((name) => name.trim()).filter(Boolean))].slice(0, MAX_AUTHORS)
+  const authors = [...new Set((input?.authors ?? []).map((name) => name.trim()).filter(Boolean))]
   if (authors.length > 0) return { author: authors[0]!, authors }
   const single = (input?.author ?? '').trim()
   return single ? { author: single, authors: [single] } : { author: '', authors: [] }
@@ -487,20 +485,20 @@ export const catalogUploadSchema = z.object({
   shelfId: z.string().min(1).max(128).optional(),
   tags: tagNameListSchema.optional(),
   /** Version label inside the library, e.g. the edition name. */
-  name: z.string().trim().max(120).optional(),
+  name: z.string().trim().max(200).optional(),
   /** Work defaults; omitted fields fall back to the parsed file metadata. */
-  title: z.string().trim().min(1).max(300).optional(),
-  author: z.string().trim().max(300).optional(),
+  title: z.string().trim().min(1).max(500).optional(),
+  author: z.string().trim().max(500).optional(),
   authors: authorListSchema.optional(),
 })
 
 export type CatalogUploadReq = z.infer<typeof catalogUploadSchema>
 
 export const catalogBookUpdateSchema = z.object({
-  title: z.string().trim().min(1).max(300).optional(),
-  author: z.string().trim().max(300).optional(),
+  title: z.string().trim().min(1).max(500).optional(),
+  author: z.string().trim().max(500).optional(),
   authors: authorListSchema.optional(),
-  description: z.string().max(4000).optional(),
+  description: z.string().max(20_000).optional(),
   /** Null clears the category path; absent leaves it unchanged. */
   categoryPath: categoryPathSchema.nullable().optional(),
   /** Replaces the work's whole tag set with these values. */
@@ -526,11 +524,11 @@ export type CatalogBookUpdateReq = z.infer<typeof catalogBookUpdateSchema>
  * "inherit the work row", which stays their source of truth.
  */
 export const catalogVersionUpdateSchema = z.object({
-  name: z.string().trim().max(120).optional(),
-  title: z.string().trim().min(1).max(300).nullable().optional(),
-  author: z.string().trim().max(300).nullable().optional(),
+  name: z.string().trim().max(200).optional(),
+  title: z.string().trim().min(1).max(500).nullable().optional(),
+  author: z.string().trim().max(500).nullable().optional(),
   authors: authorListSchema.nullable().optional(),
-  description: z.string().max(4000).nullable().optional(),
+  description: z.string().max(20_000).nullable().optional(),
   status: libraryVersionStatusSchema.optional(),
   /**
    * Version-level publication metadata (publisher, language, ISBN, subjects,

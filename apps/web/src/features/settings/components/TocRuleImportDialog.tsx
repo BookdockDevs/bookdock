@@ -4,7 +4,6 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import {
   RULE_TRANSFER_MAX_BYTES,
-  RULE_TRANSFER_MAX_RULES,
   describeTransferIssues,
   normalizeTransferName,
   suggestImportName,
@@ -222,9 +221,6 @@ export default function TocRuleImportDialog({ existingNames, onClose }: TocRuleI
           </Button>
           <span className="min-w-0 flex-1 truncate text-xs text-stone-400 dark:text-stone-500">
             {fileName ?? _('settings.tocImportNoFile')}
-          </span>
-          <span className="shrink-0 text-xs text-stone-400 tabular-nums dark:text-stone-500">
-            {_('settings.tocImportLimit', { max: RULE_TRANSFER_MAX_RULES })}
           </span>
         </div>
 

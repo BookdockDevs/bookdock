@@ -20,11 +20,12 @@ const CONTAINS_CHAPTER_TIMEOUT_MS = 10_000
 // the partial result set.
 const SCAN_TIMEOUT_BUDGET_MS = 30_000
 const MAX_SEARCH_TEXT_LENGTH = 16 * 1024 * 1024
-let activeSearches = 0
+const MAX_ACTIVE_SEARCHES_GLOBAL = 4
+const activeSearchUsers = new Set<string>()
 
-export function reserveReaderSearch(): boolean {
-  if (activeSearches >= 1) return false
-  activeSearches++
+export function reserveReaderSearch(userKey = 'global'): boolean {
+  if (activeSearchUsers.has(userKey) || activeSearchUsers.size >= MAX_ACTIVE_SEARCHES_GLOBAL) return false
+  activeSearchUsers.add(userKey)
   return true
 }
 
@@ -32,13 +33,14 @@ export function createReaderSearchStream(
   book: ReaderContentBook,
   request: ReaderSearchRequest,
   signal: AbortSignal,
+  userKey = 'global',
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
   let released = false
   const release = () => {
     if (released) return
     released = true
-    activeSearches = Math.max(0, activeSearches - 1)
+    activeSearchUsers.delete(userKey)
   }
   return new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -151,7 +153,7 @@ function createSearchWorker(): Worker {
     ? bundledWorker
     : new URL('./reader-search.worker.bootstrap.mjs', import.meta.url)
   return new Worker(workerPath, {
-    resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16 },
+    resourceLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 16 },
   })
 }
 

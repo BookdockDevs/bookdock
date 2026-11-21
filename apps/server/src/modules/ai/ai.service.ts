@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 
-import { AI_CORE_SYSTEM_PROMPT, AI_CORE_TOOL_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_ASSISTANT_MODES, AI_MAX_CONTEXT_CHARS, AI_TOOL_NAMES, createAiContextCitations, expandAiPrompt, getAiModelCapabilityFlags, getAiPromptVariables, isAiEmbeddingModel, normalizeAiCitationMarkers, normalizeAiToolName } from '@bookdock/shared'
+import { AI_CORE_SYSTEM_PROMPT, AI_CORE_TOOL_SYSTEM_PROMPT, AI_DEFAULT_ASSISTANT_MODE_PROMPT, AI_DEFAULT_READING_SCOPE, AI_MAX_CONTEXT_CHARS, AI_TOOL_NAMES, createAiContextCitations, expandAiPrompt, getAiModelCapabilityFlags, getAiPromptVariables, isAiEmbeddingModel, normalizeAiCitationMarkers, normalizeAiToolName } from '@bookdock/shared'
 import type { AiAssistantMode, AiAssistantModeInput, AiChatReq, AiCitation, AiConfigRes, AiConfigUpdateReq, AiConnectionModelTestRes, AiContextPlan, AiContextReceipt, AiContextTruncationReason, AiConversationSettings, AiGenerationDiagnostics, AiGenerationUsage, AiHistoryMessage, AiLocalChatReq, AiModelCapabilities, AiModelKind, AiModelRes, AiNormalizedEvent, AiPromptVariable, AiProvider, AiProviderRes, AiProtocol, AiReadingScope, AiRetryRecipe, AiStatusRes, AiToolName } from '@bookdock/shared'
 
 import { config } from '../../config'
@@ -77,7 +77,6 @@ function normalizeAssistantModes(modes: readonly AiAssistantModeInput[] | null |
     if (!id || !name || !prompt || seen.has(id)) continue
     seen.add(id)
     normalized.push({ id, name, prompt, builtIn: false })
-    if (normalized.length >= AI_MAX_ASSISTANT_MODES) break
   }
   return normalized
 }

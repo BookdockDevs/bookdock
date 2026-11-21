@@ -89,7 +89,8 @@ export async function createJob(connection: Connection, name: string, size: numb
 }
 
 export async function createJobs(connection: Connection, files: { name: string; size: number }[], options: { sourceTabId: number | null; sourceFrameId?: number; batchId?: string; autoStart?: boolean; notices?: { ignored: number; oversized: number } }): Promise<UploadJob[]> {
-  if (!files.length || files.length > 2000) throw new Error(t('error.generic'))
+  if (!files.length) throw new Error(t('error.generic'))
+  if (files.length > 2000) throw new Error(t('error.tooManyFiles'))
   for (const file of files) {
     if (file.size === 0) validateFile(file.name, 1, connection.uploadMaxBytes)
     else validateFile(file.name, file.size, connection.uploadMaxBytes)

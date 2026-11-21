@@ -1,10 +1,10 @@
 import { z } from 'zod'
 
-export const DICTIONARY_MAX_FILES = 12
+export const DICTIONARY_MAX_FILES = 64
 export const DICTIONARY_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 export type DictionaryScope = 'user' | 'instance'
 
-export const dictionaryLookupSchema = z.object({ word: z.string().trim().min(1).max(100) }).strict()
+export const dictionaryLookupSchema = z.object({ word: z.string().trim().min(1).max(500) }).strict()
 export const dictionaryUpdateSchema = z.object({
   enabled: z.boolean().optional(),
   name: z.string().trim().min(1).max(100).optional(),

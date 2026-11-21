@@ -72,6 +72,7 @@ export const messages = {
   },
   error: {
     generic: '操作失败',
+    tooManyFiles: '单批最多选择 2000 个文件',
     tooManyBatches: '同时进行的上传太多了，请等它们结束后再试',
     storageUnavailable: '浏览器存储不可用，请释放空间后重试',
     fileUnsupported: '请选择有效的 EPUB 或 TXT 文件',

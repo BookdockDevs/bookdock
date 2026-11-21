@@ -6,11 +6,11 @@ const STORES = ['meta', 'blobs'] as const
 
 export const THEME_ASSET_LIMITS = {
   /** Per-image byte cap */
-  maxBytes: 10 * 1024 * 1024,
+  maxBytes: 20 * 1024 * 1024,
   /** Per-image width/height cap (either axis) */
   maxDimension: 8192,
   /** Per-theme manifest cap (editor UI + package import enforce this) */
-  maxPerTheme: 8,
+  maxPerTheme: 32,
   /** Per-scope stored-asset count cap */
   maxPerScope: 512,
   /** Per-scope stored-bytes cap — the browser quota is the real ceiling */

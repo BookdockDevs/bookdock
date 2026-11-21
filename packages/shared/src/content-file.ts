@@ -3,8 +3,8 @@ import { z } from 'zod'
 import type { ClientBookRef } from './client-reading'
 
 export const CONTENT_IMAGE_MAX_BYTES = 5 * 1024 * 1024
-export const CONTENT_FILES_MAX_COUNT = 20
-export const IDEA_IMAGE_MAX_COUNT = 9
+export const CONTENT_FILES_MAX_COUNT = 100
+export const IDEA_IMAGE_MAX_COUNT = 20
 export const CONTENT_DRAFT_TTL_MS = 24 * 60 * 60 * 1000
 
 export const contentFileIdSchema = z.string().regex(/^cfile_[A-Za-z0-9_-]{21}$/)

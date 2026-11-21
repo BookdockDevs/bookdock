@@ -469,7 +469,7 @@ export function IdeaOverlay({
                         }
                       }}
                       disabled={isSidebarSubmitting}
-                      maxLength={10000}
+                      maxLength={50_000}
                       rows={2}
                       className="min-w-0 flex-1 resize-none bg-transparent text-sm leading-relaxed text-[var(--bd-read-text)] placeholder-[var(--bd-read-sub)]/50 focus:outline-hidden"
                     />

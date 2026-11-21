@@ -13,7 +13,6 @@ export {
   AI_CORE_TOOL_SYSTEM_PROMPT,
   AI_DEFAULT_ASSISTANT_MODE_PROMPT,
   AI_DEFAULT_READING_SCOPE,
-  AI_MAX_ASSISTANT_MODES,
   AI_MAX_CHAT_PROMPT_CHARS,
   AI_MAX_CHAPTER_REFERENCES,
   AI_MAX_CONTEXT_CHARS,
@@ -507,7 +506,6 @@ export {
   libraryInviteTokenSchema,
   membershipManageSchema,
   authorListSchema,
-  MAX_AUTHORS,
   normalizeAuthors,
   extractVersionNameFromFileName,
   VERSION_NAME_BLACKLIST,
@@ -530,7 +528,6 @@ export {
 
 export type { BookClassification, ClassificationKind, CategoryValuePatchReq, TagValuePatchReq } from './classification'
 export {
-  MAX_BOOK_TAGS,
   MAX_CATEGORY_DEPTH,
   MAX_CATEGORY_NAME_LENGTH,
   MAX_TAG_NAME_LENGTH,
@@ -606,7 +603,6 @@ export {
   REPLACEMENT_TRANSFER_KIND,
   RULE_TRANSFER_FORMAT_VERSION,
   RULE_TRANSFER_MAX_BYTES,
-  RULE_TRANSFER_MAX_RULES,
   isValidTocRegex,
   normalizeTransferName,
   suggestImportName,

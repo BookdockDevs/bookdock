@@ -86,7 +86,7 @@ export const COVER_PALETTE_IDS = ['stone', 'sage', 'slate', 'amber', 'rose', 'te
 export type CoverPaletteId = (typeof COVER_PALETTE_IDS)[number]
 
 /** Maximum expanded user prompt, including a bounded Reader-visible chapter variable. */
-export const AI_MAX_CHAT_PROMPT_CHARS = 12_000
+export const AI_MAX_CHAT_PROMPT_CHARS = 50_000
 
 /** Safety envelope for one direct Reader context; this is not a provider model context window. */
 export const AI_MAX_CONTEXT_CHARS = 100_000
@@ -126,8 +126,7 @@ export const AI_CORE_TOOL_SYSTEM_PROMPT = [
 export const AI_DEFAULT_ASSISTANT_MODE_PROMPT =
   '你是 Bookdock 的阅读助理。直接回答，不寒暄不客套，篇幅贴合问题。'
 
-export const AI_MAX_CHAPTER_REFERENCES = 8
-export const AI_MAX_ASSISTANT_MODES = 12
+export const AI_MAX_CHAPTER_REFERENCES = 32
 
 export const AI_MAX_HISTORY_MESSAGES = 12
 export const AI_MAX_HISTORY_MESSAGE_CHARS = 8000

@@ -108,7 +108,7 @@ parentPort!.on('message', (job: { mdx: string; mdds: string[]; kind: 'validate' 
         for (const candidate of [`\\${key}`, key]) {
           const result = archive.find(candidate)
           if (result) {
-            if (result.bytes.length > 16 * 1024 * 1024) throw new Error('Resource is too large')
+            if (result.bytes.length > 32 * 1024 * 1024) throw new Error('Resource is too large')
             parentPort!.postMessage({ data: Buffer.from(result.bytes).toString('base64') }); return
           }
         }
@@ -122,7 +122,7 @@ parentPort!.on('message', (job: { mdx: string; mdds: string[]; kind: 'validate' 
         visited.add(word)
         const result = dictionary!.find(word)
         if (!result) break
-        if (result.bytes.length > 2 * 1024 * 1024) throw new Error('Definition is too large')
+        if (result.bytes.length > 8 * 1024 * 1024) throw new Error('Definition is too large')
         const definition = dictionary!.meta.decoder.decode(result.bytes).replaceAll('\0', '')
         if (definition.trim().startsWith('@@@LINK=')) { word = definition.trim().slice(8).trim(); continue }
         parentPort!.postMessage({ headword: result.keyText, html: dictionary!.formatDefinition(definition) }); return

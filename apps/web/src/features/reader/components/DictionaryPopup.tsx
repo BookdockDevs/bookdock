@@ -221,7 +221,7 @@ export default function DictionaryPopup({ target }: DictionaryPopupProps) {
                     ? 'dictionary.accountRequired'
                     : revoked || isAccessRevocationError(lookup.error)
                     ? 'dictionary.accessRequired'
-                    : word.length > 100
+                    : word.length > 500
                     ? 'dictionary.tooLong'
                     : list.isError || lookup.isError
                       ? 'dictionary.failed'

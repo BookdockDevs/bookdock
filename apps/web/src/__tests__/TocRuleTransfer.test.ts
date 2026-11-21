@@ -65,7 +65,7 @@ describe('toc transfer file', () => {
         enabled: true,
         patterns: [{ level: 1, regex: '^x', replacement: null, enabled: true }],
       })),
-    }).success).toBe(false)
+    }).success).toBe(true)
   })
 
   it('compares names trimmed-exact and suggests import names within 200 chars', () => {
@@ -82,8 +82,7 @@ describe('toc transfer file', () => {
 describe('replacement transfer file', () => {
   it('rejects unrestorable exports before download and accepts a valid round trip', () => {
     const rule = { name: 'n', group: null, pattern: 'x', replacement: null, isRegex: false, applyTo: 'content' as const, enabled: true }
-    expect(prepareRuleTransferExport(serializeReplacementsForExport(Array(501).fill(rule))))
-      .toEqual({ success: false, reason: 'limit' })
+    expect(prepareRuleTransferExport(serializeReplacementsForExport(Array(501).fill(rule))).success).toBe(true)
     expect(prepareRuleTransferExport(serializeReplacementsForExport([{ ...rule, pattern: 'x'.repeat(2 * 1024 * 1024) }])))
       .toEqual({ success: false, reason: 'limit' })
     expect(prepareRuleTransferExport(serializeReplacementsForExport([{ ...rule, pattern: '' }])))

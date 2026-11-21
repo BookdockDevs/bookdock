@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const TRANSLATION_MAX_CHARS = 6000
+export const TRANSLATION_MAX_CHARS = 20_000
 export const TRANSLATION_LANGUAGES = [
   { id: 'zh-Hans', label: '简体中文' }, { id: 'zh-Hant', label: '繁體中文' },
   { id: 'en', label: 'English' }, { id: 'ja', label: '日本語' }, { id: 'ko', label: '한국어' },

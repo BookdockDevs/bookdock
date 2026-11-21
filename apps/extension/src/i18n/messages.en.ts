@@ -66,6 +66,7 @@ const messages: Messages = {
   },
   error: {
     generic: 'Something went wrong.',
+    tooManyFiles: 'Select at most 2,000 files per batch.',
     tooManyBatches: 'Too many uploads in progress. Let them finish, then try again.',
     storageUnavailable: 'Browser storage is unavailable. Free up space and retry.',
     fileUnsupported: 'Choose a valid EPUB or TXT file',

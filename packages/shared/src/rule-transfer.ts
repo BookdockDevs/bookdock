@@ -6,7 +6,6 @@ export const TOC_TRANSFER_KIND = 'bookdock.toc-rules' as const
 export const REPLACEMENT_TRANSFER_KIND = 'bookdock.text-replacements' as const
 export const RULE_TRANSFER_FORMAT_VERSION = 1 as const
 export const RULE_TRANSFER_MAX_BYTES = 2 * 1024 * 1024
-export const RULE_TRANSFER_MAX_RULES = 500
 
 export function isValidTocRegex(pattern: string): boolean {
   try {
@@ -61,7 +60,7 @@ export const tocTransferRuleSchema = z.object({
 export const tocTransferFileSchema = z.object({
   kind: z.literal(TOC_TRANSFER_KIND),
   formatVersion: z.literal(RULE_TRANSFER_FORMAT_VERSION),
-  rules: z.array(tocTransferRuleSchema).max(RULE_TRANSFER_MAX_RULES),
+  rules: z.array(tocTransferRuleSchema),
 }).strict()
 
 export type TocTransferPattern = z.infer<typeof tocTransferPatternSchema>
@@ -89,7 +88,7 @@ export const replacementTransferRuleSchema = z.object({
 export const replacementTransferFileSchema = z.object({
   kind: z.literal(REPLACEMENT_TRANSFER_KIND),
   formatVersion: z.literal(RULE_TRANSFER_FORMAT_VERSION),
-  rules: z.array(replacementTransferRuleSchema).max(RULE_TRANSFER_MAX_RULES),
+  rules: z.array(replacementTransferRuleSchema),
 }).strict()
 
 export type ReplacementTransferRule = z.infer<typeof replacementTransferRuleSchema>
@@ -138,7 +137,6 @@ export function transferFileByteLength(text: string): number {
 
 export function prepareRuleTransferExport(file: TocTransferFile | ReplacementTransferFile):
   { success: true; text: string } | { success: false; reason: 'limit' | 'invalid' } {
-  if (file.rules.length > RULE_TRANSFER_MAX_RULES) return { success: false, reason: 'limit' }
   const parsed = file.kind === TOC_TRANSFER_KIND
     ? tocTransferFileSchema.safeParse(file)
     : replacementTransferFileSchema.safeParse(file)

@@ -29,13 +29,13 @@ export interface HighlightSpan {
 }
 
 export const HIGHLIGHT_LIMITS = {
-  maxPatternLength: 300,
+  maxPatternLength: 2000,
   maxSampleLength: 4000,
-  maxGroups: 32,
-  maxMatchesPerRule: 200,
-  maxMatchesPerParagraph: 2000,
-  maxParagraphLength: 20000,
-  maxSpansPerParagraph: 4000,
+  maxGroups: 256,
+  maxMatchesPerRule: 1000,
+  maxMatchesPerParagraph: 5000,
+  maxParagraphLength: 100_000,
+  maxSpansPerParagraph: 10_000,
 } as const
 
 /**

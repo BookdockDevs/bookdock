@@ -597,41 +597,49 @@ async function parseToc(archive: EpubArchive, pkg: ParsedPackage): Promise<EpubT
   const ncx = (pkg.spineTocId ? pkg.manifest.find((item) => item.id === pkg.spineTocId) : undefined)
     ?? pkg.manifest.find((item) => item.mediaType === 'application/x-dtbncx+xml')
   if (ncx) {
-    const xml = await readArchiveText(archive, ncx.href, READER_STARTUP_MAX_BYTES)
-    if (xml) {
-      const doc = new DOMParser().parseFromString(xml, 'application/xml')
-      const navMap = firstElement(elementsByLocalName(doc, 'navMap'))
-      if (navMap) {
-        const entries: EpubTocItem[] = []
-        collectNcxNavPoints(navMap, entries, 1)
-        toc.push(...entries.map((entry) => ({ ...entry, href: joinManifestPath(ncx.href, entry.href) })))
+    try {
+      const xml = await readArchiveText(archive, ncx.href, READER_STARTUP_MAX_BYTES)
+      if (xml) {
+        const doc = new DOMParser().parseFromString(xml, 'application/xml')
+        const navMap = firstElement(elementsByLocalName(doc, 'navMap'))
+        if (navMap) {
+          const entries: EpubTocItem[] = []
+          collectNcxNavPoints(navMap, entries, 1)
+          toc.push(...entries.map((entry) => ({ ...entry, href: joinManifestPath(ncx.href, entry.href) })))
+        }
       }
+    } catch {
+      // Oversized or unreadable navigation must not block opening an otherwise readable book.
     }
   }
   if (toc.length === 0) {
     const nav = pkg.manifest.find((item) => isMarkupType(item.mediaType) && hasProperty(item, 'nav'))
     if (nav) {
-      const xml = await readArchiveText(archive, nav.href, READER_STARTUP_MAX_BYTES)
-      if (xml) {
-        const doc = new DOMParser().parseFromString(xml, 'application/xml')
-        const navElements = elementsByLocalName(doc, 'nav')
-        const tocNav = navElements.find((element) => {
-          const type = attribute(element, 'epub:type') ?? attribute(element, 'type') ?? ''
-          return type.split(/\s+/).some((value) => value.toLowerCase() === 'toc')
-        })
-        const entries: EpubTocItem[] = []
-        const list = tocNav ? firstElement(elementsByLocalName(tocNav, 'ol')) : null
-        if (list) {
-          collectNavList(list, entries, 1)
-        } else {
-          for (const link of elementsByLocalName(tocNav ?? doc, 'a')) {
-            const href = attribute(link, 'href')
-            if (!href) continue
-            const base = href.split('#')[0]
-            if (base) entries.push({ title: textOf(link) || base, href: base, level: 1 })
+      try {
+        const xml = await readArchiveText(archive, nav.href, READER_STARTUP_MAX_BYTES)
+        if (xml) {
+          const doc = new DOMParser().parseFromString(xml, 'application/xml')
+          const navElements = elementsByLocalName(doc, 'nav')
+          const tocNav = navElements.find((element) => {
+            const type = attribute(element, 'epub:type') ?? attribute(element, 'type') ?? ''
+            return type.split(/\s+/).some((value) => value.toLowerCase() === 'toc')
+          })
+          const entries: EpubTocItem[] = []
+          const list = tocNav ? firstElement(elementsByLocalName(tocNav, 'ol')) : null
+          if (list) {
+            collectNavList(list, entries, 1)
+          } else {
+            for (const link of elementsByLocalName(tocNav ?? doc, 'a')) {
+              const href = attribute(link, 'href')
+              if (!href) continue
+              const base = href.split('#')[0]
+              if (base) entries.push({ title: textOf(link) || base, href: base, level: 1 })
+            }
           }
+          toc.push(...entries.map((entry) => ({ ...entry, href: joinManifestPath(nav.href, entry.href) })))
         }
-        toc.push(...entries.map((entry) => ({ ...entry, href: joinManifestPath(nav.href, entry.href) })))
+      } catch {
+        // Fall through to spine-based TOC when nav exceeds the startup limit or fails to parse.
       }
     }
   }

@@ -9,11 +9,9 @@ import { BOOK_SORT_PREF_FIELDS, GRID_CARD_FIELDS, LIBRARY_SORT_MODES, RECENTLY_R
 import {
   ANNOTATION_MAX_TEXT_LENGTH,
   BOOKMARK_CONTEXT_MAX_LENGTH,
-  AI_MAX_ASSISTANT_MODES,
   AI_MAX_CHAT_PROMPT_CHARS,
   AI_MAX_CHAPTER_REFERENCES,
   AI_MAX_CONTEXT_CHARS,
-  AI_MAX_HISTORY_MESSAGES,
   AI_MAX_HISTORY_MESSAGE_CHARS,
   AI_READING_SCOPES,
   AI_TOOL_NAMES,
@@ -226,8 +224,8 @@ export const settingsUpdateSchema = z.object({
       dir: z.enum(['asc', 'desc']).optional(),
     }).optional(),
     view: z.enum(['grid', 'list']).optional(),
-    hiddenLibraryIds: z.array(z.string().max(64)).max(200).optional(),
-    libraryOrder: z.array(z.string().max(64)).max(500).optional(),
+    hiddenLibraryIds: z.array(z.string().max(64)).optional(),
+    libraryOrder: z.array(z.string().max(64)).optional(),
     gridCardFields: z.array(z.enum(GRID_CARD_FIELDS)).max(GRID_CARD_FIELDS.length).optional(),
     readingStatsEnabled: z.boolean().optional(),
     recentlyReadStyle: z.enum(RECENTLY_READ_STYLES).optional(),
@@ -307,13 +305,13 @@ export const ttsServiceOrderSchema = z.object({ ids: z.array(z.string().min(1).m
 
 export const ttsSpeechSchema = z.object({
   serviceId: z.string().min(1),
-  text: z.string().trim().min(1).max(4000),
+  text: z.string().trim().min(1).max(20_000),
   voice: z.string().max(200).optional(),
   rate: z.number().min(0.25).max(4).optional(),
 })
 
 export const ttsEdgeSpeechSchema = z.object({
-  text: z.string().trim().min(1).max(4000),
+  text: z.string().trim().min(1).max(20_000),
   voice: z.string().max(200).optional(),
   rate: z.number().min(0.5).max(2).optional(),
 })
@@ -357,7 +355,7 @@ export const aiChatSchema = z.object({
   editMessageId: z.string().trim().min(1).max(100).optional(),
   prompt: z.string().trim().min(1).max(AI_MAX_CHAT_PROMPT_CHARS),
   context: aiContextSchema,
-  history: z.array(aiHistoryMessageSchema).max(AI_MAX_HISTORY_MESSAGES).optional(),
+  history: z.array(aiHistoryMessageSchema).optional(),
   promptId: z.string().trim().min(1).max(100).optional(),
   assistantModePrompt: z.string().trim().max(2_000).optional(),
   assistantMode: z.string().trim().max(80).optional(),
@@ -370,7 +368,7 @@ export const aiChatSchema = z.object({
 export const aiLocalChatSchema = z.object({
   prompt: z.string().trim().min(1).max(AI_MAX_CHAT_PROMPT_CHARS),
   context: aiContextSchema,
-  history: z.array(aiHistoryMessageSchema).max(AI_MAX_HISTORY_MESSAGES).optional(),
+  history: z.array(aiHistoryMessageSchema).optional(),
   promptId: z.string().trim().min(1).max(100).optional(),
   assistantModePrompt: z.string().trim().max(2_000).optional(),
   assistantMode: z.string().trim().max(80).optional(),
@@ -435,7 +433,7 @@ const aiModelKindSchema = z.enum(['chat', 'embedding'])
 const aiAssistantModeSchema = z.object({
   id: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(80),
-  prompt: z.string().trim().min(1).max(2_000),
+  prompt: z.string().trim().min(1).max(20_000),
 }).strict()
 
 export const aiProviderSchema = z.enum([
@@ -455,7 +453,7 @@ export const aiProviderSchema = z.enum([
 ])
 
 export const aiConfigUpdateSchema = z.object({
-  modes: z.array(aiAssistantModeSchema).max(AI_MAX_ASSISTANT_MODES).nullable().optional(),
+  modes: z.array(aiAssistantModeSchema).nullable().optional(),
   defaultAssistantMode: aiAssistantModeSchema.nullable().optional(),
   lastUsedConversationSettings: aiThreadSettingsSchema.required({ assistantModeId: true }).optional(),
 }).strict()
@@ -464,7 +462,7 @@ const aiPromptScopeSchema = z.enum(['selection', 'reading', 'both'])
 
 export const aiPromptCreateSchema = z.object({
   name: z.string().trim().min(1).max(80),
-  prompt: z.string().trim().min(1).max(2_000),
+  prompt: z.string().trim().min(1).max(20_000),
   scope: aiPromptScopeSchema.optional(),
   enabled: z.boolean().optional(),
   availability: resourceAvailabilitySchema.optional(),
@@ -472,14 +470,14 @@ export const aiPromptCreateSchema = z.object({
 
 export const aiPromptUpdateSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
-  prompt: z.string().trim().min(1).max(2_000).optional(),
+  prompt: z.string().trim().min(1).max(20_000).optional(),
   scope: aiPromptScopeSchema.optional(),
   enabled: z.boolean().optional(),
   availability: resourceAvailabilitySchema.optional(),
 }).strict()
 
 export const aiPromptReorderSchema = z.object({
-  ids: z.array(z.string().trim().min(1).max(100)).max(50),
+  ids: z.array(z.string().trim().min(1).max(100)),
 }).strict().refine((value) => new Set(value.ids).size === value.ids.length, {
   message: 'Duplicate quick command ids',
 })
@@ -795,7 +793,7 @@ export const updateUsernameSchema = z.object({
 })
 
 export const updateBioSchema = z.object({
-  bio: z.string().trim().max(500),
+  bio: z.string().trim().max(2_000),
 })
 
 /**
@@ -957,18 +955,18 @@ export const highlightRuleStyleSchema = z.object({
 export const highlightRuleLineSchema = highlightRuleStyleSchema.shape.line
 
 export const highlightRuleGroupSchema = z.object({
-  index: z.number().int().min(1).max(32),
+  index: z.number().int().min(1),
   style: highlightRuleStyleSchema,
 })
 
 export const highlightRuleSchema = z.object({
   id: z.string().min(1).max(100),
   name: z.string().min(1).max(50),
-  pattern: z.string().min(1).max(300),
+  pattern: z.string().min(1).max(2_000),
   isRegex: z.boolean(),
   enabled: z.boolean(),
   style: highlightRuleStyleSchema.optional(),
-  groups: z.array(highlightRuleGroupSchema).max(32).optional(),
+  groups: z.array(highlightRuleGroupSchema).optional(),
 })
 
 export const readingThemeCardsSchema = z.object({
@@ -1158,11 +1156,11 @@ export type BookSaveReq = z.infer<typeof bookSaveSchema>
 export const readRevisionSchema = z.object({ revisionId: z.string().min(1).max(128) })
 
 export const fontExportSchema = z.object({
-  ids: z.array(z.string().min(1).max(100)).min(1).max(100),
+  ids: z.array(z.string().min(1).max(100)).min(1),
 })
 
 export const dictionaryExportSchema = z.object({
-  ids: z.array(z.string().min(1).max(100)).min(1).max(50),
+  ids: z.array(z.string().min(1).max(100)).min(1),
 })
 
 export const instanceThemeItemKindSchema = z.enum(['theme', 'palette', 'css', 'highlight'])
@@ -1172,6 +1170,6 @@ export const instanceThemePublishSchema = z.object({
     kind: instanceThemeItemKindSchema,
     itemId: z.string().min(1).max(120),
     payload: z.record(z.unknown()),
-  })).min(1).max(64),
-  assetIds: z.array(z.string().min(1).max(120)).max(64).optional(),
+  })).min(1),
+  assetIds: z.array(z.string().min(1).max(120)).optional(),
 })

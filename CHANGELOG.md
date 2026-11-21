@@ -36,6 +36,9 @@ All notable changes to Bookdock are documented here.
 - Library batch notifications show how many books were affected when moving books to or from shelves or the trash, hiding them, permanently deleting them, or updating reading status. English notifications for trashing, restoring, and permanently deleting a single book include its title.
 - The TTS service editor and the library create and manage dialogs mark required fields with a red asterisk. TTS credential fields show the mark only while creating a new service, and the library access password shows it when password access is selected.
 - Unified Settings card spacing, upload progress bars, export confirmation dialogs, font edit-mode checkbox alignment, and visual typography hierarchy across theme/palette/CSS/highlight dialogs.
+- Removed arbitrary count caps on AI quick commands and reordering, assistant modes, personal metadata sources, book tags, book authors (removing silent truncation past 10 authors), local-library AI thread history, local-library batch selections, library hide/order lists, theme publishing, dictionary/font batch exports, and TOC/text-replacement rule import/export (which now rely on the 2 MiB size limit).
+- Relaxed text, media, and processing bounds: AI chapter references (`8 → 32`), AI prompt templates (`12,000 → 50,000`), mode/command prompts (`2,000 → 20,000`), AI tool total output budget (`36,000 → 60,000`), default `AI_RPM` (`6 → 20`), selected-text translation (`6,000 → 20,000`), TTS speech (`4,000 → 20,000`), dictionary lookup (`100 → 500`) and multi-volume files (`12 → 64`), mdict definition/resource caps (`2/16 MB → 8/32 MB`), theme image size (`10 → 20 MB`) and per-theme count (`8 → 32`), review/idea/bio/book-metadata lengths, idea images (`9 → 20`), attachments (`20 → 100`), local TXT import chapter limit (`10,000 → 30,000`), WeRead import budgets (`50 → 400` review pages, `3,000 → 10,000` requests), and automatic highlight rule/rendering budgets (with a one-time Toast notice when a section exceeds the budget).
+- Full-book search now reserves one concurrent slot per user (up to 4 globally) with a 256 MB worker heap limit, preventing multi-MB chapters from hitting OOM and avoiding cross-user search lockouts.
 
 ### Fixed
 
@@ -43,6 +46,8 @@ All notable changes to Bookdock are documented here.
 - The AI connection Base URL no longer shows a required asterisk; leaving it empty falls back to the provider default address.
 - Fixed a settings sync race where `PUT /api/v1/settings` triggered a redundant `GET /settings` refetch, which could overwrite subsequent rapid toggle changes (such as font switches) during the debounce window.
 - Full-book search no longer aborts on the first chapter that fails to scan: the slow or unreadable chapter is skipped and the remaining chapters are searched, and the search gives up after about 30 seconds of accumulated scan timeouts instead of holding the search slot open. Plain-text searches report a neutral timeout notice instead of a regex timeout, and chapters with many replacement-rule matches no longer stall the scan.
+- EPUB opening no longer fails when an optional NCX or nav navigation file exceeds the 4 MB startup limit; oversized or unreadable navigation files now fall back to the spine-based table of contents.
+- Aligned authentication validation messages (`usernameTooLong`, `registerUsernameTooLong`, `passwordTooLong`) and theme asset error copy (`themeAssetTooLarge`) with actual limits (`32` / `128` characters and `20 MB`), and added a specific error message in the browser extension when a single drop exceeds 2,000 files.
 
 ### Upgrade notes
 
@@ -1431,6 +1436,9 @@ All notable changes to Bookdock are documented here.
 - 批量移入或移出书架、移入或移出回收站、隐藏、彻底删除和更新阅读状态时，提示会显示受影响的书籍数量。英文界面的单本书回收、恢复和彻底删除提示会带上书名。
 - 语音服务编辑器和书库创建、管理弹窗会标记必填字段：语音服务密钥仅在新建时显示星号，访问密码在选择密码访问时显示星号。
 - 统一了六个设置分页的卡片顶部间距、资源上传进度条、导出确认弹窗、字体编辑模式复选框对齐，以及主题/配色/CSS/高亮规则弹窗的三层视觉层级与通透输入框样式。
+- 移除了多项无依据的硬性条数上限：AI 快捷指令及排序、助手模式、个人元数据源、书籍标签、书籍作者（取消超过 10 人时的静默截断）、本地库 AI 会话历史、本地库批量操作、书库隐藏/排序列表、主题发布、词典/字体批量导出，以及目录与文本替换规则的导入导出条数限制（保留 2 MiB 文件大小保护）。
+- 放宽并校准了多项文本、媒体与处理上限：AI 章节引用（`8 → 32`）、AI 提问模板（`1.2 万 → 5 万`）、助手模式与快捷指令提示词（`2000 → 2 万`）、AI 工具总返回预算（`3.6 万 → 6 万`）、默认 `AI_RPM`（`6 → 20`）、划词翻译（`6000 → 2 万`）、TTS 合成文本（`4000 → 2 万`）、词典查词（`100 → 500`）与分卷文件数（`12 → 64`）、mdict 词条/资源上限（`2/16 MB → 8/32 MB`）、主题图片体积（`10 → 20 MB`）与单主题素材数（`8 → 32`）、书评/想法/简介/书籍元数据长度、想法配图（`9 → 20`）、内容附件（`20 → 100`）、本地 TXT 导入章数上限（`1 万 → 3 万`）、微信读书导入页数与请求预算（`50 → 400` 页、`3000 → 10000` 次请求），以及自动高亮规则与单节渲染预算（超出渲染预算时通过 Toast 提示一次）。
+- 全书搜索由“全服 1 并发槽”调整为“每用户 1 槽、全服最多 4 槽”，并将搜索 Worker 旧生代堆上限从 `64 MB` 提升至 `256 MB`，避免正常大章在扫描时发生 OOM 或阻塞其他用户搜索。
 
 #### 修复
 
@@ -1438,6 +1446,8 @@ All notable changes to Bookdock are documented here.
 - AI 连接的 Base URL 不再显示必填星号，留空时自动使用服务商默认地址。
 - 修复设置同步竞态问题：`PUT /api/v1/settings` 成功后不再额外触发 `GET /settings` 回灌，改为直接更新本地查询缓存，避免连续切换开关（如字体开关）在防抖窗口内被旧快照覆盖。
 - 全书搜索遇到扫描失败的章节不再整体中断：该章会被跳过，其余章节继续搜索，累计超时约满 30 秒会主动结束并保留已扫到的结果，不会长时间占用搜索。普通文本搜索的超时提示改为中性表述，不再误报正则超时；应用大量替换规则的章节扫描大章节时不再卡死。
+- 修复 EPUB 可选目录文件（NCX/nav）超过 4 MB 启动上限时导致整本书无法打开的问题：目录读取超限或解析失败时自动降级回退到 spine 线性目录。
+- 修正登录/注册用户名与密码长度校验提示（对齐实际的 `32` / `128` 字符与 `{max}` 插值）以及主题图片超限文案（`20 MB`），并为浏览器扩展单批拖放超过 2000 个文件补充了明确的超限提示。
 
 #### 升级说明
 

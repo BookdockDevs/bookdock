@@ -2356,13 +2356,13 @@ export default function AiPanel({ bookId, initialScrollPosition, open = true, on
                   <label htmlFor="ai-mode-prompt" className="cursor-pointer">{_('reader.aiModePrompt')}</label>
                   <span aria-hidden="true" className="text-red-500">*</span>
                 </div>
-                <span className="text-[11px] tabular-nums text-[var(--bd-read-sub)]/75">{assistantModeForm.prompt.length}/2000</span>
+                <span className="text-[11px] tabular-nums text-[var(--bd-read-sub)]/75">{assistantModeForm.prompt.length}/20000</span>
               </div>
               <textarea
                 ref={modePromptTextareaRef}
                 id="ai-mode-prompt"
                 aria-required="true"
-                maxLength={2_000}
+                maxLength={20_000}
                 rows={6}
                 value={assistantModeForm.prompt}
                 disabled={updateAiConfig.isPending}

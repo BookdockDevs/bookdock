@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { selectedTextTranslationRequestSchema, translationRequestSchema, type TranslationRequest } from '@bookdock/shared'
+import { TRANSLATION_MAX_CHARS, selectedTextTranslationRequestSchema, translationRequestSchema, type TranslationRequest } from '@bookdock/shared'
 
 vi.mock('../../config', () => ({ config: {
   aiBaseUrl: 'https://ai.example.test/v1', aiApiKey: 'secret', aiModel: 'test-model', aiProvider: 'openai',
@@ -117,7 +117,7 @@ describe('selection translation', () => {
     expect((await app(true).request('/api/v1/translation/config')).status).toBe(401)
     expect((await app(true).request('/api/v1/translation/translate', { method: 'POST', body: JSON.stringify(input) })).status).toBe(401)
     expect(translationRequestSchema.safeParse({ ...input, context: 'not allowed' }).success).toBe(false)
-    expect(translationRequestSchema.safeParse({ ...input, text: 'x'.repeat(6001) }).success).toBe(false)
+    expect(translationRequestSchema.safeParse({ ...input, text: 'x'.repeat(TRANSLATION_MAX_CHARS + 1) }).success).toBe(false)
     const response = await app().request('/api/v1/translation/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, text: ' ' }) })
     expect(response.status).toBe(400)
   })
@@ -150,7 +150,7 @@ describe('selection translation', () => {
   it('rejects guest, server identities, extra context and oversized local utility input', async () => {
     const { bookId: _bookId, ...selection } = input
     expect((await app(true).request('/api/v1/translation/selected-text', { method: 'POST', body: JSON.stringify(selection) })).status).toBe(401)
-    for (const body of [input, { ...selection, context: 'surroundings' }, { ...selection, text: 'x'.repeat(6001) }, { ...selection, text: ' ' }]) {
+    for (const body of [input, { ...selection, context: 'surroundings' }, { ...selection, text: 'x'.repeat(TRANSLATION_MAX_CHARS + 1) }, { ...selection, text: ' ' }]) {
       expect((await app().request('/api/v1/translation/selected-text', { method: 'POST', body: JSON.stringify(body) })).status).toBe(400)
       expect(selectedTextTranslationRequestSchema.safeParse(body).success).toBe(false)
     }

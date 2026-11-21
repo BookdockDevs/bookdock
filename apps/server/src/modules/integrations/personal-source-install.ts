@@ -1,5 +1,5 @@
 import JSZip from 'jszip'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 // JSZipObject's private internals, typed for bounded extraction. The
 // declared uncompressed size comes from the central directory; internalStream
@@ -31,7 +31,6 @@ const ARCHIVE_MAX_BYTES = 20_000_000
 const MANIFEST_MAX_BYTES = 64_000
 const ENTRY_MAX_BYTES = 2_000_000
 const ICON_MAX_BYTES = 512_000
-export const PERSONAL_SOURCE_LIMIT = 20
 
 export interface ExtractedPackage {
   manifest: PersonalMetadataSourceManifest
@@ -286,14 +285,6 @@ async function persistSource(userId: string, pkg: ExtractedPackage, origin: Inst
     .from(personalMetadataSources)
     .where(and(eq(personalMetadataSources.userId, userId), eq(personalMetadataSources.sourceId, pkg.manifest.id)))
     .get()
-  const count = db
-    .select({ count: sql<number>`count(*)` })
-    .from(personalMetadataSources)
-    .where(eq(personalMetadataSources.userId, userId))
-    .get()
-  if (!existing && (count?.count ?? 0) >= PERSONAL_SOURCE_LIMIT) {
-    throw new AppError('PERSONAL_SOURCE_LIMIT_REACHED', `At most ${PERSONAL_SOURCE_LIMIT} sources can be installed`)
-  }
   const now = Date.now()
   const hasDetail = await personalSourceHasDetail(pkg.entry.toString('utf8'))
   const row: typeof personalMetadataSources.$inferInsert = {

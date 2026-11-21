@@ -85,8 +85,9 @@ readerContentRoutes.post('/:id/reader/search', async (c) => {
   if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid reader search request', parsed.error.flatten())
   assertRevision(book, parsed.data.revisionId)
   if (book.format !== 'epub' && book.format !== 'txt') throw new AppError('READER_ENTRY_UNSUPPORTED', 'Full-book search is supported for EPUB and TXT books')
-  if (!reserveReaderSearch()) throw new AppError('READER_SEARCH_BUSY', 'Reader search is busy; try again shortly')
-  return c.newResponse(createReaderSearchStream(book, parsed.data, c.req.raw.signal), 200, {
+  const searchKey = requestUserId(c) ?? 'guest'
+  if (!reserveReaderSearch(searchKey)) throw new AppError('READER_SEARCH_BUSY', 'Reader search is busy; try again shortly')
+  return c.newResponse(createReaderSearchStream(book, parsed.data, c.req.raw.signal, searchKey), 200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'private, no-store, no-transform',
     'X-Accel-Buffering': 'no',

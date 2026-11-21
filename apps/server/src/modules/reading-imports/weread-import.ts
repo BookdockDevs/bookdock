@@ -7,8 +7,8 @@ import { AppError } from '../../middleware/error'
 // Request budget: shelf + notebooks + per-book notes/progress. The cap keeps a
 // stuck loop from running away; the skipped counter reports what was left
 // unfetched.
-const MAX_REQUESTS = 3000
-const MAX_REVIEW_PAGES = 50
+const MAX_REQUESTS = 10_000
+const MAX_REVIEW_PAGES = 400
 const MAX_RECORDS_PER_BOOK = 20000
 
 /** WeRead highlight colors are numbered; the mapping is by explicit table, not

@@ -35,9 +35,9 @@ export function reviewHalvesToRating(halves: number): number {
   return halves / 2
 }
 
-export const REVIEW_BODY_MAX_LENGTH = 20000
-export const REVIEW_TITLE_MAX_LENGTH = 100
-export const REVIEW_COMMENT_MAX_LENGTH = 10000
+export const REVIEW_BODY_MAX_LENGTH = 100_000
+export const REVIEW_TITLE_MAX_LENGTH = 200
+export const REVIEW_COMMENT_MAX_LENGTH = 50_000
 /** Independent preference key from the ideas composer (never shared). */
 export const REVIEW_VISIBILITY_KEY = 'reviews.last-created-visibility'
 

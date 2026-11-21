@@ -41,7 +41,7 @@ export function useDictionaryLookup(id: string | null, word: string) {
       client.setQueryData<{ data: DictionaryList }>(dictionaryListKey(accountId), (previous) => previous ? { data: { ...previous.data, lastUsedId: id } } : previous)
       return response
     },
-    enabled: Boolean(accountId && id && word.trim() && word.trim().length <= 100),
+    enabled: Boolean(accountId && id && word.trim() && word.trim().length <= 500),
     retry: false,
     gcTime: 0,
   })

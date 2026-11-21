@@ -51,12 +51,12 @@ export interface IdeaComposerContext {
 
 export const ideaCommentCreateSchema = z.object({
   requestId: interactionRequestIdSchema,
-  body: z.string().trim().min(1).max(10000),
+  body: z.string().trim().min(1).max(50_000),
   replyToId: z.string().min(1).optional(),
 }).strict()
 
 export const ideaCommentUpdateSchema = z.object({
-  body: z.string().trim().min(1).max(10000),
+  body: z.string().trim().min(1).max(50_000),
 }).strict()
 
 export const ideaLikeSchema = z.object({ liked: z.boolean() }).strict()

@@ -114,7 +114,7 @@ describe('personal dictionaries', () => {
     await expect(importDictionary('other', [new File(['not an mdx'], 'bad.mdx')])).rejects.toMatchObject({ code: 'DICTIONARY_INVALID' })
     await expect(importDictionary('other', [new File([mdx], 'sample.mdx'), new File([mdd], 'different.mdd')])).rejects.toMatchObject({ code: 'DICTIONARY_INVALID' })
     expect(listDictionaries('other').items).toEqual([])
-    expect(dictionaryLookupSchema.safeParse({ word: 'x'.repeat(101) }).success).toBe(false)
+    expect(dictionaryLookupSchema.safeParse({ word: 'x'.repeat(501) }).success).toBe(false)
     expect(dictionaryCandidates('“running”')).toContain('run')
   })
   it('rejects guests at the route boundary', async () => {

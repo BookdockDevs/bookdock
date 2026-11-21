@@ -41,7 +41,7 @@ const envSchema = z.object({
   STORAGE_DRIVER: z.enum(['localfs']).default('localfs'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1).max(65536).default(8192),
-  AI_RPM: z.coerce.number().int().min(1).max(120).default(6),
+  AI_RPM: z.coerce.number().int().min(1).max(120).default(20),
   AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(300000),
 })
 

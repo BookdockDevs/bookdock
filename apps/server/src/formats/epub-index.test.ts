@@ -154,4 +154,16 @@ describe('reader EPUB index', () => {
     const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('<?xml version="1.0" encoding="utf-16"?><p>甲</p>', 'utf16le')])
     expect(decodeArchiveText(utf16)).toBe('<?xml version="1.0" encoding="utf-8"?><p>甲</p>')
   })
+
+  it('falls back to spine TOC when NCX exceeds the startup byte limit', async () => {
+    const zip = new JSZip()
+    zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' })
+    zip.file('META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
+    zip.file('OEBPS/content.opf', '<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Large TOC</dc:title></metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest><spine toc="ncx"><itemref idref="c1"/></spine></package>')
+    zip.file('OEBPS/toc.ncx', `<ncx><navMap><!-- ${'x'.repeat(4 * 1024 * 1024 + 128)} --></navMap></ncx>`, { compression: 'DEFLATE' })
+    zip.file('OEBPS/ch1.xhtml', '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hello</p></body></html>')
+    const archive = await openEpubArchive(sourceFrom(await zip.generateAsync({ type: 'nodebuffer' })))
+    const startup = await extractEpubStartup(archive)
+    expect(startup.toc).toEqual([{ title: 'OEBPS/ch1.xhtml', href: 'OEBPS/ch1.xhtml', level: 1 }])
+  })
 })

@@ -9,7 +9,7 @@ import { searchAiBook } from './ai.retrieval.service'
 export const AI_TOOL_MAX_STEPS = 12
 export const AI_TOOL_MAX_CALLS = 24
 export const AI_TOOL_MAX_RESULT_CHARS = 12_000
-export const AI_TOOL_MAX_TOTAL_RESULT_CHARS = 36_000
+export const AI_TOOL_MAX_TOTAL_RESULT_CHARS = 60_000
 export const AI_TOOL_MAX_CHAPTER_CHARS = 10_000
 export const AI_TOOL_MAX_NOTE_TEXT_CHARS = 500
 export const AI_TOOL_MAX_NOTE_CONTENT_CHARS = 800
