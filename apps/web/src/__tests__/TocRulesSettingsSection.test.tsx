@@ -125,6 +125,7 @@ describe('TocRulesSettingsSection', () => {
     selectRule(1)
     selectRule(0)
     fireEvent.click(screen.getByRole('button', { name: 'settings.ruleExportSelected' }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'settings.confirmExportAction' }))
     const exported = await readExport(createUrl.mock.calls[0]![0] as Blob)
     expect(exported.kind).toBe('bookdock.toc-rules')
     expect(exported.formatVersion).toBe(1)

@@ -59,7 +59,7 @@ describe('native handoff golden examples', () => {
   it('validates sentence speech inputs without library identity, file or reading records', () => {
     expect(ttsSpeechSchema.parse(fixtures.speechRequest)).toEqual(fixtures.speechRequest)
     expect(ttsEdgeSpeechSchema.parse(fixtures.edgeSpeechRequest)).toEqual(fixtures.edgeSpeechRequest)
-    expect(ttsSpeechSchema.safeParse({ ...fixtures.speechRequest, text: 'x'.repeat(4001) }).success).toBe(false)
+    expect(ttsSpeechSchema.safeParse({ ...fixtures.speechRequest, text: 'x'.repeat(20_001) }).success).toBe(false)
     expect(ttsEdgeSpeechSchema.safeParse({ ...fixtures.edgeSpeechRequest, text: ' ' }).success).toBe(false)
   })
   it('validates selected-text utility input separately from remote-book authorization input', () => {

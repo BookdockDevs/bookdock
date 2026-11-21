@@ -71,6 +71,7 @@ vi.mock('@/features/reader/renderers/FoliateReader', () => ({
     applyShowHeader() {} applyShowFooter() {} applyReadingTheme() {} applyFont() {}
     applyParagraphStyle() {} applyPageWidth() {} applyChineseConversion() {}
     applyContinuousScroll() {} applyClickSettings() {} applyMarginals() {}
+    applyUserContentCss() {} applyUserUiOutsideCss() {} applyHighlightRules() {}
     setChapterWordCounts() {}
   },
 }))

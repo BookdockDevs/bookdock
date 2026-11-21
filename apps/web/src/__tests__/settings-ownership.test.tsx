@@ -35,13 +35,17 @@ afterEach(() => {
 function mount() { return render(<QueryClientProvider client={client}><SettingsSync /></QueryClientProvider>) }
 
 describe('presentation ownership independent of library source', () => {
-  it('preserves existing anonymous presentation on first startup and retains invalid legacy input for recovery', () => {
+  it('preserves existing anonymous presentation on first startup and retains invalid legacy input for recovery', async () => {
     useUiStore.setState({ fontOrder: ['serif'], coverFit: 'full', customThemes: [theme] })
     localStorage.setItem(DEVICE_READING_CONFIG_KEY, 'invalid legacy config')
     mount()
     expect(useUiStore.getState()).toMatchObject({ fontOrder: ['serif'], coverFit: 'full', customThemes: [theme] })
     expect(localStorage.getItem(DEVICE_READING_CONFIG_KEY)).toBe('invalid legacy config')
-    expect(fetch).not.toHaveBeenCalled()
+    // Instance-published themes are instance content, readable anonymously;
+    // no account-scoped request may leave the page on first startup.
+    await vi.waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual(['/api/v1/reading-themes/instance'])
+    })
   })
 
   it('keeps connected profiles/resources across source changes and syncs deliberate global edits', async () => {
@@ -52,7 +56,7 @@ describe('presentation ownership independent of library source', () => {
     await act(async () => { await vi.runAllTimersAsync() })
     await act(async () => { await vi.advanceTimersByTimeAsync(10) })
     expect(client.getQueryState(['settings'])?.error).toBeNull()
-    expect(useUiStore.getState()).toMatchObject({ fontSize: 31, fontOrder: ['custom'], customThemes: [theme], selectionToolbarHidden: ['translate'] })
+    expect(useUiStore.getState()).toMatchObject({ fontSize: 31, fontOrder: ['custom'], selectionToolbarHidden: ['translate'], customThemes: expect.arrayContaining([expect.objectContaining({ id: 'custom-theme' })]) })
     window.history.replaceState(null, '', '/')
     view.rerender(<QueryClientProvider client={client}><SettingsSync /></QueryClientProvider>)
     window.history.replaceState(null, '', '/local/books/book')
@@ -71,14 +75,23 @@ describe('presentation ownership independent of library source', () => {
     const view = mount()
     expect(useUiStore.getState().fontSize).toBe(25)
     act(() => { useUiStore.getState().setFontSize(27); useUiStore.getState().setCustomThemes([theme]) })
-    expect(JSON.parse(localStorage.getItem(DEVICE_SETTINGS_KEY)!)).toMatchObject({ readingConfig: config(27), customThemes: JSON.stringify([theme]) })
+    const deviceSettings = JSON.parse(localStorage.getItem(DEVICE_SETTINGS_KEY)!) as { readingConfig: string; customThemes: string }
+    expect(deviceSettings.readingConfig).toBe(config(27))
+    const persistedLibrary = JSON.parse(deviceSettings.customThemes) as { themes: Array<{ id: string }> }
+    expect(persistedLibrary.themes.map((item) => item.id)).toContain('custom-theme')
     view.unmount()
-    useUiStore.setState({ readingConfig: config(22), fontSize: 22, customThemes: [] })
+    useUiStore.setState({ readingConfig: config(22), fontSize: 22 })
+    // Wipe the theme library through its store action: a raw customThemes
+    // setState would leave the underlying library saying the theme still
+    // exists, and the remount restore would early-return as already applied.
+    useUiStore.getState().setCustomThemes([])
     window.history.replaceState(null, '', '/')
     mount()
-    expect(useUiStore.getState()).toMatchObject({ fontSize: 27, customThemes: [theme] })
+    expect(useUiStore.getState()).toMatchObject({ fontSize: 27, customThemes: expect.arrayContaining([expect.objectContaining({ id: 'custom-theme' })]) })
     await act(async () => { await vi.runAllTimersAsync() })
-    expect(fetch).not.toHaveBeenCalled()
+    const fetchUrls = vi.mocked(fetch).mock.calls.map(([url]) => String(url))
+    expect(fetchUrls.length).toBeGreaterThan(0)
+    expect(fetchUrls.every((url) => url === '/api/v1/reading-themes/instance')).toBe(true)
   })
 
   it('restores the device owner after service-account logout without overwriting its saved config', async () => {
@@ -91,7 +104,7 @@ describe('presentation ownership independent of library source', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(10) })
     expect(useUiStore.getState().fontSize).toBe(31)
     await act(async () => { useAuthStore.getState().clearAuth(); await vi.runAllTimersAsync() })
-    expect(useUiStore.getState()).toMatchObject({ fontSize: 25, customThemes: [theme] })
+    expect(useUiStore.getState()).toMatchObject({ fontSize: 25, customThemes: expect.arrayContaining([expect.objectContaining({ id: 'custom-theme' })]) })
     expect(localStorage.getItem(DEVICE_READING_CONFIG_KEY)).toBe(config(25))
     expect(vi.mocked(fetch).mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false)
   })

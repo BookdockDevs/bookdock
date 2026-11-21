@@ -73,6 +73,10 @@ export function revertInstanceAndAiJobsSchema(
   if (table('library_books') && !columns('library_books').has('category_id')) sqlite.exec('ALTER TABLE library_books ADD COLUMN category_id text')
   if (table('library_book_tag_values')) sqlite.exec('DROP TABLE library_book_tag_values')
   if (table('library_metadata_value_state')) sqlite.exec('DROP TABLE library_metadata_value_state')
+  // 0069 reading themes: the asset and instance-theme persistence tables
+  // replay after a watermark reset, so they go with the ledger row.
+  if (table('theme_assets')) sqlite.exec('DROP TABLE theme_assets')
+  if (table('instance_theme_items')) sqlite.exec('DROP TABLE instance_theme_items')
 }
 
 /** Guarded revert of 0065/0066 reading-resource and AI structure for fixtures

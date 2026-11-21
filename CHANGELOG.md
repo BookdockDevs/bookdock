@@ -2,58 +2,43 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.7] - 2026-11-22
 
 ### Highlights
 
-- Build reading themes from reusable palettes, CSS cards, and automatic highlight rules, and try them on the open book.
-- Choose separate day and night defaults, with independent appearance choices for individual books.
-- Share themes and individual cards in a ZIP that includes the images they use.
+- Build reading themes from reusable palettes, wallpapers, CSS cards, and automatic highlight rules. Try a draft in the book you are reading.
+- Choose separate day and night themes, tailor the appearance of a single book, and share themes with their images.
 
 ### Added
 
-- The reader and Settings share an editor for themes and their cards. In the reader, choose a whole theme or mix a palette, an optional CSS card, and selected highlight rules for the open book. Try an unsaved draft on the book before saving it.
-- Palettes can set separate paper and outside-page colors in scrolled reading. Add a wallpaper with adjustable opacity and blur, or use image assets in custom CSS.
-- Style TXT and reflowable EPUB content with custom CSS. The editor shows validation errors and lets you insert references to images and fonts from your reading font library.
-- Automatic highlights match text or regular expressions within paragraphs. Style the whole match or individual capture groups with text color, background color, or a solid, wavy, or dashed line. Preview rules on your own sample text. Where automatic highlights overlap manual marks, the manual mark takes precedence for the shared effect.
-- Manage themes, palettes, CSS cards, and highlight rules in Settings. Reorder the lists by dragging, select items across lists for batch deletion or export, and undo deletions.
-- Import and export themes and standalone cards together in one ZIP. Imports reuse matching items and give name collisions a numbered suffix. Images travel with the package and also sync with your account on the server so they remain available across devices. Fonts use the receiving device's font library and the stylesheet's fallbacks.
-- Export uploaded fonts, device fonts, and dictionaries as source files—single files download directly and multi-file dictionaries or batch selections stream as ZIP archives—with an export confirmation dialog showing item names and estimated total size.
-- Instance owners can publish reading themes, palettes, custom CSS cards, and highlight rules (along with referenced wallpaper and CSS image assets) as instance built-ins via the "Availability" (`Only me` / `Shared`) control in the theme editors; members and guests can use or duplicate them as personal copies while keeping originals read-only.
-- Import, export, and batch-delete AI quick commands in Settings using the same header actions and selection bar as TOC rules and text replacements.
-- Support batch deletion for uploaded/device fonts and dictionaries in Settings edit mode, respecting ownership and instance-scope permissions.
+- The reader and Settings share a theme library and editors. In scrolled reading, palettes can set separate book-page and surrounding colors and add a wallpaper. Custom CSS can style TXT and reflowable EPUB text and reference images and reading fonts.
+- Automatic highlight rules can match text or regular expressions and apply colors or lines to the whole match or individual capture groups. The editor shows the result on sample text.
+- Import and export themes or individual cards as ZIP packages with their images. Signed-in users can use their theme library and images across devices. Instance owners can make themes and cards available to members and guests.
+- Export uploaded fonts, device fonts, and dictionary source files from Settings. Edit mode supports batch deletion for fonts and dictionaries you can manage.
+- Import, export, and batch-delete AI quick commands from Settings.
 
 ### Changed
 
-- Floating reader context menus (such as theme cards and preset chips) use a refined high-contrast surface with dual-layer shadows and full-contrast typography, eliminating edge blur and color bleed on light, cream, and parchment reading themes.
-- Reading presets now control typography, layout, and behavior only; themes, palettes, custom CSS, and highlight rules always follow the reader's Theme tab and never change when switching presets.
-- The reader Settings tabs are font, layout, display, theme, and behavior. The first four each carry a "for this book" toggle: turning it on captures only the fields you explicitly change for that book, turning it off clears that group, and the other groups keep working. With the toggle off, edits write into the bound reading preset (or the global default), exactly as before.
-- A theme stays selected while the current look matches what it specifies: a highlight-only theme keeps your palette and CSS and stays selected when you change either, as long as its highlight rules remain active and in order. If any component defined by the selected theme stops matching, the theme card loses its selection. Exactly one CSS card applies: the global appearance can follow the theme, be off, or name one card, and a book inherits that or overrides it. Highlight rules layer the theme's rules, then global additions and removals, then the book's, keeping their order.
-- Use the reader's Theme tab to apply themes, palettes, CSS, and highlight rules. Theme and palette edits apply to whichever of day or night is currently active in the reader. App Settings manages the theme library and its imports and exports.
-- The desktop reader sidebar remembers pinned and floating widths separately, so resizing one mode no longer overwrites the other. Switching between pinned and floating modes re-anchors notes and AI conversation scroll positions by visible item (or keeps the AI thread pinned to the bottom), matching the table of contents.
-- The AI assistant panel moves conversation export into the header overflow menu, refines the conversation history popover, and places message actions in a fixed-height row—always visible on the latest reply and fading in on hover or focus for earlier messages—so moving the pointer no longer shifts message bubbles.
-- The sidebar notification bell appears when the account has notification records. Clearing the last record closes the open notification panel and hides the bell.
-- Library batch notifications show how many books were affected when moving books to or from shelves or the trash, hiding them, permanently deleting them, or updating reading status. English notifications for trashing, restoring, and permanently deleting a single book include its title.
-- The TTS service editor and the library create and manage dialogs mark required fields with a red asterisk. TTS credential fields show the mark only while creating a new service, and the library access password shows it when password access is selected.
-- Unified Settings card spacing, upload progress bars, export confirmation dialogs, font edit-mode checkbox alignment, and visual typography hierarchy across theme/palette/CSS/highlight dialogs.
-- Removed arbitrary count caps on AI quick commands and reordering, assistant modes, personal metadata sources, book tags, book authors (removing silent truncation past 10 authors), local-library AI thread history, local-library batch selections, library hide/order lists, theme publishing, dictionary/font batch exports, and TOC/text-replacement rule import/export (which now rely on the 2 MiB size limit).
-- Relaxed text, media, and processing bounds: AI chapter references (`8 → 32`), AI prompt templates (`12,000 → 50,000`), mode/command prompts (`2,000 → 20,000`), AI tool total output budget (`36,000 → 60,000`), default `AI_RPM` (`6 → 20`), selected-text translation (`6,000 → 20,000`), TTS speech (`4,000 → 20,000`), dictionary lookup (`100 → 500`) and multi-volume files (`12 → 64`), mdict definition/resource caps (`2/16 MB → 8/32 MB`), theme image size (`10 → 20 MB`) and per-theme count (`8 → 32`), review/idea/bio/book-metadata lengths, idea images (`9 → 20`), attachments (`20 → 100`), local TXT import chapter limit (`10,000 → 30,000`), WeRead import budgets (`50 → 400` review pages, `3,000 → 10,000` requests), and automatic highlight rule/rendering budgets (with a one-time Toast notice when a section exceeds the budget).
-- Full-book search now reserves one concurrent slot per user (up to 4 globally) with a 256 MB worker heap limit, preventing multi-MB chapters from hitting OOM and avoiding cross-user search lockouts.
+- Per-book reading settings now override font, layout, display, and theme independently. Turning off a group restores its inherited settings. Switching reading presets keeps the current theme.
+- The desktop reader remembers separate widths for pinned and floating sidebars and preserves the visible note or AI message when switching between them.
+- The AI conversation history is easier to scan, and message actions keep their space so bubbles stay still on hover or focus. Reader menus have clearer contrast on light and warm backgrounds.
+- The sidebar shows the notification bell once the account has a record. Book batch actions report how many books were affected, and English notifications for trashing, restoring, or permanently deleting one book include its title.
+- Removed entry-count limits for AI quick commands and assistant modes, personal metadata sources, book tags and authors, local AI history and batch selections, and library hide and order lists. TOC and text replacement rule packages are limited by file size.
+- Raised selected-text translation and server TTS inputs to 20,000 characters, dictionary queries to 500 characters, and dictionary imports to 64 files. Increased limits for reviews, ideas, profile bios, book metadata, and attachments. Device TXT imports can include up to 30,000 chapters, and WeRead imports can scan up to 400 review pages.
+- AI chat accepts up to 32 chapter references and 50,000 characters per prompt, with more room for tool output. Quick commands support up to 20,000 characters. The default `AI_RPM` is now 20.
 
 ### Fixed
 
-- The table of contents waits until automatic scrolling finishes before showing the button for locating the current chapter, preventing flashes when opening a book or changing chapters.
-- The AI connection Base URL no longer shows a required asterisk; leaving it empty falls back to the provider default address.
-- Fixed a settings sync race where `PUT /api/v1/settings` triggered a redundant `GET /settings` refetch, which could overwrite subsequent rapid toggle changes (such as font switches) during the debounce window.
-- Full-book search no longer aborts on the first chapter that fails to scan: the slow or unreadable chapter is skipped and the remaining chapters are searched, and the search gives up after about 30 seconds of accumulated scan timeouts instead of holding the search slot open. Plain-text searches report a neutral timeout notice instead of a regex timeout, and chapters with many replacement-rule matches no longer stall the scan.
-- EPUB opening no longer fails when an optional NCX or nav navigation file exceeds the 4 MB startup limit; oversized or unreadable navigation files now fall back to the spine-based table of contents.
-- Aligned authentication validation messages (`usernameTooLong`, `registerUsernameTooLong`, `passwordTooLong`) and theme asset error copy (`themeAssetTooLarge`) with actual limits (`32` / `128` characters and `20 MB`), and added a specific error message in the browser extension when a single drop exceeds 2,000 files.
+- The table of contents waits for automatic scrolling to finish before showing the button for locating the current chapter. Table of contents rules with unsupported regex syntax are caught before saving or previewing.
+- Rapid settings changes, such as toggling fonts, survive saving without being overwritten by an older server response.
+- Full-book search skips unreadable or timed-out chapters and keeps partial results if scan timeouts total about 30 seconds. Plain-text searches show a general timeout message. Server searches allow one active search per user and up to four across the instance.
+- EPUBs with unreadable or oversized navigation files still open with a table of contents based on the spine.
+- AI connection forms mark the Base URL as optional. Account forms display the correct username and password length limits, and the browser extension explains when a drop exceeds 2,000 files.
 
 ### Upgrade notes
 
-- Existing custom themes are converted into themes with reusable cards, keeping their theme IDs. Appearance follows the new day and night defaults after upgrade, and theme choices previously stored in reading presets are retired.
-- Existing per-book layout overrides and per-book theme choices migrate into the new per-book groups (fonts, layout, display, theme) with their values and rule order kept; a group with stored differences reads as enabled after upgrade.
-- Theme definitions and their wallpaper/CSS image assets sync to the server (`theme_assets` and `instance_theme_items` via migration `0069`), with local IndexedDB caching and automatic server fallback across devices.
+- Existing custom themes keep their IDs and become available in the new theme library. Set your day and night themes in the reader. Theme choices previously stored in reading presets are retired.
+- Existing per-book font size, layout, and clean-reading overrides carry over to the corresponding groups.
 
 ## [0.8.6] - 2026-11-17
 
@@ -1402,58 +1387,43 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### 未发布
+### [0.8.7] - 2026-11-22
 
 #### 亮点
 
-- 用可复用的配色、CSS 卡片和自动高亮规则组合阅读主题，并在当前书中试用。
-- 分别设置日间和夜间默认主题，也可以为每本书单独设置两套外观。
-- 将主题和独立卡片打包成一个 ZIP，随包分享引用的图片。
+- 用可复用的配色、壁纸、CSS 卡片和自动高亮规则组合阅读主题，并在当前书中试用草稿。
+- 分别选择日间和夜间主题，为单本书设置外观，也可连同图片一起分享主题。
 
 #### 新增
 
-- 阅读器和设置页共用主题及卡片编辑器。阅读时可以为当前书选择整套主题，也可以自由搭配配色、CSS 卡片和高亮规则。未保存的草稿可以先在当前书中试用。
-- 滚动阅读支持分别设置书页和页外底色。配色可添加壁纸并调整不透明度和模糊程度，自定义 CSS 也可引用图片素材。
-- 支持用自定义 CSS 调整 TXT 和可重排 EPUB 的正文样式。编辑器会标出校验错误，也可插入图片和阅读字体库中的字体引用。
-- 自动高亮可在段落内匹配文本或正则表达式，为整段匹配或各个捕获组分别设置文字色、底色、实线、波浪线或虚线，并用自填样文预览效果。与手动标记重叠时，同类效果以手动标记为准。
-- 在设置页集中管理主题、配色、CSS 卡片和高亮规则。各列表支持拖动排序，可跨列表多选删除或导出，并可撤销删除。
-- 主题和独立卡片可放进同一个 ZIP 导入或导出。导入时会复用内容相同的项目，名称冲突时追加数字后缀。图片随包传递并同步至账号的服务端存储以支持跨设备使用，字体由接收设备的字体库和样式中指定的后备字体提供。
-- 支持导出已上传字体、本机字体及词典源文件（单文件直接下载，多文件词典或批量导出打包为 ZIP），并在导出前提供包含条目清单与预估总大小的确认弹窗。
-- 实例所有者可在主题、配色、自定义 CSS 与高亮规则编辑弹窗中通过「可用范围（仅自己 / 共享）」将其发布为实例内置资源（自动同步关联壁纸与 CSS 图片素材）；普通成员与访客可直接使用或复制为个人副本后二创，原件保持只读。
-- 设置中的 AI 快捷指令补齐导入、导出及多选批量删除功能，交互与目录规则、文本替换保持一致。
-- 字体与词典在编辑模式下支持多选批量删除（遵循个人归属与实例权限边界）。
+- 阅读器与设置页共用主题库和编辑器。滚动阅读可以分别设置书页和页外底色，也可添加壁纸。自定义 CSS 可调整 TXT 和可重排 EPUB 的正文样式，并引用图片和阅读字体。
+- 自动高亮支持按文本或正则表达式匹配，为整个匹配或单个捕获组设置颜色和线条。编辑器可用样文预览。
+- 整套主题和独立卡片可连同图片打包成 ZIP 导入和导出。登录后可跨设备使用主题库及其图片。实例所有者可将主题及卡片共享给成员和访客。
+- 设置页支持导出已上传字体、本机字体和词典源文件。编辑模式可批量删除有权限管理的字体和词典。
+- 设置页支持导入、导出和批量删除 AI 快捷指令。
 
-#### 变更
+#### 优化
 
-- 优化阅读器浮动右键菜单（主题卡片、阅读预设等）的显示效果：采用微质感高对比卡片底色与双层立体投影，并提升文字图标对比度，解决浅色与羊皮纸等暖色背景下菜单发虚、与底色融为一体的问题。
-- 阅读预设仅管理字体排版、布局和阅读行为；主题、配色、自定义 CSS 与高亮规则始终跟随阅读器的“主题”标签页，切换预设时不再改变外观。
-- 阅读器设置分为字体、布局、显示、主题与行为五个标签页，前四个均提供“仅对本书生效”开关：开启后仅记录在本书中显式修改的字段，关闭则清除该分组的本书覆盖，其余分组互不影响；未开启时，修改直接写入当前绑定的阅读预设（或全局默认）。
-- 只要当前外观仍符合所选主题的设定，主题卡片就会保持选中状态（例如纯高亮主题在调整配色或 CSS 后仍保持选中，只要其高亮规则仍按顺序启用）；若主题定义的任一组成部分不再匹配，则会取消选中。自定义 CSS 同一时间仅生效一张卡片（全局外观可跟随主题、关闭或指定单张卡片，单本书可继承或覆盖）；高亮规则按“主题规则 → 全局增删 → 本书增删”依次叠加并保留顺序。
-- 在阅读器的“主题”标签页中应用主题、配色、CSS 与高亮规则，对主题和配色的调整会作用于当前激活的日间或夜间模式；应用设置页负责主题库的集中管理与导入导出。
-- 桌面端阅读侧栏分别记忆固定与悬浮两种模式下的宽度，调整其中一种不会覆盖另一种；在固定与悬浮之间切换时，笔记与 AI 对话列表会与目录一样按当前可见条目（或 AI 贴底状态）自动重锚滚动位置。
-- 阅读器 AI 助理面板将导出对话收纳进顶栏“更多”菜单、优化会话历史浮层排版，并将消息操作栏改为固定高度行（最新一条回复常驻显示，历史消息在悬停或聚焦时淡入），避免指针移动时气泡上下跳动。
-- 账号有通知记录时，侧栏才显示通知铃铛。清空最后一条通知后，已打开的通知面板会关闭，铃铛随之隐藏。
-- 批量移入或移出书架、移入或移出回收站、隐藏、彻底删除和更新阅读状态时，提示会显示受影响的书籍数量。英文界面的单本书回收、恢复和彻底删除提示会带上书名。
-- 语音服务编辑器和书库创建、管理弹窗会标记必填字段：语音服务密钥仅在新建时显示星号，访问密码在选择密码访问时显示星号。
-- 统一了六个设置分页的卡片顶部间距、资源上传进度条、导出确认弹窗、字体编辑模式复选框对齐，以及主题/配色/CSS/高亮规则弹窗的三层视觉层级与通透输入框样式。
-- 移除了多项无依据的硬性条数上限：AI 快捷指令及排序、助手模式、个人元数据源、书籍标签、书籍作者（取消超过 10 人时的静默截断）、本地库 AI 会话历史、本地库批量操作、书库隐藏/排序列表、主题发布、词典/字体批量导出，以及目录与文本替换规则的导入导出条数限制（保留 2 MiB 文件大小保护）。
-- 放宽并校准了多项文本、媒体与处理上限：AI 章节引用（`8 → 32`）、AI 提问模板（`1.2 万 → 5 万`）、助手模式与快捷指令提示词（`2000 → 2 万`）、AI 工具总返回预算（`3.6 万 → 6 万`）、默认 `AI_RPM`（`6 → 20`）、划词翻译（`6000 → 2 万`）、TTS 合成文本（`4000 → 2 万`）、词典查词（`100 → 500`）与分卷文件数（`12 → 64`）、mdict 词条/资源上限（`2/16 MB → 8/32 MB`）、主题图片体积（`10 → 20 MB`）与单主题素材数（`8 → 32`）、书评/想法/简介/书籍元数据长度、想法配图（`9 → 20`）、内容附件（`20 → 100`）、本地 TXT 导入章数上限（`1 万 → 3 万`）、微信读书导入页数与请求预算（`50 → 400` 页、`3000 → 10000` 次请求），以及自动高亮规则与单节渲染预算（超出渲染预算时通过 Toast 提示一次）。
-- 全书搜索由“全服 1 并发槽”调整为“每用户 1 槽、全服最多 4 槽”，并将搜索 Worker 旧生代堆上限从 `64 MB` 提升至 `256 MB`，避免正常大章在扫描时发生 OOM 或阻塞其他用户搜索。
+- 单书设置可分别覆盖字体、布局、显示和主题。关闭某组就恢复该组的继承设置。切换阅读预设时保留当前主题。
+- 桌面阅读侧栏分别记住固定和悬浮宽度，两种模式切换时会保留当前查看的笔记或 AI 消息。
+- AI 会话历史更便于浏览，消息操作预留固定空间，悬停或聚焦时气泡位置保持稳定。浅色和暖色主题下的阅读器菜单更清晰。
+- 有通知记录时才显示侧栏铃铛。批量操作会提示受影响的书籍数量，英文界面的单本书移入回收站、恢复及彻底删除提示会带上书名。
+- 移除 AI 快捷指令与助手模式、个人元数据源、书籍标签和作者、本机 AI 会话与批量选择、书库隐藏与排序的条数上限。目录与文字替换规则包按文件大小限制处理。
+- 划词翻译和服务端朗读的文本上限提高到 2 万字符，词典支持查询 500 字符、单次导入 64 个文件。书评、想法、个人简介、书籍元数据和附件也放宽了容量。本机 TXT 导入最多支持 3 万章，微信读书导入最多可抓取 400 页书评。
+- AI 对话支持引用最多 32 个章节，提问可输入 5 万字符，工具也能返回更多内容。快捷指令可保存 2 万字符，默认 `AI_RPM` 提高到 20。
 
 #### 修复
 
-- 打开书籍或切换章节时，目录会等自动滚动完成后再显示定位到当前章节的按钮，避免按钮闪现。
-- AI 连接的 Base URL 不再显示必填星号，留空时自动使用服务商默认地址。
-- 修复设置同步竞态问题：`PUT /api/v1/settings` 成功后不再额外触发 `GET /settings` 回灌，改为直接更新本地查询缓存，避免连续切换开关（如字体开关）在防抖窗口内被旧快照覆盖。
-- 全书搜索遇到扫描失败的章节不再整体中断：该章会被跳过，其余章节继续搜索，累计超时约满 30 秒会主动结束并保留已扫到的结果，不会长时间占用搜索。普通文本搜索的超时提示改为中性表述，不再误报正则超时；应用大量替换规则的章节扫描大章节时不再卡死。
-- 修复 EPUB 可选目录文件（NCX/nav）超过 4 MB 启动上限时导致整本书无法打开的问题：目录读取超限或解析失败时自动降级回退到 spine 线性目录。
-- 修正登录/注册用户名与密码长度校验提示（对齐实际的 `32` / `128` 字符与 `{max}` 插值）以及主题图片超限文案（`20 MB`），并为浏览器扩展单批拖放超过 2000 个文件补充了明确的超限提示。
+- 目录等自动滚动结束后才显示定位按钮，避免打开书籍或切换章节时按钮闪现。保存或预览目录规则前，也会拦截目录引擎不支持的正则写法。
+- 连续切换字体等设置时，较早的服务端响应不会覆盖随后做出的修改。
+- 全书搜索会跳过无法读取或超时的章节，累计扫描超时约 30 秒时保留已有结果。普通文本搜索会显示通用超时提示。服务端每位用户可同时运行一次搜索，整个实例最多四次。
+- EPUB 导航文件无法读取或过大时，仍可打开书籍，并按正文顺序生成目录。
+- AI 连接表单将 Base URL 标为选填，账号表单显示正确的用户名和密码长度限制。浏览器扩展会在单次拖入超过 2,000 个文件时给出提示。
 
 #### 升级说明
 
-- 现有自定义主题会转换为由可复用卡片组成的主题，并保留原有主题 ID。升级后，外观跟随新的日间和夜间默认设置，阅读预设中原有的主题选择不再生效。
-- 现有的单本书排版覆盖与单本书主题选择会自动迁移至新的单本书分组（字体、布局、显示、主题）中，并保留原有数值与规则顺序；存有差异的分组在升级后会自动处于开启状态。
-- 主题定义与壁纸/CSS 图片素材现已同步至服务端（迁移 `0069` 新增 `theme_assets` 与 `instance_theme_items` 表），本地通过 IndexedDB 缓存并在跨设备时自动从服务端拉取恢复。
+- 原有自定义主题保留 ID，并纳入新的主题库。可在阅读器中设置日间和夜间主题，阅读预设中的旧主题选项停止生效。
+- 原有的单书字号、排版和纯净阅读设置会迁移到对应分组，并继续生效。
 
 ### [0.8.6] - 2026-11-17
 

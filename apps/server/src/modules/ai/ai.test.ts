@@ -1749,7 +1749,7 @@ describe('ai routes', () => {
     } as never)
     const fetchMock = vi.mocked(fetch)
     fetchMock
-      .mockResolvedValueOnce(new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: Array.from({ length: 4 }, (_, index) => ({
+      .mockResolvedValueOnce(new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: Array.from({ length: 6 }, (_, index) => ({
         index, id: `budget-${index}`, function: { name: 'get_chapter_content', arguments: JSON.stringify({ chapterIndex: 1, startOffset: index * 1000 }) },
       })) } }] })}\n\ndata: [DONE]\n\n`))
       .mockResolvedValueOnce(new Response(
@@ -1767,7 +1767,7 @@ describe('ai routes', () => {
     const stream = await response.text()
     expect(stream).toContain('event: delta\ndata: {"text":"基于已提供内容作答。"}')
     const toolResultChars = [...stream.matchAll(/phase":"result"[^\n]*"resultChars":(\d+)/g)].map((match) => Number(match[1]))
-    expect(toolResultChars.length).toBe(4)
+    expect(toolResultChars.length).toBe(6)
     expect(toolResultChars.reduce((total, chars) => total + chars, 0)).toBeLessThanOrEqual(AI_TOOL_MAX_TOTAL_RESULT_CHARS)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const secondCall = fetchMock.mock.calls[1]

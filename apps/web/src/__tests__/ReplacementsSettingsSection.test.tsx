@@ -188,6 +188,7 @@ describe('ReplacementsSettingsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
     fireEvent.click(screen.getByRole('checkbox', { name: '选择 B' }))
     fireEvent.click(screen.getByRole('button', { name: '导出所选' }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '导出', exact: true }))
     const text = await new Promise<string>((resolve) => {
       const reader = new FileReader()
       reader.onload = () => resolve(String(reader.result))

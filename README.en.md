@@ -28,7 +28,7 @@ Organize EPUB and TXT books, read them online, and keep your highlights, notes, 
 | **Offline full-book cache** | Cache a readable server book in the browser to keep reading and recording progress, annotations and reading time offline; queued writes sync on reconnect, with explicit cache update and clear actions. |
 | **Browser extension** | Deliver EPUB and TXT files from any ordinary web page or upload tab via standalone Chrome/Edge and Firefox release packages. |
 | **Book metadata** | Search built-in or personally installed sources to update book information and covers. |
-| **Reading** | Customize fonts, layout, and page turns. Build day and night themes with palettes, wallpapers, book CSS, and automatic highlights, and share them as theme packages. Use reading presets, the table of contents, bookmarks, full-book search, and Simplified/Traditional Chinese conversion. |
+| **Reading** | Customize fonts, layout, and page turns. Build day and night themes with palettes, wallpapers, book CSS, and automatic highlights. Apply them per book, share them as packages, or publish them on your instance. Use reading presets, the table of contents, bookmarks, full-book search, and Simplified/Traditional Chinese conversion. |
 | **Fonts and media** | Use built-in fonts or upload your own, and play audio and video embedded in EPUB books. |
 | **E-ink reading** | Use a lightweight bookshelf and paginated reader, adjust display and tap zones, and synchronize reading progress. |
 | **Content editing** | Edit TXT and EPUB text and navigation, review changes before saving, and recover local drafts. |

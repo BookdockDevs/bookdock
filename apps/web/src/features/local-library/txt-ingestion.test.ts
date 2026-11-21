@@ -72,7 +72,7 @@ async function fileKeys(): Promise<IDBValidKey[]> {
 describe('device TXT processing and persistence', () => {
   it('rejects binary controls and oversized chapter counts before storing any files', async () => {
     await expect(addLocalBook(new File(['binary\0text'], 'Binary.txt'), scope.vaultId, identity)).rejects.toThrow('invalid publication characters')
-    await expect(addLocalBook(new File(['Chapter 1\n\nText.\n\n'.repeat(10_001)], 'Dense.txt'), scope.vaultId, identity)).rejects.toThrow('chapter count')
+    await expect(addLocalBook(new File(['Chapter 1\n\nText.\n\n'.repeat(30_001)], 'Dense.txt'), scope.vaultId, identity)).rejects.toThrow('chapter count')
     expect(await repository.listBooks(scope.vaultId)).toEqual([])
     expect(await fileKeys()).toEqual([])
   })

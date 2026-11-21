@@ -608,7 +608,7 @@ describe('auth module', () => {
 
       const id = await insertUser(db, { username: 'long-bio', password: 'password123' })
       const app = createAuthApp({ id, username: 'long-bio', role: 'member' })
-      expect((await app.request('/api/v1/auth/bio', { method: 'POST', body: JSON.stringify({ bio: 'x'.repeat(501) }) })).status).toBe(400)
+      expect((await app.request('/api/v1/auth/bio', { method: 'POST', body: JSON.stringify({ bio: 'x'.repeat(2_001) }) })).status).toBe(400)
     })
   })
 

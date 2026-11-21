@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StrictMode } from 'react'
 
+import { TRANSLATION_MAX_CHARS } from '@bookdock/shared'
 import type { AiConfigRes, AiConnectionRes, AiModelEntryRes, TranslationPreferences } from '@bookdock/shared'
 
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }))
@@ -145,9 +146,9 @@ describe('selection translation card', () => {
     view.unmount()
     expect(vi.mocked(streamTranslation).mock.calls[0]![1].aborted).toBe(true)
     const client = new QueryClient()
-    render(<QueryClientProvider client={client}><TranslationContent bookId="book" text={'x'.repeat(6001)} preferences={preferences} config={config} onClose={vi.fn()} /></QueryClientProvider>)
+    render(<QueryClientProvider client={client}><TranslationContent bookId="book" text={'x'.repeat(TRANSLATION_MAX_CHARS + 1)} preferences={preferences} config={config} onClose={vi.fn()} /></QueryClientProvider>)
     await waitFor(() => expect(streamTranslation).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(streamTranslation).mock.calls[1]![0].text).toHaveLength(6000)
+    expect(vi.mocked(streamTranslation).mock.calls[1]![0].text).toHaveLength(TRANSLATION_MAX_CHARS)
   })
 
   it('restores the last selected model and language instead of choosing the first service again', async () => {

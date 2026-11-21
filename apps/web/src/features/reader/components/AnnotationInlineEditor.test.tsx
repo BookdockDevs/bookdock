@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 
+import { IDEA_IMAGE_MAX_COUNT } from '@bookdock/shared'
 import type { ContentFile } from '@bookdock/shared'
 
 import AnnotationInlineEditor from './AnnotationInlineEditor'
@@ -30,7 +31,7 @@ it('opens the existing image picker from the footer and saves image removal with
     onSave={onSave} onCancel={onCancel} bookVersionId="version-1" targetId="idea-1"
     initialImages={[image]} visibilityEligible sourceReadable initialVisibility="shared" />)
 
-  expect(screen.getByText('1 / 9')).toBeInTheDocument()
+  expect(screen.getByText(`1 / ${IDEA_IMAGE_MAX_COUNT}`)).toBeInTheDocument()
   const picker = document.querySelector('input[type="file"]') as HTMLInputElement
   const click = vi.spyOn(picker, 'click')
   fireEvent.click(screen.getByRole('button', { name: 'contentFiles.addImage' }))
@@ -38,7 +39,7 @@ it('opens the existing image picker from the footer and saves image removal with
   expect(onCancel).not.toHaveBeenCalled()
 
   fireEvent.click(screen.getByRole('button', { name: 'contentFiles.remove' }))
-  expect(screen.getByText('0 / 9')).toBeInTheDocument()
+  expect(screen.getByText(`0 / ${IDEA_IMAGE_MAX_COUNT}`)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'annotation.save' }))
   expect(onSave).toHaveBeenCalledWith('Idea text', 'shared', { imageIds: [], draftId: 'draft-edit' })
 })

@@ -153,7 +153,7 @@ export const clientTxtPublicationSchema = z.object({
     title: z.string(), level: z.number().int().nonnegative(), startOffset: z.number().int().nonnegative(),
     endOffset: z.number().int().nonnegative(), contentStartOffset: z.number().int().nonnegative(),
     synthetic: z.boolean().optional(), wordCount: z.number().int().nonnegative(),
-  })).min(1).max(10_000),
+  })).min(1).max(30_000),
 }).superRefine((source, ctx) => {
   for (const [index, chapter] of source.chapters.entries()) {
     if (chapter.startOffset > chapter.contentStartOffset || chapter.contentStartOffset > chapter.endOffset || chapter.endOffset > source.normalizedLength || chapter.startOffset !== (index ? source.chapters[index - 1]!.endOffset : 0)) ctx.addIssue({ code: 'custom', path: ['chapters', index], message: 'Invalid normalized chapter bounds' })

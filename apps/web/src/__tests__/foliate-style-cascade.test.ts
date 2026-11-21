@@ -139,7 +139,7 @@ describe('FoliateReader computed-style cascade compatibility', () => {
     expect(css).toContain('line-height: 1.8 !important;')
     expect(css).toContain('text-indent: 2em !important;')
     expect(css).toContain('margin-bottom: 0.5em !important;')
-    expect(css).toContain('body > h1:first-child {')
+    expect(css).toContain('[data-bd-chapter-title] {')
     expect(css).toContain('padding-top: 1.5rem !important;')
     expect(css).toContain('margin-bottom: 2.25rem !important;')
   })
