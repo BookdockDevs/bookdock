@@ -218,9 +218,9 @@ export default function SystemUpdateDialog({
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-stone-900 text-white shadow-xs dark:bg-stone-100 dark:text-stone-900">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
-                <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
+              <svg viewBox="0 0 32 32" fill="none" className="h-6 w-6">
+                <path d="M13.7 3.4C13.5 2.5 14.5 2.0 15.3 2.6C21.8 7.1 25.4 12.6 25.0 19.3C25.0 20.1 24.3 20.7 23.5 20.6C19.5 19.6 15.5 19.8 11.6 20.7C10.8 20.8 10.3 20.1 10.6 19.3C12.6 14.4 13.7 8.9 13.7 3.4Z" fill="currentColor" />
+                <path d="M2.0 23.6C7.3 22.1 11.9 21.6 16.0 21.6C20.1 21.6 24.7 22.1 30.0 23.6C30.7 23.8 31.0 24.5 30.5 25.0C27.7 26.9 22.0 27.3 16.9 28.3C16.3 28.4 15.7 28.4 15.1 28.3C10.0 27.3 4.3 26.9 1.5 25.0C1.0 24.5 1.3 23.8 2.0 23.6Z" fill="currentColor" opacity="0.74" />
               </svg>
             </div>
             <div>

@@ -13,6 +13,7 @@ All notable changes to Bookdock are documented here.
 - Unified checkboxes across dialogs, WebDAV import, and settings lists onto `Checkbox` with `indeterminate` (mixed) state support, a bolder indeterminate dash matching the checkmark stroke weight, `withinLabel`, and `amber` tone; unified library and instance settings switches onto `Toggle` with `sm`/`md` sizes and focus-visible rings.
 - Replaced the raw `<progress>` upload bar in content files with a themed `progressbar`, and switched visible form and reader header/footer `<select>` controls to `Select`.
 - Placed Continuous Scroll and Chinese Conversion inline in reader Display settings, added horizontal padding to inline `ButtonGroup` tabs, and moved Idea Display Mode above Show Friend Ideas.
+- Redesigned the Bookdock brand logo and favicons (`favicon.svg`, `favicon-dark.svg`, boot loader, sidebar, auth cards, and About/Update dialogs) with a sail-and-turning-page silhouette, and added theme-adaptive logo headers to `README.md` and `README.en.md`.
 
 ### Fixed
 
@@ -1414,6 +1415,7 @@ All notable changes to Bookdock are documented here.
 - 将弹窗、WebDAV 导入与设置列表的复选框统一收口到公共 `Checkbox`，补齐 `indeterminate` 半选态（加粗横线以匹配对勾笔画）、`withinLabel` 与 `amber` 语义色；将书库管理与实例设置开关统一到支持 `sm`/`md` 尺寸与焦点环的 `Toggle`。
 - 将内容文件上传中的原生 `<progress>` 替换为适配暗色模式的自定义进度条，并将表单与阅读器页眉/页脚的原生 `<select>` 统一为 `Select` 自定义弹层。
 - 将阅读器设置中的「连续滚动」与「简繁转换」调整为单行布局，增加行内分段选项的横向留白，并将「想法展示方式」调整到「显示书友想法」上方。
+- 重新设计 Bookdock 品牌 Logo 与标签页图标（同步更新 `favicon.svg`、`favicon-dark.svg`、首屏加载、侧边栏、登录卡片以及关于/更新弹窗），采用兼具风帆与翻起书页意象的极简轮廓，并在 `README.md` 与 `README.en.md` 顶部补充适配日夜主题的 Logo 展示。
 
 #### 修复
 

@@ -1,4 +1,9 @@
 <div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./apps/web/public/favicon-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="./apps/web/public/favicon.svg" />
+    <img src="./apps/web/public/favicon.svg" alt="Bookdock" width="72" height="72" />
+  </picture>
   <h1>Bookdock</h1>
   <p>A self-hosted e-book library for reading in your browser.</p>
   <p><a href="./README.md">中文</a> · English</p>
