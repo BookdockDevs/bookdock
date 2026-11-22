@@ -842,9 +842,9 @@ function ContentEditorWorkbench() {
           {/* Right: Chapter Content & Text Editor */}
           <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-white dark:bg-stone-900">
             {activeUnit ? (
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-3 sm:px-6 sm:pb-6 sm:pt-4 lg:px-8 lg:pb-8">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 {/* Heading & Meta Toolbar */}
-                <div className="mb-3 flex items-center justify-between gap-4 border-b border-stone-200 pb-2.5 dark:border-stone-800">
+                <div className="mx-4 mt-3 flex items-center justify-between gap-4 border-b border-stone-200 pb-2.5 sm:mx-6 sm:mt-4 dark:border-stone-800">
                   <input
                     aria-label={_('editor.chapterTitle') || '章节标题'}
                     value={activeUnit.title}
@@ -883,7 +883,7 @@ function ContentEditorWorkbench() {
                     onClick={() => setHasCursor(true)}
                     onKeyUp={() => setHasCursor(true)}
                     placeholder="在此输入章节正文…"
-                    className="h-full w-full resize-none bg-transparent font-serif text-base leading-relaxed tracking-normal text-stone-800 outline-none transition-colors placeholder:text-stone-300 custom-scrollbar dark:text-stone-200 dark:placeholder:text-stone-600 sm:leading-8"
+                    className="h-full w-full resize-none bg-transparent px-4 pt-3 pb-8 font-serif text-base leading-relaxed tracking-normal text-stone-800 outline-none transition-colors placeholder:text-stone-300 custom-scrollbar dark:text-stone-200 dark:placeholder:text-stone-600 sm:px-6 sm:leading-8"
                   />
                 </div>
               </div>
@@ -907,6 +907,10 @@ function ContentEditorWorkbench() {
           currentRuleLabel={draft.tocRuleSelection.label ?? draft.tocRuleSelection.ruleId}
           onClose={() => setDiffModalOpen(false)}
           onSave={() => void saveDraft()}
+          onDiscard={() => {
+            setDiffModalOpen(false)
+            setDiscardConfirm(true)
+          }}
           saving={saving || saveMutation.isPending}
         />
 
@@ -918,8 +922,8 @@ function ContentEditorWorkbench() {
         {/* Discard Draft Confirm Dialog */}
         {discardConfirm && (
           <ConfirmDialog
-            title={_('editor.discardConfirmTitle') || '放弃当前草稿？'}
-            message={_('editor.discardConfirmMessage') || '未保存的修改将会丢失，且无法撤销。确定要放弃吗？'}
+            title={_('editor.discardConfirmTitle') || '放弃草稿'}
+            message={_('editor.discardConfirmMessage') || '未保存的修改将会丢失，确定放弃吗？'}
             confirmLabel={_('editor.discard') || '放弃草稿'}
             confirmVariant="danger"
             onConfirm={async () => {

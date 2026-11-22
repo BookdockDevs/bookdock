@@ -97,4 +97,18 @@ describe('getEpubEditorDiff', () => {
     expect(diff.documents[0]?.textChange?.before.length).toBeLessThan(450)
     expect(diff.documents[0]?.textChange?.before).toContain('中间省略')
   })
+
+  it('ignores pure CRLF vs LF line-ending differences when comparing documents', () => {
+    const draft = createEpubEditorDraft({
+      documents: [{ href: 'chapter.xhtml', content: '<html>\r\n<body><p>正文</p></body>\r\n</html>' }],
+      tocEntries: [],
+      spineOrder: ['chapter.xhtml'],
+    })
+    draft.documents[0]!.content = '<html>\n<body><p>正文</p></body>\n</html>'
+
+    const diff = getEpubEditorDiff(draft)
+
+    expect(diff.documents).toHaveLength(0)
+    expect(diff.changeCount).toBe(0)
+  })
 })

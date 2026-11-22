@@ -35,7 +35,11 @@ vi.mock('./hooks/useEditorContent', () => ({
   useSaveEditorTxt: () => ({ mutateAsync: mocks.save, isPending: mocks.pending }),
 }))
 
-vi.mock('@/api/hooks/useTocRules', () => ({ useTocRules: () => ({ data: { data: [] } }) }))
+vi.mock('@/api/hooks/useTocRules', () => ({
+  useTocRules: () => ({ data: { data: [] } }),
+  useCreateTocRule: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateTocRule: () => ({ mutate: vi.fn(), isPending: false }),
+}))
 vi.mock('./hooks/useEditorAccess', () => ({ useEditorAccess: () => 'allowed' }))
 vi.mock('./hooks/useLocalEditorDraft', () => ({ useLocalEditorDraft: () => ({ ready: true, failure: null, status: 'saved', candidate: null, clear: mocks.clear }) }))
 vi.mock('./hooks/useDraftNavigationGuard', async () => {
@@ -120,6 +124,7 @@ describe('ContentEditorPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('保存失败，草稿仍保留')
     expect(mocks.clear).not.toHaveBeenCalled()
     expect(body).toHaveValue('保留在草稿里的修改')
+    fireEvent.click(screen.getByRole('button', { name: /已暂存/ }))
     expect(screen.getByRole('button', { name: '放弃草稿' })).toBeEnabled()
   })
 
@@ -161,8 +166,8 @@ describe('ContentEditorPage', () => {
     fireEvent.change(body, { target: { value: '未保存正文' } })
     const event = new MouseEvent('click', { bubbles: true, cancelable: true })
     fireEvent(screen.getByRole('link', { name: '返回阅读' }), event)
-    expect(screen.getByRole('button', { name: '保留草稿并离开' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '放弃草稿并离开' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '暂存并离开' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '放弃并离开' })).toBeInTheDocument()
     expect(event.defaultPrevented).toBe(true)
   })
 
@@ -234,8 +239,8 @@ describe('ContentEditorPage', () => {
     render(<ContentEditorPage />)
     await screen.findByRole('textbox', { name: '章节正文' })
     fireEvent.click(screen.getByRole('button', { name: '更换目录规则' }))
-    fireEvent.click(screen.getByLabelText('新建专属规则'))
-    fireEvent.click(screen.getByRole('button', { name: '添加层级' }))
+    fireEvent.click(screen.getByLabelText('新建目录规则'))
+    fireEvent.click(screen.getByRole('button', { name: '仅本书' }))
     fireEvent.change(screen.getByRole('textbox', { name: '第1层正则表达式' }), { target: { value: '^新章$' } })
     fireEvent.click(screen.getByRole('button', { name: '保存并应用' }))
     fireEvent.click(screen.getByRole('button', { name: '应用到草稿' }))

@@ -1,39 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { closestCenter, DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
-import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { useEffect, useMemo, useState } from 'react'
 import {
-  isValidTocRegex,
   normalizeTxtText,
   pickTxtTocRule,
-  tocRuleCreateSchema,
   type TocRulePattern,
   type TocRuleRes,
 } from '@bookdock/shared'
 
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
-import Select from '@/components/ui/Select'
-import TocPatternRow, { type TocPatternError } from '@/features/settings/components/TocPatternRow'
+import TocRuleFormModal from '@/features/settings/components/TocRuleFormModal'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 import type { EditorTocRuleSelection, EditorUnit } from '../lib/editor-draft'
 import { previewTextChapters } from '../lib/text-tools'
 
-interface PatternDraft {
-  id: string
-  regex: string
-  replacement: string
-  enabled: boolean
-}
-
-function toDrafts(patterns: readonly TocRulePattern[]): PatternDraft[] {
-  return patterns.map((p, index) => ({
-    id: `custom-pat-${index}-${Date.now()}`,
-    regex: p.regex,
-    replacement: p.replacement ?? '',
-    enabled: p.enabled !== false,
-  }))
-}
+type RuleEditorState =
+  | { mode: 'create' }
+  | { mode: 'edit-global'; rule: TocRuleRes }
+  | { mode: 'edit-custom' }
+  | null
 
 interface ContentRechapterModalProps {
   initialText: string
@@ -55,43 +40,38 @@ export default function ContentRechapterModal({
   onClose,
 }: ContentRechapterModalProps) {
   const _ = useTranslation()
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  const [savedRuleOverrides, setSavedRuleOverrides] = useState<Record<string, TocRuleRes>>({})
+  const mergedRules = useMemo(() => {
+    const byId = new Map(rules.map((r) => [r.id, r]))
+    for (const [id, r] of Object.entries(savedRuleOverrides)) {
+      byId.set(id, r)
+    }
+    return Array.from(byId.values())
+  }, [rules, savedRuleOverrides])
 
   // Active target currently saved on the book
   const activeTarget: 'auto' | 'custom' | string = useMemo(() => {
     if (customPatterns && customPatterns.length > 0 && initialRuleId === 'custom') {
       return 'custom'
     }
-    if (initialRuleId && rules.some((r) => r.id === initialRuleId)) {
+    if (initialRuleId && mergedRules.some((r) => r.id === initialRuleId)) {
       return initialRuleId
     }
     return 'auto'
-  }, [initialRuleId, customPatterns, rules])
+  }, [initialRuleId, customPatterns, mergedRules])
 
   // Selected target for previewing
   const [selectedTarget, setSelectedTarget] = useState<'auto' | 'custom' | string>(activeTarget)
   const [activeCustomPatterns, setActiveCustomPatterns] = useState<TocRulePattern[]>(() => customPatterns ?? [])
   const [excludedChapterIds, setExcludedChapterIds] = useState<string[]>([])
-  const [customEditorOpen, setCustomEditorOpen] = useState(false)
-
-  // Custom editor internal drafts
-  const [patternDrafts, setPatternDrafts] = useState<PatternDraft[]>(() =>
-    toDrafts(
-      activeCustomPatterns.length > 0
-        ? activeCustomPatterns
-        : [{ level: 1, regex: '', replacement: '', enabled: true }],
-    ),
-  )
-  const nextPatternId = useRef(patternDrafts.length)
-  const patternInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
-  const [patternErrors, setPatternErrors] = useState<TocPatternError[]>(patternDrafts.map(() => null))
-  const [patternFormError, setPatternFormError] = useState('')
+  const [ruleEditor, setRuleEditor] = useState<RuleEditorState>(null)
 
   // Auto-scored rule detection with safe rule filtering
-  const validRules = useMemo(() => (rules ?? []).filter((r) => Array.isArray(r?.patterns)), [rules])
+  const validRules = useMemo(() => mergedRules.filter((r) => Array.isArray(r?.patterns)), [mergedRules])
   const normalizedText = useMemo(() => normalizeTxtText(initialText), [initialText])
   const autoRule = useMemo(() => (validRules.length > 0 ? pickTxtTocRule(validRules, normalizedText) : undefined), [normalizedText, validRules])
-  const autoRuleObj = useMemo(() => rules.find((r) => r.id === autoRule?.id), [autoRule, rules])
+  const autoRuleObj = useMemo(() => mergedRules.find((r) => r.id === autoRule?.id), [autoRule, mergedRules])
 
   // Reset exclusions on target change
   useEffect(() => {
@@ -113,7 +93,7 @@ export default function ContentRechapterModal({
         patternsToUse = [{ level: 1, regex: '^第.+章', replacement: null, enabled: true }]
       }
     } else {
-      const found = rules.find((r) => r.id === selectedTarget)
+      const found = mergedRules.find((r) => r.id === selectedTarget)
       if (found) {
         patternsToUse = found.patterns
       }
@@ -141,7 +121,7 @@ export default function ContentRechapterModal({
       levelCounts: counts,
       isFallback: fallback,
     }
-  }, [activeCustomPatterns, autoRule, initialText, rules, selectedTarget, _])
+  }, [activeCustomPatterns, autoRule, initialText, mergedRules, selectedTarget, _])
 
   // Level counts after user exclusions
   const displayedStats = useMemo(() => {
@@ -201,7 +181,7 @@ export default function ContentRechapterModal({
         ? { ruleId: autoRule.id, patterns: [...autoRule.patterns] as TocRulePattern[], label: autoRuleObj.name, auto: true }
         : { ruleId: null, patterns: null, label: null, auto: true }
     } else {
-      const found = rules.find((r) => r.id === selectedTarget)
+      const found = mergedRules.find((r) => r.id === selectedTarget)
       selection = found
         ? { ruleId: found.id, patterns: found.patterns, label: found.name, auto: false }
         : { ruleId: null, patterns: null, label: null, auto: false }
@@ -211,97 +191,12 @@ export default function ContentRechapterModal({
     onClose()
   }
 
-  // Custom pattern editor methods
-  function addCustomPattern() {
-    const id = `custom-pat-${nextPatternId.current++}-${Date.now()}`
-    setPatternDrafts((prev) => [...prev, { id, regex: '', replacement: '', enabled: true }])
-    setPatternErrors((prev) => [...prev, null])
-    setPatternFormError('')
-  }
-
-  function updateCustomPattern(index: number, patch: Partial<PatternDraft>) {
-    setPatternDrafts((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)))
-    setPatternFormError('')
-    if (patch.regex !== undefined) {
-      setPatternErrors((prev) => prev.map((e, i) => (i === index ? null : e)))
-    }
-  }
-
-  function removeCustomPattern(index: number) {
-    setPatternDrafts((prev) => prev.filter((_, i) => i !== index))
-    setPatternErrors((prev) => prev.filter((_, i) => i !== index))
-    setPatternFormError('')
-  }
-
-  function handlePatternDragEnd(event: DragEndEvent) {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-    const oldIndex = patternDrafts.findIndex((p) => p.id === active.id)
-    const newIndex = patternDrafts.findIndex((p) => p.id === over.id)
-    if (oldIndex < 0 || newIndex < 0) return
-    setPatternDrafts((prev) => arrayMove(prev, oldIndex, newIndex))
-    setPatternErrors((prev) => arrayMove(prev, oldIndex, newIndex))
-  }
-
-  function handleCopyFromTemplate(templateId: string) {
-    if (!templateId) return
-    const found = rules.find((r) => r.id === templateId)
-    if (found && found.patterns.length > 0) {
-      setPatternDrafts(toDrafts(found.patterns))
-      setPatternErrors(found.patterns.map(() => null))
-      setPatternFormError('')
-    }
-  }
-
-  function handleSaveCustomPatterns() {
-    const newErrors = patternDrafts.map((d) => {
-      const trimmed = d.regex.trim()
-      if (!trimmed) return 'required' as const
-      if (!isValidTocRegex(trimmed)) return 'invalidRegex' as const
-      return null
-    })
-    setPatternErrors(newErrors)
-    const firstErrIndex = newErrors.findIndex((e) => e !== null)
-    if (firstErrIndex >= 0) {
-      patternInputRefs.current[patternDrafts[firstErrIndex]?.id ?? '']?.focus()
-      setPatternFormError('')
-      return
-    }
-
-    const patterns = patternDrafts.map((d, index) => ({
-      level: index + 1,
-      regex: d.regex.trim(),
-      replacement: d.replacement === '' ? null : d.replacement,
-      enabled: d.enabled,
-    }))
-
-    const parsed = tocRuleCreateSchema.safeParse({ name: '本书专属规则', patterns })
-    if (!parsed.success) {
-      setPatternFormError(patterns.length === 0 ? _('settings.tocRulesAtLeastOne') : _('settings.tocRulesInvalid'))
-      return
-    }
-
-    setActiveCustomPatterns(parsed.data.patterns)
-    setSelectedTarget('custom')
-    setCustomEditorOpen(false)
-  }
-
   const headerActions = (
     <button
       type="button"
-      onClick={() => {
-        if (activeCustomPatterns.length === 0) {
-          setPatternDrafts([])
-          setPatternErrors([])
-        } else {
-          setPatternDrafts(toDrafts(activeCustomPatterns))
-          setPatternErrors(activeCustomPatterns.map(() => null))
-        }
-        setPatternFormError('')
-        setCustomEditorOpen(true)
-      }}
-      aria-label={_('library.tocRuleNewCustom') || '新建专属规则'}
-      title={_('library.tocRuleNewCustom') || '新建专属规则'}
+      onClick={() => setRuleEditor({ mode: 'create' })}
+      aria-label={_('settings.tocRulesNew') || '新建目录规则'}
+      title={_('settings.tocRulesNew') || '新建目录规则'}
       className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -363,7 +258,7 @@ export default function ContentRechapterModal({
                 <li>
                   <div
                     className={cn(
-                      'flex w-full items-center justify-between gap-1 rounded-lg px-3 py-1.5 transition-colors',
+                      'group flex w-full items-center justify-between gap-1 rounded-lg px-3 py-1.5 transition-colors',
                       selectedTarget === 'custom'
                         ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
                         : 'text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
@@ -390,18 +285,15 @@ export default function ContentRechapterModal({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
-                        setPatternDrafts(toDrafts(activeCustomPatterns))
-                        setPatternErrors(activeCustomPatterns.map(() => null))
-                        setPatternFormError('')
-                        setCustomEditorOpen(true)
+                        setRuleEditor({ mode: 'edit-custom' })
                       }}
                       title={_('library.tocRuleCustomEdit') || '编辑规则'}
                       aria-label={_('library.tocRuleCustomEdit') || '编辑规则'}
                       className={cn(
-                        'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors',
+                        'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-opacity',
                         selectedTarget === 'custom'
-                          ? 'text-white/80 hover:bg-white/20 hover:text-white dark:text-stone-700 dark:hover:bg-stone-900/20 dark:hover:text-stone-900'
-                          : 'text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
+                          ? 'opacity-100 text-white/80 hover:bg-white/20 hover:text-white dark:text-stone-700 dark:hover:bg-stone-900/20 dark:hover:text-stone-900'
+                          : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
                       )}
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -413,35 +305,60 @@ export default function ContentRechapterModal({
               )}
 
               {/* 3. Global Rule presets */}
-              {rules.filter((r) => r.enabled).map((rule) => (
+              {mergedRules.filter((r) => r.enabled).map((rule) => (
                 <li key={rule.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTarget(rule.id)}
+                  <div
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition-colors',
+                      'group flex w-full items-center justify-between gap-1 rounded-lg px-3 py-1.5 transition-colors',
                       selectedTarget === rule.id
                         ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
                         : 'text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
                     )}
                   >
-                    <span className="min-w-0 flex-1 truncate">{rule.name || '—'}</span>
-                    {activeTarget === rule.id && (
-                      <span
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTarget(rule.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left text-[13px]"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{rule.name || '—'}</span>
+                      {activeTarget === rule.id && (
+                        <span
+                          className={cn(
+                            'shrink-0 text-xs',
+                            selectedTarget === rule.id ? 'text-white/70 dark:text-stone-700' : 'text-stone-400',
+                          )}
+                        >
+                          {_('library.tocRulePinned') || '当前规则'}
+                        </span>
+                      )}
+                    </button>
+                    {rule.mine !== false && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setRuleEditor({ mode: 'edit-global', rule })
+                        }}
+                        title={_('settings.tocRulesEdit') || '编辑目录规则'}
+                        aria-label={_('settings.tocRulesEdit') || '编辑目录规则'}
                         className={cn(
-                          'shrink-0 text-xs',
-                          selectedTarget === rule.id ? 'text-white/70 dark:text-stone-700' : 'text-stone-400',
+                          'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-opacity',
+                          selectedTarget === rule.id
+                            ? 'opacity-100 text-white/80 hover:bg-white/20 hover:text-white dark:text-stone-700 dark:hover:bg-stone-900/20 dark:hover:text-stone-900'
+                            : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
                         )}
                       >
-                        {_('library.tocRulePinned') || '当前规则'}
-                      </span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                        </svg>
+                      </button>
                     )}
-                  </button>
+                  </div>
                 </li>
               ))}
             </ul>
 
-            {rules.length === 0 && (!activeCustomPatterns || activeCustomPatterns.length === 0) && (
+            {mergedRules.length === 0 && (!activeCustomPatterns || activeCustomPatterns.length === 0) && (
               <p className="mt-2 text-xs text-stone-400 dark:text-stone-500">
                 {_('library.tocRulePickerEmpty') || '暂无可用规则'}
               </p>
@@ -536,92 +453,24 @@ export default function ContentRechapterModal({
         </div>
       </Modal>
 
-      {/* Book-Specific Custom TOC Rule Sub-modal */}
-      {customEditorOpen && (
-        <Modal
-          title={_('library.tocRuleCustomModalTitle') || '编辑本书专属目录规则'}
-          onClose={() => setCustomEditorOpen(false)}
-          size="wide"
-        >
-          <div className="flex flex-col gap-4">
-            {/* Copy from template dropdown */}
-            {rules.length > 0 && (
-              <div className="flex items-center justify-between gap-3 rounded-xl bg-stone-50 px-3.5 py-2.5 dark:bg-stone-800/60">
-                <span className="text-xs text-stone-600 dark:text-stone-300">
-                  {_('library.tocRuleCopyTemplate') || '从已有规则复制模板…'}
-                </span>
-                <Select
-                  value=""
-                  aria-label={_('library.copyFromTemplate') || '从已有规则复制模板'}
-                  placeholder={_('library.tocRuleCopyTemplate') || '选择模板…'}
-                  onValueChange={handleCopyFromTemplate}
-                  options={rules.map((rule) => ({ value: rule.id, label: rule.name }))}
-                />
-              </div>
-            )}
-
-            {/* Pattern list */}
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-stone-700 dark:text-stone-200">
-                  {_('settings.tocRulesLevels') || '目录层级配置（按自上而下优先级匹配）'}
-                </span>
-                <button
-                  type="button"
-                  onClick={addCustomPattern}
-                  aria-label={_('settings.tocRulesAddPattern') || '添加层级'}
-                  title={_('settings.tocRulesAddPattern') || '添加层级'}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-stone-700 hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                  <span>{_('settings.tocRulesAddPattern') || '添加层级'}</span>
-                </button>
-              </div>
-
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handlePatternDragEnd}>
-                <SortableContext items={patternDrafts.map((p) => p.id)} strategy={verticalListSortingStrategy}>
-                  <div className="flex flex-col gap-2">
-                    {patternDrafts.map((draft, index) => (
-                      <TocPatternRow
-                        key={draft.id}
-                        id={draft.id}
-                        level={index + 1}
-                        regex={draft.regex}
-                        replacement={draft.replacement}
-                        enabled={draft.enabled}
-                        disabled={false}
-                        canRemove={patternDrafts.length > 1}
-                        error={patternErrors[index] ?? null}
-                        onChange={(patch) => updateCustomPattern(index, patch)}
-                        onRemove={() => removeCustomPattern(index)}
-                        inputRef={(el) => {
-                          patternInputRefs.current[draft.id] = el
-                        }}
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
-
-              {patternFormError && (
-                <div role="alert" className="rounded-lg bg-red-50 p-2.5 text-xs text-red-600 dark:bg-red-950/40 dark:text-red-400">
-                  {patternFormError}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2 border-t border-stone-100 pt-3 dark:border-stone-800">
-              <Button variant="secondary" onClick={() => setCustomEditorOpen(false)}>
-                {_('common.cancel') || '取消'}
-              </Button>
-              <Button variant="primary" onClick={handleSaveCustomPatterns}>
-                {_('library.tocRuleSaveAndApply') || '保存并应用'}
-              </Button>
-            </div>
-          </div>
-        </Modal>
+      {/* Global / Book-Specific TOC Rule Editor Sub-modal */}
+      {ruleEditor !== null && (
+        <TocRuleFormModal
+          mode={ruleEditor.mode}
+          rules={mergedRules}
+          initialRule={ruleEditor.mode === 'edit-global' ? ruleEditor.rule : null}
+          initialPatterns={ruleEditor.mode === 'edit-custom' ? activeCustomPatterns : null}
+          onClose={() => setRuleEditor(null)}
+          onGlobalSaved={(savedRule) => {
+            setSavedRuleOverrides((prev) => ({ ...prev, [savedRule.id]: savedRule }))
+            setSelectedTarget(savedRule.id)
+          }}
+          onCustomSaved={(patterns) => {
+            setActiveCustomPatterns(patterns)
+            setSelectedTarget('custom')
+            setRuleEditor(null)
+          }}
+        />
       )}
     </>
   )

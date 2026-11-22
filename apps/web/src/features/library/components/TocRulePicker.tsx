@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import type { Chapter, TocPreviewChapter, TocPreviewReq, TocPreviewRes, TocRulePattern } from '@bookdock/shared'
+import type { Chapter, TocPreviewChapter, TocPreviewReq, TocPreviewRes, TocRulePattern, TocRuleRes } from '@bookdock/shared'
 
 import { tocPreviewPost, useReToc, useTocPreview, useTocRules, type TocTarget } from '@/api/hooks/useTocRules'
 import { Button } from '@/components/ui/Button'
@@ -42,7 +42,12 @@ export default function TocRulePicker({
   const rules = useMemo(() => rulesQuery.data?.data ?? [], [rulesQuery.data?.data])
   const reToc = useReToc(target)
 
-  const [customEditorOpen, setCustomEditorOpen] = useState(false)
+  const [ruleEditor, setRuleEditor] = useState<
+    | { mode: 'create' }
+    | { mode: 'edit-global'; rule: TocRuleRes }
+    | { mode: 'edit-custom' }
+    | null
+  >(null)
 
   // Active target currently saved on the book
   const activeTarget: 'auto' | 'custom' | string = useMemo(() => {
@@ -215,9 +220,9 @@ export default function TocRulePicker({
   const headerActions = (
     <button
       type="button"
-      onClick={() => setCustomEditorOpen(true)}
-      aria-label={_('library.tocRuleNewCustom')}
-      title={_('library.tocRuleNewCustom')}
+      onClick={() => setRuleEditor({ mode: 'create' })}
+      aria-label={_('settings.tocRulesNew')}
+      title={_('settings.tocRulesNew')}
       className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -264,7 +269,7 @@ export default function TocRulePicker({
                 <li>
                   <div
                     className={cn(
-                      'flex w-full items-center justify-between gap-1 rounded-lg px-3 py-1.5 transition-colors',
+                      'group flex w-full items-center justify-between gap-1 rounded-lg px-3 py-1.5 transition-colors',
                       selectedTarget === 'custom'
                         ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
                         : 'text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
@@ -287,15 +292,15 @@ export default function TocRulePicker({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
-                        setCustomEditorOpen(true)
+                        setRuleEditor({ mode: 'edit-custom' })
                       }}
                       title={_('library.tocRuleCustomEdit')}
                       aria-label={_('library.tocRuleCustomEdit')}
                       className={cn(
-                        'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors',
+                        'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-opacity',
                         selectedTarget === 'custom'
-                          ? 'text-white/80 hover:bg-white/20 hover:text-white dark:text-stone-700 dark:hover:bg-stone-900/20 dark:hover:text-stone-900'
-                          : 'text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
+                          ? 'opacity-100 text-white/80 hover:bg-white/20 hover:text-white dark:text-stone-700 dark:hover:bg-stone-900/20 dark:hover:text-stone-900'
+                          : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
                       )}
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -309,24 +314,50 @@ export default function TocRulePicker({
               {/* 3. Global Rule presets */}
               {rules.map((rule) => (
                 <li key={rule.id}>
-                  <button
-                    type="button"
-                    disabled={isApplying}
-                    onClick={() => setSelectedTarget(rule.id)}
+                  <div
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition-colors disabled:opacity-50',
+                      'group flex w-full items-center justify-between gap-1 rounded-lg px-3 py-1.5 transition-colors',
                       selectedTarget === rule.id
                         ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
                         : 'text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
                     )}
                   >
-                    <span className="min-w-0 flex-1 truncate">{rule.name || '—'}</span>
-                    {activeTarget === rule.id && (
-                      <span className={cn('shrink-0 text-xs', selectedTarget === rule.id ? 'text-white/70 dark:text-stone-700' : 'text-stone-400')}>
-                        {autoScored ? _('library.tocRuleAutoScored') : _('library.tocRulePinned')}
-                      </span>
+                    <button
+                      type="button"
+                      disabled={isApplying}
+                      onClick={() => setSelectedTarget(rule.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left text-[13px] disabled:opacity-50"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{rule.name || '—'}</span>
+                      {activeTarget === rule.id && (
+                        <span className={cn('shrink-0 text-xs', selectedTarget === rule.id ? 'text-white/70 dark:text-stone-700' : 'text-stone-400')}>
+                          {autoScored ? _('library.tocRuleAutoScored') : _('library.tocRulePinned')}
+                        </span>
+                      )}
+                    </button>
+                    {rule.mine !== false && (
+                      <button
+                        type="button"
+                        disabled={isApplying}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setRuleEditor({ mode: 'edit-global', rule })
+                        }}
+                        title={_('settings.tocRulesEdit')}
+                        aria-label={_('settings.tocRulesEdit')}
+                        className={cn(
+                          'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-opacity disabled:opacity-50',
+                          selectedTarget === rule.id
+                            ? 'opacity-100 text-white/80 hover:bg-white/20 hover:text-white dark:text-stone-700 dark:hover:bg-stone-900/20 dark:hover:text-stone-900'
+                            : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200',
+                        )}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                        </svg>
+                      </button>
                     )}
-                  </button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -464,14 +495,20 @@ export default function TocRulePicker({
         </div>
       </Modal>
 
-      {/* Book-Specific Custom TOC Rule Editor */}
-      {customEditorOpen && (
+      {/* Global / Book-Specific TOC Rule Editor */}
+      {ruleEditor !== null && (
         <BookCustomTocEditor
           target={target}
-          initialPatterns={customPatterns}
-          onClose={() => setCustomEditorOpen(false)}
+          mode={ruleEditor.mode}
+          initialRule={ruleEditor.mode === 'edit-global' ? ruleEditor.rule : null}
+          initialPatterns={ruleEditor.mode === 'edit-custom' ? customPatterns : null}
+          onClose={() => setRuleEditor(null)}
+          onGlobalSaved={(savedRule) => {
+            setRuleEditor(null)
+            setSelectedTarget(savedRule.id)
+          }}
           onSaved={() => {
-            setCustomEditorOpen(false)
+            setRuleEditor(null)
             setSelectedTarget('custom')
           }}
         />

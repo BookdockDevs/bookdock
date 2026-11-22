@@ -8,6 +8,8 @@ import TocRulePicker from '../features/library/components/TocRulePicker'
 import BookCustomTocEditor from '../features/library/components/BookCustomTocEditor'
 
 const reTocMutate = vi.fn()
+const createTocRuleMutate = vi.fn()
+const updateTocRuleMutate = vi.fn()
 let lastPreviewRequest: TocPreviewReq | null = null
 let lastPreviewEnabled: boolean | undefined
 let previewEnabledCalls: boolean[] = []
@@ -60,6 +62,14 @@ vi.mock('@/api/hooks/useTocRules', () => ({
   }),
   useReToc: () => ({
     mutate: reTocMutate,
+    isPending: false,
+  }),
+  useCreateTocRule: () => ({
+    mutate: createTocRuleMutate,
+    isPending: false,
+  }),
+  useUpdateTocRule: () => ({
+    mutate: updateTocRuleMutate,
     isPending: false,
   }),
   // Paging past the preview's first window is the one path that needs the raw
@@ -189,7 +199,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     rerender(<TocRulePicker {...props} />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /中文网文（卷·章·节）/ })).toHaveClass('bg-stone-900')
+      expect(screen.getByRole('button', { name: /中文网文（卷·章·节）/ }).parentElement).toHaveClass('bg-stone-900')
       expect(screen.getByRole('button', { name: '应用' })).toBeDisabled()
     })
     expect(previewEnabledCalls.every((enabled) => !enabled)).toBe(true)
@@ -267,7 +277,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
       />,
     )
 
-    expect(screen.getByText('编辑专属目录规则')).toBeInTheDocument()
+    expect(screen.getByText('编辑目录规则')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /测试匹配/ })).toBeInTheDocument()
 
     // Click test match button
@@ -284,6 +294,25 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
       }),
       expect.anything(),
     )
+  })
+
+  it('allows deleting the last level in BookCustomTocEditor and validates empty submission', () => {
+    render(
+      <BookCustomTocEditor
+        target={{ bookId: 'book-1' }}
+        initialPatterns={[{ level: 1, regex: '^第.+章', replacement: '$1', enabled: true }]}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+
+    const removeBtn = screen.getByRole('button', { name: '删除该层级' })
+    expect(removeBtn).not.toBeDisabled()
+    fireEvent.click(removeBtn)
+
+    expect(screen.getByText('暂无目录层级，可点击「添加层级」或从现有规则复制')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保存并应用' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('至少添加一个目录层级')
   })
 
   it('renders load more button when totalChapters exceeds loaded chapters', () => {

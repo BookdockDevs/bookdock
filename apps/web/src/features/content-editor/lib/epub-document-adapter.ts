@@ -118,7 +118,7 @@ function epubThemeCss(dark: boolean, document?: Document): string {
   const link = dark ? '#93c5fd' : '#1d4ed8'
   const selection = dark ? 'rgba(96, 165, 250, .35)' : 'rgba(59, 130, 246, .25)'
   const reprojectedColors = document ? inlineColorRules(document, dark) : ''
-  return `:root{color-scheme:${dark ? 'dark' : 'light'}}html{background:${background}}body{color:${foreground};font:16px/1.8 Georgia,"Times New Roman",serif;margin:24px auto;padding:0 16px;caret-color:${foreground}}html body{box-sizing:border-box;max-width:min(100%,52rem);min-height:calc(100vh - 48px);margin-inline:auto!important}a{color:${link}}${reprojectedColors}::selection{background:${selection}}img{max-width:100%;height:auto}svg{max-width:100%}img[data-bookdock-missing]{min-width:2em;min-height:2em;outline:1px dashed currentColor}`
+  return `:root{color-scheme:${dark ? 'dark' : 'light'}}html{background:${background}}html{height:100%;overflow-x:clip}body{color:${foreground};font:16px/1.8 Georgia,"Times New Roman",serif;margin:0 auto;padding:16px 24px 32px;caret-color:${foreground}}html body{box-sizing:border-box;max-width:min(100%,52rem);min-height:100%;margin-inline:auto!important;background-attachment:scroll!important;overflow-x:clip}html body>:first-child{margin-top:0!important}a{color:${link}}${reprojectedColors}::selection{background:${selection}}img{max-width:100%;height:auto}svg{max-width:100%}img[data-bookdock-missing]{min-width:2em;min-height:2em;outline:1px dashed currentColor}`
 }
 
 export function applyEpubBackgroundContrast(document: Document, enabled: boolean): void {
@@ -267,4 +267,23 @@ export function syncEpubHeading(
   if (!heading) throw new Error('EPUB heading is not available')
   heading.textContent = entry.title
   return { ...document, content: serializeVisibleBody(document.content, liveBody) }
+}
+
+export function validateEpubXhtml(content: string): {
+  valid: boolean
+  issue: { line: number; message: string } | null
+} {
+  const parsed = new DOMParser().parseFromString(content, 'application/xhtml+xml')
+  const parserError = parsed.querySelector('parsererror')
+  if (parserError) {
+    const rawText = (parserError.textContent ?? '').replace(/\s+/g, ' ').trim()
+    const lineMatch = rawText.match(/(?:line|行)\s*(\d+)/i)
+    const line = lineMatch ? Math.max(1, Number(lineMatch[1])) : 1
+    const message = rawText ? `XHTML 语法错误：${rawText.slice(0, 160)}` : 'XHTML 语法错误，请检查标签闭合与属性格式。'
+    return { valid: false, issue: { line, message } }
+  }
+  if (!parsed.getElementsByTagName('body')[0]) {
+    return { valid: false, issue: { line: 1, message: '缺少 <body> 节点，无法作为 EPUB 正文保存。' } }
+  }
+  return { valid: true, issue: null }
 }

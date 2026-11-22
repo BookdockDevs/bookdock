@@ -24,7 +24,7 @@ describe('editor navigation guard', () => {
     await router.navigate({ to: '/editor' })
     render(<RouterProvider router={router} />)
     fireEvent.click(await screen.findByRole('button', { name: '返回' }))
-    fireEvent.click(await screen.findByRole('button', { name: '保留草稿并离开' }))
+    fireEvent.click(await screen.findByRole('button', { name: '暂存并离开' }))
     expect(preserve).toHaveBeenCalledOnce()
     expect(router.state.location.pathname).toBe('/editor')
     expect(nativeConfirm).not.toHaveBeenCalled()

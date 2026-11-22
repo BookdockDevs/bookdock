@@ -59,11 +59,13 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
   const nameInputRef = useRef<HTMLInputElement>(null)
   const patternInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const [errors, setErrors] = useState<TocPatternError[]>(drafts.map(() => null))
+  const [formError, setFormError] = useState('')
   const saving = createRule.isPending || updateRule.isPending
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   function setDraft(index: number, patch: Partial<Pick<PatternDraft, 'regex' | 'replacement' | 'enabled'>>) {
     setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)))
+    setFormError('')
     if (patch.regex !== undefined) {
       setErrors((prev) => prev.map((e, i) => (i === index ? null : e)))
     }
@@ -73,12 +75,13 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
     const id = `pattern-${nextPatternId.current++}`
     setDrafts((prev) => [...prev, { id, regex: '', replacement: '', enabled: true }])
     setErrors((prev) => [...prev, null])
+    setFormError('')
   }
 
   function removePattern(index: number) {
-    if (drafts.length <= 1) return
     setDrafts((prev) => prev.filter((_, i) => i !== index))
     setErrors((prev) => prev.filter((_, i) => i !== index))
+    setFormError('')
   }
 
   function onDragEnd({ active, over }: DragEndEvent) {
@@ -105,6 +108,11 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
     })
     setNameError(emptyName)
     setErrors(newErrors)
+    if (drafts.length === 0) {
+      setFormError(_('settings.tocRulesAtLeastOne'))
+      if (emptyName) nameInputRef.current?.focus()
+      return
+    }
     if (emptyName || newErrors.some((e) => e)) {
       if (emptyName) nameInputRef.current?.focus()
       else {
@@ -168,28 +176,40 @@ export default function TocRuleEditor({ initial, onClose }: TocRuleEditorProps) 
           </button>
         </div>
 
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-          <SortableContext items={drafts.map((draft) => draft.id)} strategy={verticalListSortingStrategy}>
-            <div className="flex flex-col gap-2">
-              {drafts.map((draft, index) => (
-                <TocPatternRow
-                  key={draft.id}
-                  id={draft.id}
-                  level={index + 1}
-                  regex={draft.regex}
-                  replacement={draft.replacement}
-                  enabled={draft.enabled}
-                  error={errors[index] ?? null}
-                  disabled={saving}
-                  canRemove={drafts.length > 1}
-                  inputRef={(element) => { patternInputRefs.current[draft.id] = element }}
-                  onChange={(patch) => setDraft(index, patch)}
-                  onRemove={() => removePattern(index)}
-                />
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
+        {drafts.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-stone-200 py-6 text-center text-xs text-stone-400 dark:border-stone-700 dark:text-stone-500">
+            {_('library.tocRuleLevelsEmpty')}
+          </p>
+        ) : (
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={drafts.map((draft) => draft.id)} strategy={verticalListSortingStrategy}>
+              <div className="flex flex-col gap-2">
+                {drafts.map((draft, index) => (
+                  <TocPatternRow
+                    key={draft.id}
+                    id={draft.id}
+                    level={index + 1}
+                    regex={draft.regex}
+                    replacement={draft.replacement}
+                    enabled={draft.enabled}
+                    error={errors[index] ?? null}
+                    disabled={saving}
+                    canRemove
+                    inputRef={(element) => { patternInputRefs.current[draft.id] = element }}
+                    onChange={(patch) => setDraft(index, patch)}
+                    onRemove={() => removePattern(index)}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        )}
+
+        {formError && (
+          <div role="alert" className="rounded-lg bg-red-50 p-2.5 text-xs text-red-600 dark:bg-red-950/40 dark:text-red-400">
+            {formError}
+          </div>
+        )}
 
         {publishable && isOwner && (
           <fieldset className="space-y-1.5">

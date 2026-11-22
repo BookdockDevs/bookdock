@@ -16,7 +16,7 @@ interface ContentEditorHeaderProps {
   onUndo: () => void
   onRedo: () => void
   onSave: () => void
-  onDiscard: () => void
+  onDiscard?: () => void
   onOpenDiff?: () => void
   onDeleteChapter?: () => void
   onSplitAtCursor?: () => void
@@ -50,7 +50,7 @@ export const ContentEditorHeader = memo(function ContentEditorHeader({
       onBack()
       return
     }
-    if (dirty) {
+    if (dirty && onDiscard) {
       onDiscard()
       return
     }
@@ -66,7 +66,6 @@ export const ContentEditorHeader = memo(function ContentEditorHeader({
   const redoLabel = _('editor.redo') || '重做'
   const saveLabel = _('editor.save') || '保存'
   const savingLabel = _('editor.saving') || '保存中…'
-  const discardLabel = _('editor.discard') || '放弃草稿'
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-stone-200 bg-white/90 px-3 backdrop-blur-md dark:border-stone-800 dark:bg-stone-900/90 sm:px-4">
@@ -178,18 +177,6 @@ export const ContentEditorHeader = memo(function ContentEditorHeader({
             </svg>
           </button>
         </div>
-
-        {dirty && (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={saving}
-            onClick={onDiscard}
-            className="text-xs text-stone-500 hover:text-red-600 dark:text-stone-400 dark:hover:text-red-400"
-          >
-            {discardLabel}
-          </Button>
-        )}
 
         <Button
           variant="primary"

@@ -1,4 +1,4 @@
-import type { EpubEditorDocument, EpubEditorDraftState, EpubEditorTocEntry } from './epub-editor-draft'
+import { normalizeEpubLineEndings, type EpubEditorDocument, type EpubEditorDraftState, type EpubEditorTocEntry } from './epub-editor-draft'
 import { extractEpubVisibleText } from './epub-document-adapter'
 
 export interface EpubEditorTextChange {
@@ -169,7 +169,7 @@ export function getEpubEditorDiff(draft: EpubEditorDraftState, includeText = tru
   const documents = documentIds.flatMap((id) => {
     const before = baselineDocuments.get(id) ?? null
     const after = currentDocuments.get(id) ?? null
-    if (before?.content === after?.content) return []
+    if (before && after ? normalizeEpubLineEndings(before.content) === normalizeEpubLineEndings(after.content) : before === after) return []
     const beforeText = includeText ? visibleText(before) : ''
     const afterText = includeText ? visibleText(after) : ''
     return [{

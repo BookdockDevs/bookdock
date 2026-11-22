@@ -8,6 +8,10 @@ import { decodeEditorTxtFile } from '../hooks/useEditorContent'
 import ContentToolDialog from './ContentToolDialog'
 
 vi.mock('../hooks/useEditorContent', () => ({ decodeEditorTxtFile: vi.fn() }))
+vi.mock('@/api/hooks/useTocRules', () => ({
+  useCreateTocRule: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateTocRule: () => ({ mutate: vi.fn(), isPending: false }),
+}))
 
 const rule: TocRuleRes = {
   id: 'chapter-rule',
@@ -65,7 +69,9 @@ describe('ContentToolDialog', () => {
       onClose={vi.fn()}
     />)
 
-    fireEvent.click(screen.getByLabelText('新建专属规则'))
+    fireEvent.click(screen.getByLabelText('新建目录规则'))
+    fireEvent.click(screen.getByRole('button', { name: '仅本书' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除该层级' }))
     fireEvent.click(screen.getByRole('button', { name: '保存并应用' }))
     expect(screen.getByRole('alert')).toHaveTextContent('至少添加一个目录层级')
     fireEvent.click(screen.getByRole('button', { name: '添加层级' }))

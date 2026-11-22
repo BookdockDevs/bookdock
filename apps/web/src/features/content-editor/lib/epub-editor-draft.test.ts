@@ -106,4 +106,21 @@ describe('EPUB editor draft', () => {
     expect(adjusted.tocEntries.map((entry) => entry.level)).toEqual([1, 2, 3, 1])
     expect(adjusted.undoStack).toHaveLength(1)
   })
+
+  it('treats CRLF-to-LF line-ending normalization from source editors as unchanged when text is reverted', () => {
+    const crlfSource = '<html>\r\n<body>\r\n<p>正文内容</p>\r\n</body>\r\n</html>'
+    let draft = createEpubEditorDraft({
+      documents: [{ href: 'chapter.xhtml', content: crlfSource }],
+      tocEntries: [],
+      spineOrder: ['chapter.xhtml'],
+    })
+
+    draft = editEpubDocument(draft, 'chapter.xhtml', '<html>\n<body>\n<p>正文1内容</p>\n</body>\n</html>')
+    expect(draft.documents[0]?.changed).toBe(true)
+    expect(hasEpubEditorChanges(draft)).toBe(true)
+
+    draft = editEpubDocument(draft, 'chapter.xhtml', '<html>\n<body>\n<p>正文内容</p>\n</body>\n</html>')
+    expect(draft.documents[0]?.changed).toBe(false)
+    expect(hasEpubEditorChanges(draft)).toBe(false)
+  })
 })

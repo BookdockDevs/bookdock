@@ -33,10 +33,12 @@ async function loadReaderLoader(): Promise<LoaderModule> {
   return dynamicImport('/foliate-js/epub.js')
 }
 
-export function prepareEditorResources(document: Document, markup: string, href: string, source: EditorPublicationSource, loadModule = loadReaderLoader, onMissing?: () => void): () => void {
+export function prepareEditorResources(document: Document, markup: string, href: string, source: EditorPublicationSource, loadModule = loadReaderLoader, onMissing?: () => void, includeStyles = true): () => void {
   const controller = new AbortController()
   const session = source.kind === 'local' ? null : new ReaderContentSession(source.manifest, source.accountScope, source.epoch, source.contentUrl, true)
-  const entries = new Map(editorSourceEntries(source).map((entry) => [entry.path, { href: entry.path, mediaType: entry.mediaType, size: entry.size }]))
+  const entryList = editorSourceEntries(source).map((entry) => ({ href: entry.path, mediaType: entry.mediaType, size: entry.size }))
+  const entries = new Map(entryList.map((entry) => [entry.href, entry]))
+  const entriesLower = new Map(entryList.map((entry) => [entry.href.toLowerCase(), entry]))
   let loader: ResourceLoader | null = null
   let disposed = false
   const insertedStyles: Element[] = []
@@ -44,7 +46,7 @@ export function prepareEditorResources(document: Document, markup: string, href:
     const module = await loadModule()
     if (disposed) return
     loader = new module.Loader({
-      resources: { manifest: [...entries.values()] }, entries,
+      resources: { manifest: entryList }, entries,
       loadText: (path: string, signal: AbortSignal) => source.kind === 'local' ? readEditorResource(source.file, path, undefined, AbortSignal.any([controller.signal, ...(signal ? [signal] : [])])) : session!.loadText(path, 'foreground', signal),
       loadBlob: (path: string, type: string, signal: AbortSignal) => source.kind === 'local' ? readEditorResource(source.file, path, type, AbortSignal.any([controller.signal, ...(signal ? [signal] : [])])) : session!.loadBlob(path, type, 'foreground', signal),
     })
@@ -53,21 +55,19 @@ export function prepareEditorResources(document: Document, markup: string, href:
     const counted = new Set<string>()
     const missing = () => { if (!disposed) onMissing?.() }
     activeLoader.loadHref = async (value, base, parents = [], parent, signal) => {
-      if (value.startsWith('#')) return value
+      if (value.startsWith('#') || /^data:/i.test(value.trim())) return value
       const resolved = resolveEditorResource(value, base)
-      const item = resolved && entries.get(resolved.path)
-      if (!resolved || !item || !/^(?:image\/(?:png|jpeg|gif|webp|avif|svg\+xml)|text\/css|font\/|application\/(?:font|vnd\.ms-fontobject|x-font))/i.test(item.mediaType)) { missing(); return '' }
+      const item = resolved && (entries.get(resolved.path) ?? entriesLower.get(resolved.path.toLowerCase()))
+      if (!resolved || !item || !/^(?:image\/(?:png|jpe?g|gif|webp|avif|svg\+xml)|text\/css|font\/|application\/(?:font|vnd\.ms-fontobject|x-font))/i.test(item.mediaType)) { return '' }
       if (!counted.has(item.href)) {
-        if (counted.size >= 256 || item.size > 16 * 1024 * 1024 || totalBytes + item.size > 32 * 1024 * 1024) { missing(); return '' }
+        if (counted.size >= 256 || item.size > 16 * 1024 * 1024 || totalBytes + item.size > 32 * 1024 * 1024) { return '' }
         counted.add(item.href)
         totalBytes += item.size
       }
       try {
         const url = await activeLoader.loadItem(item, [...parents, base, ...(parent === undefined ? [] : [parent])], signal)
-        if (!url) missing()
         return url ? `${url}${resolved.fragment}` : ''
       } catch {
-        missing()
         return ''
       }
     }
@@ -80,44 +80,48 @@ export function prepareEditorResources(document: Document, markup: string, href:
       if (bodyValue !== null && bodyValue !== undefined) document.body.setAttribute(name, bodyValue)
     }
     const insertStyle = (element: Element) => { if (!disposed) { document.head.append(element); insertedStyles.push(element) } }
-    for (const element of Array.from(sourceDocument.head?.children ?? [])) {
-      if (controller.signal.aborted) return
-      if (element.localName === 'link' && element.getAttribute('rel')?.toLowerCase().split(/\s+/).includes('stylesheet')) {
-        const value = element.getAttribute('href')
-        const url = value && await activeLoader.loadHref(value, href, [], undefined, controller.signal)
-        if (url && !disposed) {
-          const link = document.createElement('link')
-          link.rel = 'stylesheet'
-          link.href = url
-          const media = element.getAttribute('media')
-          if (media) link.media = media
-          insertStyle(link)
+    if (includeStyles) {
+      for (const element of Array.from(sourceDocument.head?.children ?? [])) {
+        if (controller.signal.aborted) return
+        if (element.localName === 'link' && element.getAttribute('rel')?.toLowerCase().split(/\s+/).includes('stylesheet')) {
+          const value = element.getAttribute('href')
+          const url = value && await activeLoader.loadHref(value, href, [], undefined, controller.signal)
+          if (value && !url) missing()
+          if (url && !disposed) {
+            const link = document.createElement('link')
+            link.rel = 'stylesheet'
+            link.href = url
+            const media = element.getAttribute('media')
+            if (media) link.media = media
+            insertStyle(link)
+          }
+        } else if (element.localName === 'style' && element.textContent) {
+          const css = await activeLoader.replaceCSS(element.textContent, href, [], undefined, controller.signal)
+          const style = document.createElement('style')
+          style.textContent = css
+          insertStyle(style)
         }
-      } else if (element.localName === 'style' && element.textContent) {
-        const css = await activeLoader.replaceCSS(element.textContent, href, [], undefined, controller.signal)
-        const style = document.createElement('style')
-        style.textContent = css
-        insertStyle(style)
       }
-    }
-    const sourceRootStyle = sourceDocument.documentElement.getAttribute('style')
-    if (sourceRootStyle) {
-      const style = await activeLoader.replaceCSS(sourceRootStyle, href, [], undefined, controller.signal)
-      if (!disposed) setEpubPresentationAttribute(document.documentElement, 'style', style)
-    }
-    const sourceBodyStyle = sourceDocument.body?.getAttribute('style')
-    if (sourceBodyStyle) {
-      const style = await activeLoader.replaceCSS(sourceBodyStyle, href, [], undefined, controller.signal)
-      if (!disposed) setEpubPresentationAttribute(document.body, 'style', style)
-    }
-    const bodyBackground = sourceDocument.body?.getAttribute('background')
-    if (bodyBackground) {
-      const url = await activeLoader.loadHref(bodyBackground, href, [], undefined, controller.signal)
-      if (!disposed && url) setEpubPresentationAttribute(document.body, 'background', url)
+      const sourceRootStyle = sourceDocument.documentElement.getAttribute('style')
+      if (sourceRootStyle) {
+        const style = await activeLoader.replaceCSS(sourceRootStyle, href, [], undefined, controller.signal)
+        if (!disposed) setEpubPresentationAttribute(document.documentElement, 'style', style)
+      }
+      const sourceBodyStyle = sourceDocument.body?.getAttribute('style')
+      if (sourceBodyStyle) {
+        const style = await activeLoader.replaceCSS(sourceBodyStyle, href, [], undefined, controller.signal)
+        if (!disposed) setEpubPresentationAttribute(document.body, 'style', style)
+      }
+      const bodyBackground = sourceDocument.body?.getAttribute('background')
+      if (bodyBackground) {
+        const url = await activeLoader.loadHref(bodyBackground, href, [], undefined, controller.signal)
+        if (!url) missing()
+        if (!disposed && url) setEpubPresentationAttribute(document.body, 'background', url)
+      }
     }
     for (const element of Array.from(document.body.querySelectorAll('style, [style], img[src], img[srcset], svg image'))) {
       if (controller.signal.aborted) return
-      if (element.localName === 'style' && element.textContent) {
+      if (includeStyles && element.localName === 'style' && element.textContent) {
         const value = element.textContent
         const css = await activeLoader.replaceCSS(value, href, [], undefined, controller.signal)
         if (!disposed && element.textContent === value) setEpubPresentationText(element, css)
@@ -130,7 +134,7 @@ export function prepareEditorResources(document: Document, markup: string, href:
           if (!element.hasAttribute('title')) setEpubPresentationAttribute(element, 'title', '鍥剧墖鏃犳硶鍔犺浇')
         }
       }
-      if (element.hasAttribute('style')) {
+      if (includeStyles && element.hasAttribute('style')) {
         const value = element.getAttribute('style')!
         const css = await activeLoader.replaceCSS(value, href, [], undefined, controller.signal)
         if (!disposed && element.getAttribute('style') === value) setEpubPresentationAttribute(element, 'style', css)
@@ -141,9 +145,12 @@ export function prepareEditorResources(document: Document, markup: string, href:
         const url = value && await activeLoader.loadHref(value, href, [], undefined, controller.signal)
         if (!disposed && element.getAttribute(name) === value) {
           if (url) setEpubPresentationAttribute(element, name, url)
-          else if (element.localName === 'img') {
-            setEpubPresentationAttribute(element, 'data-bookdock-missing', '')
-            if (!element.hasAttribute('title')) setEpubPresentationAttribute(element, 'title', '鍥剧墖鏃犳硶鍔犺浇')
+          else {
+            if (value) missing()
+            if (element.localName === 'img') {
+              setEpubPresentationAttribute(element, 'data-bookdock-missing', '')
+              if (!element.hasAttribute('title')) setEpubPresentationAttribute(element, 'title', '图片无法加载')
+            }
           }
         }
       }

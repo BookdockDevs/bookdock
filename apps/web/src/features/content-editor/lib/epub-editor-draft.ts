@@ -93,13 +93,18 @@ export function createEpubEditorDraft(input: EpubEditorSnapshot): EpubEditorDraf
   return { baseline: snapshot(initial), ...snapshot(initial), undoStack: [], redoStack: [] }
 }
 
+export function normalizeEpubLineEndings(value: string): string {
+  return value.replace(/\r\n?/g, '\n')
+}
+
 export function editEpubDocument(state: EpubEditorDraftState, href: string, content: string): EpubEditorDraftState {
   const current = state.documents.find((document) => document.href === href)
   const baseline = state.baseline.documents.find((document) => document.href === href)
   if (!current || !baseline || current.content === content) return state
+  const changed = normalizeEpubLineEndings(content) !== normalizeEpubLineEndings(baseline.content)
   return pushUndo(state, {
     ...state,
-    documents: state.documents.map((document) => document.href === href ? { ...document, content, changed: content !== baseline.content } : document),
+    documents: state.documents.map((document) => document.href === href ? { ...document, content, changed } : document),
   }, `document:${href}`, true)
 }
 

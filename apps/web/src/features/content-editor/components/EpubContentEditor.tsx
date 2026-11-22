@@ -14,26 +14,26 @@ import {
   editEpubTocEntry,
   getEpubTocSubtreeEnd,
   hasEpubEditorChanges,
-  reorderEpubSpineDocument,
   moveEpubTocSelection,
   redoEpubEditorDraft,
   undoEpubEditorDraft,
   type EpubEditorDraftState,
 } from '../lib/epub-editor-draft'
-import { applyEpubBackgroundContrast, applyEpubEditorTheme, epubEditorFrame, locateEpubFragment, markEpubImplicitTableBodies, serializeVisibleBody, syncEpubHeading } from '../lib/epub-document-adapter'
+import { applyEpubBackgroundContrast, applyEpubEditorTheme, epubEditorFrame, locateEpubFragment, markEpubImplicitTableBodies, serializeVisibleBody, syncEpubHeading, validateEpubXhtml } from '../lib/epub-document-adapter'
 import { prepareEditorResources } from '../lib/epub-editor-resources'
 import { buildEpubTocTree, findSafeEpubHeading, splitTocHref, visibleEpubTocNodes, type EpubTocNode } from '../lib/epub-editor-navigation'
 import EpubTocRow from './EpubTocRow'
-import EpubFileRow from './EpubFileRow'
+import EpubFileTree from './EpubFileTree'
 import EpubEditorDiffModal from './EpubEditorDiffModal'
 import { getEpubEditorDiff } from '../lib/epub-editor-diff'
 import { ContentEditorHeader } from './ContentEditorHeader'
 import ContentEditorPending from './ContentEditorPending'
+import CodeEditor from '@/components/ui/CodeEditor'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { useTranslation } from '@/hooks/useTranslation'
-import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { notify } from '@/lib/notifications'
+import { cn } from '@/lib/utils'
 import { useUiStore } from '@/stores/ui.store'
 import { useEditorAccess } from '../hooks/useEditorAccess'
 import { useLocalEditorDraft } from '../hooks/useLocalEditorDraft'
@@ -107,6 +107,7 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
   const [frameGeneration, setFrameGeneration] = useState(0)
   const [frameDocument, setFrameDocument] = useState<Document | null>(null)
   const [resourceWarning, setResourceWarning] = useState(false)
+  const [originalStyles, setOriginalStyles] = useState(true)
   const [backgroundContrast, setBackgroundContrast] = useState(false)
   const [discardConfirm, setDiscardConfirm] = useState(false)
   const [saveError, setSaveError] = useState(false)
@@ -120,28 +121,104 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
   const [showDiff, setShowDiff] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [view, setView] = useState<'toc' | 'files'>('toc')
-  const [fileHref, setFileHref] = useState<string | null>(null)
+  const [editorMode, setEditorMode] = useState<'wysiwyg' | 'source' | 'split'>('wysiwyg')
+  const [sourceError, setSourceError] = useState<string | null>(null)
+  const [splitFrameDocument, setSplitFrameDocument] = useState<Document | null>(null)
+  const splitIframeRef = useRef<HTMLIFrameElement>(null)
   const viewScrollRef = useRef<{ toc: { href: string | null; top: number } | null; files: { href: string | null; top: number } | null }>({ toc: null, files: null })
   const restoreScrollRef = useRef<number | null>(null)
   const [dropTarget, setDropTarget] = useState<{ index: number; placement: 'before' | 'after' } | null>(null)
-  const [showTitleActions, setShowTitleActions] = useState(false)
   const lastSelectedTocIndexRef = useRef<number | null>(null)
   const darkTheme = useUiStore((state) => state.systemTheme === 'dark')
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const titleActionsRef = useRef<HTMLDivElement>(null)
-  useDismissiblePopup(showTitleActions, titleActionsRef, () => setShowTitleActions(false))
 
   const editableDocument = draft?.documents.find((document) => document.href === activeHref) ?? null
   const previewEntry = !editableDocument && activeHref && source && manifestQuery.data && editorSourceRevision(manifestQuery.data) === source.revisionId
     ? editorSourceEntries(manifestQuery.data).find((entry) => entry.path === activeHref) : undefined
-  const previewIsText = Boolean(previewEntry && /^(application\/(xhtml\+xml|xml)|text\/html)$/i.test(previewEntry.mediaType))
-  const previewIsImage = Boolean(previewEntry && /^image\/(png|jpeg|gif|webp|avif|svg\+xml)$/i.test(previewEntry.mediaType))
-  const previewQuery = useEditorSpineText(book, manifestQuery.data, previewIsText ? activeHref ?? undefined : undefined)
+  const previewIsText = Boolean(previewEntry && /^(application\/(xhtml\+xml|xml)|text\/html)$/i.test(previewEntry.mediaType) && !/\.(opf|ncx)$/i.test(previewEntry.path))
+  const previewIsCodeText = Boolean(
+    previewEntry &&
+    !previewIsText &&
+    (/^(text\/(css|plain)|application\/(oebps-package\+xml|x-dtbncx\+xml|xml))$/i.test(previewEntry.mediaType) ||
+      /\.(css|opf|ncx|xml|txt)$/i.test(previewEntry.path)),
+  )
+  const previewIsImage = Boolean(previewEntry && /^image\/(png|jpe?g|gif|webp|avif|svg\+xml)$/i.test(previewEntry.mediaType))
+  const previewQuery = useEditorSpineText(book, manifestQuery.data, previewIsText || previewIsCodeText ? activeHref ?? undefined : undefined)
   const previewContent = previewIsText ? previewQuery.data : previewIsImage && activeHref
     ? `<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body><img alt="封面或书内图片" src="./${encodeURIComponent(activeHref.split('/').at(-1) ?? '')}${activeFragment ? `#${encodeURIComponent(activeFragment)}` : ''}"/></body></html>`
     : undefined
   const activeDocument = editableDocument ?? (activeHref && previewContent ? { href: activeHref, content: previewContent } : null)
   const previewOnly = !editableDocument
+  const archiveEntries = useMemo(() => {
+    if (manifestQuery.data && editorSourceRevision(manifestQuery.data) === source?.revisionId) {
+      return editorSourceEntries(manifestQuery.data)
+    }
+    return (draft?.documents ?? []).map((doc) => ({
+      path: doc.href,
+      mediaType: 'application/xhtml+xml',
+      size: doc.content.length,
+    }))
+  }, [draft?.documents, manifestQuery.data, source?.revisionId])
+  const changedDocHrefs = useMemo(
+    () => new Set((draft?.documents ?? []).filter((doc) => doc.changed).map((doc) => doc.href)),
+    [draft?.documents],
+  )
+  const activeXhtmlValidation = useMemo(
+    () => (editableDocument ? validateEpubXhtml(editableDocument.content) : { valid: true, issue: null }),
+    [editableDocument],
+  )
+  const [collapsedFileDirs, setCollapsedFileDirs] = useState<Set<string>>(() => new Set())
+  const allFileDirs = useMemo(() => {
+    const dirs = new Set<string>()
+    for (const entry of archiveEntries) {
+      const parts = entry.path.split('/').filter(Boolean)
+      let current = ''
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        current = current ? `${current}/${parts[i]!}` : parts[i]!
+        dirs.add(current)
+      }
+    }
+    return [...dirs]
+  }, [archiveEntries])
+  const [splitResourceKey, setSplitResourceKey] = useState(0)
+  const splitContentRef = useRef<string | undefined>(undefined)
+  const lastValidSplitMarkupRef = useRef<{ href: string; content: string } | null>(null)
+  if (editableDocument && activeXhtmlValidation.valid) {
+    lastValidSplitMarkupRef.current = { href: editableDocument.href, content: editableDocument.content }
+  }
+  const splitPreviewContent = useMemo(() => {
+    if (!editableDocument) return undefined
+    return lastValidSplitMarkupRef.current?.href === editableDocument.href
+      ? lastValidSplitMarkupRef.current.content
+      : editableDocument.content
+  }, [editableDocument])
+  const splitInitialContentRef = useRef<{ href: string | null; srcDoc: string | undefined }>({ href: null, srcDoc: undefined })
+  if (editorMode === 'split' && activeHref && splitPreviewContent) {
+    if (splitInitialContentRef.current.href !== activeHref) {
+      splitInitialContentRef.current = { href: activeHref, srcDoc: epubEditorFrame(splitPreviewContent, darkTheme) }
+    }
+  } else {
+    splitInitialContentRef.current = { href: null, srcDoc: undefined }
+  }
+  const splitPreviewSrcDoc = splitInitialContentRef.current.srcDoc
+  const [debouncedSplitContent, setDebouncedSplitContent] = useState<string | undefined>(splitPreviewContent)
+  const appliedSplitContentRef = useRef<{ doc: Document | null; content: string | undefined; resourceSig: string | null }>({
+    doc: null,
+    content: undefined,
+    resourceSig: null,
+  })
+  splitContentRef.current = debouncedSplitContent
+
+  useEffect(() => {
+    if (editorMode !== 'split') {
+      setDebouncedSplitContent(splitPreviewContent)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setDebouncedSplitContent(splitPreviewContent)
+    }, 150)
+    return () => window.clearTimeout(timer)
+  }, [editorMode, splitPreviewContent])
   const draftRef = useRef(draft)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const activeDocumentRef = useRef(activeDocument)
@@ -172,7 +249,7 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
       const recovered = draft && restoreEpubDraft(draft, payload)
       if (!recovered) return false
       const href = payload.activeHref && recovered.documents.some((item) => item.href === payload.activeHref) ? payload.activeHref : recovered.spineOrder[0] ?? null
-      setDraft(recovered); draftRef.current = recovered; setView(payload.view); setActiveHref(href); setFileHref(href)
+      setDraft(recovered); draftRef.current = recovered; setView(payload.view); setActiveHref(href)
       const index = payload.activeTocIndex !== null && recovered.tocEntries[payload.activeTocIndex] ? payload.activeTocIndex : null
       setActiveTocIndex(index); setSelectedTocIndices(index === null ? new Set() : new Set([index]))
       const location = index === null ? null : splitTocHref(recovered.tocEntries[index]!.href)
@@ -222,8 +299,63 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
     const active = activeDocumentRef.current
     if (!frameDocument || frameDocument !== iframeRef.current?.contentDocument || !active || !loaded || editorSourceRevision(loaded) !== sourceRevision.current) return
     setResourceWarning(false)
-    return prepareEditorResources(frameDocument, active.content, active.href, loaded, undefined, () => setResourceWarning(true))
-  }, [frameDocument, manifestQuery.data, activeHref, frameGeneration])
+    return prepareEditorResources(frameDocument, active.content, active.href, loaded, undefined, () => setResourceWarning(true), originalStyles)
+  }, [frameDocument, manifestQuery.data, activeHref, frameGeneration, originalStyles])
+
+  useEffect(() => {
+    if (editorMode !== 'split') return
+    if (splitFrameDocument && splitFrameDocument === splitIframeRef.current?.contentDocument) {
+      applyEpubEditorTheme(splitFrameDocument, darkTheme)
+      applyEpubBackgroundContrast(splitFrameDocument, backgroundContrast)
+    }
+  }, [editorMode, splitFrameDocument, darkTheme, backgroundContrast])
+
+  useEffect(() => {
+    if (editorMode !== 'split') return
+    const loaded = manifestQuery.data
+    const content = splitContentRef.current
+    if (!splitFrameDocument || splitFrameDocument !== splitIframeRef.current?.contentDocument || !activeHref || !content || !loaded || editorSourceRevision(loaded) !== sourceRevision.current) return
+    return prepareEditorResources(splitFrameDocument, content, activeHref, loaded, undefined, undefined, originalStyles)
+  }, [editorMode, splitFrameDocument, manifestQuery.data, activeHref, originalStyles, splitResourceKey])
+
+  useEffect(() => {
+    if (editorMode !== 'split' || !debouncedSplitContent) return
+    if (!splitFrameDocument || splitFrameDocument !== splitIframeRef.current?.contentDocument) return
+
+    const resourceSig = (debouncedSplitContent.match(/<(?:link|style|img|image)\b[^>]*>/gi) ?? []).join('\n')
+    const prev = appliedSplitContentRef.current
+    if (prev.doc !== splitFrameDocument) {
+      appliedSplitContentRef.current = { doc: splitFrameDocument, content: debouncedSplitContent, resourceSig }
+      return
+    }
+    if (prev.content === debouncedSplitContent) return
+
+    const prevScroll = splitFrameDocument.scrollingElement?.scrollTop ?? 0
+    const existingImgUrls = [...splitFrameDocument.body.querySelectorAll('img[src]')].map((el) => el.getAttribute('src'))
+    const parsed = new DOMParser().parseFromString(debouncedSplitContent, 'application/xhtml+xml')
+    const nextBody = parsed.getElementsByTagName('body')[0]
+    if (!parsed.querySelector('parsererror') && nextBody) {
+      const imported = Array.from(nextBody.childNodes, (node) => splitFrameDocument.importNode(node, true))
+      splitFrameDocument.body.replaceChildren(...imported)
+      if (prev.resourceSig === resourceSig) {
+        const nextImgs = [...splitFrameDocument.body.querySelectorAll('img[src]')]
+        nextImgs.forEach((img, index) => {
+          const cachedUrl = existingImgUrls[index]
+          if (cachedUrl && cachedUrl.startsWith('blob:')) {
+            img.setAttribute('src', cachedUrl)
+          }
+        })
+      }
+    }
+    const resourceChanged = prev.resourceSig !== resourceSig
+    appliedSplitContentRef.current = { doc: splitFrameDocument, content: debouncedSplitContent, resourceSig }
+    if (resourceChanged) {
+      setSplitResourceKey((k) => k + 1)
+    }
+    requestAnimationFrame(() => {
+      if (splitFrameDocument.scrollingElement) splitFrameDocument.scrollingElement.scrollTop = prevScroll
+    })
+  }, [editorMode, splitFrameDocument, debouncedSplitContent])
 
   useEffect(() => {
     if (!source || sourceRevision.current === source.revisionId || (draft && dirty)) return
@@ -231,7 +363,6 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
     const firstTocEntry = source.tocEntries.find((entry) => source.documents.some((document) => document.href === splitTocHref(entry.href).documentHref))
     const firstLocation = firstTocEntry ? splitTocHref(firstTocEntry.href) : null
     setActiveHref(firstLocation?.documentHref ?? source.spineOrder[0] ?? null)
-    setFileHref(firstLocation?.documentHref ?? source.spineOrder[0] ?? null)
     setActiveFragment(firstLocation?.fragment ?? null)
     setExpandedTocIndices(setOfIndices(parentIndices(buildEpubTocTree(source.tocEntries))))
     const firstTocIndex = firstTocEntry ? source.tocEntries.indexOf(firstTocEntry) : -1
@@ -269,7 +400,6 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
   }
 
   function navigateTo(href: string) {
-    setShowTitleActions(false)
     flushPendingFrameEdit()
     const { documentHref, fragment } = splitTocHref(href)
     setActiveHref(documentHref)
@@ -294,14 +424,13 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
     viewScrollRef.current[view] = { href: activeHref, top: scrolling?.scrollTop ?? 0 }
     const entry = activeTocIndex === null ? null : draft?.tocEntries[activeTocIndex]
     const destination = next === 'files'
-      ? (activeHref && draft?.spineOrder.includes(activeHref) ? activeHref : fileHref ?? draft?.spineOrder[0])
+      ? (activeHref && draft?.spineOrder.includes(activeHref) ? activeHref : viewScrollRef.current.files?.href ?? draft?.spineOrder[0])
       : entry?.href
     const destinationHref = destination ? splitTocHref(destination).documentHref : activeHref
     const savedScroll = viewScrollRef.current[next]
     restoreScrollRef.current = savedScroll?.href === destinationHref ? savedScroll.top : null
     setView(next)
     if (destination) {
-      if (next === 'files') setFileHref(destinationHref ?? null)
       navigateTo(destination)
     }
     if (scrolling && destinationHref === activeHref && restoreScrollRef.current !== null) {
@@ -447,7 +576,6 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
     document.body.contentEditable = savingRef.current || previewOnlyRef.current ? 'false' : 'true'
     document.body.setAttribute('aria-label', 'EPUB 正文编辑区')
     document.addEventListener('click', (event) => {
-      setShowTitleActions(false)
       if ((event.target as Element | null)?.closest('a')) event.preventDefault()
     })
     document.addEventListener('auxclick', (event) => {
@@ -482,11 +610,40 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
     navigation.back()
   }
 
+  function switchEditorMode(nextMode: 'wysiwyg' | 'source' | 'split') {
+    if (nextMode === editorMode) return
+    if (editorMode === 'wysiwyg') {
+      flushPendingFrameEdit()
+      setSourceError(null)
+      setEditorMode(nextMode)
+      return
+    }
+    if (nextMode === 'wysiwyg') {
+      if (!activeXhtmlValidation.valid) {
+        setSourceError(activeXhtmlValidation.issue?.message ?? 'XHTML 语法有误，请先修复后再切换到所见即所得模式。')
+        return
+      }
+      setSourceError(null)
+      setFrameGeneration((value) => value + 1)
+    }
+    setEditorMode(nextMode)
+  }
+
   async function save() {
     const baseRevisionId = sourceRevision.current
     if (!draft || !baseRevisionId || !source || !dirty) return
     const currentDraft = pendingFrameEditRef.current ? flushPendingFrameEdit() : draft
     if (!currentDraft) return
+    for (const doc of changedDocuments(currentDraft)) {
+      const check = validateEpubXhtml(doc.content)
+      if (!check.valid) {
+        setActiveHref(doc.href)
+        setEditorMode('source')
+        setSourceError(`${doc.href} 第 ${check.issue?.line ?? 1} 行：${check.issue?.message ?? 'XHTML 语法错误，无法保存'}`)
+        return
+      }
+    }
+    setSourceError(null)
     setSaveError(false)
     savingRef.current = true
     setSaving(true)
@@ -551,7 +708,6 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
     )
   }
 
-  const directoryDocumentHrefs = new Set((draft?.tocEntries ?? []).map((entry) => splitTocHref(entry.href).documentHref))
   const syncTitleReason = activeTocIndex === null ? '先选择一个目录项。' : activeHref !== currentDocument?.href ? '先定位到该目录项对应的正文。' : headingSync.reason
 
   const diffSummary = useMemo(() => draft ? getEpubEditorDiff(draft, false) : null, [draft])
@@ -606,11 +762,7 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,2fr)_minmax(0,3fr)] md:grid-cols-[280px_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] lg:grid-cols-[320px_minmax(0,1fr)]">
           {/* Left Column: TOC Directory & Hierarchy */}
           <aside className="flex min-h-0 flex-col overflow-hidden border-b border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 md:border-b-0 md:border-r">
-            <div role="group" aria-label="EPUB 视图" className="flex shrink-0 gap-1 border-b border-stone-200 p-2 dark:border-stone-800">
-              {(['toc', 'files'] as const).map((item) => <button key={item} type="button" aria-pressed={view === item} onClick={() => switchView(item)} className={`flex-1 rounded-md px-2 py-1.5 text-xs ${view === item ? 'bg-stone-200 font-medium text-stone-900 dark:bg-stone-700 dark:text-white' : 'text-stone-500 hover:bg-stone-500/10'}`}>{item === 'toc' ? '按目录' : '按文件'}</button>)}
-            </div>
-            <div className={view === 'toc' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-            {searchOpen || tocSearch ? (
+            {view === 'toc' && (searchOpen || tocSearch) ? (
               <div className="flex h-11 shrink-0 items-center gap-2 border-b border-stone-200 px-3 dark:border-stone-800">
                 <svg className="h-4 w-4 shrink-0 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <circle cx="11" cy="11" r="8" />
@@ -658,46 +810,85 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
                   </svg>
                 </button>
               </div>
-            ) : selectedIndices.length > 1 ? (
+            ) : view === 'toc' && selectedIndices.length > 1 ? (
               <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-stone-200 px-3 dark:border-stone-800">
                 <span className="rounded-full bg-stone-900 px-2.5 py-0.5 text-xs font-medium text-white dark:bg-stone-100 dark:text-stone-900">已选 {selectedIndices.length} 项</span>
                 <button type="button" onClick={() => setSelectedTocIndices(new Set(activeTocIndex === null ? [] : [activeTocIndex]))} className="text-xs text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-100">取消选择</button>
               </div>
             ) : (
-              <div className="flex h-11 shrink-0 items-center justify-between border-b border-stone-200 px-3 dark:border-stone-800">
-                <div className="flex items-center gap-1.5"><span className="text-sm font-semibold text-stone-800 dark:text-stone-100">{_('editor.tocTitle') || '目录'}</span><span className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] tabular-nums text-stone-500 dark:bg-stone-800 dark:text-stone-400">{draft.tocEntries.length}</span></div>
-                <div className="flex items-center gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchOpen(true)
-                      setTimeout(() => searchInputRef.current?.focus(), 50)
-                    }}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-500/10 hover:text-stone-700 dark:hover:text-stone-200"
-                    title="搜索目录"
-                    aria-label="搜索目录"
-                  >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <circle cx="11" cy="11" r="8" />
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                    </svg>
-                  </button>
+              <div className="flex h-11 shrink-0 items-stretch justify-between gap-2 border-b border-stone-200 px-3 dark:border-stone-800">
+                <div role="group" aria-label="EPUB 视图" className="flex items-stretch gap-4">
+                  {(['toc', 'files'] as const).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      aria-label={item === 'toc' ? '目录' : '文件'}
+                      aria-pressed={view === item}
+                      onClick={() => switchView(item)}
+                      className={cn(
+                        '-mb-px inline-flex items-center gap-1.5 border-b-2 px-0.5 text-xs transition-colors',
+                        view === item
+                          ? 'border-stone-900 font-semibold text-stone-900 dark:border-stone-100 dark:text-stone-100'
+                          : 'border-transparent text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200',
+                      )}
+                    >
+                      <span>{item === 'toc' ? '目录' : '文件'}</span>
+                      {item === 'toc' && (
+                        <span aria-hidden="true" className="rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px] leading-none tabular-nums text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                          {draft.tocEntries.length}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-0.5 self-center">
+                  {view === 'toc' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchOpen(true)
+                        setTimeout(() => searchInputRef.current?.focus(), 50)
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 transition-colors hover:bg-stone-500/10 hover:text-stone-700 dark:hover:text-stone-200"
+                      title="搜索目录"
+                      aria-label="搜索目录"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <circle cx="11" cy="11" r="8" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                      </svg>
+                    </button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      const allParents = setOfIndices(parentIndices(tocTree))
-                      const allExpanded = allParents.size > 0 && [...allParents].every((idx) => expandedTocIndices.has(idx))
-                      setExpandedTocIndices(allExpanded ? new Set() : allParents)
+                      if (view === 'toc') {
+                        const allParents = setOfIndices(parentIndices(tocTree))
+                        const allExpanded = allParents.size > 0 && [...allParents].every((idx) => expandedTocIndices.has(idx))
+                        setExpandedTocIndices(allExpanded ? new Set() : allParents)
+                      } else {
+                        const allCollapsed = allFileDirs.length > 0 && allFileDirs.every((dir) => collapsedFileDirs.has(dir))
+                        setCollapsedFileDirs(allCollapsed || collapsedFileDirs.size > 0 ? new Set() : new Set(allFileDirs))
+                      }
                     }}
                     className="h-7 px-2 text-[11px] text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200"
-                    title={expandedTocIndices.size > 0 ? '全部折叠' : '全部展开'}
+                    title={
+                      view === 'toc'
+                        ? (expandedTocIndices.size > 0 ? '全部折叠' : '全部展开')
+                        : (collapsedFileDirs.size > 0 ? '全部展开' : '全部折叠')
+                    }
                   >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{expandedTocIndices.size > 0 ? <><path d="m7 20 5-5 5 5" /><path d="m7 4 5 5 5-5" /></> : <><path d="m7 15 5 5 5-5" /><path d="m7 9 5-5 5 5" /></>}</svg>
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      {(view === 'toc' ? expandedTocIndices.size > 0 : collapsedFileDirs.size === 0)
+                        ? <><path d="m7 20 5-5 5 5" /><path d="m7 4 5 5 5-5" /></>
+                        : <><path d="m7 15 5 5 5-5" /><path d="m7 9 5-5 5 5" /></>}
+                    </svg>
                   </Button>
                 </div>
               </div>
             )}
+            <div className={view === 'toc' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
 
             {/* Tree View */}
             <div className="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
@@ -717,53 +908,235 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
             </div>
             </div>
             <div className={view === 'files' ? 'min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar' : 'hidden'}>
-              <p className="px-2 py-2 text-xs font-medium text-stone-500 dark:text-stone-400">正文阅读顺序</p>
-              {view === 'files' && <DndContext sensors={tocSensors} collisionDetection={closestCenter} onDragEnd={({ active, over }) => {
-                if (over && active.id !== over.id) update((current) => reorderEpubSpineDocument(current, String(active.id), String(over.id)))
-              }}>
-                <SortableContext items={draft.spineOrder} strategy={verticalListSortingStrategy}>
-                  {draft.spineOrder.map((href, index) => <EpubFileRow key={href} href={href} index={index} active={fileHref === href} unlisted={!directoryDocumentHrefs.has(href)} onSelect={() => { setFileHref(href); restoreScrollRef.current = null; navigateTo(href) }} />)}
-                </SortableContext>
-              </DndContext>}
+              {view === 'files' && (
+                <EpubFileTree
+                  entries={archiveEntries}
+                  spineOrder={draft.spineOrder}
+                  activeHref={activeHref}
+                  changedHrefs={changedDocHrefs}
+                  collapsedDirs={collapsedFileDirs}
+                  onToggleDir={(dirPath) => {
+                    setCollapsedFileDirs((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(dirPath)) next.delete(dirPath)
+                      else next.add(dirPath)
+                      return next
+                    })
+                  }}
+                  onSelect={(href) => {
+                    restoreScrollRef.current = null
+                    navigateTo(href)
+                  }}
+                />
+              )}
             </div>
 
           </aside>
 
           {/* Middle Column: Sandboxed iframe Text Editor */}
-          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-white px-4 pb-4 pt-3 sm:px-6 sm:pb-6 sm:pt-4 dark:bg-stone-900">
-            {view === 'toc' && <div className="mb-3 flex shrink-0 items-center gap-3 border-b border-stone-200 pb-3 dark:border-stone-800">
-              <label className="min-w-0 flex-1">
-                <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-stone-400">目录标题</span>
+          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-white dark:bg-stone-900">
+            <div className="mx-4 mt-3 flex shrink-0 items-center justify-between gap-3 border-b border-stone-200 pb-2.5 sm:mx-6 sm:mt-4 dark:border-stone-800">
+              {view === 'toc' ? (
                 <input
                   aria-label={`目录标题 ${(activeTocIndex ?? 0) + 1}`}
                   disabled={activeTocIndex === null}
                   value={currentTocEntry?.title ?? ''}
                   onChange={(event) => activeTocIndex !== null && update((current) => editEpubTocEntry(current, activeTocIndex, { title: event.target.value }))}
                   placeholder={activeHref?.split('/').at(-1) || '选择目录项以编辑标题'}
-                  className="w-full border-0 border-b border-stone-200 bg-transparent px-0 py-1 text-base font-semibold text-stone-800 outline-none placeholder:text-stone-400 focus:border-stone-500 disabled:cursor-default disabled:border-transparent dark:border-stone-700 dark:text-stone-100 dark:focus:border-stone-400"
+                  className="min-w-0 flex-1 bg-transparent text-lg font-bold tracking-tight text-stone-900 outline-none placeholder:text-stone-400 disabled:cursor-default dark:text-stone-100 sm:text-xl"
                 />
-              </label>
-              <div ref={titleActionsRef} className="relative shrink-0">
-                <button type="button" aria-label="目录项选项" aria-expanded={showTitleActions} onClick={() => setShowTitleActions((open) => !open)} className="flex h-8 w-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-500/10 dark:text-stone-400">
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-stone-600 dark:text-stone-300">
+                  {activeHref?.split('/').at(-1) || ''}
+                </span>
+              )}
+
+              <div className="flex shrink-0 items-center gap-1.5">
+                {editableDocument && (
+                  <div role="group" aria-label="编辑模式" className="flex items-center gap-0.5 rounded-md bg-stone-100 p-0.5 dark:bg-stone-800">
+                    {([
+                      ['wysiwyg', '预览'],
+                      ['source', '源码'],
+                      ['split', '分栏'],
+                    ] as const).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={editorMode === mode}
+                        onClick={() => switchEditorMode(mode)}
+                        className={cn(
+                          'rounded px-2 py-0.5 text-[11px] transition-colors',
+                          editorMode === mode
+                            ? 'bg-white font-medium text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-stone-100'
+                            : 'text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {previewOnly && activeHref && (
+                  <span
+                    role="status"
+                    title={previewContent || previewIsCodeText ? '此文件不可在工作台直接编辑，仅供预览。' : undefined}
+                    className="rounded-full bg-stone-100 px-2 py-0.5 text-[11px] text-stone-500 dark:bg-stone-800 dark:text-stone-400"
+                  >
+                    {previewContent || (previewIsCodeText && previewQuery.data !== undefined)
+                      ? '只读预览'
+                      : previewQuery.isPending && (previewIsText || previewIsCodeText)
+                        ? '加载预览…'
+                        : '无可显示内容'}
+                  </span>
+                )}
+                {view === 'toc' && !syncTitleReason && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={syncBodyHeading}
+                    className="h-7 px-2.5 text-xs"
+                  >
+                    同步正文标题
+                  </Button>
+                )}
+                {(resourceWarning || manifestQuery.isError) && (
+                  <span
+                    role="status"
+                    title="部分图片或样式无法显示，原始引用会保留。"
+                    aria-label="部分图片或样式无法显示，原始引用会保留。"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-amber-600 dark:text-amber-400"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                      <path d="M12 9v4" />
+                      <path d="M12 17h.01" />
+                    </svg>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  aria-pressed={originalStyles}
+                  aria-label={originalStyles ? '原书样式：开' : '原书样式：关'}
+                  title={originalStyles ? '原书样式：开（点击切换为简洁白底编辑，保存仍保留原样式）' : '原书样式：关（当前为简洁编辑模式，保存仍保留原样式）'}
+                  onClick={() => setOriginalStyles((value) => !value)}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-md border transition-colors',
+                    originalStyles
+                      ? 'border-stone-900 bg-stone-900 text-white dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900'
+                      : 'border-stone-200 text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:border-stone-700 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+                  )}
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                  </svg>
                 </button>
-                {showTitleActions && <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-xl border border-stone-200 bg-white p-3 shadow-lg dark:border-stone-700 dark:bg-stone-900">
-                  <Button variant="secondary" size="sm" disabled={Boolean(syncTitleReason)} title={syncTitleReason ?? undefined} onClick={syncBodyHeading} className="w-full text-xs">同步正文标题</Button>
-                  {syncTitleReason && <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">{syncTitleReason}</p>}
-                  {currentTocEntry && <details className="mt-2 text-xs text-stone-500 dark:text-stone-400"><summary className="cursor-pointer">定位详情</summary><p className="mt-1 break-all">{currentTocEntry.href}</p></details>}
-                </div>}
+                <button
+                  type="button"
+                  aria-pressed={backgroundContrast}
+                  aria-label={backgroundContrast ? '增强背景文字：开' : '增强背景文字：关'}
+                  title={backgroundContrast ? '增强背景文字：开（深色背景时提高文字可读性）' : '增强背景文字：关（深色背景时提高文字可读性）'}
+                  onClick={() => setBackgroundContrast((value) => !value)}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-md border transition-colors',
+                    backgroundContrast
+                      ? 'border-stone-900 bg-stone-900 text-white dark:border-stone-100 dark:bg-stone-100 dark:text-stone-900'
+                      : 'border-stone-200 text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:border-stone-700 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200',
+                  )}
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 3v18" />
+                    <path d="M12 8l4-2.5" />
+                    <path d="M12 12l5-3" />
+                    <path d="M12 16l4-2.5" />
+                  </svg>
+                </button>
+                {view === 'toc' && currentTocEntry && (
+                  <span
+                    title={`定位：${currentTocEntry.href}`}
+                    aria-label={`定位：${currentTocEntry.href}`}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:text-stone-500 dark:hover:bg-stone-800 dark:hover:text-stone-300"
+                  >
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 16v-4" />
+                      <path d="M12 8h.01" />
+                    </svg>
+                  </span>
+                )}
               </div>
-            </div>}
-
-            {navigationMessage && <p role="status" className="mb-2 text-xs text-amber-700 dark:text-amber-400">{navigationMessage}</p>}
-            {(resourceWarning || manifestQuery.isError) && <p role="status" className="mb-2 text-xs text-amber-700 dark:text-amber-400">部分图片或样式无法显示，原始引用会保留。</p>}
-
-            <div className="mb-2 flex shrink-0 flex-wrap items-center gap-3 text-xs text-stone-500 dark:text-stone-400">
-              <button type="button" aria-pressed={backgroundContrast} onClick={() => setBackgroundContrast((value) => !value)} className="rounded border border-stone-300 px-2 py-1 hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800">增强背景文字{backgroundContrast ? '：开' : '：关'}</button>
             </div>
-            {previewOnly && activeHref && <p role="status" className="mb-2 text-xs text-stone-500 dark:text-stone-400">{previewContent ? '此目录项不可在工作台编辑，仅供预览。' : previewQuery.isPending && previewIsText ? '正在加载目录项预览…' : '此目录项没有可显示的正文或图片。'}</p>}
 
-            {activeHref && activeDocument ? (
+            {(navigationMessage || sourceError) && (
+              <div className="mx-4 mt-2 shrink-0 space-y-1 text-xs sm:mx-6">
+                {sourceError && <p role="alert" className="text-red-600 dark:text-red-400">{sourceError}</p>}
+                {navigationMessage && <p role="status" className="text-amber-700 dark:text-amber-400">{navigationMessage}</p>}
+              </div>
+            )}
+
+            {editableDocument && editorMode === 'source' ? (
+              <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
+                <CodeEditor
+                  ariaLabel="EPUB 源码编辑区"
+                  language="xhtml"
+                  value={editableDocument.content}
+                  onChange={(next) => {
+                    setSourceError(null)
+                    update((current) => editEpubDocument(current, editableDocument.href, next))
+                  }}
+                  issues={activeXhtmlValidation.issue ? [activeXhtmlValidation.issue] : []}
+                  minHeight="0"
+                  className="min-h-0 flex-1"
+                />
+              </div>
+            ) : editableDocument && editorMode === 'split' ? (
+              <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-stone-200 dark:divide-stone-800 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+                <div className="flex min-h-0 flex-col p-3">
+                  <CodeEditor
+                    ariaLabel="EPUB 源码编辑区"
+                    language="xhtml"
+                    value={editableDocument.content}
+                    onChange={(next) => {
+                      setSourceError(null)
+                      update((current) => editEpubDocument(current, editableDocument.href, next))
+                    }}
+                    issues={activeXhtmlValidation.issue ? [activeXhtmlValidation.issue] : []}
+                    minHeight="0"
+                    className="min-h-0 flex-1"
+                  />
+                </div>
+                <iframe
+                  ref={splitIframeRef}
+                  key={activeHref ? `split:${activeHref}` : 'split:none'}
+                  srcDoc={splitPreviewSrcDoc}
+                  title="EPUB 源码实时预览"
+                  sandbox="allow-same-origin"
+                  onLoad={() => {
+                    const doc = splitIframeRef.current?.contentDocument
+                    if (doc) setSplitFrameDocument(doc)
+                  }}
+                  className="min-h-0 h-full w-full border-0 bg-white dark:bg-stone-900"
+                />
+              </div>
+            ) : previewIsCodeText && activeHref ? (
+              previewQuery.isPending ? (
+                <div className="m-auto text-sm text-stone-400">正在加载源码…</div>
+              ) : previewQuery.data !== undefined ? (
+                <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
+                  <CodeEditor
+                    ariaLabel="EPUB 只读源码区"
+                    language={/\.css$/i.test(activeHref) ? 'css' : 'xml'}
+                    value={previewQuery.data}
+                    onChange={() => {}}
+                    readOnly
+                    minHeight="0"
+                    className="min-h-0 flex-1"
+                  />
+                </div>
+              ) : (
+                <div className="m-auto text-sm text-stone-400">无法读取此文件内容。</div>
+              )
+            ) : activeHref && activeDocument ? (
               <iframe
                 ref={iframeRef}
                 key={iframeContent.key}
@@ -780,7 +1153,7 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
 
         </div>
 
-        {showDiff && <EpubEditorDiffModal draft={draft} saving={saving || saveMutation.isPending} onClose={() => setShowDiff(false)} onSave={() => { setShowDiff(false); void save() }} />}
+        {showDiff && <EpubEditorDiffModal draft={draft} saving={saving || saveMutation.isPending} onClose={() => setShowDiff(false)} onSave={() => { setShowDiff(false); void save() }} onDiscard={() => { setShowDiff(false); setDiscardConfirm(true) }} />}
 
         {/* Leave Draft Confirm Dialog */}
         {navigation.blocked && <LeaveEditorDialog saving={saving || saveMutation.isPending}
@@ -793,8 +1166,8 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
         {/* Discard Confirm Dialog */}
         {discardConfirm && (
           <ConfirmDialog
-            title={_('editor.discardConfirmTitle') || '放弃本次草稿？'}
-            message={_('editor.discardConfirmMessage') || '正文、目录和阅读顺序的所有尚未保存的修改都会恢复。'}
+            title={_('editor.discardConfirmTitle') || '放弃草稿'}
+            message={_('editor.discardConfirmMessage') || '未保存的修改将会丢失，确定放弃吗？'}
             confirmLabel={_('editor.discard') || '放弃草稿'}
             confirmVariant="danger"
             onConfirm={async () => {

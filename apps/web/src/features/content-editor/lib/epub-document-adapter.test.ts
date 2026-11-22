@@ -49,7 +49,7 @@ describe('EPUB document adapter', () => {
     expect(lightFrame).toContain('color-scheme:light')
     expect([...escapedStyleValue.matchAll(/<\/style>/gi)]).toHaveLength(1)
     expect(lightFrame).toContain('max-width:min(100%,52rem)')
-    expect(lightFrame).toContain('min-height:calc(100vh - 48px)')
+    expect(lightFrame).toContain('min-height:100%')
     expect(lightFrame).toContain('margin-inline:auto!important')
     expect(lightFrame).not.toContain('body{color:#1c1917;background:')
   })

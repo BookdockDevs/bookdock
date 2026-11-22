@@ -96,6 +96,7 @@ export default function TocPatternRow({ id, level, regex, replacement, enabled, 
             type="text"
             value={regex}
             aria-label={`第${level}层正则表达式`}
+            placeholder={_('settings.tocRulesRegexPlaceholder')}
             onChange={(event) => onChange({ regex: event.target.value })}
             disabled={disabled || !enabled}
             aria-invalid={error !== null || undefined}

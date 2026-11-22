@@ -33,4 +33,19 @@ describe('EpubEditorDiffModal', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(onSave).toHaveBeenCalledOnce()
   })
+
+  it('triggers discard from the diff modal footer when changes exist', () => {
+    const draft = createEpubEditorDraft({
+      documents: [{ href: 'Text/one.xhtml', content: '<html><body><p>Old</p></body></html>' }],
+      tocEntries: [],
+      spineOrder: ['Text/one.xhtml'],
+    })
+    draft.documents[0]!.content = '<html><body><p>New</p></body></html>'
+    const onDiscard = vi.fn()
+
+    render(<EpubEditorDiffModal draft={draft} saving={false} onClose={vi.fn()} onSave={vi.fn()} onDiscard={onDiscard} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '放弃草稿' }))
+    expect(onDiscard).toHaveBeenCalledOnce()
+  })
 })

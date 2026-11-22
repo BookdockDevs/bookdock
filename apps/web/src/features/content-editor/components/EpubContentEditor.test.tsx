@@ -85,26 +85,6 @@ describe('EPUB content editor', () => {
     await waitFor(() => expect(useToastStore.getState().toasts).toEqual([expect.objectContaining({ type: 'warning', message: { key: 'editor.savePartial', params: { count: 3 } } })]))
   })
 
-  it('saves body source, TOC edits and spine order together, then allows grouped undo', async () => {
-    render(<EpubContentEditor book={book} />)
-    fireEvent.change(screen.getByRole('textbox', { name: '目录标题 1' }), { target: { value: '新标题' } })
-    fireEvent.click(screen.getByRole('button', { name: '按文件' }))
-    act(() => dragHandlers.end!({ active: { id: 'Text/one.xhtml' }, over: { id: 'Text/two.xhtml' } } as DragEndEvent))
-    expect(screen.getByText('已暂存 2 项修改')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '撤销' }))
-    expect(screen.getByText('已暂存 1 项修改')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-
-    await waitFor(() => expect(save).toHaveBeenCalledWith({
-      baseRevisionId: 'rev-1', documents: [],
-      tocEntries: [
-        { href: 'Text/one.xhtml', title: '新标题', level: 1 },
-        { href: 'Text/two.xhtml', title: 'Two', level: 1 },
-      ],
-      spineOrder: ['Text/one.xhtml', 'Text/two.xhtml'],
-    }))
-  })
-
   it('keeps XHTML body edits in the shared draft while switching spine documents', async () => {
     render(<EpubContentEditor book={book} />)
     const frame = await screen.findByTitle('EPUB 正文编辑区')
@@ -212,9 +192,8 @@ describe('EPUB content editor', () => {
     frame.contentDocument!.body.innerHTML = '<h1 id="part-one">Part One</h1><h2 id="part-two">Part Two</h2>'
     fireEvent.click(screen.getByRole('button', { name: 'Part Two' }))
     await waitFor(() => expect(scroll).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole('button', { name: '按文件' }))
-    expect(screen.getByText('未列入目录')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '3. hidden.xhtml' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '文件' }))
+    expect(screen.getByRole('button', { name: /hidden\.xhtml/ })).toBeInTheDocument()
     delete (frame.contentWindow!.Element.prototype as Element & { scrollIntoView?: () => void }).scrollIntoView
   })
 
@@ -239,20 +218,6 @@ describe('EPUB content editor', () => {
     expect(screen.getAllByRole('treeitem').map((item) => item.textContent)).toEqual([
       expect.stringContaining('Last'), expect.stringContaining('Parent'), expect.stringContaining('Child'), expect.stringContaining('Other'),
     ])
-  })
-
-  it('reorders files independently and supports undo and redo across views', async () => {
-    render(<EpubContentEditor book={book} />)
-    fireEvent.click(screen.getByRole('button', { name: '按文件' }))
-    act(() => dragHandlers.end!({ active: { id: 'Text/one.xhtml' }, over: { id: 'Text/two.xhtml' } } as DragEndEvent))
-    fireEvent.click(screen.getByRole('button', { name: '撤销' }))
-    fireEvent.click(screen.getByRole('button', { name: '重做' }))
-    fireEvent.click(screen.getByRole('button', { name: '按目录' }))
-    expect(screen.getAllByRole('treeitem').map((item) => item.textContent)).toEqual(['One', 'Two'])
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
-      tocEntries: source.current.tocEntries, spineOrder: ['Text/two.xhtml', 'Text/one.xhtml'],
-    })))
   })
 
   it('keeps modifier selection separate from the current document and hides hierarchy controls', () => {
@@ -291,7 +256,7 @@ describe('EPUB content editor', () => {
     expect(frame.srcdoc).toContain('src="./cover.svg"')
     fireEvent.load(frame)
     expect(frame.contentDocument!.body.contentEditable).toBe('false')
-    expect(screen.getByText('此目录项不可在工作台编辑，仅供预览。')).toBeInTheDocument()
+    expect(screen.getByText('只读预览')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
   })
 
@@ -345,8 +310,8 @@ describe('EPUB content editor', () => {
     fireEvent.load(firstFrame)
     firstFrame.contentDocument!.body.innerHTML = '<p>First pending edit</p>'
     fireEvent.input(firstFrame.contentDocument!.body)
-    fireEvent.click(screen.getByRole('button', { name: '按文件' }))
-    fireEvent.click(screen.getByRole('button', { name: '2. two.xhtml' }))
+    fireEvent.click(screen.getByRole('button', { name: '文件' }))
+    fireEvent.click(screen.getByRole('button', { name: /two\.xhtml/ }))
     const secondFrame = screen.getByTitle('EPUB 正文编辑区')
     secondFrame.contentDocument!.body.innerHTML = '<p>Two</p>'
     fireEvent.load(secondFrame)
@@ -372,10 +337,10 @@ describe('EPUB content editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Second' }))
     frame.contentDocument!.body.innerHTML = '<p id="first">Edited</p><p id="second">Two</p>'
     fireEvent.input(frame.contentDocument!.body)
-    fireEvent.click(screen.getByRole('button', { name: '按文件' }))
+    fireEvent.click(screen.getByRole('button', { name: '文件' }))
     expect(screen.getByTitle('EPUB 正文编辑区')).toBe(frame)
     expect(screen.queryByRole('textbox', { name: /目录标题/ })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '按目录' }))
+    fireEvent.click(screen.getByRole('button', { name: '目录' }))
     expect(screen.getByTitle('EPUB 正文编辑区')).toBe(frame)
     expect(screen.getByRole('textbox', { name: '目录标题 2' })).toHaveValue('Second')
     expect(screen.getByText('已暂存 1 项修改')).toBeInTheDocument()
@@ -438,5 +403,40 @@ describe('EPUB content editor', () => {
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
     expect(screen.getAllByRole('treeitem')[1]).toHaveAttribute('aria-level', '2')
     expect(screen.getByText(/拖拽不会改变层级/)).toBeInTheDocument()
+  })
+
+  it('renders archive file tree in files view and blocks saving invalid XHTML source', async () => {
+    previewState.manifest = {
+      manifest: {
+        revisionId: 'rev-1',
+        entries: [
+          { path: 'Styles/book.css', mediaType: 'text/css', size: 40 },
+          { path: 'Text/one.xhtml', mediaType: 'application/xhtml+xml', size: 120 },
+        ],
+      },
+      contentUrl: '/file',
+      accountScope: 'test',
+      epoch: 0,
+    } as never
+    render(<EpubContentEditor book={book} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '文件' }))
+    expect(screen.getByRole('tree', { name: 'EPUB 文件树' })).toBeInTheDocument()
+    expect(screen.getByText('Styles')).toBeInTheDocument()
+    expect(screen.getByText('book.css')).toBeInTheDocument()
+    const treeButtons = screen.getByRole('tree', { name: 'EPUB 文件树' }).querySelectorAll('button')
+    expect(treeButtons[0]?.textContent).toContain('Text')
+
+    fireEvent.click(screen.getByRole('button', { name: '源码' }))
+    const sourceBox = screen.getByRole('textbox', { name: 'EPUB 源码编辑区' })
+    fireEvent.change(sourceBox, { target: { value: '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Unclosed</body></html>' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '预览' }))
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.queryByTitle('EPUB 正文编辑区')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(save).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/Text\/one\.xhtml/)
   })
 })

@@ -13,6 +13,7 @@ interface EpubEditorDiffModalProps {
   saving: boolean
   onClose: () => void
   onSave: () => void
+  onDiscard?: () => void
 }
 
 function documentTitle(diff: EpubEditorDocumentDiff, draft: EpubEditorDraftState): string {
@@ -41,7 +42,7 @@ function tocEntryLabel(entry: { title: string; level: number } | null, other: { 
   return entry.level !== other?.level ? `${entry.title}（层级 ${entry.level}）` : entry.title
 }
 
-export default function EpubEditorDiffModal({ draft, saving, onClose, onSave }: EpubEditorDiffModalProps) {
+export default function EpubEditorDiffModal({ draft, saving, onClose, onSave, onDiscard }: EpubEditorDiffModalProps) {
   const _ = useTranslation()
   const diff = getEpubEditorDiff(draft)
   const [expandedId, setExpandedId] = useState<string | null>(diff.documents[0]?.id ?? null)
@@ -121,13 +122,28 @@ export default function EpubEditorDiffModal({ draft, saving, onClose, onSave }: 
           </div>
         )}
 
-        <div className="flex justify-end gap-2 border-t border-stone-200 pt-3 dark:border-stone-800">
-          <Button variant="secondary" onClick={onClose}>{_('library.cancel') || '关闭'}</Button>
-          {diff.changeCount > 0 && (
-            <Button variant="primary" disabled={saving} onClick={onSave}>
-              {saving ? (_('editor.saving') || '保存中…') : (_('editor.save') || '保存')}
+        <div className="flex items-center justify-between gap-2 border-t border-stone-200 pt-3 dark:border-stone-800">
+          {onDiscard && diff.changeCount > 0 ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={saving}
+              onClick={onDiscard}
+              className="!border-red-200/90 !text-red-600 hover:!border-red-300 hover:!bg-red-50/80 hover:!text-red-700 dark:!border-red-900/60 dark:!text-red-400 dark:hover:!border-red-800 dark:hover:!bg-red-950/40 dark:hover:!text-red-300"
+            >
+              {_('editor.discard') || '放弃草稿'}
             </Button>
+          ) : (
+            <span />
           )}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose}>{_('library.cancel') || '关闭'}</Button>
+            {diff.changeCount > 0 && (
+              <Button variant="primary" disabled={saving} onClick={onSave}>
+                {saving ? (_('editor.saving') || '保存中…') : (_('editor.save') || '保存')}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </Modal>

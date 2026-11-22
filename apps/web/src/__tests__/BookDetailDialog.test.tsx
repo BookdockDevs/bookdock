@@ -1330,7 +1330,7 @@ describe('BookDetailDialog content editor action', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    fireEvent.click(await screen.findByRole('button', { name: '编辑正文' }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑内容' }))
 
     expect(navigateMock).toHaveBeenCalledWith({ to: '/books/$id/editor', params: { id: 'book-1' } })
   })
@@ -1435,7 +1435,7 @@ describe('BookDetailDialog more actions', () => {
     render(<BookDetailDialog book={{ ...book, format: 'txt' }} onClose={vi.fn()} onDelete={vi.fn()} />, { wrapper })
 
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    expect(screen.getByRole('button', { name: '编辑正文' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑内容' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更换目录规则' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '追加内容' })).not.toBeInTheDocument()
   })
@@ -1448,7 +1448,7 @@ describe('BookDetailDialog more actions', () => {
     expect(navigateMock).toHaveBeenCalledWith({ to: '/archive', search: { bookId: book.id, bookView: 'data' } })
 
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    expect(screen.getByRole('button', { name: '编辑正文' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑内容' })).toBeInTheDocument()
   })
 })
 
@@ -1849,7 +1849,7 @@ describe('BookDetailDialog shared work mode', () => {
     // Content editing stays in the overflow menu rather than adding a second
     // pair of maintenance buttons to the action row.
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
-    expect(screen.getByRole('button', { name: '编辑正文' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑内容' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '追加内容' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更换目录规则' })).not.toBeInTheDocument()
   })

@@ -59,7 +59,7 @@ describe('local recovery in the workbench', () => {
     const body = frame.contentDocument!.body
     body.innerHTML = '<p>One</p>'; fireEvent.load(frame)
     body.innerHTML = '<p>Changed</p>'; fireEvent.input(body)
-    fireEvent.click(screen.getByRole('button', { name: '按文件' }))
+    fireEvent.click(screen.getByRole('button', { name: '文件' }))
     await waitFor(() => expect(fake.records.size).toBe(1), { timeout: 3000 })
     const stored = [...fake.records.values()][0]
     expect(stored.payload.documents[0].content).toContain('Changed')

@@ -179,4 +179,59 @@ describe('EPUB editor resource references', () => {
     await waitFor(() => expect(destroyed).toHaveBeenCalled())
     expect(frame.querySelector('img')?.getAttribute('src')).toBe('a.png')
   })
+
+  it('ignores missing CSS fallback urls while still reporting missing body images', async () => {
+    class Loader {
+      loadHref: (value: string, base: string) => Promise<string | null> = async () => null
+      async loadItem(item: { href: string }) { return `blob:${item.href}` }
+      async replaceCSS(css: string, base: string) {
+        const matches = [...css.matchAll(/url\(([^)]+)\)/g)]
+        let next = css
+        for (const match of matches) {
+          const resolved = await this.loadHref(match[1]!, base)
+          next = next.replace(match[1]!, resolved ?? '')
+        }
+        return next
+      }
+      destroy() {}
+    }
+    const onMissing = vi.fn()
+    const markup = '<html xmlns="http://www.w3.org/1999/xhtml"><head><style>@font-face{src:url(res:///opt/sony/zw.ttf),url(../Fonts/missing.ttf)} .bg{background:url(../Images/.jpg)}</style></head><body><img src="../Images/Logo.jpg"/><img src="data:image/png;base64,AAA"/></body></html>'
+    const frame = new DOMParser().parseFromString(markup, 'text/html')
+    const source = {
+      manifest: { entries: [{ path: 'OEBPS/images/logo.jpg', mediaType: 'image/jpg', size: 10 }] },
+      accountScope: 'test', epoch: 0, contentUrl: '/file',
+    } as never
+    const dispose = prepareEditorResources(frame, markup, 'OEBPS/Text/ch1.xhtml', source, async () => ({ Loader }), onMissing)
+    await waitFor(() => expect(frame.querySelector('img')?.getAttribute('src')).toBe('blob:OEBPS/images/logo.jpg'))
+    expect(onMissing).not.toHaveBeenCalled()
+    dispose()
+  })
+
+  it('skips author styles when includeStyles is false while keeping images and preserving saved markup', async () => {
+    class Loader {
+      loadHref: (value: string, base: string) => Promise<string | null> = async () => null
+      async loadItem(item: { href: string }) { return `blob:${item.href}` }
+      async replaceCSS(css: string) { return css }
+      destroy() {}
+    }
+    const markup = '<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="stylesheet" href="../Styles/feiye.css"/></head><body style="background:#000"><p>Text<img src="../Images/a.png"/></p></body></html>'
+    const frame = new DOMParser().parseFromString('<html><head></head><body><p>Text<img src="../Images/a.png"></p></body></html>', 'text/html')
+    const source = {
+      manifest: { entries: [
+        { path: 'OEBPS/Styles/feiye.css', mediaType: 'text/css', size: 10 },
+        { path: 'OEBPS/Images/a.png', mediaType: 'image/png', size: 10 },
+      ] },
+      accountScope: 'test', epoch: 0, contentUrl: '/file',
+    } as never
+    const dispose = prepareEditorResources(frame, markup, 'OEBPS/Text/feiye.xhtml', source, async () => ({ Loader }), undefined, false)
+    await waitFor(() => expect(frame.querySelector('img')?.getAttribute('src')).toBe('blob:OEBPS/Images/a.png'))
+    expect(frame.head.querySelector('link[rel="stylesheet"]')).toBeNull()
+    expect(frame.body.hasAttribute('style')).toBe(false)
+    frame.querySelector('p')!.firstChild!.textContent = 'Edited'
+    const saved = serializeVisibleBody(markup, frame.body)
+    expect(saved).toContain('style="background:#000"')
+    expect(saved).toContain('../Images/a.png')
+    dispose()
+  })
 })

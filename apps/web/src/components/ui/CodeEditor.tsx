@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import CodeMirror, { EditorState, EditorView, type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { css } from '@codemirror/lang-css'
+import { xml } from '@codemirror/lang-xml'
 import { linter, type Diagnostic } from '@codemirror/lint'
 import { githubLightInit, githubDarkInit } from '@uiw/codemirror-theme-github'
 
@@ -204,8 +205,14 @@ const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEd
   }, [_])
 
   const extensions = useMemo(() => {
+    const langExt =
+      language === 'xml' || language === 'xhtml' || language === 'html'
+        ? [xml()]
+        : language === 'css'
+          ? [css()]
+          : []
     return [
-      css(),
+      ...langExt,
       EditorView.lineWrapping,
       themeExtension,
       searchPhrases,
@@ -426,7 +433,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEd
         return diagnostics
       }),
     ]
-  }, [themeExtension, searchPhrases, issues, placeholderGutterLines])
+  }, [language, themeExtension, searchPhrases, issues, placeholderGutterLines])
 
   return (
     <div

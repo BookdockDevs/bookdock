@@ -24,11 +24,11 @@ export default function LeaveEditorDialog({ saving, preserve, discard, onLeave, 
       onLeave()
     } finally { working.current = false; setDiscarding(false) }
   }
-  return <ConfirmDialog title="离开内容编辑？" message={<div className="space-y-3">
-    <p>当前修改尚未正式保存。可以保留本地草稿，之后继续编辑。</p>
+  return <ConfirmDialog title="离开编辑" message={<div className="space-y-3">
+    <p>修改尚未正式保存，可先暂存为本地草稿。</p>
     {error && <p role="alert">{error}</p>}
-  </div>} footerLeading={<Button type="button" variant="ghost" size="md" className="mr-auto h-9 px-2 text-xs !text-red-600 hover:!text-red-700 sm:text-sm dark:!text-red-400 dark:hover:!text-red-300" disabled={saving || discarding || preserving} onClick={() => { void discardAndLeave() }}>放弃草稿并离开</Button>}
-    confirmLabel="保留草稿并离开" cancelLabel="继续编辑" confirmVariant="primary" confirmDisabled={saving || discarding}
+  </div>} footerLeading={<Button type="button" variant="secondary" size="md" className="mr-auto !border-red-200/90 !text-red-600 hover:!border-red-300 hover:!bg-red-50/80 hover:!text-red-700 dark:!border-red-900/60 dark:!text-red-400 dark:hover:!border-red-800 dark:hover:!bg-red-950/40 dark:hover:!text-red-300" disabled={saving || discarding || preserving} onClick={() => { void discardAndLeave() }}>放弃并离开</Button>}
+    confirmLabel="暂存并离开" cancelLabel="继续编辑" confirmVariant="primary" confirmDisabled={saving || discarding}
     onConfirm={async () => {
       if (working.current) return
       working.current = true; setPreserving(true)
