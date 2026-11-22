@@ -64,6 +64,9 @@ export default function TocRulePicker({
   const [selectedTarget, setSelectedTarget] = useState<'auto' | 'custom' | string>(activeTarget)
   const [selectionReadyTarget, setSelectionReadyTarget] = useState<'auto' | 'custom' | string>(activeTarget)
   const [selectedExcludedIds, setSelectedExcludedIds] = useState<string[]>(() => excludedChapterIds ?? [])
+  const [editedRuleRevisions, setEditedRuleRevisions] = useState<Record<string, number>>({})
+  const editedRuleRevision = editedRuleRevisions[selectedTarget]
+  const selectedRuleRevision = editedRuleRevision ?? rules.find((rule) => rule.id === selectedTarget)?.updatedAt
   const activeExcludedIds = excludedChapterIds ?? []
 
   useEffect(() => {
@@ -79,21 +82,21 @@ export default function TocRulePicker({
     return { tocRuleId: selectedTarget, excludedChapterIds: previewExcludedIds, limit: 1000, offset: 0 }
   }, [activeTarget, customPatterns, excludedChapterIds, selectedTarget])
 
-  const shouldPreview = Boolean(currentChapters?.length) && selectionReadyTarget === activeTarget
-  const previewQuery = useTocPreview(target, previewReq, { enabled: shouldPreview })
+  const shouldPreview = selectionReadyTarget === activeTarget && (Boolean(currentChapters?.length) || editedRuleRevision !== undefined)
+  const previewQuery = useTocPreview(target, previewReq, { enabled: shouldPreview, ruleRevision: selectedRuleRevision })
   const preview = previewQuery.data?.data
 
-  const [extraChapters, setExtraChapters] = useState<TocPreviewChapter[]>([])
+  const [extraPage, setExtraPage] = useState<{ preview: TocPreviewRes; chapters: TocPreviewChapter[] } | null>(null)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
 
-  // Reset extra chapters when target changes
+  // Any in-flight page belongs to the preview it started from.
   useEffect(() => {
-    setExtraChapters([])
-  }, [selectedTarget])
+    setExtraPage(null)
+  }, [selectedTarget, selectedRuleRevision])
 
   useEffect(() => {
     setSelectedExcludedIds(selectedTarget === activeTarget ? (excludedChapterIds ?? []) : [])
-  }, [activeTarget, excludedChapterIds, selectedTarget])
+  }, [activeTarget, excludedChapterIds, selectedTarget, selectedRuleRevision])
 
   useEffect(() => {
     if (preview) setSelectedExcludedIds(preview.excludedChapterIds)
@@ -134,8 +137,10 @@ export default function TocRulePicker({
 
   const allChapters = useMemo(() => {
     if (!displayedPreview) return []
-    return [...displayedPreview.chapters, ...extraChapters]
-  }, [displayedPreview, extraChapters])
+    return extraPage?.preview === displayedPreview
+      ? [...displayedPreview.chapters, ...extraPage.chapters]
+      : displayedPreview.chapters
+  }, [displayedPreview, extraPage])
 
   const displayedPreviewStats = useMemo(() => {
     if (!displayedPreview) return { totalChapters: 0, levelCounts: {} as Record<number, number> }
@@ -173,7 +178,10 @@ export default function TocRulePicker({
         data: { chapters: TocPreviewChapter[] }
       }
       if (res?.data?.chapters?.length) {
-        setExtraChapters((prev) => [...prev, ...res.data.chapters])
+        setExtraPage((prev) => ({
+          preview,
+          chapters: [...(prev?.preview === preview ? prev.chapters : []), ...res.data.chapters],
+        }))
       }
     } catch {
       // ignore
@@ -195,7 +203,8 @@ export default function TocRulePicker({
   const exclusionsChanged =
     activeExcludedIds.length !== selectedExcludedIds.length ||
     activeExcludedIds.some((id) => !selectedExcludedIds.includes(id))
-  const canApply = isDifferentFromActive || needsRebuild || exclusionsChanged
+  const canApply = (isDifferentFromActive || needsRebuild || exclusionsChanged || editedRuleRevision !== undefined)
+    && (!shouldPreview || (Boolean(preview) && !previewQuery.isError && !previewQuery.isFetching))
   const isApplying = reToc.isPending
 
   function handleApply() {
@@ -369,7 +378,9 @@ export default function TocRulePicker({
 
           {/* Right Column: Preview Panel */}
           <div className="flex min-w-0 flex-1 flex-col gap-2.5">
-            {!displayedPreview ? (
+            {shouldPreview && previewQuery.isError ? (
+              <QueryErrorState className="py-4" isRetrying={previewQuery.isFetching} onRetry={previewQuery.refetch} />
+            ) : !displayedPreview ? (
               <div className="flex flex-1 items-center justify-center p-8 text-xs text-stone-400">
                 {shouldPreview ? _('library.tocRulePreviewLoading') : _('library.tocRuleCurrentLoading')}
               </div>
@@ -504,6 +515,9 @@ export default function TocRulePicker({
           initialPatterns={ruleEditor.mode === 'edit-custom' ? customPatterns : null}
           onClose={() => setRuleEditor(null)}
           onGlobalSaved={(savedRule) => {
+            if (ruleEditor.mode === 'edit-global' && JSON.stringify(ruleEditor.rule.patterns) !== JSON.stringify(savedRule.patterns)) {
+              setEditedRuleRevisions((previous) => ({ ...previous, [savedRule.id]: savedRule.updatedAt }))
+            }
             setRuleEditor(null)
             setSelectedTarget(savedRule.id)
           }}

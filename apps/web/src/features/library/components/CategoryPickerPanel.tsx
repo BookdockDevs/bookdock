@@ -103,6 +103,7 @@ export default function CategoryPickerPanel({
               </label>
               <Select
                 id={parentSelectId}
+                aria-label={_('library.parentCategory')}
                 value={newParentId}
                 onValueChange={setNewParentId}
                 containerClassName="w-full"

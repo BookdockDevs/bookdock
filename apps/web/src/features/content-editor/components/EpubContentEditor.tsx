@@ -180,8 +180,6 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
     }
     return [...dirs]
   }, [archiveEntries])
-  const [splitResourceKey, setSplitResourceKey] = useState(0)
-  const splitContentRef = useRef<string | undefined>(undefined)
   const lastValidSplitMarkupRef = useRef<{ href: string; content: string } | null>(null)
   if (editableDocument && activeXhtmlValidation.valid) {
     lastValidSplitMarkupRef.current = { href: editableDocument.href, content: editableDocument.content }
@@ -192,33 +190,29 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
       ? lastValidSplitMarkupRef.current.content
       : editableDocument.content
   }, [editableDocument])
-  const splitInitialContentRef = useRef<{ href: string | null; srcDoc: string | undefined }>({ href: null, srcDoc: undefined })
+  const splitInitialContentRef = useRef<{ href: string; content: string; srcDoc: string } | null>(null)
   if (editorMode === 'split' && activeHref && splitPreviewContent) {
-    if (splitInitialContentRef.current.href !== activeHref) {
-      splitInitialContentRef.current = { href: activeHref, srcDoc: epubEditorFrame(splitPreviewContent, darkTheme) }
+    if (splitInitialContentRef.current?.href !== activeHref) {
+      splitInitialContentRef.current = { href: activeHref, content: splitPreviewContent, srcDoc: epubEditorFrame(splitPreviewContent, darkTheme) }
     }
   } else {
-    splitInitialContentRef.current = { href: null, srcDoc: undefined }
+    splitInitialContentRef.current = null
   }
-  const splitPreviewSrcDoc = splitInitialContentRef.current.srcDoc
-  const [debouncedSplitContent, setDebouncedSplitContent] = useState<string | undefined>(splitPreviewContent)
-  const appliedSplitContentRef = useRef<{ doc: Document | null; content: string | undefined; resourceSig: string | null }>({
-    doc: null,
-    content: undefined,
-    resourceSig: null,
-  })
-  splitContentRef.current = debouncedSplitContent
+  const splitInitial = splitInitialContentRef.current
+  const [debouncedSplit, setDebouncedSplit] = useState<{ href: string; content: string } | null>(null)
+  const appliedSplitContentRef = useRef<{ doc: Document; content: string } | null>(null)
+  const splitContent = splitInitial && (debouncedSplit?.href === splitInitial.href ? debouncedSplit.content : splitInitial.content)
 
   useEffect(() => {
-    if (editorMode !== 'split') {
-      setDebouncedSplitContent(splitPreviewContent)
+    if (editorMode !== 'split' || !activeHref || !splitPreviewContent) {
+      setDebouncedSplit(null)
       return
     }
     const timer = window.setTimeout(() => {
-      setDebouncedSplitContent(splitPreviewContent)
+      setDebouncedSplit({ href: activeHref, content: splitPreviewContent })
     }, 150)
     return () => window.clearTimeout(timer)
-  }, [editorMode, splitPreviewContent])
+  }, [editorMode, activeHref, splitPreviewContent])
   const draftRef = useRef(draft)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const activeDocumentRef = useRef(activeDocument)
@@ -297,10 +291,11 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
   useEffect(() => {
     const loaded = manifestQuery.data
     const active = activeDocumentRef.current
-    if (!frameDocument || frameDocument !== iframeRef.current?.contentDocument || !active || !loaded || editorSourceRevision(loaded) !== sourceRevision.current) return
+    if (!frameDocument || frameDocument !== iframeRef.current?.contentDocument || !active) return
     setResourceWarning(false)
-    return prepareEditorResources(frameDocument, active.content, active.href, loaded, undefined, () => setResourceWarning(true), originalStyles)
-  }, [frameDocument, manifestQuery.data, activeHref, frameGeneration, originalStyles])
+    const resources = loaded && editorSourceRevision(loaded) === sourceRevision.current ? loaded : undefined
+    return prepareEditorResources(frameDocument, active.content, active.href, resources, undefined, () => setResourceWarning(true), originalStyles)
+  }, [editorMode, frameDocument, manifestQuery.data, activeHref, frameGeneration, originalStyles])
 
   useEffect(() => {
     if (editorMode !== 'split') return
@@ -311,51 +306,31 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
   }, [editorMode, splitFrameDocument, darkTheme, backgroundContrast])
 
   useEffect(() => {
-    if (editorMode !== 'split') return
-    const loaded = manifestQuery.data
-    const content = splitContentRef.current
-    if (!splitFrameDocument || splitFrameDocument !== splitIframeRef.current?.contentDocument || !activeHref || !content || !loaded || editorSourceRevision(loaded) !== sourceRevision.current) return
-    return prepareEditorResources(splitFrameDocument, content, activeHref, loaded, undefined, undefined, originalStyles)
-  }, [editorMode, splitFrameDocument, manifestQuery.data, activeHref, originalStyles, splitResourceKey])
-
-  useEffect(() => {
-    if (editorMode !== 'split' || !debouncedSplitContent) return
+    if (!splitInitial || !splitContent) return
     if (!splitFrameDocument || splitFrameDocument !== splitIframeRef.current?.contentDocument) return
 
-    const resourceSig = (debouncedSplitContent.match(/<(?:link|style|img|image)\b[^>]*>/gi) ?? []).join('\n')
     const prev = appliedSplitContentRef.current
-    if (prev.doc !== splitFrameDocument) {
-      appliedSplitContentRef.current = { doc: splitFrameDocument, content: debouncedSplitContent, resourceSig }
-      return
-    }
-    if (prev.content === debouncedSplitContent) return
+    const renderedContent = prev?.doc === splitFrameDocument ? prev.content : splitInitial.content
+    if (renderedContent === splitContent) return
 
-    const prevScroll = splitFrameDocument.scrollingElement?.scrollTop ?? 0
-    const existingImgUrls = [...splitFrameDocument.body.querySelectorAll('img[src]')].map((el) => el.getAttribute('src'))
-    const parsed = new DOMParser().parseFromString(debouncedSplitContent, 'application/xhtml+xml')
+    const parsed = new DOMParser().parseFromString(splitContent, 'application/xhtml+xml')
     const nextBody = parsed.getElementsByTagName('body')[0]
-    if (!parsed.querySelector('parsererror') && nextBody) {
-      const imported = Array.from(nextBody.childNodes, (node) => splitFrameDocument.importNode(node, true))
-      splitFrameDocument.body.replaceChildren(...imported)
-      if (prev.resourceSig === resourceSig) {
-        const nextImgs = [...splitFrameDocument.body.querySelectorAll('img[src]')]
-        nextImgs.forEach((img, index) => {
-          const cachedUrl = existingImgUrls[index]
-          if (cachedUrl && cachedUrl.startsWith('blob:')) {
-            img.setAttribute('src', cachedUrl)
-          }
-        })
-      }
-    }
-    const resourceChanged = prev.resourceSig !== resourceSig
-    appliedSplitContentRef.current = { doc: splitFrameDocument, content: debouncedSplitContent, resourceSig }
-    if (resourceChanged) {
-      setSplitResourceKey((k) => k + 1)
-    }
-    requestAnimationFrame(() => {
-      if (splitFrameDocument.scrollingElement) splitFrameDocument.scrollingElement.scrollTop = prevScroll
-    })
-  }, [editorMode, splitFrameDocument, debouncedSplitContent])
+    if (parsed.querySelector('parsererror') || !nextBody) return
+
+    const scrolling = splitFrameDocument.scrollingElement
+    const top = scrolling?.scrollTop ?? 0
+    splitFrameDocument.body.replaceChildren(...Array.from(nextBody.childNodes, (node) => splitFrameDocument.importNode(node, true)))
+    if (scrolling) scrolling.scrollTop = top
+    appliedSplitContentRef.current = { doc: splitFrameDocument, content: splitContent }
+  }, [splitFrameDocument, splitInitial, splitContent])
+
+  // Apply resources after the body patch so cleanup never restores attributes on the new nodes.
+  useEffect(() => {
+    if (!splitInitial || !splitContent || !splitFrameDocument || splitFrameDocument !== splitIframeRef.current?.contentDocument) return
+    const loaded = manifestQuery.data
+    const resources = loaded && editorSourceRevision(loaded) === sourceRevision.current ? loaded : undefined
+    return prepareEditorResources(splitFrameDocument, splitContent, splitInitial.href, resources, undefined, undefined, originalStyles)
+  }, [splitFrameDocument, splitInitial, splitContent, manifestQuery.data, originalStyles])
 
   useEffect(() => {
     if (!source || sourceRevision.current === source.revisionId || (draft && dirty)) return
@@ -1108,7 +1083,7 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
                 <iframe
                   ref={splitIframeRef}
                   key={activeHref ? `split:${activeHref}` : 'split:none'}
-                  srcDoc={splitPreviewSrcDoc}
+                  srcDoc={splitInitial?.srcDoc}
                   title="EPUB 源码实时预览"
                   sandbox="allow-same-origin"
                   onLoad={() => {

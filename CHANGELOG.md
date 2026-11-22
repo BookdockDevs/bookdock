@@ -2,27 +2,34 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.8] - 2026-11-23
+
+### Highlights
+
+- Edit EPUB XHTML directly and see your changes in a live side-by-side preview.
+- Create and edit TXT chapter rules while previewing how they divide a book.
 
 ### Added
 
-- Added shared `Radio`, `Select` (with `SmartMenu` dropdown popovers and a `reader` theme variant), `Input`, and `Textarea` UI primitives, and aligned `settingsForm` field classes with the shared base styles.
-- Added an archive file-tree view (`EpubFileTree`, ordered by archive folder/file structure) and `Preview | Source | Split` editing modes with XML syntax highlighting (`@codemirror/lang-xml`) and XHTML validation to the EPUB content workbench.
+- The EPUB workbench offers Preview, Source, and Split modes for editable XHTML. The source editor highlights XML syntax and checks XHTML before saving. Split view keeps showing the last valid preview while the source contains an error.
+- Browse the EPUB archive by folder in the Files tab. Open editable chapters and preview supported images, stylesheets, and package files.
 
 ### Changed
 
-- Unified checkboxes across dialogs, WebDAV import, and settings lists onto `Checkbox` with `indeterminate` (mixed) state support, a bolder indeterminate dash matching the checkmark stroke weight, `withinLabel`, and `amber` tone; unified library and instance settings switches onto `Toggle` with `sm`/`md` sizes and focus-visible rings.
-- Replaced the raw `<progress>` upload bar in content files with a themed `progressbar`, and switched visible form and reader header/footer `<select>` controls to `Select`.
-- Placed Continuous Scroll and Chinese Conversion inline in reader Display settings, added horizontal padding to inline `ButtonGroup` tabs, and moved Idea Display Mode above Show Friend Ideas.
-- Redesigned the Bookdock brand logo and favicons (`favicon.svg`, `favicon-dark.svg`, boot loader, sidebar, auth cards, and About/Update dialogs) with a sail-and-turning-page silhouette, and added theme-adaptive logo headers to `README.md` and `README.en.md`.
-- Unified the TOC rule create/edit modal (`TocRuleFormModal`) across Settings, Book Custom TOC, and Content Rechaptering with a compact rule-import selector, unified scope toggle, inline edit icons, and support for deleting the last level.
-- Refined the EPUB workbench with `目录` / `文件` tabs, shared collapse/expand controls, debounced in-place DOM patching in split mode, and removal of the redundant reading-order sub-view and file-type badges.
-- Moved the `Discard draft` action from the top-right editor header into the bottom-left of the EPUB and TXT diff modals, unified the footer's left-side destructive button with a soft-red `secondary` style, and tightened `LeaveEditorDialog` and discard confirmation copy.
+- Create or edit reusable TXT chapter rules from the book details or the workbench, then preview the updated chapter list. Book-only rules can still be edited in either place.
+- Moved Discard draft into the change review dialog for both TXT and EPUB, so you can inspect the changes before discarding them.
+- Updated the Bookdock logo and browser tab icon across light and dark themes.
+- Unified form controls across the library, settings, and reader. Reader header and footer choices follow the reading theme, dropdowns support keyboard navigation, and continuous scroll and Chinese conversion options fit on one row each.
+
+### Removed
+
+- The EPUB Files tab no longer offers drag-and-drop reordering of the book’s reading order. The Table of Contents tab still supports reordering TOC entries.
 
 ### Fixed
 
-- Fixed automatic highlight rules disappearing or misaligning when switching between scrolled and paginated reading modes by resetting the cross-axis `overlayer` dimension on flow switches and repainting cached document highlights after mode changes and layout stabilization.
-- Fixed EPUB preview scrolling and horizontal clipping, TXT editor `<textarea>` edge padding/bottom clipping, false-positive missing-resource warnings for CSS fallback `url(...)` and `data:` URLs (with `image/jpg` and case-insensitive manifest lookup), and false draft diffs when reverting edits in CRLF-encoded EPUB source files.
+- Fixed automatic highlights disappearing or shifting when switching between scrolling and paginated reading.
+- Fixed clipped content in the EPUB preview and at the bottom of the TXT editor. EPUB previews also avoid missing-resource warnings for embedded data URLs and CSS fallback references.
+- Fixed EPUB drafts showing a source change after the original text was restored in a file with CRLF line endings.
 
 ## [0.8.7] - 2026-11-22
 
@@ -1409,27 +1416,34 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [Unreleased]
+### [0.8.8] - 2026-11-23
+
+#### 亮点
+
+- 直接编辑 EPUB 的 XHTML 源码，在分栏中实时查看修改效果。
+- 预览 TXT 分章结果时，可以直接新建或编辑目录规则。
 
 #### 新增
 
-- 新增公共 `Radio`、`Select`（支持 `SmartMenu` 下拉浮层及 `reader` 主题变体）、`Input` 与 `Textarea` 基础组件，并将 `settingsForm` 表单样式基类对齐到公共组件。
-- 为 EPUB 内容编辑工作台新增按归档目录结构排序的文件树视图（`EpubFileTree`）及「预览 | 源码 | 分栏」编辑模式，接入 CodeMirror XML 语法高亮（`@codemirror/lang-xml`）与 XHTML 语法校验拦截。
+- EPUB 工作台为可编辑的 XHTML 正文提供「预览」「源码」「分栏」三种模式。源码编辑支持 XML 语法高亮和保存前校验。输入有语法错误时，分栏继续显示最近一次有效的预览。
+- EPUB 工作台的「文件」页按文件夹展示书籍包内容，可打开正文编辑，也能预览受支持的图片、样式表和包描述文件。
 
 #### 优化
 
-- 将弹窗、WebDAV 导入与设置列表的复选框统一收口到公共 `Checkbox`，补齐 `indeterminate` 半选态（加粗横线以匹配对勾笔画）、`withinLabel` 与 `amber` 语义色；将书库管理与实例设置开关统一到支持 `sm`/`md` 尺寸与焦点环的 `Toggle`。
-- 将内容文件上传中的原生 `<progress>` 替换为适配暗色模式的自定义进度条，并将表单与阅读器页眉/页脚的原生 `<select>` 统一为 `Select` 自定义弹层。
-- 将阅读器设置中的「连续滚动」与「简繁转换」调整为单行布局，增加行内分段选项的横向留白，并将「想法展示方式」调整到「显示书友想法」上方。
-- 重新设计 Bookdock 品牌 Logo 与标签页图标（同步更新 `favicon.svg`、`favicon-dark.svg`、首屏加载、侧边栏、登录卡片以及关于/更新弹窗），采用兼具风帆与翻起书页意象的极简轮廓，并在 `README.md` 与 `README.en.md` 顶部补充适配日夜主题的 Logo 展示。
-- 统一设置页、单书自定义目录与内容重分章的目录规则新建/编辑弹窗（`TocRuleFormModal`），精简规则导入下拉、统一可用范围分段控件与悬停编辑图标，并支持删除最后一个层级。
-- 优化 EPUB 工作台交互：将侧栏标签精简为「目录 / 文件」并共用全部展开/折叠操作，分栏模式改为防抖原地 DOM 更新以减少整页重建，移除冗余的阅读顺序子视图与文件类型徽标。
-- 将「放弃草稿」从编辑器顶栏右上角移至 EPUB 与 TXT 差异弹窗底部左侧，并将底栏左侧危险按钮统一为带浅红描边的 `secondary` 样式，同时精简对齐离开编辑与放弃草稿确认弹窗文案。
+- 在书籍详情或工作台的分章预览中，可以新建或编辑可复用的 TXT 目录规则，保存后查看更新的章节列表。两个入口都支持编辑本书专属规则。
+- TXT 与 EPUB 的「放弃草稿」移到差异弹窗，方便先检查修改再决定是否放弃。
+- 更新 Bookdock 标志和浏览器标签页图标，适配浅色与深色主题。
+- 统一书库、设置和阅读器的表单控件。阅读器页眉、页脚的下拉选项跟随阅读主题，支持键盘选择。「连续滚动」和「简繁转换」各占一行。
+
+#### 移除
+
+- EPUB 工作台的「文件」页取消拖拽调整正文阅读顺序。「目录」页仍可重新排列目录项。
 
 #### 修复
 
-- 修复阅读器在滚动与翻页模式间切换时自动高亮规则失效或错位的问题：在流模式切换时重置 `overlayer` 另一侧尺寸，并在模式切换与布局稳定后重绘已缓存的章节高亮。
-- 修复 EPUB 预览区无法向下滚动与横向裁切、TXT 编辑器 `<textarea>` 边缘留白/底部遮挡、CSS 回退 `url(...)` 与 `data:` 链接误报缺图（同步支持 `image/jpg` 与大小写不敏感 manifest 匹配），以及 CRLF 换行 EPUB 源码删回原文本后仍误报差异的问题。
+- 修复阅读器在滚动与翻页模式间切换时自动高亮消失或错位的问题。
+- 修复 EPUB 预览内容裁切和 TXT 编辑区底部遮挡，并解决 EPUB 预览对内嵌数据链接和 CSS 回退引用误报资源缺失的问题。
+- 修复使用 CRLF 换行的 EPUB 文件在源码改回原文后仍显示有修改的问题。
 
 ### [0.8.7] - 2026-11-22
 

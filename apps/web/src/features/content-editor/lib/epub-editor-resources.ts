@@ -33,7 +33,17 @@ async function loadReaderLoader(): Promise<LoaderModule> {
   return dynamicImport('/foliate-js/epub.js')
 }
 
-export function prepareEditorResources(document: Document, markup: string, href: string, source: EditorPublicationSource, loadModule = loadReaderLoader, onMissing?: () => void, includeStyles = true): () => void {
+export function prepareEditorResources(document: Document, markup: string, href: string, source: EditorPublicationSource | undefined, loadModule = loadReaderLoader, onMissing?: () => void, includeStyles = true): () => void {
+  if (!includeStyles) {
+    for (const element of document.body.querySelectorAll('[style]')) {
+      setEpubPresentationAttribute(element, 'style', '')
+    }
+    for (const element of document.body.querySelectorAll('style, link[rel~="stylesheet" i]')) {
+      setEpubPresentationAttribute(element, 'media', 'not all')
+    }
+  }
+  if (!source) return () => clearEpubPresentation(document.documentElement)
+
   const controller = new AbortController()
   const session = source.kind === 'local' ? null : new ReaderContentSession(source.manifest, source.accountScope, source.epoch, source.contentUrl, true)
   const entryList = editorSourceEntries(source).map((entry) => ({ href: entry.path, mediaType: entry.mediaType, size: entry.size }))
@@ -75,9 +85,9 @@ export function prepareEditorResources(document: Document, markup: string, href:
     if (sourceDocument.querySelector('parsererror')) return
     for (const name of ['class', 'id', 'lang', 'dir']) {
       const value = sourceDocument.documentElement.getAttribute(name)
-      if (value !== null) document.documentElement.setAttribute(name, value)
+      if (value !== null) setEpubPresentationAttribute(document.documentElement, name, value)
       const bodyValue = sourceDocument.body?.getAttribute(name)
-      if (bodyValue !== null && bodyValue !== undefined) document.body.setAttribute(name, bodyValue)
+      if (bodyValue !== null && bodyValue !== undefined) setEpubPresentationAttribute(document.body, name, bodyValue)
     }
     const insertStyle = (element: Element) => { if (!disposed) { document.head.append(element); insertedStyles.push(element) } }
     if (includeStyles) {

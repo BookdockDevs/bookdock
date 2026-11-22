@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { useCallback, useId, useRef, useState, type KeyboardEvent, type ReactNode, type SelectHTMLAttributes } from 'react'
 
 import SmartMenu from '@/components/ui/SmartMenu'
 import type { MenuAnchor } from '@/lib/menu-anchor'
@@ -40,8 +40,16 @@ export default function Select({
   ...props
 }: SelectProps) {
   const [menu, setMenu] = useState<MenuAnchor | null>(null)
+  const [activeIndex, setActiveIndex] = useState(-1)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const listboxId = useId()
+  const focusListbox = useCallback((element: HTMLDivElement | null) => {
+    if (!element) return
+    element.focus({ preventScroll: true })
+    const activeId = element.getAttribute('aria-activedescendant')
+    if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' })
+  }, [])
 
   if (!options) {
     return (
@@ -71,35 +79,68 @@ export default function Select({
 
   const currentValue = value === undefined ? '' : String(value)
   const selectedOption = options.find((opt) => opt.value === currentValue)
+  const enabledIndices = options.flatMap((option, index) => option.disabled ? [] : [index])
   const triggerWidth = triggerRef.current?.getBoundingClientRect().width ?? 0
   const menuWidth = triggerWidth > 0 ? Math.max(triggerWidth, minMenuWidth) : (minMenuWidth > 0 ? minMenuWidth : 'auto')
   const estimatedHeight = Math.min(options.length * 32 + 12, 252)
 
-  function toggleMenu() {
+  function openMenu(preferLast = false) {
     if (disabled) return
-    if (menu) {
-      setMenu(null)
-      return
-    }
     const el = triggerRef.current
     if (!el) return
+    const selectedIndex = enabledIndices.find((index) => options?.[index]?.value === currentValue)
+    setActiveIndex(selectedIndex ?? (preferLast ? enabledIndices.at(-1) : enabledIndices[0]) ?? -1)
     setMenu({ kind: 'element', el, placement: 'below', align: 'start' })
   }
 
   function handleSelect(nextValue: string) {
+    triggerRef.current?.focus()
     setMenu(null)
     onValueChange?.(nextValue)
   }
 
+  function handleListboxKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    switch (event.key) {
+      case 'Escape':
+      case 'Tab':
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+        triggerRef.current?.focus()
+        setMenu(null)
+        return
+      case 'Enter':
+      case ' ': {
+        event.preventDefault()
+        const option = options?.[activeIndex]
+        if (option && !option.disabled) handleSelect(option.value)
+        return
+      }
+      case 'ArrowDown':
+      case 'ArrowUp':
+      case 'Home':
+      case 'End': {
+        event.preventDefault()
+        const position = enabledIndices.indexOf(activeIndex)
+        const next = event.key === 'Home' ? enabledIndices[0]
+          : event.key === 'End' ? enabledIndices.at(-1)
+            : enabledIndices[Math.max(0, Math.min(enabledIndices.length - 1, position + (event.key === 'ArrowDown' ? 1 : -1)))]
+        if (next === undefined) return
+        setActiveIndex(next)
+        document.getElementById(`${listboxId}-${next}`)?.scrollIntoView?.({ block: 'nearest' })
+      }
+    }
+  }
+
   return (
     <span className={cn('relative inline-flex items-center', containerClassName)}>
-      {/* Native select kept visually hidden for <label htmlFor>, screen readers, and test compatibility */}
+      {/* Preserve form submission without exposing a second control. */}
       <select
         {...props}
-        id={id}
         value={currentValue}
         disabled={disabled}
-        aria-label={ariaLabel}
+        aria-hidden="true"
         tabIndex={-1}
         onChange={(e) => {
           onChange?.(e)
@@ -120,13 +161,20 @@ export default function Select({
       </select>
 
       <button
+        id={id}
         ref={triggerRef}
         type="button"
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={Boolean(menu)}
+        aria-controls={menu ? listboxId : undefined}
         aria-label={ariaLabel}
-        onClick={toggleMenu}
+        onClick={() => menu ? setMenu(null) : openMenu()}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+          event.preventDefault()
+          if (!menu) openMenu(event.key === 'ArrowUp')
+        }}
         className={cn(
           'flex w-full items-center justify-between gap-2 outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-50',
           variant === 'reader'
@@ -154,20 +202,33 @@ export default function Select({
           onClose={() => setMenu(null)}
           className="max-h-60 overflow-y-auto p-1"
         >
-          <div role="listbox" aria-label={ariaLabel} className="flex flex-col gap-0.5">
-            {options.map((opt) => {
+          <div
+            ref={focusListbox}
+            id={listboxId}
+            role="listbox"
+            aria-label={ariaLabel}
+            aria-labelledby={!ariaLabel ? id : undefined}
+            aria-activedescendant={activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined}
+            tabIndex={-1}
+            onKeyDown={handleListboxKeyDown}
+            className="flex flex-col gap-0.5 outline-none"
+          >
+            {options.map((opt, index) => {
               const isSelected = opt.value === currentValue
               return (
                 <button
                   key={opt.value}
+                  id={`${listboxId}-${index}`}
                   type="button"
                   role="option"
                   aria-selected={isSelected}
+                  tabIndex={-1}
                   disabled={opt.disabled}
                   onClick={() => handleSelect(opt.value)}
                   className={cn(
                     'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
                     'disabled:cursor-not-allowed disabled:opacity-40',
+                    index === activeIndex && 'ring-1 ring-inset ring-current/40',
                     variant === 'reader'
                       ? (isSelected
                         ? 'bg-stone-500/15 font-medium text-current'

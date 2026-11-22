@@ -155,10 +155,10 @@ export function invalidateCityVersionQueries(
 export function useTocPreview(
   target: TocTarget | undefined,
   req: TocPreviewReq,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean; ruleRevision?: number },
 ) {
   return useQuery({
-    queryKey: ['toc-preview', target, req],
+    queryKey: ['toc-preview', target, req, options?.ruleRevision],
     queryFn: () => {
       if (!target) throw new Error('toc preview requires a target')
       return apiPost<{ data: TocPreviewRes }>(`${tocBasePath(target)}/toc-preview`, req)

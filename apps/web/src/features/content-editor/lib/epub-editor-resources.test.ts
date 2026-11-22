@@ -28,6 +28,26 @@ describe('EPUB editor resource references', () => {
     }
   })
 
+  it('suppresses embedded and inline presentation without removing it from saved XHTML', () => {
+    const markup = '<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body><div><style media="screen">p{font-size:2em}</style><p style="color:red">Text</p></div></body></html>'
+    const frame = new DOMParser().parseFromString(markup, 'text/html')
+    const dispose = prepareEditorResources(frame, markup, 'chapter.xhtml', undefined, undefined, undefined, false)
+    const paragraph = frame.querySelector('p')!
+    const style = frame.querySelector('style')!
+
+    expect(paragraph.style.color).toBe('')
+    expect(style.media).toBe('not all')
+    paragraph.textContent = 'Edited'
+    const saved = new DOMParser().parseFromString(serializeVisibleBody(markup, frame.body), 'application/xhtml+xml')
+    expect(saved.querySelector('p')?.textContent).toBe('Edited')
+    expect(saved.querySelector('p')?.getAttribute('style')).toBe('color:red')
+    expect(saved.querySelector('style')?.getAttribute('media')).toBe('screen')
+
+    dispose()
+    expect(paragraph.style.color).toBe('red')
+    expect(style.media).toBe('screen')
+  })
+
   it('loads only archive resources, keeps the original body, and releases the session on disposal', async () => {
     class Loader {
       loadHref: (value: string, base: string) => Promise<string | null> = async () => null

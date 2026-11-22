@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { useReconciledMenuPosition } from '@/hooks/useMenuAnchor'
@@ -6,6 +6,8 @@ import type { MenuAnchor } from '@/lib/menu-anchor'
 import { PADDING } from '@/lib/position'
 import { selectReadingTone, useUiStore } from '@/stores/ui.store'
 import { cn } from '@/lib/utils'
+
+const MenuAncestors = createContext('')
 
 export interface SmartMenuSize {
   /** Fixed width in px, or 'auto' to shrink-wrap the widest row between minWidth and maxWidth. */
@@ -53,6 +55,8 @@ export default function SmartMenu({
   className = '',
   children,
 }: SmartMenuProps) {
+  const menuId = useId()
+  const ancestors = useContext(MenuAncestors)
   const autoWidth = size.width === 'auto'
   // Reader menus portal to body, so they carry the tone class themselves to
   // keep the `dark:` axis on the reading theme (matches Modal variant reader).
@@ -64,8 +68,12 @@ export default function SmartMenu({
 
   useEffect(() => {
     if (!anchor) return
+    const isInsideChildMenu = (target: EventTarget | null) => {
+      const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null
+      return element?.closest<HTMLElement>('[data-smart-menu]')?.dataset.menuAncestors?.split(' ').includes(menuId)
+    }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !e.defaultPrevented && !isInsideChildMenu(e.target)) {
         e.preventDefault()
         e.stopPropagation()
         e.stopImmediatePropagation()
@@ -76,7 +84,7 @@ export default function SmartMenu({
       const target = e.target as Node | null
       if (!target) return
       const exempt = triggerRef?.current ?? (anchor.kind === 'element' ? anchor.el : null)
-      if (!innerRef.current?.contains(target) && !exempt?.contains(target)) {
+      if (!innerRef.current?.contains(target) && !exempt?.contains(target) && !isInsideChildMenu(target)) {
         onClose()
       }
     }
@@ -93,7 +101,7 @@ export default function SmartMenu({
       window.removeEventListener('mousedown', onPointerDown, true)
       document.removeEventListener('content-click', onPointerDown)
     }
-  }, [anchor, onClose, innerRef, triggerRef])
+  }, [anchor, onClose, innerRef, triggerRef, menuId])
 
   if (!anchor || !position) return null
 
@@ -128,6 +136,7 @@ export default function SmartMenu({
       id={id}
       ref={innerRef}
       data-smart-menu="true"
+      data-menu-ancestors={ancestors}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => {
@@ -142,7 +151,7 @@ export default function SmartMenu({
       )}
       style={style}
     >
-      {children}
+      <MenuAncestors.Provider value={`${ancestors} ${menuId}`}>{children}</MenuAncestors.Provider>
     </div>,
     document.body,
   )

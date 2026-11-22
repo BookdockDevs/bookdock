@@ -953,17 +953,12 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByTitle('显示'))
 
     // Headers and footers are open: 3 distinct select dropdowns with position markers exist
-    const headerLeftSelect = screen.getByRole('combobox', { name: '页眉（左）' })
-    const headerCenterSelect = screen.getByRole('combobox', { name: '页眉（中）' })
-    const headerRightSelect = screen.getByRole('combobox', { name: '页眉（右）' })
-    expect(headerLeftSelect).toHaveValue('bookTitle')
-    expect(headerCenterSelect).toHaveValue('none')
-    expect(headerRightSelect).toHaveValue('time')
+    expect(screen.getByRole('button', { name: '页眉（左）' })).toHaveTextContent('书名')
+    expect(screen.getByRole('button', { name: '页眉（中）' })).toHaveTextContent('无')
+    expect(screen.getByRole('button', { name: '页眉（右）' })).toHaveTextContent('时间')
 
-    const footerLeftSelect = screen.getByRole('combobox', { name: '页脚（左）' })
-    const footerRightSelect = screen.getByRole('combobox', { name: '页脚（右）' })
-    expect(footerLeftSelect).toHaveValue('chapterProgress')
-    expect(footerRightSelect).toHaveValue('chapterWordCount')
+    expect(screen.getByRole('button', { name: '页脚（左）' })).toHaveTextContent('章进度')
+    expect(screen.getByRole('button', { name: '页脚（右）' })).toHaveTextContent('章字数')
 
     // Idea display mode is open
     expect(screen.getByText('想法展示方式')).toBeInTheDocument()
@@ -974,9 +969,7 @@ describe('SettingsPanel', () => {
     const headerToggle = screen.getByRole('switch', { name: '页眉' })
     fireEvent.click(headerToggle)
     expect(useUiStore.getState().showHeader).toBe(false)
-    expect(screen.queryByRole('combobox', { name: '页眉（左）' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('combobox', { name: '页眉（中）' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('combobox', { name: '页眉（右）' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^页眉（/ })).not.toBeInTheDocument()
     // Values in store are not cleared
     expect(useUiStore.getState().headerLeft).toBe('bookTitle')
     expect(useUiStore.getState().headerRight).toBe('time')
@@ -985,7 +978,7 @@ describe('SettingsPanel', () => {
     const footerToggle = screen.getByRole('switch', { name: '页脚' })
     fireEvent.click(footerToggle)
     expect(useUiStore.getState().showFooter).toBe(false)
-    expect(screen.queryByRole('combobox', { name: '页脚（左）' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^页脚（/ })).not.toBeInTheDocument()
     expect(useUiStore.getState().footerLeft).toBe('chapterProgress')
 
     // Turn off Friend Ideas: ideaDisplayMode stays available because it also governs own ideas
@@ -998,14 +991,12 @@ describe('SettingsPanel', () => {
     // Re-enable Header: original values are preserved and controls reappear
     fireEvent.click(headerToggle)
     expect(useUiStore.getState().showHeader).toBe(true)
-    const restoredHeaderLeft = screen.getByRole('combobox', { name: '页眉（左）' })
-    expect(restoredHeaderLeft).toHaveValue('bookTitle')
+    expect(screen.getByRole('button', { name: '页眉（左）' })).toHaveTextContent('书名')
 
     // Re-enable Footer: original values preserved
     fireEvent.click(footerToggle)
     expect(useUiStore.getState().showFooter).toBe(true)
-    const restoredFooterLeft = screen.getByRole('combobox', { name: '页脚（左）' })
-    expect(restoredFooterLeft).toHaveValue('chapterProgress')
+    expect(screen.getByRole('button', { name: '页脚（左）' })).toHaveTextContent('章进度')
 
     // Re-enable Friend Ideas
     fireEvent.click(ideasToggle)
@@ -1022,8 +1013,7 @@ describe('SettingsPanel', () => {
 
     fireEvent.click(screen.getByTitle('显示'))
 
-    // When collapsed, no combobox elements exist in the DOM, while independent idea display mode remains
-    expect(screen.queryAllByRole('combobox')).toHaveLength(0)
+    expect(screen.queryByRole('button', { name: /^页[眉脚]（/ })).not.toBeInTheDocument()
     expect(screen.getByText('想法展示方式')).toBeInTheDocument()
   })
 
@@ -1055,8 +1045,8 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByTitle('显示'))
 
     // Changing headerLeft
-    const headerLeft = screen.getByRole('combobox', { name: '页眉（左）' })
-    fireEvent.change(headerLeft, { target: { value: 'chapter' } })
+    fireEvent.click(screen.getByRole('button', { name: '页眉（左）' }))
+    fireEvent.click(screen.getByRole('option', { name: '章标题' }))
     expect(useUiStore.getState().headerLeft).toBe('chapter')
 
     // Changing ideaDisplayMode

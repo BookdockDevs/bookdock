@@ -12,6 +12,7 @@ const createTocRuleMutate = vi.fn()
 const updateTocRuleMutate = vi.fn()
 let lastPreviewRequest: TocPreviewReq | null = null
 let lastPreviewEnabled: boolean | undefined
+let lastPreviewRuleRevision: number | undefined
 let previewEnabledCalls: boolean[] = []
 
 const sampleRules: TocRuleRes[] = [
@@ -77,11 +78,12 @@ vi.mock('@/api/hooks/useTocRules', () => ({
   // no test reaches.
   tocPreviewPost: (_target: unknown, _req: TocPreviewReq) =>
     Promise.resolve({ data: { chapters: [] } }),
-  useTocPreview: (_target: unknown, req: TocPreviewReq, options?: { enabled?: boolean }) => {
+  useTocPreview: (_target: unknown, req: TocPreviewReq, options?: { enabled?: boolean; ruleRevision?: number }) => {
     const enabled = options?.enabled !== false
     lastPreviewEnabled = enabled
     previewEnabledCalls.push(enabled)
     if (enabled) lastPreviewRequest = req
+    if (enabled) lastPreviewRuleRevision = options?.ruleRevision
     const data = req.tocRuleId === 'rule-1'
       ? (useActivePreview ? activePreviewData : selectedRulePreviewData)
       : previewData
@@ -98,6 +100,7 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     vi.clearAllMocks()
     lastPreviewRequest = null
     lastPreviewEnabled = undefined
+    lastPreviewRuleRevision = undefined
     previewEnabledCalls = []
     availableRules = sampleRules
     previewData = samplePreview
@@ -169,6 +172,37 @@ describe('TocRulePicker & BookCustomTocEditor', () => {
     expect(screen.getByText('正在计算分章效果…')).toBeInTheDocument()
     expect(lastPreviewEnabled).toBe(true)
     expect(screen.getByRole('button', { name: '应用' })).toBeDisabled()
+  })
+
+  it('waits for a fresh preview after editing the active rule and allows a rebuild with unchanged counts', () => {
+    useActivePreview = true
+    activePreviewData = samplePreview
+    const props = {
+      target: { bookId: 'book-1' },
+      currentRuleId: 'rule-1',
+      currentChapters: samplePreview.chapters,
+      onClose: vi.fn(),
+    }
+    const { rerender } = render(<TocRulePicker {...props} />)
+    expect(lastPreviewRuleRevision).toBe(1)
+    expect(screen.getByRole('button', { name: '应用' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑目录规则' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '第2层正则表达式' }), { target: { value: '^新章节' } })
+    updateTocRuleMutate.mockImplementationOnce(({ body }, { onSuccess }) => {
+      activePreviewData = undefined
+      previewIsFetching = true
+      onSuccess({ data: { ...sampleRules[0], ...body, updatedAt: 2 } })
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存并应用' }))
+    expect(lastPreviewRuleRevision).toBe(2)
+    expect(screen.getByRole('button', { name: '应用' })).toBeDisabled()
+
+    activePreviewData = { ...samplePreview, chapters: samplePreview.chapters.map((chapter) => ({ ...chapter, title: '新章节' })) }
+    previewIsFetching = false
+    rerender(<TocRulePicker {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    expect(reTocMutate).toHaveBeenCalledWith({ tocRuleId: 'rule-1', excludedChapterIds: [] }, expect.anything())
   })
 
   it('displays custom rule when book has customPatterns without redundant badge', () => {

@@ -36,7 +36,7 @@ Organize EPUB and TXT books, read them online, and keep your highlights, notes, 
 | **Reading** | Customize fonts, layout, and page turns. Build day and night themes with palettes, wallpapers, book CSS, and automatic highlights. Apply them per book, share them as packages, or publish them on your instance. Use reading presets, the table of contents, bookmarks, full-book search, and Simplified/Traditional Chinese conversion. |
 | **Fonts and media** | Use built-in fonts or upload your own, and play audio and video embedded in EPUB books. |
 | **E-ink reading** | Use a lightweight bookshelf and paginated reader, adjust display and tap zones, and synchronize reading progress. |
-| **Content editing** | Edit TXT and EPUB text and navigation, review changes before saving, and recover local drafts. |
+| **Content editing** | Organize TXT chapters and preview chapter rules. Edit EPUB navigation and XHTML with a side-by-side source preview. Review changes before saving and recover local drafts. |
 | **Text and table-of-contents rules** | Apply global or per-book text replacements, make individual corrections, and use TXT table-of-contents rules; import and export rules. |
 | **Reading records** | Save progress, highlights, bookmarks, thoughts, and reviews; track reading time with customizable modules, multi-mode visualization charts, and an archive overview dashboard; clear a book's archive by All / Time / Notes scope. |
 | **Excerpt sharing** | Create share cards for excerpts or ideas, customize templates and fonts, and copy or save the images. |

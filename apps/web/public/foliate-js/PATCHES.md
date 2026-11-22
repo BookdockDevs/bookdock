@@ -100,6 +100,8 @@
    - 不能只放适配层：目标 rect 到 scroll position 的换算必须和连续视图、边距、方向在同一核心坐标系完成；模式切换时的可见范围刷新与 RAF 异步对齐由 Paginator 内部生命周期控制。
    - 影响/验证：搜索/标注/书签跳转保留 28% 上下文，阅读模式切换顶端对齐；`foliate-paginator.test.ts`、Reader navigation tests 与来回切换模式验收。
 
+   **阅读模式切换后的覆盖层尺寸（v0.8.8）**：`View.expand()` 在滚动和翻页分支都把覆盖层的交叉轴尺寸重置为 `100%`，防止继承前一种模式留下的像素尺寸。宿主 `FoliateReader` 在切换 flow 及布局稳定后用现有匹配缓存重绘自动高亮。
+
 7. **`paginator.js` / scrolled 原生 scrollbar**
    - 需求：真实 scroll container 是 shadow DOM 内 `#container`，scrolled flow 显示原生滚动条，paginated flow 不显示。
    - 不能只放适配层：宿主外层无法控制 shadow scroll container 的 scrollbar 和其内容尺寸。
