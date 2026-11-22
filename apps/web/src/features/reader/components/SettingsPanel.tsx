@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
+import Select from '@/components/ui/Select'
 import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -29,7 +30,6 @@ import ReaderKeyboardShortcuts from './ReaderKeyboardShortcuts'
 import { readerPanelVars } from '../lib/reader-panel-vars'
 import {
   ButtonGroup,
-  ControlGroup,
   InlineControlRow,
   PanelSection,
   PanelSectionList,
@@ -53,36 +53,24 @@ function FieldSelect({
   const _ = useTranslation()
   const isNone = value === 'none'
   return (
-    <div className="relative min-w-0 flex-1">
-      <select
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value as MarginalField)}
-        className={cn(
-          'h-7.5 w-full appearance-none truncate bg-transparent pl-2 pr-5 text-center text-xs outline-none transition-colors cursor-pointer hover:bg-stone-500/10 focus-visible:bg-stone-500/10 focus-visible:ring-1 focus-visible:ring-current/40 disabled:cursor-not-allowed',
-          isNone ? 'font-normal text-[var(--bd-read-sub)] opacity-70' : 'font-medium text-current',
-        )}
-        aria-label={ariaLabel ?? _('reader.marginalField')}
-      >
-        {MARGINAL_FIELDS.map((f) => (
-          <option key={f} value={f} className="bg-[var(--bd-read-bg)] text-[var(--bd-read-text)]">
-            {_(`reader.marginalField.${f}` as const)}
-          </option>
-        ))}
-      </select>
-      <svg
-        className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--bd-read-sub)] opacity-50"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <polyline points="6 9 12 15 18 9" />
-      </svg>
-    </div>
+    <Select
+      variant="reader"
+      value={value}
+      disabled={disabled}
+      aria-label={ariaLabel ?? _('reader.marginalField')}
+      onValueChange={(next) => onChange(next as MarginalField)}
+      options={MARGINAL_FIELDS.map((f) => ({
+        value: f,
+        label: _(`reader.marginalField.${f}` as const),
+      }))}
+      containerClassName="min-w-0 flex-1"
+      minMenuWidth={0}
+      chevronClassName="right-1.5 text-[var(--bd-read-sub)] opacity-50"
+      className={cn(
+        'h-7.5 rounded-none border-0 bg-transparent pl-2 pr-5 text-center text-xs hover:bg-stone-500/10 focus-visible:bg-stone-500/10 focus-visible:ring-1 focus-visible:ring-current/40 dark:bg-transparent',
+        isNone ? 'font-normal text-[var(--bd-read-sub)] opacity-70' : 'font-medium text-current',
+      )}
+    />
   )
 }
 
@@ -544,7 +532,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, overrideS
                   <button
                     type="button"
                     className={cn(
-                      'flex h-6 w-6 items-center justify-center rounded-md text-current/60 transition-transform hover:bg-current/10 hover:text-current',
+                      '-my-1 flex h-6 w-6 items-center justify-center rounded-md text-current/60 transition-transform hover:bg-current/10 hover:text-current',
                       fontsExpanded && 'rotate-180',
                     )}
                     aria-expanded={fontsExpanded}
@@ -568,7 +556,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, overrideS
                     <button
                       type="button"
                       className={cn(
-                        'flex h-6 w-6 items-center justify-center rounded-md text-current/60 transition-transform hover:bg-current/10 hover:text-current',
+                        '-my-1 flex h-6 w-6 items-center justify-center rounded-md text-current/60 transition-transform hover:bg-current/10 hover:text-current',
                         cjkExpanded && 'rotate-180',
                       )}
                       aria-expanded={cjkExpanded}
@@ -760,9 +748,9 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, overrideS
             )}
 
             {readingModeBinding.value === 'scroll' && (
-              <ControlGroup label={_('reader.continuousScroll')}>
+              <InlineControlRow label={_('reader.continuousScroll')}>
                 <ButtonGroup
-                  size="sm"
+                  inline
                   options={[
                     { value: 'off', label: _('reader.continuousScrollOff') },
                     { value: 'snap', label: _('reader.continuousScrollSnap') },
@@ -771,16 +759,16 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, overrideS
                   value={(continuousScrollBinding.value as 'off' | 'snap' | 'seamless')}
                   onChange={continuousScrollBinding.onChange}
                 />
-              </ControlGroup>
+              </InlineControlRow>
             )}
 
             <ToggleRow label={_('reader.pageAnimation')} checked={pageAnimationBinding.checked} onChange={pageAnimationBinding.onChange} />
           </PanelSection>
 
           <PanelSection title={_('reader.displayTextGroup')}>
-            <ControlGroup label={_('reader.chineseConversion')}>
+            <InlineControlRow label={_('reader.chineseConversion')}>
               <ButtonGroup
-                size="sm"
+                inline
                 options={[
                   { value: 'off', label: _('reader.chineseConversionOff') },
                   { value: 'simplified', label: _('reader.chineseConversionSimplified') },
@@ -789,7 +777,7 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, overrideS
                 value={(chineseConversionBinding.value as 'off' | 'simplified' | 'traditional')}
                 onChange={(v) => updateField('chineseConversion', v === chineseConversionBinding.value ? 'off' : v)}
               />
-            </ControlGroup>
+            </InlineControlRow>
 
             {cleanReadingSupported && (
               <ToggleRow
@@ -835,8 +823,6 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, overrideS
               />
             )}
 
-            <ToggleRow label={_('reader.showFriendIdeas')} checked={showFriendIdeasBinding.checked} onChange={showFriendIdeasBinding.onChange} />
-
             <InlineControlRow label={_('reader.ideaDisplayMode')}>
               <ButtonGroup
                 inline
@@ -848,6 +834,8 @@ export function SettingsPanel({ bookId, cleanReadingSupported = false, overrideS
                 onChange={ideaDisplayModeBinding.onChange}
               />
             </InlineControlRow>
+
+            <ToggleRow label={_('reader.showFriendIdeas')} checked={showFriendIdeasBinding.checked} onChange={showFriendIdeasBinding.onChange} />
           </PanelSection>
 
           {viewSettings && canWriteGroups && (

@@ -18,4 +18,13 @@ describe('Toggle', () => {
     const toggle = screen.getByRole('switch', { name: 'Regex' })
     expect(toggle).toHaveTextContent('Regex')
   })
+
+  it('supports md size and busy state', () => {
+    render(<Toggle checked={true} size="md" busy disabled onChange={() => {}} ariaLabel="Pending" />)
+
+    const toggle = screen.getByRole('switch', { name: 'Pending' })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    expect(toggle).toHaveAttribute('aria-busy', 'true')
+    expect(toggle).toBeDisabled()
+  })
 })

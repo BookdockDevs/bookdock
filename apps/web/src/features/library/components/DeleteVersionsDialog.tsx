@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 
 import type { CatalogBook, CatalogVersion, UndoReceipt } from '@bookdock/shared'
 
+import Checkbox from '@/components/ui/Checkbox'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -125,13 +126,13 @@ export default function DeleteVersionsDialog({ work, libraryId, preselectedIds, 
                       )}
                     >
                       <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                        <input
-                          type="checkbox"
+                        <Checkbox
+                          withinLabel
                           checked={isChecked}
                           disabled={deleting}
                           onChange={() => toggle(version.id)}
                           aria-label={versionTabLabel(version.name, fallback(versionOrdinal(versions, version.id)))}
-                          className="h-4 w-4 shrink-0 rounded accent-stone-900 dark:accent-stone-100"
+                          className="shrink-0"
                         />
                         <span className="truncate font-medium text-stone-800 dark:text-stone-200">
                           {versionTabLabel(version.name, fallback(versionOrdinal(versions, version.id)))}

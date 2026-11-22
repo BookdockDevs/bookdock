@@ -1,5 +1,6 @@
 import type { LibraryVisibility } from '@bookdock/shared'
 
+import Radio from '@/components/ui/Radio'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
 
@@ -93,15 +94,6 @@ export default function LibraryVisibilityField({
                   : 'border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50/40 dark:border-stone-700/80 dark:bg-stone-900/60 dark:hover:border-stone-600 dark:hover:bg-stone-800/40',
               )}
             >
-              <input
-                type="radio"
-                name={name}
-                value={opt.value}
-                checked={selected}
-                onChange={() => onChange(opt.value)}
-                aria-label={opt.label}
-                className="sr-only"
-              />
               <div>
                 <div className="flex items-center justify-between">
                   <div className={cn(
@@ -112,14 +104,14 @@ export default function LibraryVisibilityField({
                   )}>
                     <Icon className="h-4 w-4" />
                   </div>
-                  <div className={cn(
-                    'flex h-4 w-4 items-center justify-center rounded-full border transition-colors',
-                    selected
-                      ? 'border-stone-900 bg-stone-900 dark:border-stone-100 dark:bg-stone-100'
-                      : 'border-stone-300 group-hover:border-stone-400 dark:border-stone-600 dark:group-hover:border-stone-500',
-                  )}>
-                    {selected && <div className="h-1.5 w-1.5 rounded-full bg-white dark:bg-stone-900" />}
-                  </div>
+                  <Radio
+                    withinLabel
+                    name={name}
+                    value={opt.value}
+                    checked={selected}
+                    onChange={() => onChange(opt.value)}
+                    aria-label={opt.label}
+                  />
                 </div>
                 <span className="mt-2.5 block text-sm font-semibold text-stone-900 dark:text-stone-100">
                   {opt.label}

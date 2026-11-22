@@ -2,6 +2,7 @@ import { type ReactNode, useState } from 'react'
 
 import type { HighlightLineStyle, HighlightRuleDef, HighlightRuleLine, HighlightRuleStyle } from '@bookdock/shared'
 
+import Checkbox from '@/components/ui/Checkbox'
 import SmartMenu, { readerMenuItemClass } from '@/components/ui/SmartMenu'
 import Toggle from '@/components/ui/Toggle'
 import SettingsFormField from '@/features/settings/components/SettingsFormField'
@@ -482,12 +483,11 @@ export default function HighlightRulesDraftSection({ rules, single = false, scop
               {/* List item summary header (hidden in single card edit modal) */}
               {!single && (
                 <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={rule.enabled}
-                    onChange={(e) => update(index, { ...rule, enabled: e.target.checked })}
+                    onChange={(checked) => update(index, { ...rule, enabled: checked })}
                     aria-label={rule.name}
-                    className="accent-current cursor-pointer"
+                    className="shrink-0"
                   />
                   <span className="min-w-0 flex-1 truncate text-xs font-medium text-current">
                     {rule.name}

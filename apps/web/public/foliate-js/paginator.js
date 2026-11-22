@@ -1117,6 +1117,7 @@ class View {
                 this.#overlayer.element.style.left = '0'
                 this.#overlayer.element.style.top = '0'
                 this.#overlayer.element.style[side] = `${expandedSize}px`
+                this.#overlayer.element.style[otherSide] = '100%'
                 this.#overlayer.redraw()
             }
         } else {
@@ -1173,6 +1174,7 @@ class View {
                 this.#overlayer.element.style.left = '0'
                 this.#overlayer.element.style.top = '0'
                 this.#overlayer.element.style[side] = `${expandedSize}px`
+                this.#overlayer.element.style[otherSide] = '100%'
                 this.#overlayer.redraw()
             }
         }

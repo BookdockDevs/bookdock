@@ -12,6 +12,7 @@ import {
 
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import Select from '@/components/ui/Select'
 import TocPatternRow, { type TocPatternError } from '@/features/settings/components/TocPatternRow'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -549,24 +550,13 @@ export default function ContentRechapterModal({
                 <span className="text-xs text-stone-600 dark:text-stone-300">
                   {_('library.tocRuleCopyTemplate') || '从已有规则复制模板…'}
                 </span>
-                <select
-                  defaultValue=""
+                <Select
+                  value=""
                   aria-label={_('library.copyFromTemplate') || '从已有规则复制模板'}
-                  onChange={(e) => {
-                    handleCopyFromTemplate(e.target.value)
-                    e.target.value = ''
-                  }}
-                  className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs text-stone-700 outline-none transition-colors hover:border-stone-300 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
-                >
-                  <option value="" disabled>
-                    {_('library.tocRuleCopyTemplate') || '选择模板…'}
-                  </option>
-                  {rules.map((rule) => (
-                    <option key={rule.id} value={rule.id}>
-                      {rule.name}
-                    </option>
-                  ))}
-                </select>
+                  placeholder={_('library.tocRuleCopyTemplate') || '选择模板…'}
+                  onValueChange={handleCopyFromTemplate}
+                  options={rules.map((rule) => ({ value: rule.id, label: rule.name }))}
+                />
               </div>
             )}
 

@@ -2,6 +2,22 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Added shared `Radio`, `Select` (with `SmartMenu` dropdown popovers and a `reader` theme variant), `Input`, and `Textarea` UI primitives, and aligned `settingsForm` field classes with the shared base styles.
+
+### Changed
+
+- Unified checkboxes across dialogs, WebDAV import, and settings lists onto `Checkbox` with `indeterminate` (mixed) state support, a bolder indeterminate dash matching the checkmark stroke weight, `withinLabel`, and `amber` tone; unified library and instance settings switches onto `Toggle` with `sm`/`md` sizes and focus-visible rings.
+- Replaced the raw `<progress>` upload bar in content files with a themed `progressbar`, and switched visible form and reader header/footer `<select>` controls to `Select`.
+- Placed Continuous Scroll and Chinese Conversion inline in reader Display settings, added horizontal padding to inline `ButtonGroup` tabs, and moved Idea Display Mode above Show Friend Ideas.
+
+### Fixed
+
+- Fixed automatic highlight rules disappearing or misaligning when switching between scrolled and paginated reading modes by resetting the cross-axis `overlayer` dimension on flow switches and repainting cached document highlights after mode changes and layout stabilization.
+
 ## [0.8.7] - 2026-11-22
 
 ### Highlights
@@ -1386,6 +1402,22 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [Unreleased]
+
+#### 新增
+
+- 新增公共 `Radio`、`Select`（支持 `SmartMenu` 下拉浮层及 `reader` 主题变体）、`Input` 与 `Textarea` 基础组件，并将 `settingsForm` 表单样式基类对齐到公共组件。
+
+#### 优化
+
+- 将弹窗、WebDAV 导入与设置列表的复选框统一收口到公共 `Checkbox`，补齐 `indeterminate` 半选态（加粗横线以匹配对勾笔画）、`withinLabel` 与 `amber` 语义色；将书库管理与实例设置开关统一到支持 `sm`/`md` 尺寸与焦点环的 `Toggle`。
+- 将内容文件上传中的原生 `<progress>` 替换为适配暗色模式的自定义进度条，并将表单与阅读器页眉/页脚的原生 `<select>` 统一为 `Select` 自定义弹层。
+- 将阅读器设置中的「连续滚动」与「简繁转换」调整为单行布局，增加行内分段选项的横向留白，并将「想法展示方式」调整到「显示书友想法」上方。
+
+#### 修复
+
+- 修复阅读器在滚动与翻页模式间切换时自动高亮规则失效或错位的问题：在流模式切换时重置 `overlayer` 另一侧尺寸，并在模式切换与布局稳定后重绘已缓存的章节高亮。
 
 ### [0.8.7] - 2026-11-22
 

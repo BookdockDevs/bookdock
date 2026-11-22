@@ -8,6 +8,7 @@ import { isValidTocRegex, type TocPreviewChapter, type TocPreviewReq, type TocRu
 import { tocPreviewPost, useReToc, useTocPreview, useTocRules, type TocTarget } from '@/api/hooks/useTocRules'
 import { Button } from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import Select from '@/components/ui/Select'
 import TocPatternRow, { type TocPatternError } from '@/features/settings/components/TocPatternRow'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
@@ -207,24 +208,13 @@ export default function BookCustomTocEditor({
             <span className="text-xs text-stone-600 dark:text-stone-300">
               {_('library.tocRuleCopyTemplate')}
             </span>
-            <select
-              defaultValue=""
-              onChange={(e) => {
-                handleCopyFromTemplate(e.target.value)
-                e.target.value = ''
-              }}
+            <Select
+              value=""
+              placeholder={_('library.tocRuleCopyTemplate')}
+              onValueChange={handleCopyFromTemplate}
               disabled={saving}
-              className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs text-stone-700 outline-none transition-colors hover:border-stone-300 focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
-            >
-              <option value="" disabled>
-                {_('library.tocRuleCopyTemplate')}
-              </option>
-              {globalRules.map((rule) => (
-                <option key={rule.id} value={rule.id}>
-                  {rule.name}
-                </option>
-              ))}
-            </select>
+              options={globalRules.map((rule) => ({ value: rule.id, label: rule.name }))}
+            />
           </div>
         )}
 

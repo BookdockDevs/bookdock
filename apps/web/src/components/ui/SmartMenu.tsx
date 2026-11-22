@@ -109,7 +109,7 @@ export default function SmartMenu({
   // keep the `dark:` axis on the reading theme (matches Modal variant reader).
   const themeClass =
     variant === 'reader'
-      ? `border-stone-200/90 bg-white/95 text-stone-700 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.12),0_2px_6px_-1px_rgba(0,0,0,0.06)] dark:border-stone-800 dark:bg-stone-900/95 dark:text-stone-200 dark:shadow-[0_4px_20px_-2px_rgba(0,0,0,0.4),0_2px_6px_-1px_rgba(0,0,0,0.2)] ${readingTone}`
+      ? `border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 text-[var(--bd-read-text)] shadow-[0_4px_20px_-2px_rgba(0,0,0,0.12),0_2px_6px_-1px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_20px_-2px_rgba(0,0,0,0.4),0_2px_6px_-1px_rgba(0,0,0,0.2)] ${readingTone}`
       : 'border-stone-200/80 bg-white/95 text-stone-900 shadow-stone-900/8 dark:border-stone-700 dark:bg-stone-900/95 dark:text-stone-100'
 
   const style = {

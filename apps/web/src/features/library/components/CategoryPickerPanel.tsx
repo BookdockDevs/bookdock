@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 
 import { CATEGORY_TEMPLATES, categoryTemplatePath, type ClientCategoryView } from '@bookdock/shared'
 
+import Select from '@/components/ui/Select'
 import { useTranslation } from '@/hooks/useTranslation'
 
 import TaxonomyIcon from './TaxonomyIcon'
@@ -100,19 +101,16 @@ export default function CategoryPickerPanel({
               <label htmlFor={parentSelectId} className="block text-[11px] text-stone-400">
                 {_('library.parentCategory')}
               </label>
-              <select
+              <Select
                 id={parentSelectId}
                 value={newParentId}
-                onChange={(e) => setNewParentId(e.target.value)}
-                className="h-7 w-full rounded-md border border-stone-200 bg-white px-2 text-xs text-stone-700 outline-none transition-colors focus:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
-              >
-                <option value="">{_('library.rootCategoryOption')}</option>
-                {rootCategories.map((root) => (
-                  <option key={root.id} value={root.id}>
-                    {root.name}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setNewParentId}
+                containerClassName="w-full"
+                options={[
+                  { value: '', label: _('library.rootCategoryOption') },
+                  ...rootCategories.map((root) => ({ value: root.id, label: root.name })),
+                ]}
+              />
             </div>
 
             {/* Name input */}

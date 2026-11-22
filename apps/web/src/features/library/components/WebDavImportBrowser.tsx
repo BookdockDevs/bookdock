@@ -8,6 +8,7 @@ import {
   useStorageConnections,
 } from '@/api/hooks/useStorageConnections'
 import { Button } from '@/components/ui/Button'
+import Checkbox from '@/components/ui/Checkbox'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn, formatBytes } from '@/lib/utils'
 import { notify } from '@/lib/notifications'
@@ -217,6 +218,8 @@ export default function WebDavImportBrowser({
 
   const allSupportedSelected =
     supportedFiles.length > 0 && supportedFiles.every((f) => selectedPaths.has(f.path))
+  const someSupportedSelected =
+    supportedFiles.length > 0 && supportedFiles.some((f) => selectedPaths.has(f.path))
 
   function handleConnectionChange(id: string) {
     if (id === activeConnectionId || isImporting) return
@@ -808,11 +811,11 @@ export default function WebDavImportBrowser({
                   <label
                     className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-stone-100/80 dark:hover:bg-stone-800/80"
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
+                      withinLabel
                       checked={isChecked}
                       onChange={() => toggleFile(entry.path)}
-                      className="h-4 w-4 rounded border-stone-300 text-stone-800 focus:ring-stone-500 dark:border-stone-700 dark:bg-stone-800"
+                      className="shrink-0"
                     />
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-stone-600 dark:text-stone-300">
                       <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
@@ -939,15 +942,13 @@ export default function WebDavImportBrowser({
       <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50/80 px-3.5 py-2.5 text-xs dark:border-stone-800 dark:bg-stone-900/90">
         <div>
           {supportedFiles.length > 0 && (
-            <label className="flex cursor-pointer items-center gap-2 select-none text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200">
-              <input
-                type="checkbox"
-                checked={allSupportedSelected}
-                onChange={toggleSelectAll}
-                className="h-4 w-4 rounded border-stone-300 text-stone-800 focus:ring-stone-500 dark:border-stone-700 dark:bg-stone-800"
-              />
-              <span>{_('library.webdavSelectAll') || '全选'}</span>
-            </label>
+            <Checkbox
+              checked={allSupportedSelected}
+              indeterminate={someSupportedSelected && !allSupportedSelected}
+              onChange={toggleSelectAll}
+              label={_('library.webdavSelectAll') || '全选'}
+              className="font-normal text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200"
+            />
           )}
         </div>
 

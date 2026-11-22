@@ -1,6 +1,7 @@
 import type { AccessTokenPermission } from '@bookdock/shared'
 import { ACCESS_TOKEN_PERMISSION_REGISTRY } from '@bookdock/shared'
 
+import Checkbox from '@/components/ui/Checkbox'
 import { useTranslation } from '@/hooks/useTranslation'
 import { ACCESS_TOKEN_PERMISSION_LABEL_KEYS } from './access-token-permissions'
 
@@ -79,11 +80,11 @@ export default function AccessTokenPermissionSelector({ value, onChange }: Acces
                   : 'border-stone-200/70 bg-stone-50/40 hover:bg-stone-100/60 dark:border-stone-800/80 dark:bg-stone-800/30 dark:hover:bg-stone-800/50'
               }`}
             >
-              <input
-                type="checkbox"
+              <Checkbox
+                withinLabel
                 checked={isChecked}
                 onChange={() => togglePermission(entry.id)}
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border-stone-300 accent-stone-900 dark:border-stone-700 dark:accent-stone-100"
+                className="mt-0.5 shrink-0"
               />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">

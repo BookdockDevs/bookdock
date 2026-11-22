@@ -2,6 +2,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
 import Badge from '@/components/ui/Badge'
+import Checkbox from '@/components/ui/Checkbox'
 import Toggle from '@/components/ui/Toggle'
 import type { FontOption } from '@/features/reader/fonts'
 import { useTranslation } from '@/hooks/useTranslation'
@@ -73,16 +74,12 @@ export default function FontRow({
       )}
     >
       {sorting && (
-        <input
-          type="checkbox"
+        <Checkbox
           checked={selectable ? selected : false}
           disabled={disabled || !selectable}
           aria-label={font.name}
-          onChange={(event) => onSelectChange?.(event.target.checked)}
-          className={cn(
-            'h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300',
-            !selectable && 'cursor-not-allowed opacity-40',
-          )}
+          onChange={(checked) => onSelectChange?.(checked)}
+          className={cn('shrink-0', !selectable && 'opacity-40')}
         />
       )}
       {sorting && (

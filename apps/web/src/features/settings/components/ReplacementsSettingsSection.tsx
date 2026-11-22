@@ -9,6 +9,7 @@ import { serializeReplacementsForExport, type TextReplacementRes } from '@bookdo
 
 import { useDeleteGlobalReplacements, useReorderReplacements, useReplacements, useUpdateReplacement } from '@/api/hooks/useReplacements'
 import Badge from '@/components/ui/Badge'
+import Checkbox from '@/components/ui/Checkbox'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import QueryErrorState from '@/components/ui/QueryErrorState'
@@ -353,9 +354,15 @@ function ReplacementRow({ rule, editing, disabled, editable, selectable, onToggl
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn('flex items-center gap-3 py-2', !editing && !rule.enabled && 'opacity-60', isDragging && 'relative z-10 opacity-60')}
     >
-      {editing && selectable && <input type="checkbox" checked={selected} onChange={onSelect} disabled={disabled}
-        aria-label={_('settings.ruleSelect', { name: rule.name?.trim() || rule.pattern || '—' })}
-        className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300" />}
+      {editing && selectable && (
+        <Checkbox
+          checked={selected}
+          onChange={onSelect}
+          disabled={disabled}
+          aria-label={_('settings.ruleSelect', { name: rule.name?.trim() || rule.pattern || '—' })}
+          className="shrink-0"
+        />
+      )}
       {editing && !selectable && <span className="h-4 w-4 shrink-0" aria-hidden="true" />}
       {editing && (
         <button

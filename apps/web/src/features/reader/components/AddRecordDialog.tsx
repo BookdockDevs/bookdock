@@ -4,6 +4,7 @@ import type { ReadingLedgerSession, ReadingRecordConflictDetails, ReadingRecordC
 
 import { localDateString, useAddReadingRecord, useUpdateSession } from '@/api/hooks/reading-records'
 import { Button } from '@/components/ui/Button'
+import Checkbox from '@/components/ui/Checkbox'
 import Modal from '@/components/ui/Modal'
 import SmartMenu from '@/components/ui/SmartMenu'
 import Toggle from '@/components/ui/Toggle'
@@ -795,14 +796,15 @@ export default function AddRecordDialog({
 
           {/* 冲突覆盖选项 */}
           {conflicts.length > 0 && (
-            <label className="flex items-start gap-2.5 rounded-xl border border-amber-200/80 bg-amber-50/70 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-              <input
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-amber-200/80 bg-amber-50/70 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
+              <Checkbox
+                withinLabel
+                tone="amber"
                 name="replaceConflicts"
-                type="checkbox"
                 checked={replaceConflicts}
-                onChange={(event) => setReplaceConflicts(event.target.checked)}
+                onChange={setReplaceConflicts}
                 aria-label={_('readingData.replaceConflicts', { n: conflicts.length })}
-                className="mt-0.5 h-4 w-4 rounded accent-amber-600 cursor-pointer"
+                className="mt-0.5 shrink-0"
               />
               <span className="flex-1 font-medium leading-relaxed">
                 {_('readingData.replaceConflicts', { n: conflicts.length })}

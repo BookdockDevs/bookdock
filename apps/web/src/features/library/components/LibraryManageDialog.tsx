@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Modal from '@/components/ui/Modal'
 import PasswordInput from '@/components/ui/PasswordInput'
+import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -216,46 +217,26 @@ export default function LibraryManageDialog({ library, isOwner, onClose }: Libra
                       <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('admin.allowUserUpload')}</p>
                       <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('admin.allowUserUploadHint')}</p>
                     </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={allowMemberUpload}
-                      aria-label={_('admin.allowUserUpload')}
+                    <Toggle
+                      size="md"
+                      checked={allowMemberUpload}
                       disabled={updateLibrary.isPending}
-                      onClick={() => setAllowMemberUpload(!allowMemberUpload)}
-                      className={cn(
-                        'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60',
-                        allowMemberUpload ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-200 dark:bg-stone-700',
-                      )}
-                    >
-                      <span className={cn(
-                        'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all dark:bg-stone-900',
-                        allowMemberUpload ? 'left-[22px] dark:bg-stone-900' : 'left-0.5',
-                      )} />
-                    </button>
+                      ariaLabel={_('admin.allowUserUpload')}
+                      onChange={setAllowMemberUpload}
+                    />
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{_('settings.trash')}</p>
                       <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{_('settings.trashAutoCleanHint')}</p>
                     </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={trashEnabled}
-                      aria-label={_('settings.trashEnabled')}
+                    <Toggle
+                      size="md"
+                      checked={trashEnabled}
                       disabled={updateLibrary.isPending}
-                      onClick={() => setTrashEnabled(!trashEnabled)}
-                      className={cn(
-                        'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-60',
-                        trashEnabled ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-200 dark:bg-stone-700',
-                      )}
-                    >
-                      <span className={cn(
-                        'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all dark:bg-stone-900',
-                        trashEnabled ? 'left-[22px] dark:bg-stone-900' : 'left-0.5',
-                      )} />
-                    </button>
+                      ariaLabel={_('settings.trashEnabled')}
+                      onChange={setTrashEnabled}
+                    />
                   </div>
                   {trashEnabled && (
                     <>

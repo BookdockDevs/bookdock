@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities'
 import type { TocRuleRes } from '@bookdock/shared'
 
 import Badge from '@/components/ui/Badge'
+import Checkbox from '@/components/ui/Checkbox'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -46,9 +47,13 @@ export default function TocRuleRow({ rule, disabled, sorting, onToggle, onEdit, 
       className={cn('flex items-center gap-3 py-2.5', !sorting && !rule.enabled && 'opacity-60', isDragging && 'relative z-10 opacity-60')}
     >
       {sorting && selectable && (
-        <input type="checkbox" checked={selected} onChange={onSelect} disabled={disabled}
+        <Checkbox
+          checked={selected}
+          onChange={onSelect}
+          disabled={disabled}
           aria-label={_('settings.ruleSelect', { name: rule.name })}
-          className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300" />
+          className="shrink-0"
+        />
       )}
       {sorting && (
         <button

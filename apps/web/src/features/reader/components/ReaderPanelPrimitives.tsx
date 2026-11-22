@@ -235,7 +235,7 @@ export function ButtonGroup<T extends string | number>({
             className={cn(
               'flex items-center justify-center whitespace-nowrap tracking-wide transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-current/40 active:scale-[0.98]',
               isCompact
-                ? 'min-h-[1.75rem] rounded-md px-2.5 py-1 text-xs'
+                ? cn('min-h-[1.75rem] rounded-md py-1 text-xs', inline && options.length <= 2 ? 'px-3.5' : 'px-3')
                 : 'min-h-[2.125rem] rounded-lg px-2.5 py-1.5 text-[13px]',
               isSelected
                 ? 'bg-[var(--bd-read-bg)] font-medium text-current shadow-xs ring-1 ring-current/10'

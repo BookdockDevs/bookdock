@@ -2,6 +2,7 @@ import { REGISTRATION_MODES, type RegistrationMode } from '@bookdock/shared'
 
 import QueryErrorState from '@/components/ui/QueryErrorState'
 import SegmentedControl from '@/components/ui/SegmentedControl'
+import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -142,20 +143,15 @@ function ToggleRow({ label, hint, checked, pending, onChange }: {
         <p className="text-sm font-medium text-stone-700 dark:text-stone-200">{label}</p>
         <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{hint}</p>
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
+      <Toggle
+        size="md"
+        checked={checked}
         disabled={pending}
-        aria-busy={pending}
-        onClick={() => onChange(!checked)}
-        className={cn('relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed', checked ? 'bg-stone-900 dark:bg-stone-100' : 'bg-stone-300 dark:bg-stone-700')}
-      >
-        <span
-          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform dark:bg-stone-900 ${checked ? 'translate-x-5' : ''}`}
-        />
-      </button>
+        busy={pending}
+        dimOnDisabled={false}
+        ariaLabel={label}
+        onChange={onChange}
+      />
     </div>
   )
 }

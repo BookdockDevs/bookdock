@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities'
 import type { DictionaryItem } from '@bookdock/shared'
 
 import Badge from '@/components/ui/Badge'
+import Checkbox from '@/components/ui/Checkbox'
 import Toggle from '@/components/ui/Toggle'
 import { useTranslation } from '@/hooks/useTranslation'
 import { cn } from '@/lib/utils'
@@ -52,13 +53,12 @@ export default function DictionaryRow({
       )}
     >
       {editing && (
-        <input
-          type="checkbox"
+        <Checkbox
           checked={selected}
           disabled={disabled}
           aria-label={item.name}
-          onChange={(event) => onSelectChange?.(event.target.checked)}
-          className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300"
+          onChange={(checked) => onSelectChange?.(checked)}
+          className="shrink-0"
         />
       )}
       {editing && (

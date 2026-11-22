@@ -2817,8 +2817,9 @@ export class FoliateReader implements BookReader {
       })
       view.addEventListener('stabilized', () => {
         const reapply = new Set<string>()
-        const contents = (this.view?.renderer?.getContents?.() ?? []) as Array<{ index?: number }>
+        const contents = (this.view?.renderer?.getContents?.() ?? []) as Array<{ index?: number; doc?: Document }>
         for (const content of contents) {
+          if (content.doc && this.docHighlightResults.has(content.doc)) this.paintDocHighlights(content.doc)
           if (typeof content.index !== 'number') continue
           const bucket = this.annotationBuckets.get(sectionSpinePrefix(content.index))
           if (!bucket) continue
@@ -3497,6 +3498,14 @@ export class FoliateReader implements BookReader {
     this.view.renderer.setAttribute('flow', mode === 'page' ? 'paginated' : 'scrolled')
     this.updateLayout()
     this.applyStyles()
+    const repaintHighlights = () => {
+      for (const doc of this.docHighlightResults.keys()) this.paintDocHighlights(doc)
+    }
+    repaintHighlights()
+    requestAnimationFrame(() => {
+      if (this.destroyed || this.readingMode !== mode) return
+      repaintHighlights()
+    })
   }
 
   applyPageColumns(columns: number) {

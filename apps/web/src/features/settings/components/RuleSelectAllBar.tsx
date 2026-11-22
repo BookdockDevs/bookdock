@@ -1,3 +1,4 @@
+import Checkbox from '@/components/ui/Checkbox'
 import { useTranslation } from '@/hooks/useTranslation'
 
 interface RuleSelectAllBarProps {
@@ -24,16 +25,14 @@ export default function RuleSelectAllBar({
   const _ = useTranslation()
   return (
     <div className="flex items-center justify-between gap-3 border-b border-stone-100 py-2.5 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
-      <label className="flex cursor-pointer items-center gap-2 font-medium text-stone-600 dark:text-stone-300">
-        <input
-          type="checkbox"
-          checked={allSelected}
-          ref={(node) => { if (node) node.indeterminate = indeterminate }}
-          disabled={disabled}
-          onChange={(event) => onToggleAll(event.target.checked)}
-          className="h-4 w-4 shrink-0 accent-stone-700 dark:accent-stone-300" />
-        {label ?? _('settings.ruleSelectAll')}
-      </label>
+      <Checkbox
+        checked={allSelected}
+        indeterminate={indeterminate}
+        disabled={disabled}
+        onChange={onToggleAll}
+        label={label ?? _('settings.ruleSelectAll')}
+        className="text-stone-600 dark:text-stone-300"
+      />
       <span className="shrink-0 tabular-nums">{countLabel ?? _('settings.ruleSelectedCount', { count: selectedCount })}</span>
     </div>
   )
