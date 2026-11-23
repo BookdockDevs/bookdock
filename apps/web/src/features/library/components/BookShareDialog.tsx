@@ -11,7 +11,6 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import Input from '@/components/ui/Input'
 import Modal from '@/components/ui/Modal'
 import SegmentedControl from '@/components/ui/SegmentedControl'
-import Spinner from '@/components/ui/Spinner'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
@@ -167,9 +166,15 @@ export default function BookShareDialog({ target, userId, onClose }: BookShareDi
     >
       <div className="flex flex-col gap-4">
         {status.isPending ? (
-          <div role="status" className="flex items-center gap-2 py-4 text-sm text-stone-500 dark:text-stone-400">
-            <Spinner size="sm" />
-            <span>{_('reader.loading')}</span>
+          <div role="status" aria-busy="true" aria-label={_('reader.loading')} className="flex animate-pulse flex-col gap-4 motion-reduce:animate-none">
+            <div className="h-5 w-60 rounded bg-stone-200/70 dark:bg-stone-800" />
+            <div className="flex flex-col gap-1.5">
+              <div className="h-4 w-12 rounded bg-stone-200/60 dark:bg-stone-800/80" />
+              <div className="h-8 w-full rounded-lg bg-stone-200/70 dark:bg-stone-800" />
+            </div>
+            <div className="flex justify-end pt-1">
+              <div className="h-8 w-20 rounded-lg bg-stone-200/70 dark:bg-stone-800" />
+            </div>
           </div>
         ) : status.isError ? (
           <p role="alert" className="text-sm text-red-600 dark:text-red-400">{_('library.bookShare.loadFailed')}</p>
