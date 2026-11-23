@@ -3,6 +3,8 @@ import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { and, eq } from 'drizzle-orm'
 
+import { externalArchiveListQuerySchema } from '@bookdock/shared'
+
 import * as schema from '../../db/schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
@@ -10,6 +12,7 @@ import * as storage from '../../storage'
 import type { StorageDriver } from '../../storage/driver'
 import archiveRoutes from './archive.routes'
 import { deleteBookArchive, exportNotes, getBookDetail, getOverview, listBooks } from './archive.service'
+import { getExternalArchive, getExternalArchiveOverview } from '../ext/ext-archives.service'
 
 type TestDb = ReturnType<typeof drizzle<typeof schema>>
 
@@ -104,6 +107,28 @@ describe('archive service', () => {
     db.insert(schema.bookStates).values({ userId: ownerId, bookVersionId: bookOne, readStatus: 'finished', updatedAt: 10 }).run()
   })
 
+  it('exposes imported archives and notes-only archives to their owner', async () => {
+    const importedId = 'imported-archive'
+    db.insert(schema.readingArchives).values({
+      userId: ownerId, bookVersionId: importedId, title: 'Imported', importSource: 'weread',
+      legacyDaily: [{ date: '2026-11-01', durationSeconds: 120 }], createdAt: 1, updatedAt: 1,
+    }).run()
+    seedHighlight(db, ownerId, bookOne, 1000)
+    expect(await getExternalArchiveOverview(ownerId, externalArchiveListQuerySchema.parse({ search: 'Imported' }))).toMatchObject({
+      view: 'overview', overview: { totalBooks: 2 }, entries: [{ archiveId: importedId }],
+    })
+    await expect(getExternalArchive(ownerId, { archiveId: importedId, view: 'data' })).resolves.toMatchObject({
+      view: 'data', data: { ledger: { sourceAvailable: false }, stats: { totalSeconds: 120 } },
+    })
+    await expect(getExternalArchive(ownerId, { archiveId: bookOne, view: 'notes' })).resolves.toMatchObject({
+      view: 'notes', annotations: [{ text: 'quote 1000' }],
+    })
+    await expect(getExternalArchive(ownerId, { archiveId: bookOne, view: 'data' })).resolves.toMatchObject({ data: null })
+    expect(db.select().from(schema.readingArchives).all().map((row) => row.bookVersionId)).toEqual([importedId])
+    await expect(getExternalArchive(otherId, { archiveId: importedId, view: 'data' })).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
+    await expect(getExternalArchive(otherId, { archiveId: bookOne, view: 'notes' })).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
+  })
+
   it('returns only complete archive counts without a second book-list projection', async () => {
     seedHighlight(db, ownerId, bookOne, 100)
     seedBookmark(db, ownerId, bookOne, 200)
@@ -119,6 +144,37 @@ describe('archive service', () => {
     expect(overview).toEqual({ totalBooks: 7, counts: { highlights: 1, bookmarks: 1, ideas: 0, reviews: 0, total: 2 } })
     await listBooks(ownerId, { search: 'One', type: 'highlight', sort: 'recent', page: 1, pageSize: 1 })
     expect((await getOverview(ownerId)).totalBooks).toBe(7)
+  })
+
+  it('returns scoped account statistics alongside a filtered archive page', async () => {
+    const date = '2026-10-18'
+    db.insert(schema.readingRecords).values([
+      { id: createId('rr'), userId: ownerId, bookId: bookOne, date, durationSeconds: 300 },
+      { id: createId('rr'), userId: ownerId, bookId: bookTwo, date, durationSeconds: 600 },
+      { id: createId('rr'), userId: ownerId, bookId: bookOne, date: '2026-09-30', durationSeconds: 500 },
+      { id: createId('rr'), userId: otherId, bookId: bookOne, date, durationSeconds: 800 },
+    ]).run()
+    db.insert(schema.readingDurationFacts).values({
+      id: createId('fact'), userId: ownerId, granularity: 'account_day', date, durationSeconds: 120,
+      aggregationRole: 'additive', source: 'legado', sourceNamespace: 'fixture', sourceRecordKey: date, observedAt: 1,
+    }).run()
+    const query = externalArchiveListQuerySchema.parse({
+      from: '2026-10-01', to: '2026-10-31', timezone: 'Asia/Shanghai', search: 'Book Two', pageSize: 1,
+    })
+    expect(await getExternalArchiveOverview(ownerId, query)).toMatchObject({
+      view: 'overview',
+      overview: {
+        reading: {
+          summary: { totalSeconds: 1520, scope: { totalSeconds: 1020, totalDays: 1, totalBooks: 2 } },
+          daily: [{ date, durationSeconds: 1020 }],
+          hourly: [],
+          byCategory: [{ categoryPath: null, durationSeconds: 900, bookCount: 2 }],
+          byTag: [],
+        },
+      },
+      entries: [{ archiveId: bookTwo, durationSeconds: 600 }],
+      hasMore: false,
+    })
   })
 
   it('counts live rows per record type with real data', async () => {

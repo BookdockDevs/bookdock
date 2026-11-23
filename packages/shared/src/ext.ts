@@ -1,5 +1,78 @@
+import { z } from 'zod'
+
+import { bookShareRequestSchema } from './book-shares'
 import type { BookFormat } from './constants'
-import type { BookMetadata } from './contract'
+import type { BookMetadata, ReadingRecordCategoryItem, ReadingRecordDailyItem, ReadingRecordHourlyItem, ReadingRecordSummaryRes, ReadingRecordTagItem } from './contract'
+import { categoryPathSchema } from './classification'
+import { catalogBookUpdateSchema } from './library'
+import { archiveBooksQuerySchema, type ArchiveBookDetail, type ArchiveBookItem, type ArchiveOverview } from './reader-profile'
+import { isOrderedReadingRange, readingRangeShape } from './reading-range'
+import type { ReadingBookOverviewRes } from './reading-ledger'
+
+export const externalLibraryIdSchema = z.string().min(1).max(128)
+export const externalBookListQuerySchema = z.object({
+  libraryId: externalLibraryIdSchema.optional(),
+  q: z.string().trim().min(1).max(200).optional(),
+  format: z.enum(['epub', 'txt']).optional(),
+  author: z.string().trim().min(1).max(500).optional(),
+  categoryPath: z.string().max(4096).transform((raw, ctx): unknown => {
+    try { return JSON.parse(raw) } catch {
+      ctx.addIssue({ code: 'custom', message: 'Expected a JSON category path' })
+      return z.NEVER
+    }
+  }).pipe(categoryPathSchema).optional(),
+  tag: z.string().trim().min(1).max(100).optional(),
+  shelfId: externalLibraryIdSchema.optional(),
+  sortBy: z.enum(['title', 'createdAt', 'updatedAt', 'size']).optional(),
+  sortOrder: z.enum(['asc', 'desc']).optional(),
+  sortScope: z.enum(['library', 'global']).optional(),
+  updatedSince: z.coerce.number().int().nonnegative().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+})
+export type ExternalListParams = z.infer<typeof externalBookListQuerySchema>
+
+export const externalWorkPatchSchema = catalogBookUpdateSchema.pick({
+  title: true, author: true, authors: true, description: true, categoryPath: true, tags: true,
+}).extend({ shelfId: externalLibraryIdSchema.nullable().optional() }).strict()
+  .refine((patch) => Object.keys(patch).length > 0, 'Expected at least one field')
+export type ExternalWorkPatch = z.infer<typeof externalWorkPatchSchema>
+
+export const externalDownloadLinkSchema = z.union([
+  z.object({ action: z.literal('revoke'), libraryId: externalLibraryIdSchema.optional() }),
+  bookShareRequestSchema.extend({ action: z.literal('get-or-create').optional() }),
+])
+
+export const externalArchiveListQuerySchema = archiveBooksQuerySchema.innerType().strict()
+  .refine(isOrderedReadingRange, { message: 'Range ends before it starts', path: ['to'] })
+export const externalArchiveDetailQuerySchema = z.object({
+  ...readingRangeShape,
+  archiveId: externalLibraryIdSchema,
+  view: z.enum(['data', 'notes']).default('data'),
+}).strict().refine(isOrderedReadingRange, { message: 'Range ends before it starts', path: ['to'] })
+
+export type ExternalArchiveItem = Omit<ArchiveBookItem, 'bookVersionId' | 'coverKey' | 'coverPaletteKey' | 'coverPaletteId'> & {
+  archiveId: string
+}
+export interface ExternalArchiveOverview extends ArchiveOverview {
+  reading: {
+    summary: ReadingRecordSummaryRes
+    daily: ReadingRecordDailyItem[]
+    hourly: ReadingRecordHourlyItem[]
+    byCategory: ReadingRecordCategoryItem[]
+    byTag: ReadingRecordTagItem[]
+  }
+}
+export type ExternalArchiveRes =
+  | { view: 'overview'; overview: ExternalArchiveOverview; entries: ExternalArchiveItem[]; page: number; hasMore: boolean }
+  | ({ view: 'notes'; archiveId: string } & ArchiveBookDetail)
+  | { view: 'data'; archiveId: string; data: Omit<ReadingBookOverviewRes, 'ledger'> & { ledger: Omit<ReadingBookOverviewRes['ledger'], 'coverKey'> } | null }
+
+export interface ExternalWorkPatchRes {
+  libraryId: string
+  bookVersionId: string
+  libraryBookId: string
+}
 
 /**
  * Wire shapes for the external `/api/v1/ext` surface.
@@ -10,10 +83,9 @@ import type { BookMetadata } from './contract'
  * An external sync client cannot tell those apart from real domain fields, and
  * would break every time the Web UI changed shape, so the two never share a DTO.
  *
- * The surface is deliberately narrow: read information, upload, download, and
- * move to trash. Chapter bodies, TOCs, reading progress, taxonomy editing,
- * version management and library administration all stay in the Web, which is
- * where they have real workflows behind them.
+ * The catalog operations work with editions for reads and with the selected
+ * library's work for organization and trash. Personal reading history has its
+ * own read-only endpoint and permission.
  *
  * Download is likewise one representation, not the Web's four. The Web's export
  * pair is TXT-only, and its 校订版 form is regenerated per caller from that
@@ -22,9 +94,8 @@ import type { BookMetadata } from './contract'
  * So `GET /books/:bookVersionId/file` always returns the stored blob as
  * `application/epub+zip`, and `sourceFormat` records what was uploaded.
  *
- * Taxonomy is present only as far as placing an upload needs it: each library row
- * carries categories, private shelves and tags; an upload may name a category.
- * Creating, renaming and deleting either stays in the Web.
+ * Each library row carries its categories, private shelves and tags, which
+ * clients can reference in the catalog filters and work updates.
  */
 
 /**
@@ -103,9 +174,8 @@ export interface ExternalLibrary {
  *
  * A downloadable thing is a version, not a work: a work with three editions is
  * three files and the client may want any of them. Keyed by `bookVersionId`
- * because that is the only id every other endpoint in this surface accepts, and
- * because the same underlying file linked into two libraries is one thing to
- * sync rather than two rows that look like a duplicate.
+ * for file requests. When a version is linked into several libraries, each
+ * library has its own catalog row and library-specific fields.
  */
 export interface ExternalBook {
   bookVersionId: string

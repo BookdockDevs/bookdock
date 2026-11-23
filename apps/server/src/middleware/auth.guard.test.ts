@@ -46,6 +46,7 @@ function createGuardApp() {
   app.get('/api/v1/ext/books/:id', (c) => c.json({ data: 'detail' }))
   app.on(['GET', 'HEAD'], '/api/v1/ext/books/:id/file', (c) => c.body(null, 200))
   app.post('/api/v1/ext/books', (c) => c.json({ data: 'uploaded' }, 201))
+  app.post('/api/v1/ext/books/:id/download-link', (c) => c.json({ data: 'share' }))
   app.delete('/api/v1/ext/books/:id', (c) => c.json({ data: 'deleted' }))
   app.get('/api/v1/books', (c) => c.json({ data: 'list' }))
   app.get('/api/v1/books/:id', (c) => c.json({ data: 'detail' }))
@@ -97,7 +98,7 @@ describe('authGuard access token branch', () => {
 
   it('lets a token through exactly the operations it was granted', async () => {
     const app = createGuardApp()
-    const { plaintext } = issue(['ext:libraries', 'ext:books', 'ext:book', 'ext:file', 'ext:upload', 'ext:delete'])
+    const { plaintext } = issue(['ext:libraries', 'ext:books', 'ext:book', 'ext:file', 'ext:upload', 'ext:delete', 'ext:download-link'])
     const headers = bearer(plaintext)
 
     expect((await app.request('/api/v1/ext/libraries', { headers })).status).toBe(200)
@@ -106,6 +107,7 @@ describe('authGuard access token branch', () => {
     expect((await app.request('/api/v1/ext/books/b1/file', { headers })).status).toBe(200)
     expect((await app.request('/api/v1/ext/books/b1/file', { method: 'HEAD', headers })).status).toBe(200)
     expect((await app.request('/api/v1/ext/books', { method: 'POST', headers })).status).toBe(201)
+    expect((await app.request('/api/v1/ext/books/b1/download-link', { method: 'POST', headers })).status).toBe(200)
     expect((await app.request('/api/v1/ext/books/b1', { method: 'DELETE', headers })).status).toBe(200)
 
     const me = await app.request('/api/v1/auth/me', { headers })
@@ -124,6 +126,7 @@ describe('authGuard access token branch', () => {
     // Separate from upload on purpose: a token that can enumerate a library but
     // not pull its files cannot exfiltrate it.
     expect((await app.request('/api/v1/ext/books/b1/file', { headers })).status).toBe(403)
+    expect((await app.request('/api/v1/ext/books/b1/download-link', { method: 'POST', headers })).status).toBe(403)
     expect((await app.request('/api/v1/ext/books/b1', { headers })).status).toBe(403)
     expect((await app.request('/api/v1/ext/libraries', { headers })).status).toBe(403)
   })

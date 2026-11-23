@@ -64,11 +64,11 @@ function weekStart(date: string): string {
   return shiftDays(date, -((dow + 6) % 7))
 }
 
-async function computeTotalWordsRead(userId: string, showHidden = false): Promise<number> {
+async function computeTotalWordsRead(userId: string, showHidden = false, projectionsReady = false): Promise<number> {
   const db = getDb()
   const archives = db.select().from(readingArchives).where(eq(readingArchives.userId, userId)).all()
   if (archives.length) {
-    await ensureReadingProjections(userId, showHidden)
+    if (!projectionsReady) await ensureReadingProjections(userId, showHidden)
     const hidden = new Set(excludedReadingBookVersionIds(db, userId, showHidden))
     const rows = db.select({ totalWordUnits: readingBookStats.totalWordUnits }).from(readingBookStats)
       .where(and(eq(readingBookStats.userId, userId), hidden.size ? notInArray(readingBookStats.bookVersionId, [...hidden]) : undefined)).all()
@@ -143,6 +143,10 @@ async function computeTotalWordsRead(userId: string, showHidden = false): Promis
 }
 
 export async function getSummary(userId: string, today: string, showHidden = false, range: ReadingRange = {}): Promise<ReadingRecordSummaryRes> {
+  return (await getSummaryAndDaily(userId, today, showHidden, range)).summary
+}
+
+async function getSummaryAndDaily(userId: string, today: string, showHidden: boolean, range: ReadingRange, projectionsReady = false) {
   const db = getDb()
   const hiddenIds = excludedReadingBookVersionIds(db, userId, showHidden)
   const visibleRecords = hiddenIds.length > 0 ? notInArray(readingRecords.bookId, hiddenIds) : undefined
@@ -269,7 +273,7 @@ export async function getSummary(userId: string, today: string, showHidden = fal
     previousPeriodDays: previousDays.size,
   }
 
-  const totalWordsRead = await computeTotalWordsRead(userId, showHidden)
+  const totalWordsRead = await computeTotalWordsRead(userId, showHidden, projectionsReady)
   const scopedDays = await getDaily(userId, range, showHidden)
   const scopedDuration = aggregateDurationFacts(facts, range)
   const scopedBooks = new Set([
@@ -292,7 +296,7 @@ export async function getSummary(userId: string, today: string, showHidden = fal
       hiddenIds.length ? notInArray(readingContributions.bookVersionId, hiddenIds) : undefined,
     )).all() : []
   const scopedWordUnits = scopedContributions.reduce((sum, row) => sum + (row.wordUnits ?? 0), 0)
-  return {
+  const summary: ReadingRecordSummaryRes = {
     ...totals,
     undatedDurationSeconds: duration.undatedAdditiveSeconds,
     referenceDurationSeconds: duration.referenceSeconds,
@@ -320,6 +324,7 @@ export async function getSummary(userId: string, today: string, showHidden = fal
     totalWordsRead,
     monthlyComparison,
   }
+  return { summary, daily: scopedDays }
 }
 
 function rangeConditions(userId: string, range: { from?: string; to?: string }, hiddenIds: string[] = []) {
@@ -528,7 +533,10 @@ function readingTaxonomyFacts(userId: string, range: ReadingRange, showHidden: b
 
 /** Every distinct version/tag receives the full duration, without multiplying facts. */
 export async function getByTag(userId: string, range: ReadingRange, showHidden = false): Promise<ReadingRecordTagItem[]> {
-  const { db, facts, holdings } = readingTaxonomyFacts(userId, range, showHidden)
+  return groupReadingByTag(readingTaxonomyFacts(userId, range, showHidden))
+}
+
+function groupReadingByTag({ db, facts, holdings }: ReturnType<typeof readingTaxonomyFacts>): ReadingRecordTagItem[] {
   const workIds = [...new Set(facts.flatMap((fact) => {
     const holding = holdings.get(fact.bookVersionId)
     return holding ? [holding.libraryBookId] : []
@@ -565,7 +573,10 @@ export async function getByTag(userId: string, range: ReadingRange, showHidden =
 }
 
 export async function getByCategory(userId: string, range: ReadingRange, showHidden = false): Promise<ReadingRecordCategoryItem[]> {
-  const { facts, holdings } = readingTaxonomyFacts(userId, range, showHidden)
+  return groupReadingByCategory(readingTaxonomyFacts(userId, range, showHidden))
+}
+
+function groupReadingByCategory({ facts, holdings }: ReturnType<typeof readingTaxonomyFacts>): ReadingRecordCategoryItem[] {
   const groups = new Map<string, ReadingRecordCategoryItem>()
   for (const fact of facts) {
     const holding = holdings.get(fact.bookVersionId)
@@ -585,4 +596,12 @@ export async function getByCategory(userId: string, range: ReadingRange, showHid
     groups.set(key, group)
   }
   return [...groups.values()].sort((a, b) => b.durationSeconds - a.durationSeconds || (a.name ?? '').localeCompare(b.name ?? ''))
+}
+
+export async function getReadingOverview(userId: string, today: string, range: ReadingRange, showHidden = false) {
+  // Hourly aggregates refresh projections used by the summary and breakdowns.
+  const hourly = await getHourly(userId, range, 0, showHidden)
+  const { summary, daily } = await getSummaryAndDaily(userId, today, showHidden, range, true)
+  const taxonomy = readingTaxonomyFacts(userId, range, showHidden)
+  return { summary, daily, hourly, byCategory: groupReadingByCategory(taxonomy), byTag: groupReadingByTag(taxonomy) }
 }

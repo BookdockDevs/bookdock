@@ -708,9 +708,10 @@ export async function getReadingLedger(userId: string, bookId: string, showHidde
   }
 }
 
-async function ensureBookProjection(userId: string, bookId: string, showHidden: boolean, includePendingDeletion = false) {
-  const archive = await ensureReadingArchive(userId, bookId, showHidden, includePendingDeletion)
+async function ensureBookProjection(userId: string, bookId: string, showHidden: boolean, includePendingDeletion = false, existingArchiveOnly = false) {
   const db = getDb()
+  if (existingArchiveOnly && pendingBookDataDeletionVersionIds(db, userId).includes(bookId)) throw new AppError('BOOK_NOT_FOUND')
+  const archive = existingArchiveOnly ? ownArchive(db, userId, bookId) : await ensureReadingArchive(userId, bookId, showHidden, includePendingDeletion)
   let sourceAvailable = false
   try {
     await getBook(userId, bookId, { showHidden })
@@ -787,8 +788,8 @@ function decodeReadingCursor(cursor: string | undefined): { date: string; sortSt
   }
 }
 
-export async function getReadingLedgerOverview(userId: string, bookId: string, showHidden = false, includePendingDeletion = false): Promise<ReadingLedgerOverview> {
-  const { archive, sourceAvailable, state, stats } = await ensureBookProjection(userId, bookId, showHidden, includePendingDeletion)
+export async function getReadingLedgerOverview(userId: string, bookId: string, showHidden = false, includePendingDeletion = false, existingArchiveOnly = false): Promise<ReadingLedgerOverview> {
+  const { archive, sourceAvailable, state, stats } = await ensureBookProjection(userId, bookId, showHidden, includePendingDeletion, existingArchiveOnly)
   const db = getDb()
   const basis = readingCoverageBasis(db, bookId, [], archive, sourceAvailable)
   const projectedLegacy = projectReadingCoverage(archive.legacyIntervals, { revisionId: archive.legacyRevisionId, wordCount: archive.legacyWordCount }, basis)
@@ -833,8 +834,8 @@ export async function getReadingLedgerOverview(userId: string, bookId: string, s
   }
 }
 
-export async function getReadingLedgerStats(userId: string, bookId: string, range: { from?: string; to?: string } = {}, showHidden = false): Promise<ReadingLedgerStatsRes> {
-  const { archive, sourceAvailable, state, stats } = await ensureBookProjection(userId, bookId, showHidden)
+export async function getReadingLedgerStats(userId: string, bookId: string, range: { from?: string; to?: string; existingArchiveOnly?: boolean } = {}, showHidden = false): Promise<ReadingLedgerStatsRes> {
+  const { archive, sourceAvailable, state, stats } = await ensureBookProjection(userId, bookId, showHidden, false, range.existingArchiveOnly)
   const db = getDb()
   const dailyRows = db.select().from(readingRecords).where(and(
     eq(readingRecords.userId, userId), eq(readingRecords.bookId, bookId), eq(readingRecords.factVersion, state.factVersion),
@@ -903,8 +904,8 @@ export async function getReadingLedgerStats(userId: string, bookId: string, rang
   }
 }
 
-export async function getReadingLedgerSessions(userId: string, bookId: string, options: { from?: string; to?: string; cursor?: string; limit?: number } = {}, showHidden = false): Promise<ReadingLedgerSessionPage> {
-  const { archive, sourceAvailable, state } = await ensureBookProjection(userId, bookId, showHidden)
+export async function getReadingLedgerSessions(userId: string, bookId: string, options: { from?: string; to?: string; cursor?: string; limit?: number; existingArchiveOnly?: boolean } = {}, showHidden = false): Promise<ReadingLedgerSessionPage> {
+  const { archive, sourceAvailable, state } = await ensureBookProjection(userId, bookId, showHidden, false, options.existingArchiveOnly)
   const db = getDb()
   const cursor = decodeReadingCursor(options.cursor)
   const rows = db.select().from(readingSessions).where(and(
@@ -930,15 +931,15 @@ export async function getReadingLedgerSessions(userId: string, bookId: string, o
 export async function getReadingBookOverview(
   userId: string,
   bookId: string,
-  options: { from?: string; to?: string; limit?: number } = {},
+  options: { from?: string; to?: string; limit?: number; existingArchiveOnly?: boolean } = {},
   showHidden = false
 ): Promise<ReadingBookOverviewRes> {
   const maxAttempts = 5
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const [ledger, stats, sessions] = await Promise.all([
-      getReadingLedgerOverview(userId, bookId, showHidden),
-      getReadingLedgerStats(userId, bookId, { from: options.from, to: options.to }, showHidden),
-      getReadingLedgerSessions(userId, bookId, { from: options.from, to: options.to, limit: options.limit }, showHidden),
+      getReadingLedgerOverview(userId, bookId, showHidden, false, options.existingArchiveOnly),
+      getReadingLedgerStats(userId, bookId, options, showHidden),
+      getReadingLedgerSessions(userId, bookId, options, showHidden),
     ])
     if (ledger.dataVersion === stats.dataVersion && ledger.dataVersion === sessions.dataVersion) {
       return {

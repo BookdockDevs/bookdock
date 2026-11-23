@@ -53,6 +53,7 @@ import {
   type CatalogVersion,
   type CatalogVersionUpdateReq,
   type CatalogWorkSaveReq,
+  type ExternalWorkPatch,
   type HiddenReason,
   type LibraryVersionKind,
 } from '@bookdock/shared'
@@ -671,6 +672,7 @@ export async function listLibraryVersionEntries(
   actorId: string,
   libraryId: string,
   params: Partial<LibraryListQuery> = {},
+  options: { bookVersionId?: string; globalSort?: boolean; matchEdition?: boolean } = {},
 ): Promise<{ items: LibraryVersionEntry[]; total: number; page: number; pageSize: number }> {
   const db = getDb()
   await assertLibraryBrowsable(actorId, libraryId)
@@ -690,6 +692,7 @@ export async function listLibraryVersionEntries(
     eq(libraryBookVersions.libraryId, libraryId),
     isNull(libraryBooks.deletedAt),
   ]
+  if (options.bookVersionId) conditions.push(eq(bookVersions.id, options.bookVersionId))
   if (!manager) {
     conditions.push(workHiddenExclusion(loadLibraryHiddenTaxonomy(db, libraryId)))
     // A member never sees a hidden version. The work-level filter above is not
@@ -707,6 +710,7 @@ export async function listLibraryVersionEntries(
       )
       OR ${bookVersions.format} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.description')} LIKE ${pattern} ESCAPE '!'
+      OR ${libraryBooks.descriptionOverride} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.series')} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.subjects')} LIKE ${pattern} ESCAPE '!'
       OR ${revMeta('$.bookmeta.publisher')} LIKE ${pattern} ESCAPE '!'
@@ -716,7 +720,17 @@ export async function listLibraryVersionEntries(
       OR ${taxonomyNameMatch(pattern, libraryId)}
     )`)
   }
-  conditions.push(...sharedListConditions({ page, pageSize, ...params }, libraryId))
+  const { author, format } = params
+  conditions.push(...sharedListConditions({
+    page, pageSize, ...params,
+    ...(options.matchEdition ? { author: undefined, format: undefined } : {}),
+  }, libraryId))
+  if (options.matchEdition && author) {
+    conditions.push(sql`(${effAuthor} = ${author} OR EXISTS (
+      SELECT 1 FROM json_each(coalesce(${libraryBookVersions.authors}, ${libraryBooks.authors}, '[]')) WHERE value = ${author}
+    ))`)
+  }
+  if (options.matchEdition && format) conditions.push(eq(bookVersions.format, format))
 
   const where = and(...conditions)
   const baseQuery = () => {
@@ -731,6 +745,7 @@ export async function listLibraryVersionEntries(
     workAuthor: libraryBooks.author,
     workAuthors: libraryBooks.authors,
     workDescription: libraryBooks.description,
+    descriptionOverride: libraryBooks.descriptionOverride,
     versionDescription: libraryBookVersions.description,
     format: bookVersions.format,
     size: bookVersions.size,
@@ -780,12 +795,12 @@ export async function listLibraryVersionEntries(
     author: effAuthor,
     size: bookVersions.size,
     createdAt: libraryBooks.createdAt,
-    updatedAt: libraryBooks.updatedAt,
+    updatedAt: options.globalSort ? sql`max(${libraryBooks.updatedAt}, ${contentRevisions.createdAt})` : libraryBooks.updatedAt,
     progress: shared ? undefined : sql<number>`coalesce(${bookStates.percent}, 0)`,
     lastReadAt: shared ? undefined : bookStates.lastReadAt,
   })
   const rows = baseQuery()
-    .orderBy(asc(sql`${libraryBookVersions.pinnedAt} IS NULL`), ...orderBy)
+    .orderBy(...(options.globalSort ? [] : [asc(sql`${libraryBookVersions.pinnedAt} IS NULL`)]), ...orderBy, asc(bookVersions.id))
     .limit(pageSize).offset((page - 1) * pageSize).all()
   const total = db.select({ count: sql<number>`count(*)` })
     .from(libraryBookVersions)
@@ -803,6 +818,8 @@ export async function listLibraryVersionEntries(
   return {
     items: rows.map((row) => {
       const revisionMeta = (row.revisionMeta ?? {}) as { bookmeta?: Record<string, unknown>; fileName?: unknown }
+      const descriptionOverride = !shared && row.descriptionOverride?.trim() ? row.descriptionOverride : null
+      const bookmeta = resolveBookmeta(shared, revisionMeta.bookmeta, row.workMeta, row.versionMeta)
       return {
         bookVersionId: row.bookVersionId,
         libraryBookId: row.libraryBookId,
@@ -815,7 +832,7 @@ export async function listLibraryVersionEntries(
         format: row.format,
         size: row.size,
         coverKey: row.coverKey,
-        description: row.versionDescription ?? row.workDescription,
+        description: descriptionOverride ?? row.versionDescription ?? row.workDescription,
         wordCount: row.wordCount,
         categoryPath: row.categoryRoot ? [row.categoryRoot, ...(row.categoryLeaf ? [row.categoryLeaf] : [])] : null,
         categoryName: row.categoryLeaf ? `${row.categoryRoot} / ${row.categoryLeaf}` : row.categoryRoot ?? null,
@@ -824,7 +841,7 @@ export async function listLibraryVersionEntries(
         // Merged in JS, the same way toCatalogVersion does it: SQLite's
         // json_patch applies one patch at a time, and the layers live in
         // different tables anyway.
-        bookmeta: resolveBookmeta(shared, revisionMeta.bookmeta, row.workMeta, row.versionMeta),
+        bookmeta: descriptionOverride === null ? bookmeta : { ...bookmeta, description: descriptionOverride },
         fileName: typeof revisionMeta.fileName === 'string' ? revisionMeta.fileName : null,
         kind: row.kind,
         hidden: row.hidden,
@@ -1057,6 +1074,23 @@ export async function updateCatalogBook(actorId: string, libraryId: string, libr
   const projected = isSharedLibrary(db, libraryId)
   db.transaction((tx) => applyCatalogBookPatch(tx, { libraryId, actorId, work, projected, patch }))
   return getCatalogBook(actorId, libraryId, work.id)
+}
+
+export async function updateCatalogBookByVersion(actorId: string, libraryId: string, bookVersionId: string, patch: ExternalWorkPatch) {
+  const db = getDb()
+  await requireLibraryManager(actorId, libraryId)
+  if (patch.shelfId !== undefined) throw new AppError('VALIDATION_ERROR', 'Shelves are only available in private libraries')
+  const authors = patch.authors ?? (patch.author === undefined ? undefined : patch.author ? [patch.author] : [])
+  return db.transaction((tx) => {
+    const work = tx.select({ row: libraryBooks }).from(libraryBookVersions)
+      .innerJoin(libraryBooks, eq(libraryBookVersions.libraryBookId, libraryBooks.id))
+      .where(and(eq(libraryBookVersions.libraryId, libraryId), eq(libraryBookVersions.bookVersionId, bookVersionId),
+        eq(libraryBooks.libraryId, libraryId), isNull(libraryBooks.deletedAt)))
+      .get()?.row
+    if (!work) throw new AppError('BOOK_NOT_FOUND')
+    applyCatalogBookPatch(tx, { libraryId, actorId, work, projected: isSharedLibrary(tx, libraryId), patch: { ...patch, authors } })
+    return { libraryId, bookVersionId, libraryBookId: work.id }
+  })
 }
 
 export async function getCatalogBatchSelection(actorId: string, libraryId: string, ids: string[]): Promise<BatchSelectionItem[]> {

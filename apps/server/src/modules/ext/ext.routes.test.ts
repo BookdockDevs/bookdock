@@ -8,9 +8,15 @@ import {
   getExternalBook,
   listExternalBooks,
   listExternalLibraries,
+  updateExternalBook,
 } from './ext.service'
 import { requireLibraryManager } from '../libraries/library-access'
 import { uploadBook, uploadCatalogBook } from '../books/books.service'
+import { manageBookShare } from '../books/book-shares.service'
+import { getExternalArchive, getExternalArchiveOverview } from './ext-archives.service'
+
+vi.mock('../books/book-shares.service', () => ({ manageBookShare: vi.fn() }))
+vi.mock('./ext-archives.service', () => ({ getExternalArchive: vi.fn(), getExternalArchiveOverview: vi.fn() }))
 
 vi.mock('./ext.service', () => ({
   EXT_READ: { showHidden: true },
@@ -18,6 +24,7 @@ vi.mock('./ext.service', () => ({
   listExternalBooks: vi.fn(),
   getExternalBook: vi.fn(),
   deleteExternalBook: vi.fn(),
+  updateExternalBook: vi.fn(),
 }))
 
 // Naming a library on a delete is checked here rather than in the service, and
@@ -72,23 +79,25 @@ describe('external API routes', () => {
 
   it('returns the libraries with their write access', async () => {
     vi.mocked(listExternalLibraries).mockResolvedValue([
-      { id: 'lib1', name: 'Mine', type: 'private', role: 'owner', canWrite: true },
+      { id: 'lib1', name: 'Mine', type: 'private', role: 'owner', canWrite: true, memberCount: 1, workCount: 0, categories: [], shelves: [], tags: [] },
     ])
 
     const res = await createApp().request('/api/v1/ext/libraries')
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ data: { libraries: [{ id: 'lib1', name: 'Mine', type: 'private', role: 'owner', canWrite: true }] } })
+    expect(await res.json()).toMatchObject({ data: { libraries: [{ id: 'lib1', name: 'Mine', type: 'private', role: 'owner', canWrite: true }] } })
   })
 
   it('defaults the list to the first page and passes the filters through', async () => {
     const res = await createApp().request(
-      '/api/v1/ext/books?q=three&libraryId=lib1&format=epub&sortBy=title&sortOrder=asc&updatedSince=1700&page=2&pageSize=10',
+      '/api/v1/ext/books?q=three&libraryId=lib1&format=epub&sortBy=title&sortOrder=asc&updatedSince=1700&page=2&pageSize=10'
+      + '&author=Lin&categoryPath=%5B%22Fiction%22%5D&tag=Favorite&shelfId=s1&sortScope=global',
     )
 
     expect(res.status).toBe(200)
     expect(listExternalBooks).toHaveBeenCalledWith(USER.id, {
       q: 'three', libraryId: 'lib1', format: 'epub', sortBy: 'title', sortOrder: 'asc', updatedSince: 1700, page: 2, pageSize: 10,
+      author: 'Lin', categoryPath: ['Fiction'], tag: 'Favorite', shelfId: 's1', sortScope: 'global',
     })
   })
 
@@ -114,13 +123,15 @@ describe('external API routes', () => {
 
     const hugePage = await app.request('/api/v1/ext/books?pageSize=1000')
     expect(hugePage.status).toBe(400)
+    const invalidCategory = await app.request('/api/v1/ext/books?categoryPath=Fiction')
+    expect(invalidCategory.status).toBe(400)
   })
 
   it('reads one version by id', async () => {
     const res = await createApp().request('/api/v1/ext/books/v1')
 
     expect(res.status).toBe(200)
-    expect(getExternalBook).toHaveBeenCalledWith(USER.id, 'v1')
+    expect(getExternalBook).toHaveBeenCalledWith(USER.id, 'v1', undefined)
     expect(await res.json()).toMatchObject({ data: { bookVersionId: 'v1', cover: null } })
   })
 
@@ -164,7 +175,7 @@ describe('external API routes', () => {
 
     expect(res.status).toBe(200)
     expect(requireLibraryManager).toHaveBeenCalledWith(USER.id, 'lib1')
-    expect(deleteExternalBook).toHaveBeenCalledWith(USER.id, 'v1')
+    expect(deleteExternalBook).toHaveBeenCalledWith(USER.id, 'v1', 'lib1')
   })
 
   it('does not ask about a library when none was named', async () => {
@@ -181,5 +192,61 @@ describe('external API routes', () => {
 
     expect(res.status).toBe(404)
     expect((await res.json() as { error: { code: string } }).error.code).toBe('BOOK_NOT_FOUND')
+  })
+
+  it('passes the selected library to detail and requires it for a work patch', async () => {
+    const app = createApp()
+    const path = '/api/v1/ext/books/v1'
+    const patch = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{"title":"Edited"}' }
+    expect((await app.request(`${path}?libraryId=lib1`)).status).toBe(200)
+    expect(getExternalBook).toHaveBeenCalledWith(USER.id, 'v1', 'lib1')
+    expect((await app.request(path, patch)).status).toBe(400)
+    vi.mocked(updateExternalBook).mockResolvedValue({ libraryId: 'lib1', bookVersionId: 'v1', libraryBookId: 'work1' })
+    expect((await app.request(`${path}?libraryId=lib1`, patch)).status).toBe(200)
+    expect(updateExternalBook).toHaveBeenCalledWith(USER.id, 'lib1', 'v1', { title: 'Edited' })
+  })
+
+  it('gets or revokes a download link on the same path', async () => {
+    const app = createApp()
+    const path = '/api/v1/ext/books/v1/download-link'
+    const post = (body: object) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const get = post({ duration: '1d' })
+    const revoke = post({ action: 'revoke', libraryId: 'lib1' })
+    vi.mocked(manageBookShare).mockReturnValueOnce({ url: '/download', duration: '1h', expiresAt: 100 })
+    expect(await (await app.request(path, get)).json()).toMatchObject({ data: { duration: '1h', expiresAt: 100 } })
+    expect(manageBookShare).toHaveBeenLastCalledWith(USER.id, 'v1', undefined, { type: 'get-or-create', duration: '1d' })
+    vi.mocked(manageBookShare).mockReturnValue(null)
+    expect(await (await app.request(path, revoke)).json()).toEqual({ data: null })
+    expect(manageBookShare).toHaveBeenLastCalledWith(USER.id, 'v1', 'lib1', { type: 'revoke' })
+  })
+
+  it('dispatches the archive overview and detail on one read route', async () => {
+    const app = createApp()
+    const path = '/api/v1/ext/reading-archives'
+    vi.mocked(getExternalArchiveOverview).mockResolvedValue({
+      view: 'overview',
+      overview: {
+        totalBooks: 0,
+        counts: { highlights: 0, bookmarks: 0, ideas: 0, reviews: 0, total: 0 },
+        reading: {
+          summary: {
+            totalSeconds: 75, totalBooks: 1, totalDays: 1, totalWordsRead: 0, todaySeconds: 75,
+            undatedDurationSeconds: 0, referenceDurationSeconds: 0, currentStreak: 1, longestStreak: 1,
+            weekSeconds: 75, prevWeekSeconds: 0, monthSeconds: 75, prevMonthSeconds: 0,
+          },
+          daily: [], hourly: [], byCategory: [], byTag: [],
+        },
+      },
+      entries: [], page: 2, hasMore: false,
+    })
+    const overview = await app.request(`${path}?search=book&page=2`)
+    expect(overview.status).toBe(200)
+    expect(await overview.json()).toMatchObject({ data: { overview: { reading: { summary: { totalSeconds: 75 } } } } })
+    expect(overview.headers.get('cache-control')).toBe('private, no-store')
+    expect(getExternalArchiveOverview).toHaveBeenCalledWith(USER.id, expect.objectContaining({ search: 'book', page: 2 }))
+    vi.mocked(getExternalArchive).mockResolvedValue({ view: 'data', archiveId: 'a1', data: null })
+    expect((await app.request(`${path}?archiveId=a1&from=2026-01-01`)).status).toBe(200)
+    expect(getExternalArchive).toHaveBeenCalledWith(USER.id, { archiveId: 'a1', view: 'data', from: '2026-01-01' })
+    expect((await app.request(`${path}?archiveId=a1&view=export`)).status).toBe(400)
   })
 })

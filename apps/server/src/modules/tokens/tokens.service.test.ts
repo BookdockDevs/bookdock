@@ -121,16 +121,18 @@ describe('access token service', () => {
     expect(() => deleteAccessToken(userId, token.id)).toThrowError(expect.objectContaining({ code: 'TOKEN_NOT_FOUND' }))
   })
 
-  it('lists only the owning user\'s tokens, newest first', () => {
+  it('lists only the owning user\'s tokens in creation order, including equal timestamps', () => {
     const first = issue({ name: 'first' })
     db.update(schema.accessTokens).set({ createdAt: 1 }).where(eq(schema.accessTokens.id, first.token.id)).run()
-    issue({ name: 'second' })
+    const second = issue({ name: 'second' })
+    const third = issue({ name: 'third' })
+    db.update(schema.accessTokens).set({ createdAt: second.token.createdAt }).where(eq(schema.accessTokens.id, third.token.id)).run()
 
     const otherUserId = createId('user')
     db.insert(schema.users).values({ id: otherUserId, username: `user-${otherUserId}`, createdAt: Date.now() }).run()
     createAccessToken(otherUserId, { name: 'other', permissions: [], expiresIn: 'permanent' })
 
-    expect(listAccessTokens(userId).map((token) => token.name)).toEqual(['second', 'first'])
+    expect(listAccessTokens(userId).map((token) => token.name)).toEqual(['first', 'second', 'third'])
   })
 
   it('keeps one user out of another user\'s tokens', () => {

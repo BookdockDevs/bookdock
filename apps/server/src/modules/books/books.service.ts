@@ -3100,7 +3100,7 @@ export async function savePrivateBook(
         tx.update(libraryBookVersions).set({ pinnedAt: card.pinned ? now : null })
           .where(eq(libraryBookVersions.id, libraryBookVersionId)).run()
       }
-      if (nextMeta && latestRevision) {
+      if (nextMeta && nextMeta !== beforeMeta && latestRevision) {
         tx.update(contentRevisions).set({ meta: nextMeta }).where(eq(contentRevisions.id, latestRevision.id)).run()
       }
       if (organization?.tags !== undefined) {
@@ -3289,14 +3289,20 @@ export async function getBookCoverContent(
 ): Promise<{ data: Buffer; contentType: string; ext: string } | null> {
   const cover = await getBookCover(userId, bookId)
   if (!cover) return null
-  const storage = getStorage()
-  if (!(await storage.exists(cover.coverKey))) return null
+  return getBookCoverContentByKey(cover.coverKey, opts?.size)
+}
 
-  const size = opts?.size ?? 'thumb'
-  const ext = cover.coverKey.split('.').pop()?.toLowerCase() || 'jpg'
+export async function getBookCoverContentByKey(
+  coverKey: string,
+  size: 'original' | 'thumb' = 'thumb',
+): Promise<{ data: Buffer; contentType: string; ext: string } | null> {
+  const storage = getStorage()
+  if (!(await storage.exists(coverKey))) return null
+
+  const ext = coverKey.split('.').pop()?.toLowerCase() || 'jpg'
 
   if (size === 'original' || ext === 'svg') {
-    const data = await bufferFromStream(await storage.get(cover.coverKey))
+    const data = await bufferFromStream(await storage.get(coverKey))
     const contentType = ext === 'png'
       ? 'image/png'
       : ext === 'webp'
@@ -3309,13 +3315,13 @@ export async function getBookCoverContent(
     return { data, contentType, ext }
   }
 
-  const thumbKey = coverThumbnailKey(cover.coverKey)
+  const thumbKey = coverThumbnailKey(coverKey)
   if (await storage.exists(thumbKey)) {
     const data = await bufferFromStream(await storage.get(thumbKey))
     return { data, contentType: 'image/webp', ext: 'webp' }
   }
 
-  const original = await bufferFromStream(await storage.get(cover.coverKey))
+  const original = await bufferFromStream(await storage.get(coverKey))
   const thumb = await generateCoverThumbnail(original, ext)
   if (thumb) {
     await storage.put(thumbKey, thumb)

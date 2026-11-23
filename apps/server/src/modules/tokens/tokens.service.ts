@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 
 import type { AccessToken, AccessTokenCreateReq, AccessTokenCreateRes, AccessTokenPermission, AccessTokenUpdateReq } from '@bookdock/shared'
 
@@ -75,7 +75,7 @@ export function listAccessTokens(userId: string): AccessToken[] {
     .select()
     .from(accessTokens)
     .where(eq(accessTokens.userId, userId))
-    .orderBy(desc(accessTokens.createdAt))
+    .orderBy(asc(accessTokens.createdAt), asc(sql`rowid`))
     .all()
     .map(toAccessToken)
 }

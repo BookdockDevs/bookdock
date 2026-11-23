@@ -1,4 +1,6 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
+
+import { bookUpdateSchema } from '@bookdock/shared'
 
 import type {
   Category,
@@ -7,15 +9,17 @@ import type {
   ExternalBookListRes,
   ExternalCategory,
   ExternalLibrary,
+  ExternalListParams,
+  ExternalWorkPatch,
   ShelfListItem,
 } from '@bookdock/shared'
 
 import { getDb } from '../../db/client'
-import { libraryBookVersions } from '../../db/schema'
+import { libraries, libraryBooks, libraryBookVersions } from '../../db/schema'
 import { AppError } from '../../middleware/error'
 import {
-  getLibraryVersionPublication,
   listLibraryVersionEntries,
+  updateCatalogBookByVersion,
   type LibraryVersionEntry,
 } from '../libraries/catalog.service'
 import type { LibraryListQuery } from '../libraries/library-query'
@@ -24,7 +28,7 @@ import { listLibraries } from '../libraries/libraries.service'
 import { listShelves } from '../shelves/shelves.service'
 import { listCategoryValues, listTagValues } from '../classification/classification.service'
 import { listBrowsableLibraries } from '../books/legado.service'
-import { getActiveBook, getBookCoverContent, trashBook } from '../books/books.service'
+import { getActiveBook, getBookCoverContent, getBookCoverContentByKey, resolveLibraryBook, savePrivateBook, trashBook } from '../books/books.service'
 import { isTrashEnabled } from '../settings/settings.service'
 
 /**
@@ -42,20 +46,6 @@ import { isTrashEnabled } from '../settings/settings.service'
  * work-grouped, which is the wrong unit for something whose downloadable atom
  * is a file.
  */
-
-export interface ExternalListParams {
-  libraryId?: string
-  q?: string
-  format?: 'epub' | 'txt'
-  sortBy?: string
-  sortOrder?: string
-  /** Unix ms; see LibraryListQuery.updatedSince. */
-  updatedSince?: number
-  page: number
-  pageSize: number
-}
-
-const SORTABLE = new Set(['title', 'createdAt', 'updatedAt', 'size'])
 
 /**
  * A private library is a vault, so its owner also hides rows by default and
@@ -183,14 +173,20 @@ function queryFor(params: ExternalListParams): Partial<LibraryListQuery> {
   return {
     search: params.q,
     format: params.format,
-    sortBy: SORTABLE.has(params.sortBy ?? '') ? params.sortBy : 'updatedAt',
+    author: params.author,
+    category: params.categoryPath,
+    shelfId: params.shelfId,
+    tag: params.tag,
+    sortBy: params.sortBy ?? 'updatedAt',
     sortOrder: params.sortOrder === 'asc' ? 'asc' : 'desc',
     updatedSince: params.updatedSince,
   }
 }
 
 /**
- * List across every library the caller can browse, paged globally.
+ * Page across the browsable libraries. By default each library keeps its own
+ * sorting. For global ordering, only each library's leading rows up to the
+ * requested window can contribute to that window.
  *
  * `listLibraryVersionEntries` pages inside one library, so a global window has
  * to be assembled by walking the libraries in their fixed order and slicing
@@ -207,6 +203,8 @@ export async function listExternalBooks(userId: string, params: ExternalListPara
   const targets = params.libraryId ? browsable.filter((lib) => lib.id === params.libraryId) : browsable
 
   const query = queryFor(params)
+  const globalSort = params.sortScope === 'global'
+  const options = { globalSort, matchEdition: true }
   const offset = (params.page - 1) * params.pageSize
   const wanted = offset + params.pageSize
 
@@ -215,7 +213,7 @@ export async function listExternalBooks(userId: string, params: ExternalListPara
   // report a total that silently excludes every library after it — which reads
   // as "you have reached the end" to a client paging on hasMore.
   const firstPages = await Promise.all(targets.map((library) =>
-    listLibraryVersionEntries(userId, library.id, { ...query, page: 1, pageSize: 100 })))
+    listLibraryVersionEntries(userId, library.id, { ...query, page: 1, pageSize: 100 }, options)))
   const total = firstPages.reduce((sum, result) => sum + result.total, 0)
 
   const collected: Array<{ entry: LibraryVersionEntry; libraryId: string; libraryName: string }> = []
@@ -224,12 +222,26 @@ export async function listExternalBooks(userId: string, params: ExternalListPara
     collected.push(...first.items.map((entry) => ({ entry, libraryId: library.id, libraryName: library.name })))
     // A library smaller than one page is exhausted; anything else may have rows
     // this page has not reached yet.
-    for (let page = 2; collected.length < wanted && first.total > (page - 1) * 100; page++) {
-      const next = await listLibraryVersionEntries(userId, library.id, { ...query, page, pageSize: 100 })
+    for (let page = 2; (globalSort ? (page - 1) * 100 : collected.length) < wanted && first.total > (page - 1) * 100; page++) {
+      const next = await listLibraryVersionEntries(userId, library.id, { ...query, page, pageSize: 100 }, options)
       if (next.items.length === 0) break
       collected.push(...next.items.map((entry) => ({ entry, libraryId: library.id, libraryName: library.name })))
     }
-    if (collected.length >= wanted) break
+    if (!globalSort && collected.length >= wanted) break
+  }
+  if (globalSort) {
+    const sortBy = params.sortBy ?? 'updatedAt'
+    const direction = params.sortOrder === 'asc' ? 1 : -1
+    const compareText = (a: string, b: string) => Buffer.compare(Buffer.from(a), Buffer.from(b))
+    collected.sort((a, b) => {
+      const left = a.entry
+      const right = b.entry
+      const order = sortBy === 'title' ? compareText(left.title, right.title)
+        : sortBy === 'updatedAt' ? Math.max(left.updatedAt, left.contentUpdatedAt) - Math.max(right.updatedAt, right.contentUpdatedAt)
+        : left[sortBy] - right[sortBy]
+      return order * direction || compareText(left.libraryBookId, right.libraryBookId)
+        || compareText(left.bookVersionId, right.bookVersionId) || compareText(a.libraryId, b.libraryId)
+    })
   }
 
   return {
@@ -249,24 +261,55 @@ export async function listExternalBooks(userId: string, params: ExternalListPara
  * display needs no second round trip. Only the thumbnail: a client is not
  * archiving artwork, and the full-size original stays a Web concern.
  */
-export async function getExternalBook(userId: string, versionId: string): Promise<ExternalBookDetail> {
-  // getActiveBook is the readability gate and covers both a private card and a
-  // library version, including the collected-source check.
-  await getActiveBook(userId, versionId, EXT_READ)
-  const publication = await getLibraryVersionPublication(userId, versionId)
-  if (!publication) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-  const library = libraryOfVersion(userId, versionId)
-  if (!library) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-  const row = await singleVersionRow(userId, library.id, versionId)
-  const cover = await getBookCoverContent(userId, versionId, { size: 'thumb' })
-  return {
-    ...toExternalBook(row, library.id, library.name),
-    title: publication.title,
-    description: publication.description,
-    bookmeta: publication.bookmeta,
-    fileName: publication.fileName,
-    cover: cover ? `data:${cover.contentType};base64,${Buffer.from(cover.data).toString('base64')}` : null,
+export async function getExternalBook(userId: string, versionId: string, libraryId?: string): Promise<ExternalBookDetail> {
+  for (const library of librariesOfVersion(userId, versionId)) {
+    if (libraryId && library.id !== libraryId) continue
+    const { items: [row] } = await listLibraryVersionEntries(userId, library.id, { pageSize: 1 }, { bookVersionId: versionId })
+    if (!row) continue
+    if (library.private) {
+      try {
+        await getActiveBook(userId, versionId, EXT_READ)
+      } catch (error) {
+        // A collected card may lose its source while another library still
+        // gives the reader access to this version.
+        if (!libraryId && error instanceof AppError && error.code === 'BOOK_NOT_FOUND') continue
+        throw error
+      }
+    }
+    const cover = library.private
+      ? await getBookCoverContent(userId, versionId, { size: 'thumb' })
+      : row.coverKey ? await getBookCoverContentByKey(row.coverKey) : null
+    return {
+      ...toExternalBook(row, library.id, library.name),
+      description: row.description,
+      bookmeta: row.bookmeta,
+      fileName: row.fileName,
+      cover: cover ? `data:${cover.contentType};base64,${cover.data.toString('base64')}` : null,
+    }
   }
+  throw new AppError('BOOK_NOT_FOUND', 'Book not found')
+}
+
+export async function updateExternalBook(userId: string, libraryId: string, versionId: string, patch: ExternalWorkPatch) {
+  const db = getDb()
+  const privateLibrary = db.select({ id: libraries.id }).from(libraries).where(and(
+    eq(libraries.id, libraryId), eq(libraries.userId, userId), eq(libraries.type, 'private'),
+  )).get()
+  if (!privateLibrary) return updateCatalogBookByVersion(userId, libraryId, versionId, patch)
+
+  const { libraryBookId } = resolveLibraryBook(userId, versionId)
+  const work = db.select({ id: libraryBooks.id }).from(libraryBooks).where(and(
+    eq(libraryBooks.id, libraryBookId), eq(libraryBooks.libraryId, libraryId), isNull(libraryBooks.deletedAt),
+  )).get()
+  if (!work) throw new AppError('BOOK_NOT_FOUND')
+
+  const description = bookUpdateSchema.shape.descriptionOverride.safeParse(patch.description)
+  if (!description.success) throw new AppError('VALIDATION_ERROR', 'Invalid private book description', description.error.flatten())
+  await savePrivateBook(userId, versionId, {
+    book: { title: patch.title, author: patch.author, authors: patch.authors, descriptionOverride: description.data },
+    organization: { categoryPath: patch.categoryPath, tags: patch.tags, shelfId: patch.shelfId },
+  })
+  return { libraryId, bookVersionId: versionId, libraryBookId }
 }
 
 /**
@@ -276,10 +319,8 @@ export async function getExternalBook(userId: string, versionId: string): Promis
  * never leave the library in a state its owner cannot undo from the UI.
  * Permanent deletion is not exposed.
  */
-export async function deleteExternalBook(userId: string, versionId: string): Promise<{ bookVersionId: string }> {
-  // Reading first keeps the failure a clean 404 rather than whatever the write
-  // path would raise for a version this caller cannot see. A manager may trash
-  // a hidden book, since the listing already showed it to them.
+export async function deleteExternalBook(userId: string, versionId: string, libraryId?: string): Promise<{ bookVersionId: string }> {
+  // Keep inaccessible versions as 404, including when no library was named.
   await getActiveBook(userId, versionId, EXT_READ)
   // trashBook is the recoverable delete, and it clears deletedAt on the
   // library_books row — which for a shared library is the shared work itself, so
@@ -293,43 +334,27 @@ export async function deleteExternalBook(userId: string, versionId: string): Pro
   // So this is refused explicitly. Left to the private-only lookup it would
   // surface as BOOK_NOT_FOUND for a row the caller can plainly list and open,
   // which reads as "no such book" rather than "you may not delete this".
-  if (!libraryOfVersion(userId, versionId)?.private) {
+  const library = librariesOfVersion(userId, versionId).find((candidate) => !libraryId || candidate.id === libraryId)
+  if (!library && libraryId) throw new AppError('BOOK_NOT_FOUND', 'Book not found in the requested library')
+  if (!library?.private) {
     throw new AppError('FORBIDDEN', 'Books in a shared library can only be deleted from the web UI by a library manager')
   }
+  const { items } = await listLibraryVersionEntries(userId, library.id, { pageSize: 1 }, { bookVersionId: versionId })
+  if (items.length === 0) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
   if (!isTrashEnabled(userId)) throw new AppError('TRASH_DISABLED', 'Trash is disabled')
   await trashBook(userId, versionId)
   return { bookVersionId: versionId }
 }
 
 /**
- * Which browsable library a version should be reported under.
- *
- * A `bookVersionId` can be linked into more than one library — the same file in
- * the reader's own vault and in a shared library is one row in the book list per
- * library, but one id — so the lookup is over all its links rather than the first
- * one SQLite happens to return. The reader's own library wins, because that is
- * the copy they own and the one every private-only operation acts on. It also
- * makes this deterministic: an unordered `.get()` would otherwise attribute a
- * version to whichever library the planner reached first, so the same request
- * could name different libraries for the same book.
- *
- * Note the limit this leaves: the detail endpoint is keyed by version, so for a
- * version in several libraries it reports one of them. The list stays exact,
- * because it is paged per library.
+ * Detail without a library uses the first visible link, preferring the
+ * caller's private copy. An explicit library constrains the lookup.
  */
-function libraryOfVersion(userId: string, versionId: string) {
+function librariesOfVersion(userId: string, versionId: string) {
   const links = getDb().select({ libraryId: libraryBookVersions.libraryId }).from(libraryBookVersions)
     .where(eq(libraryBookVersions.bookVersionId, versionId)).all()
-  if (links.length === 0) return undefined
+  if (links.length === 0) return []
   const browsable = listBrowsableLibraries(userId)
   const held = new Set(links.map((link) => link.libraryId))
-  return browsable.find((lib) => lib.private && held.has(lib.id))
-    ?? browsable.find((lib) => held.has(lib.id))
-}
-
-async function singleVersionRow(userId: string, libraryId: string, versionId: string): Promise<LibraryVersionEntry> {
-  const result = await listLibraryVersionEntries(userId, libraryId, { page: 1, pageSize: 100 })
-  const found = result.items.find((entry) => entry.bookVersionId === versionId)
-  if (!found) throw new AppError('BOOK_NOT_FOUND', 'Book not found')
-  return found
+  return browsable.filter((lib) => held.has(lib.id)).sort((a, b) => Number(b.private) - Number(a.private))
 }

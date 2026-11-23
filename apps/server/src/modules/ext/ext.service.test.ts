@@ -12,11 +12,13 @@ import * as schema from '../../db/legacy-test-schema'
 import * as client from '../../db/client'
 import { createId } from '../../lib/id'
 import { updateCategoryValue } from '../classification/classification.service'
+import { getBook, savePrivateBook } from '../books/books.service'
 import {
   deleteExternalBook,
   getExternalBook,
   listExternalBooks,
   listExternalLibraries,
+  updateExternalBook,
 } from './ext.service'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -234,6 +236,12 @@ describe('external API projection', () => {
     const second = await listExternalBooks(ownerId, { page: 2, pageSize: 100 })
     expect(second.items).toHaveLength(51)
     expect(second.items.map((b) => b.title)).toContain('The Shared One')
+    const globallySorted = await listExternalBooks(ownerId, { page: 1, pageSize: 2, sortScope: 'global' })
+    expect(globallySorted.items.map((book) => book.title)).toEqual(['The Shared One', 'Book 149'])
+
+    const beyondFirstPage = second.items.find((book) => book.libraryId === privateLibraryId)!
+    await expect(getExternalBook(ownerId, beyondFirstPage.bookVersionId, privateLibraryId))
+      .resolves.toMatchObject({ title: beyondFirstPage.title, libraryId: privateLibraryId })
   })
 
   it('keeps hidden rows away from a member but not from a manager, and says which', async () => {
@@ -321,6 +329,10 @@ describe('external API projection', () => {
     const { versionId } = seedVersion(privateLibraryId, ownerId, { title: 'Mine', revisionAt: 1000 })
     seedVersion(sharedLibraryId, ownerId, { title: 'Also shared', revisionAt: 1000, sameVersionAs: versionId })
 
+    await expect(getExternalBook(ownerId, versionId)).resolves.toMatchObject({ title: 'Mine', libraryId: privateLibraryId })
+    await expect(getExternalBook(ownerId, versionId, sharedLibraryId)).resolves.toMatchObject({ title: 'Also shared', libraryId: sharedLibraryId })
+    await expect(deleteExternalBook(ownerId, versionId, sharedLibraryId)).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(db.select().from(schema.libraryBooks).all().every((work) => work.deletedAt === null)).toBe(true)
     await expect(deleteExternalBook(ownerId, versionId)).resolves.toEqual({ bookVersionId: versionId })
     // Only the private work is trashed; the shared library's copy is a separate
     // row and stays readable for everyone else.
@@ -330,6 +342,9 @@ describe('external API projection', () => {
     const shared = db.select({ deletedAt: schema.libraryBooks.deletedAt })
       .from(schema.libraryBooks).where(eq(schema.libraryBooks.libraryId, sharedLibraryId)).all()
     expect(shared.every((row) => row.deletedAt === null)).toBe(true)
+    await expect(getExternalBook(ownerId, versionId, sharedLibraryId))
+      .resolves.toMatchObject({ title: 'Also shared', libraryId: sharedLibraryId })
+    await expect(getExternalBook(ownerId, versionId, privateLibraryId)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
   })
 
   it('reports the uploaded format as sourceFormat, never as what a download returns', async () => {
@@ -365,4 +380,50 @@ describe('external API projection', () => {
 
     await expect(deleteExternalBook(memberId, versionId)).rejects.toMatchObject({ code: 'BOOK_NOT_FOUND' })
   })
+
+  it('updates only the work in the chosen library and exposes its changed taxonomy to filters', async () => {
+    const { versionId, workId } = seedVersion(privateLibraryId, ownerId, { title: 'Private title', revisionAt: 1000 })
+    seedVersion(sharedLibraryId, ownerId, { title: 'Shared title', revisionAt: 1200, sameVersionAs: versionId })
+    const shelfId = createId('shelf')
+    db.insert(schema.shelves).values({ id: shelfId, libraryId: privateLibraryId, userId: ownerId, name: 'Inbox', createdAt: 1, updatedAt: 1 }).run()
+    await expect(updateExternalBook(memberId, sharedLibraryId, versionId, { title: 'Forbidden' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(updateExternalBook(ownerId, sharedLibraryId, versionId, { title: 'Must roll back', shelfId }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(updateExternalBook(ownerId, privateLibraryId, versionId, {
+      title: 'Filed', author: 'Lin', categoryPath: ['Fiction'], tags: ['Favorite'], shelfId,
+    })).resolves.toEqual({ libraryId: privateLibraryId, bookVersionId: versionId, libraryBookId: workId })
+    const result = await listExternalBooks(ownerId, {
+      page: 1, pageSize: 10, author: 'Lin', categoryPath: ['Fiction'], tag: 'Favorite', shelfId,
+    })
+    expect(result.items).toMatchObject([{ libraryId: privateLibraryId, title: 'Filed', authors: ['Lin'], shelfName: 'Inbox' }])
+    await expect(getExternalBook(ownerId, versionId, sharedLibraryId)).resolves.toMatchObject({ title: 'Shared title' })
+  })
+
+  it('shares a private description between Web and external edits without changing the shared edition', async () => {
+    const { versionId, workId } = seedVersion(privateLibraryId, ownerId, { title: 'Private', revisionAt: 1000 })
+    const shared = seedVersion(sharedLibraryId, ownerId, { title: 'Shared', revisionAt: 1000, sameVersionAs: versionId })
+    db.update(schema.libraryBooks).set({ description: 'Publisher summary' }).where(eq(schema.libraryBooks.id, workId)).run()
+    db.update(schema.libraryBooks).set({ description: 'Shared summary' }).where(eq(schema.libraryBooks.id, shared.workId)).run()
+    db.update(schema.contentRevisions).set({ meta: { bookmeta: { description: 'Publisher summary' } } })
+      .where(eq(schema.contentRevisions.bookVersionId, versionId)).run()
+
+    await savePrivateBook(ownerId, versionId, { book: { descriptionOverride: 'Written in Web' } })
+    await expect(getExternalBook(ownerId, versionId, privateLibraryId)).resolves.toMatchObject({
+      description: 'Written in Web', bookmeta: { description: 'Written in Web' },
+    })
+    await updateExternalBook(ownerId, privateLibraryId, versionId, { description: 'Written through API' })
+    await expect(getBook(ownerId, versionId)).resolves.toMatchObject({
+      descriptionOverride: 'Written through API', meta: { bookmeta: { description: 'Written through API' } },
+    })
+    await expect(listExternalBooks(ownerId, {
+      libraryId: privateLibraryId, q: 'Written through API', page: 1, pageSize: 10,
+    })).resolves.toMatchObject({ total: 1 })
+    await expect(getExternalBook(ownerId, versionId, sharedLibraryId)).resolves.toMatchObject({ description: 'Shared summary' })
+
+    await updateExternalBook(ownerId, privateLibraryId, versionId, { description: '' })
+    await expect(getExternalBook(ownerId, versionId, privateLibraryId)).resolves.toMatchObject({ description: 'Publisher summary' })
+    await expect(getBook(ownerId, versionId)).resolves.toMatchObject({ descriptionOverride: null, meta: { bookmeta: { description: 'Publisher summary' } } })
+  })
+
 })

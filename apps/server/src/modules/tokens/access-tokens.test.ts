@@ -58,11 +58,13 @@ describe('access token permission registry', () => {
     expect(requiredPermissionFor('GET', '/api/v1/ext/books/v1/file')).toBe('ext:file')
     expect(requiredPermissionFor('HEAD', '/api/v1/ext/books/v1/file')).toBe('ext:file')
     expect(requiredPermissionFor('POST', '/api/v1/ext/books')).toBe('ext:upload')
+    expect(requiredPermissionFor('POST', '/api/v1/ext/books/v1/download-link')).toBe('ext:download-link')
+    expect(requiredPermissionFor('PATCH', '/api/v1/ext/books/v1')).toBe('ext:update-book')
     expect(requiredPermissionFor('DELETE', '/api/v1/ext/books/v1')).toBe('ext:delete')
+    expect(requiredPermissionFor('GET', '/api/v1/ext/reading-archives')).toBe('ext:reading-archives')
     // A longer path is a different shape, not a near-miss.
     expect(requiredPermissionFor('GET', '/api/v1/ext/books/v1/extra')).toBeUndefined()
     expect(requiredPermissionFor('PUT', '/api/v1/ext/books/v1')).toBeUndefined()
-    expect(requiredPermissionFor('PATCH', '/api/v1/ext/books/v1')).toBeUndefined()
   })
 
   it('keeps the reader out of the ext surface entirely', () => {

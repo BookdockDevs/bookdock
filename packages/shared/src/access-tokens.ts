@@ -24,7 +24,9 @@ export const ACCESS_TOKEN_PERMISSIONS = [
   'ext:book',
   'ext:file',
   'ext:download-link',
+  'ext:reading-archives',
   'ext:upload',
+  'ext:update-book',
   'ext:delete',
 ] as const
 
@@ -74,12 +76,22 @@ export const ACCESS_TOKEN_PERMISSION_REGISTRY: readonly AccessTokenPermissionDef
   {
     id: 'ext:download-link',
     endpoints: ['POST /api/v1/ext/books/:versionId/download-link'],
-    description: 'Get or create a book download link that recipients can use without signing in.',
+    description: 'Get, create or revoke a book download link.',
+  },
+  {
+    id: 'ext:reading-archives',
+    endpoints: ['GET /api/v1/ext/reading-archives'],
+    description: 'Read the account’s personal reading archives.',
   },
   {
     id: 'ext:upload',
     endpoints: ['POST /api/v1/ext/books'],
     description: 'Upload a book, optionally into a named library.',
+  },
+  {
+    id: 'ext:update-book',
+    endpoints: ['PATCH /api/v1/ext/books/:versionId'],
+    description: 'Update a work’s metadata and organization in a specified library.',
   },
   {
     id: 'ext:delete',

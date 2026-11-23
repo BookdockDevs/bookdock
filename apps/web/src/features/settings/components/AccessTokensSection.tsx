@@ -103,7 +103,11 @@ export default function AccessTokensSection() {
               const isExpired = token.expiresAt !== null && token.expiresAt <= Date.now()
               const isExpiringSoon =
                 token.expiresAt !== null && !isExpired && token.expiresAt - Date.now() < 7 * 24 * 60 * 60 * 1000
-              const isFullAccess = token.permissions.length === ACCESS_TOKEN_PERMISSIONS.length
+              const permissions = ACCESS_TOKEN_PERMISSIONS.filter((permission) => token.permissions.includes(permission))
+              const isFullAccess = permissions.length === ACCESS_TOKEN_PERMISSIONS.length
+              const permissionSummary = isFullAccess
+                ? _('settings.tokensFullAccess')
+                : permissions.map((permission) => _(ACCESS_TOKEN_PERMISSION_LABEL_KEYS[permission])).join(' · ')
 
               return (
                 <div
@@ -151,16 +155,11 @@ export default function AccessTokensSection() {
                       ) : null}
                     </div>
 
-                    {/* Permissions: Full access or clean dot-separated text flow */}
-                    <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-                      {isFullAccess ? (
-                        _('settings.tokensFullAccess')
-                      ) : token.permissions.length === 0 ? (
+                    <p className="mt-1 truncate text-xs text-stone-500 dark:text-stone-400" title={permissionSummary || undefined}>
+                      {permissionSummary || (
                         <span className="text-stone-400 dark:text-stone-500">
                           {_('settings.tokensNoPermissions')}
                         </span>
-                      ) : (
-                        token.permissions.map((p) => _(ACCESS_TOKEN_PERMISSION_LABEL_KEYS[p])).join(' · ')
                       )}
                     </p>
                   </div>

@@ -2,7 +2,18 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { z } from 'zod'
 
-import { bookShareRequestSchema, categoryPathSchema, type ExternalLibrariesRes, type ExternalUploadRes } from '@bookdock/shared'
+import {
+  categoryPathSchema,
+  externalArchiveDetailQuerySchema,
+  externalArchiveListQuerySchema,
+  externalBookListQuerySchema,
+  externalDownloadLinkSchema,
+  externalLibraryIdSchema,
+  externalWorkPatchSchema,
+  type ExternalLibrariesRes,
+  type ExternalUploadRes,
+  type ExternalWorkPatchRes,
+} from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
@@ -11,17 +22,19 @@ import { manageBookShare } from '../books/book-shares.service'
 import { getActiveBook, uploadBook, uploadCatalogBook } from '../books/books.service'
 import { requireLibraryManager } from '../libraries/library-access'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
+import { getExternalArchive, getExternalArchiveOverview } from './ext-archives.service'
 import {
   deleteExternalBook,
   EXT_READ,
   getExternalBook,
   listExternalBooks,
   listExternalLibraries,
+  updateExternalBook,
 } from './ext.service'
 
 /**
- * The external API for automation clients: read what is in the library, upload,
- * download, and move to trash.
+ * The external API provides catalog operations and personal archive reads for
+ * automation clients.
  *
  * It is a separate surface from `/api/v1/**` rather than a path-scoped subset of
  * it, because the Web's book list is a sidebar projection whose fields
@@ -30,26 +43,10 @@ import {
  * change whenever the Web UI does. The Legado facade is the same idea for the
  * same reason: a client with its own needs gets its own contract.
  *
- * Chapter bodies, TOCs, progress, taxonomy editing, version management and
- * library administration are all absent on purpose. They have real workflows
- * behind them in the Web, and the Web is where a person does those things.
  */
 const extRoutes = new Hono()
 
-const listQuerySchema = z.object({
-  libraryId: z.string().min(1).max(128).optional(),
-  q: z.string().trim().min(1).max(200).optional(),
-  format: z.enum(['epub', 'txt']).optional(),
-  sortBy: z.enum(['title', 'createdAt', 'updatedAt', 'size']).optional(),
-  sortOrder: z.enum(['asc', 'desc']).optional(),
-  // Unix ms watermark. A syncing client keeps the highest `updatedAt` it has
-  // seen and sends it back, so a run after the first only transfers what moved.
-  updatedSince: z.coerce.number().int().nonnegative().optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(50),
-})
-
-const writeQuerySchema = z.object({ libraryId: z.string().min(1).max(128).optional() })
+const libraryQuerySchema = z.object({ libraryId: externalLibraryIdSchema.optional() })
 
 extRoutes.get('/libraries', async (c) => {
   const user = c.get('user')
@@ -61,7 +58,7 @@ extRoutes.get('/libraries', async (c) => {
 extRoutes.get('/books', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = listQuerySchema.safeParse(c.req.query())
+  const parsed = externalBookListQuerySchema.safeParse(c.req.query())
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid query', parsed.error.flatten())
   }
@@ -71,7 +68,35 @@ extRoutes.get('/books', async (c) => {
 extRoutes.get('/books/:versionId', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  return c.json({ data: await getExternalBook(user.id, c.req.param('versionId')) })
+  const query = libraryQuerySchema.safeParse(c.req.query())
+  if (!query.success) throw new AppError('VALIDATION_ERROR', 'Invalid query', query.error.flatten())
+  return c.json({ data: await getExternalBook(user.id, c.req.param('versionId'), query.data.libraryId) })
+})
+
+extRoutes.patch('/books/:versionId', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const libraryId = externalLibraryIdSchema.safeParse(c.req.query('libraryId'))
+  if (!libraryId.success) throw new AppError('VALIDATION_ERROR', 'A libraryId is required')
+  const patch = externalWorkPatchSchema.safeParse(await c.req.json().catch(() => null))
+  if (!patch.success) throw new AppError('VALIDATION_ERROR', 'Invalid work patch', patch.error.flatten())
+  const data = await updateExternalBook(user.id, libraryId.data, c.req.param('versionId'), patch.data)
+  return c.json({ data } satisfies { data: ExternalWorkPatchRes })
+})
+
+extRoutes.get('/reading-archives', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const query = c.req.query()
+  c.header('Cache-Control', 'private, no-store')
+  if (query.archiveId !== undefined) {
+    const parsed = externalArchiveDetailQuerySchema.safeParse(query)
+    if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid archive query', parsed.error.flatten())
+    return c.json({ data: await getExternalArchive(user.id, parsed.data) })
+  }
+  const parsed = externalArchiveListQuerySchema.safeParse(query)
+  if (!parsed.success) throw new AppError('VALIDATION_ERROR', 'Invalid archive query', parsed.error.flatten())
+  return c.json({ data: await getExternalArchiveOverview(user.id, parsed.data) })
 })
 
 /**
@@ -97,13 +122,17 @@ extRoutes.post('/books/:versionId/download-link', async (c) => {
   const user = c.get('user')
   if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
   const input: unknown = await c.req.json().catch(() => null)
-  const body = bookShareRequestSchema.safeParse(input)
+  const body = externalDownloadLinkSchema.safeParse(input)
   if (!body.success) throw new AppError('VALIDATION_ERROR', 'Invalid download link options', body.error.flatten())
+  c.header('Cache-Control', 'private, no-store')
+  if (body.data.action === 'revoke') {
+    manageBookShare(user.id, c.req.param('versionId'), body.data.libraryId, { type: 'revoke' })
+    return c.json({ data: null })
+  }
   const link = manageBookShare(user.id, c.req.param('versionId'), body.data.libraryId, { type: 'get-or-create', duration: body.data.duration })
   if (!link) throw new AppError('INTERNAL_ERROR', 'Download link could not be created')
   const origin = new URL(c.req.url)
   if (origin.protocol === 'http:' && c.req.header('x-forwarded-proto') === 'https') origin.protocol = 'https:'
-  c.header('Cache-Control', 'private, no-store')
   return c.json({ data: { ...link, url: new URL(link.url, origin).toString() } })
 })
 
@@ -161,17 +190,13 @@ extRoutes.post('/books', async (c) => {
 extRoutes.delete('/books/:versionId', async (c) => {
   const user = c.get('user')
   if (!user) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Login required' } }, 401)
-  const parsed = writeQuerySchema.safeParse(c.req.query())
+  const parsed = libraryQuerySchema.safeParse(c.req.query())
   if (!parsed.success) {
     throw new AppError('VALIDATION_ERROR', 'Invalid query', parsed.error.flatten())
   }
-  // Naming a library is a claim about where the write lands, so it is checked
-  // rather than trusted: a member who trashes their own copy of a shared book's
-  // version must not be able to name someone else's library and have it act
-  // there. Omitting it means the caller's own library, which the read gate
-  // already resolved.
+  // Authorization and the trash target both use the named library.
   if (parsed.data.libraryId) await requireLibraryManager(user.id, parsed.data.libraryId)
-  return c.json({ data: await deleteExternalBook(user.id, c.req.param('versionId')) })
+  return c.json({ data: await deleteExternalBook(user.id, c.req.param('versionId'), parsed.data.libraryId) })
 })
 
 export default extRoutes

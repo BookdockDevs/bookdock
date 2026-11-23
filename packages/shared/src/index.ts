@@ -572,14 +572,26 @@ export {
 } from './metadata-source'
 
 export type {
+  ExternalArchiveRes,
   ExternalBook,
   ExternalBookDetail,
   ExternalBookListRes,
   ExternalCategory,
   ExternalLibrariesRes,
   ExternalLibrary,
+  ExternalListParams,
   ExternalTag,
   ExternalUploadRes,
+  ExternalWorkPatch,
+  ExternalWorkPatchRes,
+} from './ext'
+export {
+  externalArchiveDetailQuerySchema,
+  externalArchiveListQuerySchema,
+  externalBookListQuerySchema,
+  externalDownloadLinkSchema,
+  externalLibraryIdSchema,
+  externalWorkPatchSchema,
 } from './ext'
 
 export { getAiModelCapabilityFlags, isAiEmbeddingModel } from './ai-models'

@@ -61,11 +61,13 @@ describe('AccessTokensSection', () => {
   })
 
   it('lists name, masked secret, permission labels and expiry', async () => {
-    renderSection([LISTED])
+    renderSection([{ ...LISTED, permissions: ['ext:file', 'ext:books'] }])
 
     expect(await screen.findByText('浏览器扩展')).toBeInTheDocument()
     expect(screen.getByText(/x7f2/)).toBeInTheDocument()
-    expect(screen.getByText(/列出书籍 · 下载书籍文件/)).toBeInTheDocument()
+    const permissions = screen.getByText('列出书籍 · 下载书籍文件')
+    expect(permissions).toHaveAttribute('title', '列出书籍 · 下载书籍文件')
+    expect(permissions).toHaveClass('truncate')
     expect(screen.getByRole('switch', { name: '禁用令牌' })).toHaveAttribute('aria-checked', 'true')
   })
 
@@ -88,11 +90,12 @@ describe('AccessTokensSection', () => {
     fireEvent.click(await screen.findByRole('button', { name: /创建令牌/ }))
 
     const checkboxes = screen.getAllByRole('checkbox')
-    // Ticked by label rather than by position: the registry order is not a
-    // contract, and an index silently retargets the wrong permission the next
-    // time one is inserted.
     expect(checkboxes).toHaveLength(ACCESS_TOKEN_PERMISSION_REGISTRY.length)
     for (const checkbox of checkboxes) expect(checkbox).not.toBeChecked()
+    expect(checkboxes).toEqual([
+      '列出书库', '列出书籍', '查看书籍详情', '下载书籍文件', '获取书籍下载链接',
+      '查看阅读档案', '上传书籍', '编辑书籍信息', '删除书籍',
+    ].map((label) => screen.getByRole('checkbox', { name: new RegExp(label) })))
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '新令牌' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))

@@ -482,9 +482,13 @@ async function loadCandidateTitles(userId: string, versionIds: string[]): Promis
 }
 
 export async function getOverview(userId: string, range: ReadingRange = {}): Promise<ArchiveOverview> {
+  return summarizeArchive(userId, range, rawTallies(userId, undefined, range))
+}
+
+async function summarizeArchive(userId: string, range: ReadingRange, tallies: Map<string, VersionTally>): Promise<ArchiveOverview> {
   const db = getDb()
   const pending = new Set(pendingBookDataDeletionVersionIds(db, userId))
-  const bookIds = new Set([...rawTallies(userId, undefined, range).keys()].filter((id) => !pending.has(id)))
+  const bookIds = new Set(tallies.keys())
   for (const archive of db.select({ id: readingArchives.bookVersionId }).from(readingArchives).where(
     eq(readingArchives.userId, userId),
   ).all()) if (!pending.has(archive.id)) bookIds.add(archive.id)
@@ -492,8 +496,21 @@ export async function getOverview(userId: string, range: ReadingRange = {}): Pro
 }
 
 export async function listBooks(userId: string, query: ArchiveBooksQuery) {
-  const db = getDb()
+  return pageArchiveBooks(userId, query, rawTallies(userId, query.type, query))
+}
+
+export async function getArchiveOverviewPage(userId: string, query: ArchiveBooksQuery) {
+  // The note type changes the sort timestamps while the tally still counts all types.
   const tallies = rawTallies(userId, query.type, query)
+  const [overview, page] = await Promise.all([
+    summarizeArchive(userId, query, tallies),
+    pageArchiveBooks(userId, query, tallies),
+  ])
+  return { overview, ...page }
+}
+
+async function pageArchiveBooks(userId: string, query: ArchiveBooksQuery, tallies: Map<string, VersionTally>) {
+  const db = getDb()
 
   const selectedTypes = parseArchiveRecordTypes(query.type)
   const selectedStatuses = parseArchiveReadStatuses(query.readStatus)
