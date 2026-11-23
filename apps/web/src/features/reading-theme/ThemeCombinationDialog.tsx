@@ -24,12 +24,12 @@ interface ThemeCombinationDialogProps {
   library: ReadingThemeLibrary
   variant: 'default' | 'reader'
   onClose: () => void
-  onSave: (theme: SavedReadingTheme, scope?: 'user' | 'instance') => void
+  onSave: (theme: SavedReadingTheme, scope?: 'user' | 'instance') => void | Promise<void>
   onCreateCard: (kind: ThemeCardEdit['kind'], onCreated: (id: string) => void) => void
   onEditCard?: (edit: ThemeCardEdit) => void
   onCopyCard?: (kind: ThemeCardEdit['kind'], card: ThemeCardEdit['card']) => void
   onCopy?: (theme: SavedReadingTheme) => void
-  onDelete?: () => void
+  onDelete?: () => void | Promise<void>
   onExport?: () => void
   onTrial?: (theme: SavedReadingTheme | null) => void
   scope?: 'user' | 'instance'
@@ -63,6 +63,8 @@ export default function ThemeCombinationDialog({
   const [draftScope, setDraftScope] = useState<'user' | 'instance'>(scope)
   const [trial, setTrial] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
   const [contextMenu, setContextMenu] = useState<{
     anchor: MenuAnchor
     onEdit?: () => void
@@ -97,6 +99,18 @@ export default function ThemeCombinationDialog({
       else toggleRule(id)
     })
   }
+  const submit = async () => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    try {
+      if (deleting) await onDelete?.()
+      else await onSave({ ...draft, name: draft.name.trim() }, canChangeScope ? draftScope : undefined)
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
+  }
 
   if (trial) return <ThemeTrialBar onBack={() => { onTrial?.(null); setTrial(false) }} />
 
@@ -105,11 +119,11 @@ export default function ThemeCombinationDialog({
       title={_(existing ? 'reader.editTheme' : 'reader.newTheme')}
       variant={variant}
       containerProps={{ 'data-settings-toggle': '' }}
-      onClose={onClose}
+      onClose={() => { if (!busy) onClose() }}
       footer={
         <div className="flex w-full items-center justify-between gap-2">
           <div>
-            {!deleting && onTrial && (
+            {!deleting && !busy && onTrial && (
               <Button
                 type="button"
                 variant="secondary"
@@ -129,12 +143,13 @@ export default function ThemeCombinationDialog({
               type="button"
               variant="secondary"
               size="sm"
+              disabled={busy}
               onClick={deleting ? () => setDeleting(false) : onClose}
             >
               {_(readOnly ? 'library.close' : 'library.cancel')}
             </Button>
             {deleting && !readOnly ? (
-              <Button type="button" variant="danger" size="sm" onClick={onDelete}>
+              <Button type="button" variant="danger" size="sm" disabled={busy} onClick={() => void submit()}>
                 {_('reader.deleteTheme')}
               </Button>
             ) : !readOnly ? (
@@ -142,9 +157,9 @@ export default function ThemeCombinationDialog({
                 type="button"
                 variant="primary"
                 size="sm"
-                disabled={!hasComponent || (cards.paletteId != null && !hasPalette) || !draft.name.trim()}
+                disabled={busy || !hasComponent || (cards.paletteId != null && !hasPalette) || !draft.name.trim()}
                 title={!hasComponent ? _('reader.themeNeedsComponent') : undefined}
-                onClick={() => onSave({ ...draft, name: draft.name.trim() }, canChangeScope ? draftScope : undefined)}
+                onClick={() => void submit()}
               >
                 {_('reader.saveTheme')}
               </Button>

@@ -186,6 +186,23 @@ describe('SettingsSync persistence', () => {
     expect(useToastStore.getState().toasts).toHaveLength(0)
   })
 
+  it('reports a rejected settings write and retains the pending change', async () => {
+    useToastStore.getState().clearToasts()
+    mountSync()
+    await act(() => vi.runAllTimersAsync())
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      error: { code: 'INVALID_INPUT', message: 'Invalid settings' },
+    }), { status: 400 }))
+
+    act(() => useUiStore.getState().setFontOrder(['serif']))
+    await act(() => vi.advanceTimersByTimeAsync(1100))
+
+    expect(localStorage.getItem('bd-settings-pending')).toContain('serif')
+    expect(useToastStore.getState().toasts).toEqual([
+      expect.objectContaining({ type: 'error', message: { key: 'settings.accountSettingsSyncRejected' } }),
+    ])
+  })
+
   it('keeps retrying the latest settings silently through a prolonged outage and recovery', async () => {
     useToastStore.getState().clearToasts()
     mountSync()

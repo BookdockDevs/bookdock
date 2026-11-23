@@ -34,9 +34,9 @@ export type ThemeCardEdit =
 interface ThemeEditorDialogProps {
   editor: ThemeCardEdit
   variant: 'default' | 'reader'
-  onSave: (card: ThemeCardEdit, resourceScope?: 'user' | 'instance') => void
+  onSave: (card: ThemeCardEdit, resourceScope?: 'user' | 'instance') => void | Promise<void>
   onClose: () => void
-  onDelete?: () => void
+  onDelete?: () => void | Promise<void>
   onTrial?: (draft: ThemeCardEdit | null) => void
   onCopy?: (card: ThemeCardEdit) => void
   resourceScope?: 'user' | 'instance'
@@ -340,11 +340,23 @@ export default function ThemeEditorDialog({
         }
       }
       if (started === generation.current && scope === (useAuthStore.getState().user?.id ?? 'device')) {
-        onSave(card, canChangeScope ? draftResourceScope : undefined)
+        await onSave(card, canChangeScope ? draftResourceScope : undefined)
       }
     } catch (error) {
       const full = error instanceof ThemeAssetError && (error.category === 'too-many' || error.category === 'storage-full')
       notify.error({ key: full ? 'reader.themeAssetsStorageFull' : 'reader.themeAssetSaveFailed' })
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
+  }
+
+  const deleteCard = async () => {
+    if (!onDelete || busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    try {
+      await onDelete()
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -479,7 +491,7 @@ export default function ThemeEditorDialog({
               {_(readOnly ? 'library.close' : 'library.cancel')}
             </Button>
             {deleting && !readOnly ? (
-              <Button type="button" variant="danger" size="sm" onClick={onDelete}>
+              <Button type="button" variant="danger" size="sm" disabled={busy} onClick={() => void deleteCard()}>
                 {_('reader.deleteTheme')}
               </Button>
             ) : !readOnly ? (

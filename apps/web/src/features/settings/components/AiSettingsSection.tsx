@@ -19,9 +19,9 @@ import { useDismissiblePopup } from '@/hooks/useDismissiblePopup'
 import { useMenuAnchor } from '@/hooks/useMenuAnchor'
 import { useTranslation } from '@/hooks/useTranslation'
 import { downloadBlob, timestampSuffix } from '@/lib/download'
-import { getUserErrorNotification } from '@/lib/error-message'
+import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { useAuthStore } from '@/stores/auth.store'
+import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 
 import AiConnectionEditor from './AiConnectionEditor'
 import AiPromptRow from './AiPromptRow'
@@ -305,8 +305,10 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
   async function onImportPromptsFile(file: File | undefined) {
     if (!file || importing) return
     setImporting(true)
+    const sessionRevision = getAuthSessionRevision()
     try {
       const parsed: unknown = JSON.parse(await file.text())
+      if (getAuthSessionRevision() !== sessionRevision) return
       const rawList = Array.isArray(parsed)
         ? parsed
         : parsed && typeof parsed === 'object' && Array.isArray((parsed as { prompts?: unknown }).prompts)
@@ -329,16 +331,33 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
         return
       }
       let importedCount = 0
-      for (const item of candidates) {
-        await createPrompt.mutateAsync({
-          name: item.name.trim().slice(0, 60),
-          prompt: item.prompt.trim(),
-          availability: 'user',
+      const skipped = rawList.length - candidates.length
+      try {
+        for (const item of candidates) {
+          await createPrompt.mutateAsync({
+            name: item.name.trim().slice(0, 60),
+            prompt: item.prompt.trim(),
+            availability: 'user',
+          })
+          if (getAuthSessionRevision() !== sessionRevision) return
+          importedCount += 1
+        }
+      } catch (error) {
+        if (getAuthSessionRevision() !== sessionRevision) return
+        const report = importedCount > 0 ? notify.warning : notify.error
+        report({
+          key: 'settings.aiPromptImportInterrupted',
+          params: {
+            count: importedCount, skipped, remaining: candidates.length - importedCount - 1,
+            reason: getUserErrorMessage(error, _, 'settings.aiPromptSaveFailed'),
+          },
         })
-        importedCount += 1
+        return
       }
-      notify.success({ key: 'settings.aiPromptImported', params: { count: importedCount } })
+      if (skipped) notify.warning({ key: 'settings.aiPromptImportSkipped', params: { count: importedCount, skipped } })
+      else notify.success({ key: 'settings.aiPromptImported', params: { count: importedCount } })
     } catch (error) {
+      if (getAuthSessionRevision() !== sessionRevision) return
       if (error instanceof SyntaxError) notify.error({ key: 'settings.aiPromptImportInvalid' })
       else showError(error)
     } finally {
@@ -454,12 +473,30 @@ function AiPromptTemplates({ prompts, restoreAvailable }: { prompts: AiPromptTem
 
   async function confirmBulkDelete() {
     if (!pendingBulkDelete?.length) return
-    for (const item of pendingBulkDelete) {
-      await deletePrompt.mutateAsync(item.id)
-      setSortDrafts((current) => current?.filter((prompt) => prompt.id !== item.id) ?? current)
-      setSelectedIds((prev) => prev.filter((id) => id !== item.id))
+    const sessionRevision = getAuthSessionRevision()
+    const deleted = new Set<string>()
+    try {
+      for (const item of pendingBulkDelete) {
+        await deletePrompt.mutateAsync(item.id)
+        if (getAuthSessionRevision() !== sessionRevision) return
+        deleted.add(item.id)
+      }
+    } catch (error) {
+      if (getAuthSessionRevision() !== sessionRevision) return
+      const report = deleted.size > 0 ? notify.warning : notify.error
+      report({
+        key: 'toast.batchDeletionInterrupted',
+        params: {
+          count: deleted.size, remaining: pendingBulkDelete.length - deleted.size - 1,
+          reason: getUserErrorMessage(error, _, 'settings.aiPromptSaveFailed'),
+        },
+      })
     }
-    setPendingBulkDelete(null)
+    setSortDrafts((current) => current?.filter((prompt) => !deleted.has(prompt.id)) ?? current)
+    setSelectedIds((prev) => prev.filter((id) => !deleted.has(id)))
+    const remaining = pendingBulkDelete.filter((item) => !deleted.has(item.id))
+    setPendingBulkDelete(remaining.length ? remaining : null)
+    if (!remaining.length) notify.success({ key: 'toast.batchItemsDeleted', params: { count: deleted.size } })
   }
 
   return <section className="border-t border-stone-100 pt-2.5 dark:border-stone-800">

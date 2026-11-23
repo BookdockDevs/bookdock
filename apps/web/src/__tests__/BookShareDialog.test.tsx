@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiDelete, apiGet, apiPost } from '@/api/client'
 import BookShareDialog from '@/features/library/components/BookShareDialog'
 import i18n from '@/i18n/i18n'
+import { useToastStore } from '@/stores/toast.store'
 
 vi.mock('@/api/client', () => ({
   BASE_URL: '/api/v1',
@@ -30,6 +31,7 @@ describe('BookShareDialog', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     localStorage.clear()
+    useToastStore.getState().clearToasts()
     await i18n.changeLanguage('zh-CN')
   })
 
@@ -61,6 +63,9 @@ describe('BookShareDialog', () => {
     expect(linkInput).toHaveAttribute('readonly')
     expect(screen.getByText('永久有效')).toBeInTheDocument()
     expect(localStorage.getItem('bd-book-share-duration:u1')).toBe('permanent')
+    expect(useToastStore.getState().toasts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'success', message: { key: 'library.bookShare.generated' } }),
+    ]))
   })
 
   it('supports regenerating and revoking an active link with confirmation', async () => {
@@ -96,5 +101,9 @@ describe('BookShareDialog', () => {
       expect(apiDelete).toHaveBeenCalledWith('/book-shares/books/v2')
     })
     expect(await screen.findByRole('button', { name: '生成链接' })).toBeInTheDocument()
+    expect(useToastStore.getState().toasts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'success', message: { key: 'library.bookShare.regenerated' } }),
+      expect.objectContaining({ type: 'success', message: { key: 'library.bookShare.revoked' } }),
+    ]))
   })
 })

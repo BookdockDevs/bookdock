@@ -10,9 +10,9 @@ import QueryErrorState from '@/components/ui/QueryErrorState'
 import SettingsEmptyState from '@/components/ui/SettingsEmptyState'
 import { DictionaryIcon } from '@/features/reader/components/annotation-icons'
 import { useTranslation } from '@/hooks/useTranslation'
-import { getUserErrorNotification } from '@/lib/error-message'
+import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { useAuthStore } from '@/stores/auth.store'
+import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 
 import DictionaryEditor from './DictionaryEditor'
 import DictionaryRow from './DictionaryRow'
@@ -367,17 +367,29 @@ export default function DictionariesSettingsSection({ canImportDictionaries = tr
             if (!mutation.isPending) setBulkDeleting(null)
           }}
           onConfirm={async () => {
+            const sessionRevision = getAuthSessionRevision()
+            const deleted = new Set<string>()
             try {
               for (const item of bulkDeleting) {
                 await mutation.mutateAsync({ kind: 'delete', id: item.id })
+                if (getAuthSessionRevision() !== sessionRevision) return
+                deleted.add(item.id)
               }
-              if (useAuthStore.getState().user?.id !== user.id) return
-              setSelectedIds((prev) => prev.filter((id) => !bulkDeleting.some((item) => item.id === id)))
-              setBulkDeleting(null)
-              notify.success({ key: 'dictionary.deleted' })
             } catch (error) {
-              failed(error)
+              if (getAuthSessionRevision() !== sessionRevision) return
+              const report = deleted.size > 0 ? notify.warning : notify.error
+              report({
+                key: 'toast.batchDeletionInterrupted',
+                params: {
+                  count: deleted.size, remaining: bulkDeleting.length - deleted.size - 1,
+                  reason: getUserErrorMessage(error, _, 'library.operationFailed'),
+                },
+              })
             }
+            setSelectedIds((prev) => prev.filter((id) => !deleted.has(id)))
+            const remaining = bulkDeleting.filter((item) => !deleted.has(item.id))
+            setBulkDeleting(remaining.length ? remaining : null)
+            if (!remaining.length) notify.success({ key: 'toast.batchItemsDeleted', params: { count: deleted.size } })
           }}
         />
       )}

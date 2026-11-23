@@ -1455,6 +1455,7 @@ export default function AiPanel({ bookId, initialScrollPosition, open = true, on
   async function runRequest(request: AiRequest, replaceMessageCount = 0) {
     if (streaming) return
     const requestGeneration = requestGenerationRef.current
+    const authRevision = getAuthSessionRevision()
     const userMessage: AiMessage = {
       id: messageId(),
       role: 'user',
@@ -1601,10 +1602,13 @@ export default function AiPanel({ bookId, initialScrollPosition, open = true, on
         const streamedText = streamingTextStore.getText(assistantId)
         setMessages((current) => current.map((message) => message.id === assistantId && !message.content && streamedText ? { ...message, content: streamedText } : message))
         if (local && activeThreadId && (streamCompleted || controller.signal.aborted || failureMessage)) {
-          await local.applyAiThreadResult(activeThreadId, assistantId, {
+          const saved = await local.applyAiThreadResult(activeThreadId, assistantId, {
             content: (finalAssistantContent || streamedText) + (failureMessage ? `\n\n${failureMessage}` : ''), context: receiptSnapshot,
             citations: streamCompleted ? finalCitations : [], aborted: Boolean(controller.signal.aborted && !streamCompleted),
-          }).catch(() => undefined)
+          }).catch(() => false)
+          if (!saved && requestGenerationRef.current === requestGeneration && getAuthSessionRevision() === authRevision) {
+            notify.error({ key: 'reader.aiLocalAnswerSaveFailed' })
+          }
         }
         void queryClient.invalidateQueries({ queryKey: aiJobsKey(memoryUserId, local ? 'local' : 'book', memoryBookId) })
         abortRef.current = null
@@ -1947,6 +1951,14 @@ export default function AiPanel({ bookId, initialScrollPosition, open = true, on
         </div>
       </div>
 
+      {jobsQuery.isError && (
+        <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--bd-read-accent)] px-3 py-2 text-xs">
+          <span>{_('reader.aiJobsSyncFailed')}</span>
+          <button type="button" disabled={jobsQuery.isFetching} onClick={() => void jobsQuery.refetch()} className="shrink-0 rounded px-1 text-[var(--bd-read-primary)] underline disabled:opacity-50">
+            {_(jobsQuery.isFetching ? 'errors.retrying' : 'errors.retry')}
+          </button>
+        </div>
+      )}
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="relative min-h-0 flex-1">
           {messages.length > 0 ? (

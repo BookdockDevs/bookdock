@@ -14,11 +14,13 @@ import { useDeviceFontStore } from '../features/device-fonts/store'
 import type { DeviceFontMeta } from '../features/device-fonts/db'
 import { selectReadingThemeSlot, useUiStore } from '../stores/ui.store'
 import { useFonts } from '@/api/hooks/useFonts'
+import { removeInstanceThemeItemApi } from '@/api/hooks/useReadingThemes'
 import { useInstanceInfo } from '@/features/auth/hooks'
 import { useBookReplacements } from '@/api/hooks/useReplacements'
 import type { ReaderBookThemeSettings, TextReplacementRes } from '@bookdock/shared'
 import { LocalReaderContext, type LocalReaderSession } from '@/features/reading-data/reader-source-context'
 import { useAuthStore } from '@/stores/auth.store'
+import { useToastStore } from '@/stores/toast.store'
 import { ThemeAssetStore } from '@/features/reading-theme/assets'
 import { INITIAL_THEME_LIBRARY, readThemeLibrary, serializeThemeLibrary } from '@/features/reading-theme/theme-library'
 import { parseReadingConfig } from '../features/reader/lib/reading-profiles'
@@ -226,6 +228,42 @@ describe('SettingsPanel', () => {
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '删除' }))
     expect(useUiStore.getState().themeLibrary.themes.some(({ id }) => id === 'mine')).toBe(false)
     expect(useUiStore.getState().themeLibrary.css).toHaveLength(0)
+  })
+
+  it('keeps a theme as a personal theme after successfully removing its instance scope', async () => {
+    const previousUser = useAuthStore.getState().user
+    const previousLibrary = useUiStore.getState().instanceThemeLibrary
+    useAuthStore.setState({ user: { id: 'owner', username: 'owner', role: 'owner' } })
+    useToastStore.getState().clearToasts()
+    useUiStore.getState().setThemeLibrary(INITIAL_THEME_LIBRARY)
+    useUiStore.getState().setInstanceThemeLibrary({
+      themes: [{ id: 'shared-theme', name: '共享配色', cards: { paletteId: 'paper', cssId: null, highlightIds: [] } }],
+      palettes: [], css: [], highlights: [],
+    })
+
+    try {
+      const view = render(<ReadingThemesSettingsSection />)
+      fireEvent.click(screen.getByRole('button', { name: '共享配色' }))
+      const dialog = within(screen.getByRole('dialog'))
+      const scope = within(dialog.getByRole('group', { name: i18n.t('settings.resourceScope') }))
+      fireEvent.click(scope.getByRole('button', { name: i18n.t('settings.resourceScopeUser') }))
+      fireEvent.change(dialog.getByRole('textbox', { name: i18n.t('reader.themeName') }), { target: { value: '个人配色' } })
+      fireEvent.click(dialog.getByRole('button', { name: '保存' }))
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      expect(removeInstanceThemeItemApi).toHaveBeenCalledWith('theme', 'shared-theme')
+      expect(useUiStore.getState().personalThemeLibrary.themes).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'shared-theme', name: '个人配色' }),
+      ]))
+      expect(useToastStore.getState().toasts).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'success', message: { key: 'reader.themeItemSaved', params: { name: '个人配色' } } }),
+      ]))
+      view.unmount()
+    } finally {
+      useUiStore.getState().setInstanceThemeLibrary(previousLibrary)
+      useUiStore.getState().setThemeLibrary(INITIAL_THEME_LIBRARY)
+      useAuthStore.setState({ user: previousUser })
+    }
   })
 
   it('retains image bytes saved by another tab when deleting from a stale library', async () => {

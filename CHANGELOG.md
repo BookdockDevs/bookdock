@@ -6,14 +6,21 @@ All notable changes to Bookdock are documented here.
 
 ### Added
 
-- Share a server-hosted book from its details or context menu. Create a time-limited or permanent download link, then copy, regenerate, or revoke it. Recipients can download the EPUB or TXT without signing in. The download preserves the book’s format and skips text replacement rules.
+- Share a server-hosted book from its details or context menu. Create a time-limited or permanent download link, then copy, regenerate, or revoke it. Notifications confirm when a link is created, replaced, or revoked. Recipients can download the EPUB or TXT without signing in. The download preserves the book’s format and skips text replacement rules.
 - The external API can get or create a book download link with the new `ext:download-link` permission. If a valid link already exists, the API returns it unchanged.
+
+### Changed
+
+- Saving a reading theme or card and publishing it to the instance now show completion notifications.
+- AI quick command imports report how many entries were imported, failed, skipped, or left unprocessed. Interrupted batch deletions of quick commands, dictionaries, or instance theme items report how many were deleted and let you retry the remaining items.
 
 ### Fixed
 
 - The E Ink reader now applies your text replacement rules to chapter text, chapter headings, and table of contents labels. It respects per-book rule toggles and applies point replacements to the passages they target.
 - Invalid reading links show a clear return-to-library action and a “Book not found” browser tab title. When a book opens but its table of contents fails to load, you can retry from the table of contents panel.
-- Account settings and keyboard shortcuts retry in the background after temporary sync failures. Reconnecting resumes sync immediately, and sync failures and recovery stay silent.
+- Account settings and keyboard shortcuts retry quietly after temporary sync failures. Reconnecting resumes sync immediately. If the server rejects a change, the app reports it and keeps the pending change.
+- The AI panel warns when an answer cannot be saved to local history and offers a retry when background task status or results fail to sync.
+- Moving an instance theme or card to personal scope now completes after removing it from the instance. Deleting an instance item also completes and confirms the result.
 
 ## [0.8.8] - 2026-11-23
 
@@ -1433,14 +1440,21 @@ All notable changes to Bookdock are documented here.
 
 #### 新增
 
-- 从书籍详情或右键菜单分享服务端书籍。下载链接可设为限时或永久，支持复制、重新生成和撤销。收件人无需登录即可下载，文件保留 EPUB 或 TXT 格式，下载时不应用文本替换规则。
+- 从书籍详情或右键菜单分享服务端书籍。下载链接可设为限时或永久，支持复制、重新生成和撤销。生成、重新生成或撤销链接后会显示通知。收件人无需登录即可下载，文件保留 EPUB 或 TXT 格式，下载时不应用文本替换规则。
 - 公开 API 新增 `ext:download-link` 权限，可获取或创建书籍下载链接。已有有效链接时直接返回原链接。
+
+#### 优化
+
+- 保存阅读主题或卡片，以及将它们发布到实例后，会显示完成通知。
+- 导入 AI 快捷指令时会显示已导入、失败、跳过和未处理的数量。批量删除快捷指令、词典或实例主题项目中断时，会显示已删除数量，并可重试剩余项目。
 
 #### 修复
 
 - E Ink 阅读器现在会在正文、章节标题和目录中应用你的文本替换规则，并遵循单书规则的启停设置，将定点替换应用到指定位置。
 - 打开失效的阅读链接时，页面提供「返回书库」入口，浏览器标签页显示「未找到书籍」。书籍能打开但目录加载失败时，可以在目录面板内重试。
-- 账户设置和快捷键遇到临时同步失败时，会在后台自动重试，重新联网后立即补传。同步失败和恢复都不会弹出通知。
+- 账户设置和快捷键遇到临时同步失败时会静默重试，重新联网后立即补传。服务器拒绝设置更改时会显示通知，并保留待同步的改动。
+- AI 回答无法保存到本地会话历史时会显示提示。后台任务状态或结果同步失败时，可在 AI 面板内重试。
+- 修复实例主题或卡片转为个人项目时流程提前退出的问题。删除实例项目后也会完成操作并显示结果。
 
 ### [0.8.8] - 2026-11-23
 

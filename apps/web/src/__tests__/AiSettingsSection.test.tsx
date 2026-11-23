@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { AiConfigRes, AiConnectionRes, AiModelEntryRes, AiPromptTemplate } from '@bookdock/shared'
 
 import { useAuthStore } from '@/stores/auth.store'
+import { useToastStore } from '@/stores/toast.store'
 import i18n from '../i18n/i18n'
 import AiSettingsSection from '../features/settings/components/AiSettingsSection'
 
@@ -453,6 +454,59 @@ describe('AiSettingsSection', () => {
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith('explain-selection'))
     // The confirm closes only after the deletion has actually settled.
     await waitFor(() => expect(screen.queryByText('确定要删除快捷指令“解释这段”吗？')).not.toBeInTheDocument())
+  })
+
+  it('reports partial quick command deletion and retries only the remaining commands', async () => {
+    useToastStore.getState().clearToasts()
+    const mutateAsync = vi.fn(async (_id: string) => undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Failed'))
+    hookMocks.deletePrompt.mockReturnValue({ mutateAsync, isPending: false })
+
+    render(<AiSettingsSection />)
+    fireEvent.click(screen.getByRole('button', { name: '进入编辑模式' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除所选' }))
+    const dialog = within(screen.getByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: '删除' }))
+
+    await waitFor(() => expect(dialog.queryByText('解释这段')).toBeNull())
+    expect(dialog.getByText('翻译这段')).toBeInTheDocument()
+    expect(mutateAsync).toHaveBeenCalledTimes(2)
+    expect(useToastStore.getState().toasts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'warning', message: expect.objectContaining({
+        key: 'toast.batchDeletionInterrupted', params: expect.objectContaining({ count: 1, remaining: 3 }),
+      }) }),
+    ]))
+
+    fireEvent.click(dialog.getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(mutateAsync.mock.calls.map(([id]) => id)).toEqual([
+      'explain-selection', 'translate-selection', 'translate-selection', 'summarize-selection', 'questions-selection', 'summarize-chapter',
+    ])
+  })
+
+  it('reports committed, failed, invalid, and unattempted quick commands on import interruption', async () => {
+    useToastStore.getState().clearToasts()
+    const mutateAsync = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('Failed'))
+    hookMocks.createPrompt.mockReturnValue({ mutateAsync, isPending: false })
+    const file = new File([], 'commands.json')
+    Object.defineProperty(file, 'text', { value: async () => JSON.stringify([
+      { name: 'first', prompt: 'First command' },
+      { name: '' },
+      { name: 'second', prompt: 'Second command' },
+      { name: 'third', prompt: 'Third command' },
+    ]) })
+
+    const { container } = render(<AiSettingsSection />)
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } })
+
+    await waitFor(() => expect(useToastStore.getState().toasts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'warning', message: expect.objectContaining({
+        key: 'settings.aiPromptImportInterrupted', params: expect.objectContaining({ count: 1, skipped: 1, remaining: 1 }),
+      }) }),
+    ])))
+    expect(mutateAsync).toHaveBeenCalledTimes(2)
   })
 
   it('restores missing built-in commands directly without a confirmation', () => {

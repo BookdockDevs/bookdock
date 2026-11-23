@@ -15,6 +15,7 @@ import Spinner from '@/components/ui/Spinner'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
+import { getAuthSessionRevision } from '@/stores/auth.store'
 import type { BookShareTarget } from '@/stores/book-share.store'
 
 interface BookShareDialogProps {
@@ -26,6 +27,7 @@ interface BookShareDialogProps {
 export default function BookShareDialog({ target, userId, onClose }: BookShareDialogProps) {
   const _ = useTranslation()
   const { i18n } = useI18nTranslation()
+  const sessionRevision = getAuthSessionRevision()
   const queryClient = useQueryClient()
   const durationLabelId = useId()
   const copyTimerRef = useRef<number | null>(null)
@@ -66,22 +68,26 @@ export default function BookShareDialog({ target, userId, onClose }: BookShareDi
 
   const generate = useMutation({
     mutationFn: (replace: boolean) => apiPost<{ data: BookShareLink }>(path, { libraryId: target.libraryId, duration, replace }),
-    onSuccess: async (result) => {
+    onSuccess: async (result, replace) => {
       await queryClient.cancelQueries({ queryKey })
+      if (getAuthSessionRevision() !== sessionRevision) return
       queryClient.setQueryData(queryKey, result)
       setDraft(null)
       setCopiedUrl(null)
       setLastDuration(result.data.duration)
       try { localStorage.setItem(preferenceKey, result.data.duration) } catch { /* The current session still remembers the selection. */ }
+      notify.success({ key: replace ? 'library.bookShare.regenerated' : 'library.bookShare.generated' })
     },
   })
   const revoke = useMutation({
     mutationFn: () => apiDelete<{ data: null }>(sourcePath),
     onSuccess: async (result) => {
       await queryClient.cancelQueries({ queryKey })
+      if (getAuthSessionRevision() !== sessionRevision) return
       queryClient.setQueryData(queryKey, result)
       setDraft(null)
       setCopiedUrl(null)
+      notify.success({ key: 'library.bookShare.revoked' })
     },
   })
   const mutating = generate.isPending || revoke.isPending

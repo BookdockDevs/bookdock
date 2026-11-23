@@ -212,7 +212,10 @@ export function SettingsSync() {
         (error instanceof DOMException && error.name === 'TimeoutError') ||
         (error instanceof ApiError && (error.code === 'NETWORK_ERROR' || error.status === 0 ||
           error.status === 429 || (error.status ?? 0) >= 500))
-      if (!retryable) return
+      if (!retryable) {
+        notify.error({ key: 'settings.accountSettingsSyncRejected' })
+        return
+      }
       retryTimer.current = setTimeout(retryPending, retryDelay.current)
       retryDelay.current = Math.min(retryDelay.current * 2, MAX_RETRY_DELAY_MS)
     },

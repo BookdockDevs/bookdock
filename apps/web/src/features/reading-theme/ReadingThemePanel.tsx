@@ -93,6 +93,7 @@ export default function ReadingThemePanel({
   const saveTheme = (theme: SavedReadingTheme) => {
     const current = useUiStore.getState().themeLibrary
     setLibrary({ ...current, themes: upsertThemeCard(current.themes, { ...theme, cards: normalizeThemeCards(current, theme.cards) }) })
+    notify.success({ key: 'reader.themeItemSaved', params: { name: theme.name } })
     setThemeEditor(null)
   }
 
@@ -104,6 +105,7 @@ export default function ReadingThemePanel({
     const card = edit.card
     if (!card) return
     setLibrary(withCard(useUiStore.getState().themeLibrary, edit))
+    notify.success({ key: 'reader.themeItemSaved', params: { name: card.name } })
     cardEditor?.onCreated?.(card.id)
     closeCard()
   }

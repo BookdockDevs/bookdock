@@ -21,6 +21,7 @@ import { formatTime } from '@/lib/format-date'
 import { normalizeMarkdownParagraphLines } from '../features/reader/lib/markdown'
 import { useReaderState } from '../features/reader/state/reader-state'
 import { useAuthStore } from '../stores/auth.store'
+import { useToastStore } from '../stores/toast.store'
 import { useUiStore } from '../stores/ui.store'
 
 vi.mock('../api/client', () => ({
@@ -153,6 +154,19 @@ describe('AiPanel', () => {
     expect(screen.getByRole('button', { name: 'reader.aiSend' })).toBeDisabled()
     expect(screen.queryByText(/尚未配置|暂不可使用/)).toBeNull()
     expect(screen.queryByText('可让 AI 查看目录或章节')).toBeNull()
+  })
+
+  it('shows a retry when background tasks fail to sync', async () => {
+    const syncJobs = vi.fn().mockRejectedValueOnce(new Error('Unavailable')).mockResolvedValue({ data: [] })
+    vi.mocked(apiGet).mockImplementation(async (path) => path.startsWith('/ai/jobs?')
+      ? syncJobs()
+      : { data: { enabled: false } })
+
+    renderPanel()
+    expect(await screen.findByText('reader.aiJobsSyncFailed')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'errors.retry' }))
+    await waitFor(() => expect(screen.queryByText('reader.aiJobsSyncFailed')).toBeNull())
+    expect(syncJobs).toHaveBeenCalledTimes(2)
   })
 
   it('keeps the header and composer control groups responsive to the sidebar container', async () => {
@@ -1789,7 +1803,8 @@ describe('AiPanel', () => {
   })
 
   it('saves local drafts before background submission and updates results without appending another turn', async () => {
-    const applyAiThreadResult = vi.fn().mockResolvedValue(true)
+    useToastStore.getState().clearToasts()
+    const applyAiThreadResult = vi.fn().mockRejectedValueOnce(new Error('Storage unavailable')).mockResolvedValue(true)
     const saveAiThreadTurn = vi.fn().mockResolvedValue({
       data: {
         id: 'local-thread-1',
@@ -1865,6 +1880,9 @@ describe('AiPanel', () => {
     expect(await screen.findByText('本地解读结果')).toBeInTheDocument()
     expect(saveAiThreadTurn.mock.calls[0]![0].assistantMessage.content).toBe('')
     await waitFor(() => expect(applyAiThreadResult).toHaveBeenCalledWith('local-thread-1', expect.any(String), expect.objectContaining({ citations: [expect.objectContaining({ id: 'direct:selection', quote: '本地原文', textBasis: 'reader' })] })))
+    await waitFor(() => expect(useToastStore.getState().toasts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'error', message: { key: 'reader.aiLocalAnswerSaveFailed' } }),
+    ])))
     for (let turn = 2; turn <= 8; turn++) {
       fireEvent.change(screen.getByRole('textbox'), { target: { value: `follow up ${turn}` } })
       await waitFor(() => expect(screen.getByRole('button', { name: 'reader.aiSend' })).not.toBeDisabled())

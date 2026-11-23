@@ -38,9 +38,9 @@ import {
 } from '@/features/reading-theme/theme-library'
 import { useTranslation } from '@/hooks/useTranslation'
 import { downloadBlob } from '@/lib/download'
-import { getUserErrorNotification } from '@/lib/error-message'
+import { getUserErrorMessage, getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
-import { useAuthStore } from '@/stores/auth.store'
+import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 import { getThemeLibrarySnapshot, useUiStore } from '@/stores/ui.store'
 
 import EditModeButton from './EditModeButton'
@@ -160,11 +160,13 @@ export default function ReadingThemesSettingsSection() {
     next: boolean,
     sourceLibrary: ReadingThemeLibrary = library,
   ) {
+    const sessionRevision = getAuthSessionRevision()
     try {
       if (!next) {
         const nextInstance = await removeInstanceThemeItemApi(kind, itemId)
+        if (getAuthSessionRevision() !== sessionRevision) return false
         setInstanceThemeLibrary(nextInstance)
-        return
+        return true
       }
       const items: { kind: InstanceThemeItemKind; itemId: string; payload: Record<string, unknown> }[] = []
       const assetIds = new Set<string>()
@@ -201,7 +203,7 @@ export default function ReadingThemesSettingsSection() {
         const metas = await assetStore.list(scope).catch(() => [])
         await Promise.all(Array.from(assetIds).map(async (assetId) => {
           const blob = await assetStore.getBlob(scope, assetId).catch(() => null)
-          if (!blob) return
+          if (!blob || getAuthSessionRevision() !== sessionRevision) return
           const meta = metas.find((item) => item.id === assetId)
           await uploadThemeAssetToServer({
             assetId,
@@ -212,11 +214,13 @@ export default function ReadingThemesSettingsSection() {
           })
         }))
       }
+      if (getAuthSessionRevision() !== sessionRevision) return false
       const nextInstance = await publishInstanceThemeItemsApi({ items, assetIds: Array.from(assetIds) })
+      if (getAuthSessionRevision() !== sessionRevision) return false
       setInstanceThemeLibrary(nextInstance)
       return true
     } catch (error) {
-      notify.error(getUserErrorNotification(error, 'library.operationFailed'))
+      if (getAuthSessionRevision() === sessionRevision) notify.error(getUserErrorNotification(error, 'library.operationFailed'))
       return false
     }
   }
@@ -319,20 +323,21 @@ export default function ReadingThemesSettingsSection() {
 
   const saveCard = async (edit: ThemeCardEdit, nextScope?: 'user' | 'instance') => {
     if (!edit.card) return
+    if (nextScope === 'user' && isInstanceItem(edit.kind, edit.card.id)) {
+      const removed = await toggleInstanceBuiltIn(edit.kind, edit.card.id, false)
+      if (!removed) return
+    }
     const current = useUiStore.getState().themeLibrary
     let next: ReadingThemeLibrary
     if (edit.kind === 'palette') next = { ...current, palettes: upsertThemeCard(current.palettes, edit.card) }
     else if (edit.kind === 'css') next = { ...current, css: upsertThemeCard(current.css, edit.card) }
     else next = { ...current, highlights: upsertThemeCard(current.highlights, edit.card) }
-    if (nextScope === 'user' && isInstanceItem(edit.kind, edit.card.id)) {
-      const removed = await toggleInstanceBuiltIn(edit.kind, edit.card.id, false, next)
-      if (!removed) return
-    }
-    setLibrary(next)
     if (nextScope === 'instance') {
       const published = await toggleInstanceBuiltIn(edit.kind, edit.card.id, true, next)
       if (!published) return
-    }
+      setLibrary(useUiStore.getState().themeLibrary)
+    } else setLibrary(next)
+    notify.success({ key: nextScope === 'instance' ? 'reader.themeItemPublished' : 'reader.themeItemSaved', params: { name: edit.card.name } })
     cardEditor?.onCreated?.(edit.card.id)
     setCardEditor(null)
   }
@@ -340,16 +345,16 @@ export default function ReadingThemesSettingsSection() {
   const deleteCard = async (edit: ThemeCardEdit) => {
     const card = edit.card
     if (!card) return
-    if (isOwner && isInstanceItem(edit.kind, card.id)) {
+    const shared = isOwner && isInstanceItem(edit.kind, card.id)
+    if (shared) {
       const removed = await toggleInstanceBuiltIn(edit.kind, card.id, false)
       if (!removed) return
     }
     const before = getThemeLibrarySnapshot()
     const { library: next, affected } = removeThemeCard(before.library, edit.kind, card.id)
     setLibrary(next)
-    publishThemeDeleteUndo(
-      before,
-      affected > 0
+    if (shared) notify.success({ key: 'reader.themeInstanceItemDeleted', params: { name: card.name } })
+    else publishThemeDeleteUndo(before, affected > 0
         ? { key: 'reader.themeCardDeletedAffected', params: { name: card.name, count: affected } }
         : { key: 'reader.themeCardDeleted', params: { name: card.name } },
     )
@@ -357,7 +362,8 @@ export default function ReadingThemesSettingsSection() {
   }
 
   const deleteTheme = async (theme: SavedReadingTheme) => {
-    if (isOwner && isInstanceItem('theme', theme.id)) {
+    const shared = isOwner && isInstanceItem('theme', theme.id)
+    if (shared) {
       const removed = await toggleInstanceBuiltIn('theme', theme.id, false)
       if (!removed) return
     }
@@ -365,10 +371,8 @@ export default function ReadingThemesSettingsSection() {
     const before = getThemeLibrarySnapshot()
     const inUse = theme.id === state.readingThemeId || theme.id === state.lightReadingThemeId || theme.id === state.darkReadingThemeId
     state.deleteCustomTheme(theme.id)
-    publishThemeDeleteUndo(
-      before,
-      { key: inUse ? 'reader.themeDeletedInUse' : 'reader.themeDeleted', params: { name: theme.name } },
-    )
+    if (shared) notify.success({ key: 'reader.themeInstanceItemDeleted', params: { name: theme.name } })
+    else publishThemeDeleteUndo(before, { key: inUse ? 'reader.themeDeletedInUse' : 'reader.themeDeleted', params: { name: theme.name } })
     setThemeEditor(null)
   }
 
@@ -383,31 +387,54 @@ export default function ReadingThemesSettingsSection() {
 
   const confirmDelete = async () => {
     if (!pendingDelete) return
-    if (isOwner) {
-      for (const item of pendingDelete) {
-        if (isInstanceItem(item.group, item.id)) {
-          const removed = await toggleInstanceBuiltIn(item.group, item.id, false)
-          if (!removed) return
-        }
+    const sessionRevision = getAuthSessionRevision()
+    const shared = pendingDelete.filter((item) => isOwner && isInstanceItem(item.group, item.id))
+    const personal = pendingDelete.filter((item) => !shared.includes(item))
+    const deleted = new Set<(typeof pendingDelete)[number]>()
+    try {
+      for (const item of shared) {
+        const nextInstance = await removeInstanceThemeItemApi(item.group, item.id)
+        if (getAuthSessionRevision() !== sessionRevision) return
+        setInstanceThemeLibrary(nextInstance)
+        const state = useUiStore.getState()
+        if (item.group === 'theme') state.deleteCustomTheme(item.id)
+        else state.setThemeLibrary(removeThemeCard(state.themeLibrary, item.group, item.id).library)
+        deleted.add(item)
       }
+    } catch (error) {
+      if (getAuthSessionRevision() !== sessionRevision) return
+      setPendingDelete(pendingDelete.filter((item) => !deleted.has(item)))
+      setSelection((current) => {
+        const next = { ...current }
+        for (const item of deleted) next[item.group] = next[item.group].filter((id) => id !== item.id)
+        return next
+      })
+      const report = deleted.size > 0 ? notify.warning : notify.error
+      report({
+        key: 'toast.batchDeletionInterrupted',
+        params: {
+          count: deleted.size, remaining: pendingDelete.length - deleted.size - 1,
+          reason: getUserErrorMessage(error, _, 'library.operationFailed'),
+        },
+      })
+      return
     }
     const before = getThemeLibrarySnapshot()
     // Card deletes first: every theme that referenced one gets re-pointed, and
     // a theme delete afterwards works on the already-settled library.
     let next = before.library
-    for (const item of pendingDelete) {
+    for (const item of personal) {
       if (item.group === 'theme') continue
       next = removeThemeCard(next, item.group, item.id).library
     }
-    useUiStore.getState().setThemeLibrary(next)
-    for (const item of pendingDelete) if (item.group === 'theme') useUiStore.getState().deleteCustomTheme(item.id)
-    const count = pendingDelete.length
+    if (personal.length) {
+      setLibrary(next)
+      for (const item of personal) if (item.group === 'theme') useUiStore.getState().deleteCustomTheme(item.id)
+      publishThemeDeleteUndo(before, { key: 'reader.themeBulkDeleted', params: { count: personal.length } })
+    }
+    if (shared.length) notify.success({ key: 'reader.themeInstanceItemsDeleted', params: { count: shared.length } })
     setPendingDelete(null)
     clearSelection()
-    publishThemeDeleteUndo(
-      before,
-      { key: 'reader.themeBulkDeleted', params: { count } },
-    )
   }
 
   const reorder = (group: Group, activeId: string, overId: string) => {
@@ -429,17 +456,18 @@ export default function ReadingThemesSettingsSection() {
   }
 
   const saveTheme = async (theme: SavedReadingTheme, nextScope?: 'user' | 'instance') => {
-    const current = useUiStore.getState().themeLibrary
-    const next = { ...current, themes: upsertThemeCard(current.themes, { ...theme, cards: normalizeThemeCards(current, theme.cards) }) }
     if (nextScope === 'user' && isInstanceItem('theme', theme.id)) {
-      const removed = await toggleInstanceBuiltIn('theme', theme.id, false, next)
+      const removed = await toggleInstanceBuiltIn('theme', theme.id, false)
       if (!removed) return
     }
-    setLibrary(next)
+    const current = useUiStore.getState().themeLibrary
+    const next = { ...current, themes: upsertThemeCard(current.themes, { ...theme, cards: normalizeThemeCards(current, theme.cards) }) }
     if (nextScope === 'instance') {
       const published = await toggleInstanceBuiltIn('theme', theme.id, true, next)
       if (!published) return
-    }
+      setLibrary(useUiStore.getState().themeLibrary)
+    } else setLibrary(next)
+    notify.success({ key: nextScope === 'instance' ? 'reader.themeItemPublished' : 'reader.themeItemSaved', params: { name: theme.name } })
     setThemeEditor(null)
   }
 

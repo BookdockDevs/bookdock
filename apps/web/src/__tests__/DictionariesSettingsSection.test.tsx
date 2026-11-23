@@ -10,6 +10,7 @@ vi.mock('../api/client', async (original) => ({ ...await original<typeof import(
 import { apiDelete, apiGet, apiPatch, apiUpload } from '../api/client'
 import DictionariesSettingsSection from '../features/settings/components/DictionariesSettingsSection'
 import { useAuthStore } from '../stores/auth.store'
+import { useToastStore } from '../stores/toast.store'
 
 const data: DictionaryList = {
   items: [
@@ -79,6 +80,37 @@ describe('dictionary management using existing settings components', () => {
         enabled: undefined,
       }),
     )
+  })
+
+  it('keeps only the remaining dictionaries in a partially completed confirmation', async () => {
+    useToastStore.getState().clearToasts()
+    vi.mocked(apiGet).mockResolvedValue({ data: {
+      ...data,
+      items: [data.items[0], { ...data.items[0], id: 'dict-two', name: 'Second dictionary' }],
+    } })
+    vi.mocked(apiDelete).mockResolvedValueOnce({ data: null }).mockRejectedValueOnce(new Error('Failed'))
+
+    mount()
+    await screen.findByText('Second dictionary')
+    fireEvent.click(screen.getByLabelText('settings.editModeEnter'))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'settings.ruleSelectAll' }))
+    fireEvent.click(screen.getByLabelText('settings.ruleDeleteSelected'))
+    const dialog = within(screen.getByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'settings.confirmDeleteAction' }))
+
+    await waitFor(() => expect(dialog.queryByText('Test dictionary')).toBeNull())
+    expect(dialog.getByText('Second dictionary')).toBeInTheDocument()
+    expect(useToastStore.getState().toasts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'warning', message: expect.objectContaining({
+        key: 'toast.batchDeletionInterrupted', params: expect.objectContaining({ count: 1, remaining: 0 }),
+      }) }),
+    ]))
+
+    fireEvent.click(dialog.getByRole('button', { name: 'settings.confirmDeleteAction' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(vi.mocked(apiDelete).mock.calls.map(([route]) => route)).toEqual([
+      '/dictionaries/dict-one', '/dictionaries/dict-two', '/dictionaries/dict-two',
+    ])
   })
 
   it('imports immediately after selection and permits selecting the same file after failure', async () => {
