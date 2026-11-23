@@ -35,16 +35,17 @@ Organize EPUB and TXT books, read them online, and keep your highlights, notes, 
 | **Book metadata** | Search built-in or personally installed sources to update book information and covers. |
 | **Reading** | Customize fonts, layout, and page turns. Build day and night themes with palettes, wallpapers, book CSS, and automatic highlights. Apply them per book, share them as packages, or publish them on your instance. Use reading presets, the table of contents, bookmarks, full-book search, and Simplified/Traditional Chinese conversion. |
 | **Fonts and media** | Use built-in fonts or upload your own, and play audio and video embedded in EPUB books. |
-| **E-ink reading** | Use a lightweight bookshelf and paginated reader, adjust display and tap zones, and synchronize reading progress. |
+| **E-ink reading** | Use a lightweight bookshelf and paginated reader, adjust display and tap zones, apply text replacements, and synchronize reading progress. |
 | **Content editing** | Organize TXT chapters and preview chapter rules. Edit EPUB navigation and XHTML with a side-by-side source preview. Review changes before saving and recover local drafts. |
 | **Text and table-of-contents rules** | Apply global or per-book text replacements, make individual corrections, and use TXT table-of-contents rules; import and export rules. |
 | **Reading records** | Save progress, highlights, bookmarks, thoughts, and reviews; track reading time with customizable modules, multi-mode visualization charts, and an archive overview dashboard; clear a book's archive by All / Time / Notes scope. |
 | **Excerpt sharing** | Create share cards for excerpts or ideas, customize templates and fonts, and copy or save the images. |
-| **Sharing and discussion** | Create shared libraries, manage membership and access, share books, write reviews, and join discussions. |
+| **Sharing and discussion** | Create shared libraries, manage membership and access, share managed server books with download links, write reviews, and join discussions. |
 | **External storage** | Connect WebDAV or S3-compatible storage to browse and import books; store book files remotely with a local cache. |
 | **Import and export** | Import books from external storage, download books individually or in batches; import reading history from WeChat Read and Legado, and export reading archives to structured JSON, Markdown, and CSV. |
 | **Reading tools** | Look up words with custom MDict dictionaries, translate selections with AI, and use text-to-speech, automatic reading, and an AI reading assistant; configure services and customize the selection toolbar. |
 | **Legado book source** | Generate a book source to browse, search, and read your library in readers that support it. |
+| **External API** | Use scoped access tokens to query and update libraries and read personal reading archives. |
 | **Deployment and administration** | Self-host with Docker, manage accounts, registration, and guest access, and update from within the app. |
 
 ## Quick start

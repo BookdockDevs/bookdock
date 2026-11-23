@@ -2,30 +2,34 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.9] - 2026-11-24
+
+### Highlights
+
+- Share an EPUB or TXT download link that recipients can open without signing in.
+- Use the external API to update your library and read your personal reading archives.
 
 ### Added
 
-- Share a server-hosted book from its details or context menu. Create a time-limited or permanent download link, then copy, regenerate, or revoke it. Notifications confirm when a link is created, replaced, or revoked. Recipients can download the EPUB or TXT without signing in. The download preserves the book’s format and skips text replacement rules.
-- The external API can get, create, or revoke a book download link with the `ext:download-link` permission. A get-or-create request reuses an existing valid link and returns its actual expiry.
-- External clients with `ext:update-book` can edit a book’s title, authors, description, category, and tags in a specified library, and move private books between shelves. Private book descriptions use the same override as the Web editor.
-- External clients with `ext:reading-archives` can read their account’s reading archives. The overview includes date-filtered reading totals, note and review counts, daily and hourly activity, category and tag breakdowns, and a paginated book list. The same endpoint returns an individual book’s reading data or notes and reviews.
+- Create download links from the book details or context menu for server books you manage. Choose an expiry or keep the link permanent, then copy, regenerate, or revoke it. Downloads preserve the book’s format and use the text before any reader replacements.
+- The external API can get or create a download link and revoke it with `ext:download-link`. Get-or-create returns the existing link and its current expiry when the link is still valid.
+- External clients with `ext:update-book` can edit a book’s title, authors, description, category, and tags in a specified library, and move private books between shelves.
+- External clients with `ext:reading-archives` can read their account’s date-filtered reading statistics and archive list, or view a book’s reading data, notes, and reviews.
 
 ### Changed
 
-- Saving a reading theme or card and publishing it to the instance now show completion notifications.
-- AI quick command imports report how many entries were imported, failed, skipped, or left unprocessed. Interrupted batch deletions of quick commands, dictionaries, or instance theme items report how many were deleted and let you retry the remaining items.
-- The external book list supports author, category, tag, and private shelf filters, plus optional global sorting across libraries.
-- New access tokens appear at the end of the list. Permission options and summaries follow the same order, and long summaries stay on one line with the full text available on hover.
+- The external book list can filter by author, category, tag, and private shelf, and can sort across libraries.
+- Saving or publishing a reading theme or card now confirms completion. AI quick command imports report their results, and interrupted batch deletions of quick commands, dictionaries, or instance theme items report how many items were removed and let you retry the rest.
+- New access tokens appear at the end of the list. Permission summaries use the same order as the permission picker, and hovering shows the full summary.
 
 ### Fixed
 
-- The E Ink reader now applies your text replacement rules to chapter text, chapter headings, and table of contents labels. It respects per-book rule toggles and applies point replacements to the passages they target.
-- Invalid reading links show a clear return-to-library action and a “Book not found” browser tab title. When a book opens but its table of contents fails to load, you can retry from the table of contents panel.
-- Account settings and keyboard shortcuts retry quietly after temporary sync failures. Reconnecting resumes sync immediately. If the server rejects a change, the app reports it and keeps the pending change.
-- The AI panel warns when an answer cannot be saved to local history and offers a retry when background task status or results fail to sync.
-- Moving an instance theme or card to personal scope now completes after removing it from the instance. Deleting an instance item also completes and confirms the result.
-- External book details now work for editions beyond the first 100 results and accept a specific library ID. Trash requests honor the named library and reject shared-library targets.
+- The E Ink reader applies text replacements to chapter text, headings, and the table of contents. It respects per-book rule toggles and applies individual corrections at their target passages.
+- Invalid reading links show a return-to-library action and a “Book not found” tab title. If the book opens but the table of contents fails to load, you can retry from the table of contents panel.
+- Account settings and keyboard shortcuts retry quietly after temporary sync failures and resume syncing when the connection returns. A rejected change stays pending and shows an error.
+- The AI panel warns when an answer cannot be saved to local history and lets you retry syncing background task status or results.
+- Moving an instance theme or card to personal scope now completes, and deleting an instance item confirms the result.
+- External book details work for editions beyond the first 100 results and can target a specific library. Trash requests honor the specified private library and reject shared-library targets.
 
 ## [0.8.8] - 2026-11-23
 
@@ -1441,30 +1445,34 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [待发布]
+### [0.8.9] - 2026-11-24
+
+#### 亮点
+
+- 分享 EPUB 或 TXT 下载链接，收件人无需登录即可下载。
+- 通过外部 API 更新书库中的书籍信息，查看个人阅读档案。
 
 #### 新增
 
-- 从书籍详情或右键菜单分享服务端书籍。下载链接可设为限时或永久，支持复制、重新生成和撤销。生成、重新生成或撤销链接后会显示通知。收件人无需登录即可下载，文件保留 EPUB 或 TXT 格式，下载时不应用文本替换规则。
-- 公开 API 支持通过 `ext:download-link` 权限获取、创建或撤销书籍下载链接。获取或创建时会复用已有的有效链接，并返回实际到期时间。
-- 公开 API 支持通过 `ext:update-book` 权限编辑指定书库内书籍的标题、作者、简介、分类和标签，并调整私有库书籍所在的书架。私有库简介与 Web 编辑器使用同一份数据。
-- 公开 API 支持通过 `ext:reading-archives` 权限查看当前账号的阅读档案。总览可按日期查看阅读时长等统计、笔记与书评数量、每日与每小时阅读分布、分类与标签统计，以及分页书单。同一接口也可查看单书的阅读数据或笔记与书评。
+- 在书籍详情或右键菜单中，为你有权管理的服务端书籍创建下载链接。链接可设为限时或永久，支持复制、重新生成和撤销。下载保留书籍格式，正文以应用阅读器替换规则前的内容为准。
+- 外部 API 可通过 `ext:download-link` 获取、创建或撤销下载链接。已有有效链接时，获取或创建操作会返回该链接及其当前到期时间。
+- 外部客户端可通过 `ext:update-book` 编辑指定书库内书籍的标题、作者、简介、分类和标签，也可调整私有库书籍所在的书架。
+- 外部客户端可通过 `ext:reading-archives` 按日期查看当前账号的阅读统计与档案书单，也可查看单书的阅读数据、笔记和书评。
 
 #### 优化
 
-- 保存阅读主题或卡片，以及将它们发布到实例后，会显示完成通知。
-- 导入 AI 快捷指令时会显示已导入、失败、跳过和未处理的数量。批量删除快捷指令、词典或实例主题项目中断时，会显示已删除数量，并可重试剩余项目。
-- 公开 API 的书籍列表支持按作者、分类、标签和私有书架筛选，也可选择跨书库排序。
-- 新建的访问令牌会出现在列表末尾。权限选项和条目摘要使用同一顺序，权限摘要超出一行时截断，悬停可查看全文。
+- 外部 API 的书籍列表支持按作者、分类、标签和私有书架筛选，并可跨书库排序。
+- 保存或发布阅读主题与卡片后会显示完成通知。导入 AI 快捷指令后会显示导入、失败和跳过等数量。批量删除快捷指令、词典或实例主题项目中断时，会显示已删除数量，并可重试剩余项目。
+- 新建访问令牌排在列表末尾。权限摘要与权限选项采用相同顺序，悬停可查看完整摘要。
 
 #### 修复
 
-- E Ink 阅读器现在会在正文、章节标题和目录中应用你的文本替换规则，并遵循单书规则的启停设置，将定点替换应用到指定位置。
-- 打开失效的阅读链接时，页面提供「返回书库」入口，浏览器标签页显示「未找到书籍」。书籍能打开但目录加载失败时，可以在目录面板内重试。
-- 账户设置和快捷键遇到临时同步失败时会静默重试，重新联网后立即补传。服务器拒绝设置更改时会显示通知，并保留待同步的改动。
-- AI 回答无法保存到本地会话历史时会显示提示。后台任务状态或结果同步失败时，可在 AI 面板内重试。
-- 修复实例主题或卡片转为个人项目时流程提前退出的问题。删除实例项目后也会完成操作并显示结果。
-- 修复公开 API 查询列表前 100 条以外的版本详情时可能返回 `404` 的问题，并支持指定书库查询详情。移入回收站时按指定书库处理，共享库目标会被拒绝。
+- 墨水屏阅读器会在正文、章节标题和目录中应用文本替换，遵循单书规则的启停设置，并在指定位置应用定点替换。
+- 打开失效的阅读链接时，页面提供「返回书库」入口，标签页显示「未找到书籍」。书籍打开后若目录加载失败，可在目录面板内重试。
+- 账号设置和快捷键遇到临时同步失败时会静默重试，重新联网后立即补传。服务器拒绝更改时会提示，并保留待同步的改动。
+- AI 回答保存到本地会话历史失败时会提示。后台任务状态或结果同步失败时，可在 AI 面板内重试。
+- 修复实例主题或卡片转为个人项目时流程提前退出的问题。删除实例项目后会确认操作结果。
+- 修复外部 API 无法查询前 100 条结果以外的版本详情的问题，并支持指定书库查询。移入回收站时按指定的私有库处理，共享库目标会被拒绝。
 
 ### [0.8.8] - 2026-11-23
 
