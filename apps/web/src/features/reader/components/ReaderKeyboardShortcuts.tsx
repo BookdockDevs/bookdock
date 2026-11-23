@@ -4,12 +4,9 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
 import { useLocalReader } from '../../reading-data/reader-source-context'
 import { LOCAL_READER_SHORTCUT_SCOPE } from '../lib/reader-shortcuts'
-import { apiPut } from '@/api/client'
 import { readStoredSettings, writeStoredSettings } from '@/lib/settings-cache'
-import { notify } from '@/lib/notifications'
 import Modal from '@/components/ui/Modal'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
-import { PENDING_SETTINGS_STORAGE_KEY } from '@/stores/ui.store'
 import { cn } from '@/lib/utils'
 import {
   READER_SHORTCUT_DEFAULTS,
@@ -60,19 +57,6 @@ const commands: CommandItem[] = [
   { id: 'undo', label: 'keyboardShortcutUndo' },
   { id: 'shortcutsMenu', label: 'keyboardShortcutMenu' },
 ]
-
-function clearPendingReaderShortcuts(userId: string) {
-  try {
-    const raw = localStorage.getItem(PENDING_SETTINGS_STORAGE_KEY)
-    if (!raw) return
-    const pending = JSON.parse(raw) as { userId?: string; payload?: Record<string, unknown> }
-    if (pending.userId !== userId || !pending.payload || !('readerShortcuts' in pending.payload)) return
-    const payload = { ...pending.payload }
-    delete payload.readerShortcuts
-    if (Object.keys(payload).length) localStorage.setItem(PENDING_SETTINGS_STORAGE_KEY, JSON.stringify({ userId, payload }))
-    else localStorage.removeItem(PENDING_SETTINGS_STORAGE_KEY)
-  } catch { /* ignore unavailable storage */ }
-}
 
 function isSameShortcut(a: ReaderShortcut | null, b: ReaderShortcut | null): boolean {
   if (a === null && b === null) return true
@@ -167,8 +151,6 @@ export default function ReaderKeyboardShortcuts({
   const [draft, setDraft] = useState<DraftShortcut>({ key: null, ctrl: false, alt: false, shift: false, meta: false })
   const [conflict, setConflict] = useState<string | null>(null)
   const [confirmReset, setConfirmReset] = useState(false)
-  const syncSequence = useRef(0)
-  const syncQueue = useRef(Promise.resolve())
 
   const update = useCallback((next: ReaderShortcutMap) => {
     setMap(next)
@@ -177,23 +159,7 @@ export default function ReaderKeyboardShortcuts({
       const readerShortcuts = JSON.stringify(next)
       const cached = readStoredSettings(userId)
       if (cached) writeStoredSettings({ ...cached, readerShortcuts }, userId)
-      const requestVersion = ++syncSequence.current
-      syncQueue.current = syncQueue.current.then(async () => {
-        try {
-          await apiPut('/settings', { readerShortcuts })
-          if (requestVersion === syncSequence.current) clearPendingReaderShortcuts(userId)
-        } catch {
-          if (requestVersion !== syncSequence.current) return
-          try {
-            const raw = localStorage.getItem(PENDING_SETTINGS_STORAGE_KEY)
-            const prior = raw ? JSON.parse(raw) as { userId?: string; payload?: Record<string, unknown> } : null
-            const payload = prior?.userId === userId ? prior.payload ?? {} : {}
-            localStorage.setItem(PENDING_SETTINGS_STORAGE_KEY, JSON.stringify({ userId, payload: { ...payload, readerShortcuts } }))
-          } catch { /* ignore unavailable storage */ }
-          window.dispatchEvent(new Event('bd-settings-pending'))
-          notify.warning({ key: 'settings.syncFailed' }, { dedupeKey: 'settings-sync' })
-        }
-      })
+      window.dispatchEvent(new CustomEvent('bd-settings-shortcuts-save', { detail: { userId, readerShortcuts } }))
     }
   }, [userId, shortcutScope])
 

@@ -2053,6 +2053,16 @@ export const NavigationPanel = memo(forwardRef<NavigationPanelRef, NavigationPan
           )}
         >
           {tab === 'toc' && (() => {
+            if (open && tocPositionReady && rootNodes.length === 0 && chaptersQuery.isError && !chaptersQuery.data) {
+              return (
+                <QueryErrorState
+                  className="py-8 text-[var(--bd-read-sub)]"
+                  message={_('reader.chapterLoadFailed')}
+                  isRetrying={chaptersQuery.isFetching}
+                  onRetry={chaptersQuery.refetch}
+                />
+              )
+            }
             const showTocSkeleton = rootNodes.length === 0
               ? (chaptersQuery.isLoading || !tocPositionReady)
               : (!searchExpanded && open && !tocPlaced)

@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { SettingsRes } from '@bookdock/shared'
 import { DEFAULT_SELECTION_TOOLBAR_ORDER, settingsUpdateSchema } from '@bookdock/shared'
 
-import { apiPut } from '@/api/client'
+import { ApiError, apiPut } from '@/api/client'
 import { useInstanceThemeLibrary } from '@/api/hooks/useReadingThemes'
 import { readReaderShortcuts, readerShortcutStorageKey } from '@/features/reader/lib/reader-shortcuts'
 import { bindReadingPreferenceAccount, DEVICE_READING_CONFIG_KEY, DEVICE_SETTINGS_KEY, readingPreferenceAccountId, withReadingPreferenceHydration } from '@/features/reader/lib/reading-preference-owner'
@@ -12,13 +12,15 @@ import { emptyConfig, parseReadingConfig, READING_PROFILE_DEFAULTS, serializeRea
 import { readThemeLibrary, serializeThemeLibrary } from '@/features/reading-theme/theme-library'
 import { notify } from '@/lib/notifications'
 import { fetchSettings, readStoredSettings } from '@/lib/settings-cache'
-import { useAuthStore } from '@/stores/auth.store'
+import { getAuthSessionRevision, useAuthStore } from '@/stores/auth.store'
 import { useSettingsSyncStore } from '@/stores/settings-sync.store'
 import { PENDING_SETTINGS_STORAGE_KEY, useUiStore } from '@/stores/ui.store'
 import { useDeviceFontStore } from '@/features/device-fonts/store'
 
 const SYNC_CHANNEL = 'bd-settings'
 const SESSION_ID = Math.random().toString(36).slice(2)
+const WRITE_TIMEOUT_MS = 10_000
+const MAX_RETRY_DELAY_MS = 30_000
 
 // Only user-level settings that should travel across devices sync to the server. Flat reading
 // fields are deliberately excluded (intents sync, outcomes stay local):
@@ -102,11 +104,17 @@ interface PendingSettings {
   payload: SettingsRes
 }
 
+interface SettingsWrite extends PendingSettings {
+  storedPayload: SettingsRes | null
+  sessionRevision: number
+}
+
 function persistPendingSettings(userId: string, payload: SettingsRes) {
   try {
     localStorage.setItem(PENDING_SETTINGS_STORAGE_KEY, JSON.stringify({ userId, payload }))
+    return payload
   } catch {
-    // The normal localStorage setters still keep the UI usable when storage is unavailable.
+    return getPendingSettings(userId)
   }
 }
 
@@ -182,35 +190,69 @@ function applySettings(settings: Partial<SettingsRes>) {
 
 export function SettingsSync() {
   const queryClient = useQueryClient()
-  const syncFailedRef = useRef(false)
+  const pendingWrite = useRef<SettingsWrite | null>(null)
+  const sendingWrite = useRef<SettingsWrite | null>(null)
+  const syncedQueryData = useRef<{ data: SettingsRes } | undefined>(undefined)
+  const isMounted = useRef(false)
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const retryDelay = useRef(1000)
+  const isCurrentWrite = useCallback((write: SettingsWrite) => isMounted.current && pendingWrite.current === write &&
+    useAuthStore.getState().user?.id === write.userId && getAuthSessionRevision() === write.sessionRevision, [])
   const { mutate: saveSettings } = useMutation({
-    mutationFn: ({ userId, settings }: { userId: string; settings: SettingsRes }) => {
-      if (useAuthStore.getState().user?.id !== userId) throw new DOMException('Settings owner changed', 'AbortError')
-      return apiPut('/settings', settings)
+    scope: { id: 'account-settings' },
+    networkMode: 'always',
+    retry: false,
+    mutationFn: async (write: SettingsWrite) => {
+      if (!isCurrentWrite(write)) return
+      await apiPut('/settings', write.payload, AbortSignal.timeout(WRITE_TIMEOUT_MS))
     },
-    onError: (_error, request) => {
-      if (useAuthStore.getState().user?.id !== request.userId) return
-      syncFailedRef.current = true
-      notify.warning({ key: 'settings.syncFailed' }, { dedupeKey: 'settings-sync' })
+    onError: (error, write) => {
+      if (!isCurrentWrite(write)) return
+      const retryable = error instanceof TypeError ||
+        (error instanceof DOMException && error.name === 'TimeoutError') ||
+        (error instanceof ApiError && (error.code === 'NETWORK_ERROR' || error.status === 0 ||
+          error.status === 429 || (error.status ?? 0) >= 500))
+      if (!retryable) return
+      retryTimer.current = setTimeout(retryPending, retryDelay.current)
+      retryDelay.current = Math.min(retryDelay.current * 2, MAX_RETRY_DELAY_MS)
     },
-    onSuccess: (_result, { userId, settings }) => {
-      if (useAuthStore.getState().user?.id !== userId) return
-      if (syncFailedRef.current) {
-        const currentUserId = useAuthStore.getState().user?.id
-        const pending = currentUserId ? getPendingSettings(currentUserId) : null
-        if (pending && JSON.stringify(pending) !== JSON.stringify(settings)) return
-        syncFailedRef.current = false
-        notify.info({ key: 'settings.syncRestored' }, { dedupeKey: 'settings-sync' })
+    onSuccess: (_result, write) => {
+      if (!isCurrentWrite(write)) return
+      pendingWrite.current = null
+      if (write.storedPayload) clearPendingSettings(write.userId, write.storedPayload)
+      retryDelay.current = 1000
+      const cached = queryClient.getQueryData<{ data: SettingsRes }>(['settings'])
+      if (cached) {
+        syncedQueryData.current = queryClient.setQueryData<{ data: SettingsRes }>(
+          ['settings'], { data: { ...cached.data, ...write.payload } },
+        )
       }
+    },
+    onSettled: (_result, _error, write) => {
+      if (sendingWrite.current === write) sendingWrite.current = null
     },
   })
   const mutateRef = useRef(saveSettings)
+  const retryPending = useCallback(() => {
+    const write = pendingWrite.current
+    if (!write || sendingWrite.current === write || !isCurrentWrite(write)) return
+    clearTimeout(retryTimer.current)
+    sendingWrite.current = write
+    mutateRef.current(write)
+  }, [isCurrentWrite])
   const settingsUserRef = useRef<string | null | undefined>(undefined)
+  const settingsSessionRef = useRef<number | undefined>(undefined)
   const suppressSyncRef = useRef(false)
-  const skipNextHydrateRef = useRef(false)
   useEffect(() => {
     mutateRef.current = saveSettings
   }, [saveSettings])
+  useEffect(() => {
+    isMounted.current = true
+    return () => {
+      isMounted.current = false
+      clearTimeout(retryTimer.current)
+    }
+  }, [])
 
   // (Re)load settings whenever a session appears: initial mount, login, and
   // guest pass-through all surface as a user id change. Logged-out visitors
@@ -218,6 +260,7 @@ export function SettingsSync() {
   const user = useAuthStore((s) => s.user)
   const userId = user?.id ?? null
   const isGuest = !user
+  const sessionRevision = getAuthSessionRevision()
 
   const { data: settingsRes, isError: settingsError } = useQuery<{ data: SettingsRes }>({
     enabled: Boolean(userId) && !isGuest,
@@ -233,24 +276,34 @@ export function SettingsSync() {
   }, [instanceThemeRes])
 
   useEffect(() => {
-    if (settingsUserRef.current !== userId) {
+    if (settingsUserRef.current !== userId || settingsSessionRef.current !== sessionRevision) {
       const firstOwner = settingsUserRef.current === undefined
-      syncFailedRef.current = false
+      const previousWrite = settingsUserRef.current === userId ? pendingWrite.current : null
+      clearTimeout(retryTimer.current)
+      retryDelay.current = 1000
+      pendingWrite.current = null
+      sendingWrite.current = null
+      syncedQueryData.current = undefined
       bindReadingPreferenceAccount(userId)
       settingsUserRef.current = userId
+      settingsSessionRef.current = sessionRevision
       if (userId && !isGuest) {
         const cached = readStoredSettings(userId)
-        const pending = getPendingSettings(userId)
+        const storedPayload = getPendingSettings(userId)
+        const pending = previousWrite?.payload ?? storedPayload
         suppressSyncRef.current = true
         if (pending) {
-          applySettings(pending)
+          applySettings({ ...cached, ...pending })
         } else if (cached) {
           applySettings(cached)
         }
         suppressSyncRef.current = false
         useSettingsSyncStore.setState({ userId, ready: Boolean(pending || cached), failed: false })
         if (pending) {
-          mutateRef.current({ userId, settings: pending }, { onSuccess: () => clearPendingSettings(userId, pending) })
+          const write = { userId, payload: pending, storedPayload: previousWrite ? previousWrite.storedPayload : pending, sessionRevision }
+          pendingWrite.current = write
+          sendingWrite.current = write
+          mutateRef.current(write)
         }
       } else {
         useSettingsSyncStore.setState({ userId: null, ready: true, failed: false })
@@ -262,31 +315,7 @@ export function SettingsSync() {
         suppressSyncRef.current = false
       }
     }
-  }, [isGuest, userId])
-
-  useEffect(() => {
-    if (!userId || isGuest || !settingsRes?.data) return
-    if (skipNextHydrateRef.current) {
-      skipNextHydrateRef.current = false
-      return
-    }
-    const pending = getPendingSettings(userId)
-    if (pending) return
-
-    suppressSyncRef.current = true
-    applySettings(settingsRes.data)
-    suppressSyncRef.current = false
-    useSettingsSyncStore.setState({ userId, ready: true, failed: false })
-    const normalizedShortcuts = JSON.stringify(readReaderShortcuts(userId))
-    if (normalizedShortcuts !== settingsRes.data.readerShortcuts) {
-      void apiPut('/settings', { readerShortcuts: normalizedShortcuts }).catch(() => {
-        const pending = { ...(getPendingSettings(userId) ?? {}), readerShortcuts: normalizedShortcuts } as SettingsRes
-        persistPendingSettings(userId, pending)
-        window.dispatchEvent(new Event('bd-settings-pending'))
-        notify.warning({ key: 'settings.syncFailed' }, { dedupeKey: 'settings-sync' })
-      })
-    }
-  }, [isGuest, settingsRes, userId])
+  }, [isGuest, sessionRevision, userId])
 
   useEffect(() => {
     const state = useSettingsSyncStore.getState()
@@ -314,31 +343,52 @@ export function SettingsSync() {
       }
     }
 
-    const retryPending = () => {
-      const currentUserId = useAuthStore.getState().user?.id
-      if (!currentUserId) return
-      const pending = getPendingSettings(currentUserId)
-      if (pending) mutateRef.current({ userId: currentUserId, settings: pending }, { onSuccess: () => clearPendingSettings(currentUserId, pending) })
+    const saveShortcuts = (event: Event) => {
+      const { userId, readerShortcuts } = (event as CustomEvent<{ userId: string; readerShortcuts: string }>).detail
+      if (useAuthStore.getState().user?.id !== userId) return
+      const pending = pendingWrite.current
+      const payload = { ...(pending?.userId === userId ? pending.payload : undefined), readerShortcuts }
+      pendingWrite.current = {
+        userId, payload, storedPayload: persistPendingSettings(userId, payload), sessionRevision: getAuthSessionRevision(),
+      }
+      retryPending()
     }
     const broadcastShortcuts = () => {
       const currentUser = useAuthStore.getState().user
       if (currentUser && channel) channel.postMessage({ userId: currentUser.id, sessionId: SESSION_ID, settings: { readerShortcuts: JSON.stringify(readReaderShortcuts(currentUser.id)) } })
     }
-    window.addEventListener('bd-settings-pending', retryPending)
+    window.addEventListener('bd-settings-shortcuts-save', saveShortcuts)
     window.addEventListener('online', retryPending)
     window.addEventListener('bd-reader-shortcuts-updated', broadcastShortcuts)
 
     return () => {
-      window.removeEventListener('bd-settings-pending', retryPending)
+      window.removeEventListener('bd-settings-shortcuts-save', saveShortcuts)
       window.removeEventListener('online', retryPending)
       window.removeEventListener('bd-reader-shortcuts-updated', broadcastShortcuts)
       channel?.close()
     }
-  }, [])
+  }, [retryPending])
+
+  useEffect(() => {
+    if (!userId || isGuest || !settingsRes?.data) return
+    if (settingsRes === syncedQueryData.current) return
+    const pending = pendingWrite.current?.payload
+
+    suppressSyncRef.current = true
+    applySettings({ ...settingsRes.data, ...pending })
+    suppressSyncRef.current = false
+    useSettingsSyncStore.setState({ userId, ready: true, failed: false })
+    if (pending?.readerShortcuts !== undefined) return
+    const normalizedShortcuts = JSON.stringify(readReaderShortcuts(userId))
+    if (normalizedShortcuts !== settingsRes.data.readerShortcuts) {
+      window.dispatchEvent(new CustomEvent('bd-settings-shortcuts-save', {
+        detail: { userId, readerShortcuts: normalizedShortcuts },
+      }))
+    }
+  }, [isGuest, settingsRes, userId])
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
-    let settingsDirty = false
     const bcRef: { current: BroadcastChannel | null } = { current: null }
     if (typeof BroadcastChannel !== 'undefined') {
       try { bcRef.current = new BroadcastChannel(SYNC_CHANNEL) } catch { /* ignore */ }
@@ -360,33 +410,20 @@ export function SettingsSync() {
       }
       const scheduledUserId = user.id
       if (settingsTouched) {
-        const userId = useAuthStore.getState().user?.id
-        if (userId) persistPendingSettings(userId, pickSettings(state))
-        settingsDirty = true
+        const pending = pendingWrite.current
+        const payload = { ...(pending?.userId === user.id ? pending.payload : undefined), ...pickSettings(state) }
+        pendingWrite.current = {
+          userId: user.id, payload, storedPayload: persistPendingSettings(user.id, payload), sessionRevision: getAuthSessionRevision(),
+        }
       }
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         const latestState = useUiStore.getState()
         const payload = pickSettings(latestState)
         const user = useAuthStore.getState().user
-        if (user?.id !== scheduledUserId) { settingsDirty = false; return }
-        const pending = user ? getPendingSettings(user.id) : null
+        if (user?.id !== scheduledUserId) return
         // The device-local active preset is broadcast-only, never PUT
-        if (user && (settingsDirty || pending)) {
-          settingsDirty = false
-          const payloadToSave = pending ?? payload
-          mutateRef.current({ userId: user.id, settings: payloadToSave }, {
-            onSuccess: () => {
-              clearPendingSettings(user.id, payloadToSave)
-              if (useAuthStore.getState().user?.id === user.id && !getPendingSettings(user.id)) {
-                skipNextHydrateRef.current = true
-                queryClient.setQueryData<{ data: SettingsRes }>(['settings'], (prev) =>
-                  prev?.data ? { data: { ...prev.data, ...payloadToSave } } : prev,
-                )
-              }
-            },
-          })
-        }
+        retryPending()
         bcRef.current?.postMessage({ userId: user?.id ?? null, sessionId: SESSION_ID, settings: { ...payload, activePresetId: latestState.activePresetId } })
       }, 1000)
     })
@@ -395,7 +432,7 @@ export function SettingsSync() {
       if (timer) clearTimeout(timer)
       bcRef.current?.close()
     }
-  }, [queryClient])
+  }, [retryPending])
 
   return null
 }

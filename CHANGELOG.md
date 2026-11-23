@@ -12,6 +12,8 @@ All notable changes to Bookdock are documented here.
 ### Fixed
 
 - The E Ink reader now applies your text replacement rules to chapter text, chapter headings, and table of contents labels. It respects per-book rule toggles and applies point replacements to the passages they target.
+- Invalid reading links show a clear return-to-library action and a “Book not found” browser tab title. When a book opens but its table of contents fails to load, you can retry from the table of contents panel.
+- Account settings and keyboard shortcuts retry in the background after temporary sync failures. Reconnecting resumes sync immediately, and sync failures and recovery stay silent.
 
 ## [0.8.8] - 2026-11-23
 
@@ -1437,6 +1439,8 @@ All notable changes to Bookdock are documented here.
 #### 修复
 
 - E Ink 阅读器现在会在正文、章节标题和目录中应用你的文本替换规则，并遵循单书规则的启停设置，将定点替换应用到指定位置。
+- 打开失效的阅读链接时，页面提供「返回书库」入口，浏览器标签页显示「未找到书籍」。书籍能打开但目录加载失败时，可以在目录面板内重试。
+- 账户设置和快捷键遇到临时同步失败时，会在后台自动重试，重新联网后立即补传。同步失败和恢复都不会弹出通知。
 
 ### [0.8.8] - 2026-11-23
 

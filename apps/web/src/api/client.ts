@@ -236,8 +236,8 @@ export async function apiSave<T>(
   return body
 }
 
-export async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
+export async function apiPut<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return request<T>(path, { method: 'PUT', body: JSON.stringify(body), signal })
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {

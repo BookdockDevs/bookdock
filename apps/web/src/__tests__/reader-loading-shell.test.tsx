@@ -3,15 +3,17 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { apiGet } from '@/api/client'
+import { ApiError, apiGet } from '@/api/client'
 import Reader from '@/features/reader/Reader'
 import { useReaderState } from '@/features/reader/state/reader-state'
 import { useAuthStore } from '@/stores/auth.store'
 import { useSettingsSyncStore } from '@/stores/settings-sync.store'
+import { useToastStore } from '@/stores/toast.store'
 import { useUiStore } from '@/stores/ui.store'
 
 const sidebarPropsSpy = vi.hoisted(() => vi.fn())
 const headerPropsSpy = vi.hoisted(() => vi.fn())
+const chapterQuery = vi.hoisted(() => vi.fn(() => ({ data: undefined, isLoading: true, isError: false, error: null as Error | null })))
 
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ id: 'book-b' }),
@@ -20,7 +22,9 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@/api/client', () => ({
-  ApiError: class extends Error {},
+  ApiError: class extends Error {
+    constructor(public code: string, message: string) { super(message) }
+  },
   BASE_URL: '/api/v1',
   apiGet: vi.fn(),
   apiPatch: vi.fn(),
@@ -45,7 +49,7 @@ vi.mock('@/features/reader/hooks/useAnnotations', () => ({
   useDeleteAnnotation: () => ({ mutate: vi.fn() }),
 }))
 vi.mock('@/features/reader/hooks/useIdeas', () => ({ useReaderIdeas: () => ({ data: { data: [] }, isError: false }) }))
-vi.mock('@/features/reader/hooks/useBookChapters', () => ({ useBookChapters: () => ({ data: undefined, isLoading: true }) }))
+vi.mock('@/features/reader/hooks/useBookChapters', () => ({ useBookChapters: chapterQuery }))
 vi.mock('@/features/reader/hooks/useReadingTimer', () => ({
   useReadingTimer: () => ({
     flush: vi.fn(),
@@ -209,6 +213,33 @@ describe('Reader loading shell', () => {
     await waitFor(() => {
       expect(screen.getByText('Book not found')).toBeInTheDocument()
     })
+    expect(document.title).toBe('Book not found')
     expect(screen.queryByTestId('reader-sidebar')).toBeNull()
+  })
+
+  it('shows only the page error when both book and chapter requests fail with 404', async () => {
+    useToastStore.getState().clearToasts()
+    const error = new ApiError('BOOK_NOT_FOUND', 'Missing book')
+    chapterQuery.mockReturnValueOnce({ data: undefined, isLoading: false, isError: true, error })
+    vi.mocked(apiGet).mockImplementation((path) => path.startsWith('/books/book-b')
+      ? Promise.reject(error)
+      : Promise.resolve({ data: null }) as never)
+    render(<QueryClientProvider client={client}><Reader /></QueryClientProvider>)
+    expect(await screen.findByText(/could not be found|errors.bookNotFound/)).toBeInTheDocument()
+    expect(document.title).toBe('Book not found')
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('uses the app name while loading and an error title after a failed request', async () => {
+    let failBook!: (error: Error) => void
+    vi.mocked(apiGet).mockImplementation((path) => path.startsWith('/books/book-b')
+      ? new Promise((_resolve, reject) => { failBook = reject })
+      : Promise.resolve({ data: null }) as never)
+    render(<QueryClientProvider client={client}><Reader /></QueryClientProvider>)
+    expect(document.title).toBe('Bookdock')
+    await act(async () => { failBook(new TypeError('Network unavailable')) })
+    await waitFor(() => expect(document.title).toBe('Could not open book'))
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 })

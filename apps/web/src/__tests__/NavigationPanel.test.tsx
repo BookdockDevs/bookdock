@@ -9,6 +9,7 @@ import { formatCardExcerpt } from '../features/reader/lib/book-search'
 import { READER_SESSION_ID, useReaderState } from '../features/reader/state/reader-state'
 import { useReaderApi } from '../features/reader/hooks/useReaderApi'
 import { useAnnotations } from '../features/reader/hooks/useAnnotations'
+import { useBookChapters } from '../features/reader/hooks/useBookChapters'
 import type { SearchResult, SearchStatus } from '../features/reader/types'
 
 vi.mock('@/lib/notifications', () => ({ notify: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() } }))
@@ -41,7 +42,7 @@ vi.mock('../features/reader/hooks/useAnnotations', () => ({
 }))
 
 vi.mock('../features/reader/hooks/useBookChapters', () => ({
-  useBookChapters: () => ({ data: undefined, isLoading: false }),
+  useBookChapters: vi.fn(),
 }))
 
 vi.mock('@/api/hooks/reading-records', async (importOriginal) => {
@@ -70,6 +71,7 @@ describe('NavigationPanel', () => {
     })
     vi.mocked(useReaderApi).mockReturnValue({ renderer: { display, clearSearch, setSearchHighlightsVisible } })
     vi.mocked(useAnnotations).mockReturnValue({ data: { data: [] } } as ReturnType<typeof useAnnotations>)
+    vi.mocked(useBookChapters).mockReturnValue({ data: undefined, isLoading: false } as ReturnType<typeof useBookChapters>)
     window.localStorage.removeItem('bd-notes-display-types')
     display.mockClear()
     setSearchHighlightsVisible.mockClear()
@@ -87,6 +89,21 @@ describe('NavigationPanel', () => {
       sidebarScrollPositions: {},
       selection: null,
     })
+  })
+
+  it('offers a chapter retry only when the reader is ready and has no usable TOC', () => {
+    const refetch = vi.fn()
+    vi.mocked(useBookChapters).mockReturnValue({
+      data: undefined, isError: true, isFetching: false, refetch,
+    } as unknown as ReturnType<typeof useBookChapters>)
+    const view = render(<NavigationPanel bookId="book-1" open tocPositionReady={false} />)
+    expect(screen.queryByText('reader.chapterLoadFailed')).not.toBeInTheDocument()
+    view.rerender(<NavigationPanel bookId="book-1" open tocPositionReady />)
+    expect(screen.getByRole('alert')).toHaveTextContent('reader.chapterLoadFailed')
+    fireEvent.click(screen.getByRole('button', { name: 'errors.retry' }))
+    expect(refetch).toHaveBeenCalledOnce()
+    act(() => useReaderState.setState({ tocBookId: 'book-1', tocItems: [{ label: 'Chapter 1', href: 'chapter:0' }] }))
+    expect(screen.queryByText('reader.chapterLoadFailed')).not.toBeInTheDocument()
   })
 
   it('highlights current chapter in TOC', () => {

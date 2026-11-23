@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -51,7 +51,9 @@ describe('SettingsSync persistence', () => {
       boundPresetId: null,
     })
     useAuthStore.getState().setAuth(user)
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: {} }), {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => new Response(JSON.stringify({
+      data: url === '/api/v1/fonts' ? [] : {},
+    }), {
       headers: { 'Content-Type': 'application/json' },
     })))
   })
@@ -106,7 +108,7 @@ describe('SettingsSync persistence', () => {
 
   it('backfills the default undo shortcut into older account settings', async () => {
     const oldShortcuts = JSON.stringify({ toc: READER_SHORTCUT_DEFAULTS.toc })
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ data: { readerShortcuts: oldShortcuts } }), {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ data: { readerShortcuts: oldShortcuts } }), {
       headers: { 'Content-Type': 'application/json' },
     }))
     mountSync()
@@ -124,7 +126,7 @@ describe('SettingsSync persistence', () => {
     render(createElement(QueryClientProvider, { client }, createElement(SettingsSync)))
     await vi.runAllTimersAsync()
     expect(useSettingsSyncStore.getState()).toMatchObject({ userId: user.id, ready: false, failed: true })
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ data: {} }), { headers: { 'Content-Type': 'application/json' } }))
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ data: {} }), { headers: { 'Content-Type': 'application/json' } }))
     await client.refetchQueries({ queryKey: ['settings'] })
     await vi.runAllTimersAsync()
     expect(useSettingsSyncStore.getState()).toMatchObject({ userId: user.id, ready: true, failed: false })
@@ -170,30 +172,55 @@ describe('SettingsSync persistence', () => {
     expect(body.fontOrder).toEqual(['noto-sans-sc', 'serif', 'custom-1'])
   })
 
-  it('retains pending settings and merges repeated sync failures into one notice', async () => {
+  it('retries a transient write silently and clears the durable snapshot on success', async () => {
     useToastStore.getState().clearToasts()
     mountSync()
     await vi.runAllTimersAsync()
-    vi.mocked(fetch).mockRejectedValue(new Error('Offline'))
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError('Offline'))
     useUiStore.getState().setFontOrder(['serif'])
-    await vi.advanceTimersByTimeAsync(1100)
+    await act(() => vi.advanceTimersByTimeAsync(1100))
     expect(localStorage.getItem('bd-settings-pending')).toContain('serif')
-    const first = useToastStore.getState().toasts.find((toast) => toast.dedupeKey === 'settings-sync')
-    expect(first?.type).toBe('warning')
-    useUiStore.getState().setFontOrder(['serif', 'sans-serif'])
-    await vi.advanceTimersByTimeAsync(1100)
-    const notices = useToastStore.getState().toasts.filter((toast) => toast.dedupeKey === 'settings-sync')
-    expect(notices).toHaveLength(1)
-    expect(notices[0].id).toBe(first?.id)
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ data: {} })))
-    useUiStore.getState().setFontOrder(['sans-serif'])
-    await vi.advanceTimersByTimeAsync(1100)
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+    await act(() => vi.runAllTimersAsync())
     expect(localStorage.getItem('bd-settings-pending')).toBeNull()
-    const recovered = useToastStore.getState().toasts.find((toast) => toast.dedupeKey === 'settings-sync')
-    expect(recovered?.id).toBe(first?.id)
-    expect(recovered?.type).toBe('info')
-    expect(recovered?.message).toEqual({ key: 'settings.syncRestored' })
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('keeps retrying the latest settings silently through a prolonged outage and recovery', async () => {
     useToastStore.getState().clearToasts()
+    mountSync()
+    await vi.runAllTimersAsync()
+    vi.mocked(fetch).mockRejectedValue(new TypeError('Offline'))
+    useUiStore.getState().setFontOrder(['serif'])
+    const readerShortcuts = JSON.stringify({ ...READER_SHORTCUT_DEFAULTS, toc: null })
+    act(() => window.dispatchEvent(new CustomEvent('bd-settings-shortcuts-save', { detail: { userId: user.id, readerShortcuts } })))
+    await act(() => vi.advanceTimersByTimeAsync(16_000))
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+    expect(JSON.parse(localStorage.getItem('bd-settings-pending')!).payload).toMatchObject({ fontOrder: ['serif'], readerShortcuts })
+    const callsBefore = vi.mocked(fetch).mock.calls.length
+    await act(() => vi.advanceTimersByTimeAsync(90_000))
+    expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(callsBefore)
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ data: {} })))
+    await act(() => vi.advanceTimersByTimeAsync(30_000))
+    expect(localStorage.getItem('bd-settings-pending')).toBeNull()
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('keeps retrying temporary server responses without reporting a connection failure and retries promptly on reconnect', async () => {
+    useToastStore.getState().clearToasts()
+    mountSync()
+    await vi.runAllTimersAsync()
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({
+      error: { code: 'INTERNAL_ERROR', message: 'Unavailable' },
+    }), { status: 503 }))
+    useUiStore.getState().setFontOrder(['serif'])
+    await act(() => vi.advanceTimersByTimeAsync(20_000))
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+    expect(localStorage.getItem('bd-settings-pending')).toContain('serif')
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ data: {} })))
+    await act(async () => { window.dispatchEvent(new Event('online')) })
+    expect(localStorage.getItem('bd-settings-pending')).toBeNull()
   })
 
   it('keeps a locally pending change ahead of stale settings on reload', async () => {

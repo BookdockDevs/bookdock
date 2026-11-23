@@ -480,7 +480,15 @@ export default function Reader() {
     staleTime: 0,
     refetchOnMount: 'always',
   })
-  usePageTitle(bookQuery.data?.data?.title ?? _('reader.loading'))
+  const bookNotFound = bookQuery.error instanceof ApiError &&
+    (bookQuery.error.code === 'BOOK_NOT_FOUND' || bookQuery.error.status === 404)
+  const bookMissing = !bookQuery.isLoading && !bookQuery.data?.data
+  const pageTitle = bookQuery.isError
+    ? _(bookNotFound ? 'reader.notFound' : 'reader.openFailedTitle')
+    : bookMissing
+      ? _('reader.notFound')
+      : (bookQuery.data?.data?.title ?? _('app.name'))
+  usePageTitle(pageTitle)
 
   // Guest book theme group: browser-local storage with the same shape the
   // account syncs; legacy guest selections migrate through the shared function.
@@ -625,10 +633,10 @@ export default function Reader() {
     mutationFn: async (write: { patch: ReaderBookGroupsPatch; save: typeof dataSource.saveSettings; queue: typeof settingsWrites }) => {
       if (write.queue.epoch === getSessionEpoch()) await write.save(write.patch)
     },
-    onError: (error, write) => {
+    onError: (_error, write) => {
       if (write.queue.epoch !== getSessionEpoch()) return
       write.queue.needsRefresh = true
-      notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-settings:${write.queue.cacheId}` })
+      notify.error({ key: 'reader.settingsSaveFailed' }, { dedupeKey: `reader-settings:${write.queue.cacheId}` })
     },
     onSettled: (_data, _error, write) => {
       if (write.queue.epoch === getSessionEpoch() && write.queue.needsRefresh && write.queue.timer === null &&
@@ -683,9 +691,9 @@ export default function Reader() {
         return { ...old, data: { ...old.data, readerSettings } }
       })
     },
-    onError: (error) => {
+    onError: () => {
       void queryClient.invalidateQueries({ queryKey: ['book', cacheId] })
-      notify.error(getUserErrorNotification(error, 'reader.settingsSaveFailed'), { dedupeKey: `reader-settings:${id}` })
+      notify.error({ key: 'reader.settingsSaveFailed' }, { dedupeKey: `reader-settings:${cacheId}` })
     },
   })
   const setBoundPreset = useCallback((presetId: string | null) => {
@@ -1022,20 +1030,6 @@ export default function Reader() {
   }, [flushPendingProgress])
 
   const chaptersQuery = useBookChapters(id, !revisionQuarantined)
-
-  // Progress load failures get a dedicated in-page prompt (retry / start
-  // over) instead of a toast — the reader must not silently mount anywhere
-  const chaptersErrorShownRef = useRef(false)
-  useEffect(() => {
-    if (!chaptersQuery.isError) {
-      chaptersErrorShownRef.current = false
-      return
-    }
-    if (chaptersQuery.error instanceof ApiError && chaptersQuery.error.code === 'UNAUTHORIZED') return
-    if (chaptersErrorShownRef.current) return
-    chaptersErrorShownRef.current = true
-    notify.error({ key: 'reader.chapterLoadFailed' })
-  }, [chaptersQuery.error, chaptersQuery.isError])
 
   // Gated on bookQuery data: the reader mounts once bookQuery data exists (from
   // cache on reopen or after the initial fetch).
@@ -2312,7 +2306,7 @@ export default function Reader() {
     return (
       <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
-        <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+        <div className="flex w-full max-w-xs flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-500/10 text-red-500 dark:bg-red-500/20" aria-hidden="true">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
@@ -2321,18 +2315,21 @@ export default function Reader() {
             </svg>
           </div>
           <span className="text-sm font-medium text-red-500">{getUserErrorMessage(bookQuery.error, _, 'errors.loadFailed')}</span>
-          <div className="flex items-center gap-2 pt-1">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={bookQuery.isFetching}
-              onClick={() => void bookQuery.refetch()}
-            >
-              {bookQuery.isFetching ? _('errors.retrying') : _('errors.retry')}
-            </Button>
-            <Link to="/">
-              <Button type="button" variant="primary" size="sm">
+          <div className="flex w-full items-center gap-2 pt-1">
+            {!bookNotFound && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="lg"
+                className="flex-1"
+                disabled={bookQuery.isFetching}
+                onClick={() => void bookQuery.refetch()}
+              >
+                {bookQuery.isFetching ? _('errors.retrying') : _('errors.retry')}
+              </Button>
+            )}
+            <Link to="/" className="flex-1">
+              <Button type="button" variant="primary" size="lg" className="w-full">
                 {_('errors.backToLibrary')}
               </Button>
             </Link>
@@ -2342,11 +2339,11 @@ export default function Reader() {
     )
   }
 
-  if (!bookQuery.isLoading && !bookQuery.data?.data) {
+  if (bookMissing) {
     return (
       <div className="fixed inset-0 z-30 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--bd-read-bg)', color: 'var(--bd-read-text)' }}>
         <div ref={containerCallbackRef} />
-        <div className="flex max-w-sm flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
+        <div className="flex w-full max-w-xs flex-col items-center gap-3.5 rounded-2xl border border-[var(--bd-read-accent)] bg-[var(--bd-read-bg)]/95 p-6 text-center shadow-xl backdrop-blur-md">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-stone-500/10 text-[var(--bd-read-sub)]" aria-hidden="true">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
@@ -2354,8 +2351,8 @@ export default function Reader() {
             </svg>
           </div>
           <span className="text-sm text-[var(--bd-read-sub)]">{_('reader.notFound')}</span>
-          <Link to="/" className="pt-1">
-            <Button type="button" variant="primary" size="sm">
+          <Link to="/" className="w-full pt-1">
+            <Button type="button" variant="primary" size="lg" className="w-full">
               {_('errors.backToLibrary')}
             </Button>
           </Link>
