@@ -4,6 +4,11 @@ All notable changes to Bookdock are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Share a server-hosted book from its details or context menu. Create a time-limited or permanent download link, then copy, regenerate, or revoke it. Recipients can download the EPUB or TXT without signing in. The download preserves the book’s format and skips text replacement rules.
+- The external API can get or create a book download link with the new `ext:download-link` permission. If a valid link already exists, the API returns it unchanged.
+
 ### Fixed
 
 - The E Ink reader now applies your text replacement rules to chapter text, chapter headings, and table of contents labels. It respects per-book rule toggles and applies point replacements to the passages they target.
@@ -1423,6 +1428,11 @@ All notable changes to Bookdock are documented here.
 ## 中文
 
 ### [待发布]
+
+#### 新增
+
+- 从书籍详情或右键菜单分享服务端书籍。下载链接可设为限时或永久，支持复制、重新生成和撤销。收件人无需登录即可下载，文件保留 EPUB 或 TXT 格式，下载时不应用文本替换规则。
+- 公开 API 新增 `ext:download-link` 权限，可获取或创建书籍下载链接。已有有效链接时直接返回原链接。
 
 #### 修复
 

@@ -1,6 +1,7 @@
 import type { ClientBookRef } from '@bookdock/shared'
 import { retryReadingRecords } from '@/features/reader/lib/reading-record-queue'
 import { initRemoteOfflineSync } from '@/features/remote-cache/offline-sync'
+import BookShareDialogHost from '@/features/library/components/BookShareDialogHost'
 import DownloadDialogHost from '@/features/library/components/DownloadDialogHost'
 import { isDeviceBook } from '@/features/reading-data/book-source'
 import { evictLocalEpubCacheByPrefix } from '@/features/reader/content/local-epub-provider'
@@ -84,6 +85,7 @@ export default function AppProviders({ children }: { children?: ReactNode }) {
       <RouterProvider router={router} />
       <Toast />
       <DownloadDialogHost />
+      <BookShareDialogHost />
       {children}
     </QueryClientProvider>
   )

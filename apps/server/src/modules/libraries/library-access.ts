@@ -119,7 +119,7 @@ export interface ManagedLibrary {
  * and admins only. Private libraries resolve like any other row here — the
  * owner passes, everyone else is refused without leaking existence.
  */
-export async function requireLibraryManager(actorId: string, libraryId: string): Promise<ManagedLibrary> {
+export function requireLibraryManager(actorId: string, libraryId: string): ManagedLibrary {
   const db = getDb()
   const library = db.select().from(libraries).where(eq(libraries.id, libraryId)).get()
   if (!library) throw new AppError('LIBRARY_NOT_FOUND', 'Library not found')

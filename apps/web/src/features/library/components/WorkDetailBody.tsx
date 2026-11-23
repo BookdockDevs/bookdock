@@ -14,6 +14,7 @@ import { useReviewWorkContext } from '@/features/reviews/hooks/useReviews'
 import { reviewIconPaths } from '@/features/reviews/lib/review-icon'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
+import { useBookShareStore } from '@/stores/book-share.store'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
@@ -22,6 +23,7 @@ import { copyCover, downloadCover } from '../download'
 import { useBook, useCollectBook, useUpdateCatalogBook, useUpdateCatalogVersion } from '../hooks'
 import { getHiddenCause } from '../hidden-status'
 import BookCover from './BookCover'
+import BookShareIconPaths from './BookShareIconPaths'
 import DetailActions, { type DetailAction } from './book-detail/DetailActions'
 import CategoryChip from './book-detail/CategoryChip'
 import DetailHeader from './book-detail/DetailHeader'
@@ -396,6 +398,18 @@ export default function WorkDetailBody({
           versionLabel={versionTabLabel(selected.name, _('library.versionFallback', { n: versionOrdinal(work.versions, selected.id) }))}
         />
       ),
+    })
+  }
+  if (signedIn && canManage && selected) {
+    actions.push({
+      key: 'share',
+      label: _('library.bookShare.action'),
+      icon: <BookShareIconPaths />,
+      fold: true,
+      onClick: () => useBookShareStore.getState().open({
+        versionId: selected.bookVersionId, libraryId: work.libraryId, title: selected.effective.title, format: selected.format,
+        versionLabel: versionTabLabel(selected.name, _('library.versionFallback', { n: versionOrdinal(work.versions, selected.id) })),
+      }),
     })
   }
   if (signedIn) {

@@ -477,6 +477,13 @@
       "when": 1794700000000,
       "tag": "0069_reading_themes_and_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1795392000000,
+      "tag": "0070_book_share_links",
+      "breakpoints": true
     }
   ]
 }

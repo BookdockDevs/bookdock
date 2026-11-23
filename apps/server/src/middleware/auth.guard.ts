@@ -53,11 +53,10 @@ const PUBLIC_ROUTES = new Set([
   'GET /api/v1/legado/login',
 ])
 
-// Builtin font proxy reads: pinned open-source font binaries whose upstream
-// paths are locked by the shared registry, so anonymous access cannot turn
-// the instance into an arbitrary proxy. Device-book readers without an
-// account depend on these. GET/HEAD only — no mutation routes exist there.
 const PUBLIC_ROUTE_PATTERNS = [
+  // The share route checks its own credential independently of guest access.
+  /^\/api\/v1\/book-shares\/download\/[A-Za-z0-9_-]+$/,
+  // Device-book readers without accounts need the pinned builtin font binaries.
   /^\/api\/v1\/fonts\/builtin\/[A-Za-z0-9-]+\/[A-Za-z0-9.~-]+\/css$/,
   /^\/api\/v1\/fonts\/builtin\/[A-Za-z0-9-]+\/[A-Za-z0-9.~-]+\/res\/[A-Za-z0-9._/-]+$/,
 ]

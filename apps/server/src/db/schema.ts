@@ -806,6 +806,21 @@ export const contentRevisions = sqliteTable('content_revisions', {
   blobIdx: index('content_revisions_blob_idx').on(table.blobKey),
 }))
 
+export const bookShareLinks = sqliteTable('book_share_links', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  sourceId: text('source_id').notNull().references(() => libraryBookVersions.id, { onDelete: 'cascade' }),
+  revisionId: text('revision_id').notNull().references(() => contentRevisions.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  encryptedToken: text('encrypted_token').notNull(),
+  duration: text('duration', { enum: ['1h', '1d', '7d', '30d', 'permanent'] }).notNull(),
+  expiresAt: integer('expires_at'),
+}, (table) => ({
+  sourceUserUnique: uniqueIndex('book_share_links_source_user_unique').on(table.sourceId, table.userId),
+  userIdx: index('book_share_links_user_idx').on(table.userId),
+  revisionIdx: index('book_share_links_revision_idx').on(table.revisionId),
+}))
+
 export const contentRevisionMaps = sqliteTable('content_revision_maps', {
   id: text('id').primaryKey(),
   bookVersionId: text('book_version_id').notNull().references(() => bookVersions.id, { onDelete: 'cascade' }),

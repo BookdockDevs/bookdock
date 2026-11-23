@@ -36,6 +36,10 @@ export function revertInstanceAndAiJobsSchema(
   const table = (name: string) => sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").all(name).length > 0
   const columns = (name: string) => new Set((sqlite.prepare(`PRAGMA table_info(${name})`).all() as Array<{ name: string }>).map((column) => column.name))
 
+  for (const name of ['trash', 'new_revision', 'source_change', 'membership_delete', 'membership_demote', 'owner_change', 'disable']) {
+    sqlite.exec(`DROP TRIGGER IF EXISTS book_share_links_on_${name}`)
+  }
+  sqlite.exec('DROP TABLE IF EXISTS book_share_links')
   if (table('ai_chat_jobs')) sqlite.exec('DROP TABLE ai_chat_jobs')
   if (table('instance_invite_libraries')) sqlite.exec('DROP TABLE instance_invite_libraries')
   if (table('instance_invites')) sqlite.exec('DROP TABLE instance_invites')

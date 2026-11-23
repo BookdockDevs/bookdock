@@ -2,11 +2,12 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { z } from 'zod'
 
-import { categoryPathSchema, type ExternalLibrariesRes, type ExternalUploadRes } from '@bookdock/shared'
+import { bookShareRequestSchema, categoryPathSchema, type ExternalLibrariesRes, type ExternalUploadRes } from '@bookdock/shared'
 
 import { AppError } from '../../middleware/error'
 import { effectiveUploadMaxBytes } from '../auth/auth.service'
 import { streamBookFile } from '../books/book-file-response'
+import { manageBookShare } from '../books/book-shares.service'
 import { getActiveBook, uploadBook, uploadCatalogBook } from '../books/books.service'
 import { requireLibraryManager } from '../libraries/library-access'
 import { isTitleNormalizeEnabled } from '../settings/settings.service'
@@ -91,6 +92,20 @@ const download = async (c: Context, versionId: string) => {
 }
 extRoutes.get('/books/:versionId/file', (c) => download(c, c.req.param('versionId')))
 extRoutes.on('HEAD', '/books/:versionId/file', (c) => download(c, c.req.param('versionId')))
+
+extRoutes.post('/books/:versionId/download-link', async (c) => {
+  const user = c.get('user')
+  if (!user) throw new AppError('UNAUTHORIZED', 'Login required')
+  const input: unknown = await c.req.json().catch(() => null)
+  const body = bookShareRequestSchema.safeParse(input)
+  if (!body.success) throw new AppError('VALIDATION_ERROR', 'Invalid download link options', body.error.flatten())
+  const link = manageBookShare(user.id, c.req.param('versionId'), body.data.libraryId, { type: 'get-or-create', duration: body.data.duration })
+  if (!link) throw new AppError('INTERNAL_ERROR', 'Download link could not be created')
+  const origin = new URL(c.req.url)
+  if (origin.protocol === 'http:' && c.req.header('x-forwarded-proto') === 'https') origin.protocol = 'https:'
+  c.header('Cache-Control', 'private, no-store')
+  return c.json({ data: { ...link, url: new URL(link.url, origin).toString() } })
+})
 
 extRoutes.post('/books', async (c) => {
   const user = c.get('user')

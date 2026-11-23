@@ -23,6 +23,7 @@ export const ACCESS_TOKEN_PERMISSIONS = [
   'ext:books',
   'ext:book',
   'ext:file',
+  'ext:download-link',
   'ext:upload',
   'ext:delete',
 ] as const
@@ -69,6 +70,11 @@ export const ACCESS_TOKEN_PERMISSION_REGISTRY: readonly AccessTokenPermissionDef
     // library but not pull its files cannot exfiltrate the library, which is the
     // difference that matters if the token ever lands in a CI log.
     description: 'Download the book file, with range support.',
+  },
+  {
+    id: 'ext:download-link',
+    endpoints: ['POST /api/v1/ext/books/:versionId/download-link'],
+    description: 'Get or create a book download link that recipients can use without signing in.',
   },
   {
     id: 'ext:upload',

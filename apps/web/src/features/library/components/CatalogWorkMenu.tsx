@@ -12,7 +12,10 @@ import { notify } from '@/lib/notifications'
 
 import type { MenuAnchor } from '@/lib/menu-anchor'
 
+import { useBookShareStore } from '@/stores/book-share.store'
 import { useDownloadStore } from '@/stores/download.store'
+
+import BookShareIconPaths from './BookShareIconPaths'
 import { versionOrdinal, versionTabLabel } from '../book-row'
 import { useCollectBook, useUpdateCatalogBook } from '../hooks'
 import { getHiddenCause } from '../hidden-status'
@@ -51,6 +54,7 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, anchor, width, o
   const updateWork = useUpdateCatalogBook()
   // The menu predates versions in the UI: one work, one version, the first one.
   const first = work.versions[0]
+  const shareVersion = work.versions.find((version) => version.id === work.defaultVersionLinkId) ?? first
   // A taxonomy-derived hide has no work flag to clear: the toggle below would
   // write hidden=true on top of it, so the menu names the cause and stays inert.
   const hiddenCause = getHiddenCause(work, 'category')
@@ -167,6 +171,19 @@ export default function CatalogWorkMenu({ innerRef, triggerRef, anchor, width, o
             onClose()
             useDownloadStore.getState().open({ id: first.bookVersionId, title: first.effective.title, format: first.format,
               versionLabel: versionTabLabel(first.name, _('library.versionFallback', { n: versionOrdinal(work.versions, first.id) })),
+            })
+          }}
+        />
+      )}
+      {canManage && shareVersion && (
+        <MenuItem
+          label={_('library.bookShare.action')}
+          icon={<BookShareIconPaths />}
+          onClick={() => {
+            onClose()
+            useBookShareStore.getState().open({
+              versionId: shareVersion.bookVersionId, libraryId: work.libraryId, title: shareVersion.effective.title, format: shareVersion.format,
+              versionLabel: versionTabLabel(shareVersion.name, _('library.versionFallback', { n: versionOrdinal(work.versions, shareVersion.id) })),
             })
           }}
         />

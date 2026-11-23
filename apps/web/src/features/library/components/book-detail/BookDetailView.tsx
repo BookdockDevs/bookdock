@@ -13,6 +13,7 @@ import { clientScopeKey } from '@bookdock/shared'
 import { apiPatch, apiPut } from '@/api/client'
 import { useTranslation } from '@/hooks/useTranslation'
 import { useAuthStore } from '@/stores/auth.store'
+import { useBookShareStore } from '@/stores/book-share.store'
 import { getUserErrorNotification } from '@/lib/error-message'
 import { notify } from '@/lib/notifications'
 
@@ -21,6 +22,7 @@ import { invalidateDeviceMembershipQueries, useForkBook, useVaultOperations } fr
 import { getHiddenCause } from '../../hidden-status'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import BookCover from '../BookCover'
+import BookShareIconPaths from '../BookShareIconPaths'
 import CategoryChip from './CategoryChip'
 import DetailActions, { type DetailAction } from './DetailActions'
 import DetailCoverEditor from './DetailCoverEditor'
@@ -291,6 +293,15 @@ export default function BookDetailView({
       key: 'download',
       label: _('library.download'),
       node: <DownloadMenu bookId={book.id} bookRef={book.ref} title={displayBook.title} format={displayBook.format} />,
+    })
+  }
+  if (!readOnly && signedIn && !isLocalBook && !displayBook.source && displayBook.collected !== false) {
+    actions.push({
+      key: 'share',
+      label: _('library.bookShare.action'),
+      icon: <BookShareIconPaths />,
+      fold: true,
+      onClick: () => useBookShareStore.getState().open({ versionId: book.id, title: displayBook.title, format: displayBook.format }),
     })
   }
   if (signedIn || isLocalBook) {

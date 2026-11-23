@@ -15,7 +15,11 @@ import { formatAuthorList } from '@/lib/utils'
 import { useUpdateBook } from '../hooks'
 import { getHiddenCause } from '../hidden-status'
 
+import { useAuthStore } from '@/stores/auth.store'
+import { useBookShareStore } from '@/stores/book-share.store'
 import { useDownloadStore } from '@/stores/download.store'
+
+import BookShareIconPaths from './BookShareIconPaths'
 
 import { READ_STATUS_OPTIONS, STATUS_DOT } from './read-status'
 import { MenuHeader } from './RowMenuChrome'
@@ -105,6 +109,7 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
   const warmReader = useWarmReaderEntry()
   const updateBook = useUpdateBook()
   const cacheAction = useRemoteBookCacheAction(book)
+  const signedIn = useAuthStore((state) => Boolean(state.user))
   // B to a personal copy while the source still reads; A/C rows and library
   // reads (collected === false) have no source binding to cut. The actual
   // confirm lives with the caller, like onPublish/onDelete.
@@ -293,6 +298,22 @@ export function ContextMenuContent({ book, readOnly = false, onShowDetails, onPu
             </MenuIcon>
             {_('library.download')}
           </button>
+
+          {signedIn && !isDeviceBook(book.ref) && !book.source && book.collected !== false && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onClose()
+                useBookShareStore.getState().open({ versionId: book.id, title: book.title, format: book.format })
+              }}
+              className={itemClass}
+            >
+              <MenuIcon><BookShareIconPaths /></MenuIcon>
+              {_('library.bookShare.action')}
+            </button>
+          )}
 
           {onPublish && (
             <button

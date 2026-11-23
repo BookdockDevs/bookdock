@@ -175,9 +175,7 @@ describe('LegadoSettingsSection', () => {
     await waitFor(() => expect(rotateBtn).not.toBeDisabled())
     fireEvent.click(rotateBtn)
 
-    // Confirm dialog appears with warning
-    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
-    expect(screen.getByText('确定要重新生成免登录书源链接吗？')).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('旧链接将立即失效')
 
     // Cancel doesn't trigger rotation
     const cancelBtn = screen.getByRole('button', { name: '取消' })

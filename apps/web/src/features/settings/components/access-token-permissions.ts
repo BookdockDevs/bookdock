@@ -10,6 +10,7 @@ export const ACCESS_TOKEN_PERMISSION_LABEL_KEYS: Record<AccessTokenPermission, s
   'ext:books': 'settings.tokenPermissionExtBooks',
   'ext:book': 'settings.tokenPermissionExtBook',
   'ext:file': 'settings.tokenPermissionExtFile',
+  'ext:download-link': 'settings.tokenPermissionExtDownloadLink',
   'ext:upload': 'settings.tokenPermissionExtUpload',
   'ext:delete': 'settings.tokenPermissionExtDelete',
 }

@@ -58,6 +58,7 @@ export { expandAiPrompt, getAiPromptVariables } from './ai-prompts'
 export type { AiPromptValues, AiPromptVariable } from './ai-prompts'
 
 export type { AccessTokenDuration, AccessTokenPermission, AccessTokenPermissionDefinition } from './access-tokens'
+export * from './book-shares'
 export {
   ACCESS_TOKEN_DURATIONS,
   ACCESS_TOKEN_NAME_MAX_LENGTH,

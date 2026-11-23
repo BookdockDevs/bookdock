@@ -34,7 +34,9 @@ export function requestContext(): MiddlewareHandler {
         log(level, 'http.request.completed', {
           requestId,
           method: c.req.method,
-          path: c.req.path,
+          path: c.req.path.startsWith('/api/v1/book-shares/download/')
+            ? '/api/v1/book-shares/download/:token'
+            : c.req.path,
           status,
           durationMs: Date.now() - startedAt,
           actorRole: c.get('actorRole'),

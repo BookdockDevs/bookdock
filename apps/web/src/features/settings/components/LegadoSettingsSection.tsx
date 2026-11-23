@@ -309,7 +309,6 @@ export default function LegadoSettingsSection() {
         <ConfirmDialog
           title={_('settings.legadoRotateConfirmTitle')}
           message={_('settings.legadoRotateConfirmMessage')}
-          warning={_('settings.legadoRotateConfirmWarning')}
           confirmLabel={_('settings.legadoRotateConfirmAction')}
           confirmVariant="danger"
           errorFallback="settings.integrationsUpdateFailed"

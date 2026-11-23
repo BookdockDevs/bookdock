@@ -101,12 +101,22 @@ async function getExportableTxtBook(userId: string, bookId: string, opts?: { sho
 async function loadExportInput(userId: string, bookId: string, plain: boolean, opts?: { showHidden?: boolean }) {
   const book = await getActiveBook(userId, bookId, opts)
   const rules: ExportRule[] = plain ? [] : await loadEffectiveBookReplacementRules(userId, bookId)
+  const buffer = await readExportFile(book.filePath)
+  return { book, rules, buffer }
+}
+
+async function readExportFile(filePath: string) {
   const storage = getStorage()
-  if (!(await storage.exists(book.filePath))) {
+  if (!(await storage.exists(filePath))) {
     throw new AppError('BOOK_FILE_MISSING', 'Book file not found')
   }
-  const buffer = await bufferFromStream(await storage.get(book.filePath))
-  return { book, rules, buffer }
+  return bufferFromStream(await storage.get(filePath))
+}
+
+export async function exportPlainTxtFile(filePath: string): Promise<string> {
+  const text = assembleTxt(await extractReplacedChapters(await readExportFile(filePath), []))
+  if (!text.trim()) throw new AppError('NO_EXPORTABLE_TEXT', 'Book has no readable text to export')
+  return text
 }
 
 // Uploaded TXT bytes are not retained: its original export is recovered text.

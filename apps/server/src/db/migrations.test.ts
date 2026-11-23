@@ -117,6 +117,36 @@ function applyLegadoAccessKeyMigration(sqlite: Database.Database) {
   }
 }
 
+it('adds book download links to a pre-sharing database without changing existing content', () => {
+  const sqlite = new Database(':memory:')
+  try {
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrate(db, { migrationsFolder: migrationsDir })
+    retargetBookIdReferences(db)
+    migrateAllUpTo(db, '0070_book_share_links')
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u', 'reader', 1);
+      INSERT INTO libraries (id, user_id, type, name, created_at, updated_at)
+        VALUES ('l', 'u', 'private', 'Books', 1, 1);
+      INSERT INTO library_books (id, library_id, user_id, title, created_at, updated_at)
+        VALUES ('w', 'l', 'u', 'My book', 1, 1);
+      INSERT INTO book_versions (id, format, size, created_at, updated_at) VALUES ('v', 'txt', 1, 1, 1);
+      INSERT INTO content_revisions (id, book_version_id, revision_no, blob_key, size, created_at)
+        VALUES ('r', 'v', 1, 'file.epub', 1, 1);
+      INSERT INTO library_book_versions (id, library_id, library_book_id, book_version_id, kind, created_at, updated_at)
+        VALUES ('s', 'l', 'w', 'v', 'personal', 1, 1);
+    `)
+    migrateAll(db, { migrationsFolder: migrationsDir })
+    expect(sqlite.prepare('SELECT title FROM library_books WHERE id = ?').get('w')).toEqual({ title: 'My book' })
+    expect(sqlite.prepare('SELECT blob_key FROM content_revisions WHERE id = ?').get('r')).toEqual({ blob_key: 'file.epub' })
+    expect(sqlite.prepare('SELECT * FROM book_share_links').all()).toEqual([])
+    expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  } finally {
+    sqlite.close()
+  }
+})
+
 function applyAccessTokenMigration(sqlite: Database.Database) {
   const sql = fs.readFileSync(accessTokenMigrationFile, 'utf8')
   for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {
