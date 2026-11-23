@@ -44,6 +44,12 @@ it('toggles clean reading, restores the position and blocks book presentation re
       { path: 'image.png', mediaType: 'image/png' },
       { path: 'book.css', mediaType: 'text/css' },
     ], startupFiles: [{ path: 'chapter.xhtml', text: markup }] })
+    if (url.endsWith('/replacements?bookId=book-1')) return json([
+      { id: 'global', matchType: 'pattern', pattern: 'Text', replacement: 'Body', applyTo: 'content', enabled: false, effectiveEnabled: true },
+      { id: 'disabled', matchType: 'pattern', pattern: 'Body', replacement: 'Hidden', applyTo: 'content', enabled: true, effectiveEnabled: false },
+      { id: 'point', matchType: 'point', spineHref: 'chapter.xhtml', textOffset: 0, originalText: 'Body', replacement: 'Patched', enabled: true },
+      { id: 'unresolved', matchType: 'point', spineHref: 'chapter.xhtml', textOffset: 0, originalText: 'Patched', replacement: 'Hidden', enabled: true, locationAvailable: false },
+    ])
     if (url.includes('/progress/')) return json(null)
     throw new Error(`Unexpected request: ${url}`)
   }))
@@ -110,7 +116,8 @@ it('toggles clean reading, restores the position and blocks book presentation re
     expect(document.querySelector('foliate-view')).not.toBe(originalView)
     const text = await state.loaders[1].loadText('chapter.xhtml')
     const doc = new DOMParser().parseFromString(text, 'application/xhtml+xml')
-    expect(doc.querySelector('p')?.textContent).toContain('Text')
+    expect(doc.querySelector('p')?.textContent?.trim()).toBe('Patched')
+    expect(await state.loaders[1].loadText('chapter.xhtml')).toBe(text)
     expect(doc.querySelector('p')?.hasAttribute('style')).toBe(false)
     expect(doc.querySelector('img')?.hasAttribute('data-bd-clean-hidden')).toBe(true)
     expect(doc.querySelector('link')?.hasAttribute('href')).toBe(false)
@@ -132,7 +139,9 @@ it('toggles clean reading, restores the position and blocks book presentation re
     await vi.waitFor(() => expect(state.loaders).toHaveLength(3))
     await vi.waitFor(() => expect(state.init).toHaveBeenLastCalledWith({ lastLocation: 'epubcfi(/6/4)' }))
     expect(localStorage.getItem('bd-eink-clean-reading')).toBe('false')
-    expect(await state.loaders[2].loadText('chapter.xhtml')).toContain('src="image.png"')
+    const regularText = await state.loaders[2].loadText('chapter.xhtml')
+    expect(regularText).toContain('Patched')
+    expect(regularText).toContain('src="image.png"')
   } finally {
     vi.unstubAllGlobals()
     localStorage.removeItem('i18nextLng')

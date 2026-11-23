@@ -31,6 +31,9 @@ it('fills available space with complete rows and repaginates on resize', async (
     if (url.endsWith('/libraries')) return new Response(JSON.stringify({ data: [] }))
     if (url.includes('/reader/manifest')) return new Response(JSON.stringify({ data: { revisionId: 'rev', entries: [{ path: 'second.xhtml', mediaType: 'application/xhtml+xml' }], startupFiles: [] } }))
     if (url.includes('/reader/entry')) return new Response(JSON.stringify({ data: { text: '<html>Second</html>' } }))
+    if (url.endsWith('/replacements?bookId=book-1')) return new Response(JSON.stringify({ data: [
+      { id: 'title-rule', matchType: 'pattern', pattern: 'Chapter 1', replacement: 'Part 1', applyTo: 'title', enabled: true },
+    ] }))
     if (url.includes('/progress/')) return new Response(JSON.stringify({ data: null }))
     throw new Error(`Unexpected request: ${url}`)
   }))
@@ -64,15 +67,16 @@ it('fills available space with complete rows and repaginates on resize', async (
     buttons.find(button => button.textContent === 'Table of Contents')!.click()
     await vi.waitFor(() => expect(document.querySelector('.panel:not([hidden]) .toc-row.current')?.textContent).toBe('Chapter 2'))
     expect(document.querySelector('.toc-row.current')?.textContent).toBe('Chapter 2')
+    expect(document.querySelector('.toc-row')?.textContent).toBe('Part 1')
     expect(document.querySelectorAll('.toc-row')).toHaveLength(11)
     expect(document.querySelector('.toc-list')?.classList.contains('toc-list-fill')).toBe(true)
     expect(document.querySelector('.toc-pager')?.textContent).toContain('1 / 3')
     document.querySelectorAll<HTMLButtonElement>('.toc-pager button')[1]!.click()
-    expect(document.querySelector('.toc-row')?.textContent).toBe('Chapter 12')
+    expect(document.querySelector('.toc-row')?.textContent).toBe('Part 12')
     height = 480
     window.dispatchEvent(new Event('resize'))
     expect(document.querySelectorAll('.toc-row')).toHaveLength(10)
-    expect(document.querySelector('.toc-row')?.textContent).toBe('Chapter 11')
+    expect(document.querySelector('.toc-row')?.textContent).toBe('Part 11')
     document.querySelectorAll<HTMLButtonElement>('.toc-pager button')[1]!.click()
     expect(document.querySelectorAll('.toc-row')).toHaveLength(5)
     expect(document.querySelector('.toc-list')?.classList.contains('toc-list-fill')).toBe(false)

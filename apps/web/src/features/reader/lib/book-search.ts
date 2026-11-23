@@ -11,7 +11,8 @@
 import type { ChineseConversion, SearchStatus } from '../types'
 import { findMatches, type SearchMatchOptions } from './book-search-match'
 import { convertChinese } from '@/lib/chinese'
-import { applyReplacementsWithWorker, type TextReplacementRule } from './text-replacements'
+import { applyBrowserTextReplacements } from './browser-text-replacements'
+import type { TextReplacementRule } from './text-replacements'
 
 export { findMatches } from './book-search-match'
 export type { SearchMatchOptions } from './book-search-match'
@@ -375,7 +376,7 @@ async function loadChapterText(
   if (replacements.length || conversion !== 'off') {
     started = performance.now()
     let transformedMarkup = replacements.length
-      ? await applyReplacementsWithWorker(markup, replacements, docType)
+      ? await applyBrowserTextReplacements(markup, replacements, docType)
       : markup
     if (timings) timings.replacements += performance.now() - started
     started = performance.now()

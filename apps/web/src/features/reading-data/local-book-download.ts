@@ -2,7 +2,7 @@ import JSZip from 'jszip'
 import { ApiError } from '@/api/client'
 import { buildTxtEpubMetadata } from '@bookdock/shared'
 
-import { applyReplacementsWithWorker } from '../reader/lib/text-replacements'
+import { applyBrowserTextReplacements } from '../reader/lib/browser-text-replacements'
 import { processEpubInWorker } from '../local-library/epub-editor-worker'
 import type { ClientBookRef } from '@bookdock/shared'
 
@@ -28,7 +28,7 @@ export async function prepareLocalBookFile(ref: ClientBookRef, format: 'epub' | 
     const documents = []
     for (const document of loaded.source.documents) {
       signal.throwIfAborted()
-      documents.push({ ...document, content: await applyReplacementsWithWorker(document.content, rules, 'application/xhtml+xml', document.href) })
+      documents.push({ ...document, content: await applyBrowserTextReplacements(document.content, rules, 'application/xhtml+xml', document.href) })
     }
     if (format === 'txt') {
       const texts = documents.map((document) => {
@@ -53,7 +53,7 @@ export async function prepareLocalBookFile(ref: ClientBookRef, format: 'epub' | 
       if (section.linear === 'no') continue
       let doc = await section.createDocument()
       if (edited) {
-        const markup = await applyReplacementsWithWorker(new XMLSerializer().serializeToString(doc), rules, 'application/xhtml+xml', section.id)
+        const markup = await applyBrowserTextReplacements(new XMLSerializer().serializeToString(doc), rules, 'application/xhtml+xml', section.id)
         doc = new DOMParser().parseFromString(markup, 'application/xhtml+xml')
       }
       signal.throwIfAborted()

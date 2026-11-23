@@ -1,5 +1,7 @@
-import { applyPointMatch, applyRuleToRuns, countRuleInText, findPointMatch, type TextRun } from '@bookdock/shared'
 import type { TextReplacementRes } from '@bookdock/shared'
+import { applyPointMatch, applyRuleToRuns, countRuleInText, findPointMatch, type ReplacementRuleLike, type TextRun } from '@bookdock/shared/text-replacement-engine'
+
+import type { ReplacementJob } from './text-replacement.worker'
 
 // Only the fields the renderer needs; the API rows satisfy this structurally.
 export type TextReplacementRule = Pick<
@@ -170,6 +172,7 @@ export function applyReplacements(
  * Literal rules keep the synchronous fast path when no regex is present.
  */
 export async function applyReplacementsWithWorker(
+  createWorker: () => Worker,
   html: string,
   rules: TextReplacementRule[],
   docType: DOMParserSupportedType = 'text/html',
@@ -187,56 +190,69 @@ export async function applyReplacementsWithWorker(
   if (!activePatterns.length && !activePoints.length) return html
   const doc = parseReplacementDocument(html, docType)
   if (!doc) return html
-  const regexRules = activePatterns.filter((rule) => rule.isRegex)
-  const contentRules = activePatterns.filter((rule) => rule.applyTo !== 'title')
-  if (!regexRules.length || typeof Worker === 'undefined') {
+  if (!activePatterns.some((rule) => rule.isRegex)) {
     return rewriteReplacementDocument(doc, activePatterns, activePoints, sectionHref, onInvalid, applyPatternRules)
   }
 
   const nodes = collectTextNodes(doc)
-  const contentNodeIndexes = nodes
-    .map((node, index) => isTitleTextNode(node) ? -1 : index)
-    .filter((index) => index >= 0)
-  const contentRuns = contentNodeIndexes.map((index) => ({ text: nodes[index]!.nodeValue ?? '' }))
-  const transformedRuns = await runPatternWorker(contentRuns, contentRules)
-  for (let i = 0; i < contentNodeIndexes.length; i++) nodes[contentNodeIndexes[i]!]!.nodeValue = transformedRuns[i]!.text
-  applyTitleRules(nodes, activePatterns.filter((rule) => rule.applyTo !== 'content'))
+  const contentNodes = nodes.filter((node) => !isTitleTextNode(node))
+  const titleGroups = collectTitleGroups(nodes)
+  const nodeGroups = [[contentNodes], titleGroups]
+  const jobRules = [
+    activePatterns.filter((rule) => rule.applyTo !== 'title'),
+    activePatterns.filter((rule) => rule.applyTo !== 'content'),
+  ]
+  const jobs = nodeGroups.map((groups, index) => ({
+    groups: groups.map((group) => group.map((node) => ({ text: node.nodeValue ?? '' }))),
+    rules: jobRules[index]!,
+  }))
+  const results = await runReplacementJobs(jobs, createWorker)
+  nodeGroups.forEach((groups, jobIndex) => groups.forEach((group, groupIndex) => {
+    group.forEach((node, index) => { node.nodeValue = results[jobIndex]![groupIndex]![index]!.text })
+  }))
   if (sectionHref) applyPointPatches(nodes, activePoints, sectionHref, onInvalid)
   return new XMLSerializer().serializeToString(doc)
 }
 
-async function runPatternWorker(runs: TextRun[], rules: TextReplacementRule[]): Promise<TextRun[]> {
-  const safeRules = rules.filter((rule) => rule.applyTo !== 'title')
-  if (!safeRules.length) return runs
-  const worker = new Worker(new URL('./text-replacement.worker.ts', import.meta.url), { type: 'module' })
-  return new Promise((resolve) => {
-    let settled = false
-    const finish = (result: TextRun[]) => {
-      if (settled) return
-      settled = true
-      worker.terminate()
-      resolve(result)
+export async function applyTitleReplacementsWithWorker(
+  labels: string[],
+  rules: TextReplacementRule[],
+  createWorker: () => Worker,
+): Promise<string[]> {
+  const groups = labels.map((text) => [{ text }])
+  const [result] = await runReplacementJobs([{ groups, rules }], createWorker)
+  return result!.map(([run]) => run!.text)
+}
+
+async function runReplacementJobs(jobs: ReplacementJob[], createWorker: () => Worker): Promise<TextRun[][][]> {
+  if (jobs.some(({ groups, rules }) => groups.some((runs) => runs.length > 0) && rules.some((rule) => rule.isRegex))) {
+    try {
+      const worker = createWorker()
+      const result = await new Promise<TextRun[][][] | null>((resolve) => {
+        const timer = setTimeout(() => finish(null), 3000)
+        function finish(result: TextRun[][][] | null) {
+          clearTimeout(timer)
+          worker.terminate()
+          resolve(result)
+        }
+        worker.onmessage = (event: MessageEvent<TextRun[][][]>) => finish(event.data)
+        worker.onerror = () => finish(null)
+        try {
+          worker.postMessage(jobs)
+        } catch {
+          finish(null)
+        }
+      })
+      if (result) return result
+    } catch {
+      // Older browsers can reject Worker creation.
     }
-    const timer = setTimeout(() => {
-      // A timed-out regex rule is skipped as a safety boundary. Do not retry it
-      // on the UI thread, because that would defeat the point of the worker.
-      const literalRules = safeRules.filter((rule) => !rule.isRegex)
-      const fallback = runs.map((run) => ({ ...run }))
-      applyPatternRules(fallback, literalRules)
-      clearTimeout(timer)
-      finish(fallback)
-    }, 3000)
-    worker.onmessage = (event: MessageEvent<{ runs?: TextRun[] }>) => {
-      clearTimeout(timer)
-      finish(event.data.runs ?? runs)
-    }
-    worker.onerror = () => {
-      clearTimeout(timer)
-      const fallback = runs.map((run) => ({ ...run }))
-      applyPatternRules(fallback, safeRules.filter((rule) => !rule.isRegex))
-      finish(fallback)
-    }
-    worker.postMessage({ runs, rules: safeRules })
+  }
+  // Keep regexes off the main thread even when the worker fails or times out.
+  return jobs.map(({ groups, rules }) => {
+    const literals = rules.filter((rule) => !rule.isRegex)
+    for (const runs of groups) applyPatternRules(runs, literals)
+    return groups
   })
 }
 
@@ -288,7 +304,7 @@ function isTitleTextNode(node: Text): boolean {
   return false
 }
 
-function applyTitleRules(nodes: Text[], rules: TextReplacementRule[]): void {
+function collectTitleGroups(nodes: Text[]): Text[][] {
   const groups = new Map<Element, Text[]>()
   for (const node of nodes) {
     let title = node.parentElement
@@ -298,7 +314,11 @@ function applyTitleRules(nodes: Text[], rules: TextReplacementRule[]): void {
     group.push(node)
     groups.set(title, group)
   }
-  for (const nodesInTitle of groups.values()) {
+  return [...groups.values()]
+}
+
+function applyTitleRules(nodes: Text[], rules: TextReplacementRule[]): void {
+  for (const nodesInTitle of collectTitleGroups(nodes)) {
     const runs = nodesInTitle.map((node) => ({ text: node.nodeValue ?? '' }))
     for (const rule of rules) {
       try {
@@ -311,7 +331,7 @@ function applyTitleRules(nodes: Text[], rules: TextReplacementRule[]): void {
   }
 }
 
-function applyPatternRules(runs: TextRun[], rules: TextReplacementRule[]): void {
+function applyPatternRules(runs: TextRun[], rules: ReplacementRuleLike[]): void {
   for (const rule of rules) {
     try {
       applyRuleToRuns(runs, rule)

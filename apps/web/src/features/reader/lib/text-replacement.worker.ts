@@ -1,18 +1,22 @@
-import { applyRuleToRuns, type ReplacementRuleLike, type TextRun } from '@bookdock/shared'
+import { applyRuleToRuns, type ReplacementRuleLike, type TextRun } from '@bookdock/shared/text-replacement-engine'
 
-interface ReplacementWorkerRequest {
-  runs: TextRun[]
+export interface ReplacementJob {
+  groups: TextRun[][]
   rules: ReplacementRuleLike[]
 }
 
-self.onmessage = (event: MessageEvent<ReplacementWorkerRequest>) => {
-  const runs = event.data.runs.map((run) => ({ ...run }))
-  for (const rule of event.data.rules) {
-    try {
-      applyRuleToRuns(runs, rule)
-    } catch {
-      // A malformed rule is isolated to itself; the remaining rules still run.
+self.onmessage = (event: MessageEvent<ReplacementJob[]>) => {
+  const results = event.data.map(({ groups, rules }) => {
+    for (const runs of groups) {
+      for (const rule of rules) {
+        try {
+          applyRuleToRuns(runs, rule)
+        } catch {
+          // A malformed rule is isolated to itself; the remaining rules still run.
+        }
+      }
     }
-  }
-  self.postMessage({ runs })
+    return groups
+  })
+  self.postMessage(results)
 }

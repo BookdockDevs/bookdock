@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { applyReplacements, countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../features/reader/lib/text-replacements'
+import { applyReplacements, applyReplacementsWithWorker, countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../features/reader/lib/text-replacements'
 
 const rule = (overrides: Partial<TextReplacementRule> = {}): TextReplacementRule => ({
   matchType: 'pattern',
@@ -13,6 +13,23 @@ const rule = (overrides: Partial<TextReplacementRule> = {}): TextReplacementRule
 })
 
 const doc = (body: string) => `<html><body>${body}</body></html>`
+
+it('falls back to literal replacements for both content and headings when regex processing times out', async () => {
+  vi.useFakeTimers()
+  const worker = { postMessage: vi.fn(), terminate: vi.fn() }
+  try {
+    const pending = applyReplacementsWithWorker(() => worker as unknown as Worker, doc('<h1>foo</h1><p>foo</p>'), [
+      rule({ applyTo: 'both', isRegex: true, pattern: '(foo)', replacement: 'regex' }),
+      rule({ applyTo: 'both' }),
+    ])
+    expect(worker.postMessage).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(await pending).toContain('<h1>bar</h1><p>bar</p>')
+    expect(worker.terminate).toHaveBeenCalledOnce()
+  } finally {
+    vi.useRealTimers()
+  }
+})
 
 describe('textContentRangeNearOffset', () => {
   it('resolves the replacement text using the point-patch coordinate system', () => {

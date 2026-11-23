@@ -48,7 +48,8 @@ import { FONT_OPTIONS } from '../types'
 import { bookmarkContext, extractAnnotationText } from '../lib/annotation-text'
 import { composeMarginalLine, DEFAULT_MARGINAL_CONFIG } from '../lib/marginals'
 import { MediaOverlaySection, type MediaOverlayCue } from '../lib/media-overlay'
-import { applyReplacementsWithWorker, countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../lib/text-replacements'
+import { applyBrowserTextReplacements } from '../lib/browser-text-replacements'
+import { countPatternMatches, textContentOffset, textContentRangeNearOffset, type TextReplacementRule } from '../lib/text-replacements'
 import { NavigationPending, type NavigationTarget } from '../lib/navigation-pending'
 import { chapterTextNamespaceFromUrl, withTextCache } from '../lib/chapter-text-cache'
 import { canFallbackReaderContent, consumePreparedReaderContentText, fetchReaderManifest, fetchReaderSearch, ReaderContentError, ReaderContentSession } from '../lib/reader-content-client'
@@ -1851,7 +1852,7 @@ function attachBookDataTransform(book: any, cleanReading = false, mediaUrl?: (pa
         // Text replacements run after book CSS normalization, and only markup
         // receives text conversion; images, fonts and CSS remain untouched.
         transformed = rules.length
-          ? await applyReplacementsWithWorker(transformed, rules, docType, detail.name, reportInvalidReplacementIds)
+          ? await applyBrowserTextReplacements(transformed, rules, docType, detail.name, reportInvalidReplacementIds)
           : transformed
         if (mode !== 'off') transformed = await convertChinese(transformed, mode)
       }
@@ -3274,7 +3275,7 @@ export class FoliateReader implements BookReader {
       if (citation.textBasis !== 'reader') {
         const escaped = quote.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         let markup = `<html><body><p>${escaped}</p></body></html>`
-        if (this.replacements.length) markup = await applyReplacementsWithWorker(markup, this.replacements, 'text/html')
+        if (this.replacements.length) markup = await applyBrowserTextReplacements(markup, this.replacements, 'text/html')
         if (this.conversion !== 'off') markup = await convertChinese(markup, this.conversion)
         quote = extractChapterText(new DOMParser().parseFromString(markup, 'text/html')).text
       }

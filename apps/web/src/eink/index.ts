@@ -2,10 +2,11 @@ import './polyfills'
 import '../../public/foliate-js/view.js'
 // @ts-expect-error foliate-js is untyped JS
 import { EPUB } from '../../public/foliate-js/epub.js'
-import type { LibraryListItem } from '@bookdock/shared'
+import type { LibraryListItem, TextReplacementRes } from '@bookdock/shared'
 
 import { markEpubChapterTitle } from '../features/reader/lib/chapter-title'
 import { sanitizeCleanReadingMarkup, shouldSkipCleanReadingResource } from '../features/reader/lib/clean-reading'
+import { applyReplacementsWithWorker, applyTitleReplacementsWithWorker } from '../features/reader/lib/text-replacements'
 import { createProgressSync, restoreProgress } from './progress-sync'
 import { createNextSectionPrefetch } from './next-section-prefetch'
 import { createImageCache } from './image-cache'
@@ -17,6 +18,13 @@ import { createTextCache } from './text-cache'
 
 const app = document.querySelector<HTMLDivElement>('#app') || document.body.appendChild(document.createElement('div'))
 app.id = 'app'
+
+const createReplacementWorker = () => new Worker('/eink/text-replacement.worker.js')
+
+interface TocItem {
+  label?: string
+  subitems?: TocItem[]
+}
 
 let view: any = null
 let book: any = null
@@ -1298,9 +1306,15 @@ async function openBook(id: string, previousPosition?: { cfi: string; revisionId
   const readerView = view
   let imageFailed = false
   try {
-    const [manifestResponse, progressResponse] = await Promise.all([
+    const [manifestResponse, progressResponse, replacementRules] = await Promise.all([
       request(`/books/${id}/reader/manifest`),
-      request(`/progress/${id}?expectedUserId=${encodeURIComponent(accountId)}`)
+      request(`/progress/${id}?expectedUserId=${encodeURIComponent(accountId)}`),
+      request(`/replacements?bookId=${encodeURIComponent(id)}`)
+        .then(async (response) => {
+          const { data }: { data: TextReplacementRes[] } = await response.json()
+          return data.filter((rule) => rule.locationAvailable !== false && (rule.effectiveEnabled ?? rule.enabled))
+        })
+        .catch(() => []),
     ])
     const readerManifest = (await manifestResponse.json()).data
     manifest = readerManifest
@@ -1312,6 +1326,9 @@ async function openBook(id: string, previousPosition?: { cfi: string; revisionId
     const startup = new Map(readerManifest.startupFiles.map((file: any) => [file.path, file.text]))
     const textCache = createTextCache()
     const imageCache = createImageCache()
+    let sectionPaths: Set<string> | undefined
+    const patternRules = replacementRules.filter((rule) => rule.matchType === 'pattern' && rule.pattern)
+    const pointRules = replacementRules.filter((rule) => rule.matchType === 'point')
     const loadText = async (name: string, signal?: AbortSignal) => {
       const cached = textCache.get(name)
       if (cached !== undefined) return cached
@@ -1330,7 +1347,16 @@ async function openBook(id: string, previousPosition?: { cfi: string; revisionId
         text = entry.mediaType === 'application/xhtml+xml' ? (await response.json()).data.text : await response.text()
       }
       text = filterEinkMedia(text, entry.mediaType)
-      if (clean && /^(application\/xhtml\+xml|text\/html)$/i.test(entry.mediaType)) text = sanitizeCleanReadingMarkup(text, entry.mediaType)
+      const mediaType = entry.mediaType.toLowerCase()
+      const isMarkup = mediaType === 'application/xhtml+xml' || mediaType === 'text/html'
+      if (isMarkup) {
+        if (clean) text = sanitizeCleanReadingMarkup(text, mediaType)
+        if (replacementRules.length && !sectionPaths) return text
+        if (sectionPaths?.has(name) && !signal?.aborted) {
+          const rules = [...patternRules, ...pointRules.filter((rule) => rule.spineHref === name)]
+          if (rules.length) text = await applyReplacementsWithWorker(createReplacementWorker, text, rules, mediaType, name)
+        }
+      }
       if (signal?.aborted) return null
       textCache.set(name, text)
       return text
@@ -1361,6 +1387,20 @@ async function openBook(id: string, previousPosition?: { cfi: string; revisionId
       loadText, loadBlob, getSize: (name: string) => (entries.get(name) as any)?.size || 0,
     } as any).init()
     if (book.rendition?.layout === 'pre-paginated') throw new Error(t('eink.fixedLayoutUnsupported'))
+    if (replacementRules.length) sectionPaths = new Set(book.sections.map((section: { id: string }) => section.id))
+    const titleRules = patternRules.filter((rule) => rule.applyTo !== 'content')
+    if (titleRules.length && book.toc?.length) {
+      const items: TocItem[] = []
+      const collectLabels = (toc: TocItem[]) => {
+        for (const item of toc) {
+          if (typeof item.label === 'string') items.push(item)
+          if (item.subitems) collectLabels(item.subitems)
+        }
+      }
+      collectLabels(book.toc)
+      const labels = await applyTitleReplacementsWithWorker(items.map((item) => item.label!), titleRules, createReplacementWorker)
+      items.forEach((item, index) => { item.label = labels[index]! })
+    }
     if (clean) book.transformTarget?.addEventListener('load', (event: any) => {
       if (shouldSkipCleanReadingResource(event.detail?.type, event.detail?.href)) {
         event.detail.allow = true

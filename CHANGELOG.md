@@ -2,6 +2,12 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- The E Ink reader now applies your text replacement rules to chapter text, chapter headings, and table of contents labels. It respects per-book rule toggles and applies point replacements to the passages they target.
+
 ## [0.8.8] - 2026-11-23
 
 ### Highlights
@@ -1415,6 +1421,12 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [待发布]
+
+#### 修复
+
+- E Ink 阅读器现在会在正文、章节标题和目录中应用你的文本替换规则，并遵循单书规则的启停设置，将定点替换应用到指定位置。
 
 ### [0.8.8] - 2026-11-23
 

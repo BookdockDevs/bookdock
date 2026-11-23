@@ -15,6 +15,9 @@ const publicEinkDir = path.join(publicDir, 'eink')
 const publicHtml = path.join(publicDir, 'eink.html')
 const publicIndexHtml = path.join(publicEinkDir, 'index.html')
 const publicJs = path.join(publicEinkDir, 'eink.js')
+const workerEntry = path.join(webRoot, 'src/features/reader/lib/text-replacement.worker.ts')
+const workerName = 'text-replacement.worker.js'
+const publicWorker = path.join(publicEinkDir, workerName)
 
 fs.mkdirSync(publicEinkDir, { recursive: true })
 
@@ -34,6 +37,7 @@ const externals = [
 
 const cmd = `pnpm exec esbuild "${srcEntry}" --bundle --minify --target=es2019 --format=iife --platform=browser ${externals} --outfile="${publicJs}"`
 execSync(cmd, { stdio: 'inherit', cwd: webRoot })
+execSync(`pnpm exec esbuild "${workerEntry}" --bundle --minify --target=es2019 --format=iife --platform=browser --outfile="${publicWorker}"`, { stdio: 'inherit', cwd: webRoot })
 
 // Copy HTML to public/
 const bundleVersion = createHash('sha256').update(fs.readFileSync(publicJs)).digest('hex').slice(0, 12)
@@ -49,6 +53,7 @@ if (fs.existsSync(distDir)) {
   fs.copyFileSync(publicHtml, path.join(distDir, 'eink.html'))
   fs.copyFileSync(publicIndexHtml, path.join(distEinkDir, 'index.html'))
   fs.copyFileSync(publicJs, path.join(distEinkDir, 'eink.js'))
+  fs.copyFileSync(publicWorker, path.join(distEinkDir, workerName))
 }
 
 console.log('[build-eink] E-ink client built successfully!')

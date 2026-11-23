@@ -196,6 +196,7 @@ This section defines the current implementation boundary; older descriptions bel
 ### E-ink Lightweight Reader (2026-10)
 
 The e-ink reader provides a dedicated, zero-runtime-dependency reading client served at `/eink` for resource-constrained browsers, including the tested Kindle browser:
+- **Text replacements**: E Ink loads the current account's effective rules for the book during open. It shares the Web replacement engine for spine text and TOC labels. Chapter loading and prefetch reuse the transformed text cache, and regexes use a classic Worker with a timeout and a literal-only fallback. Rules are refreshed when the book is reopened.
 - **Routing & Device Detection**: `/eink` serves a standalone ES2019-targeted HTML+JS bundle. Hash routes distinguish the shelf from `#/book/:id`, allowing refresh and browser history to restore the selected view. Kindle User-Agent (`Kindle/`) requests to `/` redirect to `/eink` (overridable via `?desktop=1`). Other devices can open `/eink` directly.
 - **Shelf layout**: The shelf chooses columns and complete visible rows from the available viewport and uses the resulting capacity for server pagination. Resizing preserves the previous page's first item within the new page, and re-requests the new page without relying on persistent client caching.
 - **Client Architecture**: Pure DOM with zero framework runtime. Integrates Foliate e-book engine using standard HTTP byte streaming (`/api/v1/books/:id/reader/manifest` and `/entry`).

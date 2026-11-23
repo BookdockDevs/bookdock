@@ -10,8 +10,8 @@ describe('Kindle entry routes', () => {
     expect(text).toContain('/eink/eink.js')
   })
 
-  it('serves the Kindle script rather than redirecting it to HTML', async () => {
-    const res = await app.request('/eink/eink.js')
+  it.each(['/eink/eink.js', '/eink/text-replacement.worker.js'])('serves %s as JavaScript', async (path) => {
+    const res = await app.request(path)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toMatch(/javascript/)
     expect(await res.text()).not.toContain('<!doctype html>')
