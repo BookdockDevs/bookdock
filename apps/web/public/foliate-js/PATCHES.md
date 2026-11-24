@@ -1,5 +1,13 @@
 # foliate-js 本地差异与重放清单
 
+## Foreground chapter positioning
+
+- Baseline: Readest foliate-js `74d8022c3700ea76088afd58c3ae6dabfcaf2cc4`, with Bookdock's current multi-view paginator.
+- Files/symbols: `paginator.js`, foreground `#display`, viewport reconciliation, and teardown.
+- A layout callback can run while the old chapter is still visible and the new iframe is loading. Keep the explicitly requested chapter authoritative until its first anchor is positioned, and invalidate the navigation when the paginator is destroyed. The paginator owns the target view and its lifetime.
+- A valid text anchor can fall on collapsed indentation before the generated TXT heading. When its range has no layout box, scroll to the selected section's start and emit relocation so startup can prepare that section.
+- Verification: `paginator-navigation.html` restores to leading indentation and checks relocation, then switches layout in the target chapter's load event and checks that its document receives the navigation anchor.
+
 ## Personal annotation ink (2026-10-03)
 
 - Ideas additionally opt into `Overlayer.ink({ style: 'dashed' })` for softly tapered dash segments. Generic `dashedUnderline` remains unchanged. The host maps new amber ideas independently of highlight preferences, preserves existing colors, and repaints ideas on reading-theme changes.

@@ -2,12 +2,51 @@ import { DOMParser, Element as XmlElement, type Node as XmlNode } from '@xmldom/
 
 import type { RevisionMapSegment, RevisionSectionPosition, RevisionTextRange } from './revision-map'
 import { createRevisionMap } from './revision-map'
+import { txtChapterHref } from './txt-publication'
 
 interface TextSection extends RevisionSectionPosition {
   text: string
   start: number
   structuralRanges: RevisionTextRange[]
   headingRange?: { start: number; end: number }
+}
+
+export interface TxtEditorChapterIds {
+  source: readonly (string | undefined)[]
+  target: readonly string[]
+}
+
+function mapTxtEditorChapters(
+  source: TextSection[],
+  target: TextSection[],
+  chapterIds: TxtEditorChapterIds,
+): RevisionMapSegment[] | null {
+  const { source: sourceIds, target: targetIds } = chapterIds
+  if (sourceIds.length !== source.length || targetIds.length !== target.length
+    || new Set(sourceIds).size !== sourceIds.length || new Set(targetIds).size !== targetIds.length
+    || sourceIds.some((id) => !id)
+    || source.some((section, index) => section.spineHref !== txtChapterHref(index))
+    || target.some((section, index) => section.spineHref !== txtChapterHref(index))) return null
+
+  const sourceById = new Map(sourceIds.map((id, index) => [id, source[index]!]))
+  const segments: RevisionMapSegment[] = []
+  for (const [index, id] of targetIds.entries()) {
+    const prior = sourceById.get(id)
+    if (!prior) {
+      // These IDs are allocated by the workbench when a draft adds or imports
+      // a chapter. Older callers may instead supply arbitrary IDs for all rows.
+      if (!/^(?:draft|tool)-[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(id)) return null
+      continue
+    }
+    const next = target[index]!
+    if (prior.text !== next.text) return null
+    segments.push({
+      sourceSpineHref: prior.spineHref, targetSpineHref: next.spineHref,
+      sourceStart: 0, sourceEnd: prior.textLength, targetStart: 0, targetEnd: next.textLength,
+    })
+  }
+  // Re-chaptering allocates new IDs to the entire draft, including retained text.
+  return segments.length > 0 ? segments : null
 }
 
 function extractSections(markup: { href: string; markup: string }[]): TextSection[] {
@@ -110,9 +149,20 @@ export function createEpubMarkupRevisionMap(
   sourceMarkup: { href: string; markup: string }[],
   targetMarkup: { href: string; markup: string }[],
   structuralHeadingIndexes: readonly number[] = [],
+  txtEditorChapterIds?: TxtEditorChapterIds,
 ): { segments: RevisionMapSegment[]; sourceSections: RevisionSectionPosition[]; targetSections: RevisionSectionPosition[]; structuralRanges: RevisionTextRange[] } {
-  const source = withOffsets(extractSections(sourceMarkup))
-  const target = withOffsets(extractSections(targetMarkup))
+  const sourceSections = extractSections(sourceMarkup)
+  const targetSections = extractSections(targetMarkup)
+  if (txtEditorChapterIds && structuralHeadingIndexes.length === 0) {
+    const segments = mapTxtEditorChapters(sourceSections, targetSections, txtEditorChapterIds)
+    if (segments) {
+      const describeSections = (sections: TextSection[]): RevisionSectionPosition[] =>
+        sections.map(({ spineHref, size, textLength, title }) => ({ spineHref, size, textLength, title }))
+      return { segments, sourceSections: describeSections(sourceSections), targetSections: describeSections(targetSections), structuralRanges: [] }
+    }
+  }
+  const source = withOffsets(sourceSections)
+  const target = withOffsets(targetSections)
   const sharedHrefs = new Set(target.sections.map((section) => section.spineHref))
   const sourceCommonOrder = source.sections.map((section) => section.spineHref).filter((href) => sharedHrefs.has(href))
   const targetHrefs = new Set(source.sections.map((section) => section.spineHref))

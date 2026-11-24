@@ -44,7 +44,7 @@ export function toRes(kind: 'highlight' | 'bookmark' | 'idea', row: {
       id: row.id, bookId: row.bookVersionId ?? '', cfiRange: row.cfiRange ?? null, cfiAnchor: row.cfiAnchor ?? null,
       type: 'highlight', color: row.color ?? 'yellow', style: (row.style ?? 'highlight') as AnnotationRes['style'],
       text: row.text ?? '', note: null, chapter: row.chapter ?? null, chapterHref: row.chapterHref ?? null,
-      importLocator: row.importLocator ?? null, importChapterIndex: row.importChapterIndex ?? null,
+      revisionId: row.revisionId ?? null, importLocator: row.importLocator ?? null, importChapterIndex: row.importChapterIndex ?? null,
       createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt ?? null,
     }
   }
@@ -208,6 +208,11 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
   await assertReadableBook(userId, bookId, showHidden)
   const snapshot = await getBook(userId, bookId, { showHidden })
   const now = Date.now()
+  const activeRevision = data.type !== 'note' ? ideaRevision(userId, bookId)?.id ?? null : null
+  if (data.type !== 'note' && data.revisionId && data.revisionId !== activeRevision) {
+    throw new AppError('VALIDATION_ERROR', 'The reading revision has changed')
+  }
+  const revisionId = data.revisionId === null ? null : activeRevision
   if (data.type === 'highlight') {
     return db.transaction((tx) => {
       savePersonalBookSnapshot(tx as unknown as ReturnType<typeof getDb>, userId, bookId, snapshot)
@@ -225,7 +230,9 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
           eq(highlights.userId, userId),
           eq(highlights.bookVersionId, bookId),
           eq(highlights.cfiRange, data.cfiRange),
-        )).get()
+          eq(highlights.relocation, 'ok'),
+          or(isNull(highlights.revisionId), revisionId ? eq(highlights.revisionId, revisionId) : undefined),
+        )).orderBy(desc(highlights.revisionId)).get()
       if (existing) {
         tx.update(highlights).set({
           cfiAnchor: data.cfiAnchor ?? existing.cfiAnchor,
@@ -234,6 +241,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
           text: data.text ?? existing.text,
           chapter: data.chapter ?? existing.chapter,
           chapterHref: data.chapterHref ?? existing.chapterHref,
+          revisionId,
           deletedAt: null,
           updatedAt: now,
         }).where(eq(highlights.id, existing.id)).run()
@@ -243,7 +251,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
         id: createId('hl'),
         userId,
         bookVersionId: bookId,
-        revisionId: null,
+        revisionId,
         cfiRange: data.cfiRange,
         cfiAnchor: data.cfiAnchor ?? null,
         color: data.color ?? 'yellow',
@@ -261,15 +269,15 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
     })
   }
   if (data.type === 'bookmark') {
-    const revision = ideaRevision(userId, bookId)
-    if (data.revisionId && data.revisionId !== revision?.id) throw new AppError('VALIDATION_ERROR', 'The reading revision has changed')
     savePersonalBookSnapshot(db, userId, bookId, snapshot)
     const existing = db.select().from(bookmarks)
       .where(and(
         eq(bookmarks.userId, userId),
         eq(bookmarks.bookVersionId, bookId),
         eq(bookmarks.cfi, data.cfiRange),
-      )).get()
+        eq(bookmarks.relocation, 'ok'),
+        or(isNull(bookmarks.revisionId), revisionId ? eq(bookmarks.revisionId, revisionId) : undefined),
+      )).orderBy(desc(bookmarks.revisionId)).get()
     if (existing) {
       db.update(bookmarks).set({
         chapter: data.chapter ?? existing.chapter,
@@ -278,7 +286,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
         // explicit new text wins, otherwise the surviving title stays.
         title: data.text ?? existing.title,
         contextText: data.contextText ?? existing.contextText,
-        revisionId: data.revisionId === null ? null : revision?.id ?? null,
+        revisionId,
         deletedAt: null,
         updatedAt: now,
       }).where(eq(bookmarks.id, existing.id)).run()
@@ -288,7 +296,7 @@ export async function createAnnotation(userId: string, bookId: string, data: Ann
       id: createId('bm'),
       userId,
       bookVersionId: bookId,
-      revisionId: data.revisionId === null ? null : revision?.id ?? null,
+      revisionId,
       cfi: data.cfiRange,
       chapter: data.chapter ?? null,
       chapterHref: data.chapterHref ?? null,

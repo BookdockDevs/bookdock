@@ -65,6 +65,28 @@ describe('EPUB revision mapping', () => {
     expect(mapping.segments).toEqual([])
   })
 
+  it('preserves coverage only on retained TXT chapters after moving and inserting identical text', async () => {
+    const added = 'draft-12345678-1234-4234-8234-123456789abc'
+    const sourceIds = ['first', 'second']
+    const targetIds = ['second', added, 'first']
+    const makeArchive = (ids: string[]) => convertTxtToEpub(
+      { title: 'Book' },
+      ids.map((id) => ({ id, title: 'Identical title', level: 1 })),
+      () => 'Identical body.',
+    )
+    const [before, after] = await Promise.all([makeArchive(sourceIds), makeArchive(targetIds)])
+    const mapping = await createEpubRevisionMap(before, after, [], { source: sourceIds, target: targetIds })
+
+    expect(mapping.segments.map(({ sourceSpineHref, targetSpineHref }) => [sourceSpineHref, targetSpineHref])).toEqual([
+      ['OEBPS/chapter-0002.xhtml', 'OEBPS/chapter-0001.xhtml'],
+      ['OEBPS/chapter-0001.xhtml', 'OEBPS/chapter-0003.xhtml'],
+    ])
+    const actualCoverage = projectRevisionCoverage([[0, 1]], mapping.sourceSections, mapping.targetSections, mapping.segments)
+    expect(actualCoverage).toHaveLength(2)
+    expect(actualCoverage[0]![1]).toBeCloseTo(1 / 3)
+    expect(actualCoverage[1]![0]).toBeCloseTo(2 / 3)
+  })
+
   it('keeps a pure split fully covered when its new heading is marked structural', async () => {
     const first = Array.from({ length: 20 }, (_, index) => `原章节正文前半部分第${index}段，有稳定且唯一的内容。`).join('')
     const second = Array.from({ length: 20 }, (_, index) => `原章节正文后半部分第${index}段，保留各自不同的信息。`).join('')

@@ -1047,7 +1047,9 @@ export const highlights = sqliteTable('highlights', {
   deletedAt: integer('deleted_at'),
 }, (table) => ({
   userVersionIdx: index('highlights_user_version_idx').on(table.userId, table.bookVersionId, table.deletedAt),
-  userVersionCfiUnique: uniqueIndex('highlights_user_version_cfi_unique').on(table.userId, table.bookVersionId, table.cfiRange),
+  userVersionCfiUnique: uniqueIndex('highlights_user_version_cfi_unique')
+    .on(table.userId, table.bookVersionId, sql`coalesce(${table.revisionId}, '')`, table.cfiRange)
+    .where(sql`${table.relocation} = 'ok'`),
   importKeyUnique: uniqueIndex('highlights_import_key_unique').on(table.userId, table.importKey).where(sql`${table.importKey} IS NOT NULL`),
 }))
 
@@ -1073,7 +1075,9 @@ export const bookmarks = sqliteTable('bookmarks', {
   deletedAt: integer('deleted_at'),
 }, (table) => ({
   userVersionIdx: index('bookmarks_user_version_idx').on(table.userId, table.bookVersionId, table.deletedAt),
-  userVersionCfiUnique: uniqueIndex('bookmarks_user_version_cfi_unique').on(table.userId, table.bookVersionId, table.cfi),
+  userVersionCfiUnique: uniqueIndex('bookmarks_user_version_cfi_unique')
+    .on(table.userId, table.bookVersionId, sql`coalesce(${table.revisionId}, '')`, table.cfi)
+    .where(sql`${table.relocation} = 'ok'`),
   importKeyUnique: uniqueIndex('bookmarks_import_key_unique').on(table.userId, table.importKey).where(sql`${table.importKey} IS NOT NULL`),
 }))
 

@@ -484,6 +484,13 @@
       "when": 1795392000000,
       "tag": "0070_book_share_links",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1795480000000,
+      "tag": "0071_annotation_revision_cfi",
+      "breakpoints": true
     }
   ]
 }

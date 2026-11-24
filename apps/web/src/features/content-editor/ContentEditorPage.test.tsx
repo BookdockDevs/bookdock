@@ -32,7 +32,14 @@ vi.mock('./hooks/useEditorContent', () => ({
   useEditorTxtSource: () => mocks.sourcePending
     ? { data: undefined, isPending: true }
     : { data: mocks.multiChapter ? '第一章\n\n正文一\n\n第二章\n\n正文二\n\n第三章\n\n正文三' : '第一章\n\n正文' },
-  useSaveEditorTxt: () => ({ mutateAsync: mocks.save, isPending: mocks.pending }),
+  useSaveEditorTxt: (_id: string, _target: unknown, clearSavedDraft: () => Promise<boolean>) => ({
+    mutateAsync: async (input: unknown) => {
+      const result = await mocks.save(input)
+      await clearSavedDraft()
+      return result
+    },
+    isPending: mocks.pending,
+  }),
 }))
 
 vi.mock('@/api/hooks/useTocRules', () => ({
@@ -64,7 +71,7 @@ describe('ContentEditorPage', () => {
     mocks.multiChapter = false
     mocks.sourcePending = false
     mocks.save.mockReset().mockResolvedValue({ data: { revisionId: 'rev-2', changed: true, unlocated: { progress: 0, coverage: 0, highlights: 0, bookmarks: 0, notes: 0, pointReplacements: 0 } } })
-    mocks.clear.mockReset().mockResolvedValue(undefined)
+    mocks.clear.mockReset().mockResolvedValue(true)
     useToastStore.getState().clearToasts()
   })
 
@@ -78,6 +85,10 @@ describe('ContentEditorPage', () => {
   })
 
   it('keeps text changes in one draft, supports undo, and saves against the opened revision', async () => {
+    mocks.save.mockResolvedValueOnce({ data: {
+      revisionId: 'rev-2', changed: true, chapterIds: ['ch-0'],
+      unlocated: { progress: 0, coverage: 0, highlights: 0, bookmarks: 0, notes: 0, pointReplacements: 0 },
+    } })
     render(<ContentEditorPage />)
     const body = await screen.findByRole('textbox', { name: '章节正文' })
     await waitFor(() => expect(body).toHaveValue('正文'))
@@ -99,9 +110,13 @@ describe('ContentEditorPage', () => {
     expect(mocks.clear).toHaveBeenCalledOnce()
     expect(screen.queryByTitle('暂存只在当前浏览器生效，不会正式保存。点击查看修改。')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
-    fireEvent.change(body, { target: { value: '保存后的新修改' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '章节正文' }), { target: { value: '保存后的新修改' } })
     expect(screen.getByText('已暂存 1 项修改')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(mocks.save).toHaveBeenLastCalledWith(expect.objectContaining({
+      baseRevisionId: 'rev-2',
+      chapters: [{ id: 'ch-0', title: '第一章', content: '保存后的新修改', level: 1 }],
+    })))
   })
 
   it('clears the dirty indicator after a chapter title is saved', async () => {

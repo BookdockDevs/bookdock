@@ -118,7 +118,7 @@ describe('Toast', () => {
     const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
       return this.hasAttribute('data-toast-obstacle')
         ? new DOMRect(20, window.innerHeight - 80, 340, 40)
-        : new DOMRect(16, 0, 360, 100)
+        : new DOMRect(16, window.innerHeight - 116, 360, 100)
     })
     try {
       useToastStore.getState().addToast('Failed', 'error')
@@ -137,7 +137,7 @@ describe('Toast', () => {
       if (this.hasAttribute('hidden')) return new DOMRect(640, window.innerHeight - 80, 360, 0)
       return this.hasAttribute('data-toast-obstacle')
         ? new DOMRect(0, window.innerHeight - 80, 200, 40)
-        : new DOMRect(640, 0, 360, 100)
+        : new DOMRect(640, window.innerHeight - 116, 360, 100)
     })
     try {
       useToastStore.getState().addToast('Saved', 'success')
@@ -148,11 +148,25 @@ describe('Toast', () => {
     }
   })
 
+  it('keeps the default bottom position when a dialog footer is above it', () => {
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.dataset.testid === 'dialog-action') return new DOMRect(680, window.innerHeight - 180, 140, 40)
+      return new DOMRect(640, window.innerHeight - 76, 360, 60)
+    })
+    try {
+      useToastStore.getState().addToast('Imported', 'success')
+      render(<><div data-toast-obstacle="contents"><button data-testid="dialog-action">Done</button></div><Toast /></>)
+      expect(screen.getByRole('status').parentElement!.style.getPropertyValue('--bd-toast-clearance')).toBe('0px')
+    } finally {
+      geometry.mockRestore()
+    }
+  })
+
   it('measures visible controls inside a transparent reader hover corridor', () => {
     const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
       if (this.dataset.testid === 'reader-pill') return new DOMRect(20, window.innerHeight - 70, 340, 40)
       if (this.hasAttribute('data-toast-obstacle')) return new DOMRect(20, window.innerHeight - 240, 340, 210)
-      return new DOMRect(16, 0, 360, 100)
+      return new DOMRect(16, window.innerHeight - 116, 360, 100)
     })
     try {
       useToastStore.getState().addToast('Saved', 'success')

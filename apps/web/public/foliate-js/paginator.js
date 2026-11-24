@@ -1477,6 +1477,7 @@ export class Paginator extends HTMLElement {
     // A navigation may be superseded while a section or adjacent preload is
     // still loading. Only the newest navigation may reveal or re-anchor DOM.
     #displayGeneration = 0
+    #positioningSection = false
     #navigationController = null
     #lastLayout = null // cached layout from the last #beforeRender call
     // Cache of section index → vertical (boolean). Populated as views
@@ -1888,6 +1889,7 @@ export class Paginator extends HTMLElement {
         super.setAttribute(name, value)
     }
     #flushVisibleState() {
+        if (this.#positioningSection) return
         if (this.scrolled && this.#views.size > 1) this.#detectPrimaryView()
         const visible = this.#getVisibleRange()
         if (visible?.range) {
@@ -2461,14 +2463,16 @@ export class Paginator extends HTMLElement {
         }
         // Mode-specific reader styles are applied after the flow attribute,
         // so restore the captured text after those styles have reflowed it.
-        const flowSwitch = previousLayout && previousLayout.flow !== layout.flow
-        if (flowSwitch) {
-            const anchor = this.#anchor
-            requestAnimationFrame(() => this.#scrollToAnchor(anchor, 'flow-switch'))
-        } else if (anchorOffset == null || !this.#restoreAnchorScrollOffset(anchorOffset)) {
-            this.#scrollToAnchor(this.#anchor)
+        if (!this.#positioningSection) {
+            const flowSwitch = previousLayout && previousLayout.flow !== layout.flow
+            if (flowSwitch) {
+                const anchor = this.#anchor
+                requestAnimationFrame(() => this.#scrollToAnchor(anchor, 'flow-switch'))
+            } else if (anchorOffset == null || !this.#restoreAnchorScrollOffset(anchorOffset)) {
+                this.#scrollToAnchor(this.#anchor)
+            }
         }
-        this.#stabilizing = false
+        this.#stabilizing = this.#positioningSection
         // Pure container resizes re-render without growing any view, so the
         // expand hook above would never fire for them: consume a deferred
         // fill here as well, once and position-preserving.
@@ -3398,12 +3402,11 @@ export class Paginator extends HTMLElement {
         this.#anchor = anchor
         const rects = uncollapse(anchor)?.getClientRects?.()
         // if anchor is an element or a range
-        if (rects) {
+        if (rects?.length) {
             // when the start of the range is immediately after a hyphen in the
             // previous column, there is an extra zero width rect in that column
             const rect = Array.from(rects)
                 .find(r => r.width > 0 && r.height > 0 && r.x >= 0 && r.y >= 0) || rects[0]
-            if (!rect) return
             await this.#scrollToRect(rect, reason, smooth)
             // focus the element when navigating with keyboard or screen reader
             if (reason === 'navigation') {
@@ -3422,14 +3425,16 @@ export class Paginator extends HTMLElement {
             }
             return
         }
-        // if anchor is a fraction
+        // A valid CFI can point to collapsed whitespace with no layout box.
+        // Position the selected section at its start so relocation still runs.
+        const fraction = typeof anchor === 'number' ? anchor : 0
         if (this.scrolled) {
             // In scrolled mode with multi-view, offset to the primary view's position
             const primaryOffset = this.#getViewOffset(this.#primaryIndex)
             const primaryView = this.#primaryView
             const primarySize = primaryView
                 ? primaryView.element.getBoundingClientRect()[this.sideProp] : this.#renderedViewSize
-            await this.#scrollTo(primaryOffset + anchor * primarySize, reason, smooth)
+            await this.#scrollTo(primaryOffset + fraction * primarySize, reason, smooth)
             return
         }
         // In paginated mode, account for pages before the primary section
@@ -3439,7 +3444,7 @@ export class Paginator extends HTMLElement {
         const textPages = primaryView.contentPages
         if (!textPages) return
         // textPages is in column units; convert to spread page for scrolling
-        const newColumn = Math.round(anchor * (textPages - 1))
+        const newColumn = Math.round(fraction * (textPages - 1))
         const newSpreadPage = Math.floor(newColumn / this.columnCount)
         await this.#scrollToPage(pagesBeforePrimary + newSpreadPage, reason, smooth)
     }
@@ -3500,7 +3505,7 @@ export class Paginator extends HTMLElement {
     }
     // Determine which view is primary based on scroll position
     #detectPrimaryView() {
-        if (this.#views.size <= 1) return
+        if (this.#positioningSection || this.#views.size <= 1) return
         // A paginated spread may contain the end of one section and the start
         // of the next. Treat the later visible section as current so a TOC
         // jump to it does not revert to the preceding section on relocation.
@@ -3835,10 +3840,12 @@ export class Paginator extends HTMLElement {
             void this.prev()
         }
     }
-    async #display(promise) {
-        const generation = ++this.#displayGeneration
+    async #display(promise, generation) {
         const isCurrent = () => generation === this.#displayGeneration
         const blank = !this.scrolled || this.noContinuousScroll
+        // Layout and scroll callbacks may still see the outgoing chapter
+        // while the destination iframe is loading.
+        this.#positioningSection = true
         this.#stabilizing = true
         this.#container.style.opacity = blank ? '0' : '1'
         let fillStarted = false
@@ -3909,7 +3916,7 @@ export class Paginator extends HTMLElement {
                 }))
             }
             // Pre-load previous section only for short paginated alignment.
-            const primaryView = this.#primaryView
+            const primaryView = this.#views.get(index)
             if (!this.noPreload && !this.noContinuousScroll && primaryView) {
                 const needsPrev = (primaryView.contentPages > 0 && primaryView.contentPages < this.columnCount)
                 if (needsPrev) {
@@ -3924,6 +3931,9 @@ export class Paginator extends HTMLElement {
                 }
             }
             if (!isCurrent()) return
+            if (!primaryView?.document || this.#views.get(index) !== primaryView)
+                throw new Error(`Section ${index} lost its view while loading`)
+            this.#primaryIndex = index
             const resolvedAnchor = (typeof anchor === 'function'
                 ? anchor(primaryView.document) : anchor) ?? 0
             await this.scrollToAnchor(resolvedAnchor, select)
@@ -3949,9 +3959,12 @@ export class Paginator extends HTMLElement {
                 () => { if (isCurrent()) this.#stabilizing = false },
             )
         } finally {
-            if (isCurrent() && !fillStarted) {
-                this.#container.style.opacity = '1'
-                this.#stabilizing = false
+            if (isCurrent()) {
+                this.#positioningSection = false
+                if (!fillStarted) {
+                    this.#container.style.opacity = '1'
+                    this.#stabilizing = false
+                }
             }
         }
     }
@@ -4209,6 +4222,7 @@ export class Paginator extends HTMLElement {
         if (this.hasAttribute('eink') && typeof anchor === 'number') this.#anchor = anchor
         const generation = ++this.#displayGeneration
         const isCurrent = () => generation === this.#displayGeneration
+        this.#positioningSection = false
         this.#navigationController?.abort(new DOMException('Reader navigation was replaced', 'AbortError'))
         const navigationController = new AbortController()
         this.#navigationController = navigationController
@@ -4345,7 +4359,7 @@ export class Paginator extends HTMLElement {
                         console.warn(e)
                         console.warn(new Error(`Failed to load section ${index}`))
                         throw e
-                    }))
+                    }), generation)
             } catch (error) {
                 if (isCurrent()) {
                     // #display may have assigned the failed target as primary
@@ -4627,6 +4641,8 @@ export class Paginator extends HTMLElement {
         this.#einkPreloadTimer = null
         this.#navigationController?.abort(new DOMException('Reader view was destroyed', 'AbortError'))
         this.#navigationController = null
+        this.#displayGeneration++
+        this.#positioningSection = false
         this.#selectionDrag.destroy()
         this.#clearContinuousBufferTimer()
         const transition = (this.#vtDrag ?? this.#vtFinishing)?.transition

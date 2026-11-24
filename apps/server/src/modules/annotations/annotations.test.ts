@@ -97,6 +97,23 @@ describe('annotations service', () => {
     expect(items).toHaveLength(1)
   })
 
+  it.each(['highlight', 'bookmark'] as const)('creates a new %s when an older revision used the same CFI', async (type) => {
+    const cfiRange = 'epubcfi(/6/2!/4/2/1:0)'
+    const earlier = await createAnnotation(ownerId, bookId, { type, cfiRange, text: 'old chapter' })
+    const revisionId = createId('rev')
+    db.insert(schema.contentRevisions).values({
+      id: revisionId, bookVersionId: bookId, revisionNo: 2, blobKey: 'second.epub', size: 100, createdAt: Date.now(),
+    }).run()
+
+    const current = await createAnnotation(ownerId, bookId, { type, cfiRange, revisionId, text: 'current chapter' })
+    expect(current).toMatchObject({ revisionId, text: 'current chapter' })
+    expect(current.id).not.toBe(earlier.id)
+    expect(await listAnnotations(ownerId, bookId)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: earlier.id, text: 'old chapter', locationAvailable: false }),
+      expect.objectContaining({ id: current.id, text: 'current chapter', locationAvailable: true }),
+    ]))
+  })
+
   it('should reject annotation creation on another user\'s book with BOOK_NOT_FOUND', async () => {
     await expect(createAnnotation(otherId, bookId, {
       cfiRange: 'epubcfi(/6/2!/4/2)',

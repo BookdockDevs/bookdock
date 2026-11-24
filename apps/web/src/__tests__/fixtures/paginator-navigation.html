@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Paginator navigation test</title>
+<output id="result">Running</output>
+<div id="host" style="width: 560px; height: 380px"></div>
+<script type="module">
+const result = document.querySelector('#result')
+try {
+    await import(/* @vite-ignore */ new URL('/foliate-js/paginator.js', location.href).href)
+} catch (error) {
+    result.textContent = String(error)
+    throw error
+}
+const renderer = document.createElement('foliate-paginator')
+renderer.setAttribute('flow', 'scrolled')
+renderer.setAttribute('no-preload', '')
+renderer.style.cssText = 'display: block; width: 100%; height: 100%'
+document.querySelector('#host').append(renderer)
+
+const urls = []
+const sections = Array.from({ length: 4 }, (_, index) => {
+    const text = `<!doctype html><title>Chapter ${index + 1}</title><body>\n  <h1>Chapter ${index + 1}</h1><p>${`Chapter ${index + 1} text. `.repeat(1000)}</p></body>`
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/html' }))
+    urls.push(url)
+    return { id: String(index), size: text.length, load: () => url, loadContent: () => text }
+})
+
+let phase = 'open'
+try {
+    renderer.open({ sections, dir: 'ltr' })
+    let relocatedIndex = null
+    renderer.addEventListener('relocate', event => { relocatedIndex = event.detail.index })
+    await renderer.goTo({ index: 2, anchor: doc => {
+        const range = doc.createRange()
+        range.setStart(doc.body.firstChild, 3)
+        range.collapse(true)
+        return range
+    } })
+    if (relocatedIndex !== 2) throw new Error(`Invisible saved anchor did not position chapter 3: ${relocatedIndex}`)
+
+    await renderer.goTo({ index: 0, anchor: 0 })
+
+    phase = 'jump'
+    renderer.addEventListener('load', event => {
+        if (event.detail.index === 3) renderer.setAttribute('flow', 'paginated')
+    })
+    let anchoredTitle
+    await renderer.goTo({ index: 3, anchor: doc => {
+        anchoredTitle = doc.title
+        return 0
+    } })
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+
+    if (renderer.primaryIndex !== 3 || anchoredTitle !== 'Chapter 4') {
+        throw new Error(`Wrong chapter at the navigation anchor: ${renderer.primaryIndex}, ${anchoredTitle}`)
+    }
+    result.textContent = 'Passed: the requested chapter stayed current'
+} catch (error) {
+    result.textContent = `Failed (${phase}): ${error?.stack ?? String(error)}`
+} finally {
+    renderer.destroy()
+    renderer.remove()
+    for (const url of urls) URL.revokeObjectURL(url)
+}
+</script>
+</html>

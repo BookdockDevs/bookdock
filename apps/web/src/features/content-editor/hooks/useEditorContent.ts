@@ -48,10 +48,17 @@ export function decodeEditorTxtFile(bookId: string, file: File) {
   return apiUpload<{ data: EditorTxtDecodeRes }>(`/books/${encodeURIComponent(bookId)}/editor-txt-decode`, file)
 }
 
-export function useSaveEditorTxt(bookId: string, target?: ManagedEditorTarget) { return useSaveEditorContent<EditorTxtSaveReq>('txt', bookId, target) }
-export function useSaveEditorEpub(bookId: string, target?: ManagedEditorTarget) { return useSaveEditorContent<EditorEpubSaveReq>('epub', bookId, target) }
+export function useSaveEditorTxt(bookId: string, target: ManagedEditorTarget | undefined, clearSavedDraft: () => Promise<boolean>) {
+  return useSaveEditorContent<EditorTxtSaveReq>('txt', bookId, target, clearSavedDraft)
+}
 
-function useSaveEditorContent<T extends EditorTxtSaveReq | EditorEpubSaveReq>(format: 'txt' | 'epub', bookId: string, target?: ManagedEditorTarget) {
+export function useSaveEditorEpub(bookId: string, target: ManagedEditorTarget | undefined, clearSavedDraft: () => Promise<boolean>) {
+  return useSaveEditorContent<EditorEpubSaveReq>('epub', bookId, target, clearSavedDraft)
+}
+
+function useSaveEditorContent<T extends EditorTxtSaveReq | EditorEpubSaveReq>(
+  format: 'txt' | 'epub', bookId: string, target: ManagedEditorTarget | undefined, clearSavedDraft: () => Promise<boolean>,
+) {
   const queryClient = useQueryClient()
   const local = useLocalCatalog()
   const account = useAuthStore((state) => state.user)
@@ -80,11 +87,21 @@ function useSaveEditorContent<T extends EditorTxtSaveReq | EditorEpubSaveReq>(fo
       if (getAuthSessionRevision() !== epoch) throw new DOMException('Editor account changed', 'AbortError')
       return result
     },
-    onSuccess: async () => {
+    onSuccess: async ({ data }) => {
+      if (!local && getAuthSessionRevision() !== epoch) return
+      // A source refresh can restart draft recovery against the new revision.
+      await clearSavedDraft()
       if (!local && getAuthSessionRevision() !== epoch) return
       if (local) {
         await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'client-catalog' || query.queryKey.some((part) => typeof part === 'string' && part.startsWith('local:') && part.includes(JSON.stringify(local.scope))) })
         return
+      }
+      if (data.changed) {
+        // A returning reader can mount from inactive cache entries before
+        // their refetch completes. Old TXT chapter paths are ordinal.
+        for (const key of ['book', 'chapters', 'progress']) {
+          queryClient.removeQueries({ queryKey: [key, bookId], type: 'inactive' })
+        }
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['book', bookId] }),

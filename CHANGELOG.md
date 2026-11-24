@@ -2,6 +2,21 @@
 
 All notable changes to Bookdock are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Simplified workbench save and reading-position messages, along with confirmations for saving or publishing theme items and warnings about missing images or full local image storage.
+
+### Fixed
+
+- Adding, deleting, or moving chapters in the server TXT workbench preserves reading positions, notes, bookmarks, highlights, and read coverage in unchanged chapters. Consecutive saves keep using the latest chapter identities, including for chapters with identical titles and text.
+- Bookmarks and highlights can share the same location string across content revisions. Reusing that location in a new revision preserves the older record and no longer blocks a save.
+- Saving a TXT or EPUB draft clears the local copy before reloading the book, avoiding a false draft conflict after a successful save. Reopening an edited server book uses the updated table of contents and reading position.
+- The reader keeps the requested chapter when its layout changes during loading. A saved position on invisible chapter whitespace now opens at the start of that chapter.
+- Notifications stay at the bottom of the window unless they overlap controls. On desktop, an upload dialog above the bottom-right corner no longer pushes them upward.
+- Legado preserves paragraph breaks when applying TXT replacement rules, so line-scoped regular expressions no longer match across paragraphs.
+
 ## [0.8.9] - 2026-11-24
 
 ### Highlights
@@ -1444,6 +1459,21 @@ All notable changes to Bookdock are documented here.
 - This release does not include an in-app backup center or online restore.
 
 ## 中文
+
+### [未发布]
+
+#### 优化
+
+- 精简工作台保存和阅读位置相关提示，以及主题项目保存、发布成功和图片缺失、本地图片存储已满时的提示文案。
+
+#### 修复
+
+- 在服务端 TXT 工作台新增、删除或移动章节后，未改动章节里的阅读位置、笔记、书签、高亮和已读范围会跟随章节迁移。连续保存会使用最新的章节标识，标题和正文完全相同的章节也能区分。
+- 不同内容版本的书签和高亮可以使用相同的定位字符串。在新版中复用同一定位时，旧记录会保留，编辑也能正常保存。
+- TXT 和 EPUB 工作台正式保存成功后，会先清理本地草稿再刷新书籍，避免误报草稿冲突。重新打开编辑过的服务端书籍时，会使用更新后的目录和阅读位置。
+- 加载章节期间发生布局变化时，阅读器会保持目标章节。保存的位置落在不可见的章内空白时，会打开该章开头。
+- 通知默认贴在窗口底部，仅在与控件重叠时上移。桌面端上传弹窗位于右下角上方时，通知会留在右下角。
+- Legado 对 TXT 正文应用替换规则时会保留段落换行，按行匹配的正则不会误跨段落。
 
 ### [0.8.9] - 2026-11-24
 

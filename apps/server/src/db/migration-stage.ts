@@ -25,6 +25,7 @@ export const FONT_LOCAL_NAMES_TAG = '0065_font_local_names'
 export const READING_RESOURCES_AI_FOUNDATION_TAG = '0066_reading_resources_ai_foundation'
 export const BOOK_DESCRIPTION_OVERRIDE_TAG = '0067_book_description_override'
 export const BOOK_CLASSIFICATION_VALUES_TAG = '0068_book_classification_values'
+export const ANNOTATION_REVISION_CFI_TAG = '0071_annotation_revision_cfi'
 
 /** Guarded revert of 0061_instance_invites and 0062_ai_chat_jobs for legacy-fixture
  * tests that reset the migration watermark and re-run the chain from an earlier
@@ -36,6 +37,12 @@ export function revertInstanceAndAiJobsSchema(
   const table = (name: string) => sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").all(name).length > 0
   const columns = (name: string) => new Set((sqlite.prepare(`PRAGMA table_info(${name})`).all() as Array<{ name: string }>).map((column) => column.name))
 
+  // The older fixture drops relocation, which the current CFI indexes use.
+  for (const [name, cfi] of [['bookmarks', 'cfi'], ['highlights', 'cfi_range']]) {
+    if (!table(name)) continue
+    sqlite.exec(`DROP INDEX IF EXISTS ${name}_user_version_cfi_unique;
+      CREATE UNIQUE INDEX ${name}_user_version_cfi_unique ON ${name} (user_id, book_version_id, ${cfi})`)
+  }
   for (const name of ['trash', 'new_revision', 'source_change', 'membership_delete', 'membership_demote', 'owner_change', 'disable']) {
     sqlite.exec(`DROP TRIGGER IF EXISTS book_share_links_on_${name}`)
   }
@@ -303,7 +310,7 @@ export function migrateBeforeBookRetirementIncluding(
   // Older partial fixtures lack book_reviews, so stage only the archive/annotation portion there.
   // MEMBER_RESOURCE_UPLOAD_TAG keeps the drizzle `instance` shape and its
   // settings queries consistent across service-test fixtures.
-  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG, FONT_LOCAL_NAMES_TAG, READING_RESOURCES_AI_FOUNDATION_TAG, BOOK_DESCRIPTION_OVERRIDE_TAG, BOOK_CLASSIFICATION_VALUES_TAG])
+  const include = new Set([...includeTags, BOOK_STATE_PROGRESS_TAG, READING_LEDGER_TAG, READING_PROJECTION_TAG, CONTENT_EDITOR_TAG, READING_IMPORTS_TAG, INSTANCE_INVITES_TAG, AI_CHAT_JOBS_TAG, ANCHOR_EVIDENCE_TAG, MEMBER_RESOURCE_UPLOAD_TAG, FONT_LOCAL_NAMES_TAG, READING_RESOURCES_AI_FOUNDATION_TAG, BOOK_DESCRIPTION_OVERRIDE_TAG, BOOK_CLASSIFICATION_VALUES_TAG, ANNOTATION_REVISION_CFI_TAG])
   migrateWithTagFilter(
     db,
     options,

@@ -206,7 +206,7 @@ export default function UploadFilesPanel({ items, maxBytes, dragOver, setDragOve
           the close affordance is the header X, and adding files is the drop
           zone above, which is the bigger and more obvious of the two. */}
       {items.length > 0 && (
-        <div data-upload-actions="" data-toast-obstacle={toastObstacle ? '' : undefined} className="mt-6 flex justify-end gap-3">
+        <div data-upload-actions="" data-toast-obstacle={toastObstacle ? 'contents' : undefined} className="mt-6 flex justify-end gap-3">
           {hasPending ? (
             <Button onClick={onStartUpload}>{_('library.upload')}</Button>
           ) : isUploading ? (

@@ -229,7 +229,6 @@ function ContentEditorWorkbench() {
   usePageTitle(book ? _('editor.documentTitle', { title: book.title }) : _('editor.title'))
   const chaptersQuery = useEditorChapters(id, book?.format === 'txt', book?.revisionId)
   const sourceQuery = useEditorTxtSource(book)
-  const saveMutation = useSaveEditorTxt(id, managedTarget)
   const tocRulesQuery = useTocRules(!local || Boolean(serviceAccount))
 
   const [draft, setDraft] = useState<EditorDraft | null>(null)
@@ -378,7 +377,7 @@ function ContentEditorWorkbench() {
   }
 
   async function saveDraft() {
-    if (!draftRevisionId.current || !draft || (differences.length === 0 && !ruleSelectionChanged)) return
+    if (savingRef.current || !draftRevisionId.current || !draft || (differences.length === 0 && !ruleSelectionChanged)) return
     if ((libraryId || libraryBookId || versionLinkId) && !managedTarget) {
       setSaveError(true)
       return
@@ -399,13 +398,17 @@ function ContentEditorWorkbench() {
         })),
         tocRuleSelection: draft.tocRuleSelection,
       })
-      await localDraft.clear()
-      setDraft(createEditorDraft(draft.units.map((unit) => {
-        const savedUnit = { ...unit, structureOnlyTitle: false }
+      const savedIds = new Map(draft.units.map((unit, index) => [unit.id, response.data.chapterIds?.[index] ?? unit.id]))
+      const savedDraft = createEditorDraft(draft.units.map((unit) => {
+        const savedUnit = { ...unit, id: savedIds.get(unit.id)!, structureOnlyTitle: false }
         delete savedUnit.titleChanged
         delete savedUnit.contentChanged
         return savedUnit
-      }), draft.tocRuleSelection))
+      }), draft.tocRuleSelection)
+      setDraft({ ...savedDraft, activeUnitId: savedIds.get(draft.activeUnitId ?? '') ?? savedDraft.activeUnitId })
+      setSelectedIds((ids) => ids.map((unitId) => savedIds.get(unitId) ?? unitId))
+      setCollapsedIds((ids) => ids.map((unitId) => savedIds.get(unitId) ?? unitId))
+      lastSelectedIdRef.current = savedIds.get(lastSelectedIdRef.current ?? '') ?? null
       draftRevisionId.current = response.data.revisionId
       const unlocatedCount = Object.values(response.data.unlocated).reduce((sum, count) => sum + count, 0)
       if (unlocatedCount) notify.warning({ key: 'editor.savePartial', params: { count: unlocatedCount } })
@@ -472,15 +475,16 @@ function ContentEditorWorkbench() {
     draft && JSON.stringify(draft.tocRuleSelection) !== JSON.stringify(draft.baselineTocRuleSelection),
   )
   const hasChanges = differences.length > 0 || ruleSelectionChanged
-  const navigation = useDraftNavigationGuard(hasChanges, saving || saveMutation.isPending, id)
   const access = useEditorAccess(id, book?.revisionId, managedTarget, book?.format === 'txt' && !invalidTarget)
   const localDraft = useLocalEditorDraft({
     bookId: id, format: 'txt', target: managedTarget, revisionId: draftRevisionId.current,
     enabled: Boolean(book?.format === 'txt' && access === 'allowed' && draft && !sourceQuery.isError && !chaptersQuery.isError),
-    dirty: hasChanges, schema: txtPayloadSchema, changeToken: draft,
+    dirty: hasChanges, saving, schema: txtPayloadSchema, changeToken: draft,
     payload: () => serializeTxtDraft(draft!),
     restore: (payload) => { const recovered = draft && restoreTxtDraft(draft, payload); if (!recovered) return false; setDraft(recovered); return true },
   })
+  const saveMutation = useSaveEditorTxt(id, managedTarget, localDraft.clear)
+  const navigation = useDraftNavigationGuard(hasChanges, saving || saveMutation.isPending, id)
 
   if (bookQuery.isPending) {
     return <ContentEditorPending stage="content" />

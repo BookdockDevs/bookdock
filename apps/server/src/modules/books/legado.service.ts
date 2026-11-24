@@ -489,9 +489,11 @@ function txtChapterHref(index: number): string {
 }
 
 export function projectTxtChapterContent(title: string, content: string, rules: BookReplacementRule[], index: number) {
+  // Keep paragraph breaks intact in the body run so line-scoped regexes
+  // (e.g. `[^\r\n]*?`) cannot match across paragraphs.
   const runs: TextRun[] = [
     { text: title },
-    ...content.split('\n\n').map((paragraph) => ({ text: paragraph })),
+    { text: content },
   ]
   applyChapterReplacements(runs, rules, txtChapterHref(index))
 
@@ -499,15 +501,16 @@ export function projectTxtChapterContent(title: string, content: string, rules: 
   const chapterSubtitle = projectedTitle
     .replace(/^(?:第\s*[0-9〇零一二两三四五六七八九十百千万亿]+\s*(?:章|回|节|卷)|chapter\s+\d+)\s*[:：\-—]?\s*/iu, '')
     .trim()
-  const firstParagraph = runs[1]?.text.trim()
+  const paragraphs = runs[1]!.text.split('\n\n').filter((paragraph) => paragraph.trim().length > 0)
+  const firstParagraph = paragraphs[0]?.trim()
   const repeatsHeading = firstParagraph !== undefined
     && firstParagraph.length > 0
     && (firstParagraph === projectedTitle || (chapterSubtitle.length >= 2 && firstParagraph === chapterSubtitle))
-  const bodyRuns = (repeatsHeading ? runs.slice(2) : runs.slice(1))
+  const bodyParagraphs = repeatsHeading ? paragraphs.slice(1) : paragraphs
 
   return {
     title: runs[0]!.text,
-    content: bodyRuns.map((run) => run.text).join('\n\n'),
+    content: bodyParagraphs.join('\n\n'),
   }
 }
 

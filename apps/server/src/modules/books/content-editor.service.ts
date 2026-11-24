@@ -92,6 +92,22 @@ function withRestorableCfi(
   return cfi ? { ...position, cfi } : null
 }
 
+function mapUnchangedTxtPosition(
+  position: ReaderPositionAnchor,
+  sourceTexts: Map<string, string>,
+  targetTexts: Map<string, string>,
+  targetSections: RevisionSectionPosition[],
+): MappedReaderPosition | null {
+  const text = sourceTexts.get(position.spineHref)
+  if (!text || [...sourceTexts.values()].filter((candidate) => candidate === text).length !== 1) return null
+  const matches = [...targetTexts].filter(([, candidate]) => candidate === text)
+  if (matches.length !== 1) return null
+  return mapRevisionTextPosition(position.spineHref, position.textOffset, targetSections, [{
+    sourceSpineHref: position.spineHref, targetSpineHref: matches[0]![0],
+    sourceStart: 0, sourceEnd: text.length, targetStart: 0, targetEnd: text.length,
+  }])
+}
+
 type AnnotationRemapWriter = Pick<ReturnType<typeof import('../../db/client').getDb>, 'select' | 'update'>
 
 /**
@@ -121,10 +137,20 @@ function remapAnnotationAnchors(
     ? mapAnnotationAnchorWithEvidence(cfi, chapterHref, evidence, input.mapping.sourceSections, input.mapping.targetSections,
       input.sourceTexts, input.targetTexts, input.sourceMarkups, input.targetMarkups, input.mapping.segments)
     : null
-  for (const row of tx.select().from(highlights).where(eq(highlights.bookVersionId, input.bookVersionId)).all()) {
+  const reserveLocation = (locations: Set<string>, userId: string, cfi: string | null) => {
+    if (cfi === null) return true
+    const key = JSON.stringify([userId, cfi])
+    if (locations.has(key)) return false
+    locations.add(key)
+    return true
+  }
+  const highlightLocations = new Set<string>()
+  const bookmarkLocations = new Set<string>()
+  for (const row of tx.select().from(highlights).where(eq(highlights.bookVersionId, input.bookVersionId))
+    .orderBy(highlights.deletedAt, desc(highlights.updatedAt), highlights.id).all()) {
     if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
     const mapped = mapRow(row.cfiRange, row.chapterHref, row.anchorEvidence)
-    if (mapped) {
+    if (mapped && reserveLocation(highlightLocations, row.userId, mapped.cfi ?? row.cfiRange)) {
       tx.update(highlights).set({
         revisionId: input.revisionId, cfiRange: mapped.cfi ?? row.cfiRange, chapterHref: mapped.chapterHref,
         anchorEvidence: mapped.fragments ?? null, updatedAt: input.now,
@@ -134,10 +160,11 @@ function remapAnnotationAnchors(
       tx.update(highlights).set({ relocation: 'unresolved', updatedAt: input.now }).where(eq(highlights.id, row.id)).run()
     }
   }
-  for (const row of tx.select().from(bookmarks).where(eq(bookmarks.bookVersionId, input.bookVersionId)).all()) {
+  for (const row of tx.select().from(bookmarks).where(eq(bookmarks.bookVersionId, input.bookVersionId))
+    .orderBy(bookmarks.deletedAt, desc(bookmarks.updatedAt), bookmarks.id).all()) {
     if (row.revisionId && row.revisionId !== input.baseRevisionId || row.relocation === 'unresolved') continue
     const mapped = mapRow(row.cfi, row.chapterHref, row.anchorEvidence)
-    if (mapped) {
+    if (mapped && reserveLocation(bookmarkLocations, row.userId, mapped.cfi ?? row.cfi)) {
       tx.update(bookmarks).set({
         revisionId: input.revisionId, cfi: mapped.cfi ?? row.cfi, chapterHref: mapped.chapterHref,
         anchorEvidence: mapped.fragments ?? null, updatedAt: input.now,
@@ -504,7 +531,7 @@ async function saveTxtContent(
   const now = Date.now()
   const wordCount = chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0)
   const originalChapters = Array.isArray(book.meta.chapters)
-    ? book.meta.chapters as Array<{ title?: string; contentStartOffset?: number; endOffset?: number }>
+    ? book.meta.chapters as Array<{ id?: string; title?: string; contentStartOffset?: number; endOffset?: number }>
     : []
   const sameTextAndSpine = normalizeTxtEditorContent(originalText) === normalizeTxtEditorContent(normalized)
     && originalChapters.length === chaptersToSave.length
@@ -573,7 +600,8 @@ async function saveTxtContent(
     if (await storage.exists(book.filePath)) {
       sourceEpub = await bufferFromStream(await storage.get(book.filePath))
       revisionMapping = await createEpubRevisionMap(sourceEpub, epub,
-        input.chapters.flatMap((chapter, index) => chapter.structureOnlyTitle ? [index] : []))
+        input.chapters.flatMap((chapter, index) => chapter.structureOnlyTitle ? [index] : []),
+        { source: originalChapters.map((chapter) => chapter.id), target: chaptersToSave.map((chapter) => chapter.id) })
       sourceMap = revisionMapping.segments
     }
   } catch (error) {
@@ -603,6 +631,8 @@ async function saveTxtContent(
   const readerStates = db.select().from(bookStates).where(eq(bookStates.bookVersionId, bookId)).all()
   const stateMappings = await prepareReaderStateRevisionMaps(bookId, input.baseRevisionId, revisionMapping, readerStates)
   const positionAnchors = await resolveReaderPositionAnchors(bookId, input.baseRevisionId, sourceEpub, readerStates)
+  const chapterPathsUnchanged = sourceMap.length === originalChapters.length
+    && sourceMap.every((segment) => segment.sourceSpineHref === segment.targetSpineHref)
 
   try {
     db.transaction((tx) => {
@@ -657,7 +687,7 @@ async function saveTxtContent(
         }
       }
       for (const row of stateRows) {
-        if (sameTextAndSpine && row.progressRevisionId === input.baseRevisionId
+        if (sameTextAndSpine && chapterPathsUnchanged && row.progressRevisionId === input.baseRevisionId
           && (row.coverageRevisionId ?? row.progressData?.coverageRevisionId ?? input.baseRevisionId) === input.baseRevisionId) {
           const previous = row.progressData
           tx.update(bookStates).set({
@@ -700,10 +730,17 @@ async function saveTxtContent(
         const positionMapping = stateMappings.get(positionBasis)
         const coverageMapping = hadCoverage ? stateMappings.get(coverageBasis) : revisionMapping
         const sourcePosition = positionAnchors.get(row.userId)
-        const mappedPosition = positionMapping && sourcePosition
-          ? withRestorableCfi(mapRevisionTextPosition(sourcePosition.spineHref, sourcePosition.textOffset,
-              positionMapping.targetSections, positionMapping.segments), positionMapping.targetSections, targetMarkups)
-          : null
+        let mappedPosition: ReturnType<typeof withRestorableCfi> = null
+        if (positionMapping && sourcePosition) {
+          const { targetSections, segments } = positionMapping
+          let position = mapRevisionTextPosition(sourcePosition.spineHref, sourcePosition.textOffset, targetSections, segments)
+          // A book-wide diff can skip the start of an unchanged chapter after a deletion.
+          if (!position && positionBasis === input.baseRevisionId
+            && segments.some((segment) => segment.sourceSpineHref === sourcePosition.spineHref)) {
+            position = mapUnchangedTxtPosition(sourcePosition, sourceTexts, targetTexts, targetSections)
+          }
+          mappedPosition = withRestorableCfi(position, targetSections, targetMarkups)
+        }
         const mappedIntervals = coverageMapping
           ? projectRevisionCoverage(previous.intervals ?? [], coverageMapping.sourceSections, coverageMapping.targetSections,
             coverageMapping.segments, coverageMapping.structuralRanges)
@@ -745,5 +782,5 @@ async function saveTxtContent(
   }
 
   enqueueReaderArchivePreparation({ id: bookId, filePath, format: 'txt', revisionId, contentHash, size: epub.length })
-  return { revisionId, changed: true, unlocated }
+  return { revisionId, changed: true, chapterIds: chapters.map((chapter) => chapter.id), unlocated }
 }

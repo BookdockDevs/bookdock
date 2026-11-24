@@ -50,18 +50,20 @@ export function ToastStack() {
     const observed = new Set<Element>()
     const recalibrate = () => {
       frame = 0
+      // Measure the default position so an already lifted stack cannot hide the collision.
+      host.style.removeProperty('--bd-toast-clearance')
       const bounds = host.getBoundingClientRect()
       const obstacles = Array.from(document.querySelectorAll<HTMLElement>('[data-toast-obstacle]')).flatMap((element) =>
         element.dataset.toastObstacle === 'contents'
           ? Array.from(element.children).filter((child): child is HTMLElement => child instanceof HTMLElement)
           : [element],
       )
-      let clearance = 0
+      const overlappingColumns: DOMRect[] = []
       for (const obstacle of obstacles) {
         const rect = obstacle.getBoundingClientRect()
         if (rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.top < window.innerHeight
           && rect.left < bounds.right && rect.right > bounds.left) {
-          clearance = Math.max(clearance, window.innerHeight - rect.top + 12)
+          overlappingColumns.push(rect)
         }
         if (!observed.has(obstacle)) {
           resizeObserver?.observe(obstacle)
@@ -74,6 +76,13 @@ export function ToastStack() {
           observed.delete(obstacle)
         }
       }
+      let lift = 0
+      for (const rect of overlappingColumns.sort((a, b) => b.bottom - a.bottom)) {
+        if (rect.top < bounds.bottom - lift && rect.bottom > bounds.top - lift) {
+          lift = bounds.bottom - rect.top + 12
+        }
+      }
+      const clearance = lift > 0 ? window.innerHeight - bounds.bottom + lift : 0
       host.style.setProperty('--bd-toast-clearance', `${clearance}px`)
     }
     const schedule = () => {

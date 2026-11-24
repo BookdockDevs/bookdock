@@ -147,6 +147,43 @@ it('adds book download links to a pre-sharing database without changing existing
   }
 })
 
+it.each(['fresh', 'upgrade'])('scopes annotation CFIs to the revision on a %s database', (mode) => {
+  const sqlite = new Database(':memory:')
+  try {
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite, { schema })
+    migrate(db, { migrationsFolder: migrationsDir })
+    retargetBookIdReferences(db)
+    if (mode === 'upgrade') migrateAllUpTo(db, '0071_annotation_revision_cfi')
+    else migrateAll(db, { migrationsFolder: migrationsDir })
+    sqlite.exec(`
+      INSERT INTO users (id, username, created_at) VALUES ('u', 'reader', 1);
+      INSERT INTO book_versions (id, format, size, created_at, updated_at) VALUES ('v', 'txt', 1, 1, 1);
+    `)
+    const names = [['bookmarks', 'cfi'], ['highlights', 'cfi_range']] as const
+    for (const [table, cfi] of names) {
+      const insert = sqlite.prepare(`INSERT INTO ${table} (id, user_id, book_version_id, revision_id, ${cfi}, created_at, updated_at)
+        VALUES (?, 'u', 'v', ?, ?, 1, 1)`)
+      insert.run('first', 'r1', 'same-cfi')
+      insert.run('legacy', null, 'legacy-cfi')
+    }
+    if (mode === 'upgrade') migrateAll(db, { migrationsFolder: migrationsDir })
+    for (const [table, cfi] of names) {
+      const insert = sqlite.prepare(`INSERT INTO ${table} (id, user_id, book_version_id, revision_id, ${cfi}, created_at, updated_at)
+        VALUES (?, 'u', 'v', ?, ?, 1, 1)`)
+      insert.run('second', 'r2', 'same-cfi')
+      expect(() => insert.run('duplicate', 'r2', 'same-cfi')).toThrow(/UNIQUE/)
+      expect(() => insert.run('legacy-duplicate', null, 'legacy-cfi')).toThrow(/UNIQUE/)
+      expect(sqlite.prepare(`SELECT id FROM ${table} ORDER BY id`).all()).toEqual([
+        { id: 'first' }, { id: 'legacy' }, { id: 'second' },
+      ])
+    }
+    expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  } finally {
+    sqlite.close()
+  }
+})
+
 function applyAccessTokenMigration(sqlite: Database.Database) {
   const sql = fs.readFileSync(accessTokenMigrationFile, 'utf8')
   for (const statement of sql.split('--> statement-breakpoint').map((part) => part.trim()).filter(Boolean)) {

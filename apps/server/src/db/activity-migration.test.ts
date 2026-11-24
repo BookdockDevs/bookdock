@@ -64,6 +64,8 @@ describe('activity migration', () => {
     const db = drizzle(sqlite, { schema })
     await migrate(db)
     removeReadingProjectionSchema(sqlite)
+    revertReadingImportsSchema(sqlite)
+    revertInstanceAndAiJobsSchema(sqlite)
     sqlite.exec(`
       DROP TABLE activity_events;
       DROP TABLE content_revision_maps;
@@ -74,8 +76,6 @@ describe('activity migration', () => {
       ALTER TABLE text_replacements DROP COLUMN relocation;
       DROP TABLE IF EXISTS personal_metadata_sources;
       `);
-      revertReadingImportsSchema(sqlite);
-      revertInstanceAndAiJobsSchema(sqlite);
       sqlite.exec(`
       DELETE FROM __drizzle_migrations WHERE created_at >= 1793300000000;
     `)

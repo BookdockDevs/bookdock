@@ -13,6 +13,7 @@ interface Options<T> {
   revisionId: string | null
   enabled: boolean
   dirty: boolean
+  saving?: boolean
   payload: () => T
   changeToken?: unknown
   schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false } }
@@ -102,7 +103,7 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
   }, [key, accountId, isLocal, ownerIdentity, options.enabled, options.revisionId])
 
   useEffect(() => {
-    if (!key || !ready || candidate || failure || !options.revisionId) return
+    if (!key || !ready || candidate || failure || options.saving || !options.revisionId) return
     const current = generation.current
     const sequence = ++changeSequence.current
     const authRevision = getAuthSessionRevision()
@@ -130,7 +131,7 @@ export function useLocalEditorDraft<T>(options: Options<T>) {
     }, 1000)
     timerRef.current = timer
     return () => { window.clearTimeout(timer); if (timerRef.current === timer) timerRef.current = null }
-  }, [key, ready, candidate, failure, options.dirty, options.changeToken, options.revisionId, accountId, isLocal, ownerIdentity, epoch])
+  }, [key, ready, candidate, failure, options.dirty, options.saving, options.changeToken, options.revisionId, accountId, isLocal, ownerIdentity, epoch])
 
   async function discard() {
     if (!key || !candidate) return

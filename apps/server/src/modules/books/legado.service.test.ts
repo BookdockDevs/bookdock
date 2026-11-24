@@ -185,6 +185,27 @@ describe('Legado chapter replacement projection', () => {
     expect(projected).toEqual({ title: 'Part One', content: 'Hello Bookdock.\n\nreader paragraph.' })
   })
 
+  it('preserves paragraph boundaries so line-scoped TXT regexes do not match across paragraphs', () => {
+    const projected = projectTxtChapterContent(
+      '第129章 同门之争',
+      '卓凌风正想着心事，突听灭绝师太与峨嵋弟子齐齐感谢自己，内心更是愧疚不安。\n\n周芷若咬了咬嘴唇，低声说道：“是”。\n\n感谢“日WANLE”书友大赏。',
+      [
+        rule({
+          pattern: '感谢[^\\r\\n]*?赏[。！!. ]?[ \\t]*(?=\\r?\\n|$)',
+          replacement: '',
+          isRegex: true,
+          applyTo: 'content',
+        }),
+      ],
+      0,
+    )
+
+    expect(projected).toEqual({
+      title: '第129章 同门之争',
+      content: '卓凌风正想着心事，突听灭绝师太与峨嵋弟子齐齐感谢自己，内心更是愧疚不安。\n\n周芷若咬了咬嘴唇，低声说道：“是”。',
+    })
+  })
+
   it('removes an exact repeated TXT heading while preserving a non-identical opening', () => {
     expect(projectTxtChapterContent('第370章 入邺都', '入邺都\n\n将家里安顿好之后', [], 0)).toEqual({
       title: '第370章 入邺都',

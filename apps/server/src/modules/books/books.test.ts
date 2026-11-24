@@ -72,6 +72,7 @@ import { getReaderBookSettings, updateReaderBookSettings } from './reader-settin
 import { getLegadoToc } from './legado.service'
 import { createShelf, updateShelf } from '../shelves/shelves.service'
 import { updateTagValue } from '../classification/classification.service'
+import { upsertProgress } from '../progress/progress.service'
 import { createTocRule } from '../toc-rules/toc-rules.service'
 import { getEditorAccess, getEditorEpubContent, saveEditorEpubContent, saveEditorTxtContent } from './content-editor.service'
 import { extractEpubSpineText } from './epub-revision-map'
@@ -2379,7 +2380,10 @@ describe('editor TXT save', () => {
     expect((await extractEpubSpineText(targetEpub)).get(bookmark.chapterHref!)?.slice(targetOffset!, targetOffset! + quote.length)).toBe(quote)
   })
 
-  it('does not migrate bookmarks when one of two identical chapters is deleted', async () => {
+  it.each([
+    { scenario: 'with the retained chapter ID', preserveId: true, unlocatedBookmarks: 1 },
+    { scenario: 'without chapter identity', preserveId: false, unlocatedBookmarks: 2 },
+  ])('handles deletion of one of two identical chapters $scenario', async ({ preserveId, unlocatedBookmarks }) => {
     const title = '第一章重复'
     const body = '这一章的正文完全相同，无法仅凭文字判断删除的是哪一份。'.repeat(6)
     const { book } = await uploadBook(ownerId, new File([`${title}\n\n${body}\n\n${title}\n\n${body}`], 'duplicates.txt', { type: 'text/plain' }))
@@ -2407,16 +2411,17 @@ describe('editor TXT save', () => {
       }
     }
 
+    const [, retained] = await getBookChapters(ownerId, book.id)
     const result = await saveEditorTxtContent(ownerId, book.id, {
       baseRevisionId: sourceRevision.id,
-      chapters: [{ id: 'remaining', title, content: body, level: 1 }],
+      chapters: [{ id: preserveId ? retained!.id : 'remaining', title, content: body, level: 1 }],
     })
 
-    expect(result.unlocated.bookmarks).toBe(2)
-    expect(db.select().from(schema.bookmarks).all()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ revisionId: sourceRevision.id, relocation: 'unresolved', contextText: quote }),
-      expect.objectContaining({ revisionId: sourceRevision.id, relocation: 'unresolved', contextText: quote }),
-    ]))
+    expect(result.unlocated.bookmarks).toBe(unlocatedBookmarks)
+    const [deletedBookmark, retainedBookmark] = db.select().from(schema.bookmarks).orderBy(schema.bookmarks.createdAt).all()
+    expect(deletedBookmark).toMatchObject({ revisionId: sourceRevision.id, relocation: 'unresolved', contextText: quote })
+    if (preserveId) expect(retainedBookmark).toMatchObject({ revisionId: result.revisionId, chapterHref: sourceSpine[0]!.href, contextText: quote })
+    else expect(retainedBookmark).toMatchObject({ revisionId: sourceRevision.id, relocation: 'unresolved', contextText: quote })
     expect(result.unlocated.pointReplacements).toBe(1)
     expect(db.select().from(schema.textReplacements).where(eq(schema.textReplacements.id, replacementId)).get()).toMatchObject({
       relocation: 'unresolved',
@@ -2660,6 +2665,65 @@ describe('editor TXT save', () => {
     expect(spine).toHaveLength(4)
     expect(spine[1]!.markup).toContain('修改后的正文。')
     expect(spine[3]!.markup).toContain('另一段正文。')
+  })
+
+  it('keeps a chapter-start TXT reading position after deleting the preceding chapter', async () => {
+    const chapters = ['第十二章 坦白', '第十三章 明心见性', '第十七章 山顶', '第十八章 归途'].map((title, index) => ({
+      id: `chapter-${index}`, title, level: 1,
+      content: '甲'.repeat(index === 1 ? 3 : 20) + Array.from({ length: 20 }, (_, paragraph) =>
+        `旅途手记第${paragraph}段，记下${title}的见闻。船沿着溪水穿过石桥。`).join('\n\n'),
+    }))
+    const text = chapters.map(({ title, content }) => `${title}\n\n${content}`).join('\n\n')
+    const { book } = await uploadBook(ownerId, new File([text], 'delete-prior-chapter.txt', { type: 'text/plain' }))
+    const original = await getActiveBook(ownerId, book.id)
+    const source = await bufferFromStream(await storage.getStorage().get(original.filePath))
+    const section = (await loadEpubSpineMarkup(source))[2]!
+    const offset = (await extractEpubSpineText(source)).get(section.href)!.indexOf(chapters[2]!.title)
+    const contentCfi = 'epubcfi(/6/6!/4,/2/1:0,/8/1:4)'
+    expect(resolveEpubCfiTextRange(section.markup, contentCfi)?.start).toBe(offset)
+    await upsertProgress(ownerId, book.id, {
+      revisionId: book.revisionId!, cfi: 'chapter:2:0.000000', contentCfi, chapter: chapters[2]!.title, chapterIndex: 2, percent: 60,
+    })
+
+    const sourceChapters = await getBookChapters(ownerId, book.id)
+    expect(sourceChapters.map(({ title }) => title)).toEqual(chapters.map(({ title }) => title))
+    const retainedChapters = chapters.map((chapter, index) => ({ ...chapter, id: sourceChapters[index]!.id }))
+    const result = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: book.revisionId!, chapters: retainedChapters.filter((_, index) => index !== 1),
+    })
+    expect(db.select().from(schema.contentRevisionMaps).where(and(
+      eq(schema.contentRevisionMaps.sourceRevisionId, book.revisionId!),
+      eq(schema.contentRevisionMaps.targetRevisionId, result.revisionId),
+    )).get()?.segments).toContainEqual(expect.objectContaining({
+      sourceSpineHref: section.href, targetSpineHref: 'OEBPS/chapter-0002.xhtml', sourceStart: 0, targetStart: 0,
+    }))
+    const saved = db.select().from(schema.bookStates).where(and(
+      eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, book.id),
+    )).get()!
+    expect(result.unlocated.progress).toBe(0)
+    expect(saved.progressData).toMatchObject({
+      chapter: chapters[2]!.title, chapterIndex: 1, progressRevisionId: result.revisionId,
+      positionAnchor: { spineHref: 'OEBPS/chapter-0002.xhtml', textOffset: offset },
+    })
+
+    const nextDraft = retainedChapters.filter((_, index) => index !== 1)
+      .map((chapter, index) => ({ ...chapter, id: result.chapterIds![index]! }))
+    const moved = await saveEditorTxtContent(ownerId, book.id, {
+      baseRevisionId: result.revisionId, chapters: [nextDraft[1]!, nextDraft[0]!, nextDraft[2]!],
+    })
+    expect(moved.unlocated.progress).toBe(0)
+    expect(db.select().from(schema.bookStates).where(and(
+      eq(schema.bookStates.userId, ownerId), eq(schema.bookStates.bookVersionId, book.id),
+    )).get()?.progressData).toMatchObject({
+      chapter: chapters[2]!.title, chapterIndex: 0, progressRevisionId: moved.revisionId,
+      positionAnchor: { spineHref: 'OEBPS/chapter-0001.xhtml', textOffset: offset },
+    })
+    expect(db.select().from(schema.contentRevisionMaps).where(and(
+      eq(schema.contentRevisionMaps.sourceRevisionId, book.revisionId!),
+      eq(schema.contentRevisionMaps.targetRevisionId, moved.revisionId),
+    )).get()?.segments).toContainEqual(expect.objectContaining({
+      sourceSpineHref: section.href, targetSpineHref: 'OEBPS/chapter-0001.xhtml', sourceStart: 0, targetStart: 0,
+    }))
   })
 
   it('maps visible text from a scroll position after a small TXT edit', async () => {

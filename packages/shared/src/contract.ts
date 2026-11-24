@@ -2166,6 +2166,7 @@ export interface EditorEpubLoadRes {
 export interface EditorTxtSaveRes {
   revisionId: string
   changed: boolean
+  chapterIds?: string[]
   unlocated: { progress: number; coverage: number; highlights: number; bookmarks: number; notes: number; pointReplacements: number }
 }
 

@@ -136,6 +136,20 @@ describe('local editor recovery', () => {
     expect(state.records.get(draftKey('user-a', 'book', 'txt')).payload.text).toBe('second')
   })
 
+  it('does not recreate the draft while a formal save is being finalized', async () => {
+    vi.useFakeTimers()
+    const key = draftKey('user-a', 'book', 'txt')
+    const { result, rerender } = renderHook(({ saving }) => useLocalEditorDraft(options({ saving })), { initialProps: { saving: false } })
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(state.records.has(key)).toBe(true)
+
+    rerender({ saving: true })
+    await act(async () => { expect(await result.current.clear()).toBe(true) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+    expect(state.records.has(key)).toBe(false)
+  })
+
   it('cancels pending work when the content target changes', async () => {
     const first = draftKey('user-a', 'book', 'txt')
     const second = draftKey('user-a', 'other', 'txt')

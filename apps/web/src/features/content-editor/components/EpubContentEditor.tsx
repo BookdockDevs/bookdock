@@ -99,7 +99,6 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
   const _ = useTranslation()
   const sourceQuery = useEditorEpubSource(book.id, book.revisionId, book.format === 'epub', target)
   const manifestQuery = useEditorManifest(book)
-  const saveMutation = useSaveEditorEpub(book.id, target)
   const source = sourceQuery.data?.data
   const [draft, setDraft] = useState<EpubEditorDraftState | null>(null)
   const [activeHref, setActiveHref] = useState<string | null>(null)
@@ -237,7 +236,7 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
   const localDraft = useLocalEditorDraft({
     bookId: book.id, format: 'epub', target, revisionId: sourceRevision.current,
     enabled: Boolean(access === 'allowed' && source && draft && !sourceQuery.isError),
-    dirty, schema: epubPayloadSchema, changeToken: localChangeToken,
+    dirty, saving, schema: epubPayloadSchema, changeToken: localChangeToken,
     payload: () => ({ documents: changedDocuments(draft!), tocEntries: draft!.tocEntries, spineOrder: draft!.spineOrder, view, activeHref, activeTocIndex }),
     restore: (payload) => {
       const recovered = draft && restoreEpubDraft(draft, payload)
@@ -252,6 +251,7 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
       return true
     },
   })
+  const saveMutation = useSaveEditorEpub(book.id, target, localDraft.clear)
   const tocTree = useMemo(() => buildEpubTocTree(draft?.tocEntries ?? []), [draft?.tocEntries])
   const filteredTocTree = useMemo(() => visibleEpubTocNodes(tocTree, tocSearch), [tocSearch, tocTree])
   const searchActive = tocSearch.trim().length > 0
@@ -606,7 +606,7 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
 
   async function save() {
     const baseRevisionId = sourceRevision.current
-    if (!draft || !baseRevisionId || !source || !dirty) return
+    if (savingRef.current || !draft || !baseRevisionId || !source || !dirty) return
     const currentDraft = pendingFrameEditRef.current ? flushPendingFrameEdit() : draft
     if (!currentDraft) return
     for (const doc of changedDocuments(currentDraft)) {
@@ -630,7 +630,6 @@ export default function EpubContentEditor({ book, target }: EpubContentEditorPro
         tocEntries: currentDraft.tocEntries,
         spineOrder: currentDraft.spineOrder,
       })
-      await localDraft.clear()
       const unlocated = result.data.unlocated
       const unlocatedCount = unlocated.progress + unlocated.coverage + unlocated.highlights + unlocated.bookmarks + unlocated.notes + unlocated.pointReplacements
       if (unlocatedCount) notify.warning({ key: 'editor.savePartial', params: { count: unlocatedCount } })
