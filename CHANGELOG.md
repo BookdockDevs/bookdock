@@ -2,23 +2,30 @@
 
 All notable changes to Bookdock are documented here.
 
-## [Unreleased]
+## [0.8.10] - Unreleased
+
+### Highlights
+
+- Insert, delete, or move chapters in the server TXT workbench while keeping reading positions, notes, bookmarks, highlights, and read coverage in unchanged chapters. The fix covers chapters with identical titles and text and works across successive saves.
 
 ### Changed
 
-- Simplified workbench save and reading-position messages, along with confirmations for saving or publishing theme items and warnings about missing images or full local image storage.
-- The notification popover is more compact, with an active bell icon, unread dots on avatars, inline timestamps, and loading placeholders that match the notification rows.
-- The book metadata form uses a full-width toggle for additional fields. The Add tag button appears before existing tags, and the search field stays visible while you scroll the results.
+- Shortened messages about saving book edits, reading data that could not be matched after an edit, and saving or publishing themes and cards. Warnings about missing theme images and full local image storage are also shorter.
+- The notification popover has a more compact layout. The bell is highlighted while the popover is open, and each unread item has a dot on its avatar. Timestamps appear next to the notification text.
+- Click anywhere on the additional-fields row to expand book metadata. The Add tag button appears before existing tags, and the search field stays visible as you scroll through results.
+- The notification popover and download-link dialog show loading placeholders shaped like the content they replace.
 
 ### Fixed
 
-- Adding, deleting, or moving chapters in the server TXT workbench preserves reading positions, notes, bookmarks, highlights, and read coverage in unchanged chapters. Consecutive saves keep using the latest chapter identities, including for chapters with identical titles and text.
-- Bookmarks and highlights can share the same location string across content revisions. Reusing that location in a new revision preserves the older record and no longer blocks a save.
-- Saving a TXT or EPUB draft clears the local copy before reloading the book, avoiding a false draft conflict after a successful save. Reopening an edited server book uses the updated table of contents and reading position.
-- The reader keeps the requested chapter when its layout changes during loading. A saved position on invisible chapter whitespace now opens at the start of that chapter.
-- Notifications stay at the bottom of the window unless they overlap controls. On desktop, an upload dialog above the bottom-right corner no longer pushes them upward.
-- Legado preserves paragraph breaks when applying TXT replacement rules, so line-scoped regular expressions no longer match across paragraphs.
-- Dropdowns keep their opening direction when filtering shortens the list and there is still room on that side of the trigger.
+- TXT and EPUB workbenches clear the saved local draft before refreshing, preventing false conflict prompts. Reopening an edited server book loads the updated table of contents and reading position.
+- The reader stays on the requested chapter if the layout changes during loading. When a saved position falls on invisible whitespace, the reader opens at the start of that chapter.
+- Toasts stay at the bottom of the window when there is room, including when a desktop upload dialog sits above them.
+- Legado keeps TXT paragraph breaks intact while applying replacement rules, so regular expressions meant for a single line respect paragraph boundaries.
+- Filtering a dropdown keeps it above or below its button as long as it still fits on the same side.
+
+### Upgrade notes
+
+- The database upgrade rebuilds the bookmark and highlight indexes and keeps existing records. Reusing a location in a later content revision can no longer block a save.
 
 ## [0.8.9] - 2026-11-24
 
@@ -1463,23 +1470,30 @@ All notable changes to Bookdock are documented here.
 
 ## 中文
 
-### [未发布]
+### [0.8.10] - 待发布
+
+#### 亮点
+
+- 在服务端 TXT 工作台新增、删除或移动章节时，未改动章节的阅读位置、笔记、书签、高亮和已读范围会随章节迁移。即使章节标题和正文完全相同，或在同一次编辑中连续保存，各章的数据也能正确对应。
 
 #### 优化
 
-- 精简工作台保存和阅读位置相关提示，以及主题项目保存、发布成功和图片缺失、本地图片存储已满时的提示文案。
-- 通知弹层布局更紧凑。打开时铃铛图标会高亮，未读圆点显示在头像上，时间与通知内容同排，加载占位与通知列表项布局一致。
-- 书籍元数据表单可以点击整行展开更多字段。添加标签按钮放在已有标签前面，滚动结果时搜索框保持可见。
+- 精简工作台保存、编辑后阅读数据无法匹配、主题与卡片保存和发布的提示。主题图片缺失或本地图片存储已满时的提示也更简洁。
+- 通知弹层布局更紧凑。弹层打开时铃铛高亮，未读圆点显示在头像旁，时间紧跟在通知文字后面。
+- 点击整行即可展开更多书籍元数据。添加标签按钮置于已有标签之前，滚动标签搜索结果时搜索框保持可见。
+- 通知弹层和下载链接弹窗在加载时显示与实际内容布局一致的占位。
 
 #### 修复
 
-- 在服务端 TXT 工作台新增、删除或移动章节后，未改动章节里的阅读位置、笔记、书签、高亮和已读范围会跟随章节迁移。连续保存会使用最新的章节标识，标题和正文完全相同的章节也能区分。
-- 不同内容版本的书签和高亮可以使用相同的定位字符串。在新版中复用同一定位时，旧记录会保留，编辑也能正常保存。
-- TXT 和 EPUB 工作台正式保存成功后，会先清理本地草稿再刷新书籍，避免误报草稿冲突。重新打开编辑过的服务端书籍时，会使用更新后的目录和阅读位置。
-- 加载章节期间发生布局变化时，阅读器会保持目标章节。保存的位置落在不可见的章内空白时，会打开该章开头。
-- 通知默认贴在窗口底部，仅在与控件重叠时上移。桌面端上传弹窗位于右下角上方时，通知会留在右下角。
-- Legado 对 TXT 正文应用替换规则时会保留段落换行，按行匹配的正则不会误跨段落。
-- 筛选使列表变短时，只要原来一侧仍有足够空间，下拉菜单就会保持原来的展开方向。
+- TXT 和 EPUB 工作台保存成功后先清理本地草稿再刷新，避免误报草稿冲突。重新打开编辑过的服务端书籍时，会加载更新后的目录和阅读位置。
+- 加载时即使布局变化，阅读器也会保持目标章节。保存位置落在不可见的章内空白时，从该章开头打开。
+- 底部提示会避开重叠的控件。桌面端上传弹窗位于右下角上方且没有重叠时，提示仍留在右下角。
+- Legado 对 TXT 正文应用替换规则时保留段落换行，按行匹配的正则会遵守段落边界。
+- 筛选下拉菜单时，只要按钮同一侧仍有足够空间，菜单就会留在原来的一侧。
+
+#### 升级说明
+
+- 数据库升级会重建书签和高亮的索引，保留已有记录。后续内容版本复用同一定位时，编辑可以正常保存。
 
 ### [0.8.9] - 2026-11-24
 
