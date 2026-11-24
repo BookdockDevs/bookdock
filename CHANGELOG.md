@@ -7,6 +7,8 @@ All notable changes to Bookdock are documented here.
 ### Changed
 
 - Simplified workbench save and reading-position messages, along with confirmations for saving or publishing theme items and warnings about missing images or full local image storage.
+- The notification popover is more compact, with an active bell icon, unread dots on avatars, inline timestamps, and loading placeholders that match the notification rows.
+- The book metadata form uses a full-width toggle for additional fields. The Add tag button appears before existing tags, and the search field stays visible while you scroll the results.
 
 ### Fixed
 
@@ -16,6 +18,7 @@ All notable changes to Bookdock are documented here.
 - The reader keeps the requested chapter when its layout changes during loading. A saved position on invisible chapter whitespace now opens at the start of that chapter.
 - Notifications stay at the bottom of the window unless they overlap controls. On desktop, an upload dialog above the bottom-right corner no longer pushes them upward.
 - Legado preserves paragraph breaks when applying TXT replacement rules, so line-scoped regular expressions no longer match across paragraphs.
+- Dropdowns keep their opening direction when filtering shortens the list and there is still room on that side of the trigger.
 
 ## [0.8.9] - 2026-11-24
 
@@ -1465,6 +1468,8 @@ All notable changes to Bookdock are documented here.
 #### 优化
 
 - 精简工作台保存和阅读位置相关提示，以及主题项目保存、发布成功和图片缺失、本地图片存储已满时的提示文案。
+- 通知弹层布局更紧凑。打开时铃铛图标会高亮，未读圆点显示在头像上，时间与通知内容同排，加载占位与通知列表项布局一致。
+- 书籍元数据表单可以点击整行展开更多字段。添加标签按钮放在已有标签前面，滚动结果时搜索框保持可见。
 
 #### 修复
 
@@ -1474,6 +1479,7 @@ All notable changes to Bookdock are documented here.
 - 加载章节期间发生布局变化时，阅读器会保持目标章节。保存的位置落在不可见的章内空白时，会打开该章开头。
 - 通知默认贴在窗口底部，仅在与控件重叠时上移。桌面端上传弹窗位于右下角上方时，通知会留在右下角。
 - Legado 对 TXT 正文应用替换规则时会保留段落换行，按行匹配的正则不会误跨段落。
+- 筛选使列表变短时，只要原来一侧仍有足够空间，下拉菜单就会保持原来的展开方向。
 
 ### [0.8.9] - 2026-11-24
 

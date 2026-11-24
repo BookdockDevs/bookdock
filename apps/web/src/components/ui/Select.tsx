@@ -200,7 +200,7 @@ export default function Select({
           minWidth={minMenuWidth}
           maxWidth={360}
           onClose={() => setMenu(null)}
-          className="max-h-60 overflow-y-auto p-1"
+          className="max-h-60 overflow-y-auto custom-scrollbar p-1 pr-1.5"
         >
           <div
             ref={focusListbox}

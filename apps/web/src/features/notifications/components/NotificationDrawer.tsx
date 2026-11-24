@@ -21,7 +21,7 @@ interface NotificationDrawerProps {
   onClose: () => void
 }
 
-const POPOVER_WIDTH = 360
+const POPOVER_WIDTH = 320
 const POPOVER_MAX_HEIGHT = 520
 const POPOVER_MARGIN = 12
 
@@ -147,10 +147,10 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
         ref={panelRef}
         role="dialog"
         aria-labelledby="notification-popover-title"
-        className={`animate-modal-panel fixed z-50 flex max-h-[min(60vh,520px)] flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg outline-none dark:border-stone-700 dark:bg-stone-900 ${position.dir === 'down' ? 'origin-top-right' : 'origin-bottom-right'}`}
+        className={`animate-modal-panel fixed z-50 flex max-h-[min(60vh,520px)] flex-col overflow-hidden rounded-xl border border-stone-200/80 bg-white shadow-xl outline-none dark:border-stone-700 dark:bg-stone-900 ${position.dir === 'down' ? 'origin-top-right' : 'origin-bottom-right'}`}
         style={{ left: position.left, top: position.top, width: `min(${POPOVER_WIDTH}px, calc(100vw - ${POPOVER_MARGIN * 2}px))` }}
       >
-        <header className="shrink-0 border-b border-stone-100 px-4 pb-2 pt-2.5 dark:border-stone-800">
+        <header className="shrink-0 border-b border-stone-100 px-4 pt-2.5 dark:border-stone-800">
           <div className="flex items-center gap-2">
             <h2 id="notification-popover-title" className="text-base font-medium text-stone-900 dark:text-stone-100">{_('notificationDrawer.title')}</h2>
             {unreadCount > 0 && <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs tabular-nums text-stone-600 dark:bg-stone-800 dark:text-stone-300">{unreadCount > 99 ? '99+' : unreadCount}</span>}
@@ -160,36 +160,63 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
           </div>
           <div className="mt-1.5 flex items-center gap-4">
             <div className="flex items-center gap-4 text-sm">
-              <button type="button" aria-pressed={!unreadOnly} onClick={() => setUnreadOnly(false)} className={`border-b-2 pb-1 font-medium transition-colors ${!unreadOnly ? 'border-stone-900 text-stone-900 dark:border-stone-100 dark:text-stone-100' : 'border-transparent text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300'}`}>{_('notificationDrawer.all')}</button>
-              <button type="button" aria-pressed={unreadOnly} onClick={() => setUnreadOnly(true)} className={`border-b-2 pb-1 font-medium transition-colors ${unreadOnly ? 'border-stone-900 text-stone-900 dark:border-stone-100 dark:text-stone-100' : 'border-transparent text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300'}`}>{_('notificationDrawer.unread')}</button>
+              <button type="button" aria-pressed={!unreadOnly} onClick={() => setUnreadOnly(false)} className={`-mb-px border-b-2 pb-2 font-medium transition-colors ${!unreadOnly ? 'border-stone-900 text-stone-900 dark:border-stone-100 dark:text-stone-100' : 'border-transparent text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300'}`}>{_('notificationDrawer.all')}</button>
+              <button type="button" aria-pressed={unreadOnly} onClick={() => setUnreadOnly(true)} className={`-mb-px border-b-2 pb-2 font-medium transition-colors ${unreadOnly ? 'border-stone-900 text-stone-900 dark:border-stone-100 dark:text-stone-100' : 'border-transparent text-stone-400 hover:text-stone-700 dark:text-stone-500 dark:hover:text-stone-300'}`}>{_('notificationDrawer.unread')}</button>
             </div>
-            {unreadCount > 0 && <button type="button" disabled={read.isPending} onClick={() => read.mutate({ all: true }, { onError: (error) => notify.error(getUserErrorNotification(error, 'notificationCenter.readFailed')) })} className="ml-auto text-xs text-stone-500 transition-colors hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-400 dark:hover:text-stone-100">{_('notificationCenter.readAll')}</button>}
+            {unreadCount > 0 && <button type="button" disabled={read.isPending} onClick={() => read.mutate({ all: true }, { onError: (error) => notify.error(getUserErrorNotification(error, 'notificationCenter.readFailed')) })} className="mb-1.5 ml-auto text-xs text-stone-500 transition-colors hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-400 dark:hover:text-stone-100">{_('notificationCenter.readAll')}</button>}
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" onScroll={onListScroll} aria-busy={list.isPending || list.isFetchingNextPage}>
-          {list.isPending ? <div role="status" className="space-y-3 p-4"><div className="h-20 animate-pulse rounded-xl bg-stone-500/10" /><div className="h-20 animate-pulse rounded-xl bg-stone-500/10" /></div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain custom-scrollbar" onScroll={onListScroll} aria-busy={list.isPending || list.isFetchingNextPage}>
+          {list.isPending ? (
+            <ul role="status" className="divide-y divide-stone-100 dark:divide-stone-800">
+              {[0, 1, 2].map((index) => (
+                <li key={index} className="flex items-start gap-2.5 px-4 py-3">
+                  <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-stone-200/70 dark:bg-stone-800" />
+                  <div className="min-w-0 flex-1 space-y-2 py-0.5">
+                    <div className="h-3.5 w-3/4 animate-pulse rounded bg-stone-200/70 dark:bg-stone-800" />
+                    <div className="h-3 w-1/2 animate-pulse rounded bg-stone-100 dark:bg-stone-800/70" />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
             : list.isError ? <QueryErrorState className="px-4 py-8" isRetrying={list.isFetching} onRetry={() => void list.refetch()} />
               : entries.length === 0 ? <p role="status" className="px-4 py-12 text-center text-sm text-stone-500 dark:text-stone-400">{_(unreadOnly ? 'notificationDrawer.noUnread' : 'notificationDrawer.noNotifications')}</p>
                 : <ul className="divide-y divide-stone-100 dark:divide-stone-800">
                   {entries.map((entry) => (
                     <li
                       key={entry.id}
-                      className={`group relative px-4 py-3 transition-colors ${entry.readAt === null ? 'bg-stone-50/80 dark:bg-stone-800/35' : ''}`}
+                      className={`group relative px-4 py-3 transition-colors ${entry.readAt === null ? 'bg-stone-50/80 hover:bg-stone-100/80 dark:bg-stone-800/35 dark:hover:bg-stone-800/60' : 'hover:bg-stone-50 dark:hover:bg-stone-800/40'}`}
                     >
-                      <div role="button" tabIndex={0} onClick={() => openNotification(entry.id, entry.readAt)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openNotification(entry.id, entry.readAt) } }} className="block w-full pr-8 text-left focus:outline-hidden focus-visible:ring-2 focus-visible:ring-stone-400">
+                      <div role="button" tabIndex={0} onClick={() => openNotification(entry.id, entry.readAt)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openNotification(entry.id, entry.readAt) } }} className="block w-full cursor-pointer pr-7 text-left focus:outline-hidden focus-visible:ring-2 focus-visible:ring-stone-400">
                         <div className="flex items-start gap-2.5">
-                          <Link to="/profile" search={{ userId: entry.actor.id }} onClick={(event) => event.stopPropagation()} className="shrink-0" aria-label={entry.actor.name}>
-                            <Avatar src={avatarUrl(entry.actor.avatarKey)} name={entry.actor.name} className="h-8 w-8 text-xs" />
-                          </Link>
+                          <div className="relative shrink-0">
+                            <Link to="/profile" search={{ userId: entry.actor.id }} onClick={(event) => event.stopPropagation()} className="block" aria-label={entry.actor.name}>
+                              <Avatar src={avatarUrl(entry.actor.avatarKey)} name={entry.actor.name} className="h-8 w-8 text-xs" />
+                            </Link>
+                            {entry.readAt === null && (
+                              <span
+                                data-testid="notification-unread-dot"
+                                aria-label={_('notificationCenter.unread')}
+                                className="pointer-events-none absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-blue-500 dark:border-stone-900"
+                              />
+                            )}
+                          </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm text-stone-900 dark:text-stone-100"><Link to="/profile" search={{ userId: entry.actor.id }} onClick={(event) => event.stopPropagation()} className="font-semibold hover:underline">{entry.actor.name}</Link> {_(notificationActionKey(entry))}</p>
-                            <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-sm text-stone-500 dark:text-stone-400">{entry.preview}</p>
-                            <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{formatRelativeTime(_, entry.createdAt)}</p>
+                            <p className="text-sm leading-snug text-stone-900 dark:text-stone-100">
+                              <Link to="/profile" search={{ userId: entry.actor.id }} onClick={(event) => event.stopPropagation()} className="font-semibold hover:underline">{entry.actor.name}</Link>{' '}
+                              <span>{_(notificationActionKey(entry))}</span>
+                              <span className="ml-1.5 text-xs font-normal text-stone-400 dark:text-stone-500">· {formatRelativeTime(_, entry.createdAt)}</span>
+                            </p>
+                            {entry.preview && (
+                              <p className="mt-1.5 line-clamp-2 whitespace-pre-wrap break-words border-l-2 border-stone-200 pl-2 text-[13px] leading-snug text-stone-500 dark:border-stone-700 dark:text-stone-400">
+                                {entry.preview}
+                              </p>
+                            )}
                           </div>
                         </div>
                       </div>
-                      {entry.readAt === null && <span data-testid="notification-unread-dot" aria-label={_('notificationCenter.unread')} className="pointer-events-none absolute right-9 top-4.5 h-1.5 w-1.5 rounded-full bg-blue-500" />}
                       <button
                         type="button"
                         disabled={remove.isPending}
@@ -199,7 +226,7 @@ export default function NotificationDrawer({ anchorRef, open, onClose }: Notific
                           event.stopPropagation()
                           deleteEntry(entry.id)
                         }}
-                        className="absolute right-1 top-2.5 flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-400 cursor-pointer max-md:opacity-100"
+                        className="absolute right-2 top-2.5 flex h-7 w-7 items-center justify-center rounded-lg text-stone-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-400 cursor-pointer max-md:opacity-100"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2 2V6h14z" />

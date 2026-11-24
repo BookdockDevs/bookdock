@@ -78,7 +78,7 @@ describe('PublishBookDialog', () => {
 
     fireEvent.click(screen.getByLabelText('分类'))
     fireEvent.click(screen.getByRole('radio', { name: '分类' }))
-    fireEvent.click(screen.getByLabelText('新建标签'))
+    fireEvent.click(screen.getByLabelText('添加标签'))
     fireEvent.click(screen.getByRole('checkbox', { name: '标签' }))
     fireEvent.click(screen.getByRole('button', { name: '发布' }))
 

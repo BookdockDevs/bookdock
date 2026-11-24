@@ -72,7 +72,7 @@ export default function CategoryChip({ libraryId, categories: choices, categoryP
           size={{ width: 'auto', height: 288 }}
           minWidth={200}
           maxWidth={340}
-          className="max-h-72 overflow-y-auto custom-scrollbar"
+          className="max-h-72 overflow-y-auto custom-scrollbar pr-1.5"
         >
           <CategoryPickerPanel
             categories={categories}

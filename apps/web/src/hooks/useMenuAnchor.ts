@@ -151,7 +151,15 @@ export function useReconciledMenuPosition(
         height: rect && rect.height > 0 ? rect.height : sizeRef.current.height,
       }
 
-      const next = resolveMenuAnchor(active, measured)
+      // Once an above/below menu opens on one side of its trigger, keep
+      // preferring that side on subsequent frames so filtering/shrinking the
+      // list doesn't flip the menu across the trigger mid-typing.
+      const effectiveAnchor: MenuAnchor =
+        current && active.kind === 'element' && (active.placement === 'below' || active.placement === 'above')
+          ? { ...active, placement: current.dir === 'up' ? 'above' : 'below' }
+          : active
+
+      const next = resolveMenuAnchor(effectiveAnchor, measured)
       if (!next) return false
       const menu = menuRef.current
       const translate = `${next.left}px ${next.top}px`

@@ -210,7 +210,7 @@ describe('WorkEditDialog', () => {
   it('keeps the dialog open when the single save request fails', async () => {
     apiSave.mockRejectedValueOnce(new Error('Offline'))
     renderDialog()
-    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加标签' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'new' }))
     fireEvent.change(screen.getByRole('textbox', { name: '书名' }), { target: { value: 'Saved title' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -389,7 +389,7 @@ describe('WorkEditDialog', () => {
 
   it('creates and selects a new tag through the shared popover', async () => {
     renderDialog()
-    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加标签' }))
     const input = screen.getByPlaceholderText('搜索标签…')
     fireEvent.change(input, { target: { value: '硬核' } })
     fireEvent.keyDown(input, { key: 'Enter' })

@@ -183,6 +183,7 @@
   },
   "copied": "Copied",
   "common": {
+    "add": "Add",
     "retry": "Retry",
     "cancel": "Cancel",
     "copy": "Copy",
@@ -696,6 +697,7 @@
     "noCategories": "No categories yet",
     "tags": "Tags",
     "newTag": "New Tag",
+    "addTag": "Add tag",
     "noTags": "No tags yet",
     "trash": "Trash",
     "tabSortFilter": "Filter",

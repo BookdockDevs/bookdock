@@ -77,7 +77,7 @@ export default function TagSelectPopover({
       <button
         ref={triggerRef}
         type="button"
-        aria-label={_('library.newTag')}
+        aria-label={_('library.addTag')}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={toggle}
@@ -88,7 +88,7 @@ export default function TagSelectPopover({
         }`}
       >
         <span className="text-stone-400 dark:text-stone-500">+</span>
-        <span>{selectedTags.size > 0 ? _('library.tags') : _('library.newTag')}</span>
+        <span>{_('common.add')}</span>
         <svg
           className={`h-3 w-3 shrink-0 text-stone-400 transition-transform duration-200 ${
             open ? 'rotate-180' : 'rotate-0'
@@ -114,11 +114,11 @@ export default function TagSelectPopover({
           size={{ width: 'auto', height: 288 }}
           minWidth={208}
           maxWidth={304}
-          className="max-h-72 overflow-y-auto custom-scrollbar"
+          className="flex max-h-72 flex-col overflow-hidden"
         >
-          <div role="region" aria-label={_('library.tags')}>
+          <div role="region" aria-label={_('library.tags')} className="flex min-h-0 flex-1 flex-col">
           {/* Search & Quick-Create Input */}
-          <div className="mb-1 border-b border-stone-100 pb-1.5 dark:border-stone-800">
+          <div className="mb-1 shrink-0 border-b border-stone-100 pb-1.5 dark:border-stone-800">
             <div className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50/80 px-2 py-1 focus-within:border-stone-400 focus-within:bg-white dark:border-stone-700 dark:bg-stone-800/60 dark:focus-within:border-stone-500 dark:focus-within:bg-stone-900">
               <svg
                 width="12"
@@ -157,6 +157,8 @@ export default function TagSelectPopover({
             </div>
           </div>
 
+          {/* Scrollable results area so the search input stays pinned and the scrollbar never crowds it */}
+          <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar pr-1.5">
           {/* Quick Create Entry when query does not match existing tags */}
           {!exactMatch && query.trim() && (
             <button
@@ -191,21 +193,20 @@ export default function TagSelectPopover({
                   }`}
                 >
                   <span className="truncate">{tag.name}</span>
-                  {isChecked && (
-                    <svg
-                      width="13"
-                      height="13"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="shrink-0 text-stone-900 dark:text-stone-100"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  )}
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`shrink-0 text-stone-900 dark:text-stone-100 ${isChecked ? '' : 'invisible'}`}
+                    aria-hidden="true"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
                 </button>
               )
             })}
@@ -215,6 +216,7 @@ export default function TagSelectPopover({
                 {_('library.noTags')}
               </p>
             )}
+          </div>
           </div>
           </div>
         </SmartMenu>

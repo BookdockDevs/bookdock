@@ -222,30 +222,28 @@ export default function BookMetaForm({
       </div>
 
       {!limited && (
-        <>
-          <div>
-            <button
-              type="button"
-              onClick={toggleExpanded}
-              aria-expanded={open}
-              className="inline-flex items-center gap-1.5 py-1 text-xs font-medium text-stone-500 transition-colors hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200"
+        <div className="-my-1.5 space-y-2">
+          <button
+            type="button"
+            onClick={toggleExpanded}
+            aria-expanded={open}
+            className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:bg-stone-100/80 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800/60 dark:hover:text-stone-200"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={cn('transition-transform duration-200', open && 'rotate-90')}
             >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className={cn('transition-transform duration-200', open && 'rotate-90')}
-              >
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              <span>{open ? _('library.lessMetadata') : _('library.moreMetadata')}</span>
-            </button>
-          </div>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+            <span>{open ? _('library.lessMetadata') : _('library.moreMetadata')}</span>
+          </button>
 
           {open && (
             <div className="space-y-4 rounded-xl border border-stone-100 bg-stone-50/50 p-3.5 dark:border-stone-800 dark:bg-stone-800/30">
@@ -286,7 +284,7 @@ export default function BookMetaForm({
               </section>
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   )

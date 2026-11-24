@@ -262,7 +262,7 @@ describe('unified classification choices', () => {
     expect(screen.getByRole('radio', { name: 'Server' })).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: 'Device' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('radio', { name: 'Server' }))
-    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加标签' }))
     expect(screen.getByRole('checkbox', { name: '小说' })).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'LocalTag' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('checkbox', { name: '小说' }))
@@ -381,11 +381,17 @@ describe('BookDetailDialog tag chips', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    const addTag = screen.getByRole('button', { name: '添加标签' })
+    expect(addTag).toHaveTextContent('添加')
+    expect(screen.queryByRole('button', { name: '删除 小说' })).not.toBeInTheDocument()
+    fireEvent.click(addTag)
     const tag = screen.getByRole('checkbox', { name: '小说' })
     expect(tag).toHaveAttribute('aria-checked', 'false')
     fireEvent.click(tag)
     expect(tag).toHaveAttribute('aria-checked', 'true')
+    expect(addTag).toHaveAttribute('aria-expanded', 'true')
+    expect(addTag).toHaveTextContent('添加')
+    expect(screen.getByRole('button', { name: '删除 小说' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => {
@@ -397,7 +403,7 @@ describe('BookDetailDialog tag chips', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加标签' }))
     const input = screen.getByPlaceholderText('搜索标签…')
     fireEvent.change(input, { target: { value: '科幻' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -412,20 +418,20 @@ describe('BookDetailDialog tag chips', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加标签' }))
     const input = screen.getByPlaceholderText('搜索标签…')
     fireEvent.change(input, { target: { value: '科幻' } })
     fireEvent.keyDown(input, { key: 'Escape' })
 
     expect(screen.queryByPlaceholderText('搜索标签…')).toBeNull()
-    expect(screen.getByRole('button', { name: '新建标签' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加标签' })).toBeInTheDocument()
   })
 
   it('cancels the inline tag input when clicking away', () => {
     renderDialog()
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加标签' }))
     const input = screen.getByPlaceholderText('搜索标签…')
     fireEvent.change(input, { target: { value: '科幻' } })
     fireEvent.mouseDown(document.body)

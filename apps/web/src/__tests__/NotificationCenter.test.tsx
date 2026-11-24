@@ -72,14 +72,14 @@ describe('notification center', () => {
       fireEvent.click(bell)
       expect(await screen.findByRole('dialog', { name: '通知' })).toBeInTheDocument()
       expect(bell).toHaveAttribute('aria-expanded', 'true')
-      expect(bell).toHaveClass('bg-stone-200/60', 'text-stone-900')
+      expect(bell.querySelector('path')).toHaveAttribute('fill', 'currentColor')
       if (dismissal === 'toggle') fireEvent.click(bell)
       else if (dismissal === 'escape') fireEvent.keyDown(window, { key: 'Escape' })
       else if (dismissal === 'close') fireEvent.click(screen.getByRole('button', { name: '关闭通知' }))
       else fireEvent.pointerDown(document.body)
       expect(screen.queryByRole('dialog', { name: '通知' })).not.toBeInTheDocument()
       expect(bell).toHaveAttribute('aria-expanded', 'false')
-      expect(bell).not.toHaveClass('bg-stone-200/60')
+      expect(bell.querySelector('path')).toHaveAttribute('fill', 'none')
     }
   })
 

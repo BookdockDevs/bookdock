@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useReconciledMenuPosition } from '../hooks/useMenuAnchor'
 import {
   collectClipAncestors,
   isAnchorReachable,
@@ -160,5 +162,46 @@ describe('isAnchorReachable', () => {
     const el = makeElement({ left: 100, top: -200, width: 100, height: 40 })
 
     expect(isAnchorReachable(el, [])).toBe(false)
+  })
+})
+
+describe('useReconciledMenuPosition', () => {
+  it('keeps the opening side when the menu shrinks after filtering', () => {
+    let rafCallback: FrameRequestCallback | null = null
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      rafCallback = cb
+      return 1
+    })
+    const cancelSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
+
+    try {
+      // Trigger near the bottom of an 800px viewport: 288px doesn't fit below (only 80px),
+      // so it opens upward; shrinking to 80px later must stay above the trigger.
+      const trigger = makeElement({ left: 100, top: 680, width: 100, height: 40 })
+      const menu = document.createElement('div')
+      let menuHeight = 288
+      menu.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 208, height: menuHeight, right: 208, bottom: menuHeight, x: 0, y: 0, toJSON() {} }) as DOMRect
+      document.body.appendChild(menu)
+
+      const menuRef = { current: menu }
+      const anchor = { kind: 'element' as const, el: trigger, placement: 'below' as const }
+
+      renderHook(() => useReconciledMenuPosition(anchor, menuRef, { width: 208, height: 288 }, () => {}))
+
+      expect(menu.style.getPropertyValue('--slide-y')).toBe('4px')
+      expect(menu.style.translate).toBe(`${100}px ${680 - 6 - 288}px`)
+
+      menuHeight = 80
+      act(() => {
+        rafCallback?.(16)
+      })
+
+      expect(menu.style.getPropertyValue('--slide-y')).toBe('4px')
+      expect(menu.style.translate).toBe(`${100}px ${680 - 6 - 80}px`)
+    } finally {
+      rafSpy.mockRestore()
+      cancelSpy.mockRestore()
+    }
   })
 })

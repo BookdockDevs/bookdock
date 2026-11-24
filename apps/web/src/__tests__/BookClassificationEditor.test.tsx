@@ -32,7 +32,7 @@ describe('book classification editor', () => {
   it('adds a typed tag to the draft immediately without creating an entity', () => {
     const onTagsChange = vi.fn()
     renderEditor(onTagsChange)
-    fireEvent.click(screen.getByRole('button', { name: '新建标签' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加标签' }))
     fireEvent.change(screen.getByPlaceholderText('搜索标签…'), { target: { value: '星空' } })
     fireEvent.click(screen.getByRole('button', { name: '创建 “星空”' }))
     expect(onTagsChange).toHaveBeenCalledWith(expect.any(Function))

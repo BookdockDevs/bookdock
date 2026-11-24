@@ -183,6 +183,7 @@
   },
   "copied": "已复制",
   "common": {
+    "add": "添加",
     "retry": "重试",
     "cancel": "取消",
     "copy": "复制",
@@ -694,6 +695,7 @@
     "noCategories": "暂无分类",
     "tags": "标签",
     "newTag": "新建标签",
+    "addTag": "添加标签",
     "noTags": "暂无标签",
     "trash": "回收站",
     "tabSortFilter": "筛选",
